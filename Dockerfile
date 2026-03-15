@@ -3,7 +3,7 @@ FROM node:20-alpine AS builder
 WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
-COPY vite.config.js ./
+COPY vite.config.js tailwind.config.js postcss.config.js ./
 COPY app/static/ app/static/
 COPY app/templates/ app/templates/
 RUN npm run build

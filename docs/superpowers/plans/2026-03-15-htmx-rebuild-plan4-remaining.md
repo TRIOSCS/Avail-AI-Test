@@ -22,11 +22,11 @@
 
 **Backend reference:** `app/routers/crm/quotes.py` — existing API routes at `/api/requisitions/{req_id}/quote`, `/api/requisitions/{req_id}/quotes`, `/api/quotes/{quote_id}`. Model: `app/models/quotes.py` — `Quote` (quote_number, revision, status, subtotal, total_cost, total_margin_pct, customer_site_id, requisition_id, created_by_id, sent_at, followup_alert_sent_at, result, result_reason).
 
-- [ ] **Step 1: Add full-page route for quotes list**
+- [x] **Step 1: Add full-page route for quotes list**
 
 In `app/routers/htmx_views.py`, add `/v2/quotes` to the `v2_page` function's route decorators. Add a `elif "/quotes" in path:` branch that sets `current_view = "quotes"`.
 
-- [ ] **Step 2: Add partial route for quotes list**
+- [x] **Step 2: Add partial route for quotes list**
 
 Add `GET /v2/partials/quotes` endpoint to `htmx_views.py`:
 
@@ -64,7 +64,7 @@ async def quotes_list_partial(
 
 Add `Quote` to the imports at the top of the file.
 
-- [ ] **Step 3: Create quotes list template**
+- [x] **Step 3: Create quotes list template**
 
 Create `app/templates/partials/quotes/list.html`:
 
@@ -76,7 +76,7 @@ Create `app/templates/partials/quotes/list.html`:
 - Clickable rows: `hx-get="/v2/partials/quotes/{{ quote.id }}"`, `hx-target="#main-content"`, `hx-push-url="/v2/quotes/{{ quote.id }}"`
 - Pagination via `{% include "partials/shared/pagination.html" %}`
 
-- [ ] **Step 4: Add sidebar nav item for Quotes**
+- [x] **Step 4: Add sidebar nav item for Quotes**
 
 In `app/templates/partials/shared/sidebar.html`, add a "Quotes" nav item with SVG icon between Buy Plans and Settings. Use `hx-get="/v2/partials/quotes"`, `hx-target="#main-content"`, `hx-push-url="/v2/quotes"`.
 
@@ -91,7 +91,7 @@ In `app/templates/partials/shared/sidebar.html`, add a "Quotes" nav item with SV
 
 **Backend reference:** `Quote` has `line_items` (JSON) and related `QuoteLine` records (structured). `QuoteLine` fields: mpn, manufacturer, qty, cost_price, sell_price, margin_pct, offer_id, material_card_id. Routes: `PUT /api/quotes/{quote_id}` updates quote (including line_items). `POST /api/quotes/{quote_id}/send`, `POST /api/quotes/{quote_id}/result`, `POST /api/quotes/{quote_id}/revise`.
 
-- [ ] **Step 1: Add full-page and partial routes for quote detail**
+- [x] **Step 1: Add full-page and partial routes for quote detail**
 
 Add `/v2/quotes/{quote_id:int}` to the `v2_page` decorators. Add path parsing for detail URL.
 
@@ -126,7 +126,7 @@ async def quote_detail_partial(
 
 Add `QuoteLine`, `Offer` to imports.
 
-- [ ] **Step 2: Create quote detail template**
+- [x] **Step 2: Create quote detail template**
 
 Create `app/templates/partials/quotes/detail.html`:
 
@@ -154,7 +154,7 @@ Create `app/templates/partials/quotes/detail.html`:
 **Followup alert banner:**
 - Show if `quote.followup_alert_sent_at` is set: amber banner with "Follow-up sent" message
 
-- [ ] **Step 3: Create line_row.html partial for inline editing**
+- [x] **Step 3: Create line_row.html partial for inline editing**
 
 Create `app/templates/partials/quotes/line_row.html`:
 
@@ -163,7 +163,7 @@ Create `app/templates/partials/quotes/line_row.html`:
 - Auto-recalculate margin: `margin_pct = ((sell_price - cost_price) / sell_price) * 100` if sell_price > 0
 - Alpine `x-data` manages edit state per row
 
-- [ ] **Step 4: Add line item HTMX endpoints**
+- [x] **Step 4: Add line item HTMX endpoints**
 
 Add to `htmx_views.py`:
 
@@ -206,7 +206,7 @@ async def delete_quote_line(
     return HTMLResponse("")  # hx-swap="delete" removes the row
 ```
 
-- [ ] **Step 5: Add quote action endpoints (send, result, revise)**
+- [x] **Step 5: Add quote action endpoints (send, result, revise)**
 
 Add HTMX wrapper endpoints that call the existing API routes and return updated partials:
 
@@ -232,7 +232,7 @@ Each endpoint processes the form data, delegates to the service layer (same logi
 
 **Backend reference:** `app/models/offers.py` — `Offer` fields: vendor_name, mpn, qty_available, unit_price, lead_time, evidence_tier, parse_confidence, status, source, attachments (relationship), selected_for_quote. Routes: `PUT /api/offers/{id}/approve`, `PUT /api/offers/{id}/reject`, `POST /api/offers/{id}/promote`.
 
-- [ ] **Step 1: Create expandable offer card component**
+- [x] **Step 1: Create expandable offer card component**
 
 Create `app/templates/partials/shared/offer_card.html`:
 
@@ -266,7 +266,7 @@ Create `app/templates/partials/shared/offer_card.html`:
 **Files:**
 - Modify: `app/templates/partials/quotes/detail.html`
 
-- [ ] **Step 1: Add offer gallery section to quote detail**
+- [x] **Step 1: Add offer gallery section to quote detail**
 
 Below the line items table, add an "Available Offers" section:
 
@@ -276,7 +276,7 @@ Below the line items table, add an "Available Offers" section:
 - Pass `offer` and `quote` variables to the include
 - Empty state: "No offers received yet for this requisition." with `{% include "partials/shared/empty_state.html" %}`
 
-- [ ] **Step 2: Add pricing history section**
+- [x] **Step 2: Add pricing history section**
 
 Below the offer gallery:
 
@@ -294,7 +294,7 @@ Below the offer gallery:
 
 **Backend reference:** `app/models/prospect_account.py` — `ProspectAccount` fields: name, domain, industry, region, fit_score, readiness_score, discovery_source, status (suggested/claimed/dismissed), claimed_by, enrichment_data (JSONB). Routes: `app/routers/prospect_suggested.py` — `GET /api/prospects/suggested` (list with filters), `POST /api/prospects/suggested/{id}/claim`, `POST /api/prospects/suggested/{id}/dismiss`.
 
-- [ ] **Step 1: Add full-page and partial routes for prospecting**
+- [x] **Step 1: Add full-page and partial routes for prospecting**
 
 Add `/v2/prospecting` to `v2_page` decorators. Add `elif "/prospecting" in path:` branch.
 
@@ -345,7 +345,7 @@ async def prospecting_list_partial(
 
 Add `ProspectAccount` to imports.
 
-- [ ] **Step 2: Create prospecting list template**
+- [x] **Step 2: Create prospecting list template**
 
 Create `app/templates/partials/prospecting/list.html`:
 
@@ -371,7 +371,7 @@ Each card (`bg-white border border-brand-200 rounded-lg p-4 hover:shadow-sm`):
 
 - Pagination via `{% include "partials/shared/pagination.html" %}`
 
-- [ ] **Step 3: Add claim/dismiss partial endpoints**
+- [x] **Step 3: Add claim/dismiss partial endpoints**
 
 ```python
 @router.post("/v2/partials/prospecting/{prospect_id}/claim", response_class=HTMLResponse)
@@ -410,7 +410,7 @@ async def dismiss_prospect_htmx(
     return templates.TemplateResponse("partials/prospecting/_card.html", ctx)
 ```
 
-- [ ] **Step 4: Create prospect card sub-partial**
+- [x] **Step 4: Create prospect card sub-partial**
 
 Create `app/templates/partials/prospecting/_card.html` — single prospect card for OOB swaps after claim/dismiss. Same layout as cards in list but wrapped in a div with `id="prospect-{{ prospect.id }}"` for targeted swap.
 
@@ -424,7 +424,7 @@ Create `app/templates/partials/prospecting/_card.html` — single prospect card 
 
 **Backend reference:** `ProspectAccount` has enrichment_data (JSONB) with keys: `warm_intro` (dict with `has_warm_intro`, `warmth`, intro path), `one_liner`, SAM.gov data, news mentions. `fit_reasoning` (text), `readiness_signals` (JSONB). Routes: `GET /api/prospects/suggested/{id}` (full detail), `POST /api/prospects/suggested/{id}/enrich-free` (free enrichment).
 
-- [ ] **Step 1: Add full-page and partial routes for prospect detail**
+- [x] **Step 1: Add full-page and partial routes for prospect detail**
 
 Add `/v2/prospecting/{prospect_id:int}` to `v2_page` decorators. Add path parsing.
 
@@ -447,7 +447,7 @@ async def prospecting_detail_partial(
     return templates.TemplateResponse("partials/prospecting/detail.html", ctx)
 ```
 
-- [ ] **Step 2: Create prospecting detail template**
+- [x] **Step 2: Create prospecting detail template**
 
 Create `app/templates/partials/prospecting/detail.html`:
 
@@ -485,7 +485,7 @@ Create `app/templates/partials/prospecting/detail.html`:
 - Enrich: `hx-post="/v2/partials/prospecting/{{ prospect.id }}/enrich"`, with `htmx-indicator` spinner — triggers free enrichment, refreshes detail on completion
 - Create Requisition: `hx-get="/v2/partials/requisitions/create-form?customer={{ prospect.name }}"`, `@click="$dispatch('open-modal')"` — pre-fills customer from prospect
 
-- [ ] **Step 3: Add enrich endpoint**
+- [x] **Step 3: Add enrich endpoint**
 
 ```python
 @router.post("/v2/partials/prospecting/{prospect_id}/enrich", response_class=HTMLResponse)
@@ -529,7 +529,7 @@ async def enrich_prospect_htmx(
 
 **Backend reference:** `app/routers/admin/system.py` — `GET /api/admin/config` (requires settings_access), `PUT /api/admin/config/{key}` (requires admin), `GET /api/admin/connector-health` (requires admin). `app/routers/sources.py` — `GET /api/sources` (list all), `PUT /api/sources/{id}/toggle`, `PUT /api/sources/{id}/activate`, `POST /api/sources/{id}/test`. Model: `ApiSource` (name, display_name, status, is_active, last_success, last_error, env_vars, error_count_24h).
 
-- [ ] **Step 1: Add full-page and partial routes for settings**
+- [x] **Step 1: Add full-page and partial routes for settings**
 
 Add `/v2/settings` to `v2_page` decorators. Add `elif "/settings" in path:` branch.
 
@@ -585,7 +585,7 @@ async def settings_profile_tab(
 
 Add `ApiSource` to imports.
 
-- [ ] **Step 2: Create settings index template**
+- [x] **Step 2: Create settings index template**
 
 Create `app/templates/partials/settings/index.html`:
 
@@ -597,7 +597,7 @@ Create `app/templates/partials/settings/index.html`:
 - Content area: `<div id="settings-content">` — initial content loaded based on `active_tab`
 - On load, include the default tab partial: `{% include "partials/settings/sources.html" %}`
 
-- [ ] **Step 3: Create sources tab template**
+- [x] **Step 3: Create sources tab template**
 
 Create `app/templates/partials/settings/sources.html`:
 
@@ -609,7 +609,7 @@ Create `app/templates/partials/settings/sources.html`:
   - Health info: Last success timestamp (relative time), error message if failing (`text-rose-600`), error_count_24h badge
   - Test button: `hx-post="/api/sources/{{ source.id }}/test"` with spinner indicator, shows result in toast
 
-- [ ] **Step 4: Create system config tab template**
+- [x] **Step 4: Create system config tab template**
 
 Create `app/templates/partials/settings/system.html`:
 
@@ -619,7 +619,7 @@ Create `app/templates/partials/settings/system.html`:
 - `hx-trigger="submit"`, input styled with `border-brand-200 focus:ring-brand-500`
 - Only visible to admin users (server-enforced via `require_admin`)
 
-- [ ] **Step 5: Create profile tab template**
+- [x] **Step 5: Create profile tab template**
 
 Create `app/templates/partials/settings/profile.html`:
 
@@ -642,13 +642,13 @@ Create `app/templates/partials/settings/profile.html`:
 
 **Backend reference:** Buy plan templates are referenced by `htmx_views.py` but the template directory `app/templates/partials/buy_plans/` does not currently exist (templates at `app/templates/htmx/partials/buy_plans/` also not found). Routes exist in `htmx_views.py` for `/v2/partials/buy-plans` and `/v2/partials/buy-plans/{bp_id}`. Model: `app/models/buy_plan.py` — `BuyPlan` with status (BuyPlanStatus enum), `BuyPlanLine` with line_status (BuyPlanLineStatus enum), `SOVerificationStatus`.
 
-- [ ] **Step 1: Verify existing buy plan templates exist; create if missing**
+- [x] **Step 1: Verify existing buy plan templates exist; create if missing**
 
 Check if buy plan templates exist at the path referenced by `htmx_views.py`. If they exist, update them. If not, create from scratch.
 
 Expected template path: look at `htmx_views.py` buy plan partial endpoints to determine exact template path used.
 
-- [ ] **Step 2: Update buy plan list template with brand colors**
+- [x] **Step 2: Update buy plan list template with brand colors**
 
 In `partials/buy_plans/list.html`:
 
@@ -664,7 +664,7 @@ In `partials/buy_plans/list.html`:
 - Status badges: Draft=`bg-brand-100 text-brand-600`, Pending=`bg-amber-50 text-amber-700`, Active=`bg-emerald-50 text-emerald-700`, Completed=`bg-emerald-50 text-emerald-700`, Cancelled=`bg-gray-100 text-gray-600`
 - SO Verification badge: verified=emerald, rejected=rose, pending=amber
 
-- [ ] **Step 3: Update buy plan detail template with brand colors**
+- [x] **Step 3: Update buy plan detail template with brand colors**
 
 In `partials/buy_plans/detail.html`:
 
@@ -675,7 +675,7 @@ In `partials/buy_plans/detail.html`:
 - Workflow buttons: primary=`bg-brand-500 hover:bg-brand-600 text-white`, danger=`bg-rose-500 hover:bg-rose-600 text-white`, secondary=`bg-white border-brand-200 text-brand-700`
 - Verify all `hx-get`/`hx-post`/`hx-put` targets work correctly
 
-- [ ] **Step 4: Test buy plan list and detail rendering**
+- [x] **Step 4: Test buy plan list and detail rendering**
 
 ```bash
 cd /root/availai && TESTING=1 PYTHONPATH=/root/availai pytest tests/ -v -k "buy_plan" --tb=short
@@ -697,7 +697,7 @@ Manually verify:
 
 **Backend reference:** Dashboard needs counts from Requisition (status=active/sourcing/offers/quoting), VendorCard, Company models. No dedicated API endpoint needed — query directly in the HTMX view.
 
-- [ ] **Step 1: Update dashboard partial route**
+- [x] **Step 1: Update dashboard partial route**
 
 The `/v2` route already exists and maps to the `v2_page` function. Update the `/v2/partials/requisitions` default load to serve dashboard instead when path is exactly `/v2`.
 
@@ -727,7 +727,7 @@ async def dashboard_partial(
 
 Update `v2_page` to use `current_view = "dashboard"` and `partial_url = "/v2/partials/dashboard"` when path is exactly `/v2`.
 
-- [ ] **Step 2: Create dashboard template**
+- [x] **Step 2: Create dashboard template**
 
 Create `app/templates/partials/dashboard.html`:
 
@@ -771,7 +771,7 @@ Each card (`bg-white border border-brand-200 rounded-lg p-6 hover:shadow-sm curs
 **Files:**
 - Modify: `app/templates/partials/shared/sidebar.html`
 
-- [ ] **Step 1: Add Prospecting and Quotes nav items**
+- [x] **Step 1: Add Prospecting and Quotes nav items**
 
 In the sidebar navigation, ensure these items exist in order:
 1. Dashboard (`/v2/partials/dashboard`)
@@ -791,7 +791,7 @@ Each nav item:
 - Active state: `bg-brand-900 text-white` when `current_view` matches
 - Hover: `bg-brand-800`
 
-- [ ] **Step 2: Update v2_page to handle all new routes**
+- [x] **Step 2: Update v2_page to handle all new routes**
 
 Ensure `v2_page` function handles all new URL paths (`/v2/quotes`, `/v2/quotes/{id}`, `/v2/settings`, `/v2/prospecting`, `/v2/prospecting/{id}`) with correct `current_view` and `partial_url` resolution.
 
@@ -811,7 +811,7 @@ Add these route decorators:
 **Files:**
 - Modify: `tests/test_htmx_views.py` (or create if not exists)
 
-- [ ] **Step 1: Test quotes list partial**
+- [x] **Step 1: Test quotes list partial**
 
 ```python
 def test_quotes_list_partial(client, auth_headers):
@@ -824,7 +824,7 @@ def test_quotes_list_filter_by_status(client, auth_headers):
     assert resp.status_code == 200
 ```
 
-- [ ] **Step 2: Test quote detail partial**
+- [x] **Step 2: Test quote detail partial**
 
 ```python
 def test_quote_detail_partial(client, auth_headers, db_session):
@@ -834,7 +834,7 @@ def test_quote_detail_partial(client, auth_headers, db_session):
     assert resp.status_code == 200
 ```
 
-- [ ] **Step 3: Test quote line item CRUD**
+- [x] **Step 3: Test quote line item CRUD**
 
 ```python
 def test_update_quote_line(client, auth_headers, db_session):
@@ -854,7 +854,7 @@ def test_delete_quote_line(client, auth_headers, db_session):
     assert resp.status_code == 200
 ```
 
-- [ ] **Step 4: Test prospecting list partial**
+- [x] **Step 4: Test prospecting list partial**
 
 ```python
 def test_prospecting_list_partial(client, auth_headers):
@@ -867,7 +867,7 @@ def test_prospecting_filter_by_status(client, auth_headers):
     assert resp.status_code == 200
 ```
 
-- [ ] **Step 5: Test prospecting detail and actions**
+- [x] **Step 5: Test prospecting detail and actions**
 
 ```python
 def test_prospecting_detail_partial(client, auth_headers, db_session):
@@ -884,7 +884,7 @@ def test_dismiss_prospect(client, auth_headers, db_session):
     assert resp.status_code == 200
 ```
 
-- [ ] **Step 6: Test settings partial**
+- [x] **Step 6: Test settings partial**
 
 ```python
 def test_settings_partial(client, auth_headers):
@@ -905,7 +905,7 @@ def test_settings_profile_tab(client, auth_headers):
     assert resp.status_code == 200
 ```
 
-- [ ] **Step 7: Test dashboard partial**
+- [x] **Step 7: Test dashboard partial**
 
 ```python
 def test_dashboard_partial(client, auth_headers):
@@ -915,7 +915,7 @@ def test_dashboard_partial(client, auth_headers):
     assert "Open Requisitions" in resp.text
 ```
 
-- [ ] **Step 8: Run full test suite to verify no regressions**
+- [x] **Step 8: Run full test suite to verify no regressions**
 
 ```bash
 cd /root/availai && TESTING=1 PYTHONPATH=/root/availai pytest tests/ -v --tb=short
@@ -929,7 +929,7 @@ cd /root/availai && TESTING=1 PYTHONPATH=/root/availai pytest tests/ --cov=app -
 
 ## Task 12: Commit & Deploy
 
-- [ ] **Step 1: Stage and commit all new and modified files**
+- [x] **Step 1: Stage and commit all new and modified files**
 
 ```bash
 cd /root/availai && git add \
@@ -956,13 +956,13 @@ cd /root/availai && git add \
 git commit -m "feat: add Quotes, Prospecting, Settings, Dashboard HTMX views and update Buy Plans brand colors"
 ```
 
-- [ ] **Step 2: Push and deploy**
+- [x] **Step 2: Push and deploy**
 
 ```bash
 git push origin main && cd /root/availai && docker compose up -d --build && docker compose logs -f app
 ```
 
-- [ ] **Step 3: Verify deployment**
+- [x] **Step 3: Verify deployment**
 
 Check logs for errors. Hard refresh browser. Navigate to:
 - `/v2` — Dashboard with logo, stats, quick actions

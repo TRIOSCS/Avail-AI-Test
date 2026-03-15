@@ -65,7 +65,7 @@
 
 **Steps:**
 
-- [ ] **1.1** Create `app/templates/partials/requisitions/req_row.html` — a single `<tr>` that receives `req` template var. Used for initial render rows, new row after create (prepend), and search/filter results.
+- [x] **1.1** Create `app/templates/partials/requisitions/req_row.html` — a single `<tr>` that receives `req` template var. Used for initial render rows, new row after create (prepend), and search/filter results.
 
 ```html
 {# req_row.html — Single requisition table row.
@@ -116,12 +116,12 @@
 </tr>
 ```
 
-- [ ] **1.2** Verify template renders without errors by running:
+- [x] **1.2** Verify template renders without errors by running:
 ```bash
 TESTING=1 PYTHONPATH=/root/availai pytest tests/test_htmx_views.py -v -k "requisition" --no-header -q 2>&1 | head -30
 ```
 
-- [ ] **1.3** Commit:
+- [x] **1.3** Commit:
 ```bash
 git add app/templates/partials/requisitions/req_row.html
 git commit -m "Add requisition row partial for HTMX list rendering"
@@ -139,7 +139,7 @@ git commit -m "Add requisition row partial for HTMX list rendering"
 
 **Steps:**
 
-- [ ] **2.1** Create `app/templates/partials/requisitions/create_modal.html`:
+- [x] **2.1** Create `app/templates/partials/requisitions/create_modal.html`:
 
 ```html
 {# create_modal.html — Requisition creation form loaded into #modal-content.
@@ -192,7 +192,7 @@ git commit -m "Add requisition row partial for HTMX list rendering"
 </div>
 ```
 
-- [ ] **2.2** Add `GET /v2/partials/requisitions/create-form` route to `app/routers/htmx_views.py`:
+- [x] **2.2** Add `GET /v2/partials/requisitions/create-form` route to `app/routers/htmx_views.py`:
 
 ```python
 @router.get("/v2/partials/requisitions/create-form", response_class=HTMLResponse)
@@ -206,14 +206,14 @@ async def requisition_create_form(
     return templates.TemplateResponse("partials/requisitions/create_modal.html", ctx)
 ```
 
-- [ ] **2.3** Update `POST /v2/partials/requisitions/create` in `app/routers/htmx_views.py` to return a single row partial instead of the full list. After `db.commit()`, render `req_row.html` with the new req and set `HX-Trigger: showToast` header. Add `req.req_count` and `req.offer_count = 0` before rendering.
+- [x] **2.3** Update `POST /v2/partials/requisitions/create` in `app/routers/htmx_views.py` to return a single row partial instead of the full list. After `db.commit()`, render `req_row.html` with the new req and set `HX-Trigger: showToast` header. Add `req.req_count` and `req.offer_count = 0` before rendering.
 
-- [ ] **2.4** Write test for create-form route:
+- [x] **2.4** Write test for create-form route:
 ```bash
 TESTING=1 PYTHONPATH=/root/availai pytest tests/test_htmx_views.py -v -k "create" --no-header -q
 ```
 
-- [ ] **2.5** Commit:
+- [x] **2.5** Commit:
 ```bash
 git add app/templates/partials/requisitions/create_modal.html app/routers/htmx_views.py
 git commit -m "Add requisition create modal with MPN/Qty parsing"
@@ -229,7 +229,7 @@ git commit -m "Add requisition create modal with MPN/Qty parsing"
 
 **Steps:**
 
-- [ ] **3.1** Update `requisitions_list_partial` in `app/routers/htmx_views.py` to accept these additional query params:
+- [x] **3.1** Update `requisitions_list_partial` in `app/routers/htmx_views.py` to accept these additional query params:
 
 ```python
 @router.get("/v2/partials/requisitions", response_class=HTMLResponse)
@@ -252,7 +252,7 @@ async def requisitions_list_partial(
 
 Add filter logic for owner (`Requisition.created_by == owner`), urgency (`Requisition.urgency == urgency`), date_from/date_to (`Requisition.created_at >= / <=`). Add sort logic mapping column name + direction. For sales role, filter `Requisition.created_by == user.id`. Fetch team users for owner dropdown (only if not sales role). Attach `req.offer_count = len(req.offers) if req.offers else 0` for each req. Pass `users`, `user_role`, `sort`, `dir`, `owner`, `urgency`, `date_from`, `date_to` to template context.
 
-- [ ] **3.2** Rewrite `app/templates/htmx/partials/requisitions/list.html` with:
+- [x] **3.2** Rewrite `app/templates/htmx/partials/requisitions/list.html` with:
 
 The template should include:
 1. OOB breadcrumb div: `<div id="breadcrumb" hx-swap-oob="true">Requisitions</div>`
@@ -273,7 +273,7 @@ The template should include:
 10. Empty state using `{% include "partials/shared/empty_state.html" %}`
 11. All brand colors: `brand-500` buttons, `brand-600` hover, `emerald` success, `amber` warning, `rose` danger
 
-- [ ] **3.3** Add bulk action route to `app/routers/htmx_views.py`:
+- [x] **3.3** Add bulk action route to `app/routers/htmx_views.py`:
 
 ```python
 @router.post("/v2/partials/requisitions/bulk/{action}", response_class=HTMLResponse)
@@ -287,12 +287,12 @@ async def requisitions_bulk_action(
 
 Parse `ids` from form data (comma-separated). Validate action is one of: archive, activate, assign. For assign, also parse `owner_id`. Apply action to each requisition (reuse logic from `requisitions2.py`). Max 200 per bulk action. Return refreshed list partial.
 
-- [ ] **3.4** Run tests:
+- [x] **3.4** Run tests:
 ```bash
 TESTING=1 PYTHONPATH=/root/availai pytest tests/test_htmx_views.py -v -k "requisition" --no-header -q
 ```
 
-- [ ] **3.5** Commit:
+- [x] **3.5** Commit:
 ```bash
 git add app/templates/htmx/partials/requisitions/list.html app/routers/htmx_views.py
 git commit -m "Rebuild requisitions list with filters, bulk ops, and brand palette"
@@ -316,7 +316,7 @@ git commit -m "Rebuild requisitions list with filters, bulk ops, and brand palet
 
 **Steps:**
 
-- [ ] **4.1** Rewrite `app/templates/htmx/partials/requisitions/detail.html`:
+- [x] **4.1** Rewrite `app/templates/htmx/partials/requisitions/detail.html`:
 
 The template should include:
 1. OOB breadcrumb: `<div id="breadcrumb" hx-swap-oob="true"><a hx-get="/v2/partials/requisitions" hx-target="#main-content" hx-push-url="/v2/requisitions" class="text-brand-500 hover:text-brand-600 cursor-pointer">Requisitions</a> <span class="text-gray-500">></span> <span class="text-gray-900">{{ req.name }}</span></div>`
@@ -333,7 +333,7 @@ The template should include:
 4. Tab content area: `<div id="tab-content">` — initially loads parts tab inline (no extra request)
 5. Parts tab content rendered inline on first load (the other tabs lazy-load via HTMX)
 
-- [ ] **4.2** Add tab route to `app/routers/htmx_views.py`:
+- [x] **4.2** Add tab route to `app/routers/htmx_views.py`:
 
 ```python
 @router.get("/v2/partials/requisitions/{req_id}/tab/{tab}", response_class=HTMLResponse)
@@ -355,7 +355,7 @@ For `buy_plans` tab: query `BuyPlan` model filtered by `requisition_id`.
 For `tasks` tab: query `RequisitionTask` filtered by `requisition_id`, with status filter param.
 For `activity` tab: query activity events (if activity tracking model exists) or return placeholder.
 
-- [ ] **4.3** Create `app/templates/partials/requisitions/tabs/parts.html`:
+- [x] **4.3** Create `app/templates/partials/requisitions/tabs/parts.html`:
 
 ```html
 {# parts.html — Requirements table tab for requisition detail.
@@ -461,7 +461,7 @@ For `activity` tab: query activity events (if activity tracking model exists) or
 </div>
 ```
 
-- [ ] **4.4** Create `app/templates/partials/requisitions/tabs/offers.html`:
+- [x] **4.4** Create `app/templates/partials/requisitions/tabs/offers.html`:
 
 ```html
 {# offers.html — Offers tab for requisition detail.
@@ -518,7 +518,7 @@ For `activity` tab: query activity events (if activity tracking model exists) or
 </div>
 ```
 
-- [ ] **4.5** Create `app/templates/partials/requisitions/tabs/quotes.html`:
+- [x] **4.5** Create `app/templates/partials/requisitions/tabs/quotes.html`:
 
 ```html
 {# quotes.html — Quotes tab for requisition detail.
@@ -581,7 +581,7 @@ For `activity` tab: query activity events (if activity tracking model exists) or
 </div>
 ```
 
-- [ ] **4.6** Create `app/templates/partials/requisitions/tabs/buy_plans.html`:
+- [x] **4.6** Create `app/templates/partials/requisitions/tabs/buy_plans.html`:
 
 ```html
 {# buy_plans.html — Buy Plans tab for requisition detail.
@@ -632,7 +632,7 @@ For `activity` tab: query activity events (if activity tracking model exists) or
 </div>
 ```
 
-- [ ] **4.7** Create `app/templates/partials/requisitions/tabs/tasks.html`:
+- [x] **4.7** Create `app/templates/partials/requisitions/tabs/tasks.html`:
 
 ```html
 {# tasks.html — Task board tab for requisition detail.
@@ -744,7 +744,7 @@ For `activity` tab: query activity events (if activity tracking model exists) or
 </div>
 ```
 
-- [ ] **4.8** Create `app/templates/partials/requisitions/tabs/activity.html`:
+- [x] **4.8** Create `app/templates/partials/requisitions/tabs/activity.html`:
 
 ```html
 {# activity.html — Activity timeline tab for requisition detail.
@@ -776,14 +776,14 @@ For `activity` tab: query activity events (if activity tracking model exists) or
 </div>
 ```
 
-- [ ] **4.9** Update `requisition_detail_partial` in `app/routers/htmx_views.py` to also load offers count and pass `users` list for the tasks tab assignee dropdown. Add `req.offer_count = len(req.offers) if req.offers else 0`.
+- [x] **4.9** Update `requisition_detail_partial` in `app/routers/htmx_views.py` to also load offers count and pass `users` list for the tasks tab assignee dropdown. Add `req.offer_count = len(req.offers) if req.offers else 0`.
 
-- [ ] **4.10** Run tests:
+- [x] **4.10** Run tests:
 ```bash
 TESTING=1 PYTHONPATH=/root/availai pytest tests/test_htmx_views.py -v -k "requisition" --no-header -q
 ```
 
-- [ ] **4.11** Commit:
+- [x] **4.11** Commit:
 ```bash
 git add app/templates/htmx/partials/requisitions/detail.html app/templates/partials/requisitions/tabs/ app/routers/htmx_views.py
 git commit -m "Add tabbed requisition detail with parts, offers, quotes, buy plans, tasks, activity tabs"
@@ -798,7 +798,7 @@ git commit -m "Add tabbed requisition detail with parts, offers, quotes, buy pla
 
 **Steps:**
 
-- [ ] **5.1** Add delete requirement route to `app/routers/htmx_views.py`:
+- [x] **5.1** Add delete requirement route to `app/routers/htmx_views.py`:
 
 ```python
 @router.delete("/v2/partials/requisitions/{req_id}/requirements/{item_id}", response_class=HTMLResponse)
@@ -823,12 +823,12 @@ async def delete_requirement(
     return HTMLResponse("")
 ```
 
-- [ ] **5.2** Write test:
+- [x] **5.2** Write test:
 ```bash
 TESTING=1 PYTHONPATH=/root/availai pytest tests/test_htmx_views.py -v -k "delete_requirement" --no-header -q
 ```
 
-- [ ] **5.3** Commit:
+- [x] **5.3** Commit:
 ```bash
 git add app/routers/htmx_views.py
 git commit -m "Add DELETE requirement endpoint for inline removal"
@@ -843,7 +843,7 @@ git commit -m "Add DELETE requirement endpoint for inline removal"
 
 **Steps:**
 
-- [ ] **6.1** Rewrite `app/templates/htmx/partials/companies/list.html`:
+- [x] **6.1** Rewrite `app/templates/htmx/partials/companies/list.html`:
 
 The template should include:
 1. OOB breadcrumb: `<div id="breadcrumb" hx-swap-oob="true">Companies</div>`
@@ -860,12 +860,12 @@ The template should include:
 8. Empty state
 9. All `blue-600` replaced with `brand-500`, `blue-500` hover with `brand-600`, etc.
 
-- [ ] **6.2** Run tests:
+- [x] **6.2** Run tests:
 ```bash
 TESTING=1 PYTHONPATH=/root/availai pytest tests/test_htmx_views.py -v -k "compan" --no-header -q
 ```
 
-- [ ] **6.3** Commit:
+- [x] **6.3** Commit:
 ```bash
 git add app/templates/htmx/partials/companies/list.html
 git commit -m "Rebuild companies list with brand colors and avatar circles"
@@ -881,7 +881,7 @@ git commit -m "Rebuild companies list with brand colors and avatar circles"
 
 **Steps:**
 
-- [ ] **7.1** Update `company_detail_partial` in `app/routers/htmx_views.py`:
+- [x] **7.1** Update `company_detail_partial` in `app/routers/htmx_views.py`:
 
 Add loading of company contacts. Query contacts from `Contact` model (or the company's sites' contacts, depending on model structure). Count open requisitions for the company. Pass `contacts`, `open_req_count`, `user` to template context.
 
@@ -899,7 +899,7 @@ async def company_tab(
 
 Valid tabs: `sites`, `contacts`, `requisitions`, `activity`. Each loads relevant data and renders inline HTML (no separate tab template files needed for companies since they are simpler — render directly in the route or use a single template with conditionals).
 
-- [ ] **7.2** Rewrite `app/templates/htmx/partials/companies/detail.html`:
+- [x] **7.2** Rewrite `app/templates/htmx/partials/companies/detail.html`:
 
 The template should include:
 1. OOB breadcrumb: `<div id="breadcrumb" hx-swap-oob="true"><a ... class="text-brand-500 hover:text-brand-600 cursor-pointer">Companies</a> <span class="text-gray-500">></span> <span class="text-gray-900">{{ company.name }}</span></div>`
@@ -920,12 +920,12 @@ The template should include:
 10. Notes section (if present)
 11. All brand colors, no blue-600
 
-- [ ] **7.3** Run tests:
+- [x] **7.3** Run tests:
 ```bash
 TESTING=1 PYTHONPATH=/root/availai pytest tests/test_htmx_views.py -v -k "compan" --no-header -q
 ```
 
-- [ ] **7.4** Commit:
+- [x] **7.4** Commit:
 ```bash
 git add app/templates/htmx/partials/companies/detail.html app/routers/htmx_views.py
 git commit -m "Rebuild company detail with tabs, enrich button, and click-to-call contacts"
@@ -941,7 +941,7 @@ git commit -m "Rebuild company detail with tabs, enrich button, and click-to-cal
 
 **Steps:**
 
-- [ ] **8.1** Update `vendors_list_partial` in `app/routers/htmx_views.py`:
+- [x] **8.1** Update `vendors_list_partial` in `app/routers/htmx_views.py`:
 
 ```python
 @router.get("/v2/partials/vendors", response_class=HTMLResponse)
@@ -960,7 +960,7 @@ async def vendors_list_partial(
 
 Change blacklisted filtering: if `hide_blacklisted` is True, filter out blacklisted; otherwise include all. Add sort logic mapping column name + direction (valid columns: `display_name`, `sighting_count`, `overall_win_rate`, `hq_country`, `industry`). Pass `hide_blacklisted`, `sort`, `dir` to template context.
 
-- [ ] **8.2** Rewrite `app/templates/htmx/partials/vendors/list.html` from card grid to table:
+- [x] **8.2** Rewrite `app/templates/htmx/partials/vendors/list.html` from card grid to table:
 
 The template should include:
 1. OOB breadcrumb: `<div id="breadcrumb" hx-swap-oob="true">Vendors</div>`
@@ -1006,12 +1006,12 @@ Template row for each vendor:
 </tr>
 ```
 
-- [ ] **8.3** Run tests:
+- [x] **8.3** Run tests:
 ```bash
 TESTING=1 PYTHONPATH=/root/availai pytest tests/test_htmx_views.py -v -k "vendor" --no-header -q
 ```
 
-- [ ] **8.4** Commit:
+- [x] **8.4** Commit:
 ```bash
 git add app/templates/htmx/partials/vendors/list.html app/routers/htmx_views.py
 git commit -m "Rebuild vendors list as sortable table with blacklisted toggle"
@@ -1026,7 +1026,7 @@ git commit -m "Rebuild vendors list as sortable table with blacklisted toggle"
 
 **Steps:**
 
-- [ ] **9.1** Create `app/templates/partials/shared/safety_review.html`:
+- [x] **9.1** Create `app/templates/partials/shared/safety_review.html`:
 
 ```html
 {# safety_review.html — Vendor safety review block.
@@ -1099,7 +1099,7 @@ git commit -m "Rebuild vendors list as sortable table with blacklisted toggle"
 {% endif %}
 ```
 
-- [ ] **9.2** Commit:
+- [x] **9.2** Commit:
 ```bash
 git add app/templates/partials/shared/safety_review.html
 git commit -m "Add reusable safety review partial for vendor and lead detail"
@@ -1115,7 +1115,7 @@ git commit -m "Add reusable safety review partial for vendor and lead detail"
 
 **Steps:**
 
-- [ ] **10.1** Update `vendor_detail_partial` in `app/routers/htmx_views.py`:
+- [x] **10.1** Update `vendor_detail_partial` in `app/routers/htmx_views.py`:
 
 Add loading of safety data from recent `SourcingLead` records for this vendor (aggregate from most recent leads). Query: `db.query(SourcingLead).filter(SourcingLead.vendor_name_normalized == vendor.normalized_name).order_by(SourcingLead.created_at.desc()).first()`. Extract `vendor_safety_band`, `vendor_safety_summary`, `vendor_safety_flags` from the lead. Pass `safety_band`, `safety_summary`, `safety_flags` to template context.
 
@@ -1138,7 +1138,7 @@ For `contacts`: query `VendorContact` records, render contacts table with click-
 For `analytics`: call vendor_analytics endpoints internally or query directly. Render stats grid + offer history table + parts summary table.
 For `offers`: query `Offer` model filtered by `vendor_card_id`.
 
-- [ ] **10.2** Rewrite `app/templates/htmx/partials/vendors/detail.html`:
+- [x] **10.2** Rewrite `app/templates/htmx/partials/vendors/detail.html`:
 
 The template should include:
 1. OOB breadcrumb: `<div id="breadcrumb" hx-swap-oob="true"><a ... class="text-brand-500 hover:text-brand-600 cursor-pointer">Vendors</a> <span class="text-gray-500">></span> <span class="text-gray-900">{{ vendor.display_name }}</span></div>`
@@ -1175,7 +1175,7 @@ The template should include:
 </span>
 ```
 
-- [ ] **10.3** Implement the vendor tab route handler in `app/routers/htmx_views.py`. For each tab, render HTML directly using `HTMLResponse` or create minimal tab templates.
+- [x] **10.3** Implement the vendor tab route handler in `app/routers/htmx_views.py`. For each tab, render HTML directly using `HTMLResponse` or create minimal tab templates.
 
 **Contacts tab HTML** should include click-to-call:
 ```html
@@ -1204,12 +1204,12 @@ The template should include:
 - Parts summary table (or loaded via HTMX call to `/api/vendors/{card_id}/parts-summary`)
 - Empty state: "No analytics data yet — data builds as you interact with this vendor."
 
-- [ ] **10.4** Run tests:
+- [x] **10.4** Run tests:
 ```bash
 TESTING=1 PYTHONPATH=/root/availai pytest tests/test_htmx_views.py -v -k "vendor" --no-header -q
 ```
 
-- [ ] **10.5** Commit:
+- [x] **10.5** Commit:
 ```bash
 git add app/templates/htmx/partials/vendors/detail.html app/templates/partials/shared/safety_review.html app/routers/htmx_views.py
 git commit -m "Rebuild vendor detail with tabs, safety review, analytics, enrich, click-to-call"
@@ -1224,7 +1224,7 @@ git commit -m "Rebuild vendor detail with tabs, safety review, analytics, enrich
 
 **Steps:**
 
-- [ ] **11.1** Create `tests/test_htmx_core_pages.py` with tests covering:
+- [x] **11.1** Create `tests/test_htmx_core_pages.py` with tests covering:
 
 ```python
 """Tests for Plan 2 core page HTMX routes.
@@ -1259,17 +1259,17 @@ Test cases:
 
 All tests should use the `client` fixture from conftest.py, create test data (requisition, company, vendor) in fixtures, and assert response status codes and key HTML content.
 
-- [ ] **11.2** Run full test suite to verify no regressions:
+- [x] **11.2** Run full test suite to verify no regressions:
 ```bash
 TESTING=1 PYTHONPATH=/root/availai pytest tests/test_htmx_core_pages.py -v --no-header -q
 ```
 
-- [ ] **11.3** Run coverage check:
+- [x] **11.3** Run coverage check:
 ```bash
 TESTING=1 PYTHONPATH=/root/availai pytest tests/ --cov=app --cov-report=term-missing --tb=no -q
 ```
 
-- [ ] **11.4** Commit:
+- [x] **11.4** Commit:
 ```bash
 git add tests/test_htmx_core_pages.py
 git commit -m "Add tests for Plan 2 HTMX core page routes"
@@ -1284,7 +1284,7 @@ git commit -m "Add tests for Plan 2 HTMX core page routes"
 
 **Steps:**
 
-- [ ] **12.1** Search all modified templates for any remaining `blue-600`, `blue-500`, `blue-700`, `green-100`, `red-100`, `yellow-100` references. Replace with brand equivalents:
+- [x] **12.1** Search all modified templates for any remaining `blue-600`, `blue-500`, `blue-700`, `green-100`, `red-100`, `yellow-100` references. Replace with brand equivalents:
   - `blue-600` -> `brand-500`
   - `blue-700` -> `brand-600`
   - `blue-500` (hover) -> `brand-600`
@@ -1299,7 +1299,7 @@ Search command:
 grep -rn "blue-600\|blue-500\|blue-700\|green-100\|red-100\|yellow-100" app/templates/htmx/partials/requisitions/ app/templates/htmx/partials/companies/ app/templates/htmx/partials/vendors/ app/templates/partials/requisitions/ app/templates/partials/shared/safety_review.html
 ```
 
-- [ ] **12.2** Verify all OOB breadcrumb divs are present in every list and detail partial:
+- [x] **12.2** Verify all OOB breadcrumb divs are present in every list and detail partial:
   - `requisitions/list.html` — "Requisitions"
   - `requisitions/detail.html` — "Requisitions > {name}"
   - `companies/list.html` — "Companies"
@@ -1307,12 +1307,12 @@ grep -rn "blue-600\|blue-500\|blue-700\|green-100\|red-100\|yellow-100" app/temp
   - `vendors/list.html` — "Vendors"
   - `vendors/detail.html` — "Vendors > {name}"
 
-- [ ] **12.3** Run full test suite:
+- [x] **12.3** Run full test suite:
 ```bash
 TESTING=1 PYTHONPATH=/root/availai pytest tests/ -v --no-header -q
 ```
 
-- [ ] **12.4** Commit:
+- [x] **12.4** Commit:
 ```bash
 git add -A
 git commit -m "Color audit: replace all blue/green/red with brand/emerald/rose palette"
