@@ -14,9 +14,17 @@
 
 <div class="max-w-7xl mx-auto">
 
-  {# Back link #}
-  <a href="/v2/prospecting" hx-get="/v2/partials/prospecting" hx-target="#main-content" hx-push-url="/v2/prospecting"
-     class="text-sm text-brand-500 hover:text-brand-400 mb-4 inline-block">&larr; Back to Prospecting</a>
+  {# Dark navy page header #}
+  <div class="bg-brand-700 text-white px-6 py-3 rounded-t-lg mb-6 flex items-center justify-between">
+    <div class="flex items-center gap-2 text-sm">
+      <span class="text-brand-300">Avail</span>
+      <span class="text-brand-400">&rsaquo;</span>
+      <a href="/v2/prospecting" hx-get="/v2/partials/prospecting" hx-target="#main-content" hx-push-url="/v2/prospecting"
+         class="text-brand-200 hover:text-white cursor-pointer">Prospecting</a>
+      <span class="text-brand-400">&rsaquo;</span>
+      <span class="font-medium">{{ prospect.name }}</span>
+    </div>
+  </div>
 
   {# Header card #}
   <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">

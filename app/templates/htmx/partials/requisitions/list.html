@@ -9,6 +9,16 @@
 <div id="breadcrumb" hx-swap-oob="true">Requisitions</div>
 
 <div class="max-w-7xl mx-auto" x-data="{ selectedIds: new Set() }">
+  {# Dark navy page header #}
+  <div class="bg-brand-700 text-white px-6 py-3 rounded-t-lg mb-6 flex items-center justify-between">
+    <div class="flex items-center gap-2 text-sm">
+      <span class="text-brand-300">Avail</span>
+      <span class="text-brand-400">&rsaquo;</span>
+      <span class="font-medium">Requisitions</span>
+    </div>
+    <span class="text-xs text-brand-300">{{ total }} total</span>
+  </div>
+
   {# Header #}
   <div class="flex items-center justify-between mb-6">
     <div>

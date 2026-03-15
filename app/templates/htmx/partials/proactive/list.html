@@ -1,0 +1,103 @@
+{#
+  proactive/list.html — Proactive Part Match list with Matches / Sent tabs.
+  Receives: matches (list of dicts grouped by customer), sent (list), tab (str).
+  Called by: htmx_views.py proactive_list_partial endpoint.
+  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
+#}
+
+<div id="breadcrumb" hx-swap-oob="true">Proactive Part Match</div>
+
+<div class="max-w-7xl mx-auto">
+  {# Dark navy page header #}
+  <div class="bg-brand-700 text-white px-6 py-3 rounded-t-lg mb-6 flex items-center justify-between">
+    <div class="flex items-center gap-2 text-sm">
+      <span class="text-brand-300">Avail</span>
+      <span class="text-brand-400">&rsaquo;</span>
+      <span class="font-medium">Proactive Part Match</span>
+    </div>
+    <button hx-post="/api/proactive/refresh"
+            hx-target="#main-content"
+            hx-swap="none"
+            class="text-xs bg-brand-600 hover:bg-brand-500 text-white px-3 py-1 rounded transition-colors">
+      Refresh Matches
+    </button>
+  </div>
+
+  {# Tab bar #}
+  <div class="flex gap-2 mb-6">
+    <a hx-get="/v2/partials/proactive?tab=matches" hx-target="#main-content"
+       class="px-4 py-2 text-sm font-medium rounded-md transition-colors {{ 'bg-brand-500 text-white' if tab == 'matches' else 'bg-brand-100 text-brand-600 hover:bg-brand-200' }}">
+      Matches
+    </a>
+    <a hx-get="/v2/partials/proactive?tab=sent" hx-target="#main-content"
+       class="px-4 py-2 text-sm font-medium rounded-md transition-colors {{ 'bg-brand-500 text-white' if tab == 'sent' else 'bg-brand-100 text-brand-600 hover:bg-brand-200' }}">
+      Sent
+    </a>
+  </div>
+
+  {% if tab == 'matches' %}
+  {# Matches tab #}
+  {% if matches %}
+    {% for group in matches %}
+    <div class="mb-6">
+      <h3 class="text-lg font-semibold text-gray-900 mb-3">
+        {{ group.company_name | default('Unknown Customer') }}
+        <span class="text-sm font-normal text-gray-500 ml-2">{{ group.site_name | default('') }}</span>
+      </h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        {% for match in group.matches | default([]) %}
+        {% include "htmx/partials/proactive/_match_card.html" %}
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  {% else %}
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-12 text-center">
+      <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+      </svg>
+      <p class="mt-2 text-sm text-gray-500">No new proactive matches found</p>
+      <p class="mt-1 text-xs text-gray-400">Matches are generated when your vendor offers align with customer purchase history</p>
+    </div>
+  {% endif %}
+
+  {% elif tab == 'sent' %}
+  {# Sent tab #}
+  {% if sent %}
+    <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Parts</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sent</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for offer in sent %}
+          <tr class="hover:bg-brand-50">
+            <td class="px-4 py-3 text-sm text-gray-900">{{ offer.company_name | default('—') }}</td>
+            <td class="px-4 py-3 text-sm font-mono text-gray-700">{{ offer.mpns | default('—') }}</td>
+            <td class="px-4 py-3 text-sm text-gray-500">{{ offer.sent_at | default('—') }}</td>
+            <td class="px-4 py-3">
+              {% set status = offer.status | default('sent') %}
+              <span class="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full
+                {{ 'bg-emerald-50 text-emerald-700' if status == 'won' else
+                   'bg-amber-50 text-amber-700' if status == 'pending' else
+                   'bg-brand-100 text-brand-600' }}">
+                {{ status | upper }}
+              </span>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  {% else %}
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-12 text-center">
+      <p class="text-sm text-gray-500">No proactive offers sent yet</p>
+    </div>
+  {% endif %}
+  {% endif %}
+</div>

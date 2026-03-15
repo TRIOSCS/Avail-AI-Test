@@ -133,6 +133,8 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/settings", response_class=HTMLResponse)
 @router.get("/v2/prospecting", response_class=HTMLResponse)
 @router.get("/v2/prospecting/{prospect_id:int}", response_class=HTMLResponse)
+@router.get("/v2/proactive", response_class=HTMLResponse)
+@router.get("/v2/strategic", response_class=HTMLResponse)
 async def v2_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
     user = get_user(request, db)
@@ -147,6 +149,10 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         current_view = "quotes"
     elif "/prospecting" in path:
         current_view = "prospecting"
+    elif "/proactive" in path:
+        current_view = "proactive"
+    elif "/strategic" in path:
+        current_view = "strategic"
     elif "/settings" in path:
         current_view = "settings"
     elif "/vendors" in path:
@@ -2444,3 +2450,130 @@ async def settings_profile_tab(
     ctx = _base_ctx(request, user, "settings")
     ctx["profile_user"] = user
     return templates.TemplateResponse("htmx/partials/settings/profile.html", ctx)
+
+
+# ── Proactive Part Match ─────────────────────────────────────────────
+
+
+@router.get("/v2/partials/proactive", response_class=HTMLResponse)
+async def proactive_list_partial(
+    request: Request,
+    tab: str = "matches",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Proactive matches list partial — shows matches and sent offers."""
+    from ..services.proactive_service import get_matches_for_user, get_sent_offers
+
+    matches = get_matches_for_user(db, user.id, status="new")
+    sent = get_sent_offers(db, user.id) if tab == "sent" else []
+
+    ctx = _base_ctx(request, user, "proactive")
+    ctx["matches"] = matches
+    ctx["sent"] = sent
+    ctx["tab"] = tab
+    return templates.TemplateResponse("htmx/partials/proactive/list.html", ctx)
+
+
+@router.post("/v2/partials/proactive/{match_id}/dismiss", response_class=HTMLResponse)
+async def proactive_dismiss(
+    match_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Dismiss a proactive match and reload the list."""
+    from ..models import ProactiveMatch
+
+    db.query(ProactiveMatch).filter(
+        ProactiveMatch.id == match_id,
+        ProactiveMatch.salesperson_id == user.id,
+        ProactiveMatch.status == "new",
+    ).update({"status": "dismissed"}, synchronize_session=False)
+    db.commit()
+
+    # Re-render list
+    from ..services.proactive_service import get_matches_for_user
+
+    matches = get_matches_for_user(db, user.id, status="new")
+    ctx = _base_ctx(request, user, "proactive")
+    ctx["matches"] = matches
+    ctx["sent"] = []
+    ctx["tab"] = "matches"
+    return templates.TemplateResponse("htmx/partials/proactive/list.html", ctx)
+
+
+# ── Strategic Vendors (My Vendors) ───────────────────────────────────
+
+
+@router.get("/v2/partials/strategic", response_class=HTMLResponse)
+async def strategic_list_partial(
+    request: Request,
+    search: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """My Vendors list partial — claimed vendors + open pool."""
+    from ..services import strategic_vendor_service as svc
+
+    my_vendors = svc.get_my_strategic(db, user.id)
+    open_vendors, open_total = svc.get_open_pool(db, limit=20, offset=0, search=search or None)
+
+    ctx = _base_ctx(request, user, "strategic")
+    ctx["my_vendors"] = my_vendors
+    ctx["slot_count"] = len(my_vendors)
+    ctx["max_slots"] = svc.MAX_STRATEGIC_VENDORS
+    ctx["open_vendors"] = open_vendors
+    ctx["open_total"] = open_total
+    ctx["search"] = search
+    return templates.TemplateResponse("htmx/partials/strategic/list.html", ctx)
+
+
+@router.post("/v2/partials/strategic/claim/{vendor_card_id}", response_class=HTMLResponse)
+async def strategic_claim(
+    vendor_card_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Claim a vendor as strategic and reload the list."""
+    from ..services import strategic_vendor_service as svc
+
+    svc.claim_vendor(db, user.id, vendor_card_id)
+
+    my_vendors = svc.get_my_strategic(db, user.id)
+    open_vendors, open_total = svc.get_open_pool(db, limit=20, offset=0)
+
+    ctx = _base_ctx(request, user, "strategic")
+    ctx["my_vendors"] = my_vendors
+    ctx["slot_count"] = len(my_vendors)
+    ctx["max_slots"] = svc.MAX_STRATEGIC_VENDORS
+    ctx["open_vendors"] = open_vendors
+    ctx["open_total"] = open_total
+    ctx["search"] = ""
+    return templates.TemplateResponse("htmx/partials/strategic/list.html", ctx)
+
+
+@router.delete("/v2/partials/strategic/{vendor_card_id}/drop", response_class=HTMLResponse)
+async def strategic_drop(
+    vendor_card_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Drop a strategic vendor and reload the list."""
+    from ..services import strategic_vendor_service as svc
+
+    svc.drop_vendor(db, user.id, vendor_card_id)
+
+    my_vendors = svc.get_my_strategic(db, user.id)
+    open_vendors, open_total = svc.get_open_pool(db, limit=20, offset=0)
+
+    ctx = _base_ctx(request, user, "strategic")
+    ctx["my_vendors"] = my_vendors
+    ctx["slot_count"] = len(my_vendors)
+    ctx["max_slots"] = svc.MAX_STRATEGIC_VENDORS
+    ctx["open_vendors"] = open_vendors
+    ctx["open_total"] = open_total
+    ctx["search"] = ""
+    return templates.TemplateResponse("htmx/partials/strategic/list.html", ctx)

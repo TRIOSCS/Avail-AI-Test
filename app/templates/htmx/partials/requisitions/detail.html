@@ -14,6 +14,18 @@
 </div>
 
 <div class="max-w-7xl mx-auto">
+  {# Dark navy page header #}
+  <div class="bg-brand-700 text-white px-6 py-3 rounded-t-lg mb-6 flex items-center justify-between">
+    <div class="flex items-center gap-2 text-sm">
+      <span class="text-brand-300">Avail</span>
+      <span class="text-brand-400">&rsaquo;</span>
+      <a hx-get="/v2/partials/requisitions" hx-target="#main-content" hx-push-url="/v2/requisitions"
+         class="text-brand-200 hover:text-white cursor-pointer">Requisitions</a>
+      <span class="text-brand-400">&rsaquo;</span>
+      <span class="font-medium">{{ req.name }}</span>
+    </div>
+  </div>
+
   {# Header card #}
   <div class="bg-white rounded-lg shadow border border-gray-200 p-6 mb-6">
     <div class="flex items-start justify-between">
