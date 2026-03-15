@@ -99,6 +99,32 @@ class VendorDetailResponse(BaseModel):
     avg_rating: float | None = None
     review_count: int = 0
     reviews: list[dict] = Field(default_factory=list)
+    # Extended fields from card_to_dict()
+    linkedin_url: str | None = None
+    legal_name: str | None = None
+    industry: str | None = None
+    employee_size: str | None = None
+    hq_city: str | None = None
+    hq_state: str | None = None
+    hq_country: str | None = None
+    last_enriched_at: str | None = None
+    enrichment_source: str | None = None
+    brands: list[dict] = Field(default_factory=list)
+    unique_parts: int = 0
+    vendor_score: float | None = None
+    advancement_score: float | None = None
+    is_new_vendor: bool = False
+    total_outreach: int = 0
+    total_responses: int = 0
+    ghost_rate: float | None = None
+    response_velocity_hours: float | None = None
+    last_contact_at: str | None = None
+    brand_tags: list[str] = Field(default_factory=list)
+    commodity_tags: list[str] = Field(default_factory=list)
+    material_tags_updated_at: str | None = None
+    tags: list[dict] = Field(default_factory=list)
+    created_at: str | None = None
+    updated_at: str | None = None
 
 
 # ── Companies ───────────────────────────────────────────────────────────
@@ -137,6 +163,31 @@ class QuoteDetailResponse(BaseModel):
     line_items: list[dict] = Field(default_factory=list)
     subtotal: float | None = None
     sent_at: str | None = None
+    # Extended fields from quote_to_dict()
+    customer_site_id: int | None = None
+    customer_name: str | None = None
+    company_domain: str | None = None
+    company_name_short: str | None = None
+    contact_name: str | None = None
+    contact_email: str | None = None
+    site_contacts: list[dict] = Field(default_factory=list)
+    revision: int | None = None
+    total_cost: float | None = None
+    total_margin_pct: float | None = None
+    payment_terms: str | None = None
+    shipping_terms: str | None = None
+    validity_days: int | None = None
+    notes: str | None = None
+    result: str | None = None
+    result_reason: str | None = None
+    result_notes: str | None = None
+    result_at: str | None = None
+    won_revenue: float | None = None
+    created_by: str | None = None
+    created_at: str | None = None
+    updated_at: str | None = None
+    is_expired: bool = False
+    days_until_expiry: int | None = None
 
 
 class QuoteSummaryResponse(BaseModel):
@@ -221,3 +272,6 @@ class VendorEmailMetricsResponse(BaseModel):
     response_rate: int | None = None
     quote_rate: int | None = None
     avg_response_hours: float | None = None
+    last_contacted: str | None = None
+    last_reply: str | None = None
+    active_rfqs: int = 0
