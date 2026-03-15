@@ -20,7 +20,7 @@ from fastapi.templating import Jinja2Templates
 from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..database import get_db
 from ..dependencies import get_user, require_user
@@ -497,7 +497,12 @@ async def requisition_tab(
     ctx["req"] = req
 
     if tab == "parts":
-        requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
+        requirements = (
+            db.query(Requirement)
+            .options(selectinload(Requirement.sightings))
+            .filter(Requirement.requisition_id == req_id)
+            .all()
+        )
         for r in requirements:
             r.sighting_count = len(r.sightings) if r.sightings else 0
         ctx["requirements"] = requirements
@@ -1264,69 +1269,21 @@ async def vendor_tab(
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
+    from ..services.vendor_detail_service import (
+        get_vendor_contacts,
+        get_vendor_offers,
+        get_vendor_overview_data,
+    )
+
     ctx = _base_ctx(request, user, "vendors")
     ctx["vendor"] = vendor
 
     if tab == "overview":
-        recent_sightings = (
-            db.query(Sighting)
-            .filter(Sighting.vendor_name_normalized == vendor.normalized_name)
-            .order_by(Sighting.created_at.desc().nullslast())
-            .limit(10)
-            .all()
-        )
-        # Safety data
-        safety_band = None
-        safety_summary = None
-        safety_flags = None
-        safety_score = None
-        safety_available = False
-        try:
-            lead = (
-                db.query(SourcingLead)
-                .filter(SourcingLead.vendor_name_normalized == vendor.normalized_name)
-                .order_by(SourcingLead.created_at.desc())
-                .first()
-            )
-            if lead:
-                safety_band = lead.vendor_safety_band
-                safety_summary = lead.vendor_safety_summary
-                safety_flags = lead.vendor_safety_flags
-                safety_score = lead.vendor_safety_score
-                safety_available = True
-        except (SQLAlchemyError, ValueError) as exc:
-            logger.warning("Failed to load safety data for vendor {}: {}", vendor_id, exc)
-        contacts = (
-            db.query(VendorContact)
-            .filter(VendorContact.vendor_card_id == vendor_id)
-            .order_by(VendorContact.interaction_count.desc().nullslast())
-            .limit(20)
-            .all()
-        )
-        ctx.update(
-            {
-                "recent_sightings": recent_sightings,
-                "contacts": contacts,
-                "safety_band": safety_band,
-                "safety_summary": safety_summary,
-                "safety_flags": safety_flags,
-                "safety_score": safety_score,
-                "safety_available": safety_available,
-            }
-        )
-        # Re-use the inline overview from the detail template
-        # by rendering just the overview portion
+        ctx.update(get_vendor_overview_data(db, vendor))
         return templates.TemplateResponse("htmx/partials/vendors/overview_tab.html", ctx)
 
     elif tab == "contacts":
-        contacts = (
-            db.query(VendorContact)
-            .filter(VendorContact.vendor_card_id == vendor_id)
-            .order_by(VendorContact.interaction_count.desc().nullslast())
-            .limit(50)
-            .all()
-        )
-        ctx["contacts"] = contacts
+        ctx["contacts"] = get_vendor_contacts(db, vendor_id)
         ctx["vendor"] = vendor
         return templates.TemplateResponse("partials/vendors/tabs/contacts.html", ctx)
 
@@ -1363,13 +1320,7 @@ async def vendor_tab(
         return HTMLResponse(html)
 
     else:  # offers
-        offers = (
-            db.query(Offer)
-            .filter(Offer.vendor_name == vendor.display_name)
-            .order_by(Offer.created_at.desc().nullslast())
-            .limit(50)
-            .all()
-        )
+        offers = get_vendor_offers(db, vendor.display_name)
         rows = []
         for o in offers:
             price_str = f"${o.unit_price:,.4f}" if o.unit_price else "RFQ"
@@ -1488,10 +1439,14 @@ async def company_tab(
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
+    from ..services.company_detail_service import (
+        get_company_contacts,
+        get_company_requisitions,
+        get_company_sites,
+    )
+
     if tab == "sites":
-        sites = (
-            db.query(CustomerSite).filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True)).all()
-        )
+        sites = get_company_sites(db, company_id)
         rows = []
         for s in sites:
             rows.append(f"""<tr class="hover:bg-brand-50">
@@ -1519,20 +1474,19 @@ async def company_tab(
         return HTMLResponse(html)
 
     elif tab == "contacts":
-        # Get contacts from company sites
-        sites = db.query(CustomerSite).filter(CustomerSite.company_id == company_id).all()
+        contacts = get_company_contacts(db, company_id)
         rows = []
-        for s in sites:
-            if s.contact_name or s.contact_email:
-                phone_html = (
-                    f'<a href="tel:{s.contact_phone}" class="text-brand-500 hover:text-brand-600">{s.contact_phone}</a>'
-                    if getattr(s, "contact_phone", None)
-                    else '<span class="text-gray-500">\u2014</span>'
-                )
-                rows.append(f"""<tr class="hover:bg-brand-50">
-                  <td class="px-4 py-2 text-sm font-medium text-gray-900">{s.contact_name or _DASH}</td>
-                  <td class="px-4 py-2 text-sm text-gray-500">{s.site_name or _DASH}</td>
-                  <td class="px-4 py-2 text-sm text-gray-500">{s.contact_email or _DASH}</td>
+        for c in contacts:
+            phone = c.get("contact_phone")
+            phone_html = (
+                f'<a href="tel:{phone}" class="text-brand-500 hover:text-brand-600">{phone}</a>'
+                if phone
+                else '<span class="text-gray-500">\u2014</span>'
+            )
+            rows.append(f"""<tr class="hover:bg-brand-50">
+                  <td class="px-4 py-2 text-sm font-medium text-gray-900">{c.get("contact_name") or _DASH}</td>
+                  <td class="px-4 py-2 text-sm text-gray-500">{c.get("site_name") or _DASH}</td>
+                  <td class="px-4 py-2 text-sm text-gray-500">{c.get("contact_email") or _DASH}</td>
                   <td class="px-4 py-2 text-sm">{phone_html}</td>
                 </tr>""")
         if rows:
@@ -1554,13 +1508,7 @@ async def company_tab(
         return HTMLResponse(html)
 
     elif tab == "requisitions":
-        reqs = (
-            db.query(Requisition)
-            .filter(Requisition.customer_name == company.name)
-            .order_by(Requisition.created_at.desc().nullslast())
-            .limit(50)
-            .all()
-        )
+        reqs = get_company_requisitions(db, company.name)
         rows = []
         for r in reqs:
             date_str = r.created_at.strftime("%b %d, %Y") if r.created_at else "\u2014"
@@ -1637,11 +1585,11 @@ async def buy_plans_list_partial(
 ):
     """Return buy plans list as HTML partial."""
     query = db.query(BuyPlan).options(
-        joinedload(BuyPlan.quote),
+        joinedload(BuyPlan.quote).joinedload(Quote.customer_site).joinedload(CustomerSite.company),
         joinedload(BuyPlan.requisition),
         joinedload(BuyPlan.submitted_by),
         joinedload(BuyPlan.approved_by),
-        joinedload(BuyPlan.lines),
+        selectinload(BuyPlan.lines),
     )
 
     if status:
@@ -2183,20 +2131,27 @@ async def sourcing_results_partial(
 
     lead_sighting_data = {}
     if leads:
-        for lead in leads:
-            best_sighting = (
-                db.query(Sighting)
-                .filter(
-                    Sighting.requirement_id == requirement_id,
-                    Sighting.vendor_name_normalized == lead.vendor_name_normalized,
-                )
-                .order_by(Sighting.created_at.desc().nullslast())
-                .first()
+        vendor_names = [lead.vendor_name_normalized for lead in leads]
+        sightings = (
+            db.query(Sighting)
+            .filter(
+                Sighting.requirement_id == requirement_id,
+                Sighting.vendor_name_normalized.in_(vendor_names),
             )
-            if best_sighting:
+            .order_by(Sighting.created_at.desc().nullslast())
+            .all()
+        )
+        # Group by vendor, keep only the most recent (already sorted desc)
+        best_by_vendor: dict[str, Sighting] = {}
+        for s in sightings:
+            if s.vendor_name_normalized not in best_by_vendor:
+                best_by_vendor[s.vendor_name_normalized] = s
+        for lead in leads:
+            best = best_by_vendor.get(lead.vendor_name_normalized)
+            if best:
                 lead_sighting_data[lead.id] = {
-                    "qty_available": best_sighting.qty_available,
-                    "unit_price": best_sighting.unit_price,
+                    "qty_available": best.qty_available,
+                    "unit_price": best.unit_price,
                 }
 
     ctx = _base_ctx(request, user, "requisitions")
