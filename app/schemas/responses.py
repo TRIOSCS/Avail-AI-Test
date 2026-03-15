@@ -25,10 +25,9 @@ class OkResponse(BaseModel):
 
 
 # ── Search / Sightings ─────────────────────────────────────────────────
-# TODO: Audit extra="allow" on response models for potential data leakage
 
 
-class SightingItem(BaseModel, extra="allow"):
+class SightingItem(BaseModel):
     """Single search-result row returned by search_requirement / quick_search.
 
     Includes unified scoring fields added in phase-4 task-5.
@@ -48,7 +47,7 @@ class SightingItem(BaseModel, extra="allow"):
 # ── Requisitions ────────────────────────────────────────────────────────
 
 
-class RequisitionListItem(BaseModel, extra="allow"):
+class RequisitionListItem(BaseModel):
     id: int
     name: str
     status: str = ""
@@ -61,7 +60,7 @@ class RequisitionListResponse(PaginatedResponse):
     requisitions: list[dict] = Field(default_factory=list)
 
 
-class RequirementListItem(BaseModel, extra="allow"):
+class RequirementListItem(BaseModel):
     id: int
     primary_mpn: str
     target_qty: int | None = None
@@ -73,7 +72,7 @@ class RequirementListItem(BaseModel, extra="allow"):
 # ── Vendors ─────────────────────────────────────────────────────────────
 
 
-class VendorListItem(BaseModel, extra="allow"):
+class VendorListItem(BaseModel):
     id: int
     display_name: str
     emails: list[str] = Field(default_factory=list)
@@ -86,7 +85,7 @@ class VendorListResponse(PaginatedResponse):
     vendors: list[dict] = Field(default_factory=list)
 
 
-class VendorDetailResponse(BaseModel, extra="allow"):
+class VendorDetailResponse(BaseModel):
     id: int
     display_name: str
     normalized_name: str = ""
@@ -105,7 +104,7 @@ class VendorDetailResponse(BaseModel, extra="allow"):
 # ── Companies ───────────────────────────────────────────────────────────
 
 
-class CompanyListItem(BaseModel, extra="allow"):
+class CompanyListItem(BaseModel):
     id: int
     name: str
     site_count: int = 0
@@ -115,13 +114,13 @@ class CompanyListItem(BaseModel, extra="allow"):
 # ── Offers ──────────────────────────────────────────────────────────────
 
 
-class OfferGroupItem(BaseModel, extra="allow"):
+class OfferGroupItem(BaseModel):
     requirement_id: int
     mpn: str = ""
     offers: list[dict] = Field(default_factory=list)
 
 
-class OfferListResponse(BaseModel, extra="allow"):
+class OfferListResponse(BaseModel):
     has_new_offers: bool = False
     latest_offer_at: str | None = None
     groups: list[dict] = Field(default_factory=list)
@@ -130,7 +129,7 @@ class OfferListResponse(BaseModel, extra="allow"):
 # ── Quotes ──────────────────────────────────────────────────────────────
 
 
-class QuoteDetailResponse(BaseModel, extra="allow"):
+class QuoteDetailResponse(BaseModel):
     id: int
     requisition_id: int
     quote_number: str = ""
@@ -140,7 +139,7 @@ class QuoteDetailResponse(BaseModel, extra="allow"):
     sent_at: str | None = None
 
 
-class QuoteSummaryResponse(BaseModel, extra="allow"):
+class QuoteSummaryResponse(BaseModel):
     """Lightweight quote-tab projection for inline requisition view.
 
     Always populated — never blank. Shows quote status, buy plan linkage, selected
@@ -171,7 +170,7 @@ class QuoteSummaryResponse(BaseModel, extra="allow"):
 # ── Buy Plans ───────────────────────────────────────────────────────────
 
 
-class BuyPlanListItem(BaseModel, extra="allow"):
+class BuyPlanListItem(BaseModel):
     id: int
     status: str = ""
     line_items: list[dict] = Field(default_factory=list)
@@ -182,11 +181,11 @@ class BuyPlanListItem(BaseModel, extra="allow"):
 # ── Performance ─────────────────────────────────────────────────────────
 
 
-class VendorScorecardListResponse(PaginatedResponse, extra="allow"):
+class VendorScorecardListResponse(PaginatedResponse):
     vendors: list[dict] = Field(default_factory=list)
 
 
-class BuyerLeaderboardResponse(BaseModel, extra="allow"):
+class BuyerLeaderboardResponse(BaseModel):
     month: str = ""
     entries: list[dict] = Field(default_factory=list)
 
@@ -194,27 +193,27 @@ class BuyerLeaderboardResponse(BaseModel, extra="allow"):
 # ── Sources ─────────────────────────────────────────────────────────────
 
 
-class SourceListResponse(BaseModel, extra="allow"):
+class SourceListResponse(BaseModel):
     sources: list[dict] = Field(default_factory=list)
 
 
 # ── Enrichment ──────────────────────────────────────────────────────────
 
 
-class EnrichmentQueueResponse(PaginatedResponse, extra="allow"):
+class EnrichmentQueueResponse(PaginatedResponse):
     items: list[dict] = Field(default_factory=list)
 
 
 # ── Vendor Sub-endpoints ────────────────────────────────────────────────
 
 
-class VendorPartsSummaryResponse(BaseModel, extra="allow"):
+class VendorPartsSummaryResponse(BaseModel):
     vendor_name: str = ""
     total: int = 0
     items: list[dict] = Field(default_factory=list)
 
 
-class VendorEmailMetricsResponse(BaseModel, extra="allow"):
+class VendorEmailMetricsResponse(BaseModel):
     vendor_name: str = ""
     total_rfqs_sent: int = 0
     total_replies: int = 0

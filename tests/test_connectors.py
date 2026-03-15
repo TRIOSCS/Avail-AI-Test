@@ -610,6 +610,81 @@ class TestMouserConnector:
         results = c._parse({}, "X")
         assert results == []
 
+    @pytest.mark.asyncio
+    async def test_do_search_403_returns_empty(self):
+        """Mouser 403 (quota/rate limit) returns empty, does not raise."""
+        c = self._make_connector()
+        resp = _mock_response(403, text="Forbidden")
+        resp.raise_for_status = MagicMock()  # Should not be called
+        with patch("app.connectors.mouser.http") as mock_http:
+            mock_http.post = AsyncMock(return_value=resp)
+            result = await c._do_search("LM317T")
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_do_search_429_returns_empty(self):
+        """Mouser 429 (rate limit) returns empty, does not raise."""
+        c = self._make_connector()
+        resp = _mock_response(429, text="Too Many Requests")
+        resp.raise_for_status = MagicMock()
+        with patch("app.connectors.mouser.http") as mock_http:
+            mock_http.post = AsyncMock(return_value=resp)
+            result = await c._do_search("LM317T")
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_do_search_quota_error_in_body_returns_empty(self):
+        """Mouser returns 200 with quota/rate error in Errors array — return empty."""
+        c = self._make_connector()
+        resp = _mock_response(200, {"Errors": [{"Message": "Too many requests per day"}]})
+        with patch("app.connectors.mouser.http") as mock_http:
+            mock_http.post = AsyncMock(return_value=resp)
+            result = await c._do_search("LM317T")
+            assert result == []
+
+    def test_parse_picks_lowest_qty_price_break(self):
+        """Price should come from the lowest quantity price break."""
+        c = self._make_connector()
+        data = {
+            "SearchResults": {
+                "Parts": [
+                    {
+                        "ManufacturerPartNumber": "X",
+                        "Manufacturer": "M",
+                        "MouserPartNumber": "M-X",
+                        "Availability": "100 In Stock",
+                        "PriceBreaks": [
+                            {"Quantity": 100, "Price": "$0.50"},
+                            {"Quantity": 1, "Price": "$1.25"},
+                            {"Quantity": 1000, "Price": "$0.30"},
+                        ],
+                        "ProductDetailUrl": "",
+                        "Description": "",
+                    }
+                ]
+            }
+        }
+        results = c._parse(data, "X")
+        assert results[0]["unit_price"] == 1.25  # qty=1 break
+
+    def test_parse_no_price_breaks(self):
+        """Missing PriceBreaks should result in None price."""
+        c = self._make_connector()
+        data = {
+            "SearchResults": {
+                "Parts": [
+                    {
+                        "ManufacturerPartNumber": "X",
+                        "Manufacturer": "M",
+                        "MouserPartNumber": "M-X",
+                        "Availability": "50 In Stock",
+                    }
+                ]
+            }
+        }
+        results = c._parse(data, "X")
+        assert results[0]["unit_price"] is None
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  OEMSecrets Connector tests
@@ -863,6 +938,57 @@ class TestOEMSecretsConnector:
         results = c._parse(data, "ABC")
         assert results[0]["moq"] == 5
 
+    @pytest.mark.asyncio
+    async def test_do_search_401_returns_empty(self):
+        """OEMSecrets 401 (quota exhausted) returns empty, does not raise."""
+        c = self._make_connector()
+        resp = _mock_response(401, text="User is not accepted")
+        resp.raise_for_status = MagicMock()
+        with patch("app.connectors.oemsecrets.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=resp)
+            result = await c._do_search("LM317T")
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_do_search_429_returns_empty(self):
+        """OEMSecrets 429 (rate limit) returns empty, does not raise."""
+        c = self._make_connector()
+        resp = _mock_response(429, text="Rate limited")
+        resp.raise_for_status = MagicMock()
+        with patch("app.connectors.oemsecrets.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=resp)
+            result = await c._do_search("LM317T")
+            assert result == []
+
+    def test_parse_empty_prices_dict(self):
+        """Empty prices dict should result in None price."""
+        c = self._make_connector()
+        data = {
+            "stock": [
+                {
+                    "distributor": "Arrow",
+                    "mpn": "X",
+                    "stock": 100,
+                    "prices": {},
+                }
+            ]
+        }
+        results = c._parse(data, "X")
+        assert results[0]["unit_price"] is None
+
+    def test_parse_confidence_with_stock(self):
+        """Confidence should be 5 when qty is available, 3 when not."""
+        c = self._make_connector()
+        data = {
+            "stock": [
+                {"distributor": "A", "mpn": "X", "sku": "s1", "stock": 100},
+                {"distributor": "B", "mpn": "Y", "sku": "s2", "stock": 0},
+            ]
+        }
+        results = c._parse(data, "X")
+        assert results[0]["confidence"] == 5  # qty=100
+        assert results[1]["confidence"] == 3  # qty=0 (falsy)
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Sourcengine Connector tests
@@ -1001,6 +1127,53 @@ class TestSourcengineConnector:
         }
         results = c._parse(data, "ABC")
         assert results[0]["moq"] == 10
+
+    @pytest.mark.asyncio
+    async def test_do_search_non_200_raises(self):
+        """Sourcengine raises on non-200 (no graceful handling like Mouser)."""
+        c = self._make_connector()
+        resp = _mock_response(500, text="Internal Error")
+        with patch("app.connectors.sourcengine.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=resp)
+            with pytest.raises(httpx.HTTPStatusError):
+                await c._do_search("LM317T")
+
+    def test_parse_authorized_defaults_false(self):
+        """Sourcengine defaults is_authorized to False (unlike OEMSecrets)."""
+        c = self._make_connector()
+        data = {"results": [{"supplier": "Broker X", "mpn": "X", "quantity": 100}]}
+        results = c._parse(data, "X")
+        assert results[0]["is_authorized"] is False
+
+    def test_parse_authorized_true_when_set(self):
+        c = self._make_connector()
+        data = {
+            "results": [
+                {"supplier": "Arrow", "mpn": "X", "quantity": 100, "authorized": True}
+            ]
+        }
+        results = c._parse(data, "X")
+        assert results[0]["is_authorized"] is True
+
+    def test_parse_confidence_4_with_qty(self):
+        """Sourcengine confidence is 4 (not 5) when qty is present."""
+        c = self._make_connector()
+        data = {"results": [{"supplier": "S1", "mpn": "X", "quantity": 100}]}
+        results = c._parse(data, "X")
+        assert results[0]["confidence"] == 4
+
+    def test_parse_confidence_3_without_qty(self):
+        c = self._make_connector()
+        data = {"results": [{"supplier": "S1", "mpn": "X"}]}
+        results = c._parse(data, "X")
+        assert results[0]["confidence"] == 3
+
+    def test_parse_offers_key(self):
+        """Sourcengine should also accept 'offers' as top-level key."""
+        c = self._make_connector()
+        data = {"offers": [{"supplier": "S1", "mpn": "X"}]}
+        results = c._parse(data, "X")
+        assert len(results) == 1
 
 
 # ═══════════════════════════════════════════════════════════════════════
