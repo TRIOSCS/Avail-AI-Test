@@ -1136,6 +1136,48 @@ async def rfq_compose(
     return templates.TemplateResponse("partials/requisitions/rfq_compose.html", ctx)
 
 
+@router.post("/v2/partials/requisitions/{req_id}/ai-draft-rfq", response_class=HTMLResponse)
+async def ai_draft_rfq(
+    request: Request,
+    req_id: int,
+    vendor_names: str = Form(""),
+    parts_summary: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Generate AI-personalized RFQ email body for the first selected vendor."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    # Take the first vendor name from the form
+    vendor_name = vendor_names.strip() if vendor_names else "Vendor"
+    parts = [p.strip() for p in parts_summary.split(",") if p.strip()]
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["vendor_name"] = vendor_name
+
+    try:
+        from app.routers.ai import _build_vendor_history
+        from app.services.ai_service import draft_rfq
+
+        vendor_history = _build_vendor_history(vendor_name, db)
+        draft = await draft_rfq(
+            vendor_name=vendor_name,
+            parts=parts,
+            vendor_history=vendor_history,
+            user_name=user.name or "",
+        )
+        ctx["draft_body"] = draft or ""
+    except Exception as exc:
+        logger.error(f"AI draft RFQ error for req {req_id}: {exc}")
+        ctx["draft_body"] = ""
+
+    return templates.TemplateResponse(
+        "partials/requisitions/rfq_draft_result.html", ctx
+    )
+
+
 @router.post("/v2/partials/requisitions/{req_id}/rfq-send", response_class=HTMLResponse)
 async def rfq_send(
     request: Request,
