@@ -2466,8 +2466,68 @@ async def company_tab(
         return HTMLResponse(html)
 
     else:  # activity
-        html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No activity recorded yet.</p></div>'
-        return HTMLResponse(html)
+        from sqlalchemy import or_ as or_clause
+        from ..models.offers import Contact as RfqContact
+        from ..models.intelligence import ActivityLog
+
+        # Find all requisition IDs linked to this company (via FK or name match)
+        req_ids = [r.id for r in db.query(Requisition.id).filter(or_clause(
+            Requisition.company_id == company.id,
+            sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
+        )).all()]
+
+        # RFQ contacts across company's requisitions
+        contacts = []
+        if req_ids:
+            contacts = (
+                db.query(RfqContact)
+                .filter(RfqContact.requisition_id.in_(req_ids))
+                .order_by(RfqContact.created_at.desc())
+                .limit(30)
+                .all()
+            )
+        # Build req_map for backlinks
+        req_map = {}
+        if contacts:
+            linked_req_ids = {c.requisition_id for c in contacts}
+            for r in db.query(Requisition).filter(Requisition.id.in_(linked_req_ids)).all():
+                req_map[r.id] = r
+
+        # Quotes linked to company's sites
+        site_ids = [s.id for s in db.query(CustomerSite.id).filter(
+            CustomerSite.company_id == company_id
+        ).all()]
+        quotes = []
+        if site_ids:
+            quotes = (
+                db.query(Quote)
+                .filter(Quote.customer_site_id.in_(site_ids))
+                .order_by(Quote.created_at.desc().nullslast())
+                .limit(20)
+                .all()
+            )
+
+        # Direct activity logs on this company + its requisitions
+        activity_filters = [ActivityLog.company_id == company.id]
+        if req_ids:
+            activity_filters.append(ActivityLog.requisition_id.in_(req_ids))
+        activities = (
+            db.query(ActivityLog)
+            .filter(or_clause(*activity_filters))
+            .order_by(ActivityLog.created_at.desc())
+            .limit(30)
+            .all()
+        )
+
+        ctx = _base_ctx(request, user, "companies")
+        ctx.update({
+            "company": company,
+            "contacts": contacts,
+            "quotes": quotes,
+            "activities": activities,
+            "req_map": req_map,
+        })
+        return templates.TemplateResponse("partials/companies/tabs/activity_tab.html", ctx)
 
 
 # ── Sites & Site Contacts CRUD (Phase 4) ───────────────────────────────

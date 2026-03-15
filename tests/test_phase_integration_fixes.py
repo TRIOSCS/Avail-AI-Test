@@ -285,3 +285,63 @@ class TestMaterialVendorLink:
         # Vendor name should be a link
         assert "text-brand-500" in resp.text
         assert "/v2/partials/vendors" in resp.text
+
+
+# ── Phase 5B: Company activity tab ──────────────────────────────────
+
+
+class TestCompanyActivityTab:
+    def test_company_activity_tab_with_rfq(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Company activity tab shows RFQ contacts for linked requisitions."""
+        from app.models import Company, CustomerSite
+        from app.models.offers import Contact as RfqContact
+
+        company = Company(name="Activity Co", account_type="customer")
+        db_session.add(company)
+        db_session.flush()
+
+        req = Requisition(
+            name="Activity Req",
+            status="active",
+            created_by=test_user.id,
+            company_id=company.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+
+        contact = RfqContact(
+            requisition_id=req.id,
+            user_id=test_user.id,
+            contact_type="email",
+            vendor_name="Activity Vendor",
+            vendor_name_normalized="activity vendor",
+            vendor_contact="sales@activity.com",
+            subject="RFQ Activity",
+            status="sent",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/companies/{company.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "Activity Vendor" in resp.text
+        assert "RFQ History" in resp.text
+        assert f"Req #{req.id}" in resp.text
+
+    def test_company_activity_tab_empty(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Empty company activity tab shows placeholder."""
+        from app.models import Company
+
+        company = Company(name="Empty Co", account_type="customer")
+        db_session.add(company)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/companies/{company.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "No activity recorded" in resp.text
