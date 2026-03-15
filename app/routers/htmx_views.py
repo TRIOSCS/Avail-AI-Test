@@ -11,7 +11,7 @@ Depends on: models, dependencies, database, search_service
 
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
@@ -1034,6 +1034,101 @@ async def review_offer(
     logger.info("Offer {} {} by {}", offer_id, action, user.email)
 
     # Return refreshed offers tab
+    return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
+
+
+@router.get("/v2/partials/requisitions/{req_id}/add-offer-form", response_class=HTMLResponse)
+async def add_offer_form(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the manual offer entry form."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    ctx["requirements"] = requirements
+    return templates.TemplateResponse("partials/requisitions/add_offer_form.html", ctx)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/add-offer", response_class=HTMLResponse)
+async def add_offer(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a manual offer and return refreshed offers tab."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    form = await request.form()
+    vendor_name = (form.get("vendor_name") or "").strip()
+    mpn = (form.get("mpn") or "").strip()
+    if not vendor_name or not mpn:
+        return HTMLResponse(
+            '<div class="p-3 text-sm text-rose-600 bg-rose-50 rounded mb-4">Vendor name and MPN are required.</div>',
+            status_code=400,
+        )
+
+    from ..vendor_utils import normalize_vendor_name
+    from ..utils.normalization import normalize_mpn
+
+    offer = Offer(
+        requisition_id=req_id,
+        vendor_name=vendor_name,
+        vendor_name_normalized=normalize_vendor_name(vendor_name),
+        mpn=mpn,
+        normalized_mpn=normalize_mpn(mpn),
+        qty_available=int(form["qty_available"]) if form.get("qty_available") else None,
+        unit_price=float(form["unit_price"]) if form.get("unit_price") else None,
+        lead_time=form.get("lead_time") or None,
+        date_code=form.get("date_code") or None,
+        condition=form.get("condition") or None,
+        moq=int(form["moq"]) if form.get("moq") else None,
+        notes=form.get("notes") or None,
+        requirement_id=int(form["requirement_id"]) if form.get("requirement_id") else None,
+        source="manual",
+        status="active",
+        entered_by_id=user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(offer)
+    db.commit()
+    logger.info("Manual offer created: {} on req {} by {}", mpn, req_id, user.email)
+
+    return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/offers/{offer_id}/reconfirm", response_class=HTMLResponse)
+async def reconfirm_offer(
+    request: Request,
+    req_id: int,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reconfirm an offer — resets TTL and increments reconfirm count."""
+    offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+
+    now = datetime.now(timezone.utc)
+    offer.reconfirmed_at = now
+    offer.reconfirm_count = (offer.reconfirm_count or 0) + 1
+    offer.expires_at = now + timedelta(days=14)
+    offer.attribution_status = "active"
+    offer.is_stale = False
+    offer.updated_at = now
+    offer.updated_by_id = user.id
+    db.commit()
+    logger.info("Offer {} reconfirmed (count={}) by {}", offer_id, offer.reconfirm_count, user.email)
+
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
 

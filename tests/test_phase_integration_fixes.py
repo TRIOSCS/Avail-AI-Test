@@ -432,3 +432,121 @@ class TestDataOpsTab:
             assert "Company Duplicates" in resp.text
         finally:
             app.dependency_overrides.clear()
+
+
+# ── Phase 8: Offer actions ──────────────────────────────────────────
+
+
+class TestManualOfferCreation:
+    def test_add_offer_form_renders(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Add offer form renders with requirement options."""
+        req = Requisition(
+            name="Offer Form Test",
+            status="active",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+        requirement = Requirement(
+            requisition_id=req.id, primary_mpn="TEST123", target_qty=50
+        )
+        db_session.add(requirement)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/requisitions/{req.id}/add-offer-form")
+        assert resp.status_code == 200
+        assert "Add Manual Offer" in resp.text
+        assert "TEST123" in resp.text
+
+    def test_create_manual_offer(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Manual offer creation saves to DB."""
+        req = Requisition(
+            name="Manual Offer Test",
+            status="active",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/requisitions/{req.id}/add-offer",
+            data={
+                "vendor_name": "Manual Vendor",
+                "mpn": "LM358N",
+                "qty_available": "1000",
+                "unit_price": "0.25",
+                "lead_time": "1 week",
+            },
+        )
+        assert resp.status_code == 200
+
+        offer = (
+            db_session.query(Offer)
+            .filter(Offer.requisition_id == req.id, Offer.mpn == "LM358N")
+            .first()
+        )
+        assert offer is not None
+        assert offer.vendor_name == "Manual Vendor"
+        assert offer.source == "manual"
+        assert float(offer.unit_price) == 0.25
+
+    def test_create_offer_missing_fields(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Manual offer creation fails without vendor/mpn."""
+        req = Requisition(
+            name="Missing Fields Test",
+            status="active",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/requisitions/{req.id}/add-offer",
+            data={"vendor_name": "", "mpn": ""},
+        )
+        assert resp.status_code == 400
+
+
+class TestReconfirmOffer:
+    def test_reconfirm_resets_ttl(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Reconfirming an offer resets expiry and increments count."""
+        req = Requisition(
+            name="Reconfirm Test",
+            status="active",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+
+        offer = Offer(
+            requisition_id=req.id,
+            vendor_name="Reconfirm Vendor",
+            mpn="RC100",
+            status="active",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(offer)
+        db_session.commit()
+        db_session.refresh(offer)
+
+        resp = client.post(
+            f"/v2/partials/requisitions/{req.id}/offers/{offer.id}/reconfirm"
+        )
+        assert resp.status_code == 200
+
+        db_session.refresh(offer)
+        assert offer.reconfirm_count == 1
+        assert offer.reconfirmed_at is not None
+        assert offer.expires_at is not None

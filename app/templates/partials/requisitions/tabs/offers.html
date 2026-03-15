@@ -5,8 +5,17 @@
 #}
 <div x-data="{ selectedOffers: [] }">
 
-  {# ── AI Parse Buttons ─────────────────────────────────── #}
+  {# ── AI Parse & Add Buttons ────────────────────────────── #}
   <div class="flex items-center gap-2 mb-4">
+    <button hx-get="/v2/partials/requisitions/{{ req.id }}/add-offer-form"
+            hx-target="#parse-area"
+            hx-swap="innerHTML"
+            class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 inline-flex items-center gap-1.5">
+      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+      </svg>
+      Add Offer
+    </button>
     <button hx-get="/v2/partials/requisitions/{{ req.id }}/parse-email-form"
             hx-target="#parse-area"
             hx-swap="innerHTML"
@@ -130,6 +139,11 @@
                       hx-target="#tab-content"
                       class="text-xs text-rose-500 hover:text-rose-700 font-medium"
                       @click.stop>Reject</button>
+              {% elif o.status in ("active", "approved") %}
+              <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/reconfirm"
+                      hx-target="#tab-content"
+                      class="text-xs text-brand-500 hover:text-brand-600 font-medium"
+                      @click.stop>Reconfirm</button>
               {% endif %}
             </div>
           </td>
