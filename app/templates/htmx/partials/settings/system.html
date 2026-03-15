@@ -1,0 +1,56 @@
+{#
+  settings/system.html — System configuration tab (admin only).
+  Receives: config (list of SystemConfig key/value pairs).
+  Called by: htmx_views.py settings_system_tab endpoint.
+  Depends on: HTMX, Tailwind CSS with brand palette.
+#}
+
+<div class="bg-white border border-brand-200 rounded-lg overflow-hidden">
+  <div class="px-4 py-3 bg-gray-50 border-b">
+    <h2 class="text-lg font-semibold text-gray-900">System Configuration</h2>
+    <p class="text-xs text-gray-500 mt-1">Admin-only settings. Changes take effect immediately.</p>
+  </div>
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-gray-200">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Key</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Value</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-200">
+        {% if config %}
+        {% for item in config %}
+        <tr class="hover:bg-gray-50">
+          <td class="px-4 py-3 text-sm font-mono text-gray-900">{{ item.key if item.key is defined else item }}</td>
+          <td class="px-4 py-3">
+            <form hx-put="/api/admin/config/{{ item.key if item.key is defined else item }}"
+                  hx-swap="none"
+                  hx-trigger="submit"
+                  class="flex items-center gap-2">
+              {% set val = item.value if item.value is defined else '' %}
+              {% if 'secret' in (item.key if item.key is defined else '')|lower or 'password' in (item.key if item.key is defined else '')|lower or 'key' in (item.key if item.key is defined else '')|lower %}
+              <input type="password" name="value" value="{{ val }}"
+                     class="w-64 px-2 py-1 text-sm border border-brand-200 rounded-md focus:ring-brand-500 focus:border-brand-500">
+              {% else %}
+              <input type="text" name="value" value="{{ val }}"
+                     class="w-64 px-2 py-1 text-sm border border-brand-200 rounded-md focus:ring-brand-500 focus:border-brand-500">
+              {% endif %}
+              <button type="submit" class="px-2 py-1 text-xs bg-brand-500 text-white rounded hover:bg-brand-600">Save</button>
+            </form>
+          </td>
+          <td class="px-4 py-3 text-sm text-gray-400">
+            {{ item.updated_at.strftime('%b %d') if item.updated_at is defined and item.updated_at else '' }}
+          </td>
+        </tr>
+        {% endfor %}
+        {% else %}
+        <tr>
+          <td colspan="3" class="px-4 py-8 text-center text-sm text-gray-500">No configuration entries.</td>
+        </tr>
+        {% endif %}
+      </tbody>
+    </table>
+  </div>
+</div>

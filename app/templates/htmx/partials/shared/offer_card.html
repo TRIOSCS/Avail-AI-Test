@@ -1,0 +1,99 @@
+{#
+  shared/offer_card.html — Expandable offer card component using Alpine.js.
+  Receives: offer (Offer ORM object), quote (Quote ORM object, optional).
+  Called by: quotes/detail.html (via include in offer gallery loop).
+  Depends on: Alpine.js, HTMX, Tailwind CSS with brand palette.
+#}
+<div class="bg-white border border-brand-200 rounded-lg p-4 hover:shadow-sm" x-data="{ expanded: false }">
+  {# Collapsed view #}
+  <div class="flex items-start justify-between">
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="font-medium text-gray-900 truncate">{{ offer.vendor_name }}</span>
+        {% if offer.evidence_tier %}
+        {% set tier_num = offer.evidence_tier|replace('T', '')|int if offer.evidence_tier else 5 %}
+        <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded-full
+                     {% if tier_num <= 3 %}bg-emerald-50 text-emerald-700
+                     {% elif tier_num == 4 %}bg-amber-50 text-amber-700
+                     {% else %}bg-brand-100 text-brand-600{% endif %}">
+          {{ offer.evidence_tier }}
+        </span>
+        {% endif %}
+        {% set offer_status_colors = {
+          'active': 'bg-emerald-50 text-emerald-700',
+          'pending_review': 'bg-amber-50 text-amber-700',
+          'rejected': 'bg-rose-50 text-rose-700',
+          'sold': 'bg-gray-100 text-gray-600'
+        } %}
+        <span class="inline-flex px-1.5 py-0.5 text-xs font-medium rounded-full {{ offer_status_colors.get(offer.status, 'bg-gray-100 text-gray-600') }}">
+          {{ offer.status|replace('_', ' ')|capitalize }}
+        </span>
+      </div>
+      <div class="flex items-center gap-4 text-sm text-gray-600">
+        <span class="font-mono">{{ offer.mpn }}</span>
+        <span>Qty: {{ '{:,}'.format(offer.qty_available) if offer.qty_available else 'RFQ' }}</span>
+        <span>{{ '${:,.4f}'.format(offer.unit_price|float) if offer.unit_price else 'RFQ' }}</span>
+        {% if offer.lead_time %}<span class="text-gray-400">{{ offer.lead_time }}</span>{% endif %}
+      </div>
+      {% if offer.parse_confidence %}
+      <div class="mt-1 flex items-center gap-2">
+        <span class="text-xs text-gray-400">Confidence:</span>
+        <div class="w-16 h-1.5 bg-gray-200 rounded-full overflow-hidden">
+          <div class="h-full bg-brand-500 rounded-full" style="width: {{ (offer.parse_confidence * 100)|int }}%"></div>
+        </div>
+        <span class="text-xs text-gray-400">{{ '{:.0f}'.format(offer.parse_confidence * 100) }}%</span>
+      </div>
+      {% endif %}
+    </div>
+    <button @click="expanded = !expanded" class="ml-2 p-1 text-gray-400 hover:text-gray-600">
+      <svg class="h-5 w-5 transition-transform" :class="{ 'rotate-180': expanded }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </button>
+  </div>
+
+  {# Expanded view #}
+  <div x-show="expanded" x-cloak x-transition class="mt-3 pt-3 border-t border-gray-100">
+    <div class="grid grid-cols-2 gap-2 text-sm">
+      {% if offer.date_code %}<div><span class="text-gray-400">Date Code:</span> {{ offer.date_code }}</div>{% endif %}
+      {% if offer.condition %}<div><span class="text-gray-400">Condition:</span> {{ offer.condition }}</div>{% endif %}
+      {% if offer.packaging %}<div><span class="text-gray-400">Packaging:</span> {{ offer.packaging }}</div>{% endif %}
+      {% if offer.firmware %}<div><span class="text-gray-400">Firmware:</span> {{ offer.firmware }}</div>{% endif %}
+      {% if offer.moq %}<div><span class="text-gray-400">MOQ:</span> {{ '{:,}'.format(offer.moq) }}</div>{% endif %}
+      {% if offer.warranty %}<div><span class="text-gray-400">Warranty:</span> {{ offer.warranty }}</div>{% endif %}
+      {% if offer.country_of_origin %}<div><span class="text-gray-400">Origin:</span> {{ offer.country_of_origin }}</div>{% endif %}
+    </div>
+    {% if offer.notes %}
+    <p class="mt-2 text-sm text-gray-600">{{ offer.notes }}</p>
+    {% endif %}
+    {% if offer.attachments %}
+    <div class="mt-2">
+      <span class="text-xs text-gray-400">Attachments:</span>
+      {% for att in offer.attachments %}
+      <a href="{{ att.onedrive_url or '#' }}" target="_blank" class="text-xs text-brand-500 hover:text-brand-400 ml-1">{{ att.file_name }}</a>
+      {% endfor %}
+    </div>
+    {% endif %}
+    <div class="mt-2 text-xs text-gray-400">
+      Created {{ offer.created_at.strftime('%b %d, %Y') if offer.created_at else '-' }}
+    </div>
+
+    {# Action buttons #}
+    <div class="mt-3 flex flex-wrap gap-2">
+      {% if quote is defined and quote %}
+      <button hx-post="/v2/partials/quotes/{{ quote.id }}/add-offer/{{ offer.id }}"
+              hx-target="#quote-lines-body"
+              hx-swap="beforeend"
+              class="px-2 py-1 text-xs bg-brand-500 text-white rounded hover:bg-brand-600">
+        Select for Quote
+      </button>
+      {% endif %}
+      {% if offer.status == 'pending_review' %}
+      <button hx-put="/api/offers/{{ offer.id }}/approve" hx-swap="none"
+              class="px-2 py-1 text-xs bg-emerald-500 text-white rounded hover:bg-emerald-600">Approve</button>
+      <button hx-put="/api/offers/{{ offer.id }}/reject" hx-swap="none"
+              class="px-2 py-1 text-xs bg-rose-500 text-white rounded hover:bg-rose-600">Reject</button>
+      {% endif %}
+    </div>
+  </div>
+</div>

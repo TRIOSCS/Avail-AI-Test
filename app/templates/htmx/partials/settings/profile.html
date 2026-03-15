@@ -1,0 +1,36 @@
+{#
+  settings/profile.html — User profile tab.
+  Receives: profile_user (User ORM object).
+  Called by: htmx_views.py settings_profile_tab endpoint.
+  Depends on: Tailwind CSS with brand palette.
+#}
+
+<div class="bg-white border border-brand-200 rounded-lg p-6">
+  <h2 class="text-lg font-semibold text-gray-900 mb-4">Your Profile</h2>
+
+  <div class="space-y-4">
+    <div>
+      <label class="block text-sm font-medium text-gray-500 mb-1">Name</label>
+      <p class="text-lg font-medium text-gray-900">{{ profile_user.name }}</p>
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-500 mb-1">Email</label>
+      <p class="text-sm text-gray-700">{{ profile_user.email }}</p>
+    </div>
+    <div>
+      <label class="block text-sm font-medium text-gray-500 mb-1">Role</label>
+      {% set role_colors = {
+        'admin': 'bg-brand-500 text-white',
+        'buyer': 'bg-emerald-50 text-emerald-700',
+        'sales': 'bg-amber-50 text-amber-700',
+        'manager': 'bg-brand-100 text-brand-600',
+        'trader': 'bg-brand-100 text-brand-600'
+      } %}
+      <span class="inline-flex px-2.5 py-1 text-xs font-semibold rounded-full {{ role_colors.get(profile_user.role, 'bg-gray-100 text-gray-700') }}">
+        {{ profile_user.role|capitalize }}
+      </span>
+    </div>
+  </div>
+
+  <p class="mt-6 text-sm text-brand-300">Profile editing coming soon.</p>
+</div>

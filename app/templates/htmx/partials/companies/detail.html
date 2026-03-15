@@ -1,15 +1,18 @@
-{# Company detail partial — full company view with sites, contacts, and requisition history.
-   Loaded via HTMX into #main-content. #}
+{# Company detail partial — tabbed layout with enrich and click-to-call.
+   Receives: company, sites, open_req_count, user.
+   Called by: company_detail_partial route.
+   Depends on: brand palette, partials/shared/enrich_button.html.
+#}
+
+{# OOB breadcrumb update #}
+<div id="breadcrumb" hx-swap-oob="true">
+  <a hx-get="/v2/partials/companies" hx-target="#main-content" hx-push-url="/v2/companies"
+     class="text-brand-500 hover:text-brand-600 cursor-pointer">Companies</a>
+  <span class="text-gray-500 mx-1">&gt;</span>
+  <span class="text-gray-900">{{ company.name }}</span>
+</div>
 
 <div class="max-w-5xl mx-auto">
-  {# Breadcrumb #}
-  <nav class="mb-4">
-    <a hx-get="/v2/partials/companies"
-       hx-target="#main-content"
-       hx-push-url="/v2/companies"
-       class="text-sm text-blue-600 hover:text-blue-500 cursor-pointer">&larr; Back to Companies</a>
-  </nav>
-
   {# Header card #}
   <div class="bg-white rounded-lg shadow border border-gray-200 p-6 mb-6">
     <div class="flex items-start justify-between">
@@ -21,12 +24,22 @@
           {% if company.hq_city %}<span>&middot; {{ company.hq_city }}{% if company.hq_country %}, {{ company.hq_country }}{% endif %}</span>{% endif %}
         </div>
       </div>
-      {% if company.account_type %}
-      {% set type_colors = {"Customer": "bg-green-100 text-green-800", "Prospect": "bg-blue-100 text-blue-800", "Partner": "bg-purple-100 text-purple-800", "Competitor": "bg-red-100 text-red-800"} %}
-      <span class="px-3 py-1 text-sm font-medium rounded-full {{ type_colors.get(company.account_type, 'bg-gray-100 text-gray-800') }}">
-        {{ company.account_type }}
-      </span>
-      {% endif %}
+      <div class="flex items-center gap-3">
+        {% if company.account_type %}
+        {% set type_colors = {
+          "Customer": "bg-emerald-50 text-emerald-700",
+          "Prospect": "bg-brand-100 text-brand-600",
+          "Partner": "bg-brand-100 text-brand-300",
+          "Competitor": "bg-rose-50 text-rose-700"
+        } %}
+        <span class="px-3 py-1 text-sm font-medium rounded-full {{ type_colors.get(company.account_type, 'bg-gray-100 text-gray-600') }}">
+          {{ company.account_type }}
+        </span>
+        {% endif %}
+        {% set entity_type = "company" %}
+        {% set entity_id = company.id %}
+        {% include "partials/shared/enrich_button.html" %}
+      </div>
     </div>
 
     {# Quick info #}
@@ -37,69 +50,91 @@
       </div>
       <div>
         <p class="text-xs text-gray-500">Credit Terms</p>
-        <p class="font-medium text-gray-900">{{ company.credit_terms or "—" }}</p>
+        <p class="font-medium text-gray-900">{{ company.credit_terms or "\u2014" }}</p>
       </div>
       <div>
         <p class="text-xs text-gray-500">Phone</p>
-        <p class="font-medium text-gray-900">{{ company.phone or "—" }}</p>
+        <p class="font-medium text-gray-900">{{ company.phone or "\u2014" }}</p>
       </div>
       <div>
         <p class="text-xs text-gray-500">Employees</p>
-        <p class="font-medium text-gray-900">{{ company.employee_size or "—" }}</p>
+        <p class="font-medium text-gray-900">{{ company.employee_size or "\u2014" }}</p>
       </div>
     </div>
   </div>
 
   {# Stats row #}
   <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center hover:bg-brand-50 transition-colors">
       <p class="text-xs text-gray-500">Sites</p>
-      <p class="text-xl font-bold text-gray-900">{{ company.site_count or 0 }}</p>
+      <p class="text-xl font-bold text-gray-900">{{ sites|length }}</p>
     </div>
-    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center hover:bg-brand-50 transition-colors">
       <p class="text-xs text-gray-500">Open Requisitions</p>
-      <p class="text-xl font-bold text-gray-900">{{ company.open_req_count or 0 }}</p>
+      <p class="text-xl font-bold text-gray-900">{{ open_req_count }}</p>
     </div>
-    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center hover:bg-brand-50 transition-colors">
       <p class="text-xs text-gray-500">Created</p>
-      <p class="text-sm font-medium text-gray-900">{{ company.created_at.strftime('%b %d, %Y') if company.created_at else "—" }}</p>
+      <p class="text-sm font-medium text-gray-900">{{ company.created_at.strftime('%b %d, %Y') if company.created_at else "\u2014" }}</p>
     </div>
   </div>
 
-  {# Sites #}
-  {% if sites %}
-  <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden mb-6">
-    <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
-      <h2 class="text-sm font-semibold text-gray-700">Sites ({{ sites|length }})</h2>
-    </div>
-    <table class="min-w-full divide-y divide-gray-200">
-      <thead class="bg-gray-50">
-        <tr>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">City</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Country</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-gray-200">
-        {% for s in sites %}
-        <tr class="hover:bg-gray-50">
-          <td class="px-4 py-2 text-sm font-medium text-gray-900">{{ s.site_name }}</td>
-          <td class="px-4 py-2 text-sm text-gray-600">{{ s.site_type or "—" }}</td>
-          <td class="px-4 py-2 text-sm text-gray-600">{{ s.city or "—" }}</td>
-          <td class="px-4 py-2 text-sm text-gray-600">{{ s.country or "—" }}</td>
-        </tr>
+  {# Tabs #}
+  <div x-data="{ activeTab: 'sites' }">
+    <div class="border-b border-gray-200 mb-4">
+      <nav class="flex gap-6 -mb-px">
+        {% for tab_id, tab_label in [('sites', 'Sites'), ('contacts', 'Contacts'), ('requisitions', 'Requisitions'), ('activity', 'Activity')] %}
+        <button @click="activeTab = '{{ tab_id }}'"
+                hx-get="/v2/partials/companies/{{ company.id }}/tab/{{ tab_id }}"
+                hx-target="#company-tab-content"
+                hx-trigger="click"
+                hx-swap="innerHTML"
+                :class="activeTab === '{{ tab_id }}' ? 'border-brand-500 text-brand-500' : 'border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-200'"
+                class="py-3 px-1 text-sm font-medium border-b-2 transition-colors">
+          {{ tab_label }}
+        </button>
         {% endfor %}
-      </tbody>
-    </table>
+      </nav>
+    </div>
+
+    {# Tab content — sites loaded inline on first load #}
+    <div id="company-tab-content">
+      {% if sites %}
+      <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">City</th>
+              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Country</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-200">
+            {% for s in sites %}
+            <tr class="hover:bg-brand-50">
+              <td class="px-4 py-2 text-sm font-medium text-gray-900">{{ s.site_name }}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{{ s.site_type or "\u2014" }}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{{ s.city or "\u2014" }}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{{ s.country or "\u2014" }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+      {% else %}
+      <div class="p-8 text-center">
+        <p class="text-sm text-gray-500">No sites found.</p>
+      </div>
+      {% endif %}
+    </div>
   </div>
-  {% endif %}
 
   {# Notes #}
   {% if company.notes %}
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
-    <h2 class="text-sm font-semibold text-gray-700 mb-2">Notes</h2>
-    <p class="text-sm text-gray-600 whitespace-pre-wrap">{{ company.notes }}</p>
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mt-6">
+    <h2 class="text-sm font-semibold text-gray-900 mb-2">Notes</h2>
+    <p class="text-sm text-gray-500 whitespace-pre-wrap">{{ company.notes }}</p>
   </div>
   {% endif %}
 </div>

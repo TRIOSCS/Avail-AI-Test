@@ -2,7 +2,7 @@
   list.html — Buy plans list view with status filter tabs and search.
   Receives: buy_plans (list of dicts), q (str), status (str), total (int).
   Called by: htmx_views.py buy_plans_list_partial endpoint.
-  Depends on: HTMX, Alpine.js, Tailwind CSS.
+  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 <div x-data="{ status: '{{ status }}', mine: {{ 'true' if mine else 'false' }} }">
 
@@ -16,7 +16,7 @@
   <div class="flex flex-wrap items-center gap-2 mb-4">
     {% for s, label in [('', 'All'), ('draft', 'Draft'), ('pending', 'Pending'), ('active', 'Active'), ('completed', 'Completed'), ('cancelled', 'Cancelled')] %}
     <button class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors"
-            :class="status === '{{ s }}' ? 'bg-blue-600 text-white' : 'bg-gray-100 text-gray-700 hover:bg-gray-200'"
+            :class="status === '{{ s }}' ? 'bg-brand-500 text-white' : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
             @click="status = '{{ s }}'"
             hx-get="/v2/partials/buy-plans?status={{ s }}"
             hx-target="#main-content"
@@ -27,7 +27,7 @@
 
     <label class="ml-4 flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
       <input type="checkbox" x-model="mine" name="mine_toggle"
-             class="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
+             class="rounded border-gray-300 text-brand-500 focus:ring-brand-500 accent-brand-500"
              hx-get="/v2/partials/buy-plans"
              hx-trigger="change"
              hx-target="#main-content"
@@ -41,7 +41,7 @@
   <div class="mb-4">
     <input type="search" name="bp-search" value="{{ q }}"
            placeholder="Search by SO#, customer, quote..."
-           class="w-full sm:w-80 px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500"
+           class="w-full sm:w-80 px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500"
            hx-get="/v2/partials/buy-plans"
            hx-trigger="keyup changed delay:300ms"
            hx-target="#main-content"
@@ -49,7 +49,7 @@
   </div>
 
   {# Table #}
-  <div class="overflow-x-auto bg-white rounded-lg shadow">
+  <div class="overflow-x-auto bg-white rounded-lg shadow border border-brand-200">
     <table class="min-w-full divide-y divide-gray-200">
       <thead class="bg-gray-50">
         <tr>
@@ -78,20 +78,20 @@
             <td class="px-4 py-3 text-sm text-gray-600 text-right">{{ bp.line_count }}</td>
             <td class="px-4 py-3 text-sm text-gray-600 text-right">${{ '{:,.2f}'.format(bp.total_cost or 0) }}</td>
             <td class="px-4 py-3 text-sm text-right
-                        {% if (bp.total_margin_pct or 0) >= 30 %}text-green-600{% elif (bp.total_margin_pct or 0) >= 15 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                        {% if (bp.total_margin_pct or 0) >= 30 %}text-emerald-700{% elif (bp.total_margin_pct or 0) >= 15 %}text-amber-700{% else %}text-rose-700{% endif %}">
               {{ '{:.1f}'.format(bp.total_margin_pct or 0) }}%
             </td>
             <td class="px-4 py-3">
-              {% set status_colors = {'draft': 'bg-gray-100 text-gray-700', 'pending': 'bg-yellow-100 text-yellow-800', 'active': 'bg-blue-100 text-blue-800', 'completed': 'bg-green-100 text-green-800', 'halted': 'bg-red-100 text-red-800', 'cancelled': 'bg-gray-100 text-gray-500'} %}
+              {% set status_colors = {'draft': 'bg-brand-100 text-brand-600', 'pending': 'bg-amber-50 text-amber-700', 'active': 'bg-emerald-50 text-emerald-700', 'completed': 'bg-emerald-50 text-emerald-700', 'halted': 'bg-rose-50 text-rose-700', 'cancelled': 'bg-gray-100 text-gray-600'} %}
               <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(bp.status, 'bg-gray-100 text-gray-700') }}">
                 {{ bp.status }}
               </span>
               {% if bp.auto_approved %}
-              <span class="ml-1 text-xs text-green-600" title="Auto-approved">auto</span>
+              <span class="ml-1 text-xs text-emerald-600" title="Auto-approved">auto</span>
               {% endif %}
             </td>
             <td class="px-4 py-3">
-              {% set so_colors = {'pending': 'bg-yellow-100 text-yellow-800', 'approved': 'bg-green-100 text-green-800', 'rejected': 'bg-red-100 text-red-800'} %}
+              {% set so_colors = {'pending': 'bg-amber-50 text-amber-700', 'approved': 'bg-emerald-50 text-emerald-700', 'rejected': 'bg-rose-50 text-rose-700'} %}
               <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ so_colors.get(bp.so_status, 'bg-gray-100 text-gray-700') }}">
                 {{ bp.so_status }}
               </span>

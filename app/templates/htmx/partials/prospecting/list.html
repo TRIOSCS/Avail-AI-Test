@@ -1,0 +1,87 @@
+{#
+  prospecting/list.html — Prospecting card grid with fit/readiness scores and filters.
+  Receives: prospects (list), q (str), status (str), sort (str), page (int),
+            per_page (int), total (int), total_pages (int).
+  Called by: htmx_views.py prospecting_list_partial endpoint.
+  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
+#}
+
+<div id="breadcrumb" hx-swap-oob="true">Prospecting</div>
+
+<div class="max-w-7xl mx-auto">
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Prospecting</h1>
+    <span class="text-sm text-gray-500">{{ total }} prospects</span>
+  </div>
+
+  {# Search bar #}
+  <div class="mb-4">
+    <input type="text" name="q" value="{{ q }}" placeholder="Search by name or domain..."
+           class="w-full sm:w-80 px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500"
+           hx-get="/v2/partials/prospecting"
+           hx-trigger="keyup changed delay:300ms"
+           hx-target="#main-content"
+           hx-include="[name='q']">
+  </div>
+
+  {# Filter pills + sort #}
+  <div class="flex flex-wrap items-center gap-2 mb-4">
+    {% for val, label in [('', 'All'), ('suggested', 'Suggested'), ('claimed', 'Claimed'), ('dismissed', 'Dismissed')] %}
+    <button class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors
+                   {% if status == val %}bg-brand-500 text-white{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}"
+            hx-get="/v2/partials/prospecting?status={{ val }}&sort={{ sort }}"
+            hx-target="#main-content"
+            hx-push-url="true">
+      {{ label }}
+    </button>
+    {% endfor %}
+
+    <div class="ml-auto">
+      <select class="px-3 py-1.5 border border-brand-200 rounded-md text-sm focus:ring-brand-500"
+              hx-get="/v2/partials/prospecting"
+              hx-trigger="change"
+              hx-target="#main-content"
+              hx-include="[name='q']"
+              name="sort">
+        <option value="buyer_ready_desc" {% if sort == 'buyer_ready_desc' %}selected{% endif %}>Most Ready</option>
+        <option value="fit_desc" {% if sort == 'fit_desc' %}selected{% endif %}>Best Fit</option>
+        <option value="recent_desc" {% if sort == 'recent_desc' %}selected{% endif %}>Newest</option>
+      </select>
+    </div>
+  </div>
+
+  {# Card grid #}
+  {% if prospects %}
+  <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+    {% for prospect in prospects %}
+    {% include "htmx/partials/prospecting/_card.html" %}
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="bg-white border border-brand-200 rounded-lg p-12 text-center">
+    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+    </svg>
+    <p class="mt-2 text-sm text-gray-500">No prospects found</p>
+  </div>
+  {% endif %}
+
+  {# Pagination #}
+  {% if total_pages > 1 %}
+  <div class="mt-6 flex justify-center">
+    <nav class="flex gap-1">
+      {% if page > 1 %}
+      <a hx-get="/v2/partials/prospecting?page={{ page - 1 }}&status={{ status }}&sort={{ sort }}&q={{ q }}"
+         hx-target="#main-content"
+         class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-gray-50 cursor-pointer">Prev</a>
+      {% endif %}
+      <span class="px-3 py-1.5 text-sm text-gray-500">Page {{ page }} of {{ total_pages }}</span>
+      {% if page < total_pages %}
+      <a hx-get="/v2/partials/prospecting?page={{ page + 1 }}&status={{ status }}&sort={{ sort }}&q={{ q }}"
+         hx-target="#main-content"
+         class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-gray-50 cursor-pointer">Next</a>
+      {% endif %}
+    </nav>
+  </div>
+  {% endif %}
+</div>

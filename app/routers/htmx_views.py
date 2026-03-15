@@ -11,6 +11,7 @@ Depends on: models, dependencies, database, search_service
 
 import json
 import time
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
@@ -23,22 +24,30 @@ from sqlalchemy.orm import Session, joinedload
 from ..database import get_db
 from ..dependencies import get_user, require_user
 from ..models import (
+    ApiSource,
     BuyPlan,
     BuyPlanLine,
     Company,
     CustomerSite,
+    Offer,
+    Quote,
+    QuoteLine,
     Requirement,
+    RequisitionTask,
     Requisition,
     Sighting,
+    SourcingLead,
     User,
     VendorCard,
     VerificationGroupMember,
 )
 from ..models.buy_plan import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
+from ..models.prospect_account import ProspectAccount
 from ..models.vendors import VendorContact
 from ..utils.sql_helpers import escape_like
 
 router = APIRouter(tags=["htmx-views"])
+_DASH = "\u2014"  # em-dash for template fallbacks
 templates = Jinja2Templates(directory="app/templates")
 
 # Vite manifest for asset fingerprinting — read once at import time.
@@ -119,6 +128,11 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/companies/{company_id:int}", response_class=HTMLResponse)
 @router.get("/v2/buy-plans", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
+@router.get("/v2/quotes", response_class=HTMLResponse)
+@router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
+@router.get("/v2/settings", response_class=HTMLResponse)
+@router.get("/v2/prospecting", response_class=HTMLResponse)
+@router.get("/v2/prospecting/{prospect_id:int}", response_class=HTMLResponse)
 async def v2_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
     user = get_user(request, db)
@@ -129,14 +143,22 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     path = request.url.path
     if "/buy-plans" in path:
         current_view = "buy-plans"
+    elif "/quotes" in path:
+        current_view = "quotes"
+    elif "/prospecting" in path:
+        current_view = "prospecting"
+    elif "/settings" in path:
+        current_view = "settings"
     elif "/vendors" in path:
         current_view = "vendors"
     elif "/companies" in path:
         current_view = "companies"
     elif "/search" in path:
         current_view = "search"
-    else:
+    elif "/requisitions" in path:
         current_view = "requisitions"
+    else:
+        current_view = "dashboard"
 
     # Determine the correct partial URL for initial content load
     partial_url = f"/v2/partials/{current_view}"
@@ -157,6 +179,14 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         parts = path.split("/buy-plans/")
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/buy-plans/{parts[1]}"
+    elif current_view == "quotes" and "/quotes/" in path:
+        parts = path.split("/quotes/")
+        if len(parts) > 1 and parts[1].isdigit():
+            partial_url = f"/v2/partials/quotes/{parts[1]}"
+    elif current_view == "prospecting" and "/prospecting/" in path:
+        parts = path.split("/prospecting/")
+        if len(parts) > 1 and parts[1].isdigit():
+            partial_url = f"/v2/partials/prospecting/{parts[1]}"
 
     ctx = _base_ctx(request, user, current_view)
     ctx["partial_url"] = partial_url
@@ -215,13 +245,23 @@ async def requisitions_list_partial(
     request: Request,
     q: str = "",
     status: str = "",
-    limit: int = Query(50, ge=1, le=200),
+    owner: int = Query(0, ge=0),
+    urgency: str = "",
+    date_from: str = "",
+    date_to: str = "",
+    sort: str = "created_at",
+    dir: str = "desc",
+    limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return requisitions list as HTML partial."""
-    query = db.query(Requisition).options(joinedload(Requisition.creator))
+    """Return requisitions list as HTML partial with filters and sorting."""
+    query = db.query(Requisition).options(
+        joinedload(Requisition.creator),
+        joinedload(Requisition.requirements),
+        joinedload(Requisition.offers),
+    )
 
     if q.strip():
         safe = escape_like(q.strip())
@@ -231,17 +271,80 @@ async def requisitions_list_partial(
         )
     if status:
         query = query.filter(Requisition.status == status)
+    if owner:
+        query = query.filter(Requisition.created_by == owner)
+    if urgency:
+        query = query.filter(Requisition.urgency == urgency)
+    if date_from:
+        try:
+            dt = datetime.fromisoformat(date_from)
+            query = query.filter(Requisition.created_at >= dt)
+        except ValueError:
+            pass
+    if date_to:
+        try:
+            dt = datetime.fromisoformat(date_to)
+            query = query.filter(Requisition.created_at <= dt)
+        except ValueError:
+            pass
+
+    # Sales users only see their own
+    if user.role == "sales":
+        query = query.filter(Requisition.created_by == user.id)
 
     total = query.count()
-    reqs = query.order_by(Requisition.created_at.desc()).offset(offset).limit(limit).all()
 
-    # Attach requirement counts
+    # Sorting
+    sort_col_map = {
+        "name": Requisition.name,
+        "customer_name": Requisition.customer_name,
+        "status": Requisition.status,
+        "urgency": Requisition.urgency,
+        "created_at": Requisition.created_at,
+    }
+    sort_col = sort_col_map.get(sort, Requisition.created_at)
+    order = sort_col.desc() if dir == "desc" else sort_col.asc()
+    reqs = query.order_by(order).offset(offset).limit(limit).all()
+
+    # Attach counts
     for req in reqs:
         req.req_count = len(req.requirements) if req.requirements else 0
+        req.offer_count = len(req.offers) if req.offers else 0
+
+    # Fetch team users for owner dropdown (non-sales only)
+    users = []
+    if user.role != "sales":
+        users = db.query(User).order_by(User.name).all()
 
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({"requisitions": reqs, "q": q, "status": status, "total": total, "limit": limit, "offset": offset})
+    ctx.update({
+        "requisitions": reqs,
+        "q": q,
+        "status": status,
+        "owner": owner,
+        "urgency": urgency,
+        "date_from": date_from,
+        "date_to": date_to,
+        "sort": sort,
+        "dir": dir,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+        "users": users,
+        "user_role": user.role,
+    })
     return templates.TemplateResponse("htmx/partials/requisitions/list.html", ctx)
+
+
+@router.get("/v2/partials/requisitions/create-form", response_class=HTMLResponse)
+async def requisition_create_form(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the create requisition modal form."""
+    ctx = _base_ctx(request, user, "requisitions")
+    return templates.TemplateResponse("partials/requisitions/create_modal.html", ctx)
 
 
 @router.get("/v2/partials/requisitions/{req_id}", response_class=HTMLResponse)
@@ -251,12 +354,13 @@ async def requisition_detail_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return requisition detail as HTML partial."""
+    """Return requisition detail as HTML partial with tabs."""
     req = (
         db.query(Requisition)
         .options(
             joinedload(Requisition.creator),
             joinedload(Requisition.requirements),
+            joinedload(Requisition.offers),
         )
         .filter(Requisition.id == req_id)
         .first()
@@ -268,8 +372,13 @@ async def requisition_detail_partial(
     for r in requirements:
         r.sighting_count = len(r.sightings) if r.sightings else 0
 
+    req.offer_count = len(req.offers) if req.offers else 0
+
+    # Fetch users for tasks tab assignee dropdown
+    users = db.query(User).order_by(User.name).all()
+
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({"req": req, "requirements": requirements})
+    ctx.update({"req": req, "requirements": requirements, "users": users})
     return templates.TemplateResponse("htmx/partials/requisitions/detail.html", ctx)
 
 
@@ -284,7 +393,7 @@ async def requisition_create(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Create a new requisition and return updated list."""
+    """Create a new requisition and return the new row for HTMX prepend."""
     req = Requisition(
         name=name,
         customer_name=customer_name or None,
@@ -297,6 +406,7 @@ async def requisition_create(
     db.flush()
 
     # Parse parts text (format: "MPN, Qty" per line)
+    part_count = 0
     if parts_text.strip():
         for line in parts_text.strip().split("\n"):
             line = line.strip()
@@ -318,12 +428,21 @@ async def requisition_create(
                     sourcing_status="open",
                 )
                 db.add(r)
+                part_count += 1
 
     db.commit()
-    logger.info("Created requisition {} with parts from text", req.id)
+    db.refresh(req)
+    logger.info("Created requisition {} with {} parts from text", req.id, part_count)
 
-    # Return the updated list
-    return await requisitions_list_partial(request=request, q="", status="", limit=50, offset=0, user=user, db=db)
+    # Attach counts for the row partial
+    req.req_count = part_count
+    req.offer_count = 0
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    response = templates.TemplateResponse("partials/requisitions/req_row.html", ctx)
+    response.headers["HX-Trigger"] = "showToast"
+    return response
 
 
 @router.post("/v2/partials/requisitions/{req_id}/requirements", response_class=HTMLResponse)
@@ -371,6 +490,157 @@ async def add_requirement(
     <tr id="sightings-{r.id}" class="bg-gray-50"></tr>
     """
     return HTMLResponse(html)
+
+
+@router.get("/v2/partials/requisitions/{req_id}/tab/{tab}", response_class=HTMLResponse)
+async def requisition_tab(
+    request: Request,
+    req_id: int,
+    tab: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return a specific tab partial for requisition detail."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    valid_tabs = {"parts", "offers", "quotes", "buy_plans", "tasks", "activity"}
+    if tab not in valid_tabs:
+        raise HTTPException(404, f"Unknown tab: {tab}")
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+
+    if tab == "parts":
+        requirements = (
+            db.query(Requirement)
+            .filter(Requirement.requisition_id == req_id)
+            .all()
+        )
+        for r in requirements:
+            r.sighting_count = len(r.sightings) if r.sightings else 0
+        ctx["requirements"] = requirements
+        return templates.TemplateResponse("partials/requisitions/tabs/parts.html", ctx)
+
+    elif tab == "offers":
+        offers = (
+            db.query(Offer)
+            .filter(Offer.requisition_id == req_id)
+            .order_by(Offer.created_at.desc().nullslast())
+            .all()
+        )
+        ctx["offers"] = offers
+        return templates.TemplateResponse("partials/requisitions/tabs/offers.html", ctx)
+
+    elif tab == "quotes":
+        quotes = (
+            db.query(Quote)
+            .filter(Quote.requisition_id == req_id)
+            .order_by(Quote.created_at.desc().nullslast())
+            .all()
+        )
+        ctx["quotes"] = quotes
+        return templates.TemplateResponse("partials/requisitions/tabs/quotes.html", ctx)
+
+    elif tab == "buy_plans":
+        buy_plans = (
+            db.query(BuyPlan)
+            .options(joinedload(BuyPlan.lines))
+            .filter(BuyPlan.requisition_id == req_id)
+            .order_by(BuyPlan.created_at.desc().nullslast())
+            .all()
+        )
+        ctx["buy_plans"] = buy_plans
+        return templates.TemplateResponse("partials/requisitions/tabs/buy_plans.html", ctx)
+
+    elif tab == "tasks":
+        tasks = (
+            db.query(RequisitionTask)
+            .options(joinedload(RequisitionTask.assignee))
+            .filter(RequisitionTask.requisition_id == req_id)
+            .order_by(RequisitionTask.priority.desc(), RequisitionTask.created_at.desc().nullslast())
+            .all()
+        )
+        users = db.query(User).order_by(User.name).all()
+        ctx["tasks"] = tasks
+        ctx["users"] = users
+        return templates.TemplateResponse("partials/requisitions/tabs/tasks.html", ctx)
+
+    else:  # activity
+        ctx["activities"] = []
+        return templates.TemplateResponse("partials/requisitions/tabs/activity.html", ctx)
+
+
+@router.post("/v2/partials/requisitions/bulk/{action}", response_class=HTMLResponse)
+async def requisitions_bulk_action(
+    request: Request,
+    action: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Apply bulk action to selected requisitions and return refreshed list."""
+    form = await request.form()
+    ids_str = form.get("ids", "")
+    if not ids_str:
+        raise HTTPException(400, "No requisition IDs provided")
+
+    try:
+        ids = [int(x.strip()) for x in ids_str.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(400, "Invalid ID format")
+
+    if len(ids) > 200:
+        raise HTTPException(400, "Maximum 200 requisitions per bulk action")
+
+    valid_actions = {"archive", "activate", "assign"}
+    if action not in valid_actions:
+        raise HTTPException(400, f"Invalid action: {action}")
+
+    reqs = db.query(Requisition).filter(Requisition.id.in_(ids)).all()
+
+    if action == "archive":
+        for r in reqs:
+            r.status = "archived"
+    elif action == "activate":
+        for r in reqs:
+            r.status = "active"
+    elif action == "assign":
+        owner_id = form.get("owner_id")
+        if owner_id:
+            for r in reqs:
+                r.created_by = int(owner_id)
+
+    db.commit()
+    logger.info("Bulk {} applied to {} requisitions by {}", action, len(reqs), user.email)
+
+    return await requisitions_list_partial(
+        request=request, q="", status="", owner=0, urgency="",
+        date_from="", date_to="", sort="created_at", dir="desc",
+        limit=50, offset=0, user=user, db=db,
+    )
+
+
+@router.delete("/v2/partials/requisitions/{req_id}/requirements/{item_id}", response_class=HTMLResponse)
+async def delete_requirement(
+    request: Request,
+    req_id: int,
+    item_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a requirement from a requisition. Returns empty response for hx-swap='delete'."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    item = db.query(Requirement).filter(
+        Requirement.id == item_id, Requirement.requisition_id == req_id
+    ).first()
+    if not item:
+        raise HTTPException(404, "Requirement not found")
+    db.delete(item)
+    db.commit()
+    return HTMLResponse("")
 
 
 # ── Search partials ─────────────────────────────────────────────────────
@@ -448,13 +718,19 @@ async def search_run(
 async def vendors_list_partial(
     request: Request,
     q: str = "",
+    hide_blacklisted: bool = True,
+    sort: str = "sighting_count",
+    dir: str = "desc",
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return vendor list as HTML partial."""
-    query = db.query(VendorCard).filter(VendorCard.is_blacklisted.is_(False))
+    """Return vendor list as HTML partial with blacklisted toggle and sorting."""
+    query = db.query(VendorCard)
+
+    if hide_blacklisted:
+        query = query.filter(VendorCard.is_blacklisted.is_(False))
 
     if q.strip():
         safe = escape_like(q.strip())
@@ -464,10 +740,30 @@ async def vendors_list_partial(
         )
 
     total = query.count()
-    vendors = query.order_by(VendorCard.sighting_count.desc().nullslast()).offset(offset).limit(limit).all()
+
+    # Sorting
+    sort_col_map = {
+        "display_name": VendorCard.display_name,
+        "sighting_count": VendorCard.sighting_count,
+        "overall_win_rate": VendorCard.overall_win_rate,
+        "hq_country": VendorCard.hq_country,
+        "industry": VendorCard.industry,
+    }
+    sort_col = sort_col_map.get(sort, VendorCard.sighting_count)
+    order = sort_col.desc().nullslast() if dir == "desc" else sort_col.asc().nullslast()
+    vendors = query.order_by(order).offset(offset).limit(limit).all()
 
     ctx = _base_ctx(request, user, "vendors")
-    ctx.update({"vendors": vendors, "q": q, "total": total, "limit": limit, "offset": offset})
+    ctx.update({
+        "vendors": vendors,
+        "q": q,
+        "hide_blacklisted": hide_blacklisted,
+        "sort": sort,
+        "dir": dir,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    })
     return templates.TemplateResponse("htmx/partials/vendors/list.html", ctx)
 
 
@@ -478,7 +774,7 @@ async def vendor_detail_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return vendor detail as HTML partial."""
+    """Return vendor detail as HTML partial with safety data and tabs."""
     vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
     if not vendor:
         raise HTTPException(404, "Vendor not found")
@@ -499,9 +795,212 @@ async def vendor_detail_partial(
         .all()
     )
 
+    # Load safety data from most recent SourcingLead
+    safety_band = None
+    safety_summary = None
+    safety_flags = None
+    try:
+        lead = (
+            db.query(SourcingLead)
+            .filter(SourcingLead.vendor_name_normalized == vendor.normalized_name)
+            .order_by(SourcingLead.created_at.desc())
+            .first()
+        )
+        if lead:
+            safety_band = lead.vendor_safety_band
+            safety_summary = lead.vendor_safety_summary
+            safety_flags = lead.vendor_safety_flags
+    except Exception:
+        pass  # SourcingLead may not have data
+
     ctx = _base_ctx(request, user, "vendors")
-    ctx.update({"vendor": vendor, "contacts": contacts, "recent_sightings": recent_sightings})
+    ctx.update({
+        "vendor": vendor,
+        "contacts": contacts,
+        "recent_sightings": recent_sightings,
+        "safety_band": safety_band,
+        "safety_summary": safety_summary,
+        "safety_flags": safety_flags,
+    })
     return templates.TemplateResponse("htmx/partials/vendors/detail.html", ctx)
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/tab/{tab}", response_class=HTMLResponse)
+async def vendor_tab(
+    request: Request,
+    vendor_id: int,
+    tab: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return a specific tab partial for vendor detail."""
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    valid_tabs = {"overview", "contacts", "analytics", "offers"}
+    if tab not in valid_tabs:
+        raise HTTPException(404, f"Unknown tab: {tab}")
+
+    ctx = _base_ctx(request, user, "vendors")
+    ctx["vendor"] = vendor
+
+    if tab == "overview":
+        recent_sightings = (
+            db.query(Sighting)
+            .filter(Sighting.vendor_name_normalized == vendor.normalized_name)
+            .order_by(Sighting.created_at.desc().nullslast())
+            .limit(10)
+            .all()
+        )
+        # Safety data
+        safety_band = None
+        safety_summary = None
+        safety_flags = None
+        safety_score = None
+        safety_available = False
+        try:
+            lead = (
+                db.query(SourcingLead)
+                .filter(SourcingLead.vendor_name_normalized == vendor.normalized_name)
+                .order_by(SourcingLead.created_at.desc())
+                .first()
+            )
+            if lead:
+                safety_band = lead.vendor_safety_band
+                safety_summary = lead.vendor_safety_summary
+                safety_flags = lead.vendor_safety_flags
+                safety_score = lead.vendor_safety_score
+                safety_available = True
+        except Exception:
+            pass
+        contacts = (
+            db.query(VendorContact)
+            .filter(VendorContact.vendor_card_id == vendor_id)
+            .order_by(VendorContact.interaction_count.desc().nullslast())
+            .limit(20)
+            .all()
+        )
+        ctx.update({
+            "recent_sightings": recent_sightings,
+            "contacts": contacts,
+            "safety_band": safety_band,
+            "safety_summary": safety_summary,
+            "safety_flags": safety_flags,
+            "safety_score": safety_score,
+            "safety_available": safety_available,
+        })
+        # Re-use the inline overview from the detail template
+        # by rendering just the overview portion
+        return templates.TemplateResponse("htmx/partials/vendors/overview_tab.html", ctx)
+
+    elif tab == "contacts":
+        contacts = (
+            db.query(VendorContact)
+            .filter(VendorContact.vendor_card_id == vendor_id)
+            .order_by(VendorContact.interaction_count.desc().nullslast())
+            .limit(50)
+            .all()
+        )
+        rows = []
+        for c in contacts:
+            phone_html = f'<a href="tel:{c.phone}" class="text-brand-500 hover:text-brand-600">{c.phone}</a>' if c.phone else '<span class="text-gray-500">\u2014</span>'
+            rows.append(f"""<tr class="hover:bg-brand-50">
+              <td class="px-4 py-2 text-sm font-medium text-gray-900">{c.full_name or _DASH}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{c.title or _DASH}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{c.email or _DASH}</td>
+              <td class="px-4 py-2 text-sm">{phone_html}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{c.interaction_count or 0}</td>
+            </tr>""")
+        if rows:
+            html = f"""<div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Interactions</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">{''.join(rows)}</tbody>
+              </table>
+            </div>"""
+        else:
+            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No contacts found for this vendor.</p></div>'
+        return HTMLResponse(html)
+
+    elif tab == "analytics":
+        html = f"""<div class="space-y-6">
+          <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
+              <p class="text-2xl font-bold text-brand-500">{'{:.0f}%'.format((vendor.overall_win_rate or 0) * 100)}</p>
+              <p class="text-xs text-gray-500 mt-1">Win Rate</p>
+            </div>
+            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
+              <p class="text-2xl font-bold text-brand-500">{'{:.0f}%'.format((vendor.response_rate or 0) * 100)}</p>
+              <p class="text-xs text-gray-500 mt-1">Response Rate</p>
+            </div>
+            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
+              <p class="text-2xl font-bold text-brand-500">{'{:.0f}'.format(vendor.vendor_score or 0)}</p>
+              <p class="text-xs text-gray-500 mt-1">Vendor Score</p>
+            </div>
+            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
+              <p class="text-2xl font-bold text-gray-900">{vendor.sighting_count or 0}</p>
+              <p class="text-xs text-gray-500 mt-1">Sightings</p>
+            </div>
+            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
+              <p class="text-2xl font-bold text-gray-900">{'{:.0f}'.format(vendor.avg_response_hours or 0)}</p>
+              <p class="text-xs text-gray-500 mt-1">Avg Response Hours</p>
+            </div>
+            <div class="bg-white rounded-lg border border-gray-200 p-4 text-center">
+              <p class="text-2xl font-bold text-gray-900">{'{:.0f}'.format(vendor.engagement_score or 0)}</p>
+              <p class="text-xs text-gray-500 mt-1">Engagement Score</p>
+            </div>
+          </div>
+          <p class="text-sm text-gray-500 text-center">Analytics data builds as you interact with this vendor.</p>
+        </div>"""
+        return HTMLResponse(html)
+
+    else:  # offers
+        offers = (
+            db.query(Offer)
+            .filter(Offer.vendor_name == vendor.display_name)
+            .order_by(Offer.created_at.desc().nullslast())
+            .limit(50)
+            .all()
+        )
+        rows = []
+        for o in offers:
+            price_str = f"${o.unit_price:,.4f}" if o.unit_price else "RFQ"
+            date_str = o.created_at.strftime('%b %d, %Y') if o.created_at else _DASH
+            qty_str = f"{o.qty_available:,}" if o.qty_available else _DASH
+            rows.append(f"""<tr class="hover:bg-brand-50">
+              <td class="px-4 py-2 text-sm font-mono text-gray-900">{o.mpn or _DASH}</td>
+              <td class="px-4 py-2 text-sm text-gray-500 text-right">{qty_str}</td>
+              <td class="px-4 py-2 text-sm text-right">{price_str}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{o.lead_time or _DASH}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{date_str}</td>
+            </tr>""")
+        if rows:
+            html = f"""<div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">MPN</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+                    <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Price</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Lead Time</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">{''.join(rows)}</tbody>
+              </table>
+            </div>"""
+        else:
+            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No offers from this vendor yet.</p></div>'
+        return HTMLResponse(html)
 
 
 # ── Company partials ────────────────────────────────────────────────────
@@ -538,7 +1037,7 @@ async def company_detail_partial(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return company detail as HTML partial."""
+    """Return company detail as HTML partial with tabs."""
     company = (
         db.query(Company)
         .options(joinedload(Company.account_owner), joinedload(Company.sites))
@@ -550,9 +1049,150 @@ async def company_detail_partial(
 
     sites = [s for s in (company.sites or []) if s.is_active]
 
+    # Count open requisitions for this company
+    open_req_count = (
+        db.query(sqlfunc.count(Requisition.id))
+        .filter(
+            Requisition.customer_name == company.name,
+            Requisition.status.in_(["open", "active", "sourcing", "draft"]),
+        )
+        .scalar()
+        or 0
+    )
+
     ctx = _base_ctx(request, user, "companies")
-    ctx.update({"company": company, "sites": sites})
+    ctx.update({
+        "company": company,
+        "sites": sites,
+        "open_req_count": open_req_count,
+        "user": user,
+    })
     return templates.TemplateResponse("htmx/partials/companies/detail.html", ctx)
+
+
+@router.get("/v2/partials/companies/{company_id}/tab/{tab}", response_class=HTMLResponse)
+async def company_tab(
+    request: Request,
+    company_id: int,
+    tab: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return a specific tab partial for company detail."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    valid_tabs = {"sites", "contacts", "requisitions", "activity"}
+    if tab not in valid_tabs:
+        raise HTTPException(404, f"Unknown tab: {tab}")
+
+    if tab == "sites":
+        sites = (
+            db.query(CustomerSite)
+            .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
+            .all()
+        )
+        rows = []
+        for s in sites:
+            rows.append(f"""<tr class="hover:bg-brand-50">
+              <td class="px-4 py-2 text-sm font-medium text-gray-900">{s.site_name or _DASH}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{s.site_type or _DASH}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{s.city or _DASH}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{s.country or _DASH}</td>
+            </tr>""")
+        if rows:
+            html = f"""<div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Site Name</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">City</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Country</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">{''.join(rows)}</tbody>
+              </table>
+            </div>"""
+        else:
+            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No sites found.</p></div>'
+        return HTMLResponse(html)
+
+    elif tab == "contacts":
+        # Get contacts from company sites
+        sites = (
+            db.query(CustomerSite)
+            .filter(CustomerSite.company_id == company_id)
+            .all()
+        )
+        rows = []
+        for s in sites:
+            if s.contact_name or s.contact_email:
+                phone_html = f'<a href="tel:{s.contact_phone}" class="text-brand-500 hover:text-brand-600">{s.contact_phone}</a>' if getattr(s, 'contact_phone', None) else '<span class="text-gray-500">\u2014</span>'
+                rows.append(f"""<tr class="hover:bg-brand-50">
+                  <td class="px-4 py-2 text-sm font-medium text-gray-900">{s.contact_name or _DASH}</td>
+                  <td class="px-4 py-2 text-sm text-gray-500">{s.site_name or _DASH}</td>
+                  <td class="px-4 py-2 text-sm text-gray-500">{s.contact_email or _DASH}</td>
+                  <td class="px-4 py-2 text-sm">{phone_html}</td>
+                </tr>""")
+        if rows:
+            html = f"""<div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Site</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">{''.join(rows)}</tbody>
+              </table>
+            </div>"""
+        else:
+            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No contacts found.</p></div>'
+        return HTMLResponse(html)
+
+    elif tab == "requisitions":
+        reqs = (
+            db.query(Requisition)
+            .filter(Requisition.customer_name == company.name)
+            .order_by(Requisition.created_at.desc().nullslast())
+            .limit(50)
+            .all()
+        )
+        rows = []
+        for r in reqs:
+            date_str = r.created_at.strftime('%b %d, %Y') if r.created_at else '\u2014'
+            rows.append(f"""<tr class="hover:bg-brand-50 cursor-pointer"
+                hx-get="/v2/partials/requisitions/{r.id}"
+                hx-target="#main-content"
+                hx-push-url="/v2/requisitions/{r.id}">
+              <td class="px-4 py-2 text-sm font-medium text-brand-500">{r.name}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{r.status or _DASH}</td>
+              <td class="px-4 py-2 text-sm text-gray-500">{date_str}</td>
+            </tr>""")
+        if rows:
+            html = f"""<div class="overflow-x-auto">
+              <table class="min-w-full divide-y divide-gray-200">
+                <thead class="bg-gray-50">
+                  <tr>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+                    <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-gray-200">{''.join(rows)}</tbody>
+              </table>
+            </div>"""
+        else:
+            html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No requisitions for this company.</p></div>'
+        return HTMLResponse(html)
+
+    else:  # activity
+        html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No activity recorded yet.</p></div>'
+        return HTMLResponse(html)
 
 
 # ── Dashboard partial ───────────────────────────────────────────────────
@@ -1327,3 +1967,480 @@ async def lead_feedback(
         raise HTTPException(404, "Lead not found")
 
     return await lead_detail_partial(request, lead_id, user, db)
+
+
+# ── Quotes partials ───────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/quotes", response_class=HTMLResponse)
+async def quotes_list_partial(
+    request: Request,
+    q: str = "",
+    status: str = "",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return quotes list as HTML partial."""
+    query = db.query(Quote).options(
+        joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+        joinedload(Quote.requisition),
+        joinedload(Quote.created_by),
+    )
+    if q.strip():
+        safe = escape_like(q.strip())
+        query = query.filter(Quote.quote_number.ilike(f"%{safe}%"))
+    if status:
+        query = query.filter(Quote.status == status)
+    total = query.count()
+    quotes = query.order_by(Quote.created_at.desc()).offset(offset).limit(limit).all()
+    ctx = _base_ctx(request, user, "quotes")
+    ctx.update({"quotes": quotes, "q": q, "status": status, "total": total, "limit": limit, "offset": offset})
+    return templates.TemplateResponse("htmx/partials/quotes/list.html", ctx)
+
+
+@router.get("/v2/partials/quotes/{quote_id}", response_class=HTMLResponse)
+async def quote_detail_partial(
+    request: Request,
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return quote detail as HTML partial."""
+    quote = db.query(Quote).options(
+        joinedload(Quote.customer_site).joinedload(CustomerSite.company),
+        joinedload(Quote.requisition),
+        joinedload(Quote.created_by),
+    ).filter(Quote.id == quote_id).first()
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote_id).all()
+    offers = db.query(Offer).filter(
+        Offer.requisition_id == quote.requisition_id
+    ).order_by(Offer.created_at.desc()).all()
+    ctx = _base_ctx(request, user, "quotes")
+    ctx.update({"quote": quote, "lines": lines, "offers": offers})
+    return templates.TemplateResponse("htmx/partials/quotes/detail.html", ctx)
+
+
+@router.put("/v2/partials/quotes/{quote_id}/lines/{line_id}", response_class=HTMLResponse)
+async def update_quote_line(
+    request: Request,
+    quote_id: int,
+    line_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Inline edit a quote line item, return updated row."""
+    line = db.get(QuoteLine, line_id)
+    if not line or line.quote_id != quote_id:
+        raise HTTPException(404, "Line not found")
+    form = await request.form()
+    if "mpn" in form:
+        line.mpn = form["mpn"]
+    if "manufacturer" in form:
+        line.manufacturer = form["manufacturer"]
+    if "qty" in form:
+        line.qty = int(form["qty"])
+    if "cost_price" in form:
+        line.cost_price = float(form["cost_price"])
+    if "sell_price" in form:
+        line.sell_price = float(form["sell_price"])
+    if line.sell_price and float(line.sell_price) > 0 and line.cost_price is not None:
+        line.margin_pct = round(
+            (float(line.sell_price) - float(line.cost_price)) / float(line.sell_price) * 100, 2
+        )
+    db.commit()
+    ctx = _base_ctx(request, user, "quotes")
+    ctx["line"] = line
+    return templates.TemplateResponse("htmx/partials/quotes/line_row.html", ctx)
+
+
+@router.delete("/v2/partials/quotes/{quote_id}/lines/{line_id}", response_class=HTMLResponse)
+async def delete_quote_line(
+    request: Request,
+    quote_id: int,
+    line_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a quote line item."""
+    line = db.get(QuoteLine, line_id)
+    if not line or line.quote_id != quote_id:
+        raise HTTPException(404, "Line not found")
+    db.delete(line)
+    db.commit()
+    return HTMLResponse("")
+
+
+@router.post("/v2/partials/quotes/{quote_id}/lines", response_class=HTMLResponse)
+async def add_quote_line(
+    request: Request,
+    quote_id: int,
+    mpn: str = Form(...),
+    manufacturer: str = Form(""),
+    qty: int = Form(1),
+    cost_price: float = Form(0),
+    sell_price: float = Form(0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add a new line item to a quote, return the new row HTML."""
+    quote = db.get(Quote, quote_id)
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    margin_pct = 0.0
+    if sell_price > 0:
+        margin_pct = round((sell_price - cost_price) / sell_price * 100, 2)
+    line = QuoteLine(
+        quote_id=quote_id,
+        mpn=mpn,
+        manufacturer=manufacturer or None,
+        qty=qty,
+        cost_price=cost_price,
+        sell_price=sell_price,
+        margin_pct=margin_pct,
+    )
+    db.add(line)
+    db.commit()
+    db.refresh(line)
+    ctx = _base_ctx(request, user, "quotes")
+    ctx["line"] = line
+    return templates.TemplateResponse("htmx/partials/quotes/line_row.html", ctx)
+
+
+@router.post("/v2/partials/quotes/{quote_id}/add-offer/{offer_id}", response_class=HTMLResponse)
+async def add_offer_to_quote(
+    request: Request,
+    quote_id: int,
+    offer_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add an offer as a line item to a quote."""
+    quote = db.get(Quote, quote_id)
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    offer = db.get(Offer, offer_id)
+    if not offer:
+        raise HTTPException(404, "Offer not found")
+    line = QuoteLine(
+        quote_id=quote_id,
+        offer_id=offer_id,
+        mpn=offer.mpn,
+        manufacturer=offer.manufacturer,
+        qty=offer.qty_available or 0,
+        cost_price=float(offer.unit_price) if offer.unit_price else 0,
+        sell_price=0,
+        margin_pct=0,
+    )
+    db.add(line)
+    db.commit()
+    db.refresh(line)
+    ctx = _base_ctx(request, user, "quotes")
+    ctx["line"] = line
+    return templates.TemplateResponse("htmx/partials/quotes/line_row.html", ctx)
+
+
+@router.post("/v2/partials/quotes/{quote_id}/send", response_class=HTMLResponse)
+async def send_quote_htmx(
+    request: Request,
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark quote as sent — returns refreshed detail partial."""
+    from datetime import datetime, timezone
+
+    quote = db.get(Quote, quote_id)
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    quote.status = "sent"
+    quote.sent_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info("Quote {} marked as sent by {}", quote.quote_number, user.email)
+    return await quote_detail_partial(request, quote_id, user, db)
+
+
+@router.post("/v2/partials/quotes/{quote_id}/result", response_class=HTMLResponse)
+async def quote_result_htmx(
+    request: Request,
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark quote result (won/lost) — returns refreshed detail partial."""
+    from datetime import datetime, timezone
+
+    quote = db.get(Quote, quote_id)
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    form = await request.form()
+    result = form.get("result", "")
+    if result not in ("won", "lost"):
+        raise HTTPException(400, "Result must be 'won' or 'lost'")
+    quote.result = result
+    quote.status = result
+    quote.result_at = datetime.now(timezone.utc)
+    quote.result_reason = form.get("result_reason", "")
+    db.commit()
+    logger.info("Quote {} marked as {} by {}", quote.quote_number, result, user.email)
+    return await quote_detail_partial(request, quote_id, user, db)
+
+
+@router.post("/v2/partials/quotes/{quote_id}/revise", response_class=HTMLResponse)
+async def revise_quote_htmx(
+    request: Request,
+    quote_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new revision of the quote — returns the new quote detail."""
+    quote = db.get(Quote, quote_id)
+    if not quote:
+        raise HTTPException(404, "Quote not found")
+    new_rev = (quote.revision or 1) + 1
+    new_quote = Quote(
+        requisition_id=quote.requisition_id,
+        customer_site_id=quote.customer_site_id,
+        quote_number=f"{quote.quote_number}-R{new_rev}",
+        revision=new_rev,
+        line_items=quote.line_items or [],
+        subtotal=quote.subtotal,
+        total_cost=quote.total_cost,
+        total_margin_pct=quote.total_margin_pct,
+        payment_terms=quote.payment_terms,
+        shipping_terms=quote.shipping_terms,
+        validity_days=quote.validity_days,
+        notes=quote.notes,
+        status="draft",
+        created_by_id=user.id,
+    )
+    db.add(new_quote)
+    db.commit()
+    db.refresh(new_quote)
+    logger.info("Quote {} revised to rev {} as {}", quote.quote_number, new_rev, new_quote.quote_number)
+    return await quote_detail_partial(request, new_quote.id, user, db)
+
+
+@router.post("/v2/partials/quotes/{quote_id}/apply-markup", response_class=HTMLResponse)
+async def apply_markup_htmx(
+    request: Request,
+    quote_id: int,
+    markup_pct: float = Form(25.0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Apply a markup percentage to all lines in the quote."""
+    lines = db.query(QuoteLine).filter(QuoteLine.quote_id == quote_id).all()
+    for line in lines:
+        if line.cost_price and float(line.cost_price) > 0:
+            multiplier = 1 + (markup_pct / 100)
+            line.sell_price = round(float(line.cost_price) * multiplier, 4)
+            line.margin_pct = round(markup_pct / multiplier, 2)
+    db.commit()
+    return await quote_detail_partial(request, quote_id, user, db)
+
+
+# ── Prospecting partials ──────────────────────────────────────────────
+
+
+@router.get("/v2/partials/prospecting", response_class=HTMLResponse)
+async def prospecting_list_partial(
+    request: Request,
+    q: str = "",
+    status: str = "",
+    sort: str = "buyer_ready_desc",
+    page: int = Query(1, ge=1),
+    per_page: int = Query(20, ge=1, le=100),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return prospecting list as HTML partial."""
+    query = db.query(ProspectAccount)
+    if status:
+        query = query.filter(ProspectAccount.status == status)
+    else:
+        query = query.filter(ProspectAccount.status.in_(["suggested", "claimed", "dismissed"]))
+    if q.strip():
+        safe = escape_like(q.strip())
+        query = query.filter(
+            ProspectAccount.name.ilike(f"%{safe}%")
+            | ProspectAccount.domain.ilike(f"%{safe}%")
+        )
+    total = query.count()
+    if sort == "fit_desc":
+        query = query.order_by(ProspectAccount.fit_score.desc())
+    elif sort == "recent_desc":
+        query = query.order_by(ProspectAccount.created_at.desc())
+    else:
+        query = query.order_by(ProspectAccount.readiness_score.desc(), ProspectAccount.fit_score.desc())
+    prospects = query.offset((page - 1) * per_page).limit(per_page).all()
+    total_pages = (total + per_page - 1) // per_page
+    ctx = _base_ctx(request, user, "prospecting")
+    ctx.update({
+        "prospects": prospects, "q": q, "status": status, "sort": sort,
+        "page": page, "per_page": per_page, "total": total, "total_pages": total_pages,
+    })
+    return templates.TemplateResponse("htmx/partials/prospecting/list.html", ctx)
+
+
+@router.get("/v2/partials/prospecting/{prospect_id}", response_class=HTMLResponse)
+async def prospecting_detail_partial(
+    request: Request,
+    prospect_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return prospect detail as HTML partial."""
+    prospect = db.query(ProspectAccount).options(
+        joinedload(ProspectAccount.claimed_by_user),
+    ).filter(ProspectAccount.id == prospect_id).first()
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+    ctx = _base_ctx(request, user, "prospecting")
+    ctx["prospect"] = prospect
+    ctx["enrichment"] = prospect.enrichment_data or {}
+    ctx["warm_intro"] = (prospect.enrichment_data or {}).get("warm_intro", {})
+    return templates.TemplateResponse("htmx/partials/prospecting/detail.html", ctx)
+
+
+@router.post("/v2/partials/prospecting/{prospect_id}/claim", response_class=HTMLResponse)
+async def claim_prospect_htmx(
+    request: Request,
+    prospect_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Claim a prospect — returns updated card for OOB swap."""
+    from ..services.prospect_claim import claim_prospect
+
+    try:
+        claim_prospect(prospect_id, user.id, db)
+    except (LookupError, ValueError) as e:
+        raise HTTPException(400, str(e))
+    prospect = db.query(ProspectAccount).options(
+        joinedload(ProspectAccount.claimed_by_user),
+    ).filter(ProspectAccount.id == prospect_id).first()
+    ctx = _base_ctx(request, user, "prospecting")
+    ctx["prospect"] = prospect
+    return templates.TemplateResponse("htmx/partials/prospecting/_card.html", ctx)
+
+
+@router.post("/v2/partials/prospecting/{prospect_id}/dismiss", response_class=HTMLResponse)
+async def dismiss_prospect_htmx(
+    request: Request,
+    prospect_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Dismiss a prospect — returns updated card for OOB swap."""
+    from datetime import datetime, timezone
+
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+    prospect.status = "dismissed"
+    prospect.dismissed_by = user.id
+    prospect.dismissed_at = datetime.now(timezone.utc)
+    db.commit()
+    ctx = _base_ctx(request, user, "prospecting")
+    ctx["prospect"] = prospect
+    return templates.TemplateResponse("htmx/partials/prospecting/_card.html", ctx)
+
+
+@router.post("/v2/partials/prospecting/{prospect_id}/enrich", response_class=HTMLResponse)
+async def enrich_prospect_htmx(
+    request: Request,
+    prospect_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Run free enrichment on a prospect — returns refreshed detail."""
+    prospect = db.get(ProspectAccount, prospect_id)
+    if not prospect:
+        raise HTTPException(404, "Prospect not found")
+    try:
+        from ..services.prospect_free_enrichment import run_free_enrichment
+
+        await run_free_enrichment(prospect_id)
+        db.refresh(prospect)
+    except Exception as exc:
+        logger.warning("Enrichment failed for prospect {}: {}", prospect_id, exc)
+    try:
+        from ..services.prospect_warm_intros import detect_warm_intros, generate_one_liner
+
+        warm = detect_warm_intros(prospect, db)
+        one_liner = generate_one_liner(prospect, warm)
+        ed = dict(prospect.enrichment_data or {})
+        ed["warm_intro"] = warm
+        ed["one_liner"] = one_liner
+        prospect.enrichment_data = ed
+        db.commit()
+    except Exception as exc:
+        logger.warning("Warm intro detection failed for prospect {}: {}", prospect_id, exc)
+    ctx = _base_ctx(request, user, "prospecting")
+    ctx["prospect"] = prospect
+    ctx["enrichment"] = prospect.enrichment_data or {}
+    ctx["warm_intro"] = (prospect.enrichment_data or {}).get("warm_intro", {})
+    return templates.TemplateResponse("htmx/partials/prospecting/detail.html", ctx)
+
+
+# ── Settings partials ────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/settings", response_class=HTMLResponse)
+async def settings_partial(
+    request: Request,
+    tab: str = "sources",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Settings page — renders index with active tab."""
+    ctx = _base_ctx(request, user, "settings")
+    ctx["active_tab"] = tab
+    ctx["is_admin"] = user.role == "admin"
+    return templates.TemplateResponse("htmx/partials/settings/index.html", ctx)
+
+
+@router.get("/v2/partials/settings/sources", response_class=HTMLResponse)
+async def settings_sources_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Sources tab content."""
+    sources = db.query(ApiSource).order_by(ApiSource.display_name).all()
+    ctx = _base_ctx(request, user, "settings")
+    ctx["sources"] = sources
+    return templates.TemplateResponse("htmx/partials/settings/sources.html", ctx)
+
+
+@router.get("/v2/partials/settings/system", response_class=HTMLResponse)
+async def settings_system_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """System config tab — admin only."""
+    if user.role != "admin":
+        raise HTTPException(403, "Admin only")
+    from ..services.admin_service import get_all_config
+
+    config = get_all_config(db)
+    ctx = _base_ctx(request, user, "settings")
+    ctx["config"] = config
+    return templates.TemplateResponse("htmx/partials/settings/system.html", ctx)
+
+
+@router.get("/v2/partials/settings/profile", response_class=HTMLResponse)
+async def settings_profile_tab(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """User profile tab."""
+    ctx = _base_ctx(request, user, "settings")
+    ctx["profile_user"] = user
+    return templates.TemplateResponse("htmx/partials/settings/profile.html", ctx)

@@ -2,7 +2,7 @@
   detail.html — Buy plan detail with full workflow actions.
   Receives: bp (BuyPlan ORM object), lines (list), user, is_admin, is_ops_member.
   Called by: htmx_views.py buy_plan_detail_partial endpoint.
-  Depends on: HTMX, Alpine.js, Tailwind CSS.
+  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 <div x-data="{ showModal: false, modalType: '' }">
 
@@ -12,10 +12,10 @@
        hx-get="/v2/partials/buy-plans"
        hx-target="#main-content"
        hx-push-url="/v2/buy-plans"
-       class="text-sm text-blue-600 hover:text-blue-500">&larr; Buy Plans</a>
+       class="text-sm text-brand-500 hover:text-brand-400">&larr; Buy Plans</a>
     <div class="mt-2 flex items-center gap-3">
       <h1 class="text-2xl font-bold text-gray-900">Buy Plan #{{ bp.id }}</h1>
-      {% set status_colors = {'draft': 'bg-gray-100 text-gray-700', 'pending': 'bg-yellow-100 text-yellow-800', 'active': 'bg-blue-100 text-blue-800', 'completed': 'bg-green-100 text-green-800', 'halted': 'bg-red-100 text-red-800', 'cancelled': 'bg-gray-100 text-gray-500'} %}
+      {% set status_colors = {'draft': 'bg-brand-100 text-brand-600', 'pending': 'bg-amber-50 text-amber-700', 'active': 'bg-emerald-50 text-emerald-700', 'completed': 'bg-emerald-50 text-emerald-700', 'halted': 'bg-rose-50 text-rose-700', 'cancelled': 'bg-gray-100 text-gray-500'} %}
       <span class="inline-flex px-2.5 py-1 text-xs font-semibold rounded-full {{ status_colors.get(bp.status, 'bg-gray-100 text-gray-700') }}">
         {{ bp.status | upper }}
       </span>
@@ -27,30 +27,30 @@
 
   {# Summary cards #}
   <div class="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4 mb-6">
-    <div class="bg-white rounded-lg shadow p-4">
+    <div class="bg-brand-50 rounded-lg shadow p-4 border border-brand-200">
       <div class="text-xs text-gray-500 uppercase">Customer</div>
       <div class="mt-1 text-sm font-medium text-gray-900">{{ bp.requisition.customer_name if bp.requisition else '-' }}</div>
     </div>
-    <div class="bg-white rounded-lg shadow p-4">
+    <div class="bg-brand-50 rounded-lg shadow p-4 border border-brand-200">
       <div class="text-xs text-gray-500 uppercase">Quote</div>
       <div class="mt-1 text-sm font-mono text-gray-900">{{ bp.quote.quote_number if bp.quote else '-' }}</div>
     </div>
-    <div class="bg-white rounded-lg shadow p-4">
+    <div class="bg-brand-50 rounded-lg shadow p-4 border border-brand-200">
       <div class="text-xs text-gray-500 uppercase">SO#</div>
       <div class="mt-1 text-sm text-gray-900">{{ bp.sales_order_number or '-' }}</div>
     </div>
-    <div class="bg-white rounded-lg shadow p-4">
+    <div class="bg-brand-50 rounded-lg shadow p-4 border border-brand-200">
       <div class="text-xs text-gray-500 uppercase">Total Cost</div>
       <div class="mt-1 text-sm font-medium text-gray-900">${{ '{:,.2f}'.format(bp.total_cost|float if bp.total_cost else 0) }}</div>
     </div>
-    <div class="bg-white rounded-lg shadow p-4">
+    <div class="bg-brand-50 rounded-lg shadow p-4 border border-brand-200">
       <div class="text-xs text-gray-500 uppercase">Revenue</div>
       <div class="mt-1 text-sm font-medium text-gray-900">${{ '{:,.2f}'.format(bp.total_revenue|float if bp.total_revenue else 0) }}</div>
     </div>
-    <div class="bg-white rounded-lg shadow p-4">
+    <div class="bg-brand-50 rounded-lg shadow p-4 border border-brand-200">
       <div class="text-xs text-gray-500 uppercase">Margin</div>
       {% set margin = bp.total_margin_pct|float if bp.total_margin_pct else 0 %}
-      <div class="mt-1 text-sm font-medium {% if margin >= 30 %}text-green-600{% elif margin >= 15 %}text-yellow-600{% else %}text-red-600{% endif %}">
+      <div class="mt-1 text-sm font-medium {% if margin >= 30 %}text-emerald-700{% elif margin >= 15 %}text-amber-700{% else %}text-rose-700{% endif %}">
         {{ '{:.1f}'.format(margin) }}%
       </div>
     </div>
@@ -59,25 +59,25 @@
   {# SO Verification status #}
   <div class="mb-4 flex items-center gap-3">
     <span class="text-sm text-gray-600">SO Verification:</span>
-    {% set so_colors = {'pending': 'bg-yellow-100 text-yellow-800', 'approved': 'bg-green-100 text-green-800', 'rejected': 'bg-red-100 text-red-800'} %}
+    {% set so_colors = {'pending': 'bg-amber-50 text-amber-700', 'approved': 'bg-emerald-50 text-emerald-700', 'rejected': 'bg-rose-50 text-rose-700'} %}
     <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ so_colors.get(bp.so_status, 'bg-gray-100') }}">{{ bp.so_status }}</span>
     {% if bp.so_rejection_note %}
-    <span class="text-xs text-red-600">{{ bp.so_rejection_note }}</span>
+    <span class="text-xs text-rose-600">{{ bp.so_rejection_note }}</span>
     {% endif %}
   </div>
 
   {# AI Summary + Flags #}
   {% if bp.ai_summary %}
-  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg p-4">
-    <h3 class="text-sm font-semibold text-blue-800 mb-1">AI Summary</h3>
-    <p class="text-sm text-blue-700">{{ bp.ai_summary }}</p>
+  <div class="mb-4 bg-brand-50 border border-brand-200 rounded-lg p-4">
+    <h3 class="text-sm font-semibold text-brand-800 mb-1">AI Summary</h3>
+    <p class="text-sm text-brand-700">{{ bp.ai_summary }}</p>
   </div>
   {% endif %}
 
   {% if bp.ai_flags %}
   <div class="mb-4 space-y-2">
     {% for flag in bp.ai_flags %}
-    {% set flag_colors = {'critical': 'bg-red-50 border-red-200 text-red-800', 'warning': 'bg-yellow-50 border-yellow-200 text-yellow-800', 'info': 'bg-blue-50 border-blue-200 text-blue-700'} %}
+    {% set flag_colors = {'critical': 'bg-rose-50 text-rose-700 border-rose-200', 'warning': 'bg-amber-50 text-amber-700 border-amber-200', 'info': 'bg-brand-50 text-brand-600 border-brand-200'} %}
     <div class="border rounded-lg p-3 text-sm {{ flag_colors.get(flag.severity, flag_colors.info) }}">
       <span class="font-medium">[{{ flag.severity|upper }}]</span> {{ flag.message }}
     </div>
@@ -85,22 +85,22 @@
   </div>
   {% endif %}
 
-  {# ── Workflow Action Bar ──────────────────────────────────────── #}
+  {# Workflow Action Bar #}
   <div class="mb-6 flex flex-wrap gap-2">
     {% if bp.status == 'draft' %}
       <button @click="modalType = 'submit'; showModal = true"
-              class="px-4 py-2 bg-blue-600 text-white text-sm font-medium rounded-md hover:bg-blue-700">
+              class="px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600">
         Submit for Approval
       </button>
     {% endif %}
 
     {% if bp.status == 'pending' and (user.role in ['manager', 'admin'] or is_admin) %}
       <button @click="modalType = 'approve'; showModal = true"
-              class="px-4 py-2 bg-green-600 text-white text-sm font-medium rounded-md hover:bg-green-700">
+              class="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700">
         Approve
       </button>
       <button @click="modalType = 'reject'; showModal = true"
-              class="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-md hover:bg-red-700">
+              class="px-4 py-2 bg-rose-600 text-white text-sm font-medium rounded-md hover:bg-rose-700">
         Reject
       </button>
     {% endif %}
@@ -108,7 +108,7 @@
     {% if bp.status == 'active' and is_ops_member %}
       {% if bp.so_status == 'pending' %}
       <button @click="modalType = 'verify-so'; showModal = true"
-              class="px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-md hover:bg-indigo-700">
+              class="px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600">
         Verify SO
       </button>
       {% endif %}
@@ -118,21 +118,21 @@
       <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/reset"
               hx-target="#main-content"
               hx-confirm="Reset this buy plan to draft?"
-              class="px-4 py-2 bg-gray-600 text-white text-sm font-medium rounded-md hover:bg-gray-700">
+              class="px-4 py-2 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50">
         Reset to Draft
       </button>
     {% endif %}
 
     {% if bp.status not in ('completed', 'cancelled') %}
       <button @click="modalType = 'cancel'; showModal = true"
-              class="px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-50">
+              class="px-4 py-2 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50">
         Cancel
       </button>
     {% endif %}
   </div>
 
-  {# ── Line Items Table ─────────────────────────────────────────── #}
-  <div class="bg-white rounded-lg shadow overflow-hidden">
+  {# Line Items Table #}
+  <div class="bg-white rounded-lg shadow overflow-hidden border border-brand-200">
     <div class="px-4 py-3 bg-gray-50 border-b">
       <h2 class="text-lg font-semibold text-gray-900">Line Items ({{ lines|length }})</h2>
     </div>
@@ -165,16 +165,16 @@
             <td class="px-4 py-3 text-sm text-gray-600 text-right">${{ '{:,.4f}'.format(line.unit_cost|float) if line.unit_cost else '-' }}</td>
             <td class="px-4 py-3 text-sm text-gray-600 text-right">${{ '{:,.4f}'.format(line.unit_sell|float) if line.unit_sell else '-' }}</td>
             <td class="px-4 py-3 text-sm text-right
-                        {% if (line.margin_pct|float if line.margin_pct else 0) >= 30 %}text-green-600{% elif (line.margin_pct|float if line.margin_pct else 0) >= 15 %}text-yellow-600{% else %}text-red-600{% endif %}">
+                        {% if (line.margin_pct|float if line.margin_pct else 0) >= 30 %}text-emerald-700{% elif (line.margin_pct|float if line.margin_pct else 0) >= 15 %}text-amber-700{% else %}text-rose-700{% endif %}">
               {{ '{:.1f}'.format(line.margin_pct|float) if line.margin_pct else '-' }}%
             </td>
             <td class="px-4 py-3">
-              {% set line_colors = {'awaiting_po': 'bg-yellow-100 text-yellow-800', 'pending_verify': 'bg-blue-100 text-blue-800', 'verified': 'bg-green-100 text-green-800', 'issue': 'bg-red-100 text-red-800', 'cancelled': 'bg-gray-100 text-gray-500'} %}
+              {% set line_colors = {'awaiting_po': 'bg-amber-50 text-amber-700', 'pending_verify': 'bg-brand-100 text-brand-600', 'verified': 'bg-emerald-50 text-emerald-700', 'issue': 'bg-rose-50 text-rose-700', 'cancelled': 'bg-gray-100 text-gray-500'} %}
               <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ line_colors.get(line.status, 'bg-gray-100') }}">
                 {{ line.status | replace('_', ' ') }}
               </span>
               {% if line.issue_type %}
-              <span class="block mt-1 text-xs text-red-600">{{ line.issue_type }}: {{ line.issue_note or '' }}</span>
+              <span class="block mt-1 text-xs text-rose-600">{{ line.issue_type }}: {{ line.issue_note or '' }}</span>
               {% endif %}
             </td>
             <td class="px-4 py-3 text-sm text-gray-600">{{ line.buyer.name if line.buyer else '-' }}</td>
@@ -182,31 +182,30 @@
               {% if line.po_number %}
                 {{ line.po_number }}
                 {% if line.po_confirmed_at %}
-                <span class="text-xs text-green-600 block">confirmed</span>
+                <span class="text-xs text-emerald-600 block">confirmed</span>
                 {% endif %}
               {% else %}
                 -
               {% endif %}
             </td>
             <td class="px-4 py-3">
-              {# Per-line actions based on status #}
               {% if bp.status == 'active' %}
                 {% if line.status == 'awaiting_po' %}
                   <div x-data="{ showPo: false, poNum: '', shipDate: '' }">
-                    <button @click="showPo = !showPo" class="text-xs text-blue-600 hover:text-blue-500 font-medium">
+                    <button @click="showPo = !showPo" class="text-xs text-brand-500 hover:text-brand-400 font-medium">
                       Enter PO
                     </button>
                     <div x-show="showPo" x-cloak class="mt-2 space-y-1">
-                      <input x-model="poNum" type="text" placeholder="PO#" class="w-28 px-2 py-1 text-xs border rounded">
-                      <input x-model="shipDate" type="date" class="w-28 px-2 py-1 text-xs border rounded">
+                      <input x-model="poNum" type="text" placeholder="PO#" class="w-28 px-2 py-1 text-xs border border-brand-200 rounded">
+                      <input x-model="shipDate" type="date" class="w-28 px-2 py-1 text-xs border border-brand-200 rounded">
                       <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/confirm-po"
                               hx-target="#main-content"
                               :hx-vals="JSON.stringify({po_number: poNum, estimated_ship_date: shipDate})"
-                              class="px-2 py-1 text-xs bg-blue-600 text-white rounded hover:bg-blue-700">
+                              class="px-2 py-1 text-xs bg-brand-500 text-white rounded hover:bg-brand-600">
                         Confirm
                       </button>
                       <button @click="modalType = 'issue-{{ line.id }}'; showModal = true"
-                              class="px-2 py-1 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50">
+                              class="px-2 py-1 text-xs text-rose-600 border border-rose-200 rounded hover:bg-rose-50">
                         Issue
                       </button>
                     </div>
@@ -216,19 +215,19 @@
                     <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
                             hx-target="#main-content"
                             hx-vals='{"action": "approve"}'
-                            class="px-2 py-1 text-xs bg-green-600 text-white rounded hover:bg-green-700">
+                            class="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700">
                       Verify
                     </button>
                     <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
                             hx-target="#main-content"
                             hx-vals='{"action": "reject"}'
                             hx-confirm="Reject this PO?"
-                            class="px-2 py-1 text-xs text-red-600 border border-red-200 rounded hover:bg-red-50">
+                            class="px-2 py-1 text-xs text-rose-600 border border-rose-200 rounded hover:bg-rose-50">
                       Reject
                     </button>
                   </div>
                 {% elif line.status == 'verified' %}
-                  <span class="text-xs text-green-600 font-medium">Done</span>
+                  <span class="text-xs text-emerald-600 font-medium">Done</span>
                 {% endif %}
               {% endif %}
             </td>
@@ -246,25 +245,25 @@
 
   {# Notes sections #}
   {% if bp.salesperson_notes %}
-  <div class="mt-4 bg-white rounded-lg shadow p-4">
+  <div class="mt-4 bg-white rounded-lg shadow p-4 border border-brand-200">
     <h3 class="text-sm font-semibold text-gray-700 mb-1">Salesperson Notes</h3>
     <p class="text-sm text-gray-600">{{ bp.salesperson_notes }}</p>
   </div>
   {% endif %}
   {% if bp.approval_notes %}
-  <div class="mt-4 bg-white rounded-lg shadow p-4">
+  <div class="mt-4 bg-white rounded-lg shadow p-4 border border-brand-200">
     <h3 class="text-sm font-semibold text-gray-700 mb-1">Approval Notes</h3>
     <p class="text-sm text-gray-600">{{ bp.approval_notes }}</p>
   </div>
   {% endif %}
   {% if bp.case_report %}
-  <div class="mt-4 bg-white rounded-lg shadow p-4">
+  <div class="mt-4 bg-white rounded-lg shadow p-4 border border-brand-200">
     <h3 class="text-sm font-semibold text-gray-700 mb-1">Case Report</h3>
     <pre class="text-xs text-gray-600 whitespace-pre-wrap font-mono">{{ bp.case_report }}</pre>
   </div>
   {% endif %}
 
-  {# ── Modal overlay ────────────────────────────────────────────── #}
+  {# Modal overlay #}
   <div x-show="showModal" x-cloak
        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
        @keydown.escape.window="showModal = false">
@@ -278,27 +277,27 @@
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">SO# (required)</label>
               <input x-model="so" type="text" required
-                     class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500"
+                     class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500"
                      placeholder="Acctivate Sales Order #">
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Customer PO#</label>
               <input x-model="cpo" type="text"
-                     class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500">
+                     class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
             </div>
             <div>
               <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
               <textarea x-model="notes" rows="2"
-                        class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-blue-500 focus:border-blue-500"></textarea>
+                        class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500"></textarea>
             </div>
           </div>
           <div class="mt-4 flex justify-end gap-2">
-            <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border rounded-md hover:bg-gray-50">Cancel</button>
+            <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border border-brand-200 rounded-md hover:bg-gray-50">Cancel</button>
             <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/submit"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({sales_order_number: so, customer_po_number: cpo, salesperson_notes: notes})"
                     @click="showModal = false"
-                    class="px-4 py-2 text-sm bg-blue-600 text-white rounded-md hover:bg-blue-700">
+                    class="px-4 py-2 text-sm bg-brand-500 text-white rounded-md hover:bg-brand-600">
               Submit
             </button>
           </div>
@@ -312,15 +311,15 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Notes (optional)</label>
             <textarea x-model="notes" rows="3"
-                      class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"></textarea>
+                      class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm"></textarea>
           </div>
           <div class="mt-4 flex justify-end gap-2">
-            <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border rounded-md hover:bg-gray-50">Cancel</button>
+            <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border border-brand-200 rounded-md hover:bg-gray-50">Cancel</button>
             <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({action: 'approve', notes: notes})"
                     @click="showModal = false"
-                    class="px-4 py-2 text-sm bg-green-600 text-white rounded-md hover:bg-green-700">
+                    class="px-4 py-2 text-sm bg-emerald-600 text-white rounded-md hover:bg-emerald-700">
               Approve
             </button>
           </div>
@@ -334,16 +333,16 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Reason</label>
             <textarea x-model="notes" rows="3" required
-                      class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"
+                      class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm"
                       placeholder="Why is this being rejected?"></textarea>
           </div>
           <div class="mt-4 flex justify-end gap-2">
-            <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border rounded-md hover:bg-gray-50">Cancel</button>
+            <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border border-brand-200 rounded-md hover:bg-gray-50">Cancel</button>
             <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({action: 'reject', notes: notes})"
                     @click="showModal = false"
-                    class="px-4 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700">
+                    class="px-4 py-2 text-sm bg-rose-600 text-white rounded-md hover:bg-rose-700">
               Reject
             </button>
           </div>
@@ -357,28 +356,28 @@
           <div class="space-y-3">
             <div class="flex gap-4">
               <label class="flex items-center gap-1.5 text-sm">
-                <input type="radio" x-model="action" value="approve" class="text-green-600"> Approve
+                <input type="radio" x-model="action" value="approve" class="text-emerald-600"> Approve
               </label>
               <label class="flex items-center gap-1.5 text-sm">
-                <input type="radio" x-model="action" value="reject" class="text-red-600"> Reject
+                <input type="radio" x-model="action" value="reject" class="text-rose-600"> Reject
               </label>
               <label class="flex items-center gap-1.5 text-sm">
-                <input type="radio" x-model="action" value="halt" class="text-red-600"> Halt
+                <input type="radio" x-model="action" value="halt" class="text-rose-600"> Halt
               </label>
             </div>
             <div x-show="action !== 'approve'">
               <label class="block text-sm font-medium text-gray-700 mb-1">Note (required)</label>
               <textarea x-model="note" rows="2"
-                        class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"></textarea>
+                        class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm"></textarea>
             </div>
           </div>
           <div class="mt-4 flex justify-end gap-2">
-            <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border rounded-md hover:bg-gray-50">Cancel</button>
+            <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border border-brand-200 rounded-md hover:bg-gray-50">Cancel</button>
             <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/verify-so"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({action: action, rejection_note: note})"
                     @click="showModal = false"
-                    class="px-4 py-2 text-sm bg-indigo-600 text-white rounded-md hover:bg-indigo-700">
+                    class="px-4 py-2 text-sm bg-brand-500 text-white rounded-md hover:bg-brand-600">
               Confirm
             </button>
           </div>
@@ -392,15 +391,15 @@
           <div>
             <label class="block text-sm font-medium text-gray-700 mb-1">Reason</label>
             <textarea x-model="reason" rows="2"
-                      class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm"></textarea>
+                      class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm"></textarea>
           </div>
           <div class="mt-4 flex justify-end gap-2">
-            <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border rounded-md hover:bg-gray-50">Cancel</button>
+            <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border border-brand-200 rounded-md hover:bg-gray-50">Cancel</button>
             <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/cancel"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({reason: reason})"
                     @click="showModal = false"
-                    class="px-4 py-2 text-sm bg-red-600 text-white rounded-md hover:bg-red-700">
+                    class="px-4 py-2 text-sm bg-rose-500 text-white rounded-md hover:bg-rose-600">
               Cancel Plan
             </button>
           </div>

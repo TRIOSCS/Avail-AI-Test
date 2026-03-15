@@ -1,0 +1,173 @@
+{#
+  prospecting/detail.html — Prospect detail with scores, enrichment data, and actions.
+  Receives: prospect (ProspectAccount ORM), enrichment (dict), warm_intro (dict).
+  Called by: htmx_views.py prospecting_detail_partial endpoint.
+  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
+#}
+
+<div id="breadcrumb" hx-swap-oob="true">
+  <a href="/v2/prospecting" hx-get="/v2/partials/prospecting" hx-target="#main-content" hx-push-url="/v2/prospecting"
+     class="text-brand-400 hover:text-brand-300">Prospecting</a>
+  <span class="mx-1 text-gray-400">/</span>
+  {{ prospect.name }}
+</div>
+
+<div class="max-w-7xl mx-auto">
+
+  {# Back link #}
+  <a href="/v2/prospecting" hx-get="/v2/partials/prospecting" hx-target="#main-content" hx-push-url="/v2/prospecting"
+     class="text-sm text-brand-500 hover:text-brand-400 mb-4 inline-block">&larr; Back to Prospecting</a>
+
+  {# Header card #}
+  <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
+    <div class="flex items-start justify-between">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900">{{ prospect.name }}</h1>
+        {% if prospect.domain %}
+        <a href="https://{{ prospect.domain }}" target="_blank" class="text-sm text-brand-500 hover:text-brand-400">{{ prospect.domain }}</a>
+        {% endif %}
+        <div class="mt-2 flex items-center gap-3 text-sm text-gray-600">
+          {% if prospect.industry %}<span>{{ prospect.industry }}</span>{% endif %}
+          {% if prospect.region %}<span>{{ prospect.region }}</span>{% endif %}
+        </div>
+        <div class="mt-2">
+          {% set prospect_status_colors = {
+            'suggested': 'bg-brand-100 text-brand-600',
+            'claimed': 'bg-emerald-50 text-emerald-700',
+            'dismissed': 'bg-gray-100 text-gray-600'
+          } %}
+          <span class="inline-flex px-2.5 py-1 text-xs font-semibold rounded-full {{ prospect_status_colors.get(prospect.status, 'bg-gray-100 text-gray-700') }}">
+            {{ prospect.status|capitalize }}
+          </span>
+          {% if prospect.claimed_by_user %}
+          <span class="ml-2 text-sm text-gray-500">Claimed by {{ prospect.claimed_by_user.name }}</span>
+          {% endif %}
+        </div>
+      </div>
+
+      {# Action buttons #}
+      <div class="flex gap-2">
+        {% if prospect.status == 'suggested' %}
+        <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/claim"
+                hx-target="#main-content"
+                class="px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600">
+          Claim
+        </button>
+        <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
+                hx-target="#main-content"
+                class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50">
+          Dismiss
+        </button>
+        {% endif %}
+        <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/enrich"
+                hx-target="#main-content"
+                class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50 htmx-indicator">
+          <span class="htmx-indicator-content">Enrich</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  {# Scores section #}
+  <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
+    {# Fit score #}
+    <div class="bg-white border border-brand-200 rounded-lg p-6">
+      <div class="text-sm text-gray-500 mb-2">Fit Score</div>
+      {% set fit = prospect.fit_score or 0 %}
+      <div class="text-3xl font-bold {% if fit >= 70 %}text-emerald-600{% elif fit >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">{{ fit }}%</div>
+      <div class="mt-2 w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+        <div class="h-full rounded-full {% if fit >= 70 %}bg-emerald-500{% elif fit >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
+             style="width: {{ fit }}%"></div>
+      </div>
+      {% if prospect.fit_reasoning %}
+      <p class="mt-2 text-xs text-gray-500">{{ prospect.fit_reasoning }}</p>
+      {% endif %}
+    </div>
+
+    {# Readiness score #}
+    <div class="bg-white border border-brand-200 rounded-lg p-6">
+      <div class="text-sm text-gray-500 mb-2">Readiness Score</div>
+      {% set ready = prospect.readiness_score or 0 %}
+      <div class="text-3xl font-bold {% if ready >= 70 %}text-emerald-600{% elif ready >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">{{ ready }}%</div>
+      <div class="mt-2 w-full h-2 bg-gray-200 rounded-full overflow-hidden">
+        <div class="h-full rounded-full {% if ready >= 70 %}bg-emerald-500{% elif ready >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
+             style="width: {{ ready }}%"></div>
+      </div>
+      {% if prospect.readiness_signals %}
+      <div class="mt-2 flex flex-wrap gap-1">
+        {% for signal_key, signal_val in (prospect.readiness_signals or {}).items() %}
+        {% if signal_val %}
+        <span class="inline-flex px-1.5 py-0.5 text-xs bg-brand-100 text-brand-600 rounded-full">{{ signal_key }}</span>
+        {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# Discovery info #}
+  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
+    <div class="flex items-center gap-3 text-sm">
+      <span class="text-gray-500">Discovery Source:</span>
+      <span class="inline-flex bg-brand-100 text-brand-600 text-xs rounded-full px-2 py-0.5">{{ prospect.discovery_source }}</span>
+      <span class="text-gray-400">{{ prospect.created_at.strftime('%b %d, %Y') if prospect.created_at else '-' }}</span>
+    </div>
+  </div>
+
+  {# Enrichment data #}
+  {% if enrichment %}
+  <div class="bg-brand-50 border border-brand-200 rounded-lg p-4 mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">Enrichment Data</h2>
+
+    {% if enrichment.get('sam_gov') %}
+    <div class="mb-3">
+      <h3 class="text-sm font-medium text-gray-700 mb-1">SAM.gov</h3>
+      <div class="text-sm text-gray-600">
+        {% for key, val in enrichment.sam_gov.items() %}
+        <p><span class="text-gray-400">{{ key }}:</span> {{ val }}</p>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    {% if enrichment.get('news') %}
+    <div class="mb-3">
+      <h3 class="text-sm font-medium text-gray-700 mb-1">News Mentions</h3>
+      <ul class="text-sm text-gray-600 space-y-1">
+        {% for item in enrichment.news %}
+        <li>{{ item.get('headline', '') }} <span class="text-gray-400">{{ item.get('date', '') }}</span></li>
+        {% endfor %}
+      </ul>
+    </div>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="bg-brand-50 border border-brand-200 rounded-lg p-4 mb-6 text-center">
+    <p class="text-sm text-gray-500">No enrichment data yet. Click "Enrich" to gather free data.</p>
+  </div>
+  {% endif %}
+
+  {# Warm intro section #}
+  {% if warm_intro and warm_intro.get('has_warm_intro') %}
+  <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-6">
+    <h2 class="text-lg font-semibold text-emerald-800 mb-2">Warm Introduction Available</h2>
+    {% if warm_intro.get('warmth') %}
+    <p class="text-sm text-emerald-700 mb-1">Warmth: {{ warm_intro.warmth }}</p>
+    {% endif %}
+    {% if warm_intro.get('intro_path') %}
+    <p class="text-sm text-emerald-700 mb-1">Path: {{ warm_intro.intro_path }}</p>
+    {% endif %}
+    {% if enrichment.get('one_liner') %}
+    <p class="mt-2 text-sm text-emerald-600 italic">"{{ enrichment.one_liner }}"</p>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# Description / AI writeup #}
+  {% if prospect.ai_writeup or prospect.description %}
+  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-2">About</h2>
+    <p class="text-sm text-gray-600">{{ prospect.ai_writeup or prospect.description }}</p>
+  </div>
+  {% endif %}
+</div>

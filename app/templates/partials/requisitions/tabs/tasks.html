@@ -1,0 +1,93 @@
+{# tasks.html — Task board tab for requisition detail.
+   Receives: tasks (list of RequisitionTask), req (Requisition), users (list for assignee dropdown).
+   Called by: requisition tab route.
+   Depends on: RequisitionTask model (app/models/task.py), task.py router.
+#}
+<div x-data="{ taskFilter: 'all' }">
+  {# Filter buttons #}
+  <div class="flex gap-2 mb-4">
+    {% for f in ['all', 'todo', 'in_progress', 'done'] %}
+    <button @click="taskFilter = '{{ f }}'"
+            :class="taskFilter === '{{ f }}' ? 'bg-brand-500 text-white' : 'bg-white text-gray-900 border border-gray-200 hover:bg-brand-50'"
+            class="px-3 py-1 text-xs font-medium rounded-full transition-colors">
+      {{ f|replace('_', ' ')|capitalize }}
+    </button>
+    {% endfor %}
+  </div>
+
+  {# Add task form #}
+  <div class="mb-4 p-4 bg-brand-50 rounded-lg border border-brand-200">
+    <form hx-post="/api/requisitions/{{ req.id }}/tasks"
+          hx-target="#task-list"
+          hx-swap="afterbegin"
+          @htmx:after-request.camel="if(event.detail.successful) { $el.reset(); }"
+          class="flex flex-wrap items-end gap-3">
+      <div class="flex-1 min-w-[150px]">
+        <input type="text" name="title" required placeholder="Task title"
+               class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+      </div>
+      <select name="task_type" class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+        <option value="general">General</option>
+        <option value="sourcing">Sourcing</option>
+        <option value="sales">Sales</option>
+      </select>
+      <select name="priority" class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+        <option value="2">Medium</option>
+        <option value="1">Low</option>
+        <option value="3">High</option>
+      </select>
+      <select name="assigned_to_id" class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+        <option value="">Unassigned</option>
+        {% for u in users %}
+        <option value="{{ u.id }}">{{ u.name }}</option>
+        {% endfor %}
+      </select>
+      <input type="date" name="due_at" class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+      <button type="submit" class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600">Add</button>
+    </form>
+  </div>
+
+  {# Task list #}
+  <div id="task-list" class="space-y-2">
+    {% if tasks %}
+      {% for t in tasks %}
+      <div class="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-brand-200"
+           x-show="taskFilter === 'all' || taskFilter === '{{ t.status }}'">
+        {# Type badge #}
+        {% set type_colors = {"sourcing": "bg-brand-100 text-brand-600", "sales": "bg-amber-50 text-amber-700", "general": "bg-gray-100 text-gray-600"} %}
+        <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ type_colors.get(t.task_type, 'bg-gray-100 text-gray-600') }}">
+          {{ t.task_type|capitalize }}
+        </span>
+        {# Priority indicator #}
+        {% if t.priority == 3 %}
+          <span class="text-rose-500" title="High priority">
+            <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v4a1 1 0 102 0V7zm-1 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/></svg>
+          </span>
+        {% endif %}
+        {# Title #}
+        <span class="flex-1 text-sm {{ 'line-through text-gray-500' if t.status == 'done' else 'text-gray-900' }}">{{ t.title }}</span>
+        {# AI risk flag #}
+        {% if t.ai_risk_flag %}
+          <span class="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">{{ t.ai_risk_flag }}</span>
+        {% endif %}
+        {# Assignee #}
+        {% if t.assignee %}
+          <span class="text-xs text-gray-500">{{ t.assignee.name }}</span>
+        {% endif %}
+        {# Due date #}
+        {% if t.due_at %}
+          <span class="text-xs text-gray-500">{{ t.due_at.strftime('%b %d') }}</span>
+        {% endif %}
+        {# AI score #}
+        {% if t.ai_priority_score and t.ai_priority_score > 0 %}
+          <span class="text-xs text-brand-400" title="AI Priority Score">{{ "%.0f"|format(t.ai_priority_score * 100) }}</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    {% else %}
+      <div class="p-8 text-center">
+        <p class="text-sm text-gray-500">No tasks yet. Add a task to track work on this requisition.</p>
+      </div>
+    {% endif %}
+  </div>
+</div>

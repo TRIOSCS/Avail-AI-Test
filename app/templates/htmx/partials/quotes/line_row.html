@@ -1,0 +1,45 @@
+{#
+  quotes/line_row.html — Single quote line item row with inline editing via double-click.
+  Receives: line (QuoteLine ORM object), quote (Quote ORM object from parent context).
+  Called by: quotes/detail.html (loop include), update_quote_line endpoint (returned after edit).
+  Depends on: HTMX, Alpine.js, Tailwind CSS.
+#}
+<tr id="line-{{ line.id }}" class="hover:bg-gray-50"
+    x-data="{ editing: false, field: '' }"
+    @dblclick="editing = true">
+  <td class="px-4 py-3 text-sm font-mono font-medium text-gray-900">
+    <template x-if="!editing">
+      <span>{{ line.mpn }}</span>
+    </template>
+    <template x-if="editing">
+      <form hx-put="/v2/partials/quotes/{{ line.quote_id }}/lines/{{ line.id }}"
+            hx-target="#line-{{ line.id }}" hx-swap="outerHTML"
+            class="flex gap-1 items-center">
+        <input type="text" name="mpn" value="{{ line.mpn }}" class="w-28 px-1 py-0.5 text-sm border border-brand-200 rounded font-mono">
+        <input type="text" name="manufacturer" value="{{ line.manufacturer or '' }}" class="w-20 px-1 py-0.5 text-sm border border-brand-200 rounded" placeholder="Mfr">
+        <input type="number" name="qty" value="{{ line.qty or 0 }}" class="w-16 px-1 py-0.5 text-sm border border-brand-200 rounded">
+        <input type="number" name="cost_price" value="{{ '{:.4f}'.format(line.cost_price|float) if line.cost_price else '' }}" step="0.0001" class="w-20 px-1 py-0.5 text-sm border border-brand-200 rounded" placeholder="Cost">
+        <input type="number" name="sell_price" value="{{ '{:.4f}'.format(line.sell_price|float) if line.sell_price else '' }}" step="0.0001" class="w-20 px-1 py-0.5 text-sm border border-brand-200 rounded" placeholder="Sell">
+        <button type="submit" class="px-2 py-0.5 text-xs bg-brand-500 text-white rounded hover:bg-brand-600">Save</button>
+        <button type="button" @click="editing = false" class="px-2 py-0.5 text-xs text-gray-600 border rounded hover:bg-gray-100">Cancel</button>
+      </form>
+    </template>
+  </td>
+  <td class="px-4 py-3 text-sm text-gray-600" x-show="!editing">{{ line.manufacturer or '-' }}</td>
+  <td class="px-4 py-3 text-sm text-gray-600 text-right" x-show="!editing">{{ '{:,}'.format(line.qty) if line.qty else '-' }}</td>
+  <td class="px-4 py-3 text-sm text-gray-600 text-right" x-show="!editing">${{ '{:,.4f}'.format(line.cost_price|float) if line.cost_price else '-' }}</td>
+  <td class="px-4 py-3 text-sm text-gray-600 text-right" x-show="!editing">${{ '{:,.4f}'.format(line.sell_price|float) if line.sell_price else '-' }}</td>
+  <td class="px-4 py-3 text-sm text-right" x-show="!editing">
+    {% set mp = line.margin_pct|float if line.margin_pct else 0 %}
+    <span class="{% if mp >= 30 %}text-emerald-700{% elif mp >= 15 %}text-amber-700{% else %}text-rose-700{% endif %}">
+      {{ '{:.1f}'.format(mp) }}%
+    </span>
+  </td>
+  <td class="px-4 py-3" x-show="!editing">
+    <button hx-delete="/v2/partials/quotes/{{ line.quote_id }}/lines/{{ line.id }}"
+            hx-target="#line-{{ line.id }}"
+            hx-swap="delete"
+            hx-confirm="Remove this line?"
+            class="text-xs text-rose-600 hover:text-rose-500 font-medium">Delete</button>
+  </td>
+</tr>

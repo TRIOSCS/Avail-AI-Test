@@ -1,36 +1,42 @@
-{# Vendor detail partial — full vendor card with contacts, stats, and recent sightings.
-   Loaded via HTMX into #main-content. #}
+{# Vendor detail partial — tabbed layout with safety review, analytics, enrich, click-to-call.
+   Receives: vendor, contacts, recent_sightings, safety_band, safety_summary, safety_flags.
+   Called by: vendor_detail_partial route.
+   Depends on: brand palette, partials/shared/safety_review.html, partials/shared/enrich_button.html.
+#}
+
+{# OOB breadcrumb update #}
+<div id="breadcrumb" hx-swap-oob="true">
+  <a hx-get="/v2/partials/vendors" hx-target="#main-content" hx-push-url="/v2/vendors"
+     class="text-brand-500 hover:text-brand-600 cursor-pointer">Vendors</a>
+  <span class="text-gray-500 mx-1">&gt;</span>
+  <span class="text-gray-900">{{ vendor.display_name }}</span>
+</div>
 
 <div class="max-w-5xl mx-auto">
-  {# Breadcrumb #}
-  <nav class="mb-4">
-    <a hx-get="/v2/partials/vendors"
-       hx-target="#main-content"
-       hx-push-url="/v2/vendors"
-       class="text-sm text-blue-600 hover:text-blue-500 cursor-pointer">&larr; Back to Vendors</a>
-  </nav>
-
   {# Header #}
   <div class="bg-white rounded-lg shadow border border-gray-200 p-6 mb-6">
     <div class="flex items-start justify-between">
       <div>
         <h1 class="text-2xl font-bold text-gray-900">{{ vendor.display_name }}</h1>
-        <div class="mt-1 flex items-center gap-3 text-sm text-gray-500">
+        <div class="mt-1 flex flex-wrap items-center gap-3 text-sm text-gray-500">
           {% if vendor.domain %}<span>{{ vendor.domain }}</span>{% endif %}
           {% if vendor.hq_city %}<span>{{ vendor.hq_city }}{% if vendor.hq_country %}, {{ vendor.hq_country }}{% endif %}</span>{% endif %}
           {% if vendor.industry %}<span>{{ vendor.industry }}</span>{% endif %}
         </div>
       </div>
-      <div class="flex items-center gap-2">
+      <div class="flex items-center gap-3">
         {% if vendor.is_blacklisted %}
-          <span class="px-3 py-1 text-sm font-medium rounded-full bg-red-100 text-red-800">Blacklisted</span>
+          <span class="px-3 py-1 text-sm font-medium rounded-full bg-rose-50 text-rose-700">Blacklisted</span>
         {% endif %}
         {% if vendor.vendor_score %}
           <div class="text-center">
-            <p class="text-2xl font-bold text-green-600">{{ "%.0f"|format(vendor.vendor_score) }}</p>
+            <p class="text-2xl font-bold text-emerald-600">{{ "%.0f"|format(vendor.vendor_score) }}</p>
             <p class="text-xs text-gray-500">Score</p>
           </div>
         {% endif %}
+        {% set entity_type = "vendor" %}
+        {% set entity_id = vendor.id %}
+        {% include "partials/shared/enrich_button.html" %}
       </div>
     </div>
   </div>
@@ -43,7 +49,7 @@
     </div>
     <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
       <p class="text-xs text-gray-500">Win Rate</p>
-      <p class="text-xl font-bold text-gray-900">{{ "%.0f%%"|format(vendor.overall_win_rate * 100) if vendor.overall_win_rate else "—" }}</p>
+      <p class="text-xl font-bold text-gray-900">{{ "%.0f%%"|format(vendor.overall_win_rate * 100) if vendor.overall_win_rate else "\u2014" }}</p>
     </div>
     <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
       <p class="text-xs text-gray-500">Total POs</p>
@@ -51,98 +57,146 @@
     </div>
     <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
       <p class="text-xs text-gray-500">Response Time</p>
-      <p class="text-xl font-bold text-gray-900">{{ "%.0fh"|format(vendor.avg_response_hours) if vendor.avg_response_hours else "—" }}</p>
+      <p class="text-xl font-bold text-gray-900">{{ "%.0fh"|format(vendor.avg_response_hours) if vendor.avg_response_hours else "\u2014" }}</p>
     </div>
   </div>
 
-  {# Contact info #}
-  {% if vendor.emails or vendor.phones or vendor.website %}
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
-    <h2 class="text-sm font-semibold text-gray-700 mb-3">Contact Info</h2>
-    <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-      {% if vendor.website %}
-      <div>
-        <p class="text-xs text-gray-500">Website</p>
-        <a href="{{ vendor.website }}" target="_blank" class="text-blue-600 hover:underline">{{ vendor.website }}</a>
-      </div>
-      {% endif %}
-      {% if vendor.emails %}
-      <div>
-        <p class="text-xs text-gray-500">Emails</p>
-        {% for e in vendor.emails[:3] %}
-        <p class="text-gray-700">{{ e }}</p>
+  {# Tabs #}
+  <div x-data="{ activeTab: 'overview' }">
+    <div class="border-b border-gray-200 mb-4">
+      <nav class="flex gap-6 -mb-px">
+        {% for tab_id, tab_label in [('overview', 'Overview'), ('contacts', 'Contacts'), ('analytics', 'Analytics'), ('offers', 'Offers')] %}
+        <button @click="activeTab = '{{ tab_id }}'"
+                hx-get="/v2/partials/vendors/{{ vendor.id }}/tab/{{ tab_id }}"
+                hx-target="#vendor-tab-content"
+                hx-trigger="click"
+                hx-swap="innerHTML"
+                :class="activeTab === '{{ tab_id }}' ? 'border-brand-500 text-brand-500' : 'border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-200'"
+                class="py-3 px-1 text-sm font-medium border-b-2 transition-colors">
+          {{ tab_label }}
+        </button>
         {% endfor %}
-      </div>
-      {% endif %}
-      {% if vendor.phones %}
-      <div>
-        <p class="text-xs text-gray-500">Phones</p>
-        {% for p in vendor.phones[:3] %}
-        <p class="text-gray-700">{{ p }}</p>
-        {% endfor %}
-      </div>
-      {% endif %}
+      </nav>
     </div>
-  </div>
-  {% endif %}
 
-  {# Vendor contacts #}
-  {% if contacts %}
-  <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden mb-6">
-    <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
-      <h2 class="text-sm font-semibold text-gray-700">Contacts ({{ contacts|length }})</h2>
-    </div>
-    <table class="min-w-full divide-y divide-gray-200">
-      <thead class="bg-gray-50">
-        <tr>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-gray-200">
-        {% for c in contacts %}
-        <tr class="hover:bg-gray-50">
-          <td class="px-4 py-2 text-sm font-medium text-gray-900">{{ c.full_name or "—" }}</td>
-          <td class="px-4 py-2 text-sm text-gray-600">{{ c.title or "—" }}</td>
-          <td class="px-4 py-2 text-sm text-gray-600">{{ c.email or "—" }}</td>
-          <td class="px-4 py-2 text-sm text-gray-600">{{ c.phone or "—" }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-  </div>
-  {% endif %}
+    {# Tab content — overview loaded inline on first load #}
+    <div id="vendor-tab-content">
+      <div class="space-y-6">
+        {# Safety review #}
+        {% include "partials/shared/safety_review.html" %}
 
-  {# Recent sightings #}
-  {% if recent_sightings %}
-  <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
-    <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
-      <h2 class="text-sm font-semibold text-gray-700">Recent Sightings</h2>
+        {# Contact info #}
+        {% if vendor.emails or vendor.phones or vendor.website %}
+        <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+          <h2 class="text-sm font-semibold text-gray-900 mb-3">Contact Info</h2>
+          <div class="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
+            {% if vendor.website %}
+            <div>
+              <p class="text-xs text-gray-500">Website</p>
+              <a href="{{ vendor.website }}" target="_blank" class="text-brand-500 hover:text-brand-600">{{ vendor.website }}</a>
+            </div>
+            {% endif %}
+            {% if vendor.emails %}
+            <div>
+              <p class="text-xs text-gray-500">Emails</p>
+              {% for e in vendor.emails[:3] %}
+              <p class="text-gray-900">{{ e }}</p>
+              {% endfor %}
+            </div>
+            {% endif %}
+            {% if vendor.phones %}
+            <div>
+              <p class="text-xs text-gray-500">Phones</p>
+              {% for p in vendor.phones[:3] %}
+              <p class="text-gray-900">
+                <a href="tel:{{ p }}" class="text-brand-500 hover:text-brand-600">{{ p }}</a>
+              </p>
+              {% endfor %}
+            </div>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+
+        {# Contacts table #}
+        {% if contacts %}
+        <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+          <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+            <h2 class="text-sm font-semibold text-gray-900">Contacts ({{ contacts|length }})</h2>
+          </div>
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Title</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Email</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+              {% for c in contacts %}
+              <tr class="hover:bg-brand-50">
+                <td class="px-4 py-2 text-sm font-medium text-gray-900">{{ c.full_name or "\u2014" }}</td>
+                <td class="px-4 py-2 text-sm text-gray-500">{{ c.title or "\u2014" }}</td>
+                <td class="px-4 py-2 text-sm text-gray-500">{{ c.email or "\u2014" }}</td>
+                <td class="px-4 py-2 text-sm">
+                  {% if c.phone %}
+                    <a href="tel:{{ c.phone }}" class="text-brand-500 hover:text-brand-600">{{ c.phone }}</a>
+                  {% else %}
+                    <span class="text-gray-500">&mdash;</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+
+        {# Recent sightings #}
+        {% if recent_sightings %}
+        <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+          <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+            <h2 class="text-sm font-semibold text-gray-900">Recent Sightings</h2>
+          </div>
+          <table class="min-w-full divide-y divide-gray-200">
+            <thead class="bg-gray-50">
+              <tr>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">MPN</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+                <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Price</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+                <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+              </tr>
+            </thead>
+            <tbody class="divide-y divide-gray-200">
+              {% for s in recent_sightings %}
+              <tr class="hover:bg-brand-50">
+                <td class="px-4 py-2 text-sm font-mono text-gray-900">{{ s.mpn_matched or "\u2014" }}</td>
+                <td class="px-4 py-2 text-sm text-right text-gray-500">{{ "{:,}".format(s.qty_available) if s.qty_available else "\u2014" }}</td>
+                <td class="px-4 py-2 text-sm text-right {{ 'text-emerald-700 font-medium' if s.unit_price else 'text-gray-500' }}">{{ "$%.4f"|format(s.unit_price) if s.unit_price else "\u2014" }}</td>
+                <td class="px-4 py-2">
+                  {% set source_colors = {
+                    "brokerbin": "bg-sky-50 text-sky-700",
+                    "nexar": "bg-violet-50 text-violet-700",
+                    "digikey": "bg-orange-50 text-orange-700",
+                    "mouser": "bg-teal-50 text-teal-700",
+                    "oemsecrets": "bg-fuchsia-50 text-fuchsia-700",
+                    "element14": "bg-lime-50 text-lime-700",
+                    "ebay": "bg-yellow-50 text-yellow-700"
+                  } %}
+                  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ source_colors.get((s.source_type or '')|lower, 'bg-gray-100 text-gray-600') }}">
+                    {{ s.source_type or "\u2014" }}
+                  </span>
+                </td>
+                <td class="px-4 py-2 text-sm text-gray-500">{{ s.created_at.strftime('%b %d') if s.created_at else "\u2014" }}</td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+        {% endif %}
+      </div>
     </div>
-    <table class="min-w-full divide-y divide-gray-200">
-      <thead class="bg-gray-50">
-        <tr>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">MPN</th>
-          <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-          <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Price</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-        </tr>
-      </thead>
-      <tbody class="divide-y divide-gray-200">
-        {% for s in recent_sightings %}
-        <tr>
-          <td class="px-4 py-2 text-sm font-mono text-gray-900">{{ s.mpn_matched or "—" }}</td>
-          <td class="px-4 py-2 text-sm text-right text-gray-600">{{ "{:,}".format(s.qty_available) if s.qty_available else "—" }}</td>
-          <td class="px-4 py-2 text-sm text-right {{ 'text-green-700 font-medium' if s.unit_price else 'text-gray-400' }}">{{ "$%.4f"|format(s.unit_price) if s.unit_price else "—" }}</td>
-          <td class="px-4 py-2 text-xs"><span class="px-2 py-0.5 rounded-full bg-gray-100 text-gray-700">{{ s.source_type or "—" }}</span></td>
-          <td class="px-4 py-2 text-sm text-gray-500">{{ s.created_at.strftime('%b %d') if s.created_at else "—" }}</td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
   </div>
-  {% endif %}
 </div>

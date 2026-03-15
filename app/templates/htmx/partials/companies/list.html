@@ -1,19 +1,26 @@
-{# Companies list partial — searchable company table with key CRM data.
-   Loaded via HTMX into #main-content. #}
+{# Companies list partial — searchable company table with brand palette.
+   Receives: companies, search, total, limit, offset.
+   Called by: companies_list_partial route.
+   Depends on: brand palette.
+#}
+
+{# OOB breadcrumb update #}
+<div id="breadcrumb" hx-swap-oob="true">Companies</div>
 
 <div class="max-w-7xl mx-auto">
   <div class="flex items-center justify-between mb-6">
-    <h1 class="text-2xl font-bold text-gray-900">Companies</h1>
-    <span class="text-sm text-gray-500">{{ total }} compan{{ "ies" if total != 1 else "y" }}</span>
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Companies</h1>
+      <p class="text-sm text-gray-500 mt-1">{{ total }} compan{{ "ies" if total != 1 else "y" }}</p>
+    </div>
   </div>
 
   {# Search bar #}
   <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
-    <form hx-get="/v2/partials/companies" hx-target="#main-content" class="flex gap-3">
-      <input type="text" name="search" value="{{ search }}" placeholder="Search companies..."
-             hx-get="/v2/partials/companies" hx-target="#main-content" hx-trigger="keyup changed delay:300ms" hx-include="[name='search']"
-             class="flex-1 px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500">
-    </form>
+    <input type="text" name="search" value="{{ search }}" placeholder="Search companies..."
+           hx-get="/v2/partials/companies" hx-target="#main-content" hx-push-url="true"
+           hx-trigger="keyup changed delay:300ms"
+           class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
   </div>
 
   {# Table #}
@@ -28,46 +35,43 @@
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Industry</th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Owner</th>
             <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Sites</th>
-            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Open Reqs</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-200">
           {% for c in companies %}
-          <tr class="hover:bg-gray-50 cursor-pointer"
+          <tr class="hover:bg-brand-50 cursor-pointer"
               hx-get="/v2/partials/companies/{{ c.id }}"
               hx-target="#main-content"
               hx-push-url="/v2/companies/{{ c.id }}">
             <td class="px-4 py-3">
               <div class="flex items-center">
-                <div class="h-8 w-8 rounded-full bg-gray-200 flex items-center justify-center text-xs font-medium text-gray-600">
+                <div class="h-8 w-8 rounded-full bg-brand-100 flex items-center justify-center text-xs font-medium text-brand-600">
                   {{ c.name[0]|upper if c.name else "?" }}
                 </div>
                 <div class="ml-3">
-                  <p class="text-sm font-medium text-blue-600">{{ c.name }}</p>
+                  <p class="text-sm font-medium text-brand-500">{{ c.name }}</p>
                   {% if c.domain %}<p class="text-xs text-gray-500">{{ c.domain }}</p>{% endif %}
                 </div>
               </div>
             </td>
             <td class="px-4 py-3">
               {% if c.account_type %}
-              {% set type_colors = {"Customer": "bg-green-100 text-green-700", "Prospect": "bg-blue-100 text-blue-700", "Partner": "bg-purple-100 text-purple-700", "Competitor": "bg-red-100 text-red-700"} %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ type_colors.get(c.account_type, 'bg-gray-100 text-gray-700') }}">
+              {% set type_colors = {
+                "Customer": "bg-emerald-50 text-emerald-700",
+                "Prospect": "bg-brand-100 text-brand-600",
+                "Partner": "bg-brand-100 text-brand-300",
+                "Competitor": "bg-rose-50 text-rose-700"
+              } %}
+              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ type_colors.get(c.account_type, 'bg-gray-100 text-gray-600') }}">
                 {{ c.account_type }}
               </span>
               {% else %}
-              <span class="text-xs text-gray-400">—</span>
+              <span class="text-xs text-gray-500">&mdash;</span>
               {% endif %}
             </td>
-            <td class="px-4 py-3 text-sm text-gray-600">{{ c.industry or "—" }}</td>
-            <td class="px-4 py-3 text-sm text-gray-600">{{ c.account_owner.name if c.account_owner else "—" }}</td>
-            <td class="px-4 py-3 text-sm text-gray-600 text-center">{{ c.site_count or 0 }}</td>
-            <td class="px-4 py-3 text-sm text-center">
-              {% if c.open_req_count %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-blue-100 text-blue-700">{{ c.open_req_count }}</span>
-              {% else %}
-              <span class="text-gray-400">0</span>
-              {% endif %}
-            </td>
+            <td class="px-4 py-3 text-sm text-gray-500">{{ c.industry or "\u2014" }}</td>
+            <td class="px-4 py-3 text-sm text-gray-500">{{ c.account_owner.name if c.account_owner else "\u2014" }}</td>
+            <td class="px-4 py-3 text-sm text-gray-500 text-center">{{ c.site_count or 0 }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -78,17 +82,17 @@
   {# Pagination #}
   {% if total > limit %}
   <div class="mt-4 flex justify-center">
-    <nav class="flex gap-1">
+    <nav class="flex gap-1 items-center">
       {% if offset > 0 %}
       <a hx-get="/v2/partials/companies?offset={{ offset - limit }}&search={{ search }}"
          hx-target="#main-content"
-         class="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Prev</a>
+         class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
       {% endif %}
-      <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}–{{ [offset + limit, total]|min }} of {{ total }}</span>
+      <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
       {% if offset + limit < total %}
       <a hx-get="/v2/partials/companies?offset={{ offset + limit }}&search={{ search }}"
          hx-target="#main-content"
-         class="px-3 py-1.5 text-sm bg-white border border-gray-300 rounded-lg hover:bg-gray-50 cursor-pointer">Next</a>
+         class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
       {% endif %}
     </nav>
   </div>
