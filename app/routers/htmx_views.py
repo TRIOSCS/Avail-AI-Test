@@ -9,7 +9,9 @@ Called by: main.py (router mount)
 Depends on: models, dependencies, database, search_service
 """
 
+import json
 import time
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -39,6 +41,24 @@ from ..utils.sql_helpers import escape_like
 router = APIRouter(tags=["htmx-views"])
 templates = Jinja2Templates(directory="app/templates")
 
+# Vite manifest for asset fingerprinting — read once at import time.
+_MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
+_vite_manifest: dict = {}
+if _MANIFEST_PATH.exists():
+    _vite_manifest = json.loads(_MANIFEST_PATH.read_text())
+
+
+def _vite_assets() -> dict:
+    """Return Vite asset URLs for templates. Keys: js_file, css_files."""
+    entry = _vite_manifest.get("htmx_app.js", {})
+    js_file = entry.get("file", "assets/htmx_app.js")
+    css_files = entry.get("css", [])
+    # Also add standalone styles entry if not already in css list
+    styles_entry = _vite_manifest.get("styles.css", {})
+    if styles_entry.get("file") and styles_entry["file"] not in css_files:
+        css_files = [styles_entry["file"]] + css_files
+    return {"js_file": js_file, "css_files": css_files}
+
 
 def _is_htmx(request: Request) -> bool:
     """Check if this is an HTMX partial request (vs full page load)."""
@@ -47,12 +67,15 @@ def _is_htmx(request: Request) -> bool:
 
 def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
     """Shared template context for all views."""
+    assets = _vite_assets()
     return {
         "request": request,
         "user_name": user.name if user else "",
         "user_email": user.email if user else "",
         "is_admin": user.role == "admin" if user else False,
         "current_view": current_view,
+        "vite_js": assets["js_file"],
+        "vite_css": assets["css_files"],
     }
 
 

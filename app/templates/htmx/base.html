@@ -4,9 +4,10 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}AvailAI{% endblock %}</title>
-  <script src="https://cdn.tailwindcss.com"></script>
-  <script src="https://unpkg.com/htmx.org@2.0.4"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  {% for css_file in vite_css|default([]) %}
+  <link rel="stylesheet" href="/static/dist/{{ css_file }}">
+  {% endfor %}
+  <script type="module" src="/static/dist/{{ vite_js|default('assets/htmx_app.js') }}"></script>
   <style>
     [x-cloak] { display: none !important; }
     .htmx-indicator { display: none; }
@@ -146,14 +147,6 @@
   </div>
   {% endblock %}
 
-  {# Global HTMX config #}
-  <script>
-    document.body.addEventListener('htmx:beforeSwap', function(evt) {
-      // Handle 401 — redirect to login
-      if (evt.detail.xhr.status === 401) {
-        window.location.href = '/auth/login';
-      }
-    });
-  </script>
+  {# 401 handler and HTMX config are in htmx_app.js (Vite bundle) #}
 </body>
 </html>
