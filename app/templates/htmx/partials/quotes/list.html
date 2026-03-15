@@ -32,6 +32,7 @@
         <input type="text" name="q" value="{{ q }}" placeholder="Quote number..."
                class="w-full px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                hx-get="/v2/partials/quotes"
+               hx-swap="morph"
                hx-trigger="keyup changed delay:300ms"
                hx-target="#main-content"
                hx-include="[name='q']">
@@ -74,7 +75,8 @@
           <tr class="hover:bg-gray-50 cursor-pointer"
               hx-get="/v2/partials/quotes/{{ quote.id }}"
               hx-target="#main-content"
-              hx-push-url="/v2/quotes/{{ quote.id }}">
+              hx-push-url="/v2/quotes/{{ quote.id }}"
+              preload="mouseover">
             <td class="px-4 py-3 text-sm font-mono font-medium text-brand-600">{{ quote.quote_number }}</td>
             <td class="px-4 py-3 text-sm text-gray-600">{{ quote.revision or 1 }}</td>
             <td class="px-4 py-3 text-sm text-gray-600">{{ quote.requisition.name if quote.requisition else '-' }}</td>

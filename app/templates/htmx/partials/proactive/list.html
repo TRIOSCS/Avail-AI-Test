@@ -18,7 +18,9 @@
     <button hx-post="/api/proactive/refresh"
             hx-target="#main-content"
             hx-swap="none"
+            data-loading-disable
             class="text-xs bg-brand-600 hover:bg-brand-500 text-white px-3 py-1 rounded transition-colors">
+      <svg data-loading class="h-3 w-3 mr-1 spinner inline" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
       Refresh Matches
     </button>
   </div>

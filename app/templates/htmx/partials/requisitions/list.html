@@ -28,8 +28,10 @@
     <button @click="$dispatch('open-modal')"
             hx-get="/v2/partials/requisitions/create-form"
             hx-target="#modal-content"
+            data-loading-disable
             class="inline-flex items-center px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors">
-      <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      <svg data-loading class="h-4 w-4 mr-1.5 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+      <svg data-loading-remove class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
       New Requisition
     </button>
   </div>
@@ -44,6 +46,7 @@
           <input type="text" name="q" value="{{ q }}" placeholder="Name, customer..."
                  hx-get="/v2/partials/requisitions"
                  hx-target="#main-content"
+                 hx-swap="morph"
                  hx-push-url="true"
                  hx-include="#req-filters"
                  hx-trigger="keyup changed delay:300ms"
@@ -123,7 +126,7 @@
   </div>
 
   {# Bulk action bar #}
-  <div x-show="selectedIds.size > 0" x-cloak
+  <div x-show="selectedIds.size > 0" x-collapse x-cloak
        class="mb-4 p-3 bg-brand-50 rounded-lg border border-brand-200 flex items-center gap-3">
     <span class="text-sm font-medium text-brand-600" x-text="selectedIds.size + ' selected'"></span>
     <button @click="fetch('/v2/partials/requisitions/bulk/archive', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'ids='+Array.from(selectedIds).join(',')}).then(r=>r.text()).then(h=>{document.getElementById('main-content').innerHTML=h; selectedIds=new Set()})"
@@ -193,6 +196,7 @@
       <a hx-get="/v2/partials/requisitions?offset={{ offset - limit }}"
          hx-target="#main-content"
          hx-include="#req-filters"
+         preload="mouseover"
          class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
       {% endif %}
       <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
@@ -200,6 +204,7 @@
       <a hx-get="/v2/partials/requisitions?offset={{ offset + limit }}"
          hx-target="#main-content"
          hx-include="#req-filters"
+         preload="mouseover"
          class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
       {% endif %}
     </nav>

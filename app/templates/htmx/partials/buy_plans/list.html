@@ -81,7 +81,8 @@
           <tr class="hover:bg-gray-50 cursor-pointer"
               hx-get="/v2/partials/buy-plans/{{ bp.id }}"
               hx-target="#main-content"
-              hx-push-url="/v2/buy-plans/{{ bp.id }}">
+              hx-push-url="/v2/buy-plans/{{ bp.id }}"
+              preload="mouseover">
             <td class="px-4 py-3 text-sm font-medium text-gray-900">{{ bp.customer_name or '-' }}</td>
             <td class="px-4 py-3 text-sm text-gray-600 font-mono">{{ bp.quote_number or '-' }}</td>
             <td class="px-4 py-3 text-sm text-gray-600">{{ bp.sales_order_number or '-' }}</td>

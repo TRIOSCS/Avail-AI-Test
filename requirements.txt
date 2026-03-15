@@ -36,3 +36,6 @@ patchright==1.58.2
 pydantic-settings==2.13.1
 # SSE streaming for HTMX sourcing progress
 sse-starlette>=1.6.0
+# HTMX integration helpers for FastAPI
+fasthx>=3.1.0
+fastapi-htmx>=0.5.0

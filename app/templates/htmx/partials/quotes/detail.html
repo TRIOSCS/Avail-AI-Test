@@ -7,10 +7,12 @@
 
 <div id="breadcrumb" hx-swap-oob="true">
   <a href="/v2/quotes" hx-get="/v2/partials/quotes" hx-target="#main-content" hx-push-url="/v2/quotes"
+     preload="mouseover"
      class="text-brand-400 hover:text-brand-300">Quotes</a>
   <span class="mx-1 text-gray-400">/</span>
   {{ quote.quote_number }}
 </div>
+<title hx-swap-oob="true">{{ quote.quote_number }} — Quotes — AvailAI</title>
 
 <div class="max-w-7xl mx-auto" x-data="{ showMarkup: false }">
 
@@ -20,6 +22,7 @@
       <span class="text-brand-300">Avail</span>
       <span class="text-brand-400">&rsaquo;</span>
       <a href="/v2/quotes" hx-get="/v2/partials/quotes" hx-target="#main-content" hx-push-url="/v2/quotes"
+         preload="mouseover"
          class="text-brand-200 hover:text-white cursor-pointer">Quotes</a>
       <span class="text-brand-400">&rsaquo;</span>
       <span class="font-medium">{{ quote.quote_number }}</span>
@@ -48,6 +51,7 @@
           <p>Customer:
             <a hx-get="/v2/partials/companies/{{ quote.customer_site.company.id }}"
                hx-target="#main-content" hx-push-url="/v2/companies/{{ quote.customer_site.company.id }}"
+               preload="mouseover"
                class="text-brand-500 hover:text-brand-400 cursor-pointer">{{ quote.customer_site.company.name }}</a>
           </p>
           {% endif %}
@@ -55,6 +59,7 @@
           <p>Requisition:
             <a hx-get="/v2/partials/requisitions/{{ quote.requisition.id }}"
                hx-target="#main-content" hx-push-url="/v2/requisitions/{{ quote.requisition.id }}"
+               preload="mouseover"
                class="text-brand-500 hover:text-brand-400 cursor-pointer">{{ quote.requisition.name }}</a>
           </p>
           {% endif %}
@@ -77,7 +82,8 @@
 
   {# Followup alert banner #}
   {% if quote.followup_alert_sent_at %}
-  <div class="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-700">
+  <div class="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-700"
+       remove-me="8s">
     Follow-up alert was sent on {{ quote.followup_alert_sent_at.strftime('%b %d, %Y') if quote.followup_alert_sent_at else '' }}.
   </div>
   {% endif %}
@@ -93,13 +99,17 @@
     <button hx-post="/v2/partials/quotes/{{ quote.id }}/result"
             hx-target="#main-content"
             hx-vals='{"result": "won"}'
+            data-loading-disable
             class="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700">
+      <svg data-loading class="h-4 w-4 mr-1 spinner inline" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
       Mark Won
     </button>
     <button hx-post="/v2/partials/quotes/{{ quote.id }}/result"
             hx-target="#main-content"
             hx-vals='{"result": "lost"}'
+            data-loading-disable
             class="px-4 py-2 bg-rose-600 text-white text-sm font-medium rounded-md hover:bg-rose-700">
+      <svg data-loading class="h-4 w-4 mr-1 spinner inline" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
       Mark Lost
     </button>
     {% endif %}
@@ -107,7 +117,9 @@
     <button hx-post="/v2/partials/quotes/{{ quote.id }}/send"
             hx-target="#main-content"
             hx-confirm="Send this quote to the customer?"
+            data-loading-disable
             class="px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600">
+      <svg data-loading class="h-4 w-4 mr-1 spinner inline" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
       Send Quote
     </button>
     {% endif %}
@@ -124,7 +136,7 @@
   </div>
 
   {# Global markup input #}
-  <div x-show="showMarkup" x-cloak x-transition class="mb-4 bg-white border border-brand-200 rounded-lg p-4">
+  <div x-show="showMarkup" x-collapse x-cloak class="mb-4 bg-white border border-brand-200 rounded-lg p-4">
     <form hx-post="/v2/partials/quotes/{{ quote.id }}/apply-markup" hx-target="#main-content" class="flex items-center gap-3">
       <label class="text-sm font-medium text-gray-700">Markup %:</label>
       <input type="number" name="markup_pct" step="0.1" value="25" class="w-24 px-3 py-1.5 border border-brand-200 rounded-md text-sm focus:ring-brand-500">
@@ -167,6 +179,8 @@
     <div class="border-t border-gray-200 px-4 py-3 bg-gray-50">
       <form hx-post="/v2/partials/quotes/{{ quote.id }}/lines"
             hx-target="#quote-lines-body"
+            hx-target-422="#line-form-errors"
+            hx-target-5*="#line-form-errors"
             hx-swap="beforeend"
             class="flex flex-wrap gap-2 items-end">
         <div>
@@ -183,14 +197,18 @@
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Cost</label>
-          <input type="number" name="cost_price" step="0.0001" placeholder="0.5000" class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-brand-500">
+          <input type="number" name="cost_price" step="0.0001" placeholder="0.5000" x-data x-mask:dynamic="$money($input, '.')" class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-brand-500">
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Sell</label>
-          <input type="number" name="sell_price" step="0.0001" placeholder="0.7500" class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-brand-500">
+          <input type="number" name="sell_price" step="0.0001" placeholder="0.7500" x-data x-mask:dynamic="$money($input, '.')" class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-brand-500">
         </div>
-        <button type="submit" class="px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600">Add Line</button>
+        <button type="submit" data-loading-disable class="px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600">
+          <svg data-loading class="h-3 w-3 mr-1 spinner inline" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+          Add Line
+        </button>
       </form>
+      <div id="line-form-errors" class="mt-2 text-sm text-rose-600"></div>
     </div>
   </div>
 

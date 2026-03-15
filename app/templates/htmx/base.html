@@ -17,9 +17,16 @@
     .htmx-settling { opacity: 1; transition: opacity 0.15s ease-in; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner { animation: spin 0.6s linear infinite; }
+    /* loading-states extension: show/hide/disable elements during HTMX requests */
+    [data-loading] { display: none; }
+    [data-loading].htmx-request { display: inline-block; }
+    [data-loading-class] { /* classes added/removed automatically by extension */ }
+    [data-loading-disable].htmx-request { pointer-events: none; opacity: 0.5; }
   </style>
 </head>
-<body class="h-full" x-data="{ sidebarOpen: false, currentView: '{{ current_view|default("requisitions") }}' }">
+<body class="h-full"
+      hx-ext="alpine-morph, preload, response-targets, loading-states, head-support, class-tools, multi-swap, remove-me, restored"
+      x-data="{ sidebarOpen: false, currentView: '{{ current_view|default("requisitions") }}' }">
   {% block body %}
   <div class="min-h-full flex">
 
@@ -57,6 +64,7 @@
            hx-get="{{ partial }}"
            hx-target="#main-content"
            hx-push-url="{{ href }}"
+           preload="mouseover"
            @click="currentView = '{{ id }}'"
            :class="currentView === '{{ id }}' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
            class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
@@ -81,6 +89,7 @@
            hx-get="{{ partial }}"
            hx-target="#main-content"
            hx-push-url="{{ href }}"
+           preload="mouseover"
            @click="currentView = '{{ id }}'"
            :class="currentView === '{{ id }}' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
            class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
@@ -95,6 +104,7 @@
              hx-get="/v2/partials/settings"
              hx-target="#main-content"
              hx-push-url="/v2/settings"
+             preload="mouseover"
              @click="currentView = 'settings'"
              :class="currentView === 'settings' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
              class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
@@ -154,6 +164,7 @@
           ] %}
           {% for id, label, href, partial in mobile_items %}
           <a href="{{ href }}" hx-get="{{ partial }}" hx-target="#main-content" hx-push-url="{{ href }}"
+             preload="mouseover"
              @click="currentView = '{{ id }}'; sidebarOpen = false"
              :class="currentView === '{{ id }}' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
              class="flex items-center px-3 py-2 text-sm font-medium rounded-md">{{ label }}</a>
