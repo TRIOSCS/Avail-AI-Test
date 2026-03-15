@@ -77,7 +77,7 @@
   <div x-data="{ activeTab: 'overview' }">
     <div class="border-b border-gray-200 mb-4">
       <nav class="flex gap-6 -mb-px">
-        {% for tab_id, tab_label in [('overview', 'Overview'), ('contacts', 'Contacts'), ('find_contacts', 'Find Contacts'), ('analytics', 'Analytics'), ('offers', 'Offers')] %}
+        {% for tab_id, tab_label in [('overview', 'Overview'), ('contacts', 'Contacts'), ('find_contacts', 'Find Contacts'), ('emails', 'Emails'), ('analytics', 'Analytics'), ('offers', 'Offers')] %}
         <button @click="activeTab = '{{ tab_id }}'"
                 hx-get="/v2/partials/vendors/{{ vendor.id }}/tab/{{ tab_id }}"
                 hx-target="#vendor-tab-content"

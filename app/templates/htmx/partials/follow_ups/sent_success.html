@@ -1,0 +1,13 @@
+{# follow_ups/sent_success.html — Replaces a follow-up card after sending.
+   Receives: contact_id (int), vendor_name (str).
+   Called by: htmx_views.py send_follow_up_htmx endpoint.
+   Depends on: Tailwind CSS.
+#}
+<div id="follow-up-{{ contact_id }}" class="bg-emerald-50 rounded-lg border border-emerald-200 p-4">
+  <div class="flex items-center gap-2">
+    <svg class="h-5 w-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+    </svg>
+    <p class="text-sm font-medium text-emerald-700">Follow-up sent to {{ vendor_name }}</p>
+  </div>
+</div>

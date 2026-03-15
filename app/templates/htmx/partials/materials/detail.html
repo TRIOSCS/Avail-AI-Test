@@ -1,0 +1,222 @@
+{# materials/detail.html — Material card detail with specs, vendor history, and actions.
+   Receives: card (MaterialCard), vendor_history (list), sightings (list), offers (list).
+   Called by: htmx_views.py material_detail_partial endpoint.
+   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
+#}
+
+<div id="breadcrumb" hx-swap-oob="true">
+  <a href="/v2/materials" hx-get="/v2/partials/materials" hx-target="#main-content" hx-push-url="/v2/materials"
+     class="text-brand-400 hover:text-brand-300">Materials</a>
+  <span class="mx-1 text-gray-400">/</span>
+  {{ card.display_mpn or card.normalized_mpn }}
+</div>
+
+<div class="max-w-7xl mx-auto" x-data="{ editing: false }">
+
+  {# Dark navy page header #}
+  <div class="bg-brand-700 text-white px-6 py-3 rounded-t-lg mb-6 flex items-center justify-between">
+    <div class="flex items-center gap-2 text-sm">
+      <span class="text-brand-300">Avail</span>
+      <span class="text-brand-400">&rsaquo;</span>
+      <a href="/v2/materials" hx-get="/v2/partials/materials" hx-target="#main-content" hx-push-url="/v2/materials"
+         class="text-brand-200 hover:text-white cursor-pointer">Materials</a>
+      <span class="text-brand-400">&rsaquo;</span>
+      <span class="font-medium font-mono">{{ card.display_mpn or card.normalized_mpn }}</span>
+    </div>
+  </div>
+
+  {# Header card #}
+  <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
+    <div class="flex items-start justify-between">
+      <div>
+        <h1 class="text-2xl font-bold text-gray-900 font-mono">{{ card.display_mpn or card.normalized_mpn }}</h1>
+        <div class="mt-2 flex items-center gap-3">
+          {% if card.manufacturer %}
+          <span class="text-sm text-gray-600">{{ card.manufacturer }}</span>
+          {% endif %}
+          {% set lc_colors = {
+            'active': 'bg-emerald-50 text-emerald-700',
+            'eol': 'bg-amber-50 text-amber-700',
+            'obsolete': 'bg-rose-50 text-rose-700',
+            'nrfnd': 'bg-gray-100 text-gray-600',
+            'ltb': 'bg-amber-50 text-amber-600',
+          } %}
+          {% if card.lifecycle_status %}
+          <span class="px-2 py-0.5 text-xs font-medium rounded-full {{ lc_colors.get(card.lifecycle_status, 'bg-gray-100 text-gray-600') }}">
+            {{ card.lifecycle_status|upper }}
+          </span>
+          {% endif %}
+          {% if card.rohs_status %}
+          <span class="px-2 py-0.5 text-xs font-medium rounded-full {{ 'bg-emerald-50 text-emerald-700' if card.rohs_status == 'compliant' else 'bg-amber-50 text-amber-600' }}">
+            RoHS: {{ card.rohs_status|capitalize }}
+          </span>
+          {% endif %}
+        </div>
+        {% if card.description %}
+        <p class="text-sm text-gray-500 mt-2">{{ card.description }}</p>
+        {% endif %}
+      </div>
+      <div class="text-right space-y-1">
+        <p class="text-sm text-gray-500">Searches: <span class="font-medium text-gray-900">{{ card.search_count or 0 }}</span></p>
+        {% if card.last_searched_at %}
+        <p class="text-xs text-gray-400">Last: {{ card.last_searched_at.strftime('%b %d, %Y') }}</p>
+        {% endif %}
+        {% if card.enriched_at %}
+        <p class="text-xs text-emerald-600">Enriched {{ card.enriched_at.strftime('%b %d, %Y') }}</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# Specs grid #}
+  <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
+    <div class="flex items-center justify-between mb-4">
+      <h2 class="text-lg font-semibold text-gray-900">Specifications</h2>
+      <button @click="editing = !editing"
+              class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded hover:bg-brand-100"
+              x-text="editing ? 'Cancel' : 'Edit'">Edit</button>
+    </div>
+
+    {# Display mode #}
+    <div x-show="!editing" class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+      <div><span class="text-gray-500">Category:</span> <span class="font-medium">{{ card.category or "&mdash;" }}</span></div>
+      <div><span class="text-gray-500">Package:</span> <span class="font-medium">{{ card.package_type or "&mdash;" }}</span></div>
+      <div><span class="text-gray-500">Pin Count:</span> <span class="font-medium">{{ card.pin_count or "&mdash;" }}</span></div>
+      <div><span class="text-gray-500">Lifecycle:</span> <span class="font-medium">{{ card.lifecycle_status or "&mdash;" }}</span></div>
+      {% if card.specs_summary %}
+      <div class="col-span-full"><span class="text-gray-500">Specs:</span> <span class="font-medium">{{ card.specs_summary }}</span></div>
+      {% endif %}
+      {% if card.datasheet_url %}
+      <div class="col-span-full"><span class="text-gray-500">Datasheet:</span> <a href="{{ card.datasheet_url }}" target="_blank" class="text-brand-500 hover:text-brand-400">View Datasheet</a></div>
+      {% endif %}
+    </div>
+
+    {# Edit mode #}
+    <form x-show="editing" x-cloak
+          hx-put="/v2/partials/materials/{{ card.id }}"
+          hx-target="#main-content"
+          class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Manufacturer</label>
+        <input type="text" name="manufacturer" value="{{ card.manufacturer or '' }}"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Category</label>
+        <input type="text" name="category" value="{{ card.category or '' }}"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Package</label>
+        <input type="text" name="package_type" value="{{ card.package_type or '' }}"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Lifecycle</label>
+        <select name="lifecycle_status" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500">
+          <option value="">Unknown</option>
+          {% for val in ['active', 'eol', 'obsolete', 'nrfnd', 'ltb'] %}
+          <option value="{{ val }}" {{ 'selected' if card.lifecycle_status == val }}>{{ val|upper }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Pin Count</label>
+        <input type="number" name="pin_count" value="{{ card.pin_count or '' }}"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">RoHS</label>
+        <select name="rohs_status" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500">
+          <option value="">Unknown</option>
+          {% for val in ['compliant', 'non-compliant', 'exempt'] %}
+          <option value="{{ val }}" {{ 'selected' if card.rohs_status == val }}>{{ val|capitalize }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-span-2">
+        <label class="block text-xs text-gray-500 mb-1">Description</label>
+        <input type="text" name="description" value="{{ card.description or '' }}"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500">
+      </div>
+      <div class="col-span-full flex gap-2">
+        <button type="submit" class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600">Save</button>
+        <button type="button" @click="editing = false" class="px-4 py-1.5 text-sm font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50">Cancel</button>
+      </div>
+    </form>
+  </div>
+
+  {# Recent sightings #}
+  {% if sightings %}
+  <div class="bg-white border border-brand-200 rounded-lg overflow-hidden mb-6">
+    <div class="px-4 py-3 bg-gray-50 border-b">
+      <h2 class="text-lg font-semibold text-gray-900">Recent Sightings ({{ sightings|length }})</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
+            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Price</th>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for s in sightings[:20] %}
+          <tr class="hover:bg-brand-50">
+            <td class="px-4 py-2 text-sm text-gray-900">{{ s.vendor_name or "&mdash;" }}</td>
+            <td class="px-4 py-2 text-sm text-gray-600 text-right">{{ "{:,}".format(s.qty_available) if s.qty_available else "&mdash;" }}</td>
+            <td class="px-4 py-2 text-sm text-right {{ 'text-emerald-700 font-medium' if s.unit_price else 'text-gray-500' }}">
+              {{ "${:,.4f}".format(s.unit_price) if s.unit_price else "RFQ" }}
+            </td>
+            <td class="px-4 py-2 text-sm text-gray-500">{{ s.source_type or "&mdash;" }}</td>
+            <td class="px-4 py-2 text-sm text-gray-500">{{ s.created_at.strftime('%b %d') if s.created_at else "&mdash;" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {# Recent offers #}
+  {% if offers %}
+  <div class="bg-white border border-brand-200 rounded-lg overflow-hidden mb-6">
+    <div class="px-4 py-3 bg-gray-50 border-b">
+      <h2 class="text-lg font-semibold text-gray-900">Offers ({{ offers|length }})</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
+            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
+            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Price</th>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Lead Time</th>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
+            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-200">
+          {% for o in offers[:20] %}
+          <tr class="hover:bg-brand-50">
+            <td class="px-4 py-2 text-sm text-gray-900">{{ o.vendor_name or "&mdash;" }}</td>
+            <td class="px-4 py-2 text-sm text-gray-600 text-right">{{ "{:,}".format(o.qty_available) if o.qty_available else "&mdash;" }}</td>
+            <td class="px-4 py-2 text-sm text-right text-emerald-700 font-medium">
+              {{ "${:,.4f}".format(o.unit_price) if o.unit_price else "RFQ" }}
+            </td>
+            <td class="px-4 py-2 text-sm text-gray-500">{{ o.lead_time or "&mdash;" }}</td>
+            <td class="px-4 py-2">
+              <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-brand-100 text-brand-600">{{ (o.status or 'active')|capitalize }}</span>
+            </td>
+            <td class="px-4 py-2 text-sm text-gray-500">{{ o.created_at.strftime('%b %d') if o.created_at else "&mdash;" }}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+</div>

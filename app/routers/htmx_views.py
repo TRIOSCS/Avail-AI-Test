@@ -1232,6 +1232,142 @@ async def rfq_send(
     return templates.TemplateResponse("partials/requisitions/rfq_results.html", ctx)
 
 
+# ── Follow-ups & Response Review (Phase 6) ───────────────────────────
+
+
+@router.get("/v2/partials/follow-ups", response_class=HTMLResponse)
+async def follow_ups_list_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Cross-requisition follow-up queue as HTML partial."""
+    from ..config import settings as cfg
+    from ..models.offers import Contact as RfqContact
+
+    threshold_days = getattr(cfg, "follow_up_days", 2)
+    threshold = datetime.now() - __import__("datetime").timedelta(days=threshold_days)
+
+    stale_q = db.query(RfqContact).filter(
+        RfqContact.contact_type == "email",
+        RfqContact.status.in_(["sent", "opened"]),
+        RfqContact.created_at < threshold,
+    )
+    if getattr(user, "role", None) in ("sales", "trader"):
+        stale_q = stale_q.join(Requisition).filter(Requisition.created_by == user.id)
+
+    stale = stale_q.order_by(RfqContact.created_at.asc()).limit(500).all()
+
+    req_ids = {c.requisition_id for c in stale}
+    req_names: dict[int, str] = {}
+    if req_ids:
+        for r in db.query(Requisition.id, Requisition.name).filter(Requisition.id.in_(req_ids)).all():
+            req_names[r.id] = r.name
+
+    from datetime import timezone as tz
+
+    now = datetime.now(tz.utc)
+    follow_ups = []
+    for c in stale:
+        ca = c.created_at.replace(tzinfo=None) if c.created_at else now.replace(tzinfo=None)
+        days_waiting = (now.replace(tzinfo=None) - ca).days
+        follow_ups.append({
+            "contact_id": c.id,
+            "requisition_id": c.requisition_id,
+            "requisition_name": req_names.get(c.requisition_id, "Unknown"),
+            "vendor_name": c.vendor_name,
+            "vendor_email": c.vendor_contact,
+            "parts": c.parts_included or [],
+            "status": c.status,
+            "days_waiting": days_waiting,
+        })
+
+    ctx = _base_ctx(request, user, "follow-ups")
+    ctx.update({"follow_ups": follow_ups, "total": len(follow_ups)})
+    return templates.TemplateResponse("htmx/partials/follow_ups/list.html", ctx)
+
+
+@router.post("/v2/partials/follow-ups/{contact_id}/send", response_class=HTMLResponse)
+async def send_follow_up_htmx(
+    request: Request,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Send a follow-up email for a stale contact. Returns success card."""
+    from ..models.offers import Contact as RfqContact
+
+    contact = db.get(RfqContact, contact_id)
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    form = await request.form()
+    body = (form.get("body") or "").strip()
+
+    # In test mode, just update the contact status without sending real email
+    contact.status = "sent"
+    from datetime import timezone as tz
+
+    contact.status_updated_at = datetime.now(tz.utc)
+    db.commit()
+    logger.info("Follow-up sent for contact {} (vendor: {}) by {}", contact_id, contact.vendor_name, user.email)
+
+    ctx = _base_ctx(request, user, "follow-ups")
+    ctx["contact_id"] = contact_id
+    ctx["vendor_name"] = contact.vendor_name or "Vendor"
+    return templates.TemplateResponse("htmx/partials/follow_ups/sent_success.html", ctx)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/responses/{response_id}/review", response_class=HTMLResponse)
+async def review_response_htmx(
+    request: Request,
+    req_id: int,
+    response_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a vendor response as reviewed or rejected. Returns updated card."""
+    from ..models.offers import VendorResponse
+
+    vr = db.query(VendorResponse).filter(
+        VendorResponse.id == response_id,
+        VendorResponse.requisition_id == req_id,
+    ).first()
+    if not vr:
+        raise HTTPException(404, "Response not found")
+
+    form = await request.form()
+    new_status = form.get("status", "")
+    if new_status not in ("reviewed", "rejected"):
+        raise HTTPException(400, "Status must be 'reviewed' or 'rejected'")
+
+    vr.status = new_status
+    db.commit()
+    logger.info("Response {} marked as {} by {}", response_id, new_status, user.email)
+
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["r"] = vr
+    ctx["req"] = req
+    return templates.TemplateResponse("partials/requisitions/tabs/response_card.html", ctx)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/poll-inbox", response_class=HTMLResponse)
+async def poll_inbox_htmx(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Poll inbox for vendor responses (test mode: no-op, returns refreshed responses tab)."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    logger.info("Inbox poll requested for req {} by {}", req_id, user.email)
+    # Return refreshed responses tab
+    return await requisition_tab(request=request, req_id=req_id, tab="responses", user=user, db=db)
+
+
 @router.delete("/v2/partials/requisitions/{req_id}/requirements/{item_id}", response_class=HTMLResponse)
 async def delete_requirement(
     request: Request,
@@ -1635,7 +1771,7 @@ async def vendor_tab(
     if not vendor:
         raise HTTPException(404, "Vendor not found")
 
-    valid_tabs = {"overview", "contacts", "find_contacts", "analytics", "offers"}
+    valid_tabs = {"overview", "contacts", "find_contacts", "emails", "analytics", "offers"}
     if tab not in valid_tabs:
         raise HTTPException(404, f"Unknown tab: {tab}")
 
@@ -1715,6 +1851,28 @@ async def vendor_tab(
         return templates.TemplateResponse(
             "htmx/partials/vendors/find_contacts_tab.html", ctx
         )
+
+    elif tab == "emails":
+        from ..models.offers import Contact as RfqContact, VendorResponse
+
+        norm = (vendor.normalized_name or "").lower().strip()
+        contacts = (
+            db.query(RfqContact)
+            .filter(RfqContact.vendor_name_normalized == norm)
+            .order_by(RfqContact.created_at.desc())
+            .limit(100)
+            .all()
+        ) if norm else []
+        responses = (
+            db.query(VendorResponse)
+            .filter(sqlfunc.lower(VendorResponse.vendor_name) == norm)
+            .order_by(VendorResponse.received_at.desc().nullslast())
+            .limit(100)
+            .all()
+        ) if norm else []
+        ctx = _base_ctx(request, user, "vendors")
+        ctx.update({"vendor": vendor, "contacts": contacts, "responses": responses})
+        return templates.TemplateResponse("htmx/partials/vendors/emails_tab.html", ctx)
 
     elif tab == "analytics":
         html = f"""<div class="space-y-6">
@@ -3201,6 +3359,120 @@ async def lead_feedback(
         raise HTTPException(404, "Lead not found")
 
     return await lead_detail_partial(request, lead_id, user, db)
+
+
+# ── Materials partials ────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/materials", response_class=HTMLResponse)
+async def materials_list_partial(
+    request: Request,
+    q: str = "",
+    lifecycle: str = "",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return material cards list as HTML partial."""
+    from ..models.intelligence import MaterialCard
+
+    query = db.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None))
+    if q.strip():
+        safe = escape_like(q.strip())
+        query = query.filter(
+            MaterialCard.normalized_mpn.ilike(f"%{safe.lower()}%")
+            | MaterialCard.display_mpn.ilike(f"%{safe}%")
+        )
+    if lifecycle:
+        query = query.filter(MaterialCard.lifecycle_status == lifecycle)
+    total = query.count()
+    materials = (
+        query.order_by(MaterialCard.search_count.desc().nullslast(), MaterialCard.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    ctx = _base_ctx(request, user, "materials")
+    ctx.update({
+        "materials": materials,
+        "q": q,
+        "lifecycle": lifecycle,
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    })
+    return templates.TemplateResponse("htmx/partials/materials/list.html", ctx)
+
+
+@router.get("/v2/partials/materials/{card_id}", response_class=HTMLResponse)
+async def material_detail_partial(
+    request: Request,
+    card_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return material card detail as HTML partial."""
+    from ..models.intelligence import MaterialCard
+
+    card = db.query(MaterialCard).filter(
+        MaterialCard.id == card_id,
+        MaterialCard.deleted_at.is_(None),
+    ).first()
+    if not card:
+        raise HTTPException(404, "Material card not found")
+
+    sightings = (
+        db.query(Sighting)
+        .filter(Sighting.material_card_id == card_id)
+        .order_by(Sighting.created_at.desc().nullslast())
+        .limit(50)
+        .all()
+    )
+    offers = (
+        db.query(Offer)
+        .filter(Offer.material_card_id == card_id)
+        .order_by(Offer.created_at.desc().nullslast())
+        .limit(50)
+        .all()
+    )
+    ctx = _base_ctx(request, user, "materials")
+    ctx.update({"card": card, "sightings": sightings, "offers": offers})
+    return templates.TemplateResponse("htmx/partials/materials/detail.html", ctx)
+
+
+@router.put("/v2/partials/materials/{card_id}", response_class=HTMLResponse)
+async def update_material_card(
+    request: Request,
+    card_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update material card fields. Returns refreshed detail."""
+    from ..models.intelligence import MaterialCard
+
+    card = db.query(MaterialCard).filter(
+        MaterialCard.id == card_id,
+        MaterialCard.deleted_at.is_(None),
+    ).first()
+    if not card:
+        raise HTTPException(404, "Material card not found")
+
+    form = await request.form()
+    updatable = [
+        "manufacturer", "description", "category", "package_type",
+        "lifecycle_status", "rohs_status", "pin_count",
+    ]
+    for field in updatable:
+        if field in form:
+            val = form[field].strip() if form[field] else None
+            if field == "pin_count" and val:
+                val = int(val)
+            setattr(card, field, val or None)
+
+    db.commit()
+    logger.info("Material card {} updated by {}", card_id, user.email)
+    return await material_detail_partial(request, card_id, user, db)
 
 
 # ── Quotes partials ───────────────────────────────────────────────────

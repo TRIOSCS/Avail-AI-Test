@@ -1,0 +1,80 @@
+{# response_card.html — Single vendor response card with review actions.
+   Receives: r (VendorResponse object), req (Requisition).
+   Called by: htmx_views.py review_response_htmx endpoint, and responses.html loop.
+   Depends on: HTMX, Tailwind CSS with brand palette.
+#}
+<div id="response-{{ r.id }}" class="bg-white rounded-lg border border-gray-200 p-4 hover:border-brand-300 transition-colors">
+  <div class="flex items-start justify-between mb-2">
+    <div>
+      <h4 class="font-semibold text-gray-900">{{ r.vendor_name or "Unknown Vendor" }}</h4>
+      <p class="text-xs text-gray-500">{{ r.vendor_email or "" }} &middot; {{ r.received_at.strftime('%b %d, %Y %H:%M') if r.received_at else "&mdash;" }}</p>
+    </div>
+    <div class="flex items-center gap-2">
+      {% set class_colors = {
+        "quote": "bg-emerald-50 text-emerald-700",
+        "decline": "bg-rose-50 text-rose-700",
+        "ooo": "bg-amber-50 text-amber-700",
+        "bounce": "bg-gray-100 text-gray-500",
+      } %}
+      {% if r.classification %}
+      <span class="px-2 py-0.5 text-xs font-medium rounded-full {{ class_colors.get(r.classification, 'bg-gray-100 text-gray-600') }}">
+        {{ r.classification|capitalize }}
+      </span>
+      {% endif %}
+      {% if r.confidence is not none %}
+      <span class="text-xs font-medium {{ 'text-emerald-600' if r.confidence >= 0.8 else 'text-amber-600' if r.confidence >= 0.5 else 'text-gray-400' }}">
+        {{ "%.0f"|format(r.confidence * 100) }}% conf
+      </span>
+      {% endif %}
+      {% set status_colors = {
+        "new": "bg-brand-100 text-brand-700",
+        "reviewed": "bg-emerald-50 text-emerald-700",
+        "rejected": "bg-rose-50 text-rose-700",
+        "matched": "bg-emerald-50 text-emerald-700",
+      } %}
+      <span class="px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(r.status, 'bg-gray-100 text-gray-600') }}">
+        {{ (r.status or "new")|capitalize }}
+      </span>
+    </div>
+  </div>
+  {% if r.subject %}
+  <p class="text-sm text-gray-700 mb-2">{{ r.subject }}</p>
+  {% endif %}
+  {% if r.parsed_data %}
+  <div class="bg-gray-50 rounded p-3 mb-3 text-sm">
+    <p class="text-xs font-medium text-gray-500 uppercase mb-1">AI-Parsed Data</p>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs">
+      {% if r.parsed_data.get('parts') %}
+      <div><span class="text-gray-500">Parts:</span> <span class="font-mono">{{ r.parsed_data['parts']|join(', ') if r.parsed_data['parts'] is iterable and r.parsed_data['parts'] is not string else r.parsed_data['parts'] }}</span></div>
+      {% endif %}
+      {% if r.parsed_data.get('qty') %}
+      <div><span class="text-gray-500">Qty:</span> {{ r.parsed_data['qty'] }}</div>
+      {% endif %}
+      {% if r.parsed_data.get('price') %}
+      <div><span class="text-gray-500">Price:</span> ${{ r.parsed_data['price'] }}</div>
+      {% endif %}
+      {% if r.parsed_data.get('lead_time') %}
+      <div><span class="text-gray-500">Lead Time:</span> {{ r.parsed_data['lead_time'] }}</div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+  {% if r.status == "new" %}
+  <div class="flex items-center gap-2">
+    <button hx-post="/v2/partials/requisitions/{{ req.id }}/responses/{{ r.id }}/review"
+            hx-vals='{"status": "reviewed"}'
+            hx-target="#response-{{ r.id }}"
+            hx-swap="outerHTML"
+            class="px-3 py-1.5 text-xs font-medium text-emerald-600 bg-emerald-50 rounded hover:bg-emerald-100">
+      Mark Reviewed
+    </button>
+    <button hx-post="/v2/partials/requisitions/{{ req.id }}/responses/{{ r.id }}/review"
+            hx-vals='{"status": "rejected"}'
+            hx-target="#response-{{ r.id }}"
+            hx-swap="outerHTML"
+            class="px-3 py-1.5 text-xs font-medium text-rose-600 bg-rose-50 rounded hover:bg-rose-100">
+      Reject
+    </button>
+  </div>
+  {% endif %}
+</div>
