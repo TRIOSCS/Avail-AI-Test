@@ -11,7 +11,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import User, VendorCard
+from app.models import VendorCard
 from app.models.vendors import VendorContact
 
 

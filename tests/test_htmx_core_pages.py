@@ -9,12 +9,10 @@ Depends on: conftest.py fixtures, app/routers/htmx_views.py
 
 from datetime import datetime, timezone
 
-import pytest
 from fastapi.testclient import TestClient
 
-from app.models import Company, CustomerSite, Offer, Quote, Requirement, Requisition, User, VendorCard
+from app.models import Company, CustomerSite, Requirement, Requisition, VendorCard
 from app.models.vendors import VendorContact
-
 
 # ── Requisition filters and sorting ──────────────────────────────────────
 
@@ -172,21 +170,15 @@ class TestDeleteRequirement:
 
     def test_delete_requirement(self, client: TestClient, test_requisition: Requisition, db_session):
         # Get the requirement ID
-        req_item = db_session.query(Requirement).filter(
-            Requirement.requisition_id == test_requisition.id
-        ).first()
+        req_item = db_session.query(Requirement).filter(Requirement.requisition_id == test_requisition.id).first()
         assert req_item is not None
 
-        resp = client.delete(
-            f"/v2/partials/requisitions/{test_requisition.id}/requirements/{req_item.id}"
-        )
+        resp = client.delete(f"/v2/partials/requisitions/{test_requisition.id}/requirements/{req_item.id}")
         assert resp.status_code == 200
         assert resp.text == ""
 
     def test_delete_requirement_not_found(self, client: TestClient, test_requisition: Requisition):
-        resp = client.delete(
-            f"/v2/partials/requisitions/{test_requisition.id}/requirements/99999"
-        )
+        resp = client.delete(f"/v2/partials/requisitions/{test_requisition.id}/requirements/99999")
         assert resp.status_code == 404
 
     def test_delete_requirement_wrong_requisition(self, client: TestClient):

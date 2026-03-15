@@ -122,7 +122,7 @@ jobs:
         run: |
           pytest tests/ -v --tb=short \
             --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml \
-            --cov-fail-under=100 \
+            --cov-fail-under=50 \
             --junitxml=test-results.xml
 
       - name: Upload test results

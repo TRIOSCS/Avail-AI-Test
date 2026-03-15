@@ -140,9 +140,9 @@ def test_create_quote_no_offers_returns_400(client, db_session, sample_req_with_
 def test_approve_offer(client, db_session, sample_req_with_offers):
     """POST approve changes offer status to approved."""
     req = sample_req_with_offers
-    pending_offer = db_session.query(Offer).filter(
-        Offer.requisition_id == req.id, Offer.status == "pending_review"
-    ).first()
+    pending_offer = (
+        db_session.query(Offer).filter(Offer.requisition_id == req.id, Offer.status == "pending_review").first()
+    )
 
     resp = client.post(
         f"/v2/partials/requisitions/{req.id}/offers/{pending_offer.id}/review",
@@ -156,9 +156,9 @@ def test_approve_offer(client, db_session, sample_req_with_offers):
 def test_reject_offer(client, db_session, sample_req_with_offers):
     """POST reject changes offer status to rejected."""
     req = sample_req_with_offers
-    pending_offer = db_session.query(Offer).filter(
-        Offer.requisition_id == req.id, Offer.status == "pending_review"
-    ).first()
+    pending_offer = (
+        db_session.query(Offer).filter(Offer.requisition_id == req.id, Offer.status == "pending_review").first()
+    )
 
     resp = client.post(
         f"/v2/partials/requisitions/{req.id}/offers/{pending_offer.id}/review",

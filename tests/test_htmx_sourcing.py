@@ -13,8 +13,8 @@ from unittest.mock import patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Requirement, Requisition, Sighting, User, VendorCard
-from app.models.sourcing_lead import LeadEvidence, LeadFeedbackEvent, SourcingLead
+from app.models import Requirement, Requisition, Sighting, User
+from app.models.sourcing_lead import LeadEvidence, SourcingLead
 
 
 @pytest.fixture()
@@ -98,9 +98,9 @@ def sample_requisition_with_leads(db_session: Session, test_user: User):
 @pytest.fixture()
 def sample_lead(db_session: Session, sample_requisition_with_leads):
     """Return the first lead for the sample requirement."""
-    return db_session.query(SourcingLead).filter(
-        SourcingLead.requirement_id == sample_requisition_with_leads.id
-    ).first()
+    return (
+        db_session.query(SourcingLead).filter(SourcingLead.requirement_id == sample_requisition_with_leads.id).first()
+    )
 
 
 # ── Part Search Tests ──────────────────────────────────────────────────
@@ -116,11 +116,20 @@ def test_search_form_partial(client):
 
 def test_search_run_returns_results(client, db_session):
     """POST /v2/partials/search/run returns lead cards with enriched data."""
-    with patch("app.search_service.quick_search_mpn", return_value=[
-        {"vendor_name": "Acme", "mpn_matched": "LM317T", "manufacturer": "TI",
-         "qty_available": 1000, "unit_price": 0.55, "source_type": "brokerbin",
-         "lead_time": "Stock"}
-    ]):
+    with patch(
+        "app.search_service.quick_search_mpn",
+        return_value=[
+            {
+                "vendor_name": "Acme",
+                "mpn_matched": "LM317T",
+                "manufacturer": "TI",
+                "qty_available": 1000,
+                "unit_price": 0.55,
+                "source_type": "brokerbin",
+                "lead_time": "Stock",
+            }
+        ],
+    ):
         resp = client.post(
             "/v2/partials/search/run",
             data={"mpn": "LM317T"},
@@ -376,9 +385,9 @@ def test_requirement_row_has_edit_support(client, db_session, sample_requisition
     # Load the parts tab
     resp = client.get(f"/v2/partials/requisitions/{req_id}/tab/parts")
     assert resp.status_code == 200
-    assert 'x-data' in resp.text
-    assert 'editing' in resp.text
-    assert 'hx-put' in resp.text
+    assert "x-data" in resp.text
+    assert "editing" in resp.text
+    assert "hx-put" in resp.text
 
 
 def test_add_requirement_returns_template_row(client, db_session, sample_requisition_with_leads):
@@ -390,5 +399,5 @@ def test_add_requirement_returns_template_row(client, db_session, sample_requisi
     )
     assert resp.status_code == 200
     assert "STM32F407" in resp.text
-    assert 'x-data' in resp.text  # Has inline editing support
-    assert 'hx-put' in resp.text  # Has edit endpoint
+    assert "x-data" in resp.text  # Has inline editing support
+    assert "hx-put" in resp.text  # Has edit endpoint
