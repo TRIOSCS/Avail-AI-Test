@@ -332,3 +332,63 @@ def test_sourcing_results_weak_leads_warning(client, db_session, sample_lead):
     resp = client.get(f"/v2/partials/sourcing/{req_id}")
     assert resp.status_code == 200
     assert "Only weak leads found" in resp.text
+
+
+# ── Requirement Inline Editing Tests ─────────────────────────────────
+
+
+def test_requirement_inline_update(client, db_session, sample_requisition_with_leads):
+    """PUT updates a requirement and returns the updated row HTML."""
+    requirement = sample_requisition_with_leads
+    req_id = requirement.requisition_id
+    resp = client.put(
+        f"/v2/partials/requisitions/{req_id}/requirements/{requirement.id}",
+        data={
+            "primary_mpn": "LM358N",
+            "target_qty": "500",
+            "brand": "Texas Instruments",
+            "target_price": "0.3500",
+        },
+    )
+    assert resp.status_code == 200
+    assert "LM358N" in resp.text
+    assert "Texas Instruments" in resp.text
+    # Verify DB was updated
+    db_session.refresh(requirement)
+    assert requirement.primary_mpn == "LM358N"
+    assert requirement.target_qty == 500
+    assert requirement.brand == "Texas Instruments"
+
+
+def test_requirement_inline_update_not_found(client):
+    """PUT on nonexistent requirement returns 404."""
+    resp = client.put(
+        "/v2/partials/requisitions/99999/requirements/99999",
+        data={"primary_mpn": "TEST", "target_qty": "1"},
+    )
+    assert resp.status_code == 404
+
+
+def test_requirement_row_has_edit_support(client, db_session, sample_requisition_with_leads):
+    """Requirement row includes Alpine.js x-data for inline editing."""
+    requirement = sample_requisition_with_leads
+    req_id = requirement.requisition_id
+    # Load the parts tab
+    resp = client.get(f"/v2/partials/requisitions/{req_id}/tab/parts")
+    assert resp.status_code == 200
+    assert 'x-data' in resp.text
+    assert 'editing' in resp.text
+    assert 'hx-put' in resp.text
+
+
+def test_add_requirement_returns_template_row(client, db_session, sample_requisition_with_leads):
+    """POST add requirement returns a proper template row (not inline HTML)."""
+    req_id = sample_requisition_with_leads.requisition_id
+    resp = client.post(
+        f"/v2/partials/requisitions/{req_id}/requirements",
+        data={"primary_mpn": "STM32F407", "target_qty": "10", "brand": "ST"},
+    )
+    assert resp.status_code == 200
+    assert "STM32F407" in resp.text
+    assert 'x-data' in resp.text  # Has inline editing support
+    assert 'hx-put' in resp.text  # Has edit endpoint

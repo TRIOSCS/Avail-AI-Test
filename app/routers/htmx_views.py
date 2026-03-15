@@ -478,25 +478,12 @@ async def add_requirement(
     db.commit()
     db.refresh(r)
 
-    # Return a table row for HTMX append
+    # Return the new row via template for HTMX append
     r.sighting_count = 0
-    html = f"""
-    <tr class="hover:bg-gray-50">
-      <td class="px-4 py-2 text-sm font-mono font-medium text-gray-900">{r.primary_mpn}</td>
-      <td class="px-4 py-2 text-sm text-gray-600">{r.brand or '—'}</td>
-      <td class="px-4 py-2 text-sm text-gray-600">{r.target_qty:,}</td>
-      <td class="px-4 py-2 text-sm text-gray-600">—</td>
-      <td class="px-4 py-2"><span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-700">Open</span></td>
-      <td class="px-4 py-2 text-sm text-gray-600">0</td>
-      <td class="px-4 py-2">
-        <button hx-post="/v2/partials/search/run?requirement_id={r.id}&mpn={r.primary_mpn}"
-                hx-target="#sightings-{r.id}"
-                class="text-xs text-blue-600 hover:text-blue-500 font-medium">Search</button>
-      </td>
-    </tr>
-    <tr id="sightings-{r.id}" class="bg-gray-50"></tr>
-    """
-    return HTMLResponse(html)
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["r"] = r
+    ctx["req"] = req
+    return templates.TemplateResponse("partials/requisitions/tabs/req_row.html", ctx)
 
 
 @router.get("/v2/partials/requisitions/{req_id}/tab/{tab}", response_class=HTMLResponse)
@@ -648,6 +635,45 @@ async def delete_requirement(
     db.delete(item)
     db.commit()
     return HTMLResponse("")
+
+
+@router.put("/v2/partials/requisitions/{req_id}/requirements/{item_id}", response_class=HTMLResponse)
+async def update_requirement(
+    request: Request,
+    req_id: int,
+    item_id: int,
+    primary_mpn: str = Form(...),
+    target_qty: int = Form(1),
+    brand: str = Form(""),
+    target_price: float | None = Form(None),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update a requirement inline. Returns the updated row HTML."""
+    req = db.query(Requisition).filter(Requisition.id == req_id).first()
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+    item = db.query(Requirement).filter(
+        Requirement.id == item_id, Requirement.requisition_id == req_id
+    ).first()
+    if not item:
+        raise HTTPException(404, "Requirement not found")
+
+    item.primary_mpn = primary_mpn.strip()
+    item.target_qty = target_qty
+    item.brand = brand.strip() or None
+    item.target_price = target_price
+    db.commit()
+    db.refresh(item)
+
+    # Attach sighting_count for the template
+    sighting_count = db.query(Sighting).filter(Sighting.requirement_id == item.id).count()
+    item.sighting_count = sighting_count
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["r"] = item
+    ctx["req"] = req
+    return templates.TemplateResponse("partials/requisitions/tabs/req_row.html", ctx)
 
 
 # ── Search partials ─────────────────────────────────────────────────────

@@ -1,0 +1,77 @@
+{# req_row.html — Single requirement row with inline editing via double-click.
+   Receives: r (Requirement with sighting_count), req (Requisition).
+   Called by: partials/requisitions/tabs/parts.html (loop include), update_requirement (returned after edit).
+   Depends on: HTMX, Alpine.js, Tailwind CSS.
+#}
+<tr id="req-row-{{ r.id }}" class="hover:bg-brand-50 group"
+    x-data="{ editing: false }"
+    @dblclick="editing = true">
+
+  {# ── Display mode ────────────────────────────────────────── #}
+  <td class="px-4 py-2 text-sm font-mono font-medium text-gray-900" x-show="!editing">
+    {{ r.primary_mpn or "—" }}
+  </td>
+  <td class="px-4 py-2 text-sm text-gray-500" x-show="!editing">{{ r.brand or "—" }}</td>
+  <td class="px-4 py-2 text-sm text-gray-500 text-right" x-show="!editing">
+    {{ "{:,}".format(r.target_qty) if r.target_qty else "—" }}
+  </td>
+  <td class="px-4 py-2 text-sm text-gray-500 text-right" x-show="!editing">
+    {{ "${:,.4f}".format(r.target_price) if r.target_price else "—" }}
+  </td>
+  <td class="px-4 py-2" x-show="!editing">
+    {% set st_colors = {
+      "open": "bg-brand-100 text-brand-600",
+      "sourcing": "bg-brand-100 text-brand-600",
+      "offered": "bg-emerald-50 text-emerald-700",
+      "quoted": "bg-amber-50 text-amber-700"
+    } %}
+    <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ st_colors.get(r.sourcing_status, 'bg-gray-100 text-gray-600') }}">
+      {{ (r.sourcing_status or 'open')|capitalize }}
+    </span>
+  </td>
+  <td class="px-4 py-2 text-sm text-gray-500 text-right" x-show="!editing">{{ r.sighting_count }}</td>
+  <td class="px-4 py-2 text-center" x-show="!editing">
+    <div class="flex items-center justify-center gap-2">
+      <button hx-post="/v2/partials/search/run?requirement_id={{ r.id }}&mpn={{ r.primary_mpn or '' }}"
+              hx-target="#search-results-{{ r.id }}"
+              hx-indicator="#spinner-{{ r.id }}"
+              class="text-xs text-brand-500 hover:text-brand-600 font-medium"
+              @click.stop>
+        Search
+        <span id="spinner-{{ r.id }}" class="htmx-indicator ml-1">
+          <svg class="inline h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+        </span>
+      </button>
+      <button hx-delete="/v2/partials/requisitions/{{ req.id }}/requirements/{{ r.id }}"
+              hx-target="#req-row-{{ r.id }}"
+              hx-swap="delete"
+              hx-confirm="Delete this requirement?"
+              class="text-xs text-rose-500 hover:text-rose-700 font-medium opacity-0 group-hover:opacity-100"
+              @click.stop>
+        Delete
+      </button>
+    </div>
+  </td>
+
+  {# ── Edit mode (double-click) ───────────────────────────── #}
+  <td colspan="7" x-show="editing" x-cloak>
+    <form hx-put="/v2/partials/requisitions/{{ req.id }}/requirements/{{ r.id }}"
+          hx-target="#req-row-{{ r.id }}" hx-swap="outerHTML"
+          class="flex items-center gap-2 py-1">
+      <input type="text" name="primary_mpn" value="{{ r.primary_mpn or '' }}" required
+             class="w-40 px-2 py-1 text-sm font-mono border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+             placeholder="MPN">
+      <input type="text" name="brand" value="{{ r.brand or '' }}"
+             class="w-32 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+             placeholder="Brand">
+      <input type="number" name="target_qty" value="{{ r.target_qty or 1 }}" min="1"
+             class="w-20 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+             placeholder="Qty">
+      <input type="number" name="target_price" value="{{ '{:.4f}'.format(r.target_price|float) if r.target_price else '' }}" step="0.0001" min="0"
+             class="w-24 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+             placeholder="Target $">
+      <button type="submit" class="px-3 py-1 text-xs font-medium bg-brand-500 text-white rounded hover:bg-brand-600">Save</button>
+      <button type="button" @click="editing = false" class="px-3 py-1 text-xs font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-100">Cancel</button>
+    </form>
+  </td>
+</tr>
