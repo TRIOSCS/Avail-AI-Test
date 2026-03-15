@@ -2807,6 +2807,144 @@ async def dashboard_partial(
     return templates.TemplateResponse("htmx/partials/dashboard.html", ctx)
 
 
+# ── AI Insights HTMX routes (Phase 6) ─────────────────────────────────
+
+
+def _render_insights(request, user, insights, entity_type, entity_id):
+    """Render the shared insights panel partial."""
+    ctx = _base_ctx(request, user, entity_type)
+    ctx["insights"] = insights
+    ctx["entity_type"] = entity_type
+    ctx["entity_id"] = entity_id
+    return templates.TemplateResponse("partials/shared/insights_panel.html", ctx)
+
+
+@router.get("/v2/partials/requisitions/{req_id}/insights", response_class=HTMLResponse)
+async def requisition_insights_panel(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return cached AI insights panel for a requisition."""
+    from ..services.knowledge_service import get_cached_insights
+
+    insights = get_cached_insights(db, req_id)
+    return _render_insights(request, user, insights, "requisitions", req_id)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/insights/refresh", response_class=HTMLResponse)
+async def requisition_insights_refresh(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Generate fresh AI insights for a requisition and return panel."""
+    from ..services.knowledge_service import generate_insights, get_cached_insights
+
+    try:
+        generate_insights(db, req_id)
+    except Exception as e:
+        logger.warning(f"Insight generation failed for req {req_id}: {e}")
+    insights = get_cached_insights(db, req_id)
+    return _render_insights(request, user, insights, "requisitions", req_id)
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/insights", response_class=HTMLResponse)
+async def vendor_insights_panel(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return cached AI insights panel for a vendor."""
+    from ..services.knowledge_service import get_cached_vendor_insights
+
+    insights = get_cached_vendor_insights(db, vendor_id)
+    return _render_insights(request, user, insights, "vendors", vendor_id)
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/insights/refresh", response_class=HTMLResponse)
+async def vendor_insights_refresh(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Generate fresh AI insights for a vendor and return panel."""
+    from ..services.knowledge_service import generate_vendor_insights, get_cached_vendor_insights
+
+    try:
+        generate_vendor_insights(db, vendor_id)
+    except Exception as e:
+        logger.warning(f"Insight generation failed for vendor {vendor_id}: {e}")
+    insights = get_cached_vendor_insights(db, vendor_id)
+    return _render_insights(request, user, insights, "vendors", vendor_id)
+
+
+@router.get("/v2/partials/companies/{company_id}/insights", response_class=HTMLResponse)
+async def company_insights_panel(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return cached AI insights panel for a company."""
+    from ..services.knowledge_service import get_cached_company_insights
+
+    insights = get_cached_company_insights(db, company_id)
+    return _render_insights(request, user, insights, "companies", company_id)
+
+
+@router.post("/v2/partials/companies/{company_id}/insights/refresh", response_class=HTMLResponse)
+async def company_insights_refresh(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Generate fresh AI insights for a company and return panel."""
+    from ..services.knowledge_service import generate_company_insights, get_cached_company_insights
+
+    try:
+        generate_company_insights(db, company_id)
+    except Exception as e:
+        logger.warning(f"Insight generation failed for company {company_id}: {e}")
+    insights = get_cached_company_insights(db, company_id)
+    return _render_insights(request, user, insights, "companies", company_id)
+
+
+@router.get("/v2/partials/dashboard/pipeline-insights", response_class=HTMLResponse)
+async def pipeline_insights_panel(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return cached pipeline insights for the dashboard."""
+    from ..services.knowledge_service import get_cached_pipeline_insights
+
+    insights = get_cached_pipeline_insights(db)
+    return _render_insights(request, user, insights, "dashboard", 0)
+
+
+@router.post("/v2/partials/dashboard/pipeline-insights/refresh", response_class=HTMLResponse)
+async def pipeline_insights_refresh(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Generate fresh pipeline insights and return panel."""
+    from ..services.knowledge_service import generate_pipeline_insights, get_cached_pipeline_insights
+
+    try:
+        generate_pipeline_insights(db)
+    except Exception as e:
+        logger.warning(f"Pipeline insight generation failed: {e}")
+    insights = get_cached_pipeline_insights(db)
+    return _render_insights(request, user, insights, "dashboard", 0)
+
+
 # ── Buy Plans partials ─────────────────────────────────────────────────
 
 

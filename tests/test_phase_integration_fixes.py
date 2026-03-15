@@ -345,3 +345,63 @@ class TestCompanyActivityTab:
         resp = client.get(f"/v2/partials/companies/{company.id}/tab/activity")
         assert resp.status_code == 200
         assert "No activity recorded" in resp.text
+
+
+# ── Phase 6: AI Insights panels ─────────────────────────────────────
+
+
+class TestInsightsPanels:
+    def test_requisition_insights_panel_empty(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Requisition insights panel renders with no cached insights."""
+        req = Requisition(
+            name="Insights Req",
+            status="active",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/requisitions/{req.id}/insights")
+        assert resp.status_code == 200
+        assert "AI Insights" in resp.text
+        assert "No insights yet" in resp.text
+
+    def test_vendor_insights_panel_empty(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Vendor insights panel renders with no cached insights."""
+        from app.models import VendorCard
+
+        vendor = VendorCard(
+            display_name="Insights Vendor",
+            normalized_name="insights vendor",
+        )
+        db_session.add(vendor)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/vendors/{vendor.id}/insights")
+        assert resp.status_code == 200
+        assert "AI Insights" in resp.text
+
+    def test_company_insights_panel_empty(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Company insights panel renders with no cached insights."""
+        from app.models import Company
+
+        company = Company(name="Insights Co", account_type="customer")
+        db_session.add(company)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/companies/{company.id}/insights")
+        assert resp.status_code == 200
+        assert "AI Insights" in resp.text
+
+    def test_pipeline_insights_panel(self, client: TestClient):
+        """Pipeline insights panel renders."""
+        resp = client.get("/v2/partials/dashboard/pipeline-insights")
+        assert resp.status_code == 200
+        assert "AI Insights" in resp.text

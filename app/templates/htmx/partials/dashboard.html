@@ -46,6 +46,12 @@
     </div>
   </div>
 
+  {# Pipeline Insights — lazy-loaded #}
+  <div hx-get="/v2/partials/dashboard/pipeline-insights"
+       hx-trigger="load"
+       hx-swap="innerHTML"
+       class="mb-8"></div>
+
   {# Quick actions #}
   <div class="bg-white border border-brand-200 rounded-lg p-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
