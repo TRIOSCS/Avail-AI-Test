@@ -32,6 +32,7 @@
         <input type="text" name="q" value="{{ q }}" placeholder="Search vendors..."
                hx-get="/v2/partials/vendors"
                hx-target="#main-content"
+               hx-swap="morph"
                hx-push-url="true"
                hx-include="#vendor-filters"
                hx-trigger="keyup changed delay:300ms"
@@ -86,7 +87,8 @@
           <tr class="{{ 'bg-rose-50' if v.is_blacklisted else '' }} hover:bg-brand-50 cursor-pointer"
               hx-get="/v2/partials/vendors/{{ v.id }}"
               hx-target="#main-content"
-              hx-push-url="/v2/vendors/{{ v.id }}">
+              hx-push-url="/v2/vendors/{{ v.id }}"
+              preload="mouseover">
             <td class="px-4 py-3">
               <div>
                 <p class="text-sm font-medium text-brand-500">{{ v.display_name }}</p>
@@ -121,6 +123,7 @@
       <a hx-get="/v2/partials/vendors?offset={{ offset - limit }}"
          hx-target="#main-content"
          hx-include="#vendor-filters"
+         preload="mouseover"
          class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
       {% endif %}
       <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
@@ -128,6 +131,7 @@
       <a hx-get="/v2/partials/vendors?offset={{ offset + limit }}"
          hx-target="#main-content"
          hx-include="#vendor-filters"
+         preload="mouseover"
          class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
       {% endif %}
     </nav>

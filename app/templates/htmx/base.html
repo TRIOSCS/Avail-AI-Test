@@ -64,6 +64,7 @@
            hx-get="{{ partial }}"
            hx-target="#main-content"
            hx-push-url="{{ href }}"
+           preload="mouseover"
            @click="currentView = '{{ id }}'"
            :class="currentView === '{{ id }}' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
            class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
@@ -88,6 +89,7 @@
            hx-get="{{ partial }}"
            hx-target="#main-content"
            hx-push-url="{{ href }}"
+           preload="mouseover"
            @click="currentView = '{{ id }}'"
            :class="currentView === '{{ id }}' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
            class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
@@ -102,6 +104,7 @@
              hx-get="/v2/partials/settings"
              hx-target="#main-content"
              hx-push-url="/v2/settings"
+             preload="mouseover"
              @click="currentView = 'settings'"
              :class="currentView === 'settings' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
              class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
@@ -161,6 +164,7 @@
           ] %}
           {% for id, label, href, partial in mobile_items %}
           <a href="{{ href }}" hx-get="{{ partial }}" hx-target="#main-content" hx-push-url="{{ href }}"
+             preload="mouseover"
              @click="currentView = '{{ id }}'; sidebarOpen = false"
              :class="currentView === '{{ id }}' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
              class="flex items-center px-3 py-2 text-sm font-medium rounded-md">{{ label }}</a>

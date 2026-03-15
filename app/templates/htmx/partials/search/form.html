@@ -17,6 +17,8 @@
   <div class="bg-white rounded-lg shadow border border-gray-200 p-6 mb-6">
     <form hx-post="/v2/partials/search/run"
           hx-target="#search-results"
+          hx-target-4*="#search-error"
+          hx-target-5*="#search-error"
           hx-indicator="#global-search-spinner"
           x-data="{ mpn: '' }">
       <div class="flex gap-3">
@@ -26,6 +28,7 @@
                  class="w-full px-4 py-3 border border-gray-300 rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <button type="submit" :disabled="!mpn.trim()"
+                data-loading-disable
                 class="px-6 py-3 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
           <span id="global-search-spinner" class="htmx-indicator">
             <svg class="inline h-4 w-4 spinner mr-1" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
@@ -34,6 +37,7 @@
         </button>
       </div>
       <p class="mt-2 text-xs text-gray-400">Searches Nexar, BrokerBin, DigiKey, Mouser, eBay, OEMSecrets, and more in parallel.</p>
+      <div id="search-error" class="mt-3"></div>
     </form>
   </div>
 

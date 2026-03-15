@@ -8,10 +8,12 @@
 {# OOB breadcrumb update #}
 <div id="breadcrumb" hx-swap-oob="true">
   <a hx-get="/v2/partials/requisitions" hx-target="#main-content" hx-push-url="/v2/requisitions"
+     preload="mouseover"
      class="text-brand-500 hover:text-brand-600 cursor-pointer">Requisitions</a>
   <span class="text-gray-500 mx-1">&gt;</span>
   <span class="text-gray-900">{{ req.name }}</span>
 </div>
+<title hx-swap-oob="true">{{ req.name }} — AvailAI</title>
 
 <div class="max-w-7xl mx-auto">
   {# Dark navy page header #}
@@ -20,6 +22,7 @@
       <span class="text-brand-300">Avail</span>
       <span class="text-brand-400">&rsaquo;</span>
       <a hx-get="/v2/partials/requisitions" hx-target="#main-content" hx-push-url="/v2/requisitions"
+         preload="mouseover"
          class="text-brand-200 hover:text-white cursor-pointer">Requisitions</a>
       <span class="text-brand-400">&rsaquo;</span>
       <span class="font-medium">{{ req.name }}</span>
@@ -48,7 +51,9 @@
         {# Action buttons #}
         <button hx-get="/v2/partials/requisitions/{{ req.id }}/rfq-compose"
                 hx-target="#tab-content" hx-swap="innerHTML"
+                data-loading-disable
                 class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600">
+          <svg data-loading class="h-3 w-3 mr-1 spinner inline" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
           Send RFQ
         </button>
         <a href="/api/requisitions/{{ req.id }}/pdf" target="_blank"
