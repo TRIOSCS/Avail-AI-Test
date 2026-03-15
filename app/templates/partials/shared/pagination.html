@@ -1,10 +1,23 @@
 {# HTMX pagination — receives page, total_pages, target_id, url as template vars. #}
-<nav class="pagination" aria-label="Pagination">
+<nav class="flex items-center justify-between py-3" aria-label="Pagination">
+  <div class="flex gap-2">
     {% if page > 1 %}
-    <button hx-get="{{ url }}?page={{ page - 1 }}" hx-target="#{{ target_id }}" hx-swap="innerHTML">Prev</button>
+    <button hx-get="{{ url }}?page={{ page - 1 }}" hx-target="#{{ target_id }}" hx-swap="innerHTML"
+            class="px-3 py-1.5 text-sm font-medium text-brand-600 bg-white border border-brand-200 rounded-md hover:bg-brand-50">
+      Prev
+    </button>
+    {% else %}
+    <span class="px-3 py-1.5 text-sm font-medium text-gray-400 bg-gray-100 border border-gray-200 rounded-md cursor-not-allowed">Prev</span>
     {% endif %}
-    <span>Page {{ page }} of {{ total_pages }}</span>
+
     {% if page < total_pages %}
-    <button hx-get="{{ url }}?page={{ page + 1 }}" hx-target="#{{ target_id }}" hx-swap="innerHTML">Next</button>
+    <button hx-get="{{ url }}?page={{ page + 1 }}" hx-target="#{{ target_id }}" hx-swap="innerHTML"
+            class="px-3 py-1.5 text-sm font-medium text-brand-600 bg-white border border-brand-200 rounded-md hover:bg-brand-50">
+      Next
+    </button>
+    {% else %}
+    <span class="px-3 py-1.5 text-sm font-medium text-gray-400 bg-gray-100 border border-gray-200 rounded-md cursor-not-allowed">Next</span>
     {% endif %}
+  </div>
+  <span class="text-sm text-gray-500">Page {{ page }} of {{ total_pages }}</span>
 </nav>

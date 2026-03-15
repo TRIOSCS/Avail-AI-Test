@@ -136,6 +136,47 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     return templates.TemplateResponse("htmx/base_page.html", ctx)
 
 
+# ── Global search ──────────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/search/global", response_class=HTMLResponse)
+async def global_search(
+    request: Request,
+    q: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Global search across requisitions, companies, vendors."""
+    results = {"requisitions": [], "companies": [], "vendors": []}
+    if q and len(q) >= 2:
+        safe = escape_like(q.strip())
+        results["requisitions"] = (
+            db.query(Requisition)
+            .filter(
+                Requisition.name.ilike(f"%{safe}%")
+                | Requisition.customer_name.ilike(f"%{safe}%")
+            )
+            .limit(5)
+            .all()
+        )
+        results["companies"] = (
+            db.query(Company)
+            .filter(Company.name.ilike(f"%{safe}%"))
+            .limit(5)
+            .all()
+        )
+        results["vendors"] = (
+            db.query(VendorCard)
+            .filter(VendorCard.name.ilike(f"%{safe}%"))
+            .limit(5)
+            .all()
+        )
+    return templates.TemplateResponse(
+        "partials/shared/search_results.html",
+        {**_base_ctx(request, user), "results": results, "query": q},
+    )
+
+
 # ── Requisition partials ────────────────────────────────────────────────
 
 
