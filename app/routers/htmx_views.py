@@ -2307,11 +2307,15 @@ async def company_detail_partial(
 
     sites = [s for s in (company.sites or []) if s.is_active]
 
-    # Count open requisitions for this company
+    # Count open requisitions — use company_id FK if available, fall back to name match
+    from sqlalchemy import or_
     open_req_count = (
         db.query(sqlfunc.count(Requisition.id))
         .filter(
-            Requisition.customer_name == company.name,
+            or_(
+                Requisition.company_id == company.id,
+                sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
+            ),
             Requisition.status.in_(["open", "active", "sourcing", "draft"]),
         )
         .scalar()
@@ -2422,9 +2426,13 @@ async def company_tab(
         return HTMLResponse(html)
 
     elif tab == "requisitions":
+        from sqlalchemy import or_
         reqs = (
             db.query(Requisition)
-            .filter(Requisition.customer_name == company.name)
+            .filter(or_(
+                Requisition.company_id == company.id,
+                sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
+            ))
             .order_by(Requisition.created_at.desc().nullslast())
             .limit(50)
             .all()
@@ -2487,13 +2495,26 @@ async def create_site(
             '<div class="p-2 text-xs text-rose-600">Site name is required.</div>'
         )
 
+    # Enforce one-owner-per-site rule: each user can only own one site
+    parsed_owner_id = int(owner_id) if owner_id else None
+    if parsed_owner_id:
+        existing = db.query(CustomerSite).filter(
+            CustomerSite.owner_id == parsed_owner_id,
+        ).first()
+        if existing:
+            owner_user = db.get(User, parsed_owner_id)
+            owner_name = owner_user.display_name if owner_user else f"User #{parsed_owner_id}"
+            return HTMLResponse(
+                f'<div class="p-2 text-xs text-rose-600">{owner_name} already owns site "{existing.site_name}". Each user can only own one site.</div>'
+            )
+
     site = CustomerSite(
         company_id=company_id,
         site_name=site_name.strip(),
         site_type=site_type or None,
         city=city or None,
         country=country or None,
-        owner_id=int(owner_id) if owner_id else None,
+        owner_id=parsed_owner_id,
         is_active=True,
     )
     db.add(site)
