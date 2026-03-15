@@ -410,13 +410,13 @@ For each task, return:
 
 Scoring factors:
 - Due date proximity (overdue = highest)
-- Task type: sales tasks with expiring quotes are urgent
+- Task type: buying tasks (cut PO) are urgent when plan is active
 - Priority level set by buyer
 - How long the task has been open
 - Tasks from system events (auto-generated) should score slightly lower unless overdue
 
 Return JSON array matching input order:
-[{"priority_score": 0.85, "risk_flag": "Quote expires tomorrow"}, ...]
+[{"priority_score": 0.85, "risk_flag": "Bid due tomorrow"}, ...]
 """
 
 

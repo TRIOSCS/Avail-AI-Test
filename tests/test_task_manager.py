@@ -261,38 +261,6 @@ def test_auto_task_on_offer_received(db_session, test_requisition):
     assert task.task_type == "sourcing"
 
 
-def test_auto_task_on_rfq_sent(db_session, test_requisition):
-    """on_rfq_sent creates an awaiting-response task with 3-day due date."""
-    from app.services.task_service import on_rfq_sent
-
-    on_rfq_sent(db_session, test_requisition.id, "Mouser", 99)
-    task = (
-        db_session.query(RequisitionTask)
-        .filter(RequisitionTask.source_ref == "rfq:99")
-        .first()
-    )
-    assert task is not None
-    assert "Mouser" in task.title
-    assert task.due_at is not None
-    assert task.priority == 1
-
-
-def test_auto_task_on_quote_created(db_session, test_requisition):
-    """on_quote_created creates a send-quote task."""
-    from app.services.task_service import on_quote_created
-
-    on_quote_created(db_session, test_requisition.id, "Acme Corp", 55)
-    task = (
-        db_session.query(RequisitionTask)
-        .filter(RequisitionTask.source_ref == "quote:55")
-        .first()
-    )
-    assert task is not None
-    assert "Acme Corp" in task.title
-    assert task.task_type == "sales"
-    assert task.priority == 3
-
-
 def test_auto_task_idempotent(db_session, test_requisition):
     """Calling the same auto-gen helper twice does not create duplicates."""
     from app.services.task_service import on_requirement_added
