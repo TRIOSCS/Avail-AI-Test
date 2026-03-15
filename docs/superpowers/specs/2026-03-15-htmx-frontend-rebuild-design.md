@@ -87,10 +87,8 @@ Defined in `tailwind.config.js` as `brand`:
 - **Collapsible** via toggle button:
   - Expanded: icon + label, logo visible
   - Collapsed: icon only, logo hidden or reduced to mark
-- 7 navigation items with SVG icons:
-  - **Active:** Requisitions, Part Search, Buy Plans, Vendors, Companies
-  - **Active:** Prospecting (backend routes exist, templates being rebuilt)
-  - **Greyed/disabled:** Quotes (tooltip "Coming soon")
+- 9 navigation items with SVG icons:
+  - **Active:** Requisitions, Part Search, Buy Plans, Vendors, Companies, Prospecting, Quotes, Settings
 - Section label "Relationships" between Buy Plans and Vendors
 - User avatar + name + email at bottom with logout button
 - Active item: `brand-900` background, white text
@@ -157,12 +155,25 @@ All in `app/templates/partials/shared/`:
 **File:** `app/templates/partials/requisitions/list.html`
 
 - Search input: live filtering with 300ms debounce, targets table body
-- Quick filter pills: All, Open, Awarded, Archived — each sends `hx-get` with `status` param
+- **Filter bar:**
+  - Quick filter pills: All, Open, Awarded, Archived — each sends `hx-get` with `status` param
+  - Owner dropdown (visible to buyers/admins, hidden from sales role): filter by creator
+  - Urgency filter: Normal / Hot / Critical toggle pills
+  - Date range: `date_from` and `date_to` date picker inputs
+  - All filters use `hx-include="#req-filters"` to preserve state across sort/pagination interactions
+  - All filter/sort/pagination interactions use `hx-push-url` so users can bookmark/share filtered views
 - **Sortable column headers:** Click sends `hx-get` with `sort` and `dir` params, visual indicator (arrow) on active sort column
-- Table columns: Name, Customer, Parts count, Status badge, Urgency badge, Created date
+- Table columns: Name, Customer, Owner, Parts count, Offer count, Status badge, Urgency badge, Created date
+- **Bulk operations:**
+  - Checkbox column on each row + select-all checkbox in header
+  - Alpine `x-data="{ selectedIds: new Set() }"` manages selection state
+  - Bulk action bar appears when items selected: Archive, Assign (with owner dropdown), Activate
+  - `hx-post="/v2/partials/requisitions/bulk/{action}"` with comma-separated IDs
+  - Max 200 per bulk action
 - Clickable rows: `hx-get` to detail, `hx-push-url` for history
+- **Role-based visibility:** Sales role users see only their own requisitions (enforced server-side via `user_reqs_query()` in dependencies.py). Owner filter hidden for sales role.
 - **"New Requisition" button:** Opens modal via `@click="$dispatch('open-modal')"` + `hx-get` to load create form into `#modal-content`
-- Pagination via `{% include "partials/shared/pagination.html" %}`
+- Pagination via `{% include "partials/shared/pagination.html" %}`, supports configurable `per_page` (default 50, max 100)
 
 **Row partial:** `app/templates/partials/requisitions/req_row.html`
 - Single `<tr>` receiving `req` template var
@@ -191,6 +202,13 @@ All in `app/templates/partials/shared/`:
   - **Offers**: Table of offers received — columns: Vendor, MPN, Qty, Unit Price, Lead Time, Date Received, Status badge. Empty state: "No offers received yet."
   - **Quotes**: Table of quotes generated — columns: Quote #, Customer, Total, Margin %, Status badge, Created date. Empty state: "No quotes generated."
   - **Buy Plans**: Table of linked buy plans — columns: Buy Plan #, SO#, Status badge, Lines count, Total Cost, Created date. Clickable rows → buy plan detail. Empty state: "No buy plans linked."
+  - **Tasks**: Task board for this requisition (backend: `RequisitionTask` model, `routers/task.py`)
+    - Filter buttons: All, To Do, In Progress, Done
+    - Task list: each task shows type badge (sourcing/sales/general), priority indicator, title, assignee avatar, due date, AI risk flag (if set)
+    - Inline "Add task" form: title, type dropdown, priority, assignee dropdown, due date
+    - Quick actions per task: complete (checkbox), delete (x button)
+    - AI priority score shown as subtle indicator if > 0
+    - Empty state: "No tasks yet. Add a task to track work on this requisition."
   - **Activity**: Timeline of actions (searches, emails, status changes) — each entry: timestamp, user avatar, action description. Newest first.
 - Each tab loads via `hx-get="/v2/partials/requisitions/{id}/tab/{tab_name}"` into tab content area
 
@@ -216,8 +234,10 @@ All in `app/templates/partials/shared/`:
 - Header card: Company name, domain, industry, city, account type badge
 - Quick info grid (4 cols): Account Owner, Credit Terms, Phone, Employees
 - Stats row (3 cols): Sites count, Open Requisitions count, Created date
+- **Enrich button:** `hx-post="/api/enrich/company/{company_id}"` with spinner indicator. Uses `partials/shared/enrich_button.html` shared component. Refreshes company detail on completion.
 - **Tabs:** Sites, Contacts, Requisitions, Activity
 - Sites table: Site Name, Type, City, Country
+- Contacts tab: Name, Title, Email, Phone — with **click-to-call** (same pattern as vendor contacts: `tel:` links, 8x8 activity logging if enabled)
 - Notes section (if present): preformatted text
 
 ---
@@ -254,7 +274,17 @@ All in `app/templates/partials/shared/`:
   - **Data source for lead detail:** Read directly from the `SourcingLead` record.
 - Contact info card: Website (link), Emails (list), Phones (list)
 - Contacts table: Name, Title, Email, Phone
-- Recent sightings table: MPN, Qty, Price, Source badge, Date
+  - **Click-to-call:** Phone numbers render as `tel:` links. If user has `eight_by_eight_enabled`, show a phone icon button that logs a click-to-call activity event via `hx-post="/api/activity"` with `origin=click_to_call` before opening the tel link.
+- **Enrich button:** `hx-post="/api/enrich/vendor/{card_id}"` with spinner indicator. Refreshes vendor detail on completion. Uses `partials/shared/enrich_button.html` shared component.
+- **Tabs** (Alpine-driven, HTMX-loaded):
+  - **Overview** (default): Safety review block + contact info + recent sightings table (MPN, Qty, Price, Source badge, Date)
+  - **Contacts**: Full contacts table with click-to-call
+  - **Analytics**: Vendor scorecard (backend: `vendor_analytics.py`)
+    - Stats grid: Win Rate, Response Rate, Quote Quality Rate, Avg Response Hours, Engagement Score, Vendor Score
+    - Offer history table (from `/api/vendors/{card_id}/offer-history`): Part, Qty, Price, Date, Source
+    - Parts summary (from `/api/vendors/{card_id}/parts-summary`): MPN, Times Seen, Last Seen, Sources
+    - Empty state: "No analytics data yet — data builds as you interact with this vendor."
+  - **Offers**: Historical offers from this vendor — columns: MPN, Qty, Unit Price, Lead Time, Confidence, Date, Status badge. Sourced from `Offer` model filtered by vendor.
 
 ---
 
@@ -300,7 +330,66 @@ All in `app/templates/partials/shared/`:
 
 ---
 
-## 8. Dashboard
+## 8. Quotes & Offers
+
+**Backend:** Fully implemented — `Quote` model (models/quotes.py), `Offer` model (models/offers.py), `QuoteLine` model, routes in `routers/crm/quotes.py` and `routers/crm/offers.py`, buy plan creation from quotes.
+
+### Quotes List View
+
+**File:** `app/templates/partials/quotes/list.html`
+
+- Search by quote number, customer name (live, 300ms debounce)
+- Filter pills: All, Draft, Sent, Won, Lost
+- Table columns: Quote #, Revision, Requisition name, Customer, Total, Margin %, Status badge, Created date
+- Margin color-coded: emerald ≥30%, amber ≥15%, rose otherwise
+- Clickable rows → quote detail
+- Pagination
+
+### Quote Detail View
+
+**File:** `app/templates/partials/quotes/detail.html`
+
+- Breadcrumb: "Quotes > {quote.quote_number}"
+- Header card: Quote number, revision number, status badge, customer, requisition link
+- **Inline line item editing:**
+  - Table: MPN, Manufacturer, Qty, Cost Price, Sell Price, Margin %, linked Offer (if any)
+  - Double-click any cell to edit inline (`hx-trigger="dblclick"`, `hx-put` to update line item)
+  - Auto-recalculates margin on price changes
+  - Add line item row at bottom
+  - Delete line via `hx-delete` with `hx-swap="delete"` (row removed from DOM)
+- **Global markup input:** Apply markup % across all line items at once
+- **Offer gallery:**
+  - Offers for this requisition displayed as expandable cards
+  - Each offer card: Vendor, MPN, Qty, Price, Lead Time, Confidence badge, Evidence tier badge
+  - Expand to see: full offer details, attachments, parse confidence
+  - "Select for Quote" action on each offer → adds as quote line item
+  - Approval workflow: Approve / Reject buttons on pending offers
+- **Quote actions bar:**
+  - Send (generates email HTML, opens send modal)
+  - Mark Result (Won/Lost with notes)
+  - Revise (creates new revision, increments revision number)
+  - Copy Table (copies line items to clipboard)
+- **Followup alerts:** If `followup_alert_at` is set, show countdown/alert banner
+- **Pricing history:** Show previous revision prices for comparison
+
+### Offers (Standalone Access)
+
+**File:** `app/templates/partials/offers/list.html`
+
+- Accessed from requisition detail Offers tab (see Section 3)
+- Also accessible as offer cards within quote detail
+- Offer card component (`partials/shared/offer_card.html`):
+  - Vendor name, MPN, Qty, Unit Price, Lead Time
+  - Evidence tier badge (T1-T7)
+  - Parse confidence indicator
+  - Status badge (draft/pending_review/approved/promoted)
+  - Attachments list (if any)
+  - Expand/collapse for full details
+  - Actions: Approve, Promote to Quote, Reject
+
+---
+
+## 9. Dashboard
 
 **File:** `app/templates/partials/dashboard.html`
 
@@ -358,7 +447,15 @@ Each card (`partials/sourcing/lead_card.html`):
 
 **Error state:** If search fails, show toast notification "Search failed — please try again" with retry button inline in the results area.
 
-**Loading state:** While search is running, show spinner with "Searching {N} sources..." text, where N = number of enabled connectors.
+**Loading state — SSE streaming progress** (backend: `sse_broker.py`, `EventSourceResponse`):
+- When search starts, connect via `hx-ext="sse"` with `sse-connect="/v2/partials/sourcing/{requirement_id}/stream"`
+- Server sends SSE events as each connector completes: `event: source-complete`, `data: {"source": "BrokerBin", "count": 42, "elapsed_ms": 1200}`
+- UI renders a progress partial (`partials/sourcing/search_progress.html`):
+  - Per-source row: Source badge + status (searching.../done ✓/failed ✗) + result count + elapsed time
+  - Overall progress bar showing completed/total sources
+  - Results stream in as each source completes (prepended to results area via `hx-swap="afterbegin"`)
+- On completion: SSE connection closes, progress panel collapses, full results visible
+- Fallback: If SSE fails to connect, degrade to simple spinner with "Searching {N} sources..." text.
 
 ### Lead Detail View
 
@@ -468,7 +565,33 @@ Each card (`partials/sourcing/lead_card.html`):
 
 ---
 
-## 11. Vite Build Pipeline
+## 11. Settings
+
+**Backend:** Admin config via `routers/admin/system.py`, source settings via `routers/sources.py`. No user preferences endpoint yet.
+
+### Settings View
+
+**File:** `app/templates/partials/settings/index.html`
+
+- **Tabs** (Alpine-driven):
+  - **Sources** (default): Data connector enable/disable toggles
+    - List of all connectors: BrokerBin, Nexar, DigiKey, Mouser, OEMSecrets, Element14, eBay, Sourcengine, TME
+    - Each row: Source name, status badge (active/disabled/error), toggle switch (`hx-post` to enable/disable)
+    - Health indicator: last successful call timestamp, error message if failing
+    - Requires `require_settings_access` permission
+  - **System** (admin only):
+    - Config key/value editor (from `system_config` table)
+    - Encrypted values shown as masked
+    - Edit via inline form, `hx-put` to update
+    - Requires `require_admin` permission — tab hidden for non-admins
+  - **Profile**:
+    - User info display: name, email, role badge
+    - 8x8 VoIP toggle (if applicable): enable/disable click-to-call
+    - Read-only for now — no user preference editing yet (stub for future)
+
+---
+
+## 12. Vite Build Pipeline
 
 ### Dependencies
 
@@ -561,7 +684,7 @@ module.exports = {
 
 ---
 
-## 12. HTMX View Router
+## 13. HTMX View Router
 
 **File:** `app/routers/htmx_views.py`
 
@@ -579,6 +702,9 @@ module.exports = {
 - `GET /v2/companies/{id}` → Company detail (EXISTING — update template)
 - `GET /v2/buy-plans` → Buy plans list (EXISTING — update template)
 - `GET /v2/buy-plans/{id}` → Buy plan detail (EXISTING — update template)
+- `GET /v2/quotes` → Quotes list (NEW)
+- `GET /v2/quotes/{id}` → Quote detail (NEW)
+- `GET /v2/settings` → Settings (NEW)
 - `GET /v2/prospecting` → Prospecting list (NEW)
 - `GET /v2/prospecting/{id}` → Prospect detail (NEW)
 - `GET /v2/sourcing/{requirement_id}` → Sourcing results (NEW)
@@ -604,6 +730,19 @@ All prefixed `/v2/partials/`:
 - `GET /partials/companies/{id}` — detail (EXISTING — update template)
 - `GET /partials/buy-plans` — list (EXISTING — update template)
 - `GET /partials/buy-plans/{id}` — detail (EXISTING — update template)
+- `GET /partials/quotes` — list (NEW)
+- `GET /partials/quotes/{id}` — detail (NEW)
+- `PUT /partials/quotes/{id}/lines/{line_id}` — inline edit line item (NEW)
+- `DELETE /partials/quotes/{id}/lines/{line_id}` — delete line item (NEW)
+- `POST /partials/quotes/{id}/send` — send quote (NEW)
+- `POST /partials/quotes/{id}/result` — mark won/lost (NEW)
+- `POST /partials/quotes/{id}/revise` — create revision (NEW)
+- `GET /partials/settings` — settings page (NEW)
+- `GET /partials/settings/sources` — sources tab (NEW)
+- `GET /partials/settings/system` — system config tab, admin only (NEW)
+- `GET /partials/settings/profile` — user profile tab (NEW)
+- `POST /partials/requisitions/bulk/{action}` — bulk archive/assign/activate (NEW)
+- `GET /partials/sourcing/{requirement_id}/stream` — SSE search progress (NEW)
 - `GET /partials/prospecting` — list (NEW)
 - `GET /partials/prospecting/{id}` — detail (NEW)
 - `POST /partials/prospecting/{id}/claim` — claim prospect (NEW)
@@ -628,7 +767,7 @@ def is_htmx_boosted(request: Request) -> bool:
 
 ---
 
-## 13. Template Directory Structure
+## 14. Template Directory Structure
 
 ```
 app/templates/
@@ -646,6 +785,8 @@ app/templates/
 │   │   ├── pagination.html          # HTMX pagination
 │   │   ├── empty_state.html         # Empty state with icon + message
 │   │   ├── safety_review.html       # Vendor safety review block (reused in vendor detail + lead detail)
+│   │   ├── enrich_button.html       # Reusable enrich button (companies, vendors, prospects)
+│   │   ├── offer_card.html          # Expandable offer card (quotes detail, req offers tab)
 │   │   └── search_results.html      # Global search dropdown
 │   ├── requisitions/
 │   │   ├── list.html
@@ -657,6 +798,7 @@ app/templates/
 │   │       ├── offers.html
 │   │       ├── quotes.html
 │   │       ├── buy_plans.html
+│   │       ├── tasks.html
 │   │       └── activity.html
 │   ├── companies/
 │   │   ├── list.html
@@ -670,20 +812,30 @@ app/templates/
 │   ├── search/
 │   │   ├── form.html
 │   │   └── results.html
+│   ├── quotes/
+│   │   ├── list.html
+│   │   ├── detail.html
+│   │   └── line_row.html           # Inline-editable quote line item
 │   ├── sourcing/
 │   │   ├── results.html
 │   │   ├── lead_card.html
 │   │   ├── lead_detail.html
+│   │   ├── search_progress.html    # SSE progress during multi-source search
 │   │   └── followup_queue.html
 │   ├── prospecting/
 │   │   ├── list.html
 │   │   └── detail.html
+│   ├── settings/
+│   │   ├── index.html
+│   │   ├── sources.html
+│   │   ├── system.html
+│   │   └── profile.html
 │   └── dashboard.html
 ```
 
 ---
 
-## 14. UX Principles (Enforced Throughout)
+## 15. UX Principles (Enforced Throughout)
 
 From user feedback, applied consistently:
 
@@ -697,7 +849,7 @@ From user feedback, applied consistently:
 
 ---
 
-## 15. Mobile Responsive Design
+## 16. Mobile Responsive Design
 
 **Breakpoints:**
 - Mobile: < 768px
@@ -716,19 +868,24 @@ From user feedback, applied consistently:
 
 ---
 
-## 16. Verification Criteria
+## 17. Verification Criteria
 
 The rebuild is complete when:
 
-1. All 10 page views render correctly (requisitions, companies, vendors, buy plans, search, sourcing results, lead detail, followup queue, prospecting, dashboard)
+1. All 13 page views render correctly (requisitions, companies, vendors, buy plans, quotes, search, sourcing results, lead detail, followup queue, prospecting, settings, dashboard, login)
 2. AVAIL logo displays in sidebar, login, and mobile header
 3. Brand color system applied consistently — no leftover `gray-900` sidebar, no `blue-600` buttons
-4. All shared components work: modal (open/close/escape), toast (auto-dismiss), pagination, empty states
-5. Sidebar collapses/expands, persists state
-6. Topbar breadcrumb updates per page, global search returns results
+4. All shared components work: modal (open/close/escape), toast (auto-dismiss), pagination, empty states, enrich button, offer card, safety review
+5. Sidebar collapses/expands, persists state, all 9 nav items present
+6. Topbar breadcrumb updates per page via OOB swap, global search returns grouped results
 7. Mobile: hamburger drawer works, bottom nav works, tables → cards below 768px
-8. Sourcing: filters work, lead cards display all data, lead detail shows evidence + safety + actions
+8. Sourcing: SSE progress streams, filters work, lead cards display all data, lead detail shows evidence + safety + actions
 9. Prospecting: list/detail renders, claim/dismiss/enrich actions work
-10. Vite builds successfully, no CDN dependencies remain
-11. All existing backend tests still pass
-12. New HTMX endpoint tests pass for all partial routes
+10. Quotes: list/detail renders, inline line editing works, offer gallery works, send/result/revise actions work
+11. Requisitions: all filters work (status, owner, urgency, date range), bulk operations work, role-based visibility enforced, all 6 tabs load (parts, offers, quotes, buy plans, tasks, activity)
+12. Vendors: all 4 tabs work (overview, contacts, analytics, offers), click-to-call logs activity, enrich button works
+13. Companies: contacts tab has click-to-call, enrich button works
+14. Settings: sources tab shows connector status, system tab admin-only, profile tab renders
+15. Vite builds successfully, no CDN dependencies remain
+16. All existing backend tests still pass
+17. New HTMX endpoint tests pass for all partial routes
