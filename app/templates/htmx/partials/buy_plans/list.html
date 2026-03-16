@@ -1,11 +1,13 @@
 {#
-  list.html — Buy plans list view with status filter tabs and search.
-  Receives: buy_plans (list of dicts), q (str), status (str), total (int).
+  buy_plans/list.html — Buy plans list view with status filter tabs, My Only toggle,
+  search, and sortable table with margin color-coding.
+  Receives: buy_plans (list of dicts), q (str), status (str), mine (bool), total (int).
   Called by: htmx_views.py buy_plans_list_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 {# OOB breadcrumb update #}
 <div id="breadcrumb" hx-swap-oob="true">Buy Plans</div>
+<title hx-swap-oob="true">Buy Plans — AvailAI</title>
 
 <div class="max-w-7xl mx-auto" x-data="{ status: '{{ status }}', mine: {{ 'true' if mine else 'false' }} }">
 
@@ -15,28 +17,33 @@
     <span class="text-sm text-gray-500">{{ total }} total</span>
   </div>
 
-  {# Status filter tabs #}
+  {# Status filter tabs + My Only toggle #}
   <div class="flex flex-wrap items-center gap-2 mb-4">
     {% for s, label in [('', 'All'), ('draft', 'Draft'), ('pending', 'Pending'), ('active', 'Active'), ('completed', 'Completed'), ('cancelled', 'Cancelled')] %}
-    <button class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors"
-            :class="status === '{{ s }}' ? 'bg-brand-500 text-white' : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
+    <button class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                   {% if status == s %}bg-brand-500 text-white shadow-sm{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}"
             @click="status = '{{ s }}'"
             hx-get="/v2/partials/buy-plans?status={{ s }}"
             hx-target="#main-content"
-            hx-include="[name='bp-search']">
+            hx-push-url="true"
+            hx-include="[name='bp-search']"
+            :hx-vals="JSON.stringify({mine: mine})">
       {{ label }}
     </button>
     {% endfor %}
 
-    <label class="ml-4 flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
+    <div class="ml-4 h-6 w-px bg-brand-200"></div>
+
+    <label class="ml-2 flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none group">
       <input type="checkbox" x-model="mine" name="mine_toggle"
              class="rounded border-gray-300 text-brand-500 focus:ring-brand-500 accent-brand-500"
              hx-get="/v2/partials/buy-plans"
              hx-trigger="change"
              hx-target="#main-content"
+             hx-push-url="true"
              hx-include="[name='bp-search']"
              :hx-vals="JSON.stringify({mine: mine, status: status})">
-      My Only
+      <span class="group-hover:text-brand-600">My Only</span>
     </label>
   </div>
 
@@ -44,10 +51,11 @@
   <div class="mb-4">
     <input type="search" name="bp-search" value="{{ q }}"
            placeholder="Search by SO#, customer, quote..."
-           class="w-full sm:w-80 px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500"
+           class="w-full sm:w-80 px-3 py-2 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
            hx-get="/v2/partials/buy-plans"
            hx-trigger="keyup changed delay:300ms"
            hx-target="#main-content"
+           hx-push-url="true"
            :hx-vals="JSON.stringify({status: status, mine: mine})">
   </div>
 
@@ -56,48 +64,64 @@
     <table class="min-w-full divide-y divide-gray-200">
       <thead class="bg-gray-50">
         <tr>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Quote</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SO#</th>
-          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Lines</th>
-          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cost</th>
-          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Margin</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">SO</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Submitted</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quote #</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SO#</th>
+          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Lines</th>
+          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
+          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Margin %</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SO Verification</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Submitted by</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-200">
         {% if buy_plans %}
           {% for bp in buy_plans %}
-          <tr class="hover:bg-gray-50 cursor-pointer"
+          <tr class="hover:bg-brand-50/40 cursor-pointer transition-colors"
               hx-get="/v2/partials/buy-plans/{{ bp.id }}"
               hx-target="#main-content"
               hx-push-url="/v2/buy-plans/{{ bp.id }}"
               preload="mouseover">
             <td class="px-4 py-3 text-sm font-medium text-gray-900">{{ bp.customer_name or '-' }}</td>
-            <td class="px-4 py-3 text-sm text-gray-600 font-mono">{{ bp.quote_number or '-' }}</td>
-            <td class="px-4 py-3 text-sm text-gray-600">{{ bp.sales_order_number or '-' }}</td>
+            <td class="px-4 py-3 text-sm text-brand-600 font-mono font-medium">{{ bp.quote_number or '-' }}</td>
+            <td class="px-4 py-3 text-sm text-gray-700">{{ bp.sales_order_number or '-' }}</td>
             <td class="px-4 py-3 text-sm text-gray-600 text-right">{{ bp.line_count }}</td>
-            <td class="px-4 py-3 text-sm text-gray-600 text-right">${{ '{:,.2f}'.format(bp.total_cost or 0) }}</td>
-            <td class="px-4 py-3 text-sm text-right
-                        {% if (bp.total_margin_pct or 0) >= 30 %}text-emerald-700{% elif (bp.total_margin_pct or 0) >= 15 %}text-amber-700{% else %}text-rose-700{% endif %}">
-              {{ '{:.1f}'.format(bp.total_margin_pct or 0) }}%
+            <td class="px-4 py-3 text-sm text-gray-900 text-right font-medium">${{ '{:,.2f}'.format(bp.total_cost or 0) }}</td>
+            <td class="px-4 py-3 text-sm text-right">
+              {% set bm = bp.total_margin_pct or 0 %}
+              <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium
+                           {% if bm >= 30 %}bg-emerald-50 text-emerald-700
+                           {% elif bm >= 15 %}bg-amber-50 text-amber-700
+                           {% else %}bg-rose-50 text-rose-700{% endif %}">
+                {{ '{:.1f}'.format(bm) }}%
+              </span>
             </td>
             <td class="px-4 py-3">
-              {% set status_colors = {'draft': 'bg-brand-100 text-brand-600', 'pending': 'bg-amber-50 text-amber-700', 'active': 'bg-emerald-50 text-emerald-700', 'completed': 'bg-emerald-50 text-emerald-700', 'halted': 'bg-rose-50 text-rose-700', 'cancelled': 'bg-gray-100 text-gray-600'} %}
+              {% set status_colors = {
+                'draft': 'bg-brand-100 text-brand-600',
+                'pending': 'bg-amber-50 text-amber-700',
+                'active': 'bg-emerald-50 text-emerald-700',
+                'completed': 'bg-emerald-50 text-emerald-700',
+                'halted': 'bg-rose-50 text-rose-700',
+                'cancelled': 'bg-gray-100 text-gray-600'
+              } %}
               <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(bp.status, 'bg-gray-100 text-gray-700') }}">
-                {{ bp.status }}
+                {{ bp.status|capitalize }}
               </span>
               {% if bp.auto_approved %}
-              <span class="ml-1 text-xs text-emerald-600" title="Auto-approved">auto</span>
+              <span class="ml-1 inline-flex px-1.5 py-0.5 text-xs rounded bg-emerald-50 text-emerald-600" title="Auto-approved">auto</span>
               {% endif %}
             </td>
             <td class="px-4 py-3">
-              {% set so_colors = {'pending': 'bg-amber-50 text-amber-700', 'approved': 'bg-emerald-50 text-emerald-700', 'rejected': 'bg-rose-50 text-rose-700'} %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ so_colors.get(bp.so_status, 'bg-gray-100 text-gray-700') }}">
-                {{ bp.so_status }}
+              {% set so_colors = {
+                'pending': 'bg-amber-50 text-amber-700',
+                'approved': 'bg-emerald-50 text-emerald-700',
+                'rejected': 'bg-rose-50 text-rose-700'
+              } %}
+              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ so_colors.get(bp.so_status, 'bg-gray-100 text-gray-600') }}">
+                {{ bp.so_status|capitalize if bp.so_status else '-' }}
               </span>
             </td>
             <td class="px-4 py-3 text-sm text-gray-600">{{ bp.submitted_by_name or '-' }}</td>
@@ -106,8 +130,12 @@
           {% endfor %}
         {% else %}
           <tr>
-            <td colspan="10" class="px-4 py-8 text-center text-sm text-gray-500">
-              No buy plans found.
+            <td colspan="10" class="px-4 py-12 text-center">
+              <svg class="mx-auto h-12 w-12 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+              </svg>
+              <p class="text-sm font-medium text-gray-500">No buy plans found</p>
+              <p class="mt-1 text-xs text-gray-400">Try adjusting your search or filter criteria.</p>
             </td>
           </tr>
         {% endif %}

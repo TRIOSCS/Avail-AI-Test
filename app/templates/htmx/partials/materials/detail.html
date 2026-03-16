@@ -1,14 +1,15 @@
-{# materials/detail.html — Material card detail with specs, vendor history, and actions.
-   Receives: card (MaterialCard), vendor_history (list), sightings (list), offers (list).
-   Called by: htmx_views.py material_detail_partial endpoint.
-   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
+{#
+  materials/detail.html — Material card detail with specs, sightings, offers, and actions.
+  Receives: card (MaterialCard), vendor_history (list), sightings (list), offers (list).
+  Called by: htmx_views.py material_detail_partial endpoint.
+  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
 <div id="breadcrumb" hx-swap-oob="true">
   <a href="/v2/materials" hx-get="/v2/partials/materials" hx-target="#main-content" hx-push-url="/v2/materials"
-     class="text-brand-400 hover:text-brand-300">Materials</a>
-  <span class="mx-1 text-gray-400">/</span>
-  {{ card.display_mpn or card.normalized_mpn }}
+     class="text-brand-500 hover:text-brand-600">Materials</a>
+  <span class="mx-1.5 text-gray-400">/</span>
+  <span class="text-gray-700 font-medium">{{ card.display_mpn or card.normalized_mpn }}</span>
 </div>
 
 <div class="max-w-7xl mx-auto" x-data="{ editing: false }">
@@ -18,24 +19,26 @@
     <div class="flex items-start justify-between">
       <div>
         <h1 class="text-2xl font-bold text-gray-900 font-mono">{{ card.display_mpn or card.normalized_mpn }}</h1>
-        <div class="mt-2 flex items-center gap-3">
+        <div class="mt-2 flex flex-wrap items-center gap-2">
           {% if card.manufacturer %}
           <span class="text-sm text-gray-600">{{ card.manufacturer }}</span>
+          <span class="text-gray-300">|</span>
           {% endif %}
           {% set lc_colors = {
-            'active': 'bg-emerald-50 text-emerald-700',
-            'eol': 'bg-amber-50 text-amber-700',
-            'obsolete': 'bg-rose-50 text-rose-700',
-            'nrfnd': 'bg-gray-100 text-gray-600',
-            'ltb': 'bg-amber-50 text-amber-600',
+            'active': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+            'eol': 'bg-amber-50 text-amber-700 border-amber-200',
+            'obsolete': 'bg-rose-50 text-rose-700 border-rose-200',
+            'nrfnd': 'bg-gray-100 text-gray-600 border-gray-200',
+            'ltb': 'bg-amber-50 text-amber-600 border-amber-200',
           } %}
           {% if card.lifecycle_status %}
-          <span class="px-2 py-0.5 text-xs font-medium rounded-full {{ lc_colors.get(card.lifecycle_status, 'bg-gray-100 text-gray-600') }}">
+          <span class="inline-flex px-2.5 py-0.5 text-xs font-medium rounded-full border {{ lc_colors.get(card.lifecycle_status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
             {{ card.lifecycle_status|upper }}
           </span>
           {% endif %}
           {% if card.rohs_status %}
-          <span class="px-2 py-0.5 text-xs font-medium rounded-full {{ 'bg-emerald-50 text-emerald-700' if card.rohs_status == 'compliant' else 'bg-amber-50 text-amber-600' }}">
+          <span class="inline-flex px-2.5 py-0.5 text-xs font-medium rounded-full border
+            {{ 'bg-emerald-50 text-emerald-700 border-emerald-200' if card.rohs_status == 'compliant' else 'bg-amber-50 text-amber-600 border-amber-200' }}">
             RoHS: {{ card.rohs_status|capitalize }}
           </span>
           {% endif %}
@@ -44,14 +47,30 @@
         <p class="text-sm text-gray-500 mt-2">{{ card.description }}</p>
         {% endif %}
       </div>
-      <div class="text-right space-y-1">
-        <p class="text-sm text-gray-500">Searches: <span class="font-medium text-gray-900">{{ card.search_count or 0 }}</span></p>
+      <div class="text-right space-y-1.5 ml-6 flex-shrink-0">
+        <p class="text-sm text-gray-500">Searches: <span class="font-bold text-brand-600">{{ card.search_count or 0 }}</span></p>
         {% if card.last_searched_at %}
         <p class="text-xs text-gray-400">Last: {{ card.last_searched_at.strftime('%b %d, %Y') }}</p>
         {% endif %}
         {% if card.enriched_at %}
-        <p class="text-xs text-emerald-600">Enriched {{ card.enriched_at.strftime('%b %d, %Y') }}</p>
+        <p class="inline-flex items-center gap-1 text-xs text-emerald-600">
+          <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+          </svg>
+          Enriched {{ card.enriched_at.strftime('%b %d, %Y') }}
+        </p>
         {% endif %}
+        {# Enrich button #}
+        <button hx-post="/v2/partials/materials/{{ card.id }}/enrich"
+                hx-target="this"
+                hx-swap="outerHTML"
+                class="mt-1 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 transition-colors">
+          <svg class="h-3.5 w-3.5 htmx-indicator animate-spin" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+          Enrich
+        </button>
       </div>
     </div>
   </div>
@@ -59,23 +78,40 @@
   {# Specs grid #}
   <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
     <div class="flex items-center justify-between mb-4">
-      <h2 class="text-lg font-semibold text-gray-900">Specifications</h2>
-      <button @click="editing = !editing"
-              class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded hover:bg-brand-100"
-              x-text="editing ? 'Cancel' : 'Edit'">Edit</button>
+      <h2 class="text-base font-semibold text-gray-900">Specifications</h2>
+      <div class="flex gap-2">
+        <button hx-get="/v2/partials/materials/{{ card.id }}/insights"
+                hx-target="#insights-panel"
+                hx-swap="innerHTML"
+                class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 transition-colors">
+          Insights
+        </button>
+        <button @click="editing = !editing"
+                class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors"
+                x-text="editing ? 'Cancel' : 'Edit'">Edit</button>
+      </div>
     </div>
 
     {# Display mode #}
     <div x-show="!editing" class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-      <div><span class="text-gray-500">Category:</span> <span class="font-medium">{{ card.category or "&mdash;" }}</span></div>
-      <div><span class="text-gray-500">Package:</span> <span class="font-medium">{{ card.package_type or "&mdash;" }}</span></div>
-      <div><span class="text-gray-500">Pin Count:</span> <span class="font-medium">{{ card.pin_count or "&mdash;" }}</span></div>
-      <div><span class="text-gray-500">Lifecycle:</span> <span class="font-medium">{{ card.lifecycle_status or "&mdash;" }}</span></div>
+      <div><span class="text-gray-400 text-xs font-medium block mb-0.5">Category</span> <span class="font-medium text-gray-900">{{ card.category or "--" }}</span></div>
+      <div><span class="text-gray-400 text-xs font-medium block mb-0.5">Package</span> <span class="font-medium text-gray-900">{{ card.package_type or "--" }}</span></div>
+      <div><span class="text-gray-400 text-xs font-medium block mb-0.5">Pin Count</span> <span class="font-medium text-gray-900">{{ card.pin_count or "--" }}</span></div>
+      <div><span class="text-gray-400 text-xs font-medium block mb-0.5">Lifecycle</span> <span class="font-medium text-gray-900">{{ card.lifecycle_status or "--" }}</span></div>
       {% if card.specs_summary %}
-      <div class="col-span-full"><span class="text-gray-500">Specs:</span> <span class="font-medium">{{ card.specs_summary }}</span></div>
+      <div class="col-span-full"><span class="text-gray-400 text-xs font-medium block mb-0.5">Specs</span> <span class="font-medium text-gray-900">{{ card.specs_summary }}</span></div>
       {% endif %}
       {% if card.datasheet_url %}
-      <div class="col-span-full"><span class="text-gray-500">Datasheet:</span> <a href="{{ card.datasheet_url }}" target="_blank" class="text-brand-500 hover:text-brand-400">View Datasheet</a></div>
+      <div class="col-span-full">
+        <span class="text-gray-400 text-xs font-medium block mb-0.5">Datasheet</span>
+        <a href="{{ card.datasheet_url }}" target="_blank" rel="noopener"
+           class="inline-flex items-center gap-1 text-brand-500 hover:text-brand-600 font-medium">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"/>
+          </svg>
+          View Datasheet
+        </a>
+      </div>
       {% endif %}
     </div>
 
@@ -85,23 +121,23 @@
           hx-target="#main-content"
           class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Manufacturer</label>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Manufacturer</label>
         <input type="text" name="manufacturer" value="{{ card.manufacturer or '' }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500">
+               class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Category</label>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Category</label>
         <input type="text" name="category" value="{{ card.category or '' }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500">
+               class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Package</label>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Package</label>
         <input type="text" name="package_type" value="{{ card.package_type or '' }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500">
+               class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Lifecycle</label>
-        <select name="lifecycle_status" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500">
+        <label class="block text-xs font-medium text-gray-500 mb-1">Lifecycle</label>
+        <select name="lifecycle_status" class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
           <option value="">Unknown</option>
           {% for val in ['active', 'eol', 'obsolete', 'nrfnd', 'ltb'] %}
           <option value="{{ val }}" {{ 'selected' if card.lifecycle_status == val }}>{{ val|upper }}</option>
@@ -109,13 +145,13 @@
         </select>
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">Pin Count</label>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Pin Count</label>
         <input type="number" name="pin_count" value="{{ card.pin_count or '' }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500">
+               class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
       </div>
       <div>
-        <label class="block text-xs text-gray-500 mb-1">RoHS</label>
-        <select name="rohs_status" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500">
+        <label class="block text-xs font-medium text-gray-500 mb-1">RoHS</label>
+        <select name="rohs_status" class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
           <option value="">Unknown</option>
           {% for val in ['compliant', 'non-compliant', 'exempt'] %}
           <option value="{{ val }}" {{ 'selected' if card.rohs_status == val }}>{{ val|capitalize }}</option>
@@ -123,51 +159,64 @@
         </select>
       </div>
       <div class="col-span-2">
-        <label class="block text-xs text-gray-500 mb-1">Description</label>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Description</label>
         <input type="text" name="description" value="{{ card.description or '' }}"
-               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500">
+               class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
       </div>
-      <div class="col-span-full flex gap-2">
-        <button type="submit" class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600">Save</button>
-        <button type="button" @click="editing = false" class="px-4 py-1.5 text-sm font-medium text-gray-600 border border-gray-300 rounded hover:bg-gray-50">Cancel</button>
+      <div class="col-span-full flex gap-2 pt-1">
+        <button type="submit" class="inline-flex items-center gap-1 px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 transition-colors">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+          </svg>
+          Save
+        </button>
+        <button type="button" @click="editing = false" class="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">Cancel</button>
       </div>
     </form>
   </div>
 
+  {# Insights panel (lazy-loaded) #}
+  <div id="insights-panel" class="mb-6"></div>
+
   {# Recent sightings #}
   {% if sightings %}
   <div class="bg-white border border-brand-200 rounded-lg overflow-hidden mb-6">
-    <div class="px-4 py-3 bg-gray-50 border-b">
-      <h2 class="text-lg font-semibold text-gray-900">Recent Sightings ({{ sightings|length }})</h2>
+    <div class="px-5 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+      <h2 class="text-base font-semibold text-gray-900">Recent Sightings</h2>
+      <span class="text-xs text-gray-500">{{ sightings|length }} total</span>
     </div>
     <div class="overflow-x-auto">
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
-            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
-            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Price</th>
-            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
-            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+            <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
+            <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
+            <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
+            <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+            <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-200">
           {% for s in sightings[:20] %}
-          <tr class="hover:bg-brand-50">
-            <td class="px-4 py-2 text-sm text-gray-900">
+          <tr class="hover:bg-brand-50 transition-colors">
+            <td class="px-4 py-2.5 text-sm">
               {% if s.vendor_name %}
               <a hx-get="/v2/partials/vendors?q={{ s.vendor_name|urlencode }}"
                  hx-target="#main-content"
                  hx-push-url="/v2/vendors?q={{ s.vendor_name|urlencode }}"
-                 class="text-brand-500 hover:text-brand-600 cursor-pointer">{{ s.vendor_name }}</a>
-              {% else %}&mdash;{% endif %}
+                 class="text-brand-500 hover:text-brand-600 cursor-pointer font-medium">{{ s.vendor_name }}</a>
+              {% else %}<span class="text-gray-400">--</span>{% endif %}
             </td>
-            <td class="px-4 py-2 text-sm text-gray-600 text-right">{{ "{:,}".format(s.qty_available) if s.qty_available else "&mdash;" }}</td>
-            <td class="px-4 py-2 text-sm text-right {{ 'text-emerald-700 font-medium' if s.unit_price else 'text-gray-500' }}">
-              {{ "${:,.4f}".format(s.unit_price) if s.unit_price else "RFQ" }}
+            <td class="px-4 py-2.5 text-sm text-gray-600 text-right font-mono">{{ "{:,}".format(s.qty_available) if s.qty_available else "--" }}</td>
+            <td class="px-4 py-2.5 text-sm text-right">
+              {% if s.unit_price %}
+              <span class="text-emerald-700 font-medium font-mono">${{ "{:,.4f}".format(s.unit_price) }}</span>
+              {% else %}
+              <span class="text-gray-400 text-xs">RFQ</span>
+              {% endif %}
             </td>
-            <td class="px-4 py-2 text-sm text-gray-500">{{ s.source_type or "&mdash;" }}</td>
-            <td class="px-4 py-2 text-sm text-gray-500">{{ s.created_at.strftime('%b %d') if s.created_at else "&mdash;" }}</td>
+            <td class="px-4 py-2.5 text-sm text-gray-500">{{ s.source_type or "--" }}</td>
+            <td class="px-4 py-2.5 text-sm text-gray-500">{{ s.created_at.strftime('%b %d') if s.created_at else "--" }}</td>
           </tr>
           {% endfor %}
         </tbody>
@@ -179,34 +228,46 @@
   {# Recent offers #}
   {% if offers %}
   <div class="bg-white border border-brand-200 rounded-lg overflow-hidden mb-6">
-    <div class="px-4 py-3 bg-gray-50 border-b">
-      <h2 class="text-lg font-semibold text-gray-900">Offers ({{ offers|length }})</h2>
+    <div class="px-5 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+      <h2 class="text-base font-semibold text-gray-900">Offers</h2>
+      <span class="text-xs text-gray-500">{{ offers|length }} total</span>
     </div>
     <div class="overflow-x-auto">
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
-            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
-            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-            <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Price</th>
-            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Lead Time</th>
-            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-            <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
+            <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
+            <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
+            <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Price</th>
+            <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Time</th>
+            <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+            <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-200">
           {% for o in offers[:20] %}
-          <tr class="hover:bg-brand-50">
-            <td class="px-4 py-2 text-sm text-gray-900">{{ o.vendor_name or "&mdash;" }}</td>
-            <td class="px-4 py-2 text-sm text-gray-600 text-right">{{ "{:,}".format(o.qty_available) if o.qty_available else "&mdash;" }}</td>
-            <td class="px-4 py-2 text-sm text-right text-emerald-700 font-medium">
-              {{ "${:,.4f}".format(o.unit_price) if o.unit_price else "RFQ" }}
+          <tr class="hover:bg-brand-50 transition-colors">
+            <td class="px-4 py-2.5 text-sm text-gray-900">{{ o.vendor_name or "--" }}</td>
+            <td class="px-4 py-2.5 text-sm text-gray-600 text-right font-mono">{{ "{:,}".format(o.qty_available) if o.qty_available else "--" }}</td>
+            <td class="px-4 py-2.5 text-sm text-right">
+              {% if o.unit_price %}
+              <span class="text-emerald-700 font-medium font-mono">${{ "{:,.4f}".format(o.unit_price) }}</span>
+              {% else %}
+              <span class="text-gray-400 text-xs">RFQ</span>
+              {% endif %}
             </td>
-            <td class="px-4 py-2 text-sm text-gray-500">{{ o.lead_time or "&mdash;" }}</td>
-            <td class="px-4 py-2">
-              <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-brand-100 text-brand-600">{{ (o.status or 'active')|capitalize }}</span>
+            <td class="px-4 py-2.5 text-sm text-gray-500">{{ o.lead_time or "--" }}</td>
+            <td class="px-4 py-2.5">
+              {% set st_colors = {
+                'active': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                'pending_review': 'bg-amber-50 text-amber-700 border-amber-200',
+                'rejected': 'bg-rose-50 text-rose-700 border-rose-200',
+              } %}
+              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border {{ st_colors.get(o.status, 'bg-brand-50 text-brand-600 border-brand-200') }}">
+                {{ (o.status or 'active')|replace('_', ' ')|capitalize }}
+              </span>
             </td>
-            <td class="px-4 py-2 text-sm text-gray-500">{{ o.created_at.strftime('%b %d') if o.created_at else "&mdash;" }}</td>
+            <td class="px-4 py-2.5 text-sm text-gray-500">{{ o.created_at.strftime('%b %d') if o.created_at else "--" }}</td>
           </tr>
           {% endfor %}
         </tbody>

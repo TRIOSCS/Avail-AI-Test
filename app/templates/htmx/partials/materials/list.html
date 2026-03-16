@@ -1,20 +1,31 @@
-{# materials/list.html — Material card list with search and lifecycle filter.
-   Receives: materials (list of MaterialCard), q (str), lifecycle (str),
-             total (int), limit (int), offset (int).
-   Called by: htmx_views.py materials_list_partial endpoint.
-   Depends on: HTMX, Tailwind CSS with brand palette.
+{#
+  materials/list.html — Material card list with search and lifecycle filter.
+  Receives: materials (list of MaterialCard), q (str), lifecycle (str),
+            total (int), limit (int), offset (int).
+  Called by: htmx_views.py materials_list_partial endpoint.
+  Depends on: HTMX, Tailwind CSS with brand palette.
 #}
 
-<div id="breadcrumb" hx-swap-oob="true">Materials</div>
+<div id="breadcrumb" hx-swap-oob="true">
+  <span class="text-brand-600 font-medium">Materials</span>
+</div>
 
 <div class="max-w-7xl mx-auto">
-  {# Search bar #}
+  {# Header #}
+  <div class="flex items-center justify-between mb-4">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Material Cards</h1>
+      <p class="text-sm text-gray-500 mt-1">{{ total }} material{{ "s" if total != 1 }}</p>
+    </div>
+  </div>
+
+  {# Search + filter bar #}
   <div class="bg-white border border-brand-200 rounded-lg p-4 mb-4">
     <div class="flex flex-wrap gap-3 items-end">
       <div class="flex-1 min-w-[200px]">
         <label class="block text-xs font-medium text-gray-500 mb-1">Search MPN</label>
         <input type="text" name="q" value="{{ q }}" placeholder="Search by part number..."
-               class="w-full px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500"
+               class="w-full px-3 py-2 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                hx-get="/v2/partials/materials"
                hx-trigger="keyup changed delay:300ms"
                hx-target="#main-content"
@@ -25,60 +36,78 @@
 
   {# Lifecycle filter pills #}
   <div class="flex flex-wrap gap-2 mb-4">
-    {% for val, label in [('', 'All'), ('active', 'Active'), ('eol', 'EOL'), ('obsolete', 'Obsolete'), ('nrfnd', 'NRFND'), ('ltb', 'LTB')] %}
-    <button class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors
-                   {% if lifecycle == val %}bg-brand-500 text-white{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}"
+    {% for val, label, icon_color in [
+      ('', 'All', 'text-gray-500'),
+      ('active', 'Active', 'text-emerald-500'),
+      ('eol', 'EOL', 'text-amber-500'),
+      ('obsolete', 'Obsolete', 'text-rose-500'),
+      ('nrfnd', 'NRFND', 'text-gray-400'),
+      ('ltb', 'LTB', 'text-amber-400')
+    ] %}
+    <button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors
+                   {% if lifecycle == val %}bg-brand-500 text-white shadow-sm{% else %}bg-white text-gray-600 border border-brand-200 hover:bg-brand-50{% endif %}"
             hx-get="/v2/partials/materials?lifecycle={{ val }}&q={{ q }}"
             hx-target="#main-content">
+      {% if val %}
+      <span class="w-2 h-2 rounded-full {% if lifecycle == val %}bg-white{% else %}{{ icon_color }} bg-current{% endif %}"></span>
+      {% endif %}
       {{ label }}
     </button>
     {% endfor %}
   </div>
 
   {# Table #}
-  <div class="bg-white rounded-lg shadow border border-brand-200 overflow-hidden">
+  <div class="bg-white rounded-lg border border-brand-200 overflow-hidden">
     {% if materials %}
     <div class="overflow-x-auto">
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MPN</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Manufacturer</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Category</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Lifecycle</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Searches</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Enriched</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MPN</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Manufacturer</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lifecycle</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Searches</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Enriched</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-200">
           {% for m in materials %}
-          <tr class="hover:bg-gray-50 cursor-pointer"
+          <tr class="hover:bg-brand-50 cursor-pointer transition-colors"
               hx-get="/v2/partials/materials/{{ m.id }}"
               hx-target="#main-content"
-              hx-push-url="/v2/materials/{{ m.id }}">
-            <td class="px-4 py-3 text-sm font-mono font-medium text-brand-600">{{ m.display_mpn or m.normalized_mpn or "&mdash;" }}</td>
-            <td class="px-4 py-3 text-sm text-gray-600">{{ m.manufacturer or "&mdash;" }}</td>
-            <td class="px-4 py-3 text-sm text-gray-600">{{ m.category or "&mdash;" }}</td>
+              hx-push-url="/v2/materials/{{ m.id }}"
+              preload="mouseover">
+            <td class="px-4 py-3">
+              <span class="text-sm font-mono font-semibold text-brand-600">{{ m.display_mpn or m.normalized_mpn or "--" }}</span>
+            </td>
+            <td class="px-4 py-3 text-sm text-gray-600">{{ m.manufacturer or "--" }}</td>
+            <td class="px-4 py-3 text-sm text-gray-600">{{ m.category or "--" }}</td>
             <td class="px-4 py-3">
               {% set lc_colors = {
-                'active': 'bg-emerald-50 text-emerald-700',
-                'eol': 'bg-amber-50 text-amber-700',
-                'obsolete': 'bg-rose-50 text-rose-700',
-                'nrfnd': 'bg-gray-100 text-gray-600',
-                'ltb': 'bg-amber-50 text-amber-600',
+                'active': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+                'eol': 'bg-amber-50 text-amber-700 border-amber-200',
+                'obsolete': 'bg-rose-50 text-rose-700 border-rose-200',
+                'nrfnd': 'bg-gray-100 text-gray-600 border-gray-200',
+                'ltb': 'bg-amber-50 text-amber-600 border-amber-200',
               } %}
               {% if m.lifecycle_status %}
-              <span class="px-2 py-0.5 text-xs font-medium rounded-full {{ lc_colors.get(m.lifecycle_status, 'bg-gray-100 text-gray-600') }}">
+              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border {{ lc_colors.get(m.lifecycle_status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
                 {{ m.lifecycle_status|upper }}
               </span>
               {% else %}
-              <span class="text-xs text-gray-400">&mdash;</span>
+              <span class="text-xs text-gray-400">--</span>
               {% endif %}
             </td>
-            <td class="px-4 py-3 text-sm text-gray-600 text-right">{{ m.search_count or 0 }}</td>
+            <td class="px-4 py-3 text-sm text-gray-600 text-right font-medium">{{ m.search_count or 0 }}</td>
             <td class="px-4 py-3">
               {% if m.enriched_at %}
-              <span class="text-xs text-emerald-600">{{ m.enriched_at.strftime('%b %d') }}</span>
+              <span class="inline-flex items-center gap-1 text-xs text-emerald-600">
+                <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                </svg>
+                {{ m.enriched_at.strftime('%b %d') }}
+              </span>
               {% else %}
               <span class="text-xs text-gray-400">No</span>
               {% endif %}
@@ -90,11 +119,11 @@
     </div>
     {% else %}
     <div class="p-12 text-center">
-      <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
+      <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
       </svg>
-      <p class="mt-2 text-sm text-gray-500">No material cards found</p>
-      {% if q %}<p class="text-xs text-gray-400 mt-1">Try a different search term.</p>{% endif %}
+      <p class="mt-3 text-sm font-medium text-gray-600">No material cards found</p>
+      {% if q %}<p class="text-xs text-gray-400 mt-1">Try a different search term</p>{% endif %}
     </div>
     {% endif %}
   </div>
@@ -102,17 +131,17 @@
   {# Pagination #}
   {% if total > limit %}
   <div class="mt-4 flex justify-center">
-    <nav class="flex gap-1">
+    <nav class="flex gap-1 items-center">
       {% if offset > 0 %}
       <a hx-get="/v2/partials/materials?offset={{ offset - limit }}&q={{ q }}&lifecycle={{ lifecycle }}"
          hx-target="#main-content"
-         class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-gray-50 cursor-pointer">Prev</a>
+         class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Prev</a>
       {% endif %}
-      <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}-{{ [offset + limit, total]|min }} of {{ total }}</span>
+      <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
       {% if offset + limit < total %}
       <a hx-get="/v2/partials/materials?offset={{ offset + limit }}&q={{ q }}&lifecycle={{ lifecycle }}"
          hx-target="#main-content"
-         class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-gray-50 cursor-pointer">Next</a>
+         class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Next</a>
       {% endif %}
     </nav>
   </div>

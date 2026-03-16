@@ -1,35 +1,86 @@
-<div class="company-intel-card">
-  <h4>Intelligence Brief: {{ company.name }}</h4>
+{#
+  ai/company_intel.html — AI-generated company intelligence brief.
+  Receives: company (Company), intel (dict with summary, revenue, employees, products,
+            components_they_buy, opportunity_signals, recent_news).
+  Called by: htmx_views.py company_intel route.
+  Depends on: Tailwind CSS with brand palette.
+#}
+<div class="bg-white rounded-lg border border-brand-200 p-5">
+  <div class="flex items-center gap-2 mb-4">
+    <svg class="h-5 w-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+    </svg>
+    <h4 class="text-base font-semibold text-gray-900">Intelligence Brief: {{ company.name }}</h4>
+  </div>
+
   {% if intel.summary %}
-  <p class="intel-summary">{{ intel.summary }}</p>
+  <div class="bg-brand-50 rounded-lg px-4 py-3 mb-4 border border-brand-100">
+    <p class="text-sm text-brand-800 leading-relaxed">{{ intel.summary }}</p>
+  </div>
   {% endif %}
-  <div class="intel-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin:1rem 0;">
+
+  {# Key metrics grid #}
+  <div class="grid grid-cols-2 gap-3 mb-4">
     {% if intel.revenue %}
-    <div><strong>Revenue:</strong> {{ intel.revenue }}</div>
+    <div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
+      <p class="text-xs text-gray-400 font-medium mb-0.5">Revenue</p>
+      <p class="text-sm font-medium text-gray-900">{{ intel.revenue }}</p>
+    </div>
     {% endif %}
     {% if intel.employees %}
-    <div><strong>Employees:</strong> {{ intel.employees }}</div>
+    <div class="bg-gray-50 rounded-lg p-3 border border-gray-100">
+      <p class="text-xs text-gray-400 font-medium mb-0.5">Employees</p>
+      <p class="text-sm font-medium text-gray-900">{{ intel.employees }}</p>
+    </div>
     {% endif %}
     {% if intel.products %}
-    <div style="grid-column:span 2;"><strong>Products:</strong> {{ intel.products }}</div>
+    <div class="col-span-2 bg-gray-50 rounded-lg p-3 border border-gray-100">
+      <p class="text-xs text-gray-400 font-medium mb-0.5">Products</p>
+      <p class="text-sm font-medium text-gray-900">{{ intel.products }}</p>
+    </div>
     {% endif %}
   </div>
+
   {% if intel.components_they_buy %}
-  <div class="intel-section">
-    <strong>Components They Buy:</strong>
-    <ul>{% for c in intel.components_they_buy %}<li>{{ c }}</li>{% endfor %}</ul>
+  <div class="mb-4">
+    <h5 class="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">Components They Buy</h5>
+    <div class="flex flex-wrap gap-1.5">
+      {% for c in intel.components_they_buy %}
+      <span class="inline-flex px-2.5 py-1 text-xs font-medium text-brand-700 bg-brand-50 rounded-full border border-brand-200">{{ c }}</span>
+      {% endfor %}
+    </div>
   </div>
   {% endif %}
+
   {% if intel.opportunity_signals %}
-  <div class="intel-section">
-    <strong>Opportunity Signals:</strong>
-    <ul>{% for s in intel.opportunity_signals %}<li>{{ s }}</li>{% endfor %}</ul>
+  <div class="mb-4">
+    <h5 class="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">Opportunity Signals</h5>
+    <div class="space-y-1.5">
+      {% for s in intel.opportunity_signals %}
+      <div class="flex items-start gap-2">
+        <svg class="h-4 w-4 text-emerald-500 mt-0.5 flex-shrink-0" fill="currentColor" viewBox="0 0 20 20">
+          <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+        </svg>
+        <p class="text-sm text-gray-700">{{ s }}</p>
+      </div>
+      {% endfor %}
+    </div>
   </div>
   {% endif %}
+
   {% if intel.recent_news %}
-  <div class="intel-section">
-    <strong>Recent News:</strong>
-    <ul>{% for n in intel.recent_news %}<li>{{ n }}</li>{% endfor %}</ul>
+  <div>
+    <h5 class="text-xs font-semibold text-gray-700 uppercase tracking-wider mb-2">Recent News</h5>
+    <div class="space-y-1.5">
+      {% for n in intel.recent_news %}
+      <div class="flex items-start gap-2">
+        <svg class="h-4 w-4 text-brand-400 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/>
+        </svg>
+        <p class="text-sm text-gray-700">{{ n }}</p>
+      </div>
+      {% endfor %}
+    </div>
   </div>
   {% endif %}
 </div>

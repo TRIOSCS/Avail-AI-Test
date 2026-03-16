@@ -1,7 +1,7 @@
 {# offers.html — Offers tab for requisition detail with action buttons.
    Receives: offers (list of Offer objects), req (Requisition), draft_quote (Quote or None).
    Called by: requisition tab route.
-   Depends on: brand palette, HTMX, Alpine.js.
+   Depends on: brand palette, HTMX, Alpine.js, partials/shared/offer_card.html.
 #}
 <div x-data="{ selectedOffers: [] }">
 
@@ -78,64 +78,68 @@
     </div>
   </div>
 
-  <div class="overflow-x-auto">
+  <div class="overflow-x-auto bg-white rounded-lg border border-brand-200">
     <form id="offers-form">
     <table class="min-w-full divide-y divide-gray-200">
-      <thead class="bg-gray-50">
+      <thead class="bg-gray-50 sticky top-0">
         <tr>
-          <th class="px-3 py-2 text-center w-8">
+          <th class="px-3 py-2.5 text-center w-8">
             <input type="checkbox"
                    @change="selectedOffers = $el.checked ? [{% for o in offers %}{{ o.id }}{{ ',' if not loop.last }}{% endfor %}] : []"
                    class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
           </th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">MPN</th>
-          <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-          <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Unit Price</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Lead Time</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Date</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-          <th class="px-4 py-2 text-center text-xs font-medium text-gray-500 uppercase">Actions</th>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MPN</th>
+          <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
+          <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Price</th>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lead Time</th>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date Received</th>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+          <th class="px-4 py-2.5 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-200">
         {% for o in offers %}
-        <tr class="hover:bg-brand-50 group">
-          <td class="px-3 py-2 text-center">
+        <tr id="offer-row-{{ o.id }}" class="hover:bg-brand-50 group">
+          <td class="px-3 py-2.5 text-center">
             <input type="checkbox" name="offer_ids" value="{{ o.id }}"
                    @change="$el.checked ? selectedOffers.push({{ o.id }}) : selectedOffers = selectedOffers.filter(x => x !== {{ o.id }})"
                    class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
           </td>
-          <td class="px-4 py-2 text-sm text-gray-900">{{ o.vendor_name or "—" }}</td>
-          <td class="px-4 py-2 text-sm font-mono text-gray-900">{{ o.mpn or "—" }}</td>
-          <td class="px-4 py-2 text-sm text-gray-500 text-right">{{ "{:,}".format(o.qty_available) if o.qty_available else "—" }}</td>
-          <td class="px-4 py-2 text-sm text-right {{ 'text-emerald-700 font-medium' if o.unit_price else 'text-gray-500' }}">
+          <td class="px-4 py-2.5 text-sm font-medium text-gray-900">{{ o.vendor_name or "—" }}</td>
+          <td class="px-4 py-2.5 text-sm font-mono text-gray-900">{{ o.mpn or "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-500 text-right">{{ "{:,}".format(o.qty_available) if o.qty_available else "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-right {{ 'text-emerald-700 font-medium' if o.unit_price else 'text-gray-500' }}">
             {{ "${:,.4f}".format(o.unit_price) if o.unit_price else "RFQ" }}
           </td>
-          <td class="px-4 py-2 text-sm text-gray-500">{{ o.lead_time or "—" }}</td>
-          <td class="px-4 py-2 text-sm text-gray-500">{{ o.created_at.strftime('%b %d') if o.created_at else "—" }}</td>
-          <td class="px-4 py-2">
+          <td class="px-4 py-2.5 text-sm text-gray-500">{{ o.lead_time or "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-500">{{ o.created_at.strftime('%b %d, %Y') if o.created_at else "—" }}</td>
+          <td class="px-4 py-2.5">
             {% set offer_colors = {
               "active": "bg-emerald-50 text-emerald-700",
               "pending_review": "bg-amber-50 text-amber-700",
               "approved": "bg-emerald-50 text-emerald-700",
               "rejected": "bg-rose-50 text-rose-700",
-              "draft": "bg-brand-100 text-brand-600"
+              "draft": "bg-brand-100 text-brand-600",
+              "sold": "bg-gray-100 text-gray-600"
             } %}
             <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ offer_colors.get(o.status, 'bg-gray-100 text-gray-600') }}">
               {{ (o.status or 'unknown')|replace('_', ' ')|capitalize }}
             </span>
           </td>
-          <td class="px-4 py-2 text-center" x-data="{ open: false }">
+          <td class="px-4 py-2.5 text-center" x-data="{ open: false }">
             <div class="relative inline-block">
               <button @click.stop="open = !open" @click.outside="open = false"
-                      class="text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                      class="text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity p-1 rounded hover:bg-gray-100">
                 <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
                   <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/>
                 </svg>
               </button>
-              <div x-show="open" x-cloak
-                   class="absolute right-0 top-full mt-1 w-36 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
+              <div x-show="open" x-cloak x-transition:enter="transition ease-out duration-100"
+                   x-transition:enter-start="opacity-0 scale-95" x-transition:enter-end="opacity-100 scale-100"
+                   x-transition:leave="transition ease-in duration-75"
+                   x-transition:leave-start="opacity-100 scale-100" x-transition:leave-end="opacity-0 scale-95"
+                   class="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
                 <button hx-get="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/edit-form"
                         hx-target="#parse-area" hx-swap="innerHTML"
                         @click.stop="open = false"
@@ -144,11 +148,21 @@
                 <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
                         hx-vals='{"action": "approve"}' hx-target="#tab-content"
                         @click.stop="open = false"
-                        class="w-full text-left px-3 py-1.5 text-xs text-emerald-600 hover:bg-emerald-50">Approve</button>
+                        class="w-full text-left px-3 py-1.5 text-xs text-emerald-600 hover:bg-emerald-50">
+                  <span class="inline-flex items-center gap-1">
+                    <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+                    Approve
+                  </span>
+                </button>
                 <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
                         hx-vals='{"action": "reject"}' hx-target="#tab-content"
                         @click.stop="open = false"
-                        class="w-full text-left px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50">Reject</button>
+                        class="w-full text-left px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50">
+                  <span class="inline-flex items-center gap-1">
+                    <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+                    Reject
+                  </span>
+                </button>
                 {% elif o.status in ("active", "approved") %}
                 <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/reconfirm"
                         hx-target="#tab-content"
@@ -164,7 +178,8 @@
                         @click.stop="open = false"
                         class="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">History</button>
                 <button hx-delete="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}"
-                        hx-target="#tab-content" hx-confirm="Delete this offer? This cannot be undone."
+                        hx-target="#offer-row-{{ o.id }}" hx-swap="delete"
+                        hx-confirm="Delete this offer? This cannot be undone."
                         @click.stop="open = false"
                         class="w-full text-left px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 border-t border-gray-100">Delete</button>
               </div>
@@ -177,12 +192,12 @@
     </form>
   </div>
   {% else %}
-  <div class="p-8 text-center">
-    <svg class="mx-auto h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+  <div class="py-12 text-center">
+    <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
             d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
     </svg>
-    <p class="text-sm text-gray-500 mt-2">No offers received yet.</p>
+    <p class="text-sm font-medium text-gray-500 mt-3">No offers received yet.</p>
     <p class="text-xs text-gray-400 mt-1">Offers appear here when vendors respond to RFQs or when leads are promoted.</p>
   </div>
   {% endif %}

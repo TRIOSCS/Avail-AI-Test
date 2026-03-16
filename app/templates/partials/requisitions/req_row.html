@@ -1,9 +1,9 @@
-{# req_row.html — Single requisition table row.
+{# req_row.html — Single requisition table row for the list view.
    Receives: req (Requisition object with req_count, offer_count attrs).
    Called by: requisitions/list.html loop, create endpoint (prepend).
-   Depends on: brand color palette from tailwind.config.js.
+   Depends on: brand color palette from tailwind.config.js, Alpine.js (for checkbox state).
 #}
-<tr class="hover:bg-brand-50 cursor-pointer group"
+<tr class="hover:bg-brand-50 cursor-pointer group transition-colors"
     hx-get="/v2/partials/requisitions/{{ req.id }}"
     hx-target="#main-content"
     hx-push-url="/v2/requisitions/{{ req.id }}">
@@ -14,11 +14,20 @@
            :checked="selectedIds.has({{ req.id }})"
            class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500">
   </td>
-  <td class="px-4 py-3 text-sm font-medium text-brand-500">{{ req.name }}</td>
-  <td class="px-4 py-3 text-sm text-gray-500">{{ req.customer_name or "\u2014" }}</td>
-  <td class="px-4 py-3 text-sm text-gray-500">{{ req.creator.name if req.creator else "\u2014" }}</td>
-  <td class="px-4 py-3 text-sm text-gray-500">{{ req.req_count }}</td>
-  <td class="px-4 py-3 text-sm text-gray-500">{{ req.offer_count|default(0) }}</td>
+  <td class="px-4 py-3 text-sm font-medium text-brand-500 group-hover:text-brand-600">{{ req.name }}</td>
+  <td class="px-4 py-3 text-sm text-gray-500">{{ req.customer_name or "—" }}</td>
+  <td class="px-4 py-3 text-sm text-gray-500">
+    {% if req.creator %}
+      <span class="inline-flex items-center gap-1.5">
+        <span class="inline-flex items-center justify-center h-5 w-5 rounded-full bg-brand-100 text-brand-600 text-[10px] font-bold">{{ req.creator.name[:1]|upper }}</span>
+        {{ req.creator.name }}
+      </span>
+    {% else %}
+      —
+    {% endif %}
+  </td>
+  <td class="px-4 py-3 text-sm text-gray-500 tabular-nums">{{ req.req_count }}</td>
+  <td class="px-4 py-3 text-sm text-gray-500 tabular-nums">{{ req.offer_count|default(0) }}</td>
   <td class="px-4 py-3">
     {% set status_colors = {
       "active": "bg-emerald-50 text-emerald-700",
@@ -28,7 +37,8 @@
       "lost": "bg-rose-50 text-rose-700",
       "archived": "bg-gray-100 text-gray-600",
       "awarded": "bg-emerald-50 text-emerald-700",
-      "open": "bg-emerald-50 text-emerald-700"
+      "open": "bg-emerald-50 text-emerald-700",
+      "cancelled": "bg-gray-100 text-gray-600"
     } %}
     <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(req.status, 'bg-gray-100 text-gray-600') }}">
       {{ req.status|capitalize }}
@@ -36,12 +46,18 @@
   </td>
   <td class="px-4 py-3">
     {% if req.urgency == "critical" %}
-      <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-rose-50 text-rose-700">Critical</span>
+      <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-rose-50 text-rose-700">
+        <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v4a1 1 0 102 0V7zm-1 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/></svg>
+        Critical
+      </span>
     {% elif req.urgency == "hot" %}
-      <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700">Hot</span>
+      <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700">
+        <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M12.395 2.553a1 1 0 00-1.45-.385c-.345.23-.614.558-.822.88-.214.33-.403.713-.57 1.116-.334.804-.614 1.768-.84 2.734a31.365 31.365 0 00-.613 3.58 2.64 2.64 0 01-.945-1.067c-.328-.68-.398-1.534-.398-2.654A1 1 0 005.05 6.05 6.981 6.981 0 003 11a7 7 0 1011.95-4.95c-.592-.591-.98-.985-1.348-1.467-.363-.476-.724-1.063-1.207-2.03zM12.12 15.12A3 3 0 017 13s.879.5 2.5.5c0-1 .5-4 1.25-4.5.5 1 .786 1.293 1.371 1.879A2.99 2.99 0 0113 13a2.99 2.99 0 01-.879 2.121z" clip-rule="evenodd"/></svg>
+        Hot
+      </span>
     {% else %}
-      <span class="text-sm text-gray-500">Normal</span>
+      <span class="text-sm text-gray-400">Normal</span>
     {% endif %}
   </td>
-  <td class="px-4 py-3 text-sm text-gray-500">{{ req.created_at.strftime('%b %d, %Y') if req.created_at else "\u2014" }}</td>
+  <td class="px-4 py-3 text-sm text-gray-500">{{ req.created_at.strftime('%b %d, %Y') if req.created_at else "—" }}</td>
 </tr>

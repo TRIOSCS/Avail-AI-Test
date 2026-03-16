@@ -1,7 +1,7 @@
-{# Company detail partial — tabbed layout with enrich and click-to-call.
+{# Company detail partial — tabbed layout with enrich, quick info, stats, and click-to-call.
    Receives: company, sites, open_req_count, user.
-   Called by: company_detail_partial route.
-   Depends on: brand palette, partials/shared/enrich_button.html.
+   Called by: company_detail_partial route in htmx_views.py.
+   Depends on: brand palette, partials/shared/enrich_button.html, partials/shared/empty_state.html.
 #}
 
 {# OOB breadcrumb update #}
@@ -9,32 +9,47 @@
   <a hx-get="/v2/partials/companies" hx-target="#main-content" hx-push-url="/v2/companies"
      preload="mouseover"
      class="text-brand-500 hover:text-brand-600 cursor-pointer">Companies</a>
-  <span class="text-gray-500 mx-1">&gt;</span>
-  <span class="text-gray-900">{{ company.name }}</span>
+  <span class="text-gray-400 mx-1.5">/</span>
+  <span class="text-gray-900 font-medium">{{ company.name }}</span>
 </div>
 <title hx-swap-oob="true">{{ company.name }} — Companies — AvailAI</title>
 
-<div class="max-w-5xl mx-auto">
-  {# Header card #}
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-6 mb-6">
+<div class="max-w-5xl mx-auto space-y-6">
+
+  {# ── Header Card ─────────────────────────────────────────── #}
+  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-6">
     <div class="flex items-start justify-between">
-      <div>
-        <h1 class="text-2xl font-bold text-gray-900">{{ company.name }}</h1>
-        <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-500">
-          {% if company.domain %}<span>{{ company.domain }}</span>{% endif %}
-          {% if company.industry %}<span>&middot; {{ company.industry }}</span>{% endif %}
-          {% if company.hq_city %}<span>&middot; {{ company.hq_city }}{% if company.hq_country %}, {{ company.hq_country }}{% endif %}</span>{% endif %}
+      <div class="flex items-start gap-4">
+        {# Initial avatar circle #}
+        <div class="flex-shrink-0 h-12 w-12 rounded-full bg-brand-100 flex items-center justify-center">
+          <span class="text-lg font-bold text-brand-600">{{ company.name[:1]|upper }}</span>
+        </div>
+        <div>
+          <h1 class="text-2xl font-bold text-gray-900">{{ company.name }}</h1>
+          <div class="mt-1 flex flex-wrap items-center gap-2 text-sm text-gray-500">
+            {% if company.domain %}
+              <a href="https://{{ company.domain }}" target="_blank" class="text-brand-500 hover:text-brand-600">{{ company.domain }}</a>
+            {% endif %}
+            {% if company.industry %}
+              <span class="text-gray-300">|</span>
+              <span>{{ company.industry }}</span>
+            {% endif %}
+            {% if company.hq_city %}
+              <span class="text-gray-300">|</span>
+              <span>{{ company.hq_city }}{% if company.hq_country %}, {{ company.hq_country }}{% endif %}</span>
+            {% endif %}
+          </div>
         </div>
       </div>
       <div class="flex items-center gap-3">
         {% if company.account_type %}
         {% set type_colors = {
-          "Customer": "bg-emerald-50 text-emerald-700",
-          "Prospect": "bg-brand-100 text-brand-600",
-          "Partner": "bg-brand-100 text-brand-300",
-          "Competitor": "bg-rose-50 text-rose-700"
+          "Customer": "bg-emerald-50 text-emerald-700 border-emerald-200",
+          "Prospect": "bg-brand-100 text-brand-600 border-brand-200",
+          "Partner": "bg-brand-50 text-brand-400 border-brand-200",
+          "Competitor": "bg-rose-50 text-rose-700 border-rose-200"
         } %}
-        <span class="px-3 py-1 text-sm font-medium rounded-full {{ type_colors.get(company.account_type, 'bg-gray-100 text-gray-600') }}">
+        <span class="px-3 py-1 text-sm font-medium rounded-full border {{ type_colors.get(company.account_type, 'bg-gray-100 text-gray-600 border-gray-200') }}">
           {{ company.account_type }}
         </span>
         {% endif %}
@@ -44,105 +59,140 @@
       </div>
     </div>
 
-    {# Quick info #}
-    <div class="mt-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-      <div>
-        <p class="text-xs text-gray-500">Account Owner</p>
-        <p class="font-medium text-gray-900">{{ company.account_owner.name if company.account_owner else "Unassigned" }}</p>
+    {# Quick info grid (4 cols) #}
+    <div class="mt-6 grid grid-cols-2 md:grid-cols-4 gap-4">
+      <div class="p-3 rounded-lg bg-gray-50">
+        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Account Owner</p>
+        <p class="mt-1 text-sm font-medium text-gray-900">
+          {% if company.account_owner %}
+            <span class="inline-flex items-center gap-1.5">
+              <span class="inline-flex items-center justify-center h-5 w-5 rounded-full bg-brand-100 text-brand-600 text-[10px] font-bold">{{ company.account_owner.name[:1]|upper }}</span>
+              {{ company.account_owner.name }}
+            </span>
+          {% else %}
+            <span class="text-gray-400">Unassigned</span>
+          {% endif %}
+        </p>
       </div>
-      <div>
-        <p class="text-xs text-gray-500">Credit Terms</p>
-        <p class="font-medium text-gray-900">{{ company.credit_terms or "\u2014" }}</p>
+      <div class="p-3 rounded-lg bg-gray-50">
+        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Credit Terms</p>
+        <p class="mt-1 text-sm font-medium text-gray-900">{{ company.credit_terms or "—" }}</p>
       </div>
-      <div>
-        <p class="text-xs text-gray-500">Phone</p>
-        <p class="font-medium text-gray-900">{{ company.phone or "\u2014" }}</p>
+      <div class="p-3 rounded-lg bg-gray-50">
+        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Phone</p>
+        <p class="mt-1 text-sm font-medium">
+          {% if company.phone %}
+            <a href="tel:{{ company.phone }}" class="text-brand-500 hover:text-brand-600">{{ company.phone }}</a>
+          {% else %}
+            <span class="text-gray-400">—</span>
+          {% endif %}
+        </p>
       </div>
-      <div>
-        <p class="text-xs text-gray-500">Employees</p>
-        <p class="font-medium text-gray-900">{{ company.employee_size or "\u2014" }}</p>
+      <div class="p-3 rounded-lg bg-gray-50">
+        <p class="text-xs font-medium text-gray-500 uppercase tracking-wider">Employees</p>
+        <p class="mt-1 text-sm font-medium text-gray-900">{{ company.employee_size or "—" }}</p>
       </div>
     </div>
   </div>
 
-  {# Stats row #}
-  <div class="grid grid-cols-2 md:grid-cols-3 gap-4 mb-6">
-    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center hover:bg-brand-50 transition-colors">
-      <p class="text-xs text-gray-500">Sites</p>
-      <p class="text-xl font-bold text-gray-900">{{ sites|length }}</p>
+  {# ── Stats Row (3 cols) ──────────────────────────────────── #}
+  <div class="grid grid-cols-2 md:grid-cols-3 gap-4">
+    <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4 text-center hover:bg-brand-50 transition-colors">
+      <p class="text-2xl font-bold text-gray-900">{{ sites|length }}</p>
+      <p class="text-xs font-medium text-gray-500 mt-1">Sites</p>
     </div>
-    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center hover:bg-brand-50 transition-colors">
-      <p class="text-xs text-gray-500">Open Requisitions</p>
-      <p class="text-xl font-bold text-gray-900">{{ open_req_count }}</p>
+    <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4 text-center hover:bg-brand-50 transition-colors">
+      <p class="text-2xl font-bold text-gray-900">{{ open_req_count }}</p>
+      <p class="text-xs font-medium text-gray-500 mt-1">Open Requisitions</p>
     </div>
-    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center hover:bg-brand-50 transition-colors">
-      <p class="text-xs text-gray-500">Created</p>
-      <p class="text-sm font-medium text-gray-900">{{ company.created_at.strftime('%b %d, %Y') if company.created_at else "\u2014" }}</p>
+    <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4 text-center hover:bg-brand-50 transition-colors">
+      <p class="text-sm font-medium text-gray-900">{{ company.created_at.strftime('%b %d, %Y') if company.created_at else "—" }}</p>
+      <p class="text-xs font-medium text-gray-500 mt-1">Created</p>
     </div>
   </div>
+
+  {# Enrich results placeholder #}
+  <div id="enrich-results-{{ company.id }}"></div>
 
   {# AI Insights — lazy-loaded #}
   <div hx-get="/v2/partials/companies/{{ company.id }}/insights"
        hx-trigger="load"
        hx-swap="innerHTML"
-       class="mb-6"></div>
+       class="empty:hidden"></div>
 
-  {# Tabs #}
+  {# ── Tabs ────────────────────────────────────────────────── #}
   <div x-data="{ activeTab: 'sites' }">
-    <div class="border-b border-gray-200 mb-4">
+    <div class="border-b border-gray-200">
       <nav class="flex gap-6 -mb-px">
-        {% for tab_id, tab_label in [('sites', 'Sites'), ('contacts', 'Contacts'), ('requisitions', 'Requisitions'), ('activity', 'Activity')] %}
+        {% for tab_id, tab_label, tab_count in [
+          ('sites', 'Sites', sites|length),
+          ('contacts', 'Contacts', none),
+          ('requisitions', 'Requisitions', open_req_count),
+          ('activity', 'Activity', none)
+        ] %}
         <button @click="activeTab = '{{ tab_id }}'"
                 hx-get="/v2/partials/companies/{{ company.id }}/tab/{{ tab_id }}"
                 hx-target="#company-tab-content"
                 hx-trigger="click"
                 hx-swap="innerHTML"
-                :class="activeTab === '{{ tab_id }}' ? 'border-brand-500 text-brand-500' : 'border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-200'"
-                class="py-3 px-1 text-sm font-medium border-b-2 transition-colors">
+                :class="activeTab === '{{ tab_id }}' ? 'border-brand-500 text-brand-600 font-semibold' : 'border-transparent text-gray-500 hover:text-gray-700 hover:border-gray-300'"
+                class="py-3 px-1 text-sm font-medium border-b-2 transition-colors inline-flex items-center gap-1.5">
           {{ tab_label }}
+          {% if tab_count is not none and tab_count > 0 %}
+            <span class="inline-flex items-center justify-center h-5 min-w-[20px] px-1 text-[10px] font-bold rounded-full bg-brand-100 text-brand-600">{{ tab_count }}</span>
+          {% endif %}
         </button>
         {% endfor %}
       </nav>
     </div>
 
     {# Tab content — sites loaded inline on first load #}
-    <div id="company-tab-content">
+    <div id="company-tab-content" class="mt-4">
       {% if sites %}
-      <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+      <div class="bg-white rounded-xl shadow-sm border border-brand-200 overflow-hidden">
         <table class="min-w-full divide-y divide-gray-200">
           <thead class="bg-gray-50">
             <tr>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Name</th>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Type</th>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">City</th>
-              <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Country</th>
+              <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Site Name</th>
+              <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Type</th>
+              <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">City</th>
+              <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Country</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-gray-200">
             {% for s in sites %}
-            <tr class="hover:bg-brand-50">
-              <td class="px-4 py-2 text-sm font-medium text-gray-900">{{ s.site_name }}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{{ s.site_type or "\u2014" }}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{{ s.city or "\u2014" }}</td>
-              <td class="px-4 py-2 text-sm text-gray-500">{{ s.country or "\u2014" }}</td>
+            <tr class="hover:bg-brand-50 cursor-pointer transition-colors"
+                hx-get="/v2/partials/companies/{{ company.id }}/sites/{{ s.id }}"
+                hx-target="#company-tab-content"
+                hx-swap="innerHTML">
+              <td class="px-4 py-2.5 text-sm font-medium text-gray-900">{{ s.site_name }}</td>
+              <td class="px-4 py-2.5 text-sm text-gray-500">
+                {% if s.site_type %}
+                  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-brand-100 text-brand-600">{{ s.site_type }}</span>
+                {% else %}
+                  —
+                {% endif %}
+              </td>
+              <td class="px-4 py-2.5 text-sm text-gray-500">{{ s.city or "—" }}</td>
+              <td class="px-4 py-2.5 text-sm text-gray-500">{{ s.country or "—" }}</td>
             </tr>
             {% endfor %}
           </tbody>
         </table>
       </div>
       {% else %}
-      <div class="p-8 text-center">
-        <p class="text-sm text-gray-500">No sites found.</p>
-      </div>
+      {% set message = "No sites found for this company." %}
+      {% include "partials/shared/empty_state.html" %}
       {% endif %}
     </div>
   </div>
 
-  {# Notes #}
+  {# ── Notes ───────────────────────────────────────────────── #}
   {% if company.notes %}
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mt-6">
+  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-4">
     <h2 class="text-sm font-semibold text-gray-900 mb-2">Notes</h2>
-    <p class="text-sm text-gray-500 whitespace-pre-wrap">{{ company.notes }}</p>
+    <p class="text-sm text-gray-600 whitespace-pre-wrap leading-relaxed">{{ company.notes }}</p>
   </div>
   {% endif %}
+
 </div>

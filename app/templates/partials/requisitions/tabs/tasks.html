@@ -1,49 +1,71 @@
 {# tasks.html — Task board tab for requisition detail.
-   Receives: tasks (list of RequisitionTask), req (Requisition), users (list for assignee dropdown).
+   Receives: tasks (list of RequisitionTask with assignee loaded), req (Requisition), users (list for assignee dropdown).
    Called by: requisition tab route.
-   Depends on: RequisitionTask model (app/models/task.py), task.py router.
+   Depends on: RequisitionTask model (app/models/task.py), task.py router, HTMX, Alpine.js.
 #}
 <div x-data="{ taskFilter: 'all' }">
   {# Filter buttons #}
-  <div class="flex gap-2 mb-4">
-    {% for f in ['all', 'todo', 'in_progress', 'done'] %}
-    <button @click="taskFilter = '{{ f }}'"
-            :class="taskFilter === '{{ f }}' ? 'bg-brand-500 text-white' : 'bg-white text-gray-900 border border-gray-200 hover:bg-brand-50'"
-            class="px-3 py-1 text-xs font-medium rounded-full transition-colors">
-      {{ f|replace('_', ' ')|capitalize }}
-    </button>
-    {% endfor %}
+  <div class="flex items-center justify-between mb-4">
+    <div class="flex gap-2">
+      {% for f, label in [('all', 'All'), ('todo', 'To Do'), ('in_progress', 'In Progress'), ('done', 'Done')] %}
+      <button @click="taskFilter = '{{ f }}'"
+              :class="taskFilter === '{{ f }}' ? 'bg-brand-500 text-white shadow-sm' : 'bg-white text-gray-700 border border-gray-200 hover:bg-brand-50 hover:border-brand-200'"
+              class="px-3 py-1.5 text-xs font-medium rounded-full transition-colors">
+        {{ label }}
+      </button>
+      {% endfor %}
+    </div>
+    <span class="text-xs text-gray-400">{{ tasks|length }} task{{ "s" if tasks|length != 1 }}</span>
   </div>
 
-  {# Add task form #}
+  {# Inline add task form #}
   <div class="mb-4 p-4 bg-brand-50 rounded-lg border border-brand-200">
     <form hx-post="/api/requisitions/{{ req.id }}/tasks"
           hx-target="#task-list"
           hx-swap="afterbegin"
-          @htmx:after-request.camel="if(event.detail.successful) { $el.reset(); }"
+          @htmx:after-request.camel="if(event.detail.successful) { $el.reset(); Alpine.store('toast').message='Task added'; Alpine.store('toast').type='success'; Alpine.store('toast').show=true; }"
           class="flex flex-wrap items-end gap-3">
-      <div class="flex-1 min-w-[150px]">
+      <div class="flex-1 min-w-[180px]">
+        <label class="block text-xs font-medium text-gray-500 mb-1">Title</label>
         <input type="text" name="title" required placeholder="Task title"
-               class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+               class="w-full px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
       </div>
-      <select name="task_type" class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-        <option value="general">General</option>
-        <option value="sourcing">Sourcing</option>
-        <option value="sales">Sales</option>
-      </select>
-      <select name="priority" class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-        <option value="2">Medium</option>
-        <option value="1">Low</option>
-        <option value="3">High</option>
-      </select>
-      <select name="assigned_to_id" class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-        <option value="">Unassigned</option>
-        {% for u in users %}
-        <option value="{{ u.id }}">{{ u.name }}</option>
-        {% endfor %}
-      </select>
-      <input type="date" name="due_at" class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-      <button type="submit" class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600">Add</button>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Type</label>
+        <select name="task_type" class="px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+          <option value="general">General</option>
+          <option value="sourcing">Sourcing</option>
+          <option value="sales">Sales</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Priority</label>
+        <select name="priority" class="px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+          <option value="2">Medium</option>
+          <option value="1">Low</option>
+          <option value="3">High</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Assignee</label>
+        <select name="assigned_to_id" class="px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+          <option value="">Unassigned</option>
+          {% for u in users %}
+          <option value="{{ u.id }}">{{ u.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-500 mb-1">Due</label>
+        <input type="date" name="due_at" class="px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+      </div>
+      <button type="submit"
+              class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 inline-flex items-center gap-1.5">
+        <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        Add
+      </button>
     </form>
   </div>
 
@@ -51,42 +73,99 @@
   <div id="task-list" class="space-y-2">
     {% if tasks %}
       {% for t in tasks %}
-      <div class="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-brand-200"
+      <div id="task-{{ t.id }}"
+           class="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-brand-200 hover:shadow-sm transition-all"
            x-show="taskFilter === 'all' || taskFilter === '{{ t.status }}'">
+
+        {# Complete checkbox #}
+        {% if t.status != 'done' %}
+        <button hx-post="/api/requisitions/{{ req.id }}/tasks/{{ t.id }}/complete"
+                hx-target="#task-{{ t.id }}"
+                hx-swap="outerHTML"
+                class="flex-shrink-0 h-5 w-5 rounded-full border-2 border-gray-300 hover:border-emerald-500 hover:bg-emerald-50 transition-colors"
+                title="Mark complete">
+        </button>
+        {% else %}
+        <div class="flex-shrink-0 h-5 w-5 rounded-full bg-emerald-500 flex items-center justify-center">
+          <svg class="h-3 w-3 text-white" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+          </svg>
+        </div>
+        {% endif %}
+
         {# Type badge #}
-        {% set type_colors = {"sourcing": "bg-brand-100 text-brand-600", "sales": "bg-amber-50 text-amber-700", "general": "bg-gray-100 text-gray-600"} %}
-        <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ type_colors.get(t.task_type, 'bg-gray-100 text-gray-600') }}">
-          {{ t.task_type|capitalize }}
+        {% set type_colors = {
+          "sourcing": "bg-brand-100 text-brand-600",
+          "sales": "bg-amber-50 text-amber-700",
+          "general": "bg-gray-100 text-gray-600"
+        } %}
+        <span class="flex-shrink-0 inline-flex px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider rounded-full {{ type_colors.get(t.task_type, 'bg-gray-100 text-gray-600') }}">
+          {{ t.task_type }}
         </span>
+
         {# Priority indicator #}
         {% if t.priority == 3 %}
-          <span class="text-rose-500" title="High priority">
+          <span class="flex-shrink-0 text-rose-500" title="High priority">
             <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v4a1 1 0 102 0V7zm-1 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/></svg>
           </span>
+        {% elif t.priority == 1 %}
+          <span class="flex-shrink-0 text-gray-300" title="Low priority">
+            <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm0-2a6 6 0 100-12 6 6 0 000 12z" clip-rule="evenodd"/></svg>
+          </span>
         {% endif %}
+
         {# Title #}
-        <span class="flex-1 text-sm {{ 'line-through text-gray-500' if t.status == 'done' else 'text-gray-900' }}">{{ t.title }}</span>
+        <span class="flex-1 text-sm {{ 'line-through text-gray-400' if t.status == 'done' else 'text-gray-900' }}">{{ t.title }}</span>
+
         {# AI risk flag #}
         {% if t.ai_risk_flag %}
-          <span class="text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full">{{ t.ai_risk_flag }}</span>
+          <span class="flex-shrink-0 text-xs text-amber-700 bg-amber-50 px-2 py-0.5 rounded-full border border-amber-200">
+            <svg class="inline h-3 w-3 mr-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+            </svg>
+            {{ t.ai_risk_flag }}
+          </span>
         {% endif %}
-        {# Assignee #}
+
+        {# AI priority score #}
+        {% if t.ai_priority_score and t.ai_priority_score > 0 %}
+          <span class="flex-shrink-0 text-[10px] text-brand-400 font-mono" title="AI Priority Score">{{ "%.0f"|format(t.ai_priority_score * 100) }}</span>
+        {% endif %}
+
+        {# Assignee avatar #}
         {% if t.assignee %}
-          <span class="text-xs text-gray-500">{{ t.assignee.name }}</span>
+          <span class="flex-shrink-0 inline-flex items-center justify-center h-6 w-6 rounded-full bg-brand-100 text-brand-600 text-[10px] font-bold"
+                title="{{ t.assignee.name }}">
+            {{ t.assignee.name[:1]|upper }}
+          </span>
         {% endif %}
+
         {# Due date #}
         {% if t.due_at %}
-          <span class="text-xs text-gray-500">{{ t.due_at.strftime('%b %d') }}</span>
+          <span class="flex-shrink-0 text-xs text-gray-500">{{ t.due_at.strftime('%b %d') }}</span>
         {% endif %}
-        {# AI score #}
-        {% if t.ai_priority_score and t.ai_priority_score > 0 %}
-          <span class="text-xs text-brand-400" title="AI Priority Score">{{ "%.0f"|format(t.ai_priority_score * 100) }}</span>
-        {% endif %}
+
+        {# Delete button #}
+        <button hx-delete="/api/requisitions/{{ req.id }}/tasks/{{ t.id }}"
+                hx-target="#task-{{ t.id }}"
+                hx-swap="delete"
+                hx-confirm="Delete this task?"
+                class="flex-shrink-0 text-gray-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
+                title="Delete task">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
       </div>
       {% endfor %}
     {% else %}
-      <div class="p-8 text-center">
-        <p class="text-sm text-gray-500">No tasks yet. Add a task to track work on this requisition.</p>
+      <div class="py-12 text-center">
+        <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+        </svg>
+        <p class="text-sm font-medium text-gray-500 mt-3">No tasks yet.</p>
+        <p class="text-xs text-gray-400 mt-1">Add a task to track work on this requisition.</p>
       </div>
     {% endif %}
   </div>

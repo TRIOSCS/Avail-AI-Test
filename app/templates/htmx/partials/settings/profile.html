@@ -1,36 +1,83 @@
 {#
-  settings/profile.html — User profile tab.
+  settings/profile.html — User profile tab with info display and 8x8 VoIP toggle.
   Receives: profile_user (User ORM object).
   Called by: htmx_views.py settings_profile_tab endpoint.
-  Depends on: Tailwind CSS with brand palette.
+  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
-<div class="bg-white border border-brand-200 rounded-lg p-6">
-  <h2 class="text-lg font-semibold text-gray-900 mb-4">Your Profile</h2>
+<div class="max-w-2xl">
+  <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-5">Your Profile</h2>
 
-  <div class="space-y-4">
-    <div>
-      <label class="block text-sm font-medium text-gray-500 mb-1">Name</label>
-      <p class="text-lg font-medium text-gray-900">{{ profile_user.name }}</p>
-    </div>
-    <div>
-      <label class="block text-sm font-medium text-gray-500 mb-1">Email</label>
-      <p class="text-sm text-gray-700">{{ profile_user.email }}</p>
-    </div>
-    <div>
-      <label class="block text-sm font-medium text-gray-500 mb-1">Role</label>
-      {% set role_colors = {
-        'admin': 'bg-brand-500 text-white',
-        'buyer': 'bg-emerald-50 text-emerald-700',
-        'sales': 'bg-amber-50 text-amber-700',
-        'manager': 'bg-brand-100 text-brand-600',
-        'trader': 'bg-brand-100 text-brand-600'
-      } %}
-      <span class="inline-flex px-2.5 py-1 text-xs font-semibold rounded-full {{ role_colors.get(profile_user.role, 'bg-gray-100 text-gray-700') }}">
-        {{ profile_user.role|capitalize }}
-      </span>
+    <div class="space-y-5">
+      {# User avatar + name #}
+      <div class="flex items-center gap-4">
+        <div class="w-14 h-14 rounded-full bg-brand-500 flex items-center justify-center text-white text-xl font-bold">
+          {{ profile_user.name[0]|upper if profile_user.name else '?' }}
+        </div>
+        <div>
+          <p class="text-lg font-semibold text-gray-900">{{ profile_user.name }}</p>
+          <p class="text-sm text-gray-500">{{ profile_user.email }}</p>
+        </div>
+      </div>
+
+      <hr class="border-gray-200">
+
+      {# Role badge #}
+      <div>
+        <label class="block text-sm font-medium text-gray-500 mb-1.5">Role</label>
+        {% set role_colors = {
+          'admin': 'bg-brand-500 text-white',
+          'buyer': 'bg-emerald-50 text-emerald-700',
+          'sales': 'bg-amber-50 text-amber-700',
+          'manager': 'bg-brand-100 text-brand-600',
+          'trader': 'bg-brand-100 text-brand-600'
+        } %}
+        <span class="inline-flex px-3 py-1 text-sm font-semibold rounded-full {{ role_colors.get(profile_user.role, 'bg-gray-100 text-gray-700') }}">
+          {{ profile_user.role|capitalize }}
+        </span>
+      </div>
+
+      {# Email #}
+      <div>
+        <label class="block text-sm font-medium text-gray-500 mb-1.5">Email</label>
+        <p class="text-sm text-gray-800">{{ profile_user.email }}</p>
+      </div>
+
+      {# Account created #}
+      {% if profile_user.created_at %}
+      <div>
+        <label class="block text-sm font-medium text-gray-500 mb-1.5">Member Since</label>
+        <p class="text-sm text-gray-800">{{ profile_user.created_at.strftime('%B %d, %Y') }}</p>
+      </div>
+      {% endif %}
     </div>
   </div>
 
-  <p class="mt-6 text-sm text-brand-300">Profile editing coming soon.</p>
+  {# 8x8 VoIP Toggle #}
+  <div class="bg-white border border-brand-200 rounded-lg p-6"
+       x-data="{ enabled: {{ 'true' if profile_user.eight_by_eight_enabled is defined and profile_user.eight_by_eight_enabled else 'false' }} }">
+    <div class="flex items-center justify-between">
+      <div>
+        <h3 class="text-sm font-semibold text-gray-900">8x8 Click-to-Call</h3>
+        <p class="text-xs text-gray-500 mt-0.5">Enable click-to-call integration for phone numbers. When enabled, clicking a phone number will initiate a call through 8x8 VoIP.</p>
+      </div>
+      <label class="relative inline-flex items-center cursor-pointer ml-4">
+        <input type="checkbox" x-model="enabled"
+               class="sr-only peer"
+               hx-post="/api/user/toggle-8x8"
+               hx-swap="none">
+        <div class="w-11 h-6 bg-gray-200 peer-focus:ring-2 peer-focus:ring-brand-300 rounded-full
+                    peer peer-checked:after:translate-x-full peer-checked:after:border-white
+                    after:content-[''] after:absolute after:top-[2px] after:left-[2px]
+                    after:bg-white after:border-gray-300 after:border after:rounded-full
+                    after:h-5 after:w-5 after:transition-all peer-checked:bg-brand-500"></div>
+      </label>
+    </div>
+    <div x-show="enabled" x-cloak class="mt-3 p-3 bg-brand-50 rounded-md">
+      <p class="text-xs text-brand-600">8x8 integration is active. Phone numbers across the app will use click-to-call.</p>
+    </div>
+  </div>
+
+  <p class="mt-6 text-sm text-brand-300">Additional profile settings coming soon.</p>
 </div>

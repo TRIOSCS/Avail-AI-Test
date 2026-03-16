@@ -1,5 +1,6 @@
 {#
-  quotes/detail.html — Quote detail with inline line editing, offer gallery, and actions.
+  quotes/detail.html — Quote detail with inline line editing, offer gallery, actions bar,
+  pricing history, followup alert, and copy table functionality.
   Receives: quote (Quote ORM), lines (list of QuoteLine), offers (list of Offer).
   Called by: htmx_views.py quote_detail_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
@@ -14,14 +15,14 @@
 </div>
 <title hx-swap-oob="true">{{ quote.quote_number }} — Quotes — AvailAI</title>
 
-<div class="max-w-7xl mx-auto" x-data="{ showMarkup: false }">
+<div class="max-w-7xl mx-auto" x-data="{ showMarkup: false, showHistory: false }">
 
   {# Header card #}
   <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
-    <div class="flex items-start justify-between">
+    <div class="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-4">
       <div>
-        <h1 class="text-2xl font-bold text-gray-900 font-mono">{{ quote.quote_number }}</h1>
-        <div class="mt-2 flex items-center gap-3">
+        <div class="flex items-center gap-3">
+          <h1 class="text-2xl font-bold text-gray-900 font-mono">{{ quote.quote_number }}</h1>
           <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-brand-100 text-brand-600">Rev {{ quote.revision or 1 }}</span>
           {% set status_colors = {
             'draft': 'bg-brand-100 text-brand-600',
@@ -35,127 +36,188 @@
         </div>
         <div class="mt-3 text-sm text-gray-600 space-y-1">
           {% if quote.customer_site and quote.customer_site.company %}
-          <p>Customer:
+          <p>
+            <span class="text-gray-400">Customer:</span>
             <a hx-get="/v2/partials/companies/{{ quote.customer_site.company.id }}"
                hx-target="#main-content" hx-push-url="/v2/companies/{{ quote.customer_site.company.id }}"
                preload="mouseover"
-               class="text-brand-500 hover:text-brand-400 cursor-pointer">{{ quote.customer_site.company.name }}</a>
+               class="text-brand-500 hover:text-brand-400 cursor-pointer font-medium">{{ quote.customer_site.company.name }}</a>
           </p>
           {% endif %}
           {% if quote.requisition %}
-          <p>Requisition:
+          <p>
+            <span class="text-gray-400">Requisition:</span>
             <a hx-get="/v2/partials/requisitions/{{ quote.requisition.id }}"
                hx-target="#main-content" hx-push-url="/v2/requisitions/{{ quote.requisition.id }}"
                preload="mouseover"
-               class="text-brand-500 hover:text-brand-400 cursor-pointer">{{ quote.requisition.name }}</a>
+               class="text-brand-500 hover:text-brand-400 cursor-pointer font-medium">{{ quote.requisition.name }}</a>
+          </p>
+          {% endif %}
+          {% if quote.created_by %}
+          <p>
+            <span class="text-gray-400">Created by:</span>
+            <span class="text-gray-700">{{ quote.created_by.name }}</span>
+            <span class="text-gray-400 ml-1">{{ quote.created_at.strftime('%b %d, %Y') if quote.created_at else '' }}</span>
           </p>
           {% endif %}
         </div>
       </div>
 
       {# Summary stats #}
-      <div class="text-right space-y-1">
-        <p class="text-sm text-gray-500">Subtotal: <span class="font-medium text-gray-900">${{ '{:,.2f}'.format(quote.subtotal|float) if quote.subtotal else '0.00' }}</span></p>
-        <p class="text-sm text-gray-500">Cost: <span class="font-medium text-gray-900">${{ '{:,.2f}'.format(quote.total_cost|float) if quote.total_cost else '0.00' }}</span></p>
-        {% set margin = quote.total_margin_pct|float if quote.total_margin_pct else 0 %}
-        <p class="text-sm text-gray-500">Margin:
-          <span class="font-medium {% if margin >= 30 %}text-emerald-700{% elif margin >= 15 %}text-amber-700{% else %}text-rose-700{% endif %}">
+      <div class="flex gap-4 sm:gap-6">
+        <div class="text-center">
+          <p class="text-xs text-gray-400 uppercase tracking-wider mb-1">Subtotal</p>
+          <p class="text-lg font-semibold text-gray-900">${{ '{:,.2f}'.format(quote.subtotal|float) if quote.subtotal else '0.00' }}</p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-gray-400 uppercase tracking-wider mb-1">Cost</p>
+          <p class="text-lg font-semibold text-gray-900">${{ '{:,.2f}'.format(quote.total_cost|float) if quote.total_cost else '0.00' }}</p>
+        </div>
+        <div class="text-center">
+          <p class="text-xs text-gray-400 uppercase tracking-wider mb-1">Margin</p>
+          {% set margin = quote.total_margin_pct|float if quote.total_margin_pct else 0 %}
+          <p class="text-lg font-semibold {% if margin >= 30 %}text-emerald-700{% elif margin >= 15 %}text-amber-700{% else %}text-rose-700{% endif %}">
             {{ '{:.1f}'.format(margin) }}%
-          </span>
-        </p>
+          </p>
+        </div>
       </div>
     </div>
   </div>
 
   {# Followup alert banner #}
   {% if quote.followup_alert_sent_at %}
-  <div class="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-3 text-sm text-amber-700"
-       remove-me="8s">
-    Follow-up alert was sent on {{ quote.followup_alert_sent_at.strftime('%b %d, %Y') if quote.followup_alert_sent_at else '' }}.
+  <div class="mb-4 bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+    <svg class="w-5 h-5 text-amber-600 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+    </svg>
+    <div>
+      <p class="text-sm font-medium text-amber-800">Follow-up Alert</p>
+      <p class="text-sm text-amber-700 mt-0.5">
+        Follow-up alert was sent on {{ quote.followup_alert_sent_at.strftime('%b %d, %Y at %I:%M %p') if quote.followup_alert_sent_at else '' }}.
+        Consider following up with the customer.
+      </p>
+    </div>
   </div>
   {% endif %}
 
   {# Quote actions bar #}
   <div class="mb-6 flex flex-wrap gap-2">
-    <a href="/api/quotes/{{ quote.id }}/pdf" target="_blank"
-       class="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50 flex items-center gap-1">
-      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-      Download PDF
-    </a>
+    {% if quote.status == 'draft' %}
+    <button hx-post="/v2/partials/quotes/{{ quote.id }}/send"
+            hx-target="#main-content"
+            hx-confirm="Send this quote to the customer?"
+            data-loading-disable
+            class="px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600 flex items-center gap-1.5 transition-colors">
+      <svg data-loading class="h-4 w-4 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+      Send Quote
+    </button>
+    {% endif %}
+
     {% if quote.status == 'sent' %}
     <button hx-post="/v2/partials/quotes/{{ quote.id }}/result"
             hx-target="#main-content"
             hx-vals='{"result": "won"}'
             data-loading-disable
-            class="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700">
-      <svg data-loading class="h-4 w-4 mr-1 spinner inline" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+            class="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 flex items-center gap-1.5 transition-colors">
+      <svg data-loading class="h-4 w-4 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
       Mark Won
     </button>
     <button hx-post="/v2/partials/quotes/{{ quote.id }}/result"
             hx-target="#main-content"
             hx-vals='{"result": "lost"}'
             data-loading-disable
-            class="px-4 py-2 bg-rose-600 text-white text-sm font-medium rounded-md hover:bg-rose-700">
-      <svg data-loading class="h-4 w-4 mr-1 spinner inline" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+            class="px-4 py-2 bg-rose-600 text-white text-sm font-medium rounded-md hover:bg-rose-700 flex items-center gap-1.5 transition-colors">
+      <svg data-loading class="h-4 w-4 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
       Mark Lost
     </button>
     {% endif %}
+
     {% if quote.status == 'won' %}
     <button hx-post="/v2/partials/quotes/{{ quote.id }}/build-buy-plan"
             hx-target="#main-content"
             hx-confirm="Build a buy plan from this quote?"
-            class="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 flex items-center gap-1">
+            class="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 flex items-center gap-1.5 transition-colors">
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
       Build Buy Plan
     </button>
     {% endif %}
-    {% if quote.status == 'draft' %}
-    <button hx-post="/v2/partials/quotes/{{ quote.id }}/send"
-            hx-target="#main-content"
-            hx-confirm="Send this quote to the customer?"
-            data-loading-disable
-            class="px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600">
-      <svg data-loading class="h-4 w-4 mr-1 spinner inline" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
-      Send Quote
-    </button>
-    {% endif %}
+
     <button hx-post="/v2/partials/quotes/{{ quote.id }}/revise"
             hx-target="#main-content"
             hx-confirm="Create a new revision of this quote?"
-            class="px-4 py-2 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50">
+            class="px-4 py-2 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50 flex items-center gap-1.5 transition-colors">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
       Revise
     </button>
+
     <button @click="showMarkup = !showMarkup"
-            class="px-4 py-2 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50">
+            class="px-4 py-2 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50 flex items-center gap-1.5 transition-colors">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M7 7h.01M7 3h5c.512 0 1.024.195 1.414.586l7 7a2 2 0 010 2.828l-7 7a2 2 0 01-2.828 0l-7-7A1.994 1.994 0 013 12V7a4 4 0 014-4z"/></svg>
       Apply Markup
     </button>
+
+    <button @click="
+      const rows = document.querySelectorAll('#quote-lines-body tr:not(#empty-lines-row)');
+      let text = 'MPN\tManufacturer\tQty\tCost\tSell\tMargin %\n';
+      rows.forEach(r => {
+        const cells = r.querySelectorAll('td');
+        if (cells.length >= 6) {
+          text += Array.from(cells).slice(0, 6).map(c => c.textContent.trim()).join('\t') + '\n';
+        }
+      });
+      navigator.clipboard.writeText(text).then(() => {
+        window.dispatchEvent(new CustomEvent('toast', {detail: {message: 'Table copied to clipboard', type: 'success'}}));
+      });
+    "
+            class="px-4 py-2 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50 flex items-center gap-1.5 transition-colors">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 5H6a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2v-1M8 5a2 2 0 002 2h2a2 2 0 002-2M8 5a2 2 0 012-2h2a2 2 0 012 2m0 0h2a2 2 0 012 2v3m2 4H10m0 0l3-3m-3 3l3 3"/></svg>
+      Copy Table
+    </button>
+
+    <a href="/api/quotes/{{ quote.id }}/pdf" target="_blank"
+       class="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+      Download PDF
+    </a>
   </div>
 
   {# Global markup input #}
   <div x-show="showMarkup" x-collapse x-cloak class="mb-4 bg-white border border-brand-200 rounded-lg p-4">
-    <form hx-post="/v2/partials/quotes/{{ quote.id }}/apply-markup" hx-target="#main-content" class="flex items-center gap-3">
+    <form hx-post="/v2/partials/quotes/{{ quote.id }}/apply-markup" hx-target="#main-content" class="flex flex-wrap items-center gap-3">
       <label class="text-sm font-medium text-gray-700">Markup %:</label>
-      <input type="number" name="markup_pct" step="0.1" value="25" class="w-24 px-3 py-1.5 border border-brand-200 rounded-md text-sm focus:ring-brand-500">
-      <button type="submit" class="px-3 py-1.5 bg-brand-500 text-white text-sm rounded-md hover:bg-brand-600">Apply to All Lines</button>
+      <input type="number" name="markup_pct" step="0.1" value="25"
+             class="w-24 px-3 py-1.5 border border-brand-200 rounded-md text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+      <button type="submit" data-loading-disable
+              class="px-4 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600 transition-colors">
+        <svg data-loading class="h-3 w-3 mr-1 spinner inline" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+        Apply to All Lines
+      </button>
+      <p class="text-xs text-gray-400">Sets sell price = cost + markup % on every line item.</p>
     </form>
   </div>
 
   {# Line items table #}
   <div class="bg-white rounded-lg shadow border border-brand-200 overflow-hidden mb-6">
-    <div class="px-4 py-3 bg-gray-50 border-b">
-      <h2 class="text-lg font-semibold text-gray-900">Line Items ({{ lines|length }})</h2>
+    <div class="px-4 py-3 bg-gray-50 border-b border-brand-200 flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-gray-900">Line Items
+        <span class="ml-1 text-sm font-normal text-gray-500">({{ lines|length }})</span>
+      </h2>
+      <span class="text-xs text-gray-400">Double-click a row to edit</span>
     </div>
     <div class="overflow-x-auto">
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">MPN</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Manufacturer</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Qty</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Cost Price</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Sell Price</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">Margin %</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Actions</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MPN</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Manufacturer</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost Price</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Sell Price</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Margin %</th>
+            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
           </tr>
         </thead>
         <tbody id="quote-lines-body" class="divide-y divide-gray-200">
@@ -164,7 +226,12 @@
           {% endfor %}
           {% if not lines %}
           <tr id="empty-lines-row">
-            <td colspan="7" class="px-4 py-8 text-center text-sm text-gray-500">No line items yet. Add one below or select from offers.</td>
+            <td colspan="7" class="px-4 py-8 text-center">
+              <svg class="mx-auto h-8 w-8 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+              </svg>
+              <p class="text-sm text-gray-500">No line items yet. Add one below or select from offers.</p>
+            </td>
           </tr>
           {% endif %}
         </tbody>
@@ -181,26 +248,33 @@
             class="flex flex-wrap gap-2 items-end">
         <div>
           <label class="block text-xs text-gray-500 mb-1">MPN</label>
-          <input type="text" name="mpn" required placeholder="LM317T" class="w-32 px-2 py-1.5 text-sm border border-brand-200 rounded-md font-mono focus:ring-brand-500">
+          <input type="text" name="mpn" required placeholder="LM317T"
+                 class="w-32 px-2 py-1.5 text-sm border border-brand-200 rounded-md font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Manufacturer</label>
-          <input type="text" name="manufacturer" placeholder="TI" class="w-28 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-brand-500">
+          <input type="text" name="manufacturer" placeholder="TI"
+                 class="w-28 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Qty</label>
-          <input type="number" name="qty" value="1" min="1" class="w-20 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-brand-500">
+          <input type="number" name="qty" value="1" min="1"
+                 class="w-20 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Cost</label>
-          <input type="number" name="cost_price" step="0.0001" placeholder="0.5000" x-data x-mask:dynamic="$money($input, '.')" class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-brand-500">
+          <input type="number" name="cost_price" step="0.0001" placeholder="0.5000"
+                 class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Sell</label>
-          <input type="number" name="sell_price" step="0.0001" placeholder="0.7500" x-data x-mask:dynamic="$money($input, '.')" class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-brand-500">
+          <input type="number" name="sell_price" step="0.0001" placeholder="0.7500"
+                 class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-md focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         </div>
-        <button type="submit" data-loading-disable class="px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600">
-          <svg data-loading class="h-3 w-3 mr-1 spinner inline" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+        <button type="submit" data-loading-disable
+                class="px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600 transition-colors flex items-center gap-1">
+          <svg data-loading class="h-3 w-3 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+          <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
           Add Line
         </button>
       </form>
@@ -208,12 +282,47 @@
     </div>
   </div>
 
+  {# Pricing history toggle #}
+  {% if lines %}
+  <div class="mb-6">
+    <button @click="showHistory = !showHistory"
+            class="text-sm text-brand-500 hover:text-brand-600 font-medium flex items-center gap-1">
+      <svg class="w-4 h-4 transition-transform" :class="showHistory && 'rotate-90'" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+      </svg>
+      Pricing History (Previous Revisions)
+    </button>
+    <div x-show="showHistory" x-collapse x-cloak class="mt-3">
+      <div class="bg-white border border-brand-200 rounded-lg overflow-hidden">
+        {% for line in lines %}
+        {% if line.mpn %}
+        <div class="border-b border-gray-100 last:border-b-0">
+          <div class="px-4 py-2 bg-gray-50 text-xs font-medium text-gray-500 uppercase">
+            {{ line.mpn }}
+          </div>
+          <div hx-get="/v2/partials/quotes/pricing-history/{{ line.mpn }}"
+               hx-trigger="revealed"
+               hx-swap="innerHTML"
+               class="px-4 py-3 text-sm text-gray-500">
+            <span class="htmx-indicator">Loading pricing history...</span>
+          </div>
+        </div>
+        {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
   {# Offer gallery #}
   {% if offers %}
   <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
-    <h2 class="text-lg font-semibold text-gray-900 mb-4">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4 flex items-center gap-2">
+      <svg class="w-5 h-5 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11H5m14 0a2 2 0 012 2v6a2 2 0 01-2 2H5a2 2 0 01-2-2v-6a2 2 0 012-2m14 0V9a2 2 0 00-2-2M5 11V9a2 2 0 012-2m0 0V5a2 2 0 012-2h6a2 2 0 012 2v2M7 7h10"/>
+      </svg>
       Offers for this Requisition
-      <span class="ml-2 inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-brand-100 text-brand-600">{{ offers|length }}</span>
+      <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-brand-100 text-brand-600">{{ offers|length }}</span>
     </h2>
     <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
       {% for offer in offers %}
@@ -222,7 +331,10 @@
     </div>
   </div>
   {% else %}
-  <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6 text-center">
+  <div class="bg-white border border-brand-200 rounded-lg p-8 mb-6 text-center">
+    <svg class="mx-auto h-10 w-10 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+    </svg>
     <p class="text-sm text-gray-500">No offers received yet for this requisition.</p>
   </div>
   {% endif %}

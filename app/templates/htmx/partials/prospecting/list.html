@@ -11,46 +11,56 @@
 <div class="max-w-7xl mx-auto">
   <div class="flex items-center justify-between mb-4">
     <h1 class="text-2xl font-bold text-gray-900">Prospecting</h1>
-    <span class="text-sm text-gray-500">{{ total }} prospects</span>
+    <span class="text-sm text-gray-500">{{ total }} prospect{{ "s" if total != 1 }}</span>
   </div>
 
-  {# Search bar #}
-  <div class="mb-4">
-    <input type="text" name="q" value="{{ q }}" placeholder="Search by name or domain..."
-           class="w-full sm:w-80 px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500"
-           hx-get="/v2/partials/prospecting"
-           hx-trigger="keyup changed delay:300ms"
-           hx-target="#main-content"
-           hx-include="[name='q']">
-  </div>
+  {# Search + Filter + Sort bar #}
+  <div id="prospect-filters" class="space-y-3 mb-6">
+    {# Search bar #}
+    <div>
+      <input type="text" name="q" value="{{ q }}" placeholder="Search by name or domain..."
+             class="w-full sm:w-80 px-3 py-2 border border-brand-200 rounded-lg text-sm
+                    focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+             hx-get="/v2/partials/prospecting"
+             hx-trigger="keyup changed delay:300ms"
+             hx-target="#main-content"
+             hx-push-url="true"
+             hx-include="[name='sort'], [name='status_filter']">
+    </div>
 
-  {# Filter pills + sort #}
-  <div class="flex flex-wrap items-center gap-2 mb-4">
-    {% for val, label in [('', 'All'), ('suggested', 'Suggested'), ('claimed', 'Claimed'), ('dismissed', 'Dismissed')] %}
-    <button class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors
-                   {% if status == val %}bg-brand-500 text-white{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}"
-            hx-get="/v2/partials/prospecting?status={{ val }}&sort={{ sort }}"
-            hx-target="#main-content"
-            hx-push-url="true">
-      {{ label }}
-    </button>
-    {% endfor %}
-
-    <div class="ml-auto">
-      <select class="px-3 py-1.5 border border-brand-200 rounded-md text-sm focus:ring-brand-500"
-              hx-get="/v2/partials/prospecting"
-              hx-trigger="change"
+    {# Filter pills + sort #}
+    <div class="flex flex-wrap items-center gap-2">
+      {% for val, label in [('', 'All'), ('suggested', 'Suggested'), ('claimed', 'Claimed'), ('dismissed', 'Dismissed')] %}
+      <button class="px-3 py-1.5 text-sm font-medium rounded-full transition-colors
+                     {% if status == val %}bg-brand-500 text-white shadow-sm{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}"
+              hx-get="/v2/partials/prospecting?status={{ val }}&sort={{ sort }}&q={{ q }}"
               hx-target="#main-content"
-              hx-include="[name='q']"
-              name="sort">
-        <option value="buyer_ready_desc" {% if sort == 'buyer_ready_desc' %}selected{% endif %}>Most Ready</option>
-        <option value="fit_desc" {% if sort == 'fit_desc' %}selected{% endif %}>Best Fit</option>
-        <option value="recent_desc" {% if sort == 'recent_desc' %}selected{% endif %}>Newest</option>
-      </select>
+              hx-push-url="true">
+        {{ label }}
+        {% if val == '' and total is defined %}
+        <span class="ml-1 text-xs opacity-75">{{ total }}</span>
+        {% endif %}
+      </button>
+      {% endfor %}
+
+      <div class="ml-auto">
+        <select name="sort"
+                class="px-3 py-1.5 border border-brand-200 rounded-lg text-sm
+                       focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                hx-get="/v2/partials/prospecting"
+                hx-trigger="change"
+                hx-target="#main-content"
+                hx-push-url="true"
+                hx-include="[name='q']">
+          <option value="fit_desc" {% if sort == 'fit_desc' %}selected{% endif %}>Best Fit</option>
+          <option value="buyer_ready_desc" {% if sort == 'buyer_ready_desc' %}selected{% endif %}>Most Ready</option>
+          <option value="recent_desc" {% if sort == 'recent_desc' %}selected{% endif %}>Newest</option>
+        </select>
+      </div>
     </div>
   </div>
 
-  {# Card grid #}
+  {# Card grid — 3-col desktop, 2-col tablet, 1-col mobile #}
   {% if prospects %}
   <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
     {% for prospect in prospects %}
@@ -60,28 +70,42 @@
   {% else %}
   <div class="bg-white border border-brand-200 rounded-lg p-12 text-center">
     <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z"/>
     </svg>
     <p class="mt-2 text-sm text-gray-500">No prospects found</p>
+    {% if status %}
+    <p class="text-xs text-gray-400 mt-1">Try clearing the filter or searching for something else.</p>
+    {% endif %}
   </div>
   {% endif %}
 
   {# Pagination #}
   {% if total_pages > 1 %}
-  <div class="mt-6 flex justify-center">
-    <nav class="flex gap-1">
-      {% if page > 1 %}
-      <a hx-get="/v2/partials/prospecting?page={{ page - 1 }}&status={{ status }}&sort={{ sort }}&q={{ q }}"
-         hx-target="#main-content"
-         class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-gray-50 cursor-pointer">Prev</a>
-      {% endif %}
-      <span class="px-3 py-1.5 text-sm text-gray-500">Page {{ page }} of {{ total_pages }}</span>
-      {% if page < total_pages %}
-      <a hx-get="/v2/partials/prospecting?page={{ page + 1 }}&status={{ status }}&sort={{ sort }}&q={{ q }}"
-         hx-target="#main-content"
-         class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-gray-50 cursor-pointer">Next</a>
-      {% endif %}
-    </nav>
+  <div class="mt-6 flex items-center justify-center gap-2">
+    {% if page > 1 %}
+    <a hx-get="/v2/partials/prospecting?page={{ page - 1 }}&status={{ status }}&sort={{ sort }}&q={{ q }}"
+       hx-target="#main-content"
+       hx-push-url="true"
+       class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">
+      &larr; Prev
+    </a>
+    {% else %}
+    <span class="px-3 py-1.5 text-sm text-gray-400 border border-gray-100 rounded-lg cursor-not-allowed">&larr; Prev</span>
+    {% endif %}
+
+    <span class="px-3 py-1.5 text-sm text-gray-500">Page {{ page }} of {{ total_pages }}</span>
+
+    {% if page < total_pages %}
+    <a hx-get="/v2/partials/prospecting?page={{ page + 1 }}&status={{ status }}&sort={{ sort }}&q={{ q }}"
+       hx-target="#main-content"
+       hx-push-url="true"
+       class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">
+      Next &rarr;
+    </a>
+    {% else %}
+    <span class="px-3 py-1.5 text-sm text-gray-400 border border-gray-100 rounded-lg cursor-not-allowed">Next &rarr;</span>
+    {% endif %}
   </div>
   {% endif %}
 </div>
