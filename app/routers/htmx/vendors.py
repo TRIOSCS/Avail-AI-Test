@@ -451,3 +451,360 @@ async def vendor_delete(
     response = HTMLResponse("")
     response.headers["HX-Redirect"] = "/v2/partials/vendors"
     return response
+
+
+# ── Vendor Contact CRUD endpoints ────────────────────────────────────
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/contacts/add-form", response_class=HTMLResponse)
+async def vendor_contact_add_form(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return an inline HTML form for adding a new contact to a vendor."""
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    html = f"""<form hx-post="/v2/partials/vendors/{vendor_id}/contacts"
+      hx-target="#contacts-tab-content" hx-swap="innerHTML"
+      class="space-y-4 p-6 bg-white rounded-lg border border-gray-200">
+  <h3 class="text-lg font-semibold text-gray-900">Add Contact</h3>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+    <input type="text" name="full_name" required
+           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-brand-500" />
+  </div>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+    <input type="email" name="email"
+           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-brand-500" />
+  </div>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+    <input type="text" name="phone"
+           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-brand-500" />
+  </div>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Title</label>
+    <input type="text" name="title"
+           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-brand-500" />
+  </div>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Label</label>
+    <input type="text" name="label" placeholder="e.g. Sales, Purchasing"
+           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-brand-500" />
+  </div>
+  <div class="flex gap-3">
+    <button type="submit"
+            class="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-md hover:bg-brand-700">
+      Add Contact
+    </button>
+    <button type="button"
+            hx-get="/v2/partials/vendors/{vendor_id}/tab/contacts" hx-target="#contacts-tab-content"
+            class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200">
+      Cancel
+    </button>
+  </div>
+</form>"""
+    return HTMLResponse(html)
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/contacts", response_class=HTMLResponse)
+async def vendor_contact_create(
+    request: Request,
+    vendor_id: int,
+    full_name: str = Form(...),
+    email: str = Form(""),
+    phone: str = Form(""),
+    title: str = Form(""),
+    label: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new vendor contact with source=manual, confidence=100, is_verified=True.
+
+    Deduplicates by email. Syncs email into the vendor card's emails list.
+    """
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    clean_email = email.strip().lower() if email else ""
+    clean_name = full_name.strip()
+
+    if not clean_name:
+        error_html = (
+            '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">'
+            "Full name is required.</div>"
+        )
+        return HTMLResponse(error_html, status_code=422)
+
+    if clean_email:
+        existing = (
+            db.query(VendorContact)
+            .filter(
+                VendorContact.vendor_card_id == vendor_id,
+                VendorContact.email == clean_email,
+            )
+            .first()
+        )
+        if existing:
+            error_html = (
+                '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">'
+                f"A contact with email {clean_email} already exists for this vendor.</div>"
+            )
+            return HTMLResponse(error_html, status_code=409)
+
+    contact = VendorContact(
+        vendor_card_id=vendor_id,
+        full_name=clean_name,
+        email=clean_email or None,
+        phone=phone.strip() or None,
+        title=title.strip() or None,
+        label=label.strip() or None,
+        source="manual",
+        confidence=100,
+        is_verified=True,
+    )
+    db.add(contact)
+
+    if clean_email and vendor.emails is not None and clean_email not in vendor.emails:
+        vendor.emails = list(vendor.emails) + [clean_email]
+    elif clean_email and vendor.emails is None:
+        vendor.emails = [clean_email]
+
+    try:
+        db.commit()
+        logger.info(
+            "Contact '{}' created for vendor {} by {}",
+            clean_name,
+            vendor_id,
+            user.email,
+        )
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.error("Failed to create contact for vendor {}: {}", vendor_id, exc)
+        raise HTTPException(500, "Failed to create contact")
+
+    success_html = (
+        '<div class="p-3 bg-green-50 border border-green-200 rounded-md text-sm text-green-700">'
+        f"Contact {clean_name} added successfully.</div>"
+    )
+    response = HTMLResponse(success_html)
+    response.headers["HX-Trigger"] = "refreshContacts"
+    return response
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/contacts/{contact_id}/edit", response_class=HTMLResponse)
+async def vendor_contact_edit_form(
+    request: Request,
+    vendor_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return an inline edit form pre-filled with a contact's current values."""
+    contact = (
+        db.query(VendorContact)
+        .filter(
+            VendorContact.id == contact_id,
+            VendorContact.vendor_card_id == vendor_id,
+        )
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    html = f"""<form hx-put="/v2/partials/vendors/{vendor_id}/contacts/{contact_id}"
+      hx-target="#contact-row-{contact_id}" hx-swap="outerHTML"
+      class="space-y-4 p-6 bg-white rounded-lg border border-gray-200">
+  <h3 class="text-lg font-semibold text-gray-900">Edit Contact</h3>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+    <input type="text" name="full_name" value="{contact.full_name or ""}" required
+           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-brand-500" />
+  </div>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+    <input type="email" name="email" value="{contact.email or ""}"
+           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-brand-500" />
+  </div>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+    <input type="text" name="phone" value="{contact.phone or ""}"
+           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-brand-500" />
+  </div>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Title</label>
+    <input type="text" name="title" value="{contact.title or ""}"
+           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-brand-500" />
+  </div>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Label</label>
+    <input type="text" name="label" value="{contact.label or ""}"
+           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-brand-500" />
+  </div>
+  <div class="flex gap-3">
+    <button type="submit"
+            class="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-md hover:bg-brand-700">
+      Save Changes
+    </button>
+    <button type="button"
+            hx-get="/v2/partials/vendors/{vendor_id}/tab/contacts" hx-target="#contacts-tab-content"
+            class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200">
+      Cancel
+    </button>
+  </div>
+</form>"""
+    return HTMLResponse(html)
+
+
+@router.put("/v2/partials/vendors/{vendor_id}/contacts/{contact_id}", response_class=HTMLResponse)
+async def vendor_contact_update(
+    request: Request,
+    vendor_id: int,
+    contact_id: int,
+    full_name: str = Form(""),
+    email: str = Form(""),
+    phone: str = Form(""),
+    title: str = Form(""),
+    label: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update a vendor contact's fields. Deduplicates email and syncs to vendor card."""
+    contact = (
+        db.query(VendorContact)
+        .filter(
+            VendorContact.id == contact_id,
+            VendorContact.vendor_card_id == vendor_id,
+        )
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    clean_email = email.strip().lower() if email else ""
+    old_email = contact.email
+
+    if clean_email and clean_email != old_email:
+        existing = (
+            db.query(VendorContact)
+            .filter(
+                VendorContact.vendor_card_id == vendor_id,
+                VendorContact.email == clean_email,
+                VendorContact.id != contact_id,
+            )
+            .first()
+        )
+        if existing:
+            error_html = (
+                '<div class="p-3 bg-red-50 border border-red-200 rounded-md text-sm text-red-700">'
+                f"A contact with email {clean_email} already exists for this vendor.</div>"
+            )
+            return HTMLResponse(error_html, status_code=409)
+
+    contact.full_name = full_name.strip() or contact.full_name
+    contact.email = clean_email or None
+    contact.phone = phone.strip() or None
+    contact.title = title.strip() or None
+    contact.label = label.strip() or None
+
+    if vendor.emails is None:
+        vendor.emails = []
+    emails_list = list(vendor.emails)
+    if old_email and old_email in emails_list:
+        emails_list.remove(old_email)
+    if clean_email and clean_email not in emails_list:
+        emails_list.append(clean_email)
+    vendor.emails = emails_list
+
+    try:
+        db.commit()
+        logger.info(
+            "Contact {} updated for vendor {} by {}",
+            contact_id,
+            vendor_id,
+            user.email,
+        )
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.error("Failed to update contact {}: {}", contact_id, exc)
+        raise HTTPException(500, "Failed to update contact")
+
+    title_str = f" &middot; {contact.title}" if contact.title else ""
+    email_str = f'<a href="mailto:{contact.email}" class="text-brand-600 hover:underline">{contact.email}</a>' if contact.email else ""
+    phone_str = contact.phone or ""
+
+    updated_html = f"""<tr id="contact-row-{contact.id}" class="hover:bg-brand-50">
+  <td class="px-4 py-2 text-sm font-medium text-gray-900">{contact.full_name}{title_str}</td>
+  <td class="px-4 py-2 text-sm">{email_str}</td>
+  <td class="px-4 py-2 text-sm text-gray-500">{phone_str}</td>
+  <td class="px-4 py-2 text-sm text-gray-500">{contact.label or ""}</td>
+  <td class="px-4 py-2 text-sm">
+    <button hx-get="/v2/partials/vendors/{vendor_id}/contacts/{contact.id}/edit"
+            hx-target="#contact-row-{contact.id}" hx-swap="outerHTML"
+            class="text-brand-600 hover:text-brand-800 text-xs font-medium">Edit</button>
+    <button hx-delete="/v2/partials/vendors/{vendor_id}/contacts/{contact.id}"
+            hx-confirm="Delete this contact?"
+            class="text-red-600 hover:text-red-800 text-xs font-medium ml-2">Delete</button>
+  </td>
+</tr>"""
+    return HTMLResponse(updated_html)
+
+
+@router.delete("/v2/partials/vendors/{vendor_id}/contacts/{contact_id}")
+async def vendor_contact_delete(
+    request: Request,
+    vendor_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a vendor contact and remove its email from the vendor card's emails list."""
+    contact = (
+        db.query(VendorContact)
+        .filter(
+            VendorContact.id == contact_id,
+            VendorContact.vendor_card_id == vendor_id,
+        )
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    contact_email = contact.email
+    if contact_email and vendor.emails:
+        emails_list = list(vendor.emails)
+        if contact_email in emails_list:
+            emails_list.remove(contact_email)
+            vendor.emails = emails_list
+
+    try:
+        db.delete(contact)
+        db.commit()
+        logger.info(
+            "Contact {} deleted from vendor {} by {}",
+            contact_id,
+            vendor_id,
+            user.email,
+        )
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.error("Failed to delete contact {}: {}", contact_id, exc)
+        raise HTTPException(500, "Failed to delete contact")
+
+    response = HTMLResponse("")
+    response.headers["HX-Trigger"] = "refreshContacts"
+    return response

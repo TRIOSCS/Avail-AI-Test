@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session, joinedload
 from ...database import get_db
 from ...dependencies import require_user
 from ...models import Company, CustomerSite, Requisition, User
+from ...models.crm import SiteContact
 from ._helpers import _DASH, _base_ctx, escape_like, router, templates
 
 
@@ -578,4 +579,377 @@ async def company_update(
     )
     response = templates.TemplateResponse("htmx/partials/companies/detail.html", ctx)
     response.headers["HX-Trigger"] = "refreshCompanyDetail"
+    return response
+
+
+# ── Site CRUD ────────────────────────────────────────────────────────
+
+
+def _v(val):
+    """Escape a value for an HTML attribute."""
+    if val is None:
+        return ""
+    return str(val).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+
+
+@router.post("/v2/partials/companies/{company_id}/sites", response_class=HTMLResponse)
+async def site_create(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+    site_name: str = Form(""),
+    site_type: str = Form(""),
+    city: str = Form(""),
+    state: str = Form(""),
+    country: str = Form(""),
+    contact_name: str = Form(""),
+    contact_email: str = Form(""),
+):
+    """Create a new site under a company."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    site_name = site_name.strip()
+    if not site_name:
+        html = """
+        <div class="rounded-md bg-red-50 p-4">
+          <p class="text-sm text-red-700">Site name is required.</p>
+        </div>
+        """
+        return HTMLResponse(html, status_code=422)
+
+    site = CustomerSite(
+        company_id=company_id,
+        site_name=site_name,
+        site_type=site_type.strip() or None,
+        city=city.strip() or None,
+        state=state.strip() or None,
+        country=country.strip() or None,
+        contact_name=contact_name.strip() or None,
+        contact_email=contact_email.strip() or None,
+        is_active=True,
+    )
+    db.add(site)
+    db.commit()
+    db.refresh(site)
+
+    logger.info("Created site id={} name={!r} for company_id={}", site.id, site.site_name, company_id)
+
+    html = f"""
+    <div class="rounded-md bg-green-50 p-4">
+      <p class="text-sm text-green-700">Site <strong>{_v(site.site_name)}</strong> created successfully.</p>
+    </div>
+    """
+    response = HTMLResponse(html)
+    response.headers["HX-Trigger"] = "refreshSites"
+    return response
+
+
+@router.put("/v2/partials/sites/{site_id}", response_class=HTMLResponse)
+async def site_update(
+    request: Request,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+    site_name: str = Form(None),
+    site_type: str = Form(None),
+    city: str = Form(None),
+    state: str = Form(None),
+    country: str = Form(None),
+    payment_terms: str = Form(None),
+    shipping_terms: str = Form(None),
+    notes: str = Form(None),
+):
+    """Update site fields (PATCH semantics — only update provided fields)."""
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+
+    fields = {
+        "site_name": site_name,
+        "site_type": site_type,
+        "city": city,
+        "state": state,
+        "country": country,
+        "payment_terms": payment_terms,
+        "shipping_terms": shipping_terms,
+        "notes": notes,
+    }
+
+    updated = []
+    for field_name, value in fields.items():
+        if value is not None:
+            cleaned = value.strip() if value else None
+            setattr(site, field_name, cleaned or None)
+            updated.append(field_name)
+
+    if site_name is not None and not site.site_name:
+        html = """
+        <div class="rounded-md bg-red-50 p-4">
+          <p class="text-sm text-red-700">Site name cannot be blank.</p>
+        </div>
+        """
+        return HTMLResponse(html, status_code=422)
+
+    db.commit()
+    db.refresh(site)
+    logger.info("Updated site id={} fields={}", site.id, updated)
+
+    html = f"""
+    <div class="rounded-md bg-green-50 p-4">
+      <p class="text-sm text-green-700">Site <strong>{_v(site.site_name)}</strong> updated successfully.</p>
+    </div>
+    """
+    response = HTMLResponse(html)
+    response.headers["HX-Trigger"] = "refreshSites"
+    return response
+
+
+# ── Site Contact CRUD ────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/sites/{site_id}/contacts/add-form", response_class=HTMLResponse)
+async def site_contact_add_form(
+    request: Request,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return inline HTML form for adding a contact to a site."""
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+
+    html = f"""
+    <div class="p-4 border border-gray-200 rounded-md bg-gray-50 mt-4">
+      <h3 class="text-sm font-semibold text-gray-900 mb-3">Add Contact to {_v(site.site_name)}</h3>
+      <form hx-post="/v2/partials/sites/{site.id}/contacts" hx-target="closest div" hx-swap="outerHTML"
+            class="space-y-3">
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Full Name *</label>
+            <input type="text" name="full_name" required
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Title</label>
+            <input type="text" name="title"
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-3">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Email</label>
+            <input type="email" name="email"
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+            <input type="text" name="phone"
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <input type="checkbox" name="is_primary" value="true" id="is_primary_{site.id}"
+                 class="rounded border-gray-300 text-brand-600 focus:ring-brand-500" />
+          <label for="is_primary_{site.id}" class="text-sm text-gray-700">Primary contact</label>
+        </div>
+        <div class="flex justify-end gap-3 pt-2">
+          <button type="button" hx-get="/v2/partials/companies/{site.company_id}/tab/contacts"
+                  hx-target="#tab-content"
+                  class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+            Cancel
+          </button>
+          <button type="submit"
+                  class="px-3 py-1.5 text-sm font-medium text-white bg-brand-600 border border-transparent rounded-md hover:bg-brand-700">
+            Add Contact
+          </button>
+        </div>
+      </form>
+    </div>
+    """
+    return HTMLResponse(html)
+
+
+@router.post("/v2/partials/sites/{site_id}/contacts", response_class=HTMLResponse)
+async def site_contact_create(
+    request: Request,
+    site_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+    full_name: str = Form(""),
+    title: str = Form(""),
+    email: str = Form(""),
+    phone: str = Form(""),
+    is_primary: str = Form(""),
+):
+    """Create a new contact at a site."""
+    site = db.query(CustomerSite).filter(CustomerSite.id == site_id).first()
+    if not site:
+        raise HTTPException(404, "Site not found")
+
+    full_name = full_name.strip()
+    if not full_name:
+        html = """
+        <div class="rounded-md bg-red-50 p-4">
+          <p class="text-sm text-red-700">Contact name is required.</p>
+        </div>
+        """
+        return HTMLResponse(html, status_code=422)
+
+    email_val = email.strip().lower() or None
+
+    # Email dedup check at this site
+    if email_val:
+        existing = (
+            db.query(SiteContact)
+            .filter(
+                SiteContact.customer_site_id == site_id,
+                SiteContact.email == email_val,
+                SiteContact.is_active.is_(True),
+            )
+            .first()
+        )
+        if existing:
+            html = f"""
+            <div class="rounded-md bg-red-50 p-4">
+              <p class="text-sm text-red-700">A contact with email <strong>{_v(email_val)}</strong> already exists at this site.</p>
+            </div>
+            """
+            return HTMLResponse(html, status_code=422)
+
+    primary = is_primary.lower() in ("true", "1", "on", "yes") if is_primary else False
+
+    # If marking as primary, clear from other contacts at this site
+    if primary:
+        db.query(SiteContact).filter(
+            SiteContact.customer_site_id == site_id,
+            SiteContact.is_primary.is_(True),
+        ).update({"is_primary": False})
+
+    contact = SiteContact(
+        customer_site_id=site_id,
+        full_name=full_name,
+        title=title.strip() or None,
+        email=email_val,
+        phone=phone.strip() or None,
+        is_primary=primary,
+        is_active=True,
+    )
+    db.add(contact)
+    db.commit()
+    db.refresh(contact)
+
+    logger.info("Created site contact id={} name={!r} at site_id={}", contact.id, contact.full_name, site_id)
+
+    html = f"""
+    <div class="rounded-md bg-green-50 p-4">
+      <p class="text-sm text-green-700">Contact <strong>{_v(contact.full_name)}</strong> added successfully.</p>
+    </div>
+    """
+    response = HTMLResponse(html)
+    response.headers["HX-Trigger"] = "refreshContacts"
+    return response
+
+
+@router.put("/v2/partials/sites/{site_id}/contacts/{contact_id}", response_class=HTMLResponse)
+async def site_contact_update(
+    request: Request,
+    site_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+    full_name: str = Form(None),
+    title: str = Form(None),
+    email: str = Form(None),
+    phone: str = Form(None),
+    is_primary: str = Form(None),
+):
+    """Update a site contact (PATCH semantics — only update provided fields)."""
+    contact = (
+        db.query(SiteContact)
+        .filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    updated = []
+
+    if full_name is not None:
+        cleaned = full_name.strip()
+        if not cleaned:
+            html = """
+            <div class="rounded-md bg-red-50 p-4">
+              <p class="text-sm text-red-700">Contact name cannot be blank.</p>
+            </div>
+            """
+            return HTMLResponse(html, status_code=422)
+        contact.full_name = cleaned
+        updated.append("full_name")
+
+    if title is not None:
+        contact.title = title.strip() or None
+        updated.append("title")
+
+    if email is not None:
+        contact.email = email.strip().lower() or None
+        updated.append("email")
+
+    if phone is not None:
+        contact.phone = phone.strip() or None
+        updated.append("phone")
+
+    if is_primary is not None:
+        primary = is_primary.lower() in ("true", "1", "on", "yes") if is_primary else False
+        if primary and not contact.is_primary:
+            db.query(SiteContact).filter(
+                SiteContact.customer_site_id == site_id,
+                SiteContact.is_primary.is_(True),
+                SiteContact.id != contact_id,
+            ).update({"is_primary": False})
+        contact.is_primary = primary
+        updated.append("is_primary")
+
+    db.commit()
+    db.refresh(contact)
+    logger.info("Updated site contact id={} fields={}", contact.id, updated)
+
+    html = f"""
+    <div class="rounded-md bg-green-50 p-4">
+      <p class="text-sm text-green-700">Contact <strong>{_v(contact.full_name)}</strong> updated successfully.</p>
+    </div>
+    """
+    response = HTMLResponse(html)
+    response.headers["HX-Trigger"] = "refreshContacts"
+    return response
+
+
+@router.delete("/v2/partials/sites/{site_id}/contacts/{contact_id}", response_class=HTMLResponse)
+async def site_contact_delete(
+    request: Request,
+    site_id: int,
+    contact_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a site contact."""
+    contact = (
+        db.query(SiteContact)
+        .filter(SiteContact.id == contact_id, SiteContact.customer_site_id == site_id)
+        .first()
+    )
+    if not contact:
+        raise HTTPException(404, "Contact not found")
+
+    contact_name = contact.full_name
+    db.delete(contact)
+    db.commit()
+
+    logger.info("Deleted site contact id={} name={!r} from site_id={}", contact_id, contact_name, site_id)
+
+    response = HTMLResponse("")
+    response.headers["HX-Trigger"] = "refreshContacts"
     return response
