@@ -1,0 +1,85 @@
+You are repairing the current sourcing/requisitions UI implementation.
+
+Critical instruction:
+Do not continue building blindly from the current state.
+The current UI appears off-spec and visually broken.
+Audit first, plan second, then repair in small slices.
+
+Use these as source of truth:
+- uploaded recovery/supporting docs
+- previously uploaded sourcing vision / rebuild docs
+- latest screenshot showing the broken layout state
+
+Important product constraints:
+- No resizable split-pane layout
+- No Buyer Follow-Up Queue
+- Keep list → detail interaction model
+- Keep Confidence separate from Safety
+- Keep source attribution visible
+- Keep suggested next action visible
+- Use caution-oriented vendor safety language
+
+I am a beginner, so explain everything in plain English.
+
+Your task now:
+
+PHASE 1 — layout/root-cause audit only
+Do not edit code.
+
+Tasks:
+1. Inspect the current shell and sourcing/requisitions page layout.
+2. Identify exactly why the sidebar/content relationship is broken.
+3. Identify why the center pane is compressed.
+4. Identify why the right detail area is mostly blank/underused.
+5. Map the specific files responsible:
+   - templates/components
+   - layout wrappers
+   - CSS/Tailwind classes
+   - any JS/HTMX/React glue involved
+6. Compare the current page against the intended list → detail model.
+7. Recommend the safest first repair slice.
+
+Output format:
+1. What is visibly wrong
+2. Likely root causes
+3. Files responsible
+4. What should stay
+5. What should change
+6. Safest first repair slice
+7. Risks
+
+Stop and wait.
+
+PHASE 2 — recovery plan only
+Do not edit code.
+
+Tasks:
+1. Create a small-slice repair plan.
+2. Break it into the smallest sensible steps.
+3. For each slice include:
+   - goal
+   - files likely to change
+   - why it matters
+   - risk level
+   - how to test it
+4. Recommend build order.
+
+Likely preferred order:
+1. shell/content width contract fix
+2. list/results layout fix
+3. detail pane rendering/selection fix
+4. spacing/overflow cleanup
+5. sourcing-specific presentation polish
+
+Stop and wait.
+
+PHASE 3+ — implement one approved slice at a time
+Rules:
+- smallest safe diff
+- explain changes simply
+- run checks
+- stop after each slice
+
+Do not skip phases.
+Do not widen scope.
+Do not introduce new product features while repairing layout.
