@@ -1,0 +1,10 @@
+<div class="rfq-draft-card">
+  <h4>AI-Generated RFQ Draft</h4>
+  <p class="text-muted">For {{ vendor_name }} — {{ requisition.name }}</p>
+  <div class="draft-content" style="border:1px solid #ddd;border-radius:6px;padding:1rem;background:#fafafa;white-space:pre-wrap;font-family:inherit;">{{ draft_body }}</div>
+  <div class="draft-actions" style="margin-top:1rem;display:flex;gap:0.5rem;">
+    <button class="btn btn-primary" onclick="navigator.clipboard.writeText(this.closest('.rfq-draft-card').querySelector('.draft-content').textContent)">
+      Copy to Clipboard
+    </button>
+  </div>
+</div>

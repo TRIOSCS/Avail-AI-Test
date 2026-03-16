@@ -23,6 +23,12 @@ class TestRequisitionFilters:
     def test_list_with_status_filter(self, client: TestClient, test_requisition: Requisition):
         resp = client.get("/v2/partials/requisitions?status=open")
         assert resp.status_code == 200
+        assert test_requisition.name in resp.text
+
+    def test_list_with_status_filter_no_match(self, client: TestClient, test_requisition: Requisition):
+        resp = client.get("/v2/partials/requisitions?status=closed")
+        assert resp.status_code == 200
+        assert test_requisition.name not in resp.text
 
     def test_list_with_urgency_filter(self, client: TestClient, test_requisition: Requisition):
         resp = client.get("/v2/partials/requisitions?urgency=normal")
@@ -48,6 +54,12 @@ class TestRequisitionFilters:
     def test_list_combined_filters(self, client: TestClient, test_requisition: Requisition):
         resp = client.get("/v2/partials/requisitions?status=open&urgency=normal&sort=name&dir=asc")
         assert resp.status_code == 200
+        assert test_requisition.name in resp.text
+
+    def test_list_with_invalid_status_returns_empty(self, client: TestClient, test_requisition: Requisition):
+        resp = client.get("/v2/partials/requisitions?status=bogus_status")
+        assert resp.status_code == 200
+        assert test_requisition.name not in resp.text
 
 
 # ── Requisition create modal ─────────────────────────────────────────────

@@ -1,0 +1,37 @@
+<div class="parsed-email-results">
+  <h4>Parsed Email Results</h4>
+  <div class="email-meta" style="margin-bottom:1rem;">
+    <span class="badge">Type: {{ email_type }}</span>
+    <span class="badge">Confidence: {{ '%.0f'|format(confidence * 100) }}%</span>
+    <span class="text-muted">{{ total_quotes }} quote{{ 's' if total_quotes != 1 else '' }} extracted</span>
+  </div>
+  {% if vendor_notes %}
+  <p class="vendor-notes"><em>{{ vendor_notes }}</em></p>
+  {% endif %}
+  {% if quotes %}
+  <table class="table table-sm">
+    <thead>
+      <tr>
+        <th>MPN</th>
+        <th>Qty</th>
+        <th>Unit Price</th>
+        <th>Lead Time</th>
+        <th>Condition</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for q in quotes %}
+      <tr>
+        <td>{{ q.mpn or '—' }}</td>
+        <td>{{ q.qty or '—' }}</td>
+        <td>{{ q.unit_price or '—' }}</td>
+        <td>{{ q.lead_time or '—' }}</td>
+        <td>{{ q.condition or '—' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No quotes could be extracted from this email.</p>
+  {% endif %}
+</div>

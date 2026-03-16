@@ -1,0 +1,35 @@
+<div class="company-intel-card">
+  <h4>Intelligence Brief: {{ company.name }}</h4>
+  {% if intel.summary %}
+  <p class="intel-summary">{{ intel.summary }}</p>
+  {% endif %}
+  <div class="intel-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:0.5rem;margin:1rem 0;">
+    {% if intel.revenue %}
+    <div><strong>Revenue:</strong> {{ intel.revenue }}</div>
+    {% endif %}
+    {% if intel.employees %}
+    <div><strong>Employees:</strong> {{ intel.employees }}</div>
+    {% endif %}
+    {% if intel.products %}
+    <div style="grid-column:span 2;"><strong>Products:</strong> {{ intel.products }}</div>
+    {% endif %}
+  </div>
+  {% if intel.components_they_buy %}
+  <div class="intel-section">
+    <strong>Components They Buy:</strong>
+    <ul>{% for c in intel.components_they_buy %}<li>{{ c }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  {% if intel.opportunity_signals %}
+  <div class="intel-section">
+    <strong>Opportunity Signals:</strong>
+    <ul>{% for s in intel.opportunity_signals %}<li>{{ s }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+  {% if intel.recent_news %}
+  <div class="intel-section">
+    <strong>Recent News:</strong>
+    <ul>{% for n in intel.recent_news %}<li>{{ n }}</li>{% endfor %}</ul>
+  </div>
+  {% endif %}
+</div>

@@ -18,7 +18,7 @@ Called by: all routers
 Depends on: models, database, config
 """
 
-import secrets
+import hmac
 from datetime import datetime, timedelta, timezone
 
 from fastapi import Depends, HTTPException, Request
@@ -52,7 +52,12 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
         from .config import settings
 
         agent_key = request.headers.get("x-agent-key")
-        if agent_key and settings.agent_api_key and secrets.compare_digest(agent_key, settings.agent_api_key):
+        if (
+            agent_key
+            and settings.agent_api_key
+            and hmac.compare_digest(agent_key, settings.agent_api_key)
+        ):
+            logger.info("Agent API access: method={} path={}", request.method, request.url.path)
             user = db.query(User).filter_by(email="agent@availai.local").first()
     if not user:
         raise HTTPException(401, "Not authenticated")
@@ -68,16 +73,20 @@ def is_admin(user: User) -> bool:
 
 
 def require_admin(request: Request, db: Session = Depends(get_db)) -> User:
-    """Dependency: raises 403 if user is not an admin."""
+    """Dependency: raises 403 if user is not an admin. Blocks agent service account."""
     user = require_user(request, db)
+    if user.email == "agent@availai.local":
+        raise HTTPException(403, "Agent keys cannot access admin endpoints")
     if user.role != "admin":
         raise HTTPException(403, "Admin access required")
     return user
 
 
 def require_settings_access(request: Request, db: Session = Depends(get_db)) -> User:
-    """Dependency: allows admin only."""
+    """Dependency: allows admin only. Blocks agent service account."""
     user = require_user(request, db)
+    if user.email == "agent@availai.local":
+        raise HTTPException(403, "Agent keys cannot access settings")
     if user.role != "admin":
         raise HTTPException(403, "Settings access required")
     return user

@@ -1,0 +1,37 @@
+<div class="ai-contact-results">
+  <h4>AI Contact Search Results</h4>
+  <p class="text-muted">Found {{ total }} contact{{ 's' if total != 1 else '' }} for {{ vendor.display_name }}</p>
+  {% if contacts %}
+  <table class="table table-sm">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Title</th>
+        <th>Email</th>
+        <th>Confidence</th>
+        <th>Actions</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in contacts %}
+      <tr id="prospect-{{ c.id }}">
+        <td>{{ c.full_name }}</td>
+        <td>{{ c.title or '—' }}</td>
+        <td>{{ c.email or '—' }}</td>
+        <td><span class="badge badge-{{ c.confidence }}">{{ c.confidence }}</span></td>
+        <td>
+          <button class="btn btn-xs btn-primary"
+                  hx-post="/v2/partials/ai/prospect-contacts/{{ c.id }}/promote"
+                  hx-target="#prospect-{{ c.id }}"
+                  hx-swap="outerHTML">
+            Promote
+          </button>
+        </td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No contacts found. Try broadening your search criteria.</p>
+  {% endif %}
+</div>
