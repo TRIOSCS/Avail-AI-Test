@@ -5,9 +5,11 @@
    Context vars: lead (SourcingLead), lead_sighting_data (dict keyed by lead.id) #}
 
 {% set sighting = lead_sighting_data.get(lead.id, {}) %}
+{# Compact layout: left teal border for claimed leads, denser spacing #}
 <div id="lead-card-{{ lead.id }}"
-     class="bg-white rounded-lg border border-brand-200 hover:border-brand-400
-            hover:shadow-md transition-all cursor-pointer"
+     class="bg-white rounded-lg border hover:shadow-md transition-all cursor-pointer
+            {% if lead.buyer_status == 'contacted' or lead.buyer_status == 'has_stock' %}border-l-4 border-l-teal-500 border-brand-200{% else %}border-brand-200{% endif %}
+            hover:border-brand-400"
      hx-get="/v2/partials/sourcing/leads/{{ lead.id }}"
      hx-target="#main-content" hx-push-url="/sourcing/leads/{{ lead.id }}">
 
@@ -78,20 +80,13 @@
       {% endwith %}
     </div>
 
-    {# Row 4: Qty + Price + Freshness #}
+    {# Row 4: Qty / Price combined + Freshness (compact layout) #}
     <div class="flex items-center justify-between text-sm">
-      <div class="flex gap-4">
-        <span class="text-gray-600">
-          {% if sighting.qty_available %}
-            {{ '{:,}'.format(sighting.qty_available) }} avail
-          {% else %}--{% endif %}
-        </span>
-        <span class="font-medium text-gray-900">
-          {% if sighting.unit_price %}
-            ${{ '%.4f'|format(sighting.unit_price) }}
-          {% else %}RFQ{% endif %}
-        </span>
-      </div>
+      <span class="text-gray-600">
+        {% if sighting.qty_available %}{{ '{:,}'.format(sighting.qty_available) }}{% else %}--{% endif %}
+        <span class="text-gray-300 mx-0.5">/</span>
+        <span class="font-medium text-gray-900">{% if sighting.unit_price %}${{ '%.4f'|format(sighting.unit_price) }}{% else %}RFQ{% endif %}</span>
+      </span>
       <span class="text-xs text-gray-400">
         {% if lead.source_last_seen_at %}
           {{ lead.source_last_seen_at | timesince }}

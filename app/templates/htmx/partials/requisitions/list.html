@@ -135,7 +135,13 @@
               <input type="checkbox" class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500"
                      @change="if($event.target.checked){document.querySelectorAll('#req-table-body input[type=checkbox]').forEach(c=>{c.checked=true;selectedIds.add(parseInt(c.value))})}else{selectedIds=new Set();document.querySelectorAll('#req-table-body input[type=checkbox]').forEach(c=>c.checked=false)}; selectedIds=new Set(selectedIds)">
             </th>
-            {% for col_name, col_key in [('Name', 'name'), ('Customer', 'customer_name'), ('Owner', None), ('Parts', None), ('Offers', None), ('Status', 'status'), ('Urgency', 'urgency'), ('Created', 'created_at')] %}
+            {# Role-based column order: sales sees quote/offer/deadline first, sourcing sees coverage/RFQs first #}
+            {% if user_role == 'sales' %}
+              {% set columns = [('Name', 'name'), ('Customer', 'customer_name'), ('Status', 'status'), ('Offers', None), ('Parts', None), ('Urgency', 'urgency'), ('Owner', None), ('Created', 'created_at')] %}
+            {% else %}
+              {% set columns = [('Name', 'name'), ('Customer', 'customer_name'), ('Owner', None), ('Parts', None), ('Offers', None), ('Status', 'status'), ('Urgency', 'urgency'), ('Created', 'created_at')] %}
+            {% endif %}
+            {% for col_name, col_key in columns %}
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {% if col_key %}
               <a hx-get="/v2/partials/requisitions?sort={{ col_key }}&dir={{ 'asc' if sort == col_key and dir == 'desc' else 'desc' }}"

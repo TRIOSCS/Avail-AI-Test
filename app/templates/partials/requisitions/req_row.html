@@ -1,49 +1,57 @@
 {# req_row.html — Single requisition table row for the list view.
-   Receives: req (Requisition object with req_count, offer_count attrs).
+   Receives: req (Requisition object with req_count, offer_count attrs), user_role (str).
    Called by: requisitions/list.html loop, create endpoint (prepend).
    Depends on: brand color palette from tailwind.config.js, Alpine.js (for checkbox state).
 #}
-<tr class="hover:bg-brand-50 cursor-pointer group transition-colors"
-    hx-get="/v2/partials/requisitions/{{ req.id }}"
-    hx-target="#main-content"
-    hx-push-url="/v2/requisitions/{{ req.id }}">
-  {# Checkbox (stops row click propagation) #}
-  <td class="px-3 py-3 w-10" @click.stop>
-    <input type="checkbox" :value="{{ req.id }}"
-           @change="$event.target.checked ? selectedIds.add({{ req.id }}) : selectedIds.delete({{ req.id }}); selectedIds = new Set(selectedIds)"
-           :checked="selectedIds.has({{ req.id }})"
-           class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500">
-  </td>
+
+{# Reusable cell macros #}
+{% macro cell_name() %}
   <td class="px-4 py-3 text-sm font-medium text-brand-500 group-hover:text-brand-600">{{ req.name }}</td>
+{% endmacro %}
+
+{% macro cell_customer() %}
   <td class="px-4 py-3 text-sm text-gray-500">{{ req.customer_name or "—" }}</td>
+{% endmacro %}
+
+{% macro cell_owner() %}
   <td class="px-4 py-3 text-sm text-gray-500">
     {% if req.creator %}
       <span class="inline-flex items-center gap-1.5">
         <span class="inline-flex items-center justify-center h-5 w-5 rounded-full bg-brand-100 text-brand-600 text-[10px] font-bold">{{ req.creator.name[:1]|upper }}</span>
         {{ req.creator.name }}
       </span>
-    {% else %}
-      —
-    {% endif %}
+    {% else %}—{% endif %}
   </td>
+{% endmacro %}
+
+{% macro cell_parts() %}
   <td class="px-4 py-3 text-sm text-gray-500 tabular-nums">{{ req.req_count }}</td>
+{% endmacro %}
+
+{% macro cell_offers() %}
   <td class="px-4 py-3 text-sm text-gray-500 tabular-nums">{{ req.offer_count|default(0) }}</td>
+{% endmacro %}
+
+{% macro cell_status() %}
+  {% set status_colors = {
+    "active": "bg-emerald-50 text-emerald-700",
+    "draft": "bg-brand-100 text-brand-600",
+    "sourcing": "bg-brand-100 text-brand-600",
+    "won": "bg-emerald-50 text-emerald-700",
+    "lost": "bg-rose-50 text-rose-700",
+    "archived": "bg-gray-100 text-gray-600",
+    "awarded": "bg-emerald-50 text-emerald-700",
+    "open": "bg-emerald-50 text-emerald-700",
+    "cancelled": "bg-gray-100 text-gray-600"
+  } %}
   <td class="px-4 py-3">
-    {% set status_colors = {
-      "active": "bg-emerald-50 text-emerald-700",
-      "draft": "bg-brand-100 text-brand-600",
-      "sourcing": "bg-brand-100 text-brand-600",
-      "won": "bg-emerald-50 text-emerald-700",
-      "lost": "bg-rose-50 text-rose-700",
-      "archived": "bg-gray-100 text-gray-600",
-      "awarded": "bg-emerald-50 text-emerald-700",
-      "open": "bg-emerald-50 text-emerald-700",
-      "cancelled": "bg-gray-100 text-gray-600"
-    } %}
     <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(req.status, 'bg-gray-100 text-gray-600') }}">
       {{ req.status|capitalize }}
     </span>
   </td>
+{% endmacro %}
+
+{% macro cell_urgency() %}
   <td class="px-4 py-3">
     {% if req.urgency == "critical" %}
       <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-rose-50 text-rose-700">
@@ -59,5 +67,27 @@
       <span class="text-sm text-gray-400">Normal</span>
     {% endif %}
   </td>
+{% endmacro %}
+
+{% macro cell_created() %}
   <td class="px-4 py-3 text-sm text-gray-500">{{ req.created_at.strftime('%b %d, %Y') if req.created_at else "—" }}</td>
+{% endmacro %}
+
+<tr class="hover:bg-brand-50 cursor-pointer group transition-colors"
+    hx-get="/v2/partials/requisitions/{{ req.id }}"
+    hx-target="#main-content"
+    hx-push-url="/v2/requisitions/{{ req.id }}">
+  {# Checkbox (stops row click propagation) #}
+  <td class="px-3 py-3 w-10" @click.stop>
+    <input type="checkbox" :value="{{ req.id }}"
+           @change="$event.target.checked ? selectedIds.add({{ req.id }}) : selectedIds.delete({{ req.id }}); selectedIds = new Set(selectedIds)"
+           :checked="selectedIds.has({{ req.id }})"
+           class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500">
+  </td>
+  {# Role-based column order: sales sees status/offers first, sourcing sees parts/owner first #}
+  {% if user_role == 'sales' %}
+    {{ cell_name() }}{{ cell_customer() }}{{ cell_status() }}{{ cell_offers() }}{{ cell_parts() }}{{ cell_urgency() }}{{ cell_owner() }}{{ cell_created() }}
+  {% else %}
+    {{ cell_name() }}{{ cell_customer() }}{{ cell_owner() }}{{ cell_parts() }}{{ cell_offers() }}{{ cell_status() }}{{ cell_urgency() }}{{ cell_created() }}
+  {% endif %}
 </tr>

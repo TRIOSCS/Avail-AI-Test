@@ -101,9 +101,18 @@ Rules:
 
 
 async def parse_freeform_intake(
-    text: str, requisition_context: list[dict[str, Any]] | None = None
+    text: str,
+    requisition_context: list[dict[str, Any]] | None = None,
+    mode: str = "auto",
 ) -> dict[str, Any] | None:
-    """Classify pasted text and extract an RFQ or offer draft."""
+    """Classify pasted text and extract an RFQ or offer draft.
+
+    Args:
+        text: Raw pasted text from user.
+        requisition_context: Existing parts for context matching.
+        mode: "auto" lets AI decide, "rfq" forces all rows to requirements,
+              "offer" forces all rows to offers.
+    """
     cleaned = _clean_text(text)
     if not cleaned:
         return None
@@ -119,21 +128,29 @@ async def parse_freeform_intake(
         context_block = "\nCurrent requisition context:\n" + "\n".join(context_lines)
 
     prompt = f"Pasted text:\n{cleaned}{context_block}"
-    result = await routed_structured(
-        prompt=prompt,
-        schema=INTAKE_SCHEMA,
-        system=SYSTEM_PROMPT,
-        model_tier="fast",
-        max_tokens=1800,
-    )
+
+    try:
+        result = await routed_structured(
+            prompt=prompt,
+            schema=INTAKE_SCHEMA,
+            system=SYSTEM_PROMPT,
+            model_tier="fast",
+            max_tokens=1800,
+        )
+    except Exception:
+        logger.warning("AI intake LLM call failed, falling back to heuristic parser")
+        result = None
 
     if not result or not isinstance(result, dict):
-        logger.warning("AI intake parser returned no result")
-        return None
+        logger.info("Using heuristic fallback parser")
+        result = _heuristic_parse(cleaned)
+        if not result:
+            return None
 
     _normalize_requirements(result)
     _normalize_offers(result)
     _normalize_top_level(result)
+    _coerce_mode(result, mode)
     _backfill_document_type(result)
     _backfill_requisition_name(result)
 
@@ -272,6 +289,117 @@ def _backfill_requisition_name(result: dict[str, Any]) -> None:
         result["requisition_name"] = f"{customer_name} RFQ intake {stamp}"
     else:
         result["requisition_name"] = f"AI intake draft {stamp}"
+
+
+def _coerce_mode(result: dict[str, Any], mode: str) -> None:
+    """Force all rows to one type when user explicitly declares mode.
+
+    If mode is 'rfq', move any offer rows into requirements.
+    If mode is 'offer', move any requirement rows into offers.
+    """
+    if mode not in ("rfq", "offer"):
+        return
+
+    if mode == "rfq":
+        for offer in (result.get("offers") or []):
+            result.setdefault("requirements", []).append({
+                "mpn": offer.get("mpn", ""),
+                "quantity": offer.get("qty_available") or 1,
+                "manufacturer": offer.get("manufacturer"),
+                "target_price": offer.get("unit_price"),
+                "condition": offer.get("condition"),
+                "date_codes": offer.get("date_code"),
+                "packaging": offer.get("packaging"),
+                "notes": offer.get("notes"),
+            })
+        result["offers"] = []
+        result["document_type"] = "rfq"
+
+    elif mode == "offer":
+        default_vendor = _clean_scalar(result.get("vendor_name")) or ""
+        for req in (result.get("requirements") or []):
+            result.setdefault("offers", []).append({
+                "vendor_name": default_vendor,
+                "mpn": req.get("mpn", ""),
+                "manufacturer": req.get("manufacturer"),
+                "qty_available": req.get("quantity"),
+                "unit_price": req.get("target_price"),
+                "currency": "USD",
+                "lead_time": None,
+                "date_code": req.get("date_codes"),
+                "condition": req.get("condition"),
+                "packaging": req.get("packaging"),
+                "moq": None,
+                "notes": req.get("notes"),
+            })
+        result["requirements"] = []
+        result["document_type"] = "offer"
+
+
+def _heuristic_parse(text: str) -> dict[str, Any] | None:
+    """Regex-based fallback for TSV/CSV/delimited text when LLM fails.
+
+    Scans each line for part-number-like tokens followed by optional
+    quantity and price columns. Returns a minimal result dict.
+    """
+    import re
+
+    mpn_pattern = re.compile(
+        r"^[\s\"']*([A-Z0-9][A-Z0-9\-\.\/\+]{2,30}[A-Z0-9])"
+    )
+    lines = text.strip().split("\n")
+    rows: list[dict[str, Any]] = []
+
+    for line in lines:
+        line = line.strip()
+        if not line or line.startswith("#") or line.startswith("//"):
+            continue
+
+        cells = re.split(r"[\t,|;]+", line)
+        if not cells:
+            continue
+
+        match = mpn_pattern.match(cells[0].strip())
+        if not match:
+            continue
+
+        mpn = match.group(1).strip()
+        qty = None
+        price = None
+        manufacturer = None
+
+        if len(cells) > 1:
+            qty = normalize_quantity(cells[1].strip())
+        if len(cells) > 2:
+            price = normalize_price(cells[2].strip())
+        if len(cells) > 3:
+            manufacturer = _clean_scalar(cells[3].strip())
+
+        rows.append({
+            "mpn": normalize_mpn(mpn) or mpn.upper(),
+            "quantity": qty or 1,
+            "manufacturer": manufacturer,
+            "target_price": price,
+            "condition": None,
+            "date_codes": None,
+            "packaging": None,
+            "notes": None,
+        })
+
+    if not rows:
+        return None
+
+    return {
+        "document_type": "unclear",
+        "confidence": 0.3,
+        "summary": f"Heuristic parser extracted {len(rows)} row(s) from tabular text.",
+        "requisition_name": None,
+        "customer_name": None,
+        "vendor_name": None,
+        "notes": None,
+        "requirements": rows,
+        "offers": [],
+    }
 
 
 def _clean_text(text: str) -> str:
