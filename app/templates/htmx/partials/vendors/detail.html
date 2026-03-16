@@ -15,19 +15,6 @@
 <title hx-swap-oob="true">{{ vendor.display_name }} — Vendors — AvailAI</title>
 
 <div class="max-w-5xl mx-auto">
-  {# Dark navy page header #}
-  <div class="bg-brand-700 text-white px-6 py-3 rounded-t-lg mb-6 flex items-center justify-between">
-    <div class="flex items-center gap-2 text-sm">
-      <span class="text-brand-300">Avail</span>
-      <span class="text-brand-400">&rsaquo;</span>
-      <a hx-get="/v2/partials/vendors" hx-target="#main-content" hx-push-url="/v2/vendors"
-         preload="mouseover"
-         class="text-brand-200 hover:text-white cursor-pointer">Vendors</a>
-      <span class="text-brand-400">&rsaquo;</span>
-      <span class="font-medium">{{ vendor.display_name }}</span>
-    </div>
-  </div>
-
   {# Header #}
   <div class="bg-white rounded-lg shadow border border-gray-200 p-6 mb-6">
     <div class="flex items-start justify-between">

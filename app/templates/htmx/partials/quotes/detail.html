@@ -16,19 +16,6 @@
 
 <div class="max-w-7xl mx-auto" x-data="{ showMarkup: false }">
 
-  {# Dark navy page header #}
-  <div class="bg-brand-700 text-white px-6 py-3 rounded-t-lg mb-6 flex items-center justify-between">
-    <div class="flex items-center gap-2 text-sm">
-      <span class="text-brand-300">Avail</span>
-      <span class="text-brand-400">&rsaquo;</span>
-      <a href="/v2/quotes" hx-get="/v2/partials/quotes" hx-target="#main-content" hx-push-url="/v2/quotes"
-         preload="mouseover"
-         class="text-brand-200 hover:text-white cursor-pointer">Quotes</a>
-      <span class="text-brand-400">&rsaquo;</span>
-      <span class="font-medium">{{ quote.quote_number }}</span>
-    </div>
-  </div>
-
   {# Header card #}
   <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
     <div class="flex items-start justify-between">
