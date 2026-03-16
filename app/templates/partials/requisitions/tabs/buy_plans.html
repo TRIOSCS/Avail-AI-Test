@@ -1,46 +1,65 @@
 {# buy_plans.html — Buy Plans tab for requisition detail.
-   Receives: buy_plans (list of BuyPlan objects).
+   Receives: buy_plans (list of BuyPlan objects with lines loaded), req (Requisition).
    Called by: requisition tab route.
+   Depends on: brand palette, HTMX.
 #}
 <div>
   {% if buy_plans %}
-  <div class="overflow-x-auto">
+  <div class="flex items-center justify-between mb-4">
+    <p class="text-sm text-gray-500">
+      <span class="font-semibold text-gray-900">{{ buy_plans|length }}</span> buy plan{{ "s" if buy_plans|length != 1 }}
+    </p>
+  </div>
+  <div class="overflow-x-auto bg-white rounded-lg border border-brand-200">
     <table class="min-w-full divide-y divide-gray-200">
-      <thead class="bg-gray-50">
+      <thead class="bg-gray-50 sticky top-0">
         <tr>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Buy Plan #</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">SO#</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-          <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Lines</th>
-          <th class="px-4 py-2 text-right text-xs font-medium text-gray-500 uppercase">Total Cost</th>
-          <th class="px-4 py-2 text-left text-xs font-medium text-gray-500 uppercase">Created</th>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Buy Plan #</th>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SO#</th>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+          <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Lines</th>
+          <th class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Total Cost</th>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-200">
         {% for bp in buy_plans %}
-        <tr class="hover:bg-brand-50 cursor-pointer"
+        <tr class="hover:bg-brand-50 cursor-pointer transition-colors"
             hx-get="/v2/partials/buy-plans/{{ bp.id }}"
             hx-target="#main-content"
-            hx-push-url="/buy-plans/{{ bp.id }}">
-          <td class="px-4 py-2 text-sm font-medium text-brand-500">#{{ bp.id }}</td>
-          <td class="px-4 py-2 text-sm text-gray-500">{{ bp.sales_order_number or "\u2014" }}</td>
-          <td class="px-4 py-2">
-            {% set bp_colors = {"draft": "bg-brand-100 text-brand-600", "pending_approval": "bg-amber-50 text-amber-700", "approved": "bg-emerald-50 text-emerald-700", "active": "bg-emerald-50 text-emerald-700", "completed": "bg-emerald-50 text-emerald-700", "cancelled": "bg-gray-100 text-gray-600"} %}
+            hx-push-url="/v2/buy-plans/{{ bp.id }}">
+          <td class="px-4 py-2.5 text-sm font-medium text-brand-500 hover:text-brand-600">#{{ bp.id }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-500 font-mono">{{ bp.sales_order_number or "—" }}</td>
+          <td class="px-4 py-2.5">
+            {% set bp_colors = {
+              "draft": "bg-brand-100 text-brand-600",
+              "pending_approval": "bg-amber-50 text-amber-700",
+              "approved": "bg-emerald-50 text-emerald-700",
+              "active": "bg-emerald-50 text-emerald-700",
+              "completed": "bg-emerald-50 text-emerald-700",
+              "cancelled": "bg-gray-100 text-gray-600",
+              "rejected": "bg-rose-50 text-rose-700"
+            } %}
             <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ bp_colors.get(bp.status, 'bg-gray-100 text-gray-600') }}">
               {{ (bp.status or 'unknown')|replace('_', ' ')|capitalize }}
             </span>
           </td>
-          <td class="px-4 py-2 text-sm text-gray-500 text-right">{{ bp.lines|length if bp.lines else 0 }}</td>
-          <td class="px-4 py-2 text-sm text-gray-500 text-right">{{ "${:,.2f}".format(bp.total_cost) if bp.total_cost else "\u2014" }}</td>
-          <td class="px-4 py-2 text-sm text-gray-500">{{ bp.created_at.strftime('%b %d, %Y') if bp.created_at else "\u2014" }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-500 text-right">{{ bp.lines|length if bp.lines else 0 }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-900 font-medium text-right">{{ "${:,.2f}".format(bp.total_cost) if bp.total_cost else "—" }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-500">{{ bp.created_at.strftime('%b %d, %Y') if bp.created_at else "—" }}</td>
         </tr>
         {% endfor %}
       </tbody>
     </table>
   </div>
   {% else %}
-  <div class="p-8 text-center">
-    <p class="text-sm text-gray-500">No buy plans linked.</p>
+  <div class="py-12 text-center">
+    <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+    </svg>
+    <p class="text-sm font-medium text-gray-500 mt-3">No buy plans linked.</p>
+    <p class="text-xs text-gray-400 mt-1">Buy plans are created after a quote is won and a sales order is received.</p>
   </div>
   {% endif %}
 </div>

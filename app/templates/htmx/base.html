@@ -201,7 +201,7 @@
       </header>
 
       {# ── Page content ─────────────────────────────────────── #}
-      <main class="pt-14 lg:pt-0">
+      <main class="pt-14 lg:pt-0 pb-16 lg:pb-0">
         <div id="main-content" class="p-4 lg:p-8">
           {% block content %}{% endblock %}
         </div>
@@ -237,6 +237,27 @@
        style="display: none;">
     <span x-text="$store.toast.message"></span>
   </div>
+
+  {# ── Mobile bottom nav (5 items) ──────────────────────────── #}
+  <nav class="lg:hidden fixed bottom-0 inset-x-0 bg-white border-t border-brand-200 z-40 flex justify-around items-center"
+       style="padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));">
+    {% set bottom_nav = [
+      ('requisitions', 'Reqs', '/v2/requisitions', '/v2/partials/requisitions', 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'),
+      ('search', 'Search', '/v2/search', '/v2/partials/search', 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
+      ('buy-plans', 'Buy Plans', '/v2/buy-plans', '/v2/partials/buy-plans', 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
+      ('vendors', 'Vendors', '/v2/vendors', '/v2/partials/vendors', 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4'),
+      ('companies', 'Companies', '/v2/companies', '/v2/partials/companies', 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z'),
+    ] %}
+    {% for id, label, href, partial, icon in bottom_nav %}
+    <a href="{{ href }}" hx-get="{{ partial }}" hx-target="#main-content" hx-push-url="{{ href }}"
+       @click="currentView = '{{ id }}'"
+       :class="currentView === '{{ id }}' ? 'text-brand-500' : 'text-gray-400'"
+       class="flex flex-col items-center justify-center py-2 px-1 min-h-[44px] min-w-[44px] text-xs font-medium">
+      <svg class="h-5 w-5 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ icon }}"/></svg>
+      <span>{{ label }}</span>
+    </a>
+    {% endfor %}
+  </nav>
 
   {# Icon templates for SSE progress (cloned by Alpine sourcingProgress component) #}
   <template id="tpl-icon-check">

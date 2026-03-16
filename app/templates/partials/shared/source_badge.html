@@ -1,22 +1,29 @@
-{# Reusable source badge partial — renders a colored pill for each connector source.
-   Expects either `r.source_type` (from a result dict) or standalone `source_type` in context.
-   Called by: search/results.html, sourcing/lead_card.html, sourcing/lead_detail.html
-   Depends on: nothing (pure template) #}
-{% set st = (r.source_type if r is defined and r.source_type is defined else source_type|default(''))|lower %}
-{% if st == 'brokerbin' %}
-  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-sky-100 text-sky-700">BrokerBin</span>
-{% elif st in ('nexar', 'octopart') %}
-  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-violet-100 text-violet-700">Nexar</span>
-{% elif st == 'digikey' %}
-  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-orange-100 text-orange-700">DigiKey</span>
-{% elif st == 'mouser' %}
-  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-teal-100 text-teal-700">Mouser</span>
-{% elif st == 'oemsecrets' %}
-  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-fuchsia-100 text-fuchsia-700">OEMSecrets</span>
-{% elif st in ('element14', 'farnell') %}
-  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-lime-100 text-lime-700">Element14</span>
-{% elif st == 'ebay' %}
-  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-yellow-100 text-yellow-700">eBay</span>
+{#
+  source_badge.html — Colored pill badge for connector source type.
+  Maps source_name to a Tailwind color class and renders a small rounded pill.
+  Called by: search/results.html, sourcing/lead_card.html, sourcing/lead_detail.html
+  Depends on: nothing (pure template)
+  Context vars: source_name (str)
+#}
+{% set sn = source_name|default('')|lower|trim %}
+
+{% set source_map = {
+  'brokerbin':        {'label': 'BrokerBin',       'bg': 'bg-sky-100',     'text': 'text-sky-700'},
+  'nexar':            {'label': 'Nexar',           'bg': 'bg-violet-100',  'text': 'text-violet-700'},
+  'octopart':         {'label': 'Nexar',           'bg': 'bg-violet-100',  'text': 'text-violet-700'},
+  'digikey':          {'label': 'DigiKey',         'bg': 'bg-orange-100',  'text': 'text-orange-700'},
+  'mouser':           {'label': 'Mouser',          'bg': 'bg-teal-100',    'text': 'text-teal-700'},
+  'oemsecrets':       {'label': 'OEMSecrets',      'bg': 'bg-fuchsia-100', 'text': 'text-fuchsia-700'},
+  'element14':        {'label': 'Element14',       'bg': 'bg-lime-100',    'text': 'text-lime-700'},
+  'farnell':          {'label': 'Element14',       'bg': 'bg-lime-100',    'text': 'text-lime-700'},
+  'ebay':             {'label': 'eBay',            'bg': 'bg-yellow-100',  'text': 'text-yellow-700'},
+  'vendor_affinity':  {'label': 'Vendor Affinity', 'bg': 'bg-brand-100',   'text': 'text-brand-700'},
+  'ai_live_web':      {'label': 'AI Live Web',     'bg': 'bg-gray-100',    'text': 'text-gray-600'}
+} %}
+
+{% set src = source_map.get(sn) %}
+{% if src %}
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ src.bg }} {{ src.text }}">{{ src.label }}</span>
 {% else %}
-  <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600">{{ st|title or 'Unknown' }}</span>
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-gray-100 text-gray-600">{{ source_name|default('Unknown')|title }}</span>
 {% endif %}

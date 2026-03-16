@@ -4,77 +4,106 @@
   Called by: prospecting/list.html (loop include), claim/dismiss endpoints (OOB swap).
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
-<div id="prospect-{{ prospect.id }}" class="bg-white border border-brand-200 rounded-lg p-4 hover:shadow-sm">
+{% set prospect_status_colors = {
+  'suggested': 'bg-brand-100 text-brand-600',
+  'claimed': 'bg-emerald-50 text-emerald-700',
+  'dismissed': 'bg-gray-100 text-gray-600'
+} %}
+
+<div id="prospect-{{ prospect.id }}"
+     class="bg-white border border-brand-200 rounded-lg p-4 hover:shadow-md hover:border-brand-300 transition-all">
   {# Card body — clickable to detail #}
   <div class="cursor-pointer"
        hx-get="/v2/partials/prospecting/{{ prospect.id }}"
        hx-target="#main-content"
        hx-push-url="/v2/prospecting/{{ prospect.id }}">
-    <div class="flex items-start justify-between mb-2">
+
+    {# Row 1: Name + status badge #}
+    <div class="flex items-start justify-between mb-3">
       <div class="min-w-0">
         <h3 class="text-sm font-bold text-gray-900 truncate">{{ prospect.name }}</h3>
+        {% if prospect.domain %}
         <p class="text-xs text-brand-400 truncate">{{ prospect.domain }}</p>
+        {% endif %}
       </div>
-      {% set prospect_status_colors = {
-        'suggested': 'bg-brand-100 text-brand-600',
-        'claimed': 'bg-emerald-50 text-emerald-700',
-        'dismissed': 'bg-gray-100 text-gray-600'
-      } %}
-      <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ prospect_status_colors.get(prospect.status, 'bg-gray-100 text-gray-600') }}">
+      <span class="shrink-0 ml-2 inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ prospect_status_colors.get(prospect.status, 'bg-gray-100 text-gray-600') }}">
         {{ prospect.status|capitalize }}
       </span>
     </div>
 
     {# Fit score bar #}
     <div class="mb-2">
+      {% set fit = prospect.fit_score or 0 %}
       <div class="flex items-center justify-between text-xs mb-0.5">
-        <span class="text-gray-500">Fit: {{ prospect.fit_score or 0 }}%</span>
+        <span class="text-gray-500">Fit</span>
+        <span class="font-medium {% if fit >= 70 %}text-emerald-600{% elif fit >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">{{ fit }}%</span>
       </div>
       <div class="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
-        {% set fit = prospect.fit_score or 0 %}
-        <div class="h-full rounded-full {% if fit >= 70 %}bg-emerald-500{% elif fit >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
+        <div class="h-full rounded-full transition-all {% if fit >= 70 %}bg-emerald-500{% elif fit >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
              style="width: {{ fit }}%"></div>
       </div>
     </div>
 
     {# Readiness score bar #}
     <div class="mb-3">
+      {% set ready = prospect.readiness_score or 0 %}
       <div class="flex items-center justify-between text-xs mb-0.5">
-        <span class="text-gray-500">Ready: {{ prospect.readiness_score or 0 }}%</span>
+        <span class="text-gray-500">Readiness</span>
+        <span class="font-medium {% if ready >= 70 %}text-emerald-600{% elif ready >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">{{ ready }}%</span>
       </div>
       <div class="w-full h-1.5 bg-gray-200 rounded-full overflow-hidden">
-        {% set ready = prospect.readiness_score or 0 %}
-        <div class="h-full rounded-full {% if ready >= 70 %}bg-emerald-500{% elif ready >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
+        <div class="h-full rounded-full transition-all {% if ready >= 70 %}bg-emerald-500{% elif ready >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
              style="width: {{ ready }}%"></div>
       </div>
     </div>
 
-    {# Meta info #}
+    {# Industry + Region #}
     <div class="flex items-center gap-2 text-xs text-gray-500 mb-2">
-      {% if prospect.industry %}<span>{{ prospect.industry }}</span>{% endif %}
-      {% if prospect.region %}<span>{{ prospect.region }}</span>{% endif %}
+      {% if prospect.industry %}
+      <span class="truncate">{{ prospect.industry }}</span>
+      {% endif %}
+      {% if prospect.industry and prospect.region %}
+      <span class="text-gray-300">&middot;</span>
+      {% endif %}
+      {% if prospect.region %}
+      <span>{{ prospect.region }}</span>
+      {% endif %}
     </div>
 
+    {# Discovery source badge #}
     {% if prospect.discovery_source %}
-    <span class="inline-flex bg-brand-100 text-brand-600 text-xs rounded-full px-2 py-0.5">{{ prospect.discovery_source }}</span>
+    <span class="inline-flex px-2 py-0.5 text-xs font-medium bg-brand-100 text-brand-600 rounded-full">
+      {{ prospect.discovery_source }}
+    </span>
+    {% endif %}
+
+    {# Claimed by info #}
+    {% if prospect.status == 'claimed' and prospect.claimed_by_user %}
+    <div class="mt-2 text-xs text-gray-500">
+      Claimed by {{ prospect.claimed_by_user.name|default('—') }}
+    </div>
     {% endif %}
   </div>
 
-  {# Quick action buttons — only for suggested #}
+  {# Quick action buttons #}
   {% if prospect.status == 'suggested' %}
   <div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
     <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/claim"
             hx-target="#prospect-{{ prospect.id }}"
             hx-swap="outerHTML"
-            class="flex-1 px-2 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600">
+            class="flex-1 px-2 py-1.5 bg-brand-500 text-white text-xs font-medium rounded-md hover:bg-brand-600 transition-colors">
       Claim
     </button>
     <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
             hx-target="#prospect-{{ prospect.id }}"
             hx-swap="outerHTML"
-            class="flex-1 px-2 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50">
+            class="flex-1 px-2 py-1.5 bg-white border border-brand-200 text-brand-700 text-xs font-medium rounded-md hover:bg-brand-50 transition-colors">
       Dismiss
     </button>
+  </div>
+  {% elif prospect.status == 'dismissed' %}
+  <div class="mt-3 pt-3 border-t border-gray-100">
+    <span class="text-xs text-gray-400">Dismissed {{ prospect.dismissed_at.strftime('%b %d') if prospect.dismissed_at else '' }}</span>
   </div>
   {% endif %}
 </div>

@@ -1,21 +1,62 @@
 {#
-  proactive/list.html — Proactive Part Match list with Matches / Sent tabs.
+  proactive/list.html — Proactive Part Match list with Matches / Sent tabs + scorecard.
   Receives: matches (list of dicts grouped by customer), sent (list), tab (str).
   Called by: htmx_views.py proactive_list_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
-<div id="breadcrumb" hx-swap-oob="true">Proactive Part Match</div>
+<div id="breadcrumb" hx-swap-oob="true">
+  <span class="text-brand-600 font-medium">Proactive</span>
+</div>
 
-<div class="max-w-7xl mx-auto">
+<div class="max-w-7xl mx-auto" x-data="{ showScorecard: false }">
+  {# Header #}
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Proactive Part Match</h1>
+      <p class="text-sm text-gray-500 mt-1">AI-matched vendor stock to customer purchase history</p>
+    </div>
+    <button @click="showScorecard = !showScorecard"
+            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 transition-colors">
+      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"/>
+      </svg>
+      Scorecard
+    </button>
+  </div>
+
+  {# Scorecard panel — lazy-loaded #}
+  <div x-show="showScorecard" x-cloak x-transition class="mb-6"
+       hx-get="/v2/partials/proactive/scorecard"
+       hx-trigger="intersect once"
+       hx-swap="innerHTML">
+    <div class="flex items-center justify-center py-6 text-sm text-gray-400">
+      <svg class="animate-spin h-4 w-4 mr-2 text-brand-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+      </svg>
+      Loading scorecard...
+    </div>
+  </div>
+
   {# Tab bar #}
   <div class="flex gap-2 mb-6">
     <a hx-get="/v2/partials/proactive?tab=matches" hx-target="#main-content"
-       class="px-4 py-2 text-sm font-medium rounded-md transition-colors {{ 'bg-brand-500 text-white' if tab == 'matches' else 'bg-brand-100 text-brand-600 hover:bg-brand-200' }}">
+       class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors
+              {{ 'bg-brand-500 text-white shadow-sm' if tab == 'matches' else 'bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200' }}">
+      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+      </svg>
       Matches
+      <span hx-get="/v2/partials/proactive/badge" hx-trigger="load" hx-swap="innerHTML"
+            class="inline-flex items-center"></span>
     </a>
     <a hx-get="/v2/partials/proactive?tab=sent" hx-target="#main-content"
-       class="px-4 py-2 text-sm font-medium rounded-md transition-colors {{ 'bg-brand-500 text-white' if tab == 'sent' else 'bg-brand-100 text-brand-600 hover:bg-brand-200' }}">
+       class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition-colors
+              {{ 'bg-brand-500 text-white shadow-sm' if tab == 'sent' else 'bg-brand-50 text-brand-600 hover:bg-brand-100 border border-brand-200' }}">
+      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+      </svg>
       Sent
     </a>
   </div>
@@ -24,12 +65,20 @@
   {# Matches tab #}
   {% if matches %}
     {% for group in matches %}
-    <div class="mb-6">
-      <h3 class="text-lg font-semibold text-gray-900 mb-3">
-        {{ group.company_name | default('Unknown Customer') }}
-        <span class="text-sm font-normal text-gray-500 ml-2">{{ group.site_name | default('') }}</span>
-      </h3>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+    <div class="mb-8">
+      <div class="flex items-center gap-2 mb-3">
+        <div class="flex items-center justify-center w-8 h-8 rounded-full bg-brand-100 text-brand-600 text-sm font-bold">
+          {{ (group.company_name or 'U')[0]|upper }}
+        </div>
+        <div>
+          <h3 class="text-base font-semibold text-gray-900">{{ group.company_name | default('Unknown Customer') }}</h3>
+          {% if group.site_name %}
+          <span class="text-xs text-gray-500">{{ group.site_name }}</span>
+          {% endif %}
+        </div>
+        <span class="ml-auto text-xs text-gray-400">{{ group.matches|length if group.matches else 0 }} match{{ 'es' if (group.matches|length if group.matches else 0) != 1 }}</span>
+      </div>
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
         {% for match in group.matches | default([]) %}
         {% include "htmx/partials/proactive/_match_card.html" %}
         {% endfor %}
@@ -37,51 +86,69 @@
     </div>
     {% endfor %}
   {% else %}
-    <div class="bg-white rounded-lg shadow border border-gray-200 p-12 text-center">
-      <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    <div class="bg-white rounded-lg border border-brand-200 p-12 text-center">
+      <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
       </svg>
-      <p class="mt-2 text-sm text-gray-500">No new proactive matches found</p>
-      <p class="mt-1 text-xs text-gray-400">Matches are generated when your vendor offers align with customer purchase history</p>
+      <p class="mt-3 text-sm font-medium text-gray-600">No new proactive matches</p>
+      <p class="mt-1 text-xs text-gray-400">Matches appear when vendor offers align with customer purchase history</p>
     </div>
   {% endif %}
 
   {% elif tab == 'sent' %}
   {# Sent tab #}
   {% if sent %}
-    <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
-      <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
-          <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Customer</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Parts</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Sent</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
-          </tr>
-        </thead>
-        <tbody class="divide-y divide-gray-200">
-          {% for offer in sent %}
-          <tr class="hover:bg-brand-50">
-            <td class="px-4 py-3 text-sm text-gray-900">{{ offer.company_name | default('—') }}</td>
-            <td class="px-4 py-3 text-sm font-mono text-gray-700">{{ offer.mpns | default('—') }}</td>
-            <td class="px-4 py-3 text-sm text-gray-500">{{ offer.sent_at | default('—') }}</td>
-            <td class="px-4 py-3">
-              {% set status = offer.status | default('sent') %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full
-                {{ 'bg-emerald-50 text-emerald-700' if status == 'won' else
-                   'bg-amber-50 text-amber-700' if status == 'pending' else
-                   'bg-brand-100 text-brand-600' }}">
-                {{ status | upper }}
-              </span>
-            </td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
+    <div class="bg-white rounded-lg border border-brand-200 overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Parts</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Sent</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+              <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-200">
+            {% for offer in sent %}
+            <tr class="hover:bg-brand-50 transition-colors">
+              <td class="px-4 py-3 text-sm text-gray-900">{{ offer.company_name | default('--') }}</td>
+              <td class="px-4 py-3 text-sm font-mono text-brand-600">{{ offer.mpns | default('--') }}</td>
+              <td class="px-4 py-3 text-sm text-gray-500">{{ offer.sent_at | default('--') }}</td>
+              <td class="px-4 py-3">
+                {% set status = offer.status | default('sent') %}
+                <span class="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full
+                  {{ 'bg-emerald-50 text-emerald-700' if status == 'won' else
+                     'bg-amber-50 text-amber-700' if status == 'pending' else
+                     'bg-brand-50 text-brand-600' if status == 'sent' else
+                     'bg-rose-50 text-rose-700' if status == 'lost' else
+                     'bg-gray-100 text-gray-600' }}">
+                  {{ status | upper }}
+                </span>
+              </td>
+              <td class="px-4 py-3 text-right">
+                {% if status == 'won' and offer.id %}
+                <button hx-post="/v2/partials/proactive/{{ offer.id }}/convert"
+                        hx-target="#main-content"
+                        class="px-3 py-1 text-xs font-medium text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors">
+                  Convert
+                </button>
+                {% endif %}
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
     </div>
   {% else %}
-    <div class="bg-white rounded-lg shadow border border-gray-200 p-12 text-center">
-      <p class="text-sm text-gray-500">No proactive offers sent yet</p>
+    <div class="bg-white rounded-lg border border-brand-200 p-12 text-center">
+      <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+      </svg>
+      <p class="mt-3 text-sm font-medium text-gray-600">No proactive offers sent yet</p>
+      <p class="mt-1 text-xs text-gray-400">Draft and send offers from the Matches tab</p>
     </div>
   {% endif %}
   {% endif %}

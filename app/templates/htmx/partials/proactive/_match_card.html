@@ -1,44 +1,85 @@
 {#
-  proactive/_match_card.html — Individual proactive match card.
+  proactive/_match_card.html — Individual proactive match card with actions.
   Receives: match (dict with id, mpn, manufacturer, vendor_name, qty, unit_price,
             customer_purchase_count, customer_last_purchased_at, confidence, reason).
   Called by: proactive/list.html loop.
-  Depends on: brand palette.
+  Depends on: HTMX, Alpine.js, brand palette.
 #}
 
-<div class="bg-white rounded-lg shadow border border-gray-200 p-4">
-  <div class="flex items-start justify-between mb-2">
+<div id="match-card-{{ match.id }}" class="bg-white rounded-lg border border-brand-200 p-4 hover:border-brand-300 hover:shadow-sm transition-all"
+     x-data="{ showDraft: false }">
+  {# Header: MPN + confidence badge #}
+  <div class="flex items-start justify-between mb-3">
     <div>
-      <p class="text-sm font-semibold text-gray-900 font-mono">{{ match.mpn | default('—') }}</p>
-      <p class="text-xs text-gray-500">{{ match.manufacturer | default('') }}</p>
+      <p class="text-sm font-bold text-gray-900 font-mono">{{ match.mpn | default('--') }}</p>
+      {% if match.manufacturer %}
+      <p class="text-xs text-gray-500 mt-0.5">{{ match.manufacturer }}</p>
+      {% endif %}
     </div>
     {% set conf = match.confidence | default('medium') %}
-    <span class="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full
-      {{ 'bg-emerald-50 text-emerald-700' if conf == 'high' else
-         'bg-amber-50 text-amber-700' if conf == 'medium' else
-         'bg-gray-100 text-gray-600' }}">
+    <span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-full
+      {{ 'bg-emerald-50 text-emerald-700 border border-emerald-200' if conf == 'high' else
+         'bg-amber-50 text-amber-700 border border-amber-200' if conf == 'medium' else
+         'bg-gray-100 text-gray-600 border border-gray-200' }}">
+      {% if conf == 'high' %}
+      <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+      {% endif %}
       {{ conf | upper }}
     </span>
   </div>
 
-  <div class="text-xs text-gray-600 space-y-1 mb-3">
-    <p><span class="text-gray-400">Vendor:</span> {{ match.vendor_name | default('—') }}</p>
-    <p><span class="text-gray-400">Qty:</span> {{ match.qty | default(0) | int }}
-       {% if match.unit_price %}<span class="ml-2 text-gray-400">Price:</span> ${{ '%.2f' | format(match.unit_price) }}{% endif %}</p>
+  {# Details grid #}
+  <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs mb-3">
+    <div>
+      <span class="text-gray-400 font-medium">Vendor</span>
+      <p class="text-gray-700">{{ match.vendor_name | default('--') }}</p>
+    </div>
+    <div>
+      <span class="text-gray-400 font-medium">Available</span>
+      <p class="text-gray-700">
+        {{ "{:,}".format(match.qty|int) if match.qty else '--' }}
+        {% if match.unit_price %}
+        <span class="text-emerald-700 font-medium ml-1">${{ '%.2f' | format(match.unit_price) }}</span>
+        {% endif %}
+      </p>
+    </div>
     {% if match.customer_purchase_count %}
-    <p><span class="text-gray-400">Customer bought:</span> {{ match.customer_purchase_count }}x
-       {% if match.customer_last_purchased_at %}(last {{ match.customer_last_purchased_at }}){% endif %}</p>
-    {% endif %}
-    {% if match.reason %}
-    <p class="text-gray-500 italic">{{ match.reason }}</p>
+    <div class="col-span-2">
+      <span class="text-gray-400 font-medium">Customer history</span>
+      <p class="text-gray-700">
+        Bought {{ match.customer_purchase_count }}x
+        {% if match.customer_last_purchased_at %}
+        <span class="text-gray-400">(last {{ match.customer_last_purchased_at }})</span>
+        {% endif %}
+      </p>
+    </div>
     {% endif %}
   </div>
 
-  <div class="flex gap-2">
+  {# AI reasoning #}
+  {% if match.reason %}
+  <div class="bg-brand-50 rounded-lg px-3 py-2 mb-3 border border-brand-100">
+    <div class="flex items-start gap-1.5">
+      <svg class="h-3.5 w-3.5 text-brand-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+      </svg>
+      <p class="text-xs text-brand-700 leading-relaxed">{{ match.reason }}</p>
+    </div>
+  </div>
+  {% endif %}
+
+  {# Actions #}
+  <div class="flex flex-wrap gap-2" x-show="!showDraft">
+    <button hx-post="/v2/partials/proactive/{{ match.id }}/draft"
+            hx-target="#match-card-{{ match.id }}"
+            hx-swap="innerHTML"
+            class="flex-1 px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 transition-colors text-center">
+      Draft Offer
+    </button>
     <button hx-post="/v2/partials/proactive/{{ match.id }}/dismiss"
             hx-target="#main-content"
             hx-confirm="Dismiss this match?"
-            class="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
+            class="px-3 py-1.5 text-xs font-medium text-gray-600 bg-white border border-gray-200 rounded-lg hover:bg-gray-50 transition-colors">
       Dismiss
     </button>
   </div>

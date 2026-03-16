@@ -2,26 +2,51 @@
   quotes/line_row.html — Single quote line item row with inline editing via double-click.
   Receives: line (QuoteLine ORM object), quote (Quote ORM object from parent context).
   Called by: quotes/detail.html (loop include), update_quote_line endpoint (returned after edit).
-  Depends on: HTMX, Alpine.js, Tailwind CSS.
+  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
-<tr id="line-{{ line.id }}" class="hover:bg-gray-50"
-    x-data="{ editing: false, field: '' }"
+<tr id="line-{{ line.id }}" class="hover:bg-brand-50/40 transition-colors group"
+    x-data="{ editing: false }"
     @dblclick="editing = true">
-  <td class="px-4 py-3 text-sm font-mono font-medium text-gray-900">
+  {# MPN cell — in edit mode, expands to show full inline form #}
+  <td class="px-4 py-3 text-sm font-mono font-medium text-gray-900" :colspan="editing ? 7 : 1">
     <template x-if="!editing">
       <span>{{ line.mpn }}</span>
     </template>
     <template x-if="editing">
       <form hx-put="/v2/partials/quotes/{{ line.quote_id }}/lines/{{ line.id }}"
             hx-target="#line-{{ line.id }}" hx-swap="outerHTML"
-            class="flex gap-1 items-center">
-        <input type="text" name="mpn" value="{{ line.mpn }}" class="w-28 px-1 py-0.5 text-sm border border-brand-200 rounded font-mono">
-        <input type="text" name="manufacturer" value="{{ line.manufacturer or '' }}" class="w-20 px-1 py-0.5 text-sm border border-brand-200 rounded" placeholder="Mfr">
-        <input type="number" name="qty" value="{{ line.qty or 0 }}" class="w-16 px-1 py-0.5 text-sm border border-brand-200 rounded">
-        <input type="number" name="cost_price" value="{{ '{:.4f}'.format(line.cost_price|float) if line.cost_price else '' }}" step="0.0001" class="w-20 px-1 py-0.5 text-sm border border-brand-200 rounded" placeholder="Cost">
-        <input type="number" name="sell_price" value="{{ '{:.4f}'.format(line.sell_price|float) if line.sell_price else '' }}" step="0.0001" class="w-20 px-1 py-0.5 text-sm border border-brand-200 rounded" placeholder="Sell">
-        <button type="submit" class="px-2 py-0.5 text-xs bg-brand-500 text-white rounded hover:bg-brand-600">Save</button>
-        <button type="button" @click="editing = false" class="px-2 py-0.5 text-xs text-gray-600 border rounded hover:bg-gray-100">Cancel</button>
+            class="flex flex-wrap gap-2 items-end">
+        <div>
+          <label class="block text-xs text-gray-400 mb-0.5">MPN</label>
+          <input type="text" name="mpn" value="{{ line.mpn }}"
+                 class="w-28 px-2 py-1 text-sm border border-brand-200 rounded font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-0.5">Mfr</label>
+          <input type="text" name="manufacturer" value="{{ line.manufacturer or '' }}"
+                 class="w-24 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-0.5">Qty</label>
+          <input type="number" name="qty" value="{{ line.qty or 0 }}"
+                 class="w-20 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-0.5">Cost</label>
+          <input type="number" name="cost_price" value="{{ '{:.4f}'.format(line.cost_price|float) if line.cost_price else '' }}"
+                 step="0.0001"
+                 class="w-24 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-400 mb-0.5">Sell</label>
+          <input type="number" name="sell_price" value="{{ '{:.4f}'.format(line.sell_price|float) if line.sell_price else '' }}"
+                 step="0.0001"
+                 class="w-24 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div class="flex gap-1">
+          <button type="submit" class="px-3 py-1 text-xs bg-brand-500 text-white rounded-md hover:bg-brand-600 font-medium transition-colors">Save</button>
+          <button type="button" @click="editing = false" class="px-3 py-1 text-xs text-gray-600 border border-gray-300 rounded-md hover:bg-gray-100 transition-colors">Cancel</button>
+        </div>
       </form>
     </template>
   </td>
@@ -31,15 +56,20 @@
   <td class="px-4 py-3 text-sm text-gray-600 text-right" x-show="!editing">${{ '{:,.4f}'.format(line.sell_price|float) if line.sell_price else '-' }}</td>
   <td class="px-4 py-3 text-sm text-right" x-show="!editing">
     {% set mp = line.margin_pct|float if line.margin_pct else 0 %}
-    <span class="{% if mp >= 30 %}text-emerald-700{% elif mp >= 15 %}text-amber-700{% else %}text-rose-700{% endif %}">
+    <span class="inline-flex px-1.5 py-0.5 rounded text-xs font-medium
+                 {% if mp >= 30 %}bg-emerald-50 text-emerald-700
+                 {% elif mp >= 15 %}bg-amber-50 text-amber-700
+                 {% else %}bg-rose-50 text-rose-700{% endif %}">
       {{ '{:.1f}'.format(mp) }}%
     </span>
   </td>
-  <td class="px-4 py-3" x-show="!editing">
+  <td class="px-4 py-3 text-center" x-show="!editing">
     <button hx-delete="/v2/partials/quotes/{{ line.quote_id }}/lines/{{ line.id }}"
             hx-target="#line-{{ line.id }}"
             hx-swap="delete"
             hx-confirm="Remove this line?"
-            class="text-xs text-rose-600 hover:text-rose-500 font-medium">Delete</button>
+            class="text-xs text-rose-500 hover:text-rose-700 font-medium opacity-0 group-hover:opacity-100 transition-opacity">
+      <svg class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
+    </button>
   </td>
 </tr>

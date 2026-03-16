@@ -5,6 +5,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
+{# OOB breadcrumb #}
 <div id="breadcrumb" hx-swap-oob="true">
   <a href="/v2/prospecting" hx-get="/v2/partials/prospecting" hx-target="#main-content" hx-push-url="/v2/prospecting"
      class="text-brand-400 hover:text-brand-300">Prospecting</a>
@@ -20,13 +21,15 @@
       <div>
         <h1 class="text-2xl font-bold text-gray-900">{{ prospect.name }}</h1>
         {% if prospect.domain %}
-        <a href="https://{{ prospect.domain }}" target="_blank" class="text-sm text-brand-500 hover:text-brand-400">{{ prospect.domain }}</a>
+        <a href="https://{{ prospect.domain }}" target="_blank" rel="noopener"
+           class="text-sm text-brand-500 hover:text-brand-600 hover:underline">{{ prospect.domain }} &nearr;</a>
         {% endif %}
         <div class="mt-2 flex items-center gap-3 text-sm text-gray-600">
           {% if prospect.industry %}<span>{{ prospect.industry }}</span>{% endif %}
+          {% if prospect.industry and prospect.region %}<span class="text-gray-300">&middot;</span>{% endif %}
           {% if prospect.region %}<span>{{ prospect.region }}</span>{% endif %}
         </div>
-        <div class="mt-2">
+        <div class="mt-2 flex items-center gap-2">
           {% set prospect_status_colors = {
             'suggested': 'bg-brand-100 text-brand-600',
             'claimed': 'bg-emerald-50 text-emerald-700',
@@ -36,64 +39,96 @@
             {{ prospect.status|capitalize }}
           </span>
           {% if prospect.claimed_by_user %}
-          <span class="ml-2 text-sm text-gray-500">Claimed by {{ prospect.claimed_by_user.name }}</span>
+          <span class="text-sm text-gray-500">Claimed by {{ prospect.claimed_by_user.name }}</span>
           {% endif %}
         </div>
       </div>
 
       {# Action buttons #}
-      <div class="flex gap-2">
+      <div class="flex flex-wrap gap-2">
         {% if prospect.status == 'suggested' %}
         <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/claim"
                 hx-target="#main-content"
-                class="px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600">
+                class="px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors">
           Claim
         </button>
         <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
                 hx-target="#main-content"
-                class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50">
+                class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors">
           Dismiss
+        </button>
+        {% elif prospect.status == 'claimed' %}
+        <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
+                hx-target="#main-content"
+                hx-confirm="Release this prospect back to the pool?"
+                class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors">
+          Release
         </button>
         {% endif %}
         <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/enrich"
                 hx-target="#main-content"
-                class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50 htmx-indicator">
-          <span class="htmx-indicator-content">Enrich</span>
+                hx-indicator="#enrich-spinner"
+                class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors flex items-center gap-1.5">
+          <span id="enrich-spinner" class="htmx-indicator">
+            <svg class="h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
+              <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+              <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+            </svg>
+          </span>
+          Enrich
         </button>
+        {% if prospect.status == 'claimed' %}
+        <a href="/v2/requisitions?action=create&customer={{ prospect.name|urlencode }}"
+           hx-get="/v2/partials/requisitions?action=create&customer={{ prospect.name|urlencode }}"
+           hx-target="#main-content"
+           hx-push-url="true"
+           class="px-3 py-1.5 bg-emerald-600 text-white text-sm font-medium rounded-lg hover:bg-emerald-700 transition-colors">
+          Create Requisition
+        </a>
+        {% endif %}
       </div>
     </div>
   </div>
 
-  {# Scores section #}
+  {# Scores section — side by side #}
   <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mb-6">
     {# Fit score #}
     <div class="bg-white border border-brand-200 rounded-lg p-6">
-      <div class="text-sm text-gray-500 mb-2">Fit Score</div>
+      <div class="text-sm font-medium text-gray-500 mb-2">Fit Score</div>
       {% set fit = prospect.fit_score or 0 %}
-      <div class="text-3xl font-bold {% if fit >= 70 %}text-emerald-600{% elif fit >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">{{ fit }}%</div>
-      <div class="mt-2 w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-        <div class="h-full rounded-full {% if fit >= 70 %}bg-emerald-500{% elif fit >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
+      <div class="text-3xl font-bold {% if fit >= 70 %}text-emerald-600{% elif fit >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">
+        {{ fit }}%
+      </div>
+      <div class="mt-3 w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
+        <div class="h-full rounded-full transition-all {% if fit >= 70 %}bg-emerald-500{% elif fit >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
              style="width: {{ fit }}%"></div>
       </div>
       {% if prospect.fit_reasoning %}
-      <p class="mt-2 text-xs text-gray-500">{{ prospect.fit_reasoning }}</p>
+      <p class="mt-3 text-xs text-gray-500 leading-relaxed">{{ prospect.fit_reasoning }}</p>
       {% endif %}
     </div>
 
     {# Readiness score #}
     <div class="bg-white border border-brand-200 rounded-lg p-6">
-      <div class="text-sm text-gray-500 mb-2">Readiness Score</div>
+      <div class="text-sm font-medium text-gray-500 mb-2">Readiness Score</div>
       {% set ready = prospect.readiness_score or 0 %}
-      <div class="text-3xl font-bold {% if ready >= 70 %}text-emerald-600{% elif ready >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">{{ ready }}%</div>
-      <div class="mt-2 w-full h-2 bg-gray-200 rounded-full overflow-hidden">
-        <div class="h-full rounded-full {% if ready >= 70 %}bg-emerald-500{% elif ready >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
+      <div class="text-3xl font-bold {% if ready >= 70 %}text-emerald-600{% elif ready >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">
+        {{ ready }}%
+      </div>
+      <div class="mt-3 w-full h-2.5 bg-gray-200 rounded-full overflow-hidden">
+        <div class="h-full rounded-full transition-all {% if ready >= 70 %}bg-emerald-500{% elif ready >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
              style="width: {{ ready }}%"></div>
       </div>
       {% if prospect.readiness_signals %}
-      <div class="mt-2 flex flex-wrap gap-1">
+      <div class="mt-3 flex flex-wrap gap-1.5">
         {% for signal_key, signal_val in (prospect.readiness_signals or {}).items() %}
         {% if signal_val %}
-        <span class="inline-flex px-1.5 py-0.5 text-xs bg-brand-100 text-brand-600 rounded-full">{{ signal_key }}</span>
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs rounded-full bg-brand-100 text-brand-600">
+          <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+          </svg>
+          {{ signal_key|replace("_", " ")|title }}
+        </span>
         {% endif %}
         {% endfor %}
       </div>
@@ -105,65 +140,148 @@
   <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
     <div class="flex items-center gap-3 text-sm">
       <span class="text-gray-500">Discovery Source:</span>
-      <span class="inline-flex bg-brand-100 text-brand-600 text-xs rounded-full px-2 py-0.5">{{ prospect.discovery_source }}</span>
-      <span class="text-gray-400">{{ prospect.created_at.strftime('%b %d, %Y') if prospect.created_at else '-' }}</span>
+      <span class="inline-flex px-2.5 py-0.5 text-xs font-medium bg-brand-100 text-brand-600 rounded-full">
+        {{ prospect.discovery_source }}
+      </span>
+      <span class="text-gray-400">{{ prospect.created_at.strftime('%b %d, %Y') if prospect.created_at else '—' }}</span>
     </div>
   </div>
 
   {# Enrichment data #}
   {% if enrichment %}
-  <div class="bg-brand-50 border border-brand-200 rounded-lg p-4 mb-6">
-    <h2 class="text-lg font-semibold text-gray-900 mb-3">Enrichment Data</h2>
+  <div class="bg-brand-50 border border-brand-200 rounded-lg p-5 mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-4">Enrichment Data</h2>
 
     {% if enrichment.get('sam_gov') %}
-    <div class="mb-3">
-      <h3 class="text-sm font-medium text-gray-700 mb-1">SAM.gov</h3>
-      <div class="text-sm text-gray-600">
+    <div class="mb-4">
+      <h3 class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
+        <svg class="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+        </svg>
+        SAM.gov
+      </h3>
+      <div class="text-sm text-gray-600 grid grid-cols-1 sm:grid-cols-2 gap-1">
         {% for key, val in enrichment.sam_gov.items() %}
-        <p><span class="text-gray-400">{{ key }}:</span> {{ val }}</p>
+        <p><span class="text-gray-400 font-medium">{{ key|replace("_", " ")|title }}:</span> {{ val }}</p>
         {% endfor %}
       </div>
     </div>
     {% endif %}
 
     {% if enrichment.get('news') %}
-    <div class="mb-3">
-      <h3 class="text-sm font-medium text-gray-700 mb-1">News Mentions</h3>
-      <ul class="text-sm text-gray-600 space-y-1">
+    <div class="mb-4">
+      <h3 class="text-sm font-semibold text-gray-700 mb-2 flex items-center gap-1.5">
+        <svg class="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 20H5a2 2 0 01-2-2V6a2 2 0 012-2h10a2 2 0 012 2v1m2 13a2 2 0 01-2-2V7m2 13a2 2 0 002-2V9a2 2 0 00-2-2h-2m-4-3H9M7 16h6M7 8h6v4H7V8z"/>
+        </svg>
+        News Mentions
+      </h3>
+      <ul class="text-sm text-gray-600 space-y-1.5">
         {% for item in enrichment.news %}
-        <li>{{ item.get('headline', '') }} <span class="text-gray-400">{{ item.get('date', '') }}</span></li>
+        <li class="flex items-start gap-2">
+          <span class="text-gray-300 mt-1">&bull;</span>
+          <div>
+            <span>{{ item.get('headline', '') }}</span>
+            <span class="text-gray-400 text-xs ml-1">{{ item.get('date', '') }}</span>
+          </div>
+        </li>
         {% endfor %}
       </ul>
     </div>
     {% endif %}
+
+    {# Signals #}
+    {% if enrichment.get('signals') %}
+    <div class="mb-4">
+      <h3 class="text-sm font-semibold text-gray-700 mb-2">Signals</h3>
+      <div class="flex flex-wrap gap-2">
+        {% for signal in enrichment.signals %}
+        <span class="inline-flex items-center px-2.5 py-1 text-xs font-medium bg-amber-50 text-amber-700 rounded-full">
+          {{ signal }}
+        </span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
   </div>
   {% else %}
-  <div class="bg-brand-50 border border-brand-200 rounded-lg p-4 mb-6 text-center">
-    <p class="text-sm text-gray-500">No enrichment data yet. Click "Enrich" to gather free data.</p>
+  <div class="bg-brand-50 border border-brand-200 rounded-lg p-6 mb-6 text-center">
+    <svg class="mx-auto w-8 h-8 text-brand-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/>
+    </svg>
+    <p class="text-sm text-gray-500">No enrichment data yet.</p>
+    <p class="text-xs text-gray-400 mt-1">Click "Enrich" above to gather free data from SAM.gov and news sources.</p>
   </div>
   {% endif %}
 
   {# Warm intro section #}
   {% if warm_intro and warm_intro.get('has_warm_intro') %}
-  <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-4 mb-6">
-    <h2 class="text-lg font-semibold text-emerald-800 mb-2">Warm Introduction Available</h2>
+  <div class="bg-emerald-50 border border-emerald-200 rounded-lg p-5 mb-6">
+    <h2 class="text-lg font-semibold text-emerald-800 mb-3 flex items-center gap-2">
+      <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z"/>
+      </svg>
+      Warm Introduction Available
+    </h2>
     {% if warm_intro.get('warmth') %}
-    <p class="text-sm text-emerald-700 mb-1">Warmth: {{ warm_intro.warmth }}</p>
+    <div class="mb-2">
+      <span class="text-sm text-emerald-600 font-medium">Warmth:</span>
+      <span class="text-sm text-emerald-700 ml-1">{{ warm_intro.warmth }}</span>
+    </div>
     {% endif %}
     {% if warm_intro.get('intro_path') %}
-    <p class="text-sm text-emerald-700 mb-1">Path: {{ warm_intro.intro_path }}</p>
+    <div class="mb-2">
+      <span class="text-sm text-emerald-600 font-medium">Path:</span>
+      <span class="text-sm text-emerald-700 ml-1">{{ warm_intro.intro_path }}</span>
+    </div>
     {% endif %}
     {% if enrichment.get('one_liner') %}
-    <p class="mt-2 text-sm text-emerald-600 italic">"{{ enrichment.one_liner }}"</p>
+    <div class="mt-3 p-3 bg-emerald-100/50 rounded-md">
+      <p class="text-sm text-emerald-700 italic">"{{ enrichment.one_liner }}"</p>
+      <p class="text-xs text-emerald-500 mt-1">Suggested opening line</p>
+    </div>
     {% endif %}
   </div>
   {% endif %}
 
   {# Description / AI writeup #}
   {% if prospect.ai_writeup or prospect.description %}
-  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-6">
+  <div class="bg-white border border-brand-200 rounded-lg p-5 mb-6">
     <h2 class="text-lg font-semibold text-gray-900 mb-2">About</h2>
-    <p class="text-sm text-gray-600">{{ prospect.ai_writeup or prospect.description }}</p>
+    <p class="text-sm text-gray-600 leading-relaxed">{{ prospect.ai_writeup or prospect.description }}</p>
+  </div>
+  {% endif %}
+
+  {# Additional details grid #}
+  {% if prospect.employee_count_range or prospect.revenue_range or prospect.hq_location or prospect.naics_code %}
+  <div class="bg-white border border-brand-200 rounded-lg p-5 mb-6">
+    <h2 class="text-lg font-semibold text-gray-900 mb-3">Company Details</h2>
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+      {% if prospect.employee_count_range %}
+      <div>
+        <dt class="text-xs text-gray-400 font-medium">Employees</dt>
+        <dd class="text-sm text-gray-900 mt-0.5">{{ prospect.employee_count_range }}</dd>
+      </div>
+      {% endif %}
+      {% if prospect.revenue_range %}
+      <div>
+        <dt class="text-xs text-gray-400 font-medium">Revenue</dt>
+        <dd class="text-sm text-gray-900 mt-0.5">{{ prospect.revenue_range }}</dd>
+      </div>
+      {% endif %}
+      {% if prospect.hq_location %}
+      <div>
+        <dt class="text-xs text-gray-400 font-medium">HQ Location</dt>
+        <dd class="text-sm text-gray-900 mt-0.5">{{ prospect.hq_location }}</dd>
+      </div>
+      {% endif %}
+      {% if prospect.naics_code %}
+      <div>
+        <dt class="text-xs text-gray-400 font-medium">NAICS Code</dt>
+        <dd class="text-sm font-mono text-gray-900 mt-0.5">{{ prospect.naics_code }}</dd>
+      </div>
+      {% endif %}
+    </div>
   </div>
   {% endif %}
 </div>

@@ -1,31 +1,61 @@
-<div class="prospect-contacts-list">
-  <p class="text-muted">{{ total }} prospect contact{{ 's' if total != 1 else '' }}</p>
+{#
+  ai/prospect_contacts_table.html — Prospect contacts list table.
+  Receives: total (int), contacts (list of dicts with full_name, title, email,
+            source, confidence, is_saved).
+  Called by: htmx_views.py prospect_contacts route.
+  Depends on: Tailwind CSS with brand palette.
+#}
+<div class="bg-white rounded-lg border border-brand-200 p-5">
+  <div class="flex items-center justify-between mb-4">
+    <h4 class="text-sm font-semibold text-gray-900">Prospect Contacts</h4>
+    <span class="text-xs text-gray-500">{{ total }} contact{{ 's' if total != 1 else '' }}</span>
+  </div>
+
   {% if contacts %}
-  <table class="table table-sm">
-    <thead>
-      <tr>
-        <th>Name</th>
-        <th>Title</th>
-        <th>Email</th>
-        <th>Source</th>
-        <th>Confidence</th>
-        <th>Saved</th>
-      </tr>
-    </thead>
-    <tbody>
-      {% for c in contacts %}
-      <tr>
-        <td>{{ c.full_name }}</td>
-        <td>{{ c.title or '—' }}</td>
-        <td>{{ c.email or '—' }}</td>
-        <td>{{ c.source }}</td>
-        <td>{{ c.confidence }}</td>
-        <td>{{ 'Yes' if c.is_saved else 'No' }}</td>
-      </tr>
-      {% endfor %}
-    </tbody>
-  </table>
+  <div class="overflow-x-auto">
+    <table class="min-w-full divide-y divide-gray-200">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Name</th>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Email</th>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Source</th>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Confidence</th>
+          <th class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Saved</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-200">
+        {% for c in contacts %}
+        <tr class="hover:bg-brand-50 transition-colors">
+          <td class="px-4 py-2.5 text-sm font-medium text-gray-900">{{ c.full_name }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-500">{{ c.title or '--' }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-500">{{ c.email or '--' }}</td>
+          <td class="px-4 py-2.5 text-sm text-gray-500">{{ c.source }}</td>
+          <td class="px-4 py-2.5">
+            <span class="inline-flex px-2 py-0.5 text-xs font-semibold rounded-full border
+              {{ 'bg-emerald-50 text-emerald-700 border-emerald-200' if c.confidence == 'high' else
+                 'bg-amber-50 text-amber-700 border-amber-200' if c.confidence == 'medium' else
+                 'bg-gray-100 text-gray-600 border-gray-200' }}">
+              {{ c.confidence }}
+            </span>
+          </td>
+          <td class="px-4 py-2.5">
+            {% if c.is_saved %}
+            <svg class="h-4 w-4 text-emerald-500" fill="currentColor" viewBox="0 0 20 20">
+              <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+            </svg>
+            {% else %}
+            <span class="text-xs text-gray-400">No</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
   {% else %}
-  <p>No prospect contacts found.</p>
+  <div class="p-6 text-center">
+    <p class="text-sm text-gray-500">No prospect contacts found.</p>
+  </div>
   {% endif %}
 </div>

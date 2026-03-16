@@ -1,23 +1,50 @@
-{# HTMX pagination — receives page, total_pages, target_id, url as template vars. #}
-<nav class="flex items-center justify-between py-3" aria-label="Pagination">
+{#
+  pagination.html — HTMX-powered pagination controls with Prev/Next and page indicator.
+  Renders brand-colored buttons that swap content via hx-get.
+  Called by: any list partial that needs pagination (requisitions, vendors, companies, etc.)
+  Depends on: HTMX
+  Context vars: page (int), total_pages (int), base_url (str)
+#}
+<nav class="flex items-center justify-between border-t border-gray-100 py-3" aria-label="Pagination">
   <div class="flex gap-2">
     {% if page > 1 %}
-    <button hx-get="{{ url }}?page={{ page - 1 }}" hx-target="#{{ target_id }}" hx-swap="innerHTML"
-            class="px-3 py-1.5 text-sm font-medium text-brand-600 bg-white border border-brand-200 rounded-md hover:bg-brand-50">
+    <button hx-get="{{ base_url }}?page={{ page - 1 }}"
+            hx-target="#main-content"
+            hx-swap="innerHTML"
+            class="inline-flex items-center gap-1 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-sm font-medium text-brand-600 hover:bg-brand-50 transition-colors">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+      </svg>
       Prev
     </button>
     {% else %}
-    <span class="px-3 py-1.5 text-sm font-medium text-gray-400 bg-gray-100 border border-gray-200 rounded-md cursor-not-allowed">Prev</span>
+    <span class="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm font-medium text-gray-400 cursor-not-allowed">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+      </svg>
+      Prev
+    </span>
     {% endif %}
 
     {% if page < total_pages %}
-    <button hx-get="{{ url }}?page={{ page + 1 }}" hx-target="#{{ target_id }}" hx-swap="innerHTML"
-            class="px-3 py-1.5 text-sm font-medium text-brand-600 bg-white border border-brand-200 rounded-md hover:bg-brand-50">
+    <button hx-get="{{ base_url }}?page={{ page + 1 }}"
+            hx-target="#main-content"
+            hx-swap="innerHTML"
+            class="inline-flex items-center gap-1 rounded-lg border border-brand-200 bg-white px-3 py-1.5 text-sm font-medium text-brand-600 hover:bg-brand-50 transition-colors">
       Next
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
+      </svg>
     </button>
     {% else %}
-    <span class="px-3 py-1.5 text-sm font-medium text-gray-400 bg-gray-100 border border-gray-200 rounded-md cursor-not-allowed">Next</span>
+    <span class="inline-flex items-center gap-1 rounded-lg border border-gray-200 bg-gray-50 px-3 py-1.5 text-sm font-medium text-gray-400 cursor-not-allowed">
+      Next
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
+      </svg>
+    </span>
     {% endif %}
   </div>
+
   <span class="text-sm text-gray-500">Page {{ page }} of {{ total_pages }}</span>
 </nav>

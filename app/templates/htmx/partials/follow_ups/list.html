@@ -1,53 +1,105 @@
-{# follow_ups/list.html — Cross-requisition follow-up queue.
-   Receives: follow_ups (list of dicts), total (int).
-   Called by: htmx_views.py follow_ups_list_partial endpoint.
-   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
+{#
+  follow_ups/list.html — Cross-requisition follow-up queue.
+  Receives: follow_ups (list of dicts), total (int).
+  Called by: htmx_views.py follow_ups_list_partial endpoint.
+  Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
-<div id="breadcrumb" hx-swap-oob="true">Follow-Ups</div>
+<div id="breadcrumb" hx-swap-oob="true">
+  <span class="text-brand-600 font-medium">Follow-Ups</span>
+</div>
 
 <div class="max-w-7xl mx-auto">
-  <div class="flex items-center justify-between mb-4">
-    <h1 class="text-2xl font-bold text-gray-900">Follow-Up Queue</h1>
-    <span class="text-sm text-gray-500">{{ total }} contact{{ "s" if total != 1 }} needing follow-up</span>
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Follow-Up Queue</h1>
+      <p class="text-sm text-gray-500 mt-1">
+        <span class="font-medium text-amber-600">{{ total }}</span> contact{{ "s" if total != 1 }} needing follow-up
+      </p>
+    </div>
+    {% if follow_ups and follow_ups|length > 1 %}
+    <button hx-post="/v2/partials/follow-ups/batch"
+            hx-target="#main-content"
+            hx-confirm="Send follow-up emails to all {{ total }} contacts?"
+            class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 transition-colors shadow-sm">
+      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+      </svg>
+      Send All
+    </button>
+    {% endif %}
   </div>
 
   {% if follow_ups %}
   <div class="space-y-3">
     {% for fu in follow_ups %}
-    <div id="follow-up-{{ fu.contact_id }}" class="bg-white rounded-lg border border-gray-200 p-4 hover:border-brand-300 transition-colors"
+    <div id="follow-up-{{ fu.contact_id }}"
+         class="bg-white rounded-lg border border-brand-200 p-5 hover:border-brand-300 hover:shadow-sm transition-all"
          x-data="{ showForm: false }">
       <div class="flex items-start justify-between">
         <div class="flex-1 min-w-0">
-          <div class="flex items-center gap-2 mb-1">
+          {# Vendor name + badges #}
+          <div class="flex items-center gap-2 mb-2">
             <h4 class="text-sm font-semibold text-gray-900">{{ fu.vendor_name or "Unknown Vendor" }}</h4>
-            <span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-50 text-amber-700">
-              {{ fu.days_waiting }} day{{ "s" if fu.days_waiting != 1 }} waiting
+            {% set days = fu.days_waiting %}
+            <span class="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full border
+              {{ 'bg-rose-50 text-rose-700 border-rose-200' if days >= 7 else
+                 'bg-amber-50 text-amber-700 border-amber-200' if days >= 3 else
+                 'bg-brand-50 text-brand-600 border-brand-200' }}">
+              {{ days }} day{{ "s" if days != 1 }}
             </span>
             {% set st_colors = {
-              'sent': 'bg-blue-50 text-blue-700',
-              'opened': 'bg-amber-50 text-amber-700',
+              'sent': 'bg-sky-50 text-sky-700 border-sky-200',
+              'opened': 'bg-amber-50 text-amber-700 border-amber-200',
             } %}
-            <span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ st_colors.get(fu.status, 'bg-gray-100 text-gray-600') }}">
+            <span class="inline-flex items-center px-2 py-0.5 text-[10px] font-semibold rounded-full border {{ st_colors.get(fu.status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
+              {% if fu.status == 'opened' %}
+              <svg class="h-2.5 w-2.5 mr-0.5" fill="currentColor" viewBox="0 0 20 20">
+                <path d="M10 12a2 2 0 100-4 2 2 0 000 4z"/>
+                <path fill-rule="evenodd" d="M.458 10C1.732 5.943 5.522 3 10 3s8.268 2.943 9.542 7c-1.274 4.057-5.064 7-9.542 7S1.732 14.057.458 10zM14 10a4 4 0 11-8 0 4 4 0 018 0z" clip-rule="evenodd"/>
+              </svg>
+              {% endif %}
               {{ fu.status|capitalize }}
             </span>
           </div>
-          <p class="text-xs text-gray-500">{{ fu.vendor_email or "" }}</p>
-          {% if fu.parts %}
-          <p class="text-xs text-gray-400 mt-1 truncate">Parts: {{ fu.parts if fu.parts is string else fu.parts|join(', ') }}</p>
+
+          {# Contact email #}
+          {% if fu.vendor_email %}
+          <p class="text-xs text-gray-500 mb-1">
+            <svg class="inline h-3 w-3 mr-1 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+            </svg>
+            {{ fu.vendor_email }}
+          </p>
           {% endif %}
-          <p class="text-xs text-gray-400 mt-0.5">
-            Req:
+
+          {# Parts list #}
+          {% if fu.parts %}
+          <p class="text-xs text-gray-400 truncate">
+            <span class="text-gray-500 font-medium">Parts:</span>
+            <span class="font-mono">{{ fu.parts if fu.parts is string else fu.parts|join(', ') }}</span>
+          </p>
+          {% endif %}
+
+          {# Requisition link #}
+          <p class="text-xs text-gray-400 mt-1">
             <a hx-get="/v2/partials/requisitions/{{ fu.requisition_id }}"
                hx-target="#main-content" hx-push-url="/v2/requisitions/{{ fu.requisition_id }}"
-               class="text-brand-500 hover:text-brand-400 cursor-pointer">{{ fu.requisition_name or "Req #" ~ fu.requisition_id }}</a>
+               class="text-brand-500 hover:text-brand-600 cursor-pointer font-medium">
+              {{ fu.requisition_name or "Req #" ~ fu.requisition_id }}
+            </a>
           </p>
         </div>
-        <div class="flex items-center gap-2 ml-4">
+
+        {# Action button #}
+        <div class="flex items-center gap-2 ml-4 flex-shrink-0">
           <button @click="showForm = !showForm"
-                  class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded hover:bg-brand-100"
-                  x-text="showForm ? 'Cancel' : 'Send Follow-Up'">
-            Send Follow-Up
+                  class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
+                  :class="showForm ? 'text-gray-600 bg-gray-100 hover:bg-gray-200' : 'text-brand-600 bg-brand-50 border border-brand-200 hover:bg-brand-100'">
+            <svg x-show="!showForm" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+            </svg>
+            <span x-text="showForm ? 'Cancel' : 'Send Follow-Up'"></span>
           </button>
         </div>
       </div>
@@ -57,15 +109,18 @@
             hx-post="/v2/partials/follow-ups/{{ fu.contact_id }}/send"
             hx-target="#follow-up-{{ fu.contact_id }}"
             hx-swap="outerHTML"
-            class="mt-3 space-y-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+            class="mt-4 space-y-3 p-4 bg-brand-50 rounded-lg border border-brand-100">
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Follow-Up Message (optional — uses default if blank)</label>
+          <label class="block text-xs font-medium text-gray-600 mb-1">Follow-Up Message <span class="text-gray-400">(optional -- uses default if blank)</span></label>
           <textarea name="body" rows="3"
                     placeholder="Hi, following up on our RFQ regarding {{ fu.parts if fu.parts is string else fu.parts|join(', ') if fu.parts else 'your parts' }}..."
-                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500"></textarea>
+                    class="w-full px-3 py-2 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 bg-white"></textarea>
         </div>
         <button type="submit"
-                class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
+                class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 transition-colors">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
+          </svg>
           Send
         </button>
       </form>
@@ -73,12 +128,12 @@
     {% endfor %}
   </div>
   {% else %}
-  <div class="bg-white rounded-lg border border-gray-200 p-12 text-center">
-    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 13l4 4L19 7"/>
+  <div class="bg-white rounded-lg border border-brand-200 p-12 text-center">
+    <svg class="mx-auto h-12 w-12 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
     </svg>
-    <p class="mt-2 text-sm text-gray-500">No follow-ups needed!</p>
-    <p class="text-xs text-gray-400 mt-1">All RFQ contacts have been responded to or are still within the follow-up window.</p>
+    <p class="mt-3 text-sm font-medium text-gray-600">No follow-ups needed!</p>
+    <p class="text-xs text-gray-400 mt-1">All RFQ contacts have responded or are within the follow-up window.</p>
   </div>
   {% endif %}
 </div>

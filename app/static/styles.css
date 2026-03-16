@@ -1,3 +1,124 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer components {
+  /* Buttons */
+  .btn-primary {
+    @apply bg-brand-500 text-white hover:bg-brand-600 px-4 py-2 text-sm font-medium rounded-lg transition-colors focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
+  }
+
+  .btn-secondary {
+    @apply bg-white text-brand-600 border border-brand-300 hover:bg-brand-50 px-4 py-2 text-sm font-medium rounded-lg transition-colors;
+  }
+
+  .btn-danger {
+    @apply bg-rose-600 text-white hover:bg-rose-700 px-4 py-2 text-sm font-medium rounded-lg transition-colors;
+  }
+
+  .btn-sm {
+    @apply px-3 py-1.5 text-xs;
+  }
+
+  /* Status badges */
+  .badge-success {
+    @apply bg-emerald-50 text-emerald-700 px-2 py-0.5 text-xs font-medium rounded-full;
+  }
+
+  .badge-warning {
+    @apply bg-amber-50 text-amber-700 px-2 py-0.5 text-xs font-medium rounded-full;
+  }
+
+  .badge-danger {
+    @apply bg-rose-50 text-rose-700 px-2 py-0.5 text-xs font-medium rounded-full;
+  }
+
+  .badge-info {
+    @apply bg-brand-100 text-brand-600 px-2 py-0.5 text-xs font-medium rounded-full;
+  }
+
+  .badge-neutral {
+    @apply bg-gray-100 text-gray-600 px-2 py-0.5 text-xs font-medium rounded-full;
+  }
+
+  /* Source badges — each connector gets a distinct hue */
+  .source-badge-brokerbin {
+    @apply bg-sky-100 text-sky-700 px-2 py-0.5 text-xs font-medium rounded-full;
+  }
+
+  .source-badge-nexar {
+    @apply bg-violet-100 text-violet-700 px-2 py-0.5 text-xs font-medium rounded-full;
+  }
+
+  .source-badge-digikey {
+    @apply bg-orange-100 text-orange-700 px-2 py-0.5 text-xs font-medium rounded-full;
+  }
+
+  .source-badge-mouser {
+    @apply bg-teal-100 text-teal-700 px-2 py-0.5 text-xs font-medium rounded-full;
+  }
+
+  .source-badge-oemsecrets {
+    @apply bg-fuchsia-100 text-fuchsia-700 px-2 py-0.5 text-xs font-medium rounded-full;
+  }
+
+  .source-badge-element14 {
+    @apply bg-lime-100 text-lime-700 px-2 py-0.5 text-xs font-medium rounded-full;
+  }
+
+  .source-badge-ebay {
+    @apply bg-yellow-100 text-yellow-700 px-2 py-0.5 text-xs font-medium rounded-full;
+  }
+
+  /* Cards */
+  .card {
+    @apply bg-white border border-brand-200 rounded-lg;
+  }
+
+  .card-padded {
+    @apply bg-white border border-brand-200 rounded-lg p-6;
+  }
+
+  .stat-card {
+    @apply bg-white border border-brand-200 rounded-lg p-4 text-center;
+  }
+
+  /* Data table */
+  .data-table {
+    @apply w-full text-sm text-left;
+  }
+
+  .data-table th {
+    @apply px-4 py-3 text-xs font-medium text-gray-500 uppercase tracking-wider bg-gray-50 border-b border-gray-200;
+  }
+
+  .data-table td {
+    @apply px-4 py-3 border-b border-gray-100;
+  }
+
+  .data-table tr:hover td {
+    @apply bg-gray-50;
+  }
+
+  /* Filter pills */
+  .filter-pill {
+    @apply px-3 py-1.5 text-sm font-medium rounded-full border transition-colors cursor-pointer;
+  }
+
+  .filter-pill-active {
+    @apply bg-brand-500 text-white border-brand-500;
+  }
+
+  .filter-pill-inactive {
+    @apply bg-white text-gray-600 border-gray-300 hover:border-brand-300 hover:text-brand-600;
+  }
+
+  /* Misc UI */
+  .confidence-bar {
+    @apply h-2 rounded-full bg-gray-200 overflow-hidden;
+  }
+
+  .input-search {
+    @apply w-full px-3 py-2 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 placeholder-gray-400;
+  }
+}

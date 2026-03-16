@@ -1,20 +1,26 @@
-{# thread_summary.html — AI-generated email thread summary.
-   Receives: summary (str|None), error (str|None).
-   Called by: htmx_views.py email_thread_summary route.
-   Depends on: Tailwind CSS.
+{#
+  thread_summary.html — AI-generated email thread summary.
+  Receives: summary (str|None), error (str|None).
+  Called by: htmx_views.py email_thread_summary route.
+  Depends on: Tailwind CSS with brand palette.
 #}
 {% if error %}
-<div class="m-4 bg-amber-50 border border-amber-200 rounded p-3">
-  <p class="text-sm text-amber-700">{{ error }}</p>
+<div class="m-4 bg-amber-50 border border-amber-200 rounded-lg p-3">
+  <div class="flex items-center gap-2">
+    <svg class="h-4 w-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"/>
+    </svg>
+    <p class="text-sm text-amber-700">{{ error }}</p>
+  </div>
 </div>
 {% elif summary %}
-<div class="m-4 bg-brand-50 border border-brand-200 rounded-lg p-3">
+<div class="m-4 bg-brand-50 border border-brand-100 rounded-lg p-4">
   <div class="flex items-center gap-2 mb-2">
-    <svg class="h-4 w-4 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+    <svg class="h-4 w-4 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
     </svg>
-    <span class="text-xs font-semibold text-brand-700">AI Summary</span>
+    <span class="text-xs font-semibold text-brand-700 uppercase tracking-wider">AI Summary</span>
   </div>
-  <p class="text-sm text-gray-700">{{ summary }}</p>
+  <p class="text-sm text-gray-700 leading-relaxed">{{ summary }}</p>
 </div>
 {% endif %}

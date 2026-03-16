@@ -1,122 +1,101 @@
-{# Safety review shared component — renders safety band, signals, and recommendation.
-   Reusable across vendor detail and lead detail views.
-   Called by: sourcing/lead_detail.html, vendors/detail.html
-   Depends on: nothing (pure template)
-   Context vars:
-     safety_band (str): "low_risk", "medium_risk", "high_risk", or "unknown"
-     safety_score (float|None): 0-100
-     safety_summary (str): Human-readable summary
-     safety_flags (list[str]): Positive signals prefixed with "positive:", others are caution
-     safety_available (bool, optional): If false, show "no data" message #}
-
-{% if safety_available is defined and not safety_available %}
-<div class="bg-gray-50 rounded-lg p-4 border border-gray-200">
-  <p class="text-sm text-gray-500">No safety data available -- safety is assessed when sourcing leads are created.</p>
-</div>
-{% else %}
-
+{#
+  safety_review.html — Vendor Trust & Safety Review panel.
+  Renders safety band badge, summary, two-column signal lists, and recommended action.
+  Uses caution-oriented language (never accusatory).
+  Called by: sourcing/lead_detail.html, vendors/detail.html
+  Depends on: nothing (pure template)
+  Context vars:
+    safety_band (str): "low_risk", "medium_risk", or "high_risk"
+    safety_summary (str): Human-readable summary text
+    positive_signals (list[str]): Green checkmark items
+    caution_signals (list[str]): Amber warning items
+    recommended_action (str): Recommended buyer action text
+#}
+{% set badge_styles = {
+  'low_risk': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+  'medium_risk': 'bg-amber-50 text-amber-700 border-amber-200',
+  'high_risk': 'bg-rose-50 text-rose-700 border-rose-200'
+} %}
+{% set badge_labels = {
+  'low_risk': 'Low Risk',
+  'medium_risk': 'Medium Risk',
+  'high_risk': 'High Risk'
+} %}
 {% set band_colors = {
   'low_risk': 'bg-emerald-500',
   'medium_risk': 'bg-amber-500',
-  'high_risk': 'bg-rose-500',
-  'unknown': 'bg-gray-400'
-} %}
-{% set badge_colors = {
-  'low_risk': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-  'medium_risk': 'bg-amber-50 text-amber-700 border-amber-200',
-  'high_risk': 'bg-rose-50 text-rose-700 border-rose-200',
-  'unknown': 'bg-gray-100 text-gray-600 border-gray-200'
-} %}
-{% set band_labels = {
-  'low_risk': 'Low Risk',
-  'medium_risk': 'Medium Risk',
-  'high_risk': 'High Risk',
-  'unknown': 'Unknown'
+  'high_risk': 'bg-rose-500'
 } %}
 
-<div class="bg-white rounded-lg border border-brand-200 overflow-hidden">
+<div class="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
   {# Color band at top #}
   <div class="h-1.5 {{ band_colors.get(safety_band, 'bg-gray-400') }}"></div>
 
-  <div class="p-4 space-y-4">
-    {# Header row: badge + score #}
+  <div class="p-5 space-y-4">
+    {# Header #}
     <div class="flex items-center justify-between">
-      <h3 class="text-sm font-semibold text-gray-900">Safety Review</h3>
-      <div class="flex items-center gap-3">
-        {% if safety_score is not none %}
-        <span class="text-sm font-medium text-gray-600">{{ '%.0f'|format(safety_score) }}%</span>
-        {% endif %}
-        <span class="inline-flex px-2.5 py-0.5 text-xs font-medium rounded-full border
-                     {{ badge_colors.get(safety_band, badge_colors.unknown) }}">
-          {{ band_labels.get(safety_band, 'Unknown') }}
-        </span>
-      </div>
+      <h3 class="text-base font-semibold text-gray-900">Vendor Trust & Safety Review</h3>
+      <span class="inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium
+                   {{ badge_styles.get(safety_band, 'bg-gray-100 text-gray-600 border-gray-200') }}">
+        {{ badge_labels.get(safety_band, 'Unknown') }}
+      </span>
     </div>
 
     {# Summary #}
-    <p class="text-sm text-gray-600">{{ safety_summary }}</p>
-
-    {# Positive signals #}
-    {% set positive_flags_list = [] %}
-    {% for flag in safety_flags %}
-      {% if flag.startswith('positive:') %}
-        {% if positive_flags_list.append(flag) %}{% endif %}
-      {% endif %}
-    {% endfor %}
-    {% if positive_flags_list %}
-    <div>
-      <h4 class="text-xs font-semibold text-emerald-700 uppercase tracking-wider mb-2">Positive Signals</h4>
-      <ul class="space-y-1">
-        {% for flag in positive_flags_list %}
-        <li class="flex items-start gap-2 text-sm text-emerald-700">
-          <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
-          </svg>
-          <span>{{ flag.replace('positive:', '').replace('_', ' ')|title }}</span>
-        </li>
-        {% endfor %}
-      </ul>
-    </div>
+    {% if safety_summary %}
+    <p class="text-sm leading-relaxed text-gray-600">{{ safety_summary }}</p>
     {% endif %}
 
-    {# Caution signals #}
-    {% set caution_flags_list = [] %}
-    {% for flag in safety_flags %}
-      {% if not flag.startswith('positive:') %}
-        {% if caution_flags_list.append(flag) %}{% endif %}
+    {# Two-column signals #}
+    {% if positive_signals or caution_signals %}
+    <div class="grid grid-cols-1 gap-4 sm:grid-cols-2">
+      {# Positive signals #}
+      {% if positive_signals %}
+      <div>
+        <h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-emerald-700">Positive Signals</h4>
+        <ul class="space-y-1.5">
+          {% for signal in positive_signals %}
+          <li class="flex items-start gap-2 text-sm text-emerald-700">
+            <svg class="mt-0.5 h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+            </svg>
+            <span>{{ signal }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
       {% endif %}
-    {% endfor %}
-    {% if caution_flags_list %}
-    <div>
-      <h4 class="text-xs font-semibold text-amber-700 uppercase tracking-wider mb-2">Caution Signals</h4>
-      <ul class="space-y-1">
-        {% for flag in caution_flags_list %}
-        <li class="flex items-start gap-2 text-sm text-amber-700">
-          <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/>
-          </svg>
-          <span>{{ flag.replace('_', ' ')|title }}</span>
-        </li>
-        {% endfor %}
-      </ul>
+
+      {# Caution signals #}
+      {% if caution_signals %}
+      <div>
+        <h4 class="mb-2 text-xs font-semibold uppercase tracking-wider text-amber-700">Caution Signals</h4>
+        <ul class="space-y-1.5">
+          {% for signal in caution_signals %}
+          <li class="flex items-start gap-2 text-sm text-amber-700">
+            <svg class="mt-0.5 h-4 w-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round"
+                    d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+            </svg>
+            <span>{{ signal }}</span>
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
     </div>
     {% endif %}
 
     {# Recommended action #}
-    {% if safety_band == 'high_risk' %}
-    <div class="bg-rose-50 rounded p-3 text-sm text-rose-700">
-      <span class="font-medium">Recommended:</span> Verify vendor identity and contact details before any outreach.
-    </div>
-    {% elif safety_band == 'medium_risk' %}
-    <div class="bg-amber-50 rounded p-3 text-sm text-amber-700">
-      <span class="font-medium">Recommended:</span> Confirm business footprint and contact path before relying on inventory claims.
-    </div>
-    {% elif safety_band == 'low_risk' %}
-    <div class="bg-emerald-50 rounded p-3 text-sm text-emerald-700">
-      <span class="font-medium">Recommended:</span> Lower risk -- proceed with standard verification of stock and terms.
+    {% if recommended_action %}
+    {% set action_styles = {
+      'low_risk': 'bg-emerald-50 text-emerald-700',
+      'medium_risk': 'bg-amber-50 text-amber-700',
+      'high_risk': 'bg-rose-50 text-rose-700'
+    } %}
+    <div class="rounded-lg p-3 text-sm {{ action_styles.get(safety_band, 'bg-gray-50 text-gray-700') }}">
+      <span class="font-medium">Recommended:</span> {{ recommended_action }}
     </div>
     {% endif %}
   </div>
 </div>
-{% endif %}

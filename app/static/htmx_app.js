@@ -113,6 +113,7 @@ function _viewFromPath(path) {
     if (/\/proactive(\/|$)/.test(path)) return 'proactive';
     if (/\/strategic(\/|$)/.test(path)) return 'strategic';
     if (/\/settings(\/|$)/.test(path)) return 'settings';
+    if (/\/my-vendors(\/|$)/.test(path)) return 'my-vendors';
     if (/\/vendors(\/|$)/.test(path)) return 'vendors';
     if (/\/companies(\/|$)/.test(path)) return 'companies';
     if (/\/search(\/|$)/.test(path)) return 'search';
@@ -205,9 +206,27 @@ Alpine.data('sourcingProgress', (requirementId, totalSources) => ({
     },
     handleSearchComplete(data) {
         setTimeout(function() {
-            htmx.ajax('GET', '/partials/sourcing/' + requirementId, '#main-content');
+            htmx.ajax('GET', '/v2/partials/sourcing/' + requirementId, '#main-content');
         }, 500);
     }
 }));
+
+// ── Keyboard shortcuts ─────────────────────────────────────
+// Cmd+K / Ctrl+K → focus global search
+document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+        e.preventDefault();
+        var searchInput = document.querySelector('#global-search-results')?.previousElementSibling?.querySelector('input[type="search"]')
+            || document.querySelector('input[name="q"]');
+        if (searchInput) searchInput.focus();
+    }
+    // Escape → close modal or drawer
+    if (e.key === 'Escape') {
+        var drawer = document.getElementById('lead-drawer');
+        if (drawer && drawer.dataset.open === 'true') {
+            drawer.dataset.open = 'false';
+        }
+    }
+});
 
 Alpine.start();

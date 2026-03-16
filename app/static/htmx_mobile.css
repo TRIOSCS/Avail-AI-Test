@@ -27,10 +27,10 @@
     .responsive-table tr {
         display: block;
         margin-bottom: 0;
-        border: 1px solid var(--border, #b7c7d8);
+        border: 1px solid #b7c7d8;
         border-radius: 8px;
         padding: 12px;
-        background: var(--white, #fff);
+        background: #ffffff;
         box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
     }
 
@@ -39,7 +39,7 @@
     }
 
     .responsive-table tr.clickable-row:active {
-        background: var(--surface, #f8fafc);
+        background: #f0f4f8;
         transform: scale(0.99);
     }
 
@@ -55,7 +55,7 @@
     .responsive-table td::before {
         content: attr(data-label);
         font-weight: 600;
-        color: var(--muted, #94a3b8);
+        color: #8b9daf;
         font-size: 12px;
         flex-shrink: 0;
         margin-right: 8px;
@@ -152,8 +152,8 @@
         bottom: 0;
         left: 0;
         right: 0;
-        background: var(--white, #fff);
-        border-top: 1px solid var(--border, #b7c7d8);
+        background: #ffffff;
+        border-top: 1px solid #b7c7d8;
         z-index: 200;
         padding: 4px 0;
         padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));
@@ -172,7 +172,7 @@
         min-height: 44px;
         min-width: 44px;
         text-decoration: none;
-        color: var(--muted, #94a3b8);
+        color: #8b9daf;
         font-size: 10px;
         position: relative;
         -webkit-tap-highlight-color: transparent;
@@ -180,7 +180,7 @@
     }
 
     .mobile-nav-item.active {
-        color: var(--blue, #3d6895);
+        color: #3d6895;
     }
 
     .mobile-nav-item:active {
@@ -200,7 +200,7 @@
         min-width: 16px;
         height: 16px;
         border-radius: 8px;
-        background: var(--red, #ef4444);
+        background: #ef4444;
         color: #fff;
         font-size: 9px;
         font-weight: 700;
@@ -220,8 +220,8 @@
         position: absolute;
         bottom: 100%;
         right: 8px;
-        background: var(--white, #fff);
-        border: 1px solid var(--border, #b7c7d8);
+        background: #ffffff;
+        border: 1px solid #b7c7d8;
         border-radius: 12px;
         box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.1);
         padding: 8px 0;
@@ -236,18 +236,18 @@
         padding: 10px 16px;
         min-height: 44px;
         text-decoration: none;
-        color: var(--text, #1e293b);
+        color: #1e293b;
         font-size: 14px;
         font-weight: 500;
         transition: background 0.1s;
     }
 
     .mobile-more-item:active {
-        background: var(--surface, #f8fafc);
+        background: #f0f4f8;
     }
 
     .mobile-more-item svg {
-        color: var(--muted, #94a3b8);
+        color: #8b9daf;
         flex-shrink: 0;
     }
 }
@@ -286,7 +286,7 @@
         display: block;
         width: 36px;
         height: 4px;
-        background: var(--border, #b7c7d8);
+        background: #b7c7d8;
         border-radius: 2px;
         margin: 0 auto 8px;
     }
@@ -305,7 +305,7 @@
         gap: 4px;
         border: none;
         background: none;
-        color: var(--blue, #3d6895);
+        color: #3d6895;
         font-size: 13px;
         font-weight: 500;
         cursor: pointer;
