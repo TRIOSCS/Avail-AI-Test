@@ -1,31 +1,42 @@
-{# review_queue.html — Review queue for medium-confidence AI-parsed offers.
-   Receives: offers (list[Offer]), user (User).
-   Called by: htmx_views.py offer_review_queue route.
-   Depends on: HTMX, Tailwind CSS with brand palette.
+{#
+  review_queue.html — Review queue for medium-confidence AI-parsed offers.
+  Receives: offers (list[Offer]), user (User).
+  Called by: htmx_views.py offer_review_queue route.
+  Depends on: HTMX, Tailwind CSS with brand palette.
 #}
-<div class="space-y-4">
-  <div class="flex items-center justify-between">
-    <h2 class="text-lg font-semibold text-gray-900">Offer Review Queue</h2>
-    <span class="text-sm text-gray-500">{{ offers|length }} pending review</span>
+
+<div id="breadcrumb" hx-swap-oob="true">
+  <span class="text-brand-600 font-medium">Offer Review</span>
+</div>
+
+<div id="review-queue-content" class="max-w-7xl mx-auto">
+  <div class="flex items-center justify-between mb-6">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Offer Review Queue</h1>
+      <p class="text-sm text-gray-500 mt-1">
+        <span class="font-medium text-amber-600">{{ offers|length }}</span> offer{{ 's' if offers|length != 1 }} pending review
+      </p>
+    </div>
   </div>
 
   {% if offers %}
   <div class="space-y-3">
     {% for o in offers %}
-    <div class="bg-white border border-gray-200 rounded-lg p-4 hover:border-brand-300 transition-colors">
+    <div class="bg-white border border-brand-200 rounded-lg p-5 hover:border-brand-300 hover:shadow-sm transition-all">
       <div class="flex items-start justify-between">
         <div class="flex-1">
-          <div class="flex items-center gap-3 mb-2">
-            <span class="text-sm font-semibold text-gray-900">{{ o.vendor_name or '—' }}</span>
-            <span class="font-mono text-sm text-gray-600">{{ o.mpn or '—' }}</span>
+          {# Vendor + MPN + confidence #}
+          <div class="flex items-center gap-3 mb-3">
+            <span class="text-sm font-semibold text-gray-900">{{ o.vendor_name or '--' }}</span>
+            <span class="font-mono text-sm font-medium text-brand-600">{{ o.mpn or '--' }}</span>
             {% if o.parse_confidence is not none %}
             <span class="inline-flex items-center gap-1 text-xs">
               {% if o.parse_confidence and o.parse_confidence >= 0.8 %}
               <span class="w-2 h-2 rounded-full bg-emerald-500"></span>
-              <span class="text-emerald-700">{{ (o.parse_confidence * 100)|int }}%</span>
+              <span class="text-emerald-700 font-medium">{{ (o.parse_confidence * 100)|int }}%</span>
               {% elif o.parse_confidence and o.parse_confidence >= 0.5 %}
               <span class="w-2 h-2 rounded-full bg-amber-500"></span>
-              <span class="text-amber-700">{{ (o.parse_confidence * 100)|int }}%</span>
+              <span class="text-amber-700 font-medium">{{ (o.parse_confidence * 100)|int }}%</span>
               {% else %}
               <span class="w-2 h-2 rounded-full bg-gray-400"></span>
               <span class="text-gray-500">{{ (o.parse_confidence * 100)|int if o.parse_confidence else 0 }}%</span>
@@ -33,55 +44,85 @@
             </span>
             {% endif %}
           </div>
-          <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-1 text-sm">
+
+          {# Details grid #}
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-2 text-sm mb-2">
             <div>
-              <span class="text-gray-500">Qty:</span>
-              <span class="text-gray-900">{{ "{:,}".format(o.qty_available) if o.qty_available else '—' }}</span>
+              <span class="text-xs text-gray-400 font-medium">Qty</span>
+              <p class="text-gray-900 font-mono">{{ "{:,}".format(o.qty_available) if o.qty_available else '--' }}</p>
             </div>
             <div>
-              <span class="text-gray-500">Price:</span>
-              <span class="text-gray-900">{{ "${:,.4f}".format(o.unit_price) if o.unit_price else 'RFQ' }}</span>
+              <span class="text-xs text-gray-400 font-medium">Price</span>
+              <p class="{{ 'text-emerald-700 font-medium font-mono' if o.unit_price else 'text-gray-400' }}">
+                {{ "${:,.4f}".format(o.unit_price) if o.unit_price else 'RFQ' }}
+              </p>
             </div>
             <div>
-              <span class="text-gray-500">Lead:</span>
-              <span class="text-gray-900">{{ o.lead_time or '—' }}</span>
+              <span class="text-xs text-gray-400 font-medium">Lead Time</span>
+              <p class="text-gray-900">{{ o.lead_time or '--' }}</p>
             </div>
             <div>
-              <span class="text-gray-500">Source:</span>
-              <span class="text-gray-900">{{ o.source or '—' }}</span>
+              <span class="text-xs text-gray-400 font-medium">Source</span>
+              <p class="text-gray-900">{{ o.source or '--' }}</p>
             </div>
           </div>
+
+          {# Requisition + date #}
           {% if o.requisition_id %}
-          <div class="mt-1 text-xs text-gray-400">
-            REQ-{{ "%03d"|format(o.requisition_id) }}
-            {% if o.created_at %} · {{ o.created_at.strftime('%b %d, %H:%M') }}{% endif %}
+          <div class="flex items-center gap-2 text-xs text-gray-400">
+            <a hx-get="/v2/partials/requisitions/{{ o.requisition_id }}"
+               hx-target="#main-content"
+               hx-push-url="/v2/requisitions/{{ o.requisition_id }}"
+               class="text-brand-500 hover:text-brand-600 font-medium cursor-pointer">
+              REQ-{{ "%03d"|format(o.requisition_id) }}
+            </a>
+            {% if o.created_at %}
+            <span>{{ o.created_at.strftime('%b %d, %H:%M') }}</span>
+            {% endif %}
           </div>
           {% endif %}
         </div>
-        <div class="flex items-center gap-2 ml-4">
+
+        {# Action buttons #}
+        <div class="flex items-start gap-2 ml-4 flex-shrink-0">
           <button hx-post="/v2/partials/offers/{{ o.id }}/promote"
                   hx-target="#review-queue-content"
-                  class="px-3 py-1.5 text-xs font-medium text-white bg-emerald-500 rounded hover:bg-emerald-600">
+                  class="inline-flex items-center gap-1 px-3 py-2 text-xs font-medium text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+            </svg>
             Approve
           </button>
           <button hx-post="/v2/partials/offers/{{ o.id }}/reject"
                   hx-target="#review-queue-content"
                   hx-confirm="Reject this offer?"
-                  class="px-3 py-1.5 text-xs font-medium text-rose-600 bg-rose-50 border border-rose-200 rounded hover:bg-rose-100">
+                  class="inline-flex items-center gap-1 px-3 py-2 text-xs font-medium text-rose-600 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100 transition-colors">
+            <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
             Reject
+          </button>
+          <button hx-get="/v2/partials/offers/{{ o.id }}/changelog"
+                  hx-target="#changelog-{{ o.id }}"
+                  hx-swap="innerHTML"
+                  class="px-2 py-2 text-xs text-gray-400 hover:text-brand-500 rounded-lg hover:bg-gray-50 transition-colors"
+                  title="View changelog">
+            <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"/>
+            </svg>
           </button>
         </div>
       </div>
+      <div id="changelog-{{ o.id }}" class="mt-2"></div>
     </div>
     {% endfor %}
   </div>
   {% else %}
-  <div class="p-8 text-center">
-    <svg class="mx-auto h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
-            d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+  <div class="bg-white rounded-lg border border-brand-200 p-12 text-center">
+    <svg class="mx-auto h-12 w-12 text-emerald-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
     </svg>
-    <p class="text-sm text-gray-500 mt-2">No offers pending review.</p>
+    <p class="mt-3 text-sm font-medium text-gray-600">No offers pending review</p>
     <p class="text-xs text-gray-400 mt-1">AI-parsed offers with medium confidence appear here for human verification.</p>
   </div>
   {% endif %}
