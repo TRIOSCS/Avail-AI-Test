@@ -1,0 +1,31 @@
+<div class="prospect-contacts-list">
+  <p class="text-muted">{{ total }} prospect contact{{ 's' if total != 1 else '' }}</p>
+  {% if contacts %}
+  <table class="table table-sm">
+    <thead>
+      <tr>
+        <th>Name</th>
+        <th>Title</th>
+        <th>Email</th>
+        <th>Source</th>
+        <th>Confidence</th>
+        <th>Saved</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for c in contacts %}
+      <tr>
+        <td>{{ c.full_name }}</td>
+        <td>{{ c.title or '—' }}</td>
+        <td>{{ c.email or '—' }}</td>
+        <td>{{ c.source }}</td>
+        <td>{{ c.confidence }}</td>
+        <td>{{ 'Yes' if c.is_saved else 'No' }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+  <p>No prospect contacts found.</p>
+  {% endif %}
+</div>
