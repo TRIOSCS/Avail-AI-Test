@@ -16,10 +16,11 @@
   </div>
 
   {# Filter bar #}
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6"
+       x-data="{ view: '{{ view|default('table') }}' }">
     <form id="vendor-filters" class="flex flex-wrap gap-3 items-end">
       <div class="flex-1 min-w-[200px]">
-        <input type="text" name="q" value="{{ q }}" placeholder="Search vendors..."
+        <input type="text" name="q" value="{{ q }}" placeholder="Search vendors, brands, commodities..."
                hx-get="/v2/partials/vendors"
                hx-target="#main-content"
                hx-swap="morph"
@@ -30,20 +31,38 @@
       </div>
       <input type="hidden" name="sort" value="{{ sort }}">
       <input type="hidden" name="dir" value="{{ dir }}">
-      <div x-data="{ hideBlacklisted: {{ 'true' if hide_blacklisted else 'false' }} }" class="flex items-center gap-2">
-        <input type="hidden" name="hide_blacklisted" :value="hideBlacklisted">
-        <label class="flex items-center gap-2 text-sm text-gray-500 cursor-pointer">
-          <input type="checkbox" x-model="hideBlacklisted"
-                 @change="htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'changed')"
-                 class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500">
-          Hide blacklisted
-        </label>
+      <input type="hidden" name="view" :value="view">
+      <div class="flex items-center gap-2">
+        <div x-data="{ hideBlacklisted: {{ 'true' if hide_blacklisted else 'false' }} }">
+          <input type="hidden" name="hide_blacklisted" :value="hideBlacklisted">
+          <label class="flex items-center gap-2 text-sm text-gray-500 cursor-pointer">
+            <input type="checkbox" x-model="hideBlacklisted"
+                   @change="htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'changed')"
+                   class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500">
+            Hide blacklisted
+          </label>
+        </div>
+        {# View toggle: table / cards #}
+        <button type="button"
+                @click="view = view === 'cards' ? 'table' : 'cards'; $nextTick(() => htmx.trigger(document.querySelector('#vendor-filters [name=q]'), 'changed'))"
+                class="px-3 py-1.5 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-brand-50"
+                x-text="view === 'cards' ? 'Table' : 'Cards'">
+        </button>
       </div>
     </form>
   </div>
 
-  {# Table #}
-  {% if vendors %}
+  {# Card grid view #}
+  {% if view == 'cards' and vendors %}
+  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4 mb-6">
+    {% for v in vendors %}
+      {% include "htmx/partials/vendors/vendor_card.html" %}
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# Table view #}
+  {% if view != 'cards' and vendors %}
   <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
     <div class="overflow-x-auto">
       <table class="min-w-full divide-y divide-gray-200">
@@ -128,7 +147,10 @@
   </div>
   {% endif %}
 
-  {% else %}
+  {% endif %}
+
+  {# Empty state (no vendors at all) #}
+  {% if not vendors %}
   <div class="bg-white rounded-lg shadow border border-gray-200 p-12 text-center">
     <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/></svg>
     <p class="mt-2 text-sm text-gray-500">No vendors found</p>

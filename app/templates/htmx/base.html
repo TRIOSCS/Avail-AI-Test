@@ -22,6 +22,8 @@
     [data-loading].htmx-request { display: inline-block; }
     [data-loading-class] { /* classes added/removed automatically by extension */ }
     [data-loading-disable].htmx-request { pointer-events: none; opacity: 0.5; }
+    /* Safety: never let swapping state persist more than 2s */
+    .htmx-swapping { transition: opacity 0.15s ease-out !important; }
   </style>
 </head>
 <body class="h-full"
@@ -199,6 +201,10 @@
           <span class="text-sm text-gray-500">{{ user_name }}</span>
         </div>
       </header>
+
+      {# ── Page-level loading bar ────────────────────────────── #}
+      <div id="page-loading-bar" class="fixed top-0 left-0 right-0 h-0.5 z-50 bg-brand-500 origin-left scale-x-0 transition-transform duration-300"
+           style="display: none;"></div>
 
       {# ── Page content ─────────────────────────────────────── #}
       <main class="pt-14 lg:pt-0 pb-16 lg:pb-0">

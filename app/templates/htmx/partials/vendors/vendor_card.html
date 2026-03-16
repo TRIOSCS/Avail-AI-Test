@@ -1,0 +1,104 @@
+{# vendor_card.html — Rich card for vendor grid view.
+   Shows vendor name, score bar, brand/commodity tags, strategic claim badge,
+   rating stars, and key stats.
+   Called by: vendors/list.html (card grid mode)
+   Depends on: brand palette, Alpine.js
+   Context vars: v (VendorCard), claim_map (dict of vendor_card_id -> {user_name, days_left})
+#}
+<div class="bg-white rounded-lg border border-brand-200 hover:border-brand-400
+            hover:shadow-md transition-all cursor-pointer p-4 space-y-3"
+     hx-get="/v2/partials/vendors/{{ v.id }}"
+     hx-target="#main-content"
+     hx-push-url="/v2/vendors/{{ v.id }}">
+
+  {# Row 1: Vendor name + strategic badge #}
+  <div class="flex items-start justify-between">
+    <div class="min-w-0">
+      <h3 class="font-semibold text-gray-900 truncate">{{ v.display_name }}</h3>
+      {% if v.domain %}
+      <p class="text-xs text-gray-400 truncate">{{ v.domain }}</p>
+      {% endif %}
+    </div>
+    {% set claim = claim_map.get(v.id) if claim_map else None %}
+    {% if claim %}
+      <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-violet-50 text-violet-700 flex-shrink-0"
+            title="Claimed by {{ claim.user_name }} — {{ claim.days_left }} days left">
+        Strategic ({{ claim.user_name }})
+      </span>
+    {% elif v.is_blacklisted %}
+      <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-rose-50 text-rose-700 flex-shrink-0">
+        Blacklisted
+      </span>
+    {% endif %}
+  </div>
+
+  {# Row 2: Score bar #}
+  {% if v.vendor_score %}
+  <div>
+    <div class="flex items-center justify-between mb-1">
+      <span class="text-xs text-gray-500">Score</span>
+      <span class="text-sm font-semibold
+        {% if v.vendor_score >= 66 %}text-emerald-700
+        {% elif v.vendor_score >= 33 %}text-brand-600
+        {% else %}text-amber-700{% endif %}">
+        {{ '%.0f'|format(v.vendor_score) }}
+      </span>
+    </div>
+    <div class="w-full bg-gray-200 rounded-full h-1.5">
+      <div class="h-1.5 rounded-full transition-all
+        {% if v.vendor_score >= 66 %}bg-emerald-500
+        {% elif v.vendor_score >= 33 %}bg-brand-500
+        {% else %}bg-amber-500{% endif %}"
+           style="width: {{ [v.vendor_score, 100]|min }}%"></div>
+    </div>
+  </div>
+  {% else %}
+  <p class="text-xs text-gray-400 italic">New — no score yet</p>
+  {% endif %}
+
+  {# Row 3: Brand + commodity tags #}
+  {% if v.brand_tags or v.commodity_tags %}
+  <div class="flex flex-wrap gap-1">
+    {% for tag in (v.brand_tags or [])[:5] %}
+    <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-violet-50 text-violet-600">{{ tag }}</span>
+    {% endfor %}
+    {% if (v.brand_tags or [])|length > 5 %}
+    <span class="px-1.5 py-0.5 text-[10px] text-gray-400">+{{ (v.brand_tags|length) - 5 }} more</span>
+    {% endif %}
+    {% for tag in (v.commodity_tags or [])[:4] %}
+    <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-sky-50 text-sky-600">{{ tag }}</span>
+    {% endfor %}
+    {% if (v.commodity_tags or [])|length > 4 %}
+    <span class="px-1.5 py-0.5 text-[10px] text-gray-400">+{{ (v.commodity_tags|length) - 4 }} more</span>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  {# Row 4: Rating stars #}
+  {% if v.avg_rating %}
+  <div class="flex items-center gap-1">
+    {% for i in range(1, 6) %}
+      {% if i <= (v.avg_rating|round|int) %}
+      <svg class="w-3.5 h-3.5 text-amber-400" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+      {% else %}
+      <svg class="w-3.5 h-3.5 text-gray-200" fill="currentColor" viewBox="0 0 20 20"><path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/></svg>
+      {% endif %}
+    {% endfor %}
+    {% if v.review_count %}<span class="text-xs text-gray-400 ml-1">({{ v.review_count }})</span>{% endif %}
+  </div>
+  {% endif %}
+
+  {# Row 5: Stats #}
+  <div class="flex items-center justify-between text-xs text-gray-500 pt-2 border-t border-gray-100">
+    <span>{{ v.sighting_count or 0 }} sightings</span>
+    <span>{{ '%.0f%%'|format((v.overall_win_rate or 0) * 100) }} win</span>
+    <span>{{ '%.0f%%'|format((v.response_rate or 0) * 100) }} resp</span>
+  </div>
+
+  {# Row 6: Location + industry #}
+  {% if v.hq_country or v.industry %}
+  <div class="text-xs text-gray-400 truncate">
+    {{ v.hq_country or '' }}{% if v.hq_country and v.industry %} · {% endif %}{{ v.industry or '' }}
+  </div>
+  {% endif %}
+</div>

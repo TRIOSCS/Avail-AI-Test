@@ -1,0 +1,189 @@
+{# workspace.html — Split-panel sourcing workspace.
+   Left panel: compact lead rows with filters above. Right panel: lead detail.
+   Resizable divider persisted to localStorage. Keyboard navigation.
+   Called by: htmx_views.sourcing_workspace_partial
+   Depends on: partials/shared/split_panel.html, partials/sourcing/filter_bar.html,
+               partials/sourcing/lead_row.html
+   Context vars: requirement, leads, lead_sighting_data, total, page, total_pages,
+                 per_page, f_confidence, f_safety, f_freshness, f_source, f_status,
+                 f_contactability, f_corroborated, f_sort, selected_lead_id #}
+
+{# OOB breadcrumb #}
+<div id="breadcrumb" hx-swap-oob="true">
+  <a href="/requisitions" hx-get="/v2/partials/requisitions" hx-target="#main-content" hx-push-url="true"
+     class="text-brand-500 hover:text-brand-600">Requisitions</a>
+  <span class="text-gray-400 mx-1">/</span>
+  <a href="/requisitions/{{ requirement.requisition_id }}"
+     hx-get="/v2/partials/requisitions/{{ requirement.requisition_id }}"
+     hx-target="#main-content" hx-push-url="true"
+     class="text-brand-500 hover:text-brand-600">{{ requirement.requisition.name if requirement.requisition else '' }}</a>
+  <span class="text-gray-400 mx-1">/</span>
+  <span class="text-gray-900">Sourcing: {{ requirement.primary_mpn }}</span>
+</div>
+
+<div class="flex flex-col h-[calc(100vh-4rem)]" x-data="sourcingWorkspace()"
+     @keydown.arrow-down.prevent="selectNext()"
+     @keydown.arrow-up.prevent="selectPrev()"
+     @keydown.escape="clearSelection()"
+     tabindex="0">
+
+  {# Header bar: MPN + count + Re-search #}
+  <div class="flex items-center justify-between px-3 py-2 border-b border-brand-200 bg-white flex-shrink-0">
+    <div class="flex items-center gap-3">
+      <h1 class="text-lg font-bold text-gray-900">
+        <span class="font-mono">{{ requirement.primary_mpn }}</span>
+      </h1>
+      <span class="text-xs text-gray-500">
+        {{ requirement.brand or '' }}{% if requirement.brand %} · {% endif %}{{ total }} lead{{ 's' if total != 1 }}
+      </span>
+    </div>
+    <div class="flex items-center gap-2">
+      <a href="/sourcing/{{ requirement.id }}"
+         hx-get="/v2/partials/sourcing/{{ requirement.id }}"
+         hx-target="#main-content" hx-push-url="/sourcing/{{ requirement.id }}"
+         class="text-xs text-gray-500 hover:text-brand-500"
+         title="Switch to card grid view">Grid view</a>
+      <button hx-post="/v2/partials/sourcing/{{ requirement.id }}/search"
+              hx-target="#main-content"
+              class="px-3 py-1.5 bg-brand-500 text-white text-xs font-medium rounded-lg
+                     hover:bg-brand-600">
+        Re-search
+      </button>
+    </div>
+  </div>
+
+  {# Filter bar #}
+  <div class="flex-shrink-0 px-3 py-2 bg-gray-50 border-b border-gray-200">
+    {% with filter_target='#lead-list-content', compact=true %}
+      {% include "partials/sourcing/filter_bar.html" %}
+    {% endwith %}
+  </div>
+
+  {# Warning: all leads weak #}
+  {% if leads and leads|selectattr('confidence_band', 'equalto', 'low')|list|length == leads|length %}
+  <div class="mx-3 mt-2 bg-amber-50 border border-amber-200 rounded px-3 py-1.5 flex items-center gap-2 text-xs flex-shrink-0">
+    <svg class="w-4 h-4 text-amber-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4.5c-.77-.833-2.694-.833-3.464 0L3.34 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+    </svg>
+    <span class="text-amber-800 font-medium">Only weak leads found</span>
+    <span class="text-amber-600">— consider broadening search or adding sources.</span>
+  </div>
+  {% endif %}
+
+  {# Split panel: lead list (left) + lead detail (right) #}
+  <div class="flex flex-1 overflow-hidden min-h-0"
+       x-data="splitPanel('sourcing', 35)">
+
+    {# Left panel: lead list #}
+    <div class="overflow-y-auto overflow-x-hidden border-r border-brand-200 bg-white flex-shrink-0"
+         :style="'width:' + leftWidth + '%'"
+         id="split-left-sourcing">
+      <div id="lead-list-content">
+        {% if leads %}
+        {% for lead in leads %}
+          {% include "partials/sourcing/lead_row.html" %}
+        {% endfor %}
+
+        {# Pagination #}
+        {% if total_pages > 1 %}
+        <div class="px-3 py-2 flex items-center justify-between text-xs text-gray-500 border-t border-gray-200">
+          <span>{{ page }} / {{ total_pages }}</span>
+          <div class="flex gap-1">
+            {% if page > 1 %}
+            <a hx-get="/v2/partials/sourcing/{{ requirement.id }}/workspace-list?page={{ page - 1 }}&confidence={{ f_confidence }}&safety={{ f_safety }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ f_status }}&contactability={{ f_contactability }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
+               hx-target="#lead-list-content"
+               class="px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 cursor-pointer">Prev</a>
+            {% endif %}
+            {% if page < total_pages %}
+            <a hx-get="/v2/partials/sourcing/{{ requirement.id }}/workspace-list?page={{ page + 1 }}&confidence={{ f_confidence }}&safety={{ f_safety }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ f_status }}&contactability={{ f_contactability }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
+               hx-target="#lead-list-content"
+               class="px-2 py-1 rounded border border-gray-300 hover:bg-gray-50 cursor-pointer">Next</a>
+            {% endif %}
+          </div>
+        </div>
+        {% endif %}
+
+        {% else %}
+        <div class="flex flex-col items-center justify-center py-12 text-gray-400">
+          <svg class="w-10 h-10" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+          <p class="mt-2 text-sm">No leads found</p>
+        </div>
+        {% endif %}
+      </div>
+    </div>
+
+    {# Resizable divider #}
+    <div class="w-1 bg-brand-200 hover:bg-brand-400 cursor-col-resize flex-shrink-0 relative group transition-colors"
+         @mousedown="startResize($event)"
+         @touchstart.prevent="startTouchResize($event)">
+      <div class="absolute top-1/2 -translate-y-1/2 left-1/2 -translate-x-1/2 w-3 h-8 flex flex-col items-center justify-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div class="w-0.5 h-0.5 rounded-full bg-brand-500"></div>
+        <div class="w-0.5 h-0.5 rounded-full bg-brand-500"></div>
+        <div class="w-0.5 h-0.5 rounded-full bg-brand-500"></div>
+      </div>
+    </div>
+
+    {# Right panel: lead detail #}
+    <div class="overflow-y-auto flex-1 bg-brand-50"
+         id="split-right-sourcing">
+      {# Placeholder shown when no lead is selected #}
+      <div class="flex items-center justify-center h-full text-gray-400">
+        <div class="text-center">
+          <svg class="mx-auto h-10 w-10 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5"
+                  d="M15 15l-2 5L9 9l11 4-5 2zm0 0l5 5M7.188 2.239l.777 2.897M5.136 7.965l-2.898-.777M13.95 4.05l-2.122 2.122m-5.657 5.656l-2.12 2.122"/>
+          </svg>
+          <p class="text-sm">Select a lead to view details</p>
+          <p class="text-xs mt-1">Use arrow keys to navigate, Enter to select</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  document.addEventListener('alpine:init', () => {
+    if (!Alpine._sourcingWorkspaceRegistered) {
+      Alpine.data('sourcingWorkspace', () => ({
+        selectedLead: {{ selected_lead_id|default(0) }},
+        leadIds: [{% for lead in leads %}{{ lead.id }}{% if not loop.last %}, {% endif %}{% endfor %}],
+
+        selectNext() {
+          const idx = this.leadIds.indexOf(this.selectedLead);
+          if (idx < this.leadIds.length - 1) {
+            this.selectedLead = this.leadIds[idx + 1];
+            this._loadLead(this.selectedLead);
+          }
+        },
+
+        selectPrev() {
+          const idx = this.leadIds.indexOf(this.selectedLead);
+          if (idx > 0) {
+            this.selectedLead = this.leadIds[idx - 1];
+            this._loadLead(this.selectedLead);
+          }
+        },
+
+        clearSelection() {
+          this.selectedLead = 0;
+          const target = document.getElementById('split-right-sourcing');
+          if (target) {
+            target.innerHTML = '<div class="flex items-center justify-center h-full text-gray-400"><div class="text-center"><p class="text-sm">Select a lead to view details</p></div></div>';
+          }
+        },
+
+        _loadLead(leadId) {
+          htmx.ajax('GET', '/v2/partials/sourcing/leads/' + leadId + '/panel',
+            { target: '#split-right-sourcing', swap: 'innerHTML' });
+          const row = document.getElementById('lead-row-' + leadId);
+          if (row) row.scrollIntoView({ block: 'nearest' });
+        }
+      }));
+      Alpine._sourcingWorkspaceRegistered = true;
+    }
+  });
+</script>

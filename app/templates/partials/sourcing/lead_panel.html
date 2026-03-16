@@ -1,0 +1,370 @@
+{# lead_panel.html — Condensed lead detail for workspace right panel.
+   Denser version of lead_detail.html: no breadcrumb, collapsible sections, smaller spacing.
+   Includes OOB swap of lead row in left panel after status changes.
+   Called by: htmx_views.lead_panel_partial
+   Depends on: partials/shared/source_badge.html, partials/shared/safety_review.html
+   Context vars: lead, evidence, evidence_by_category, category_labels,
+                 requirement, vendor_card, best_sighting #}
+
+{# OOB: update lead row highlight in left panel #}
+{% if lead %}
+<div id="lead-row-{{ lead.id }}" hx-swap-oob="true"
+     class="px-3 py-2 border-b border-gray-100 cursor-pointer bg-brand-50 border-l-2 border-l-brand-500 group"
+     hx-get="/v2/partials/sourcing/leads/{{ lead.id }}/panel"
+     hx-target="#split-right-sourcing" hx-swap="innerHTML">
+  {# Minimal OOB row — just enough for the highlight update #}
+  <div class="flex items-center gap-2 min-h-[28px]">
+    {% set dot_color = {'low_risk': 'bg-emerald-500', 'medium_risk': 'bg-amber-500', 'high_risk': 'bg-rose-500'} %}
+    <span class="w-2 h-2 rounded-full flex-shrink-0 {{ dot_color.get(lead.vendor_safety_band, 'bg-gray-400') }}"></span>
+    <span class="text-sm font-medium text-gray-900 truncate flex-1">{{ lead.vendor_name }}</span>
+    {% if lead.buyer_status and lead.buyer_status != 'new' %}
+    {% set status_colors = {'contacted': 'text-amber-600', 'has_stock': 'text-emerald-600', 'bad_lead': 'text-gray-400 line-through'} %}
+    <span class="text-[10px] font-medium {{ status_colors.get(lead.buyer_status, 'text-gray-500') }}">
+      {{ lead.buyer_status|replace('_', ' ')|title }}
+    </span>
+    {% endif %}
+    <div class="flex items-center gap-1 flex-shrink-0 w-[72px]">
+      <span class="text-[11px] font-semibold tabular-nums
+        {% if lead.confidence_score >= 70 %}text-emerald-600{% elif lead.confidence_score >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">
+        {{ '%.0f'|format(lead.confidence_score) }}%
+      </span>
+      <div class="w-10 bg-gray-200 rounded-full h-1">
+        <div class="h-1 rounded-full {% if lead.confidence_score >= 70 %}bg-emerald-500{% elif lead.confidence_score >= 40 %}bg-amber-500{% else %}bg-rose-500{% endif %}"
+             style="width: {{ [lead.confidence_score, 100]|min }}%"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+<div class="p-4 space-y-3">
+
+  {# ===== Summary Section ===== #}
+  <div class="bg-white rounded-lg border border-brand-200 p-3">
+    <div class="flex items-start justify-between gap-2">
+      <div class="min-w-0">
+        <h2 class="text-base font-bold text-gray-900 truncate">{{ lead.vendor_name }}</h2>
+        <p class="text-xs text-gray-500">
+          <span class="font-mono">{{ lead.part_number_matched }}</span>
+          {% if lead.match_type != 'exact' %}
+          <span class="text-amber-600 ml-0.5">({{ lead.match_type }})</span>
+          {% endif %}
+        </p>
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        {# Confidence #}
+        <span class="text-xl font-bold
+          {% if lead.confidence_score >= 70 %}text-emerald-600
+          {% elif lead.confidence_score >= 40 %}text-amber-600
+          {% else %}text-rose-600{% endif %}">
+          {{ '%.0f'|format(lead.confidence_score) }}%
+        </span>
+        {# Safety badge #}
+        {% set safety_badge = {
+          'low_risk': 'bg-emerald-50 text-emerald-700',
+          'medium_risk': 'bg-amber-50 text-amber-700',
+          'high_risk': 'bg-rose-50 text-rose-700',
+          'unknown': 'bg-gray-100 text-gray-600'
+        } %}
+        <span class="px-2 py-0.5 text-[11px] font-medium rounded-full
+                     {{ safety_badge.get(lead.vendor_safety_band, 'bg-gray-100 text-gray-600') }}">
+          {{ lead.vendor_safety_band|replace('_', ' ')|title if lead.vendor_safety_band else 'Unknown' }}
+        </span>
+        {# Buyer status #}
+        {% set status_colors = {
+          'new': 'bg-brand-100 text-brand-600',
+          'contacted': 'bg-amber-50 text-amber-700',
+          'has_stock': 'bg-emerald-50 text-emerald-700',
+          'no_stock': 'bg-gray-100 text-gray-600',
+          'bad_lead': 'bg-rose-50 text-rose-700',
+          'do_not_contact': 'bg-rose-50 text-rose-700'
+        } %}
+        <span class="px-2 py-0.5 text-[11px] font-medium rounded-full
+                     {{ status_colors.get(lead.buyer_status, 'bg-gray-100 text-gray-600') }}">
+          {{ lead.buyer_status|replace('_', ' ')|title }}
+        </span>
+      </div>
+    </div>
+
+    {# Sub-dimension scores — compact inline #}
+    <div class="flex flex-wrap gap-3 mt-2 pt-2 border-t border-gray-100">
+      {% for dim_label, dim_val in [('Fresh', lead.freshness_score), ('Source', lead.source_reliability_score), ('Contact', lead.contactability_score), ('History', lead.historical_success_score)] %}
+        {% if dim_val is not none %}
+        <div class="text-center">
+          <span class="text-[10px] text-gray-400 block leading-none">{{ dim_label }}</span>
+          <span class="text-xs font-semibold {% if dim_val >= 70 %}text-emerald-600{% elif dim_val >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">{{ '%.0f'|format(dim_val) }}</span>
+        </div>
+        {% endif %}
+      {% endfor %}
+      {% if lead.corroborated %}
+      <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-emerald-50 text-emerald-700">
+        ✓ Corroborated ({{ lead.evidence_count }})
+      </span>
+      {% endif %}
+    </div>
+
+    {# Reason + suggested action #}
+    {% if lead.reason_summary %}
+    <p class="text-xs text-gray-600 mt-2">{{ lead.reason_summary }}</p>
+    {% endif %}
+    {% if lead.suggested_next_action %}
+    <p class="text-[11px] text-brand-500 font-medium mt-0.5">{{ lead.suggested_next_action }}</p>
+    {% endif %}
+
+    {# Risk flags (inline) #}
+    {% if lead.risk_flags %}
+    <div class="flex flex-wrap gap-1 mt-1.5">
+      {% for flag in lead.risk_flags %}
+        {% if flag.startswith('positive:') %}
+        <span class="px-1 py-0.5 text-[9px] font-medium rounded bg-emerald-50 text-emerald-600">
+          {{ flag.replace('positive:', '')|replace('_', ' ')|title }}
+        </span>
+        {% else %}
+        <span class="px-1 py-0.5 text-[9px] font-medium rounded bg-amber-50 text-amber-600">
+          {{ flag|replace('_', ' ')|title }}
+        </span>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {# Signal snapshot grid #}
+    {% if best_sighting %}
+    <div class="grid grid-cols-4 gap-2 mt-2 pt-2 border-t border-gray-100">
+      <div>
+        <span class="text-[10px] text-gray-400">Qty</span>
+        <p class="text-sm font-semibold text-gray-900">{{ '{:,}'.format(best_sighting.qty_available) if best_sighting.qty_available else '--' }}</p>
+      </div>
+      <div>
+        <span class="text-[10px] text-gray-400">Price</span>
+        <p class="text-sm font-semibold text-gray-900">{% if best_sighting.unit_price %}${{ '%.4f'|format(best_sighting.unit_price) }}{% else %}RFQ{% endif %}</p>
+      </div>
+      <div>
+        <span class="text-[10px] text-gray-400">Lead Time</span>
+        <p class="text-sm font-semibold text-gray-900">{{ best_sighting.lead_time or (best_sighting.lead_time_days|string ~ 'd' if best_sighting.lead_time_days else '--') }}</p>
+      </div>
+      <div>
+        <span class="text-[10px] text-gray-400">MOQ</span>
+        <p class="text-sm font-semibold text-gray-900">{{ '{:,}'.format(best_sighting.moq) if best_sighting.moq else '--' }}</p>
+      </div>
+      <div>
+        <span class="text-[10px] text-gray-400">Condition</span>
+        <p class="text-xs font-medium text-gray-900">{{ best_sighting.condition or '--' }}</p>
+      </div>
+      <div>
+        <span class="text-[10px] text-gray-400">Date Code</span>
+        <p class="text-xs font-medium text-gray-900">{{ best_sighting.date_code or '--' }}</p>
+      </div>
+      <div>
+        <span class="text-[10px] text-gray-400">Packaging</span>
+        <p class="text-xs font-medium text-gray-900">{{ best_sighting.packaging or '--' }}</p>
+      </div>
+      {% if best_sighting.evidence_tier %}
+      <div>
+        <span class="text-[10px] text-gray-400">Tier</span>
+        {% set tier_colors = {'T1': 'bg-emerald-50 text-emerald-700', 'T2': 'bg-sky-50 text-sky-700', 'T3': 'bg-violet-50 text-violet-700', 'T4': 'bg-amber-50 text-amber-700'} %}
+        <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ tier_colors.get(best_sighting.evidence_tier, 'bg-gray-100 text-gray-600') }}">
+          {{ best_sighting.evidence_tier }}
+        </span>
+      </div>
+      {% endif %}
+    </div>
+    {% endif %}
+  </div>
+
+  {# ===== Buyer Actions (compact inline) ===== #}
+  <div class="bg-white rounded-lg border border-brand-200 p-3">
+    <form hx-post="/v2/partials/sourcing/leads/{{ lead.id }}/status"
+          hx-target="#split-right-sourcing"
+          class="flex items-end gap-2">
+      <div class="flex-1 min-w-0">
+        <label class="text-[10px] text-gray-500">Status</label>
+        <select name="status"
+                class="w-full text-xs border border-gray-300 rounded px-2 py-1.5
+                       focus:ring-brand-500 focus:border-brand-500">
+          {% for val, label in [('new', 'New'), ('contacted', 'Contacted'), ('has_stock', 'Has Stock'), ('no_stock', 'No Stock'), ('bad_lead', 'Bad Lead'), ('do_not_contact', 'Do Not Contact')] %}
+          <option value="{{ val }}" {{ 'selected' if lead.buyer_status == val }}>{{ label }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="flex-1 min-w-0">
+        <label class="text-[10px] text-gray-500">Note</label>
+        <input type="text" name="note" placeholder="Optional note..."
+               class="w-full text-xs border border-gray-300 rounded px-2 py-1.5
+                      focus:ring-brand-500 focus:border-brand-500">
+      </div>
+      <button type="submit"
+              class="px-3 py-1.5 bg-brand-500 text-white text-xs font-medium rounded
+                     hover:bg-brand-600 flex-shrink-0">
+        Update
+      </button>
+      {% if lead.contact_email %}
+      <button type="button"
+              class="px-3 py-1.5 bg-emerald-500 text-white text-xs font-medium rounded
+                     hover:bg-emerald-600 flex-shrink-0">
+        RFQ
+      </button>
+      {% endif %}
+    </form>
+  </div>
+
+  {# ===== Contact Info (compact) ===== #}
+  <div class="bg-white rounded-lg border border-brand-200 p-3">
+    <h3 class="text-xs font-semibold text-gray-900 mb-2">Contact</h3>
+    <div class="grid grid-cols-3 gap-2 text-xs">
+      <div>
+        <span class="text-[10px] text-gray-400">Email</span>
+        {% if lead.contact_email %}
+        <p class="text-gray-900 truncate">{{ lead.contact_email }}</p>
+        {% elif vendor_card and vendor_card.emails %}
+        <p class="text-gray-900 truncate">{{ vendor_card.emails[0] }}</p>
+        {% else %}
+        <p class="text-gray-400">--</p>
+        {% endif %}
+      </div>
+      <div>
+        <span class="text-[10px] text-gray-400">Phone</span>
+        {% if lead.contact_phone %}
+        <p class="text-gray-900">{{ lead.contact_phone }}</p>
+        {% elif vendor_card and vendor_card.phones %}
+        <p class="text-gray-900">{{ vendor_card.phones[0] }}</p>
+        {% else %}
+        <p class="text-gray-400">--</p>
+        {% endif %}
+      </div>
+      <div>
+        <span class="text-[10px] text-gray-400">Website</span>
+        {% if lead.contact_url %}
+        <a href="{{ lead.contact_url }}" target="_blank" rel="noopener"
+           class="text-brand-500 hover:text-brand-600 truncate block">{{ lead.contact_url|truncate(25) }}</a>
+        {% elif vendor_card and vendor_card.website %}
+        <a href="{{ vendor_card.website }}" target="_blank" rel="noopener"
+           class="text-brand-500 hover:text-brand-600 truncate block">{{ vendor_card.website|truncate(25) }}</a>
+        {% else %}
+        <p class="text-gray-400">--</p>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  {# ===== Evidence (collapsible) ===== #}
+  <div class="bg-white rounded-lg border border-brand-200" x-data="{ open: {{ 'true' if evidence|length <= 5 else 'false' }} }">
+    <button @click="open = !open" class="w-full px-3 py-2 flex items-center justify-between text-left">
+      <h3 class="text-xs font-semibold text-gray-900">Evidence ({{ evidence|length }})</h3>
+      <svg class="w-4 h-4 text-gray-400 transition-transform" :class="{ 'rotate-180': open }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </button>
+    <div x-show="open" x-collapse class="border-t border-gray-100">
+      {% if evidence %}
+      <div class="divide-y divide-gray-50">
+        {% for ev in evidence %}
+        <div class="px-3 py-2 flex items-start gap-2">
+          <div class="flex-1 min-w-0">
+            <div class="flex items-center gap-1.5">
+              {% with source_type=ev.source_type %}{% include "partials/shared/source_badge.html" %}{% endwith %}
+              <span class="text-[10px] text-gray-400">{{ ev.signal_type|replace('_', ' ')|title }}</span>
+              {% if ev.confidence_impact %}
+              <span class="text-[10px] font-medium {% if ev.confidence_impact > 0 %}text-emerald-600{% else %}text-rose-600{% endif %}">
+                {{ '+' if ev.confidence_impact > 0 }}{{ '%.1f'|format(ev.confidence_impact) }}%
+              </span>
+              {% endif %}
+            </div>
+            <p class="text-[11px] text-gray-600 mt-0.5 line-clamp-2">{{ ev.explanation }}</p>
+            <div class="flex items-center gap-2 mt-0.5">
+              <span class="text-[10px] text-gray-400">{% if ev.observed_at %}{{ ev.observed_at | timesince }}{% endif %}</span>
+              {% set verify_colors = {'raw': 'bg-gray-100 text-gray-600', 'inferred': 'bg-brand-100 text-brand-600', 'buyer_confirmed': 'bg-emerald-50 text-emerald-700', 'rejected': 'bg-rose-50 text-rose-700'} %}
+              <span class="px-1 py-0.5 text-[9px] font-medium rounded {{ verify_colors.get(ev.verification_state, 'bg-gray-100 text-gray-600') }}">
+                {{ ev.verification_state|replace('_', ' ')|title }}
+              </span>
+            </div>
+          </div>
+        </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="px-3 py-4 text-center text-[11px] text-gray-400">No evidence records.</div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ===== Source Attribution (collapsible, collapsed by default) ===== #}
+  <div class="bg-white rounded-lg border border-brand-200" x-data="{ open: false }">
+    <button @click="open = !open" class="w-full px-3 py-2 flex items-center justify-between text-left">
+      <h3 class="text-xs font-semibold text-gray-900">Source Attribution</h3>
+      <svg class="w-4 h-4 text-gray-400 transition-transform" :class="{ 'rotate-180': open }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </button>
+    <div x-show="open" x-collapse class="border-t border-gray-100 divide-y divide-gray-50">
+      {% for category, items in evidence_by_category.items() %}
+      <div class="px-3 py-2">
+        <h4 class="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
+          {{ category_labels.get(category, category|title) }}
+        </h4>
+        <div class="flex flex-wrap gap-1">
+          {% for ev in items %}
+          <div class="inline-flex items-center gap-1 px-1.5 py-0.5 bg-gray-50 rounded text-[10px]">
+            {% with source_type=ev.source_type %}{% include "partials/shared/source_badge.html" %}{% endwith %}
+            <span class="text-gray-500">{{ ev.signal_type|replace('_', ' ') }}</span>
+          </div>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# ===== Safety Review (collapsible) ===== #}
+  {% if lead.vendor_safety_band %}
+  <div x-data="{ open: true }">
+    <button @click="open = !open" class="w-full flex items-center justify-between text-left mb-1">
+      <h3 class="text-xs font-semibold text-gray-900">Safety Review</h3>
+      <svg class="w-4 h-4 text-gray-400 transition-transform" :class="{ 'rotate-180': open }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </button>
+    <div x-show="open" x-collapse>
+      {% with safety_band=lead.vendor_safety_band,
+              safety_score=lead.vendor_safety_score,
+              safety_summary=lead.vendor_safety_summary,
+              safety_flags=lead.vendor_safety_flags %}
+        {% include "partials/shared/safety_review.html" %}
+      {% endwith %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# ===== Activity History (collapsible, collapsed by default) ===== #}
+  {% if lead.feedback_events %}
+  <div class="bg-white rounded-lg border border-brand-200" x-data="{ open: false }">
+    <button @click="open = !open" class="w-full px-3 py-2 flex items-center justify-between text-left">
+      <h3 class="text-xs font-semibold text-gray-900">Activity ({{ lead.feedback_events|length }})</h3>
+      <svg class="w-4 h-4 text-gray-400 transition-transform" :class="{ 'rotate-180': open }" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
+      </svg>
+    </button>
+    <div x-show="open" x-collapse class="border-t border-gray-100 px-3 py-2 space-y-1">
+      {% for event in lead.feedback_events|sort(attribute='created_at', reverse=True) %}
+      <div class="flex items-center gap-2 text-[11px] text-gray-500">
+        <span>{{ event.created_at | timesince }}</span>
+        <span class="font-medium text-gray-700">{{ event.status|replace('_', ' ')|title }}</span>
+        {% if event.note %}
+        <span class="text-gray-400">— {{ event.note }}</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# Link to full detail page #}
+  <div class="text-center">
+    <a href="/sourcing/leads/{{ lead.id }}"
+       hx-get="/v2/partials/sourcing/leads/{{ lead.id }}"
+       hx-target="#main-content" hx-push-url="/sourcing/leads/{{ lead.id }}"
+       class="text-[11px] text-brand-500 hover:text-brand-600">
+      Open full detail →
+    </a>
+  </div>
+</div>

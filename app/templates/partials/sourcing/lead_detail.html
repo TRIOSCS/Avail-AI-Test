@@ -80,9 +80,68 @@
       </div>
     </div>
 
-    {# Sighting data: qty + price + lead time #}
+    {# Confidence band + sub-dimension scores #}
+    <div class="flex flex-wrap gap-4 mt-4 pt-4 border-t border-gray-100">
+      {% if lead.confidence_band %}
+      {% set band_colors = {'high': 'bg-emerald-50 text-emerald-700', 'medium': 'bg-amber-50 text-amber-700', 'low': 'bg-rose-50 text-rose-700'} %}
+      <span class="inline-flex px-2.5 py-0.5 text-xs font-medium rounded-full {{ band_colors.get(lead.confidence_band, 'bg-gray-100 text-gray-600') }}">
+        {{ lead.confidence_band|title }} Confidence
+      </span>
+      {% endif %}
+      {% for dim_label, dim_val in [('Freshness', lead.freshness_score), ('Source Reliability', lead.source_reliability_score), ('Contactability', lead.contactability_score), ('Historical Success', lead.historical_success_score)] %}
+        {% if dim_val is not none %}
+        <div class="text-center">
+          <span class="text-xs text-gray-400 block">{{ dim_label }}</span>
+          <span class="text-sm font-semibold {% if dim_val >= 70 %}text-emerald-600{% elif dim_val >= 40 %}text-amber-600{% else %}text-rose-600{% endif %}">{{ '%.0f'|format(dim_val) }}</span>
+        </div>
+        {% endif %}
+      {% endfor %}
+    </div>
+
+    {# Reason summary + suggested next action #}
+    {% if lead.reason_summary %}
+    <p class="text-sm text-gray-600 mt-3">{{ lead.reason_summary }}</p>
+    {% endif %}
+    {% if lead.suggested_next_action %}
+    <p class="text-xs text-brand-500 font-medium mt-1">{{ lead.suggested_next_action }}</p>
+    {% endif %}
+
+    {# Corroboration badge #}
+    {% if lead.corroborated %}
+    <div class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium
+                rounded-full bg-emerald-50 text-emerald-700 mt-2">
+      <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+      </svg>
+      Corroborated ({{ lead.evidence_count }} signals)
+    </div>
+    {% endif %}
+
+    {# Risk flags #}
+    {% if lead.risk_flags %}
+    <div class="flex flex-wrap gap-1 mt-2">
+      {% for flag in lead.risk_flags %}
+        {% if flag.startswith('positive:') %}
+          <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-emerald-50 text-emerald-600">
+            {{ flag.replace('positive:', '')|replace('_', ' ')|title }}
+          </span>
+        {% else %}
+          <span class="px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-50 text-amber-600">
+            {{ flag|replace('_', ' ')|title }}
+          </span>
+        {% endif %}
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {# Notes for buyer #}
+    {% if lead.notes_for_buyer %}
+    <p class="text-xs text-gray-500 italic mt-2">{{ lead.notes_for_buyer }}</p>
+    {% endif %}
+
+    {# Signal snapshot: qty, price, lead time, condition, date code, packaging, MOQ #}
     {% if best_sighting %}
-    <div class="flex gap-6 mt-4 pt-4 border-t border-gray-100">
+    <div class="grid grid-cols-2 sm:grid-cols-4 gap-4 mt-4 pt-4 border-t border-gray-100">
       <div>
         <span class="text-xs text-gray-400">Qty Available</span>
         <p class="text-lg font-semibold text-gray-900">
@@ -101,6 +160,35 @@
           {{ best_sighting.lead_time or (best_sighting.lead_time_days|string ~ ' days' if best_sighting.lead_time_days else '--') }}
         </p>
       </div>
+      <div>
+        <span class="text-xs text-gray-400">MOQ</span>
+        <p class="text-lg font-semibold text-gray-900">
+          {{ '{:,}'.format(best_sighting.moq) if best_sighting.moq else '--' }}
+        </p>
+      </div>
+      <div>
+        <span class="text-xs text-gray-400">Condition</span>
+        <p class="text-sm font-medium text-gray-900">{{ best_sighting.condition or '--' }}</p>
+      </div>
+      <div>
+        <span class="text-xs text-gray-400">Date Code</span>
+        <p class="text-sm font-medium text-gray-900">{{ best_sighting.date_code or '--' }}</p>
+      </div>
+      <div>
+        <span class="text-xs text-gray-400">Packaging</span>
+        <p class="text-sm font-medium text-gray-900">{{ best_sighting.packaging or '--' }}</p>
+      </div>
+      {% if best_sighting.evidence_tier %}
+      <div>
+        <span class="text-xs text-gray-400">Evidence Tier</span>
+        {% set tier_map = {'T1': 'Authorized Distributor', 'T2': 'Direct API', 'T3': 'Marketplace', 'T4': 'AI Parsed', 'T5': 'AI Verified', 'T6': 'Manual Entry', 'T7': 'Historical'} %}
+        {% set tier_colors = {'T1': 'bg-emerald-50 text-emerald-700', 'T2': 'bg-sky-50 text-sky-700', 'T3': 'bg-violet-50 text-violet-700', 'T4': 'bg-amber-50 text-amber-700', 'T5': 'bg-teal-50 text-teal-700', 'T6': 'bg-gray-100 text-gray-600', 'T7': 'bg-brand-50 text-brand-600'} %}
+        <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ tier_colors.get(best_sighting.evidence_tier, 'bg-gray-100 text-gray-600') }}"
+              title="{{ tier_map.get(best_sighting.evidence_tier, best_sighting.evidence_tier) }}">
+          {{ best_sighting.evidence_tier }}
+        </span>
+      </div>
+      {% endif %}
     </div>
     {% endif %}
   </div>

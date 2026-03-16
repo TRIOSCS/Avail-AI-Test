@@ -1,50 +1,92 @@
 {# req_row.html — Single requisition table row for the list view.
-   Receives: req (Requisition object with req_count, offer_count attrs).
-   Called by: requisitions/list.html loop, create endpoint (prepend).
-   Depends on: brand color palette from tailwind.config.js, Alpine.js (for checkbox state).
+   Receives: req (Requisition ORM object with req_count, offer_count, creator), user_role (str), user (User).
+   Called by: requisitions/list.html loop, create endpoint (prepend), inline save (row swap).
+   Depends on: brand palette, Alpine.js (selectedIds), HTMX.
 #}
-<tr class="hover:bg-brand-50 cursor-pointer group transition-colors"
-    hx-get="/v2/partials/requisitions/{{ req.id }}"
-    hx-target="#main-content"
-    hx-push-url="/v2/requisitions/{{ req.id }}">
-  {# Checkbox (stops row click propagation) #}
-  <td class="px-3 py-3 w-10" @click.stop>
-    <input type="checkbox" :value="{{ req.id }}"
-           @change="$event.target.checked ? selectedIds.add({{ req.id }}) : selectedIds.delete({{ req.id }}); selectedIds = new Set(selectedIds)"
-           :checked="selectedIds.has({{ req.id }})"
-           class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500">
+
+{# Status badge colors #}
+{% set status_colors = {
+  "active": "bg-emerald-50 text-emerald-700",
+  "draft": "bg-brand-100 text-brand-600",
+  "sourcing": "bg-brand-100 text-brand-600",
+  "won": "bg-emerald-50 text-emerald-700",
+  "lost": "bg-rose-50 text-rose-700",
+  "archived": "bg-gray-100 text-gray-600",
+  "awarded": "bg-emerald-50 text-emerald-700",
+  "open": "bg-emerald-50 text-emerald-700",
+  "cancelled": "bg-gray-100 text-gray-600"
+} %}
+
+{# Reusable cell macros — some are inline-editable (dblclick) #}
+{% macro cell_name() %}
+  <td class="px-4 py-3 text-sm font-medium text-brand-500 group-hover:text-brand-600"
+      hx-get="/v2/partials/requisitions/{{ req.id }}/edit/name?context=row"
+      hx-target="this"
+      hx-swap="innerHTML"
+      hx-trigger="dblclick"
+      @click.stop
+      title="Double-click to edit">
+    <a hx-get="/v2/partials/requisitions/{{ req.id }}"
+       hx-target="#main-content"
+       hx-push-url="/v2/requisitions/{{ req.id }}"
+       @click.stop
+       class="hover:underline">
+      {{ req.name }}
+    </a>
   </td>
-  <td class="px-4 py-3 text-sm font-medium text-brand-500 group-hover:text-brand-600">{{ req.name }}</td>
+{% endmacro %}
+
+{% macro cell_customer() %}
   <td class="px-4 py-3 text-sm text-gray-500">{{ req.customer_name or "—" }}</td>
-  <td class="px-4 py-3 text-sm text-gray-500">
+{% endmacro %}
+
+{% macro cell_owner() %}
+  <td class="px-4 py-3 text-sm text-gray-500"
+      hx-get="/v2/partials/requisitions/{{ req.id }}/edit/owner?context=row"
+      hx-target="this"
+      hx-swap="innerHTML"
+      hx-trigger="dblclick"
+      @click.stop
+      title="Double-click to reassign">
     {% if req.creator %}
       <span class="inline-flex items-center gap-1.5">
         <span class="inline-flex items-center justify-center h-5 w-5 rounded-full bg-brand-100 text-brand-600 text-[10px] font-bold">{{ req.creator.name[:1]|upper }}</span>
         {{ req.creator.name }}
       </span>
-    {% else %}
-      —
-    {% endif %}
+    {% else %}—{% endif %}
   </td>
+{% endmacro %}
+
+{% macro cell_parts() %}
   <td class="px-4 py-3 text-sm text-gray-500 tabular-nums">{{ req.req_count }}</td>
+{% endmacro %}
+
+{% macro cell_offers() %}
   <td class="px-4 py-3 text-sm text-gray-500 tabular-nums">{{ req.offer_count|default(0) }}</td>
-  <td class="px-4 py-3">
-    {% set status_colors = {
-      "active": "bg-emerald-50 text-emerald-700",
-      "draft": "bg-brand-100 text-brand-600",
-      "sourcing": "bg-brand-100 text-brand-600",
-      "won": "bg-emerald-50 text-emerald-700",
-      "lost": "bg-rose-50 text-rose-700",
-      "archived": "bg-gray-100 text-gray-600",
-      "awarded": "bg-emerald-50 text-emerald-700",
-      "open": "bg-emerald-50 text-emerald-700",
-      "cancelled": "bg-gray-100 text-gray-600"
-    } %}
+{% endmacro %}
+
+{% macro cell_status() %}
+  <td class="px-4 py-3"
+      hx-get="/v2/partials/requisitions/{{ req.id }}/edit/status?context=row"
+      hx-target="this"
+      hx-swap="innerHTML"
+      hx-trigger="dblclick"
+      @click.stop
+      title="Double-click to change status">
     <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(req.status, 'bg-gray-100 text-gray-600') }}">
       {{ req.status|capitalize }}
     </span>
   </td>
-  <td class="px-4 py-3">
+{% endmacro %}
+
+{% macro cell_urgency() %}
+  <td class="px-4 py-3"
+      hx-get="/v2/partials/requisitions/{{ req.id }}/edit/urgency?context=row"
+      hx-target="this"
+      hx-swap="innerHTML"
+      hx-trigger="dblclick"
+      @click.stop
+      title="Double-click to change urgency">
     {% if req.urgency == "critical" %}
       <span class="inline-flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-rose-50 text-rose-700">
         <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v4a1 1 0 102 0V7zm-1 8a1 1 0 100-2 1 1 0 000 2z" clip-rule="evenodd"/></svg>
@@ -59,5 +101,82 @@
       <span class="text-sm text-gray-400">Normal</span>
     {% endif %}
   </td>
+{% endmacro %}
+
+{% macro cell_created() %}
   <td class="px-4 py-3 text-sm text-gray-500">{{ req.created_at.strftime('%b %d, %Y') if req.created_at else "—" }}</td>
+{% endmacro %}
+
+{% macro cell_actions() %}
+  <td class="px-3 py-3" @click.stop x-data="{ open: false }">
+    <div class="relative">
+      <button @click="open = !open" @click.outside="open = false"
+              class="p-1 text-gray-400 hover:text-gray-600 rounded hover:bg-gray-100" type="button">
+        <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/></svg>
+      </button>
+      <div x-show="open" x-cloak x-transition
+           class="absolute right-0 top-full mt-1 w-40 bg-white border border-gray-200 rounded-lg shadow-lg z-50 py-1">
+        {% if req.status != 'archived' %}
+        <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/archive"
+                hx-target="#main-content"
+                hx-confirm="Archive '{{ req.name }}'?"
+                @click="open = false"
+                class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Archive</button>
+        {% else %}
+        <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/activate"
+                hx-target="#main-content"
+                @click="open = false"
+                class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Activate</button>
+        {% endif %}
+        {% if not req.claimed_by_id and user and user.role in ('buyer','trader','manager','admin') %}
+        <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/claim"
+                hx-target="#main-content"
+                @click="open = false"
+                class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Claim</button>
+        {% elif req.claimed_by_id and user and req.claimed_by_id == user.id %}
+        <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/unclaim"
+                hx-target="#main-content"
+                @click="open = false"
+                class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Unclaim</button>
+        {% endif %}
+        {% if req.status in ('active', 'sourcing', 'offers', 'quoting', 'quoted', 'open', 'reopened') %}
+        <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/won"
+                hx-target="#main-content"
+                @click="open = false"
+                class="w-full text-left px-3 py-1.5 text-sm text-emerald-700 hover:bg-emerald-50">Mark Won</button>
+        {% endif %}
+        {% if req.status in ('quoted',) %}
+        <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/lost"
+                hx-target="#main-content"
+                @click="open = false"
+                class="w-full text-left px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50">Mark Lost</button>
+        {% endif %}
+        <hr class="my-1 border-gray-100">
+        <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/clone"
+                hx-target="#main-content"
+                @click="open = false"
+                class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Clone</button>
+      </div>
+    </div>
+  </td>
+{% endmacro %}
+
+<tr id="req-row-{{ req.id }}"
+    class="hover:bg-brand-50 cursor-pointer group transition-colors {{ 'border-l-2 border-rose-400' if req.urgency == 'critical' else '' }}"
+    hx-get="/v2/partials/requisitions/{{ req.id }}"
+    hx-target="#main-content"
+    hx-push-url="/v2/requisitions/{{ req.id }}">
+  {# Checkbox (stops row click propagation) #}
+  <td class="px-3 py-3 w-10" @click.stop>
+    <input type="checkbox" :value="{{ req.id }}"
+           @change="$event.target.checked ? selectedIds.add({{ req.id }}) : selectedIds.delete({{ req.id }}); selectedIds = new Set(selectedIds)"
+           :checked="selectedIds.has({{ req.id }})"
+           class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500">
+  </td>
+  {# Role-based column order #}
+  {% if user_role == 'sales' %}
+    {{ cell_name() }}{{ cell_customer() }}{{ cell_status() }}{{ cell_offers() }}{{ cell_parts() }}{{ cell_urgency() }}{{ cell_owner() }}{{ cell_created() }}{{ cell_actions() }}
+  {% else %}
+    {{ cell_name() }}{{ cell_customer() }}{{ cell_owner() }}{{ cell_parts() }}{{ cell_offers() }}{{ cell_status() }}{{ cell_urgency() }}{{ cell_created() }}{{ cell_actions() }}
+  {% endif %}
 </tr>

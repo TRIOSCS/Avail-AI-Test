@@ -505,6 +505,55 @@ async def ai_draft_rfq(
     return {"available": True, "body": draft}
 
 
+# ── Feature 5b: Unified AI Intake Parser ──────────────────────────────────
+
+
+@router.post("/api/ai/intake-parse")
+@limiter.limit("10/minute")
+async def ai_intake_parse(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Unified intake parser — classifies pasted text as RFQ or offer.
+
+    Accepts JSON body: {text: str, mode: "auto"|"rfq"|"offer", requisition_id?: int}
+    Falls back to heuristic TSV/CSV parser when AI is unavailable.
+    """
+    body = await request.json()
+    raw_text = (body.get("text") or "").strip()
+    mode = body.get("mode", "auto")
+    requisition_id = body.get("requisition_id")
+
+    if not raw_text or len(raw_text) < 5:
+        raise HTTPException(422, "Text must be at least 5 characters")
+    if len(raw_text) > 12000:
+        raise HTTPException(422, "Text exceeds 12,000 character limit")
+    if mode not in ("auto", "rfq", "offer"):
+        raise HTTPException(422, "Mode must be auto, rfq, or offer")
+
+    rfq_context = None
+    if requisition_id:
+        req = get_req_for_user(db, user, requisition_id, options=[])
+        if not req:
+            raise HTTPException(404, "Requisition not found")
+        reqs = db.query(Requirement).filter(
+            Requirement.requisition_id == requisition_id
+        ).all()
+        rfq_context = [
+            {"mpn": r.primary_mpn, "qty": r.target_qty or 1}
+            for r in reqs
+            if r.primary_mpn
+        ]
+
+    from app.services.ai_intake_parser import parse_freeform_intake
+
+    result = await parse_freeform_intake(raw_text, rfq_context, mode=mode)
+    if not result:
+        return {"parsed": False, "reason": "Could not extract any rows from text"}
+    return {"parsed": True, "template": result}
+
+
 # ── Feature 6: Freeform paste → RFQ/Offer templates ──────────────────────
 
 

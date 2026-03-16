@@ -15,8 +15,10 @@ Depends on: _helpers (router, templates, _base_ctx, _DASH, escape_like),
 from fastapi import Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from loguru import logger
+from sqlalchemy import cast, or_
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
+from sqlalchemy.types import String
 
 from ...database import get_db
 from ...dependencies import require_admin, require_user
@@ -32,6 +34,7 @@ async def vendors_list_partial(
     hide_blacklisted: bool = True,
     sort: str = "sighting_count",
     dir: str = "desc",
+    view: str = "table",
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
@@ -45,7 +48,15 @@ async def vendors_list_partial(
 
     if q.strip():
         safe = escape_like(q.strip())
-        query = query.filter(VendorCard.display_name.ilike(f"%{safe}%") | VendorCard.domain.ilike(f"%{safe}%"))
+        query = query.filter(
+            or_(
+                VendorCard.display_name.ilike(f"%{safe}%"),
+                VendorCard.domain.ilike(f"%{safe}%"),
+                cast(VendorCard.brand_tags, String).ilike(f"%{safe}%"),
+                cast(VendorCard.commodity_tags, String).ilike(f"%{safe}%"),
+                VendorCard.industry.ilike(f"%{safe}%"),
+            )
+        )
 
     total = query.count()
 
@@ -61,6 +72,32 @@ async def vendors_list_partial(
     order = sort_col.desc().nullslast() if dir == "desc" else sort_col.asc().nullslast()
     vendors = query.order_by(order).offset(offset).limit(limit).all()
 
+    # Build strategic claim map for card view badges
+    claim_map = {}
+    if view == "cards" and vendors:
+        try:
+            from ...models.strategic import StrategicVendor
+            vendor_ids = [v.id for v in vendors]
+            claims = (
+                db.query(StrategicVendor, User.name)
+                .join(User, StrategicVendor.user_id == User.id)
+                .filter(
+                    StrategicVendor.vendor_card_id.in_(vendor_ids),
+                    StrategicVendor.released_at.is_(None),
+                )
+                .all()
+            )
+            from datetime import datetime, timezone
+            now = datetime.now(timezone.utc)
+            for sv, user_name in claims:
+                days_left = (sv.expires_at - now).days if sv.expires_at else 0
+                claim_map[sv.vendor_card_id] = {
+                    "user_name": user_name,
+                    "days_left": max(0, days_left),
+                }
+        except Exception as exc:
+            logger.warning("Failed to load strategic claims: {}", exc)
+
     ctx = _base_ctx(request, user, "vendors")
     ctx.update(
         {
@@ -69,9 +106,11 @@ async def vendors_list_partial(
             "hide_blacklisted": hide_blacklisted,
             "sort": sort,
             "dir": dir,
+            "view": view,
             "total": total,
             "limit": limit,
             "offset": offset,
+            "claim_map": claim_map,
         }
     )
     return templates.TemplateResponse("htmx/partials/vendors/list.html", ctx)

@@ -104,6 +104,7 @@ Alpine.store('preferences', Alpine.$persist({
 htmx.config.defaultSwapStyle = 'innerHTML';
 htmx.config.historyCacheSize = 10;
 htmx.config.selfRequestsOnly = true;
+htmx.config.timeout = 15000;  // 15s timeout — prevents requests from hanging forever
 
 // ── Derive currentView from URL path ────────────────────────
 function _viewFromPath(path) {
@@ -147,6 +148,27 @@ document.body.addEventListener('htmx:historyRestore', function () {
 // ── HTMX error handler — show toast on failed requests ──────
 htmx.on('htmx:responseError', (evt) => {
     Alpine.store('toast').message = 'Request failed. Please try again.';
+    Alpine.store('toast').type = 'error';
+    Alpine.store('toast').show = true;
+});
+
+// ── Clear stuck loading/swapping states after errors or timeouts ──
+htmx.on('htmx:timeout', (evt) => {
+    Alpine.store('toast').message = 'Request timed out. Please try again.';
+    Alpine.store('toast').type = 'error';
+    Alpine.store('toast').show = true;
+});
+
+// Safety net: after ANY request ends (success, error, or abort), force-clear
+// stuck CSS classes that can freeze the UI (pointer-events:none, opacity:0).
+htmx.on('htmx:afterRequest', function(evt) {
+    var elt = evt.detail.elt;
+    if (elt) elt.classList.remove('htmx-request', 'htmx-swapping');
+});
+htmx.on('htmx:sendError', function(evt) {
+    var elt = evt.detail.elt;
+    if (elt) elt.classList.remove('htmx-request', 'htmx-swapping');
+    Alpine.store('toast').message = 'Network error. Check your connection.';
     Alpine.store('toast').type = 'error';
     Alpine.store('toast').show = true;
 });
@@ -210,6 +232,35 @@ Alpine.data('sourcingProgress', (requirementId, totalSources) => ({
         }, 500);
     }
 }));
+
+// ── Page-level loading bar for navigation ──────────────────
+// Shows a slim progress bar at the top when navigating between pages.
+htmx.on('htmx:beforeRequest', function(evt) {
+    // Only show for #main-content targeted requests (page navigation)
+    var target = evt.detail.target || evt.detail.elt;
+    if (target && target.id === 'main-content' || (evt.detail.elt && evt.detail.elt.getAttribute('hx-target') === '#main-content')) {
+        var bar = document.getElementById('page-loading-bar');
+        if (bar) {
+            bar.style.display = 'block';
+            // Force reflow then animate
+            bar.offsetHeight;
+            bar.style.transform = 'scaleX(0.7)';
+        }
+    }
+});
+htmx.on('htmx:afterSwap', function(evt) {
+    var bar = document.getElementById('page-loading-bar');
+    if (bar) {
+        bar.style.transform = 'scaleX(1)';
+        setTimeout(function() {
+            bar.style.display = 'none';
+            bar.style.transform = 'scaleX(0)';
+        }, 200);
+    }
+    // Safety: always reset body overflow after page navigation
+    // (prevents stuck overflow:hidden from lead-drawer or modal)
+    document.body.style.overflow = '';
+});
 
 // ── Keyboard shortcuts ─────────────────────────────────────
 // Cmd+K / Ctrl+K → focus global search
