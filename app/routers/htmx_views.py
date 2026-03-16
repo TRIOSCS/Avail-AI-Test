@@ -148,7 +148,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
     user = get_user(request, db)
     if not user:
-        return templates.TemplateResponse("htmx/login.html", {"request": request})
+        return templates.TemplateResponse("htmx/login.html", {"request": request, **_vite_assets()})
 
     # Determine which view to load based on URL path
     path = request.url.path
@@ -4895,7 +4895,7 @@ async def v2_sourcing_page(request: Request, requirement_id: int, db: Session = 
     """Full page load for sourcing results."""
     user = get_user(request, db)
     if not user:
-        return templates.TemplateResponse("htmx/login.html", {"request": request})
+        return templates.TemplateResponse("htmx/login.html", {"request": request, **_vite_assets()})
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}"
     return templates.TemplateResponse("htmx/base_page.html", ctx)
@@ -4906,7 +4906,7 @@ async def v2_lead_detail_page(request: Request, lead_id: int, db: Session = Depe
     """Full page load for lead detail."""
     user = get_user(request, db)
     if not user:
-        return templates.TemplateResponse("htmx/login.html", {"request": request})
+        return templates.TemplateResponse("htmx/login.html", {"request": request, **_vite_assets()})
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/leads/{lead_id}"
     return templates.TemplateResponse("htmx/base_page.html", ctx)
@@ -5320,7 +5320,7 @@ async def v2_sourcing_workspace_page(request: Request, requirement_id: int, db: 
     """Full page load for sourcing workspace (split-panel view)."""
     user = get_user(request, db)
     if not user:
-        return templates.TemplateResponse("htmx/login.html", {"request": request})
+        return templates.TemplateResponse("htmx/login.html", {"request": request, **_vite_assets()})
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}/workspace"
     return templates.TemplateResponse("htmx/base_page.html", ctx)

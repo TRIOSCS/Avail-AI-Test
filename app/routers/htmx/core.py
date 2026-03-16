@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from ...database import get_db
 from ...dependencies import get_user, require_user
 from ...models import ApiSource, Company, Requisition, User, VendorCard
-from ._helpers import _base_ctx, escape_like, router, templates
+from ._helpers import _base_ctx, _vite_assets, escape_like, router, templates
 
 # ── Full page entry points ──────────────────────────────────────────────
 
@@ -40,7 +40,7 @@ async def htmx_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
     user = get_user(request, db)
     if not user:
-        return templates.TemplateResponse("htmx/login.html", {"request": request})
+        return templates.TemplateResponse("htmx/login.html", {"request": request, **_vite_assets()})
 
     # Determine which view to load based on URL path
     path = request.url.path
