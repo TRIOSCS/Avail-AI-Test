@@ -44,12 +44,12 @@
 
   {# ── Back Button ───────────────────────────────────────── #}
   <div class="flex gap-3">
-    <button hx-get="/partials/requisitions/{{ req.id }}/tab/activity"
+    <button hx-get="/v2/partials/requisitions/{{ req.id }}/tab/activity"
             hx-target="#tab-content" hx-swap="innerHTML"
             class="px-4 py-2 text-sm font-medium text-brand-500 border border-brand-300 rounded-lg hover:bg-brand-50">
       View Activity
     </button>
-    <button hx-get="/partials/requisitions/{{ req.id }}/tab/parts"
+    <button hx-get="/v2/partials/requisitions/{{ req.id }}/tab/parts"
             hx-target="#tab-content" hx-swap="innerHTML"
             class="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-50">
       Back to Parts

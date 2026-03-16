@@ -4,7 +4,7 @@
 #}
 <div class="p-6">
   <h2 class="text-lg font-semibold text-gray-900 mb-4">New Requisition</h2>
-  <form hx-post="/partials/requisitions/create"
+  <form hx-post="/v2/partials/requisitions/create"
         hx-target="#req-table-body"
         hx-swap="afterbegin"
         @htmx:after-request.camel="if(event.detail.successful) { $dispatch('close-modal'); Alpine.store('toast').message='Requisition created'; Alpine.store('toast').type='success'; Alpine.store('toast').show=true; }">

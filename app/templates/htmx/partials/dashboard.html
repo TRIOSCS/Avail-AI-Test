@@ -15,23 +15,23 @@
   {# Stats cards #}
   <div class="grid grid-cols-1 md:grid-cols-3 gap-6 mb-8">
     <div class="bg-brand-50 border border-brand-200 rounded-lg p-6 hover:shadow-sm cursor-pointer"
-         hx-get="/partials/requisitions"
+         hx-get="/v2/partials/requisitions"
          hx-target="#main-content"
-         hx-push-url="/requisitions">
+         hx-push-url="/v2/requisitions">
       <p class="text-sm font-medium text-gray-500">Open Requisitions</p>
       <p class="mt-1 text-3xl font-bold text-brand-500">{{ stats.open_reqs }}</p>
     </div>
     <div class="bg-brand-50 border border-brand-200 rounded-lg p-6 hover:shadow-sm cursor-pointer"
-         hx-get="/partials/vendors"
+         hx-get="/v2/partials/vendors"
          hx-target="#main-content"
-         hx-push-url="/vendors">
+         hx-push-url="/v2/vendors">
       <p class="text-sm font-medium text-gray-500">Active Vendors</p>
       <p class="mt-1 text-3xl font-bold text-brand-500">{{ stats.vendor_count }}</p>
     </div>
     <div class="bg-brand-50 border border-brand-200 rounded-lg p-6 hover:shadow-sm cursor-pointer"
-         hx-get="/partials/companies"
+         hx-get="/v2/partials/companies"
          hx-target="#main-content"
-         hx-push-url="/companies">
+         hx-push-url="/v2/companies">
       <p class="text-sm font-medium text-gray-500">Companies</p>
       <p class="mt-1 text-3xl font-bold text-brand-500">{{ stats.company_count }}</p>
     </div>
@@ -48,15 +48,15 @@
     <h2 class="text-lg font-semibold text-gray-900 mb-4">Quick Actions</h2>
     <div class="flex flex-wrap gap-3">
       <button class="inline-flex items-center px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors"
-              hx-get="/partials/requisitions"
+              hx-get="/v2/partials/requisitions"
               hx-target="#main-content"
-              hx-push-url="/requisitions">
+              hx-push-url="/v2/requisitions">
         + New Requisition
       </button>
       <button class="inline-flex items-center px-4 py-2 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors"
-              hx-get="/partials/search"
+              hx-get="/v2/partials/search"
               hx-target="#main-content"
-              hx-push-url="/search">
+              hx-push-url="/v2/search">
         Search Parts
       </button>
     </div>

@@ -21,7 +21,7 @@
         <td><span class="badge badge-{{ c.confidence }}">{{ c.confidence }}</span></td>
         <td>
           <button class="btn btn-xs btn-primary"
-                  hx-post="/partials/ai/prospect-contacts/{{ c.id }}/promote"
+                  hx-post="/v2/partials/ai/prospect-contacts/{{ c.id }}/promote"
                   hx-target="#prospect-{{ c.id }}"
                   hx-swap="outerHTML">
             Promote

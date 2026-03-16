@@ -15,7 +15,7 @@
     <button @click="tab = 'sources'"
             :class="tab === 'sources' ? 'bg-brand-500 text-white' : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
             class="px-4 py-2 text-sm font-medium rounded-md transition-colors"
-            hx-get="/partials/settings/sources"
+            hx-get="/v2/partials/settings/sources"
             hx-target="#settings-content">
       Sources
     </button>
@@ -23,7 +23,7 @@
     <button @click="tab = 'system'"
             :class="tab === 'system' ? 'bg-brand-500 text-white' : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
             class="px-4 py-2 text-sm font-medium rounded-md transition-colors"
-            hx-get="/partials/settings/system"
+            hx-get="/v2/partials/settings/system"
             hx-target="#settings-content">
       System
     </button>
@@ -38,7 +38,7 @@
     <button @click="tab = 'profile'"
             :class="tab === 'profile' ? 'bg-brand-500 text-white' : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
             class="px-4 py-2 text-sm font-medium rounded-md transition-colors"
-            hx-get="/partials/settings/profile"
+            hx-get="/v2/partials/settings/profile"
             hx-target="#settings-content">
       Profile
     </button>
@@ -46,7 +46,7 @@
 
   {# Tab content area #}
   <div id="settings-content"
-       hx-get="/partials/settings/{{ active_tab }}"
+       hx-get="/v2/partials/settings/{{ active_tab }}"
        hx-trigger="load"
        hx-target="#settings-content">
     <div class="flex items-center justify-center py-12">
