@@ -1,24 +1,25 @@
 """
-routers/htmx/vendors.py — Vendor list, detail, and tab partials.
+routers/htmx/vendors.py — Vendor list, detail, tab partials, and CRUD.
 
 Handles all /v2/partials/vendors/ routes: vendor listing with search/sort,
-vendor detail with safety data, and per-vendor tab content (overview,
-contacts, analytics, offers).
+vendor detail with safety data, per-vendor tab content (overview, contacts,
+analytics, offers), inline edit form, update, blacklist toggle, delete,
+and typeahead search.
 
 Called by: htmx router package (__init__.py includes this module's router)
 Depends on: _helpers (router, templates, _base_ctx, _DASH, escape_like),
             models (VendorCard, VendorContact, Sighting, SourcingLead, User, Offer),
-            dependencies (require_user), database (get_db)
+            dependencies (require_user, require_admin), database (get_db)
 """
 
-from fastapi import Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, Form, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse
 from loguru import logger
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 
 from ...database import get_db
-from ...dependencies import require_user
+from ...dependencies import require_admin, require_user
 from ...models import Sighting, SourcingLead, User, VendorCard
 from ...models.vendors import VendorContact
 from ._helpers import _DASH, _base_ctx, escape_like, router, templates
@@ -74,6 +75,35 @@ async def vendors_list_partial(
         }
     )
     return templates.TemplateResponse("htmx/partials/vendors/list.html", ctx)
+
+
+@router.get("/v2/partials/vendors/typeahead")
+async def vendor_typeahead(
+    q: str = Query("", min_length=2),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return JSON list of vendor name matches for typeahead autocomplete.
+
+    Searches display_name and normalized_name, returns up to 15 results
+    sorted by sighting_count descending.
+    """
+    safe = escape_like(q.strip())
+    vendors = (
+        db.query(VendorCard)
+        .filter(
+            VendorCard.display_name.ilike(f"%{safe}%")
+            | VendorCard.normalized_name.ilike(f"%{safe}%")
+        )
+        .order_by(VendorCard.sighting_count.desc().nullslast())
+        .limit(15)
+        .all()
+    )
+    results = [
+        {"id": v.id, "name": v.display_name, "type": "vendor"}
+        for v in vendors
+    ]
+    return JSONResponse(results)
 
 
 @router.get("/v2/partials/vendors/{vendor_id}", response_class=HTMLResponse)
@@ -238,3 +268,186 @@ async def vendor_tab(
         else:
             html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No offers from this vendor yet.</p></div>'
         return HTMLResponse(html)
+
+
+# ── Vendor CRUD endpoints ────────────────────────────────────────────
+
+
+@router.get("/v2/partials/vendors/{vendor_id}/edit", response_class=HTMLResponse)
+async def vendor_edit_form(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return an inline edit form pre-filled with vendor data.
+
+    The form uses hx-put to submit updates back to the vendor detail endpoint.
+    """
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    emails_str = ", ".join(vendor.emails) if vendor.emails else ""
+    phones_str = ", ".join(vendor.phones) if vendor.phones else ""
+
+    html = f"""<form hx-put="/v2/partials/vendors/{vendor.id}" hx-target="#main-content" class="space-y-4 p-6 bg-white rounded-lg border border-gray-200">
+  <h3 class="text-lg font-semibold text-gray-900">Edit Vendor</h3>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Display Name</label>
+    <input type="text" name="display_name" value="{vendor.display_name or ""}"
+           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-brand-500" />
+  </div>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Website</label>
+    <input type="text" name="website" value="{vendor.website or ""}"
+           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-brand-500" />
+  </div>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Emails (comma-separated)</label>
+    <input type="text" name="emails" value="{emails_str}"
+           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-brand-500" />
+  </div>
+  <div>
+    <label class="block text-sm font-medium text-gray-700 mb-1">Phones (comma-separated)</label>
+    <input type="text" name="phones" value="{phones_str}"
+           class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-brand-500" />
+  </div>
+  <div class="flex gap-3">
+    <button type="submit"
+            class="px-4 py-2 bg-brand-600 text-white text-sm font-medium rounded-md hover:bg-brand-700">
+      Save Changes
+    </button>
+    <button type="button"
+            hx-get="/v2/partials/vendors/{vendor.id}" hx-target="#main-content"
+            class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200">
+      Cancel
+    </button>
+  </div>
+</form>"""
+    return HTMLResponse(html)
+
+
+@router.put("/v2/partials/vendors/{vendor_id}", response_class=HTMLResponse)
+async def vendor_update(
+    request: Request,
+    vendor_id: int,
+    display_name: str = Form(""),
+    website: str = Form(""),
+    emails: str = Form(""),
+    phones: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update a vendor's editable fields and redirect to the detail view.
+
+    Cleans email and phone lists: strips whitespace, lowercases emails,
+    removes empty entries, and deduplicates.
+    """
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    # Clean emails: strip, lowercase, filter empty, deduplicate
+    clean_emails = list(
+        dict.fromkeys(
+            e.strip().lower() for e in emails.split(",") if e.strip()
+        )
+    )
+
+    # Clean phones: strip, filter empty, deduplicate
+    clean_phones = list(
+        dict.fromkeys(
+            p.strip() for p in phones.split(",") if p.strip()
+        )
+    )
+
+    vendor.display_name = display_name.strip() or vendor.display_name
+    vendor.website = website.strip() or None
+    vendor.emails = clean_emails
+    vendor.phones = clean_phones
+
+    try:
+        db.commit()
+        logger.info("Vendor {} updated by {}", vendor_id, user.email)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.error("Failed to update vendor {}: {}", vendor_id, exc)
+        raise HTTPException(500, "Failed to update vendor")
+
+    response = HTMLResponse("")
+    response.headers["HX-Redirect"] = f"/v2/partials/vendors/{vendor_id}"
+    return response
+
+
+@router.post("/v2/partials/vendors/{vendor_id}/blacklist", response_class=HTMLResponse)
+async def vendor_toggle_blacklist(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle the is_blacklisted flag on a vendor and return an updated badge.
+
+    Returns a small HTML snippet showing the new blacklist status.
+    Sets HX-Trigger header so the page can optionally refresh related elements.
+    """
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    vendor.is_blacklisted = not vendor.is_blacklisted
+
+    try:
+        db.commit()
+        logger.info(
+            "Vendor {} blacklist toggled to {} by {}",
+            vendor_id,
+            vendor.is_blacklisted,
+            user.email,
+        )
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.error("Failed to toggle blacklist for vendor {}: {}", vendor_id, exc)
+        raise HTTPException(500, "Failed to update blacklist status")
+
+    if vendor.is_blacklisted:
+        badge = (
+            '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full '
+            'text-xs font-medium bg-red-100 text-red-800">Blacklisted</span>'
+        )
+    else:
+        badge = (
+            '<span class="inline-flex items-center px-2.5 py-0.5 rounded-full '
+            'text-xs font-medium bg-green-100 text-green-800">Active</span>'
+        )
+
+    response = HTMLResponse(badge)
+    response.headers["HX-Trigger"] = "vendorStatusChanged"
+    return response
+
+
+@router.delete("/v2/partials/vendors/{vendor_id}")
+async def vendor_delete(
+    request: Request,
+    vendor_id: int,
+    user: User = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    """Delete a vendor card (admin only). Redirects to the vendor list via HX-Redirect."""
+    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
+    if not vendor:
+        raise HTTPException(404, "Vendor not found")
+
+    try:
+        db.delete(vendor)
+        db.commit()
+        logger.info("Vendor {} deleted by admin {}", vendor_id, user.email)
+    except SQLAlchemyError as exc:
+        db.rollback()
+        logger.error("Failed to delete vendor {}: {}", vendor_id, exc)
+        raise HTTPException(500, "Failed to delete vendor")
+
+    response = HTMLResponse("")
+    response.headers["HX-Redirect"] = "/v2/partials/vendors"
+    return response

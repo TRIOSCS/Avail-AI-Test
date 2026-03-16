@@ -10,14 +10,15 @@ Depends on: models (Company, Requisition, CustomerSite, User),
             services.company_detail_service, dependencies (require_user, get_db)
 """
 
-from fastapi import Depends, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import Depends, Form, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse, JSONResponse
+from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ...database import get_db
 from ...dependencies import require_user
-from ...models import Company, Requisition, User
+from ...models import Company, CustomerSite, Requisition, User
 from ._helpers import _DASH, _base_ctx, escape_like, router, templates
 
 
@@ -43,6 +44,114 @@ async def companies_list_partial(
     ctx = _base_ctx(request, user, "companies")
     ctx.update({"companies": companies, "search": search, "total": total, "limit": limit, "offset": offset})
     return templates.TemplateResponse("htmx/partials/companies/list.html", ctx)
+
+
+@router.get("/v2/partials/companies/create-form", response_class=HTMLResponse)
+async def company_create_form(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return inline HTML form for creating a new company."""
+    account_types = ["Customer", "Prospect", "Partner", "Competitor"]
+    options = "\n".join(
+        f'<option value="{t}">{t}</option>' for t in account_types
+    )
+    html = f"""
+    <div class="max-w-2xl mx-auto p-6">
+      <h2 class="text-xl font-semibold text-gray-900 mb-6">Create New Company</h2>
+      <form hx-post="/v2/partials/companies/create" hx-target="#main-content"
+            class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Company Name *</label>
+          <input type="text" name="name" required
+                 class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Website</label>
+            <input type="text" name="website"
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Industry</label>
+            <input type="text" name="industry"
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Account Type</label>
+            <select name="account_type"
+                    class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm">
+              <option value="">-- Select --</option>
+              {options}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Domain</label>
+            <input type="text" name="domain"
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+          <input type="text" name="phone"
+                 class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+          <textarea name="notes" rows="3"
+                    class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm"></textarea>
+        </div>
+        <div class="flex justify-end gap-3 pt-4">
+          <button type="button"
+                  hx-get="/v2/partials/companies" hx-target="#main-content"
+                  class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+            Cancel
+          </button>
+          <button type="submit"
+                  class="px-4 py-2 text-sm font-medium text-white bg-brand-600 border border-transparent rounded-md hover:bg-brand-700">
+            Create Company
+          </button>
+        </div>
+      </form>
+    </div>
+    """
+    return HTMLResponse(html)
+
+
+@router.get("/v2/partials/companies/typeahead", response_class=JSONResponse)
+async def company_typeahead(
+    request: Request,
+    q: str = Query("", min_length=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return JSON list for company typeahead (name + sites)."""
+    if len(q.strip()) < 2:
+        return JSONResponse([])
+
+    safe = escape_like(q.strip())
+    companies = (
+        db.query(Company)
+        .filter(Company.is_active.is_(True), Company.name.ilike(f"%{safe}%"))
+        .options(joinedload(Company.sites))
+        .order_by(Company.name)
+        .limit(20)
+        .all()
+    )
+
+    results = []
+    for c in companies:
+        sites = [
+            {"id": s.id, "site_name": s.site_name}
+            for s in (c.sites or [])
+            if s.is_active
+        ]
+        results.append({"id": c.id, "name": c.name, "sites": sites})
+
+    return JSONResponse(results)
 
 
 @router.get("/v2/partials/companies/{company_id}", response_class=HTMLResponse)
@@ -205,3 +314,268 @@ async def company_tab(
     else:  # activity
         html = '<div class="p-8 text-center"><p class="text-sm text-gray-500">No activity recorded yet.</p></div>'
         return HTMLResponse(html)
+
+
+@router.post("/v2/partials/companies/create", response_class=HTMLResponse)
+async def company_create(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+    name: str = Form(""),
+    website: str = Form(""),
+    industry: str = Form(""),
+    notes: str = Form(""),
+    domain: str = Form(""),
+    account_type: str = Form(""),
+    phone: str = Form(""),
+):
+    """Create a new company with an auto-generated HQ site."""
+    name = name.strip()
+    if not name:
+        html = """
+        <div class="max-w-2xl mx-auto p-6">
+          <div class="rounded-md bg-red-50 p-4">
+            <p class="text-sm text-red-700">Company name is required.</p>
+          </div>
+        </div>
+        """
+        return HTMLResponse(html, status_code=422)
+
+    company = Company(
+        name=name,
+        website=website.strip() or None,
+        industry=industry.strip() or None,
+        notes=notes.strip() or None,
+        domain=domain.strip() or None,
+        account_type=account_type.strip() or None,
+        phone=phone.strip() or None,
+        is_active=True,
+    )
+    db.add(company)
+    db.flush()
+
+    hq_site = CustomerSite(
+        company_id=company.id,
+        site_name="HQ",
+        is_active=True,
+    )
+    db.add(hq_site)
+    db.commit()
+    db.refresh(company)
+
+    logger.info("Created company id={} name={!r} with HQ site", company.id, company.name)
+
+    html = f"""
+    <div class="max-w-2xl mx-auto p-6">
+      <div class="rounded-md bg-green-50 p-4 mb-4">
+        <p class="text-sm text-green-700">Company <strong>{company.name}</strong> created successfully.</p>
+      </div>
+    </div>
+    """
+    response = HTMLResponse(html)
+    response.headers["HX-Trigger"] = "refreshCompanyList"
+    return response
+
+
+@router.get("/v2/partials/companies/{company_id}/edit", response_class=HTMLResponse)
+async def company_edit_form(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return inline HTML form pre-filled with current company values."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    account_types = ["Customer", "Prospect", "Partner", "Competitor"]
+
+    def _opt(val):
+        opts = ['<option value="">-- Select --</option>']
+        for t in account_types:
+            sel = " selected" if val and val == t else ""
+            opts.append(f'<option value="{t}"{sel}>{t}</option>')
+        return "\n".join(opts)
+
+    def _v(val):
+        """Escape a value for an HTML attribute."""
+        if val is None:
+            return ""
+        return str(val).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
+
+    html = f"""
+    <div class="max-w-2xl mx-auto p-6">
+      <h2 class="text-xl font-semibold text-gray-900 mb-6">Edit Company: {_v(company.name)}</h2>
+      <form hx-put="/v2/partials/companies/{company.id}" hx-target="#main-content"
+            class="space-y-4">
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
+          <input type="text" name="name" value="{_v(company.name)}"
+                 class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Website</label>
+            <input type="text" name="website" value="{_v(company.website)}"
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Industry</label>
+            <input type="text" name="industry" value="{_v(company.industry)}"
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Account Type</label>
+            <select name="account_type"
+                    class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm">
+              {_opt(company.account_type)}
+            </select>
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Domain</label>
+            <input type="text" name="domain" value="{_v(company.domain)}"
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+        </div>
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Phone</label>
+            <input type="text" name="phone" value="{_v(company.phone)}"
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">Credit Terms</label>
+            <input type="text" name="credit_terms" value="{_v(company.credit_terms)}"
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+        </div>
+        <div class="grid grid-cols-3 gap-4">
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">HQ City</label>
+            <input type="text" name="hq_city" value="{_v(company.hq_city)}"
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">HQ State</label>
+            <input type="text" name="hq_state" value="{_v(company.hq_state)}"
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+          <div>
+            <label class="block text-sm font-medium text-gray-700 mb-1">HQ Country</label>
+            <input type="text" name="hq_country" value="{_v(company.hq_country)}"
+                   class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm" />
+          </div>
+        </div>
+        <div>
+          <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+          <textarea name="notes" rows="3"
+                    class="w-full rounded-md border-gray-300 shadow-sm focus:border-brand-500 focus:ring-brand-500 text-sm">{_v(company.notes)}</textarea>
+        </div>
+        <div class="flex justify-end gap-3 pt-4">
+          <button type="button"
+                  hx-get="/v2/partials/companies/{company.id}" hx-target="#main-content"
+                  class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
+            Cancel
+          </button>
+          <button type="submit"
+                  class="px-4 py-2 text-sm font-medium text-white bg-brand-600 border border-transparent rounded-md hover:bg-brand-700">
+            Save Changes
+          </button>
+        </div>
+      </form>
+    </div>
+    """
+    return HTMLResponse(html)
+
+
+@router.put("/v2/partials/companies/{company_id}", response_class=HTMLResponse)
+async def company_update(
+    request: Request,
+    company_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+    name: str = Form(None),
+    website: str = Form(None),
+    industry: str = Form(None),
+    notes: str = Form(None),
+    domain: str = Form(None),
+    account_type: str = Form(None),
+    phone: str = Form(None),
+    credit_terms: str = Form(None),
+    hq_city: str = Form(None),
+    hq_state: str = Form(None),
+    hq_country: str = Form(None),
+):
+    """Update an existing company and return the refreshed detail partial."""
+    company = db.query(Company).filter(Company.id == company_id).first()
+    if not company:
+        raise HTTPException(404, "Company not found")
+
+    fields = {
+        "name": name,
+        "website": website,
+        "industry": industry,
+        "notes": notes,
+        "domain": domain,
+        "account_type": account_type,
+        "phone": phone,
+        "credit_terms": credit_terms,
+        "hq_city": hq_city,
+        "hq_state": hq_state,
+        "hq_country": hq_country,
+    }
+
+    updated = []
+    for field_name, value in fields.items():
+        if value is not None:
+            cleaned = value.strip() if value else None
+            setattr(company, field_name, cleaned or None)
+            updated.append(field_name)
+
+    if not company.name:
+        html = """
+        <div class="max-w-2xl mx-auto p-6">
+          <div class="rounded-md bg-red-50 p-4">
+            <p class="text-sm text-red-700">Company name cannot be blank.</p>
+          </div>
+        </div>
+        """
+        return HTMLResponse(html, status_code=422)
+
+    db.commit()
+    db.refresh(company)
+    logger.info("Updated company id={} fields={}", company.id, updated)
+
+    # Return the full detail partial so the page refreshes cleanly
+    company = (
+        db.query(Company)
+        .options(joinedload(Company.account_owner), joinedload(Company.sites))
+        .filter(Company.id == company_id)
+        .first()
+    )
+    sites = [s for s in (company.sites or []) if s.is_active]
+    open_req_count = (
+        db.query(sqlfunc.count(Requisition.id))
+        .filter(
+            Requisition.customer_name == company.name,
+            Requisition.status.in_(["open", "active", "sourcing", "draft"]),
+        )
+        .scalar()
+        or 0
+    )
+
+    ctx = _base_ctx(request, user, "companies")
+    ctx.update(
+        {
+            "company": company,
+            "sites": sites,
+            "open_req_count": open_req_count,
+            "user": user,
+        }
+    )
+    response = templates.TemplateResponse("htmx/partials/companies/detail.html", ctx)
+    response.headers["HX-Trigger"] = "refreshCompanyDetail"
+    return response
