@@ -177,7 +177,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     elif "/requisitions" in path:
         current_view = "requisitions"
     else:
-        current_view = "dashboard"
+        current_view = "requisitions"
 
     # Determine the correct partial URL for initial content load
     partial_url = f"/v2/partials/{current_view}"
