@@ -2116,11 +2116,11 @@ async def search_run(
         from ..search_service import quick_search_mpn
 
         raw_results = await quick_search_mpn(search_mpn, db)
-        if isinstance(raw_results, list):
-            results = raw_results
-        else:
-            results = raw_results.get("sightings", [])
-            source_errors = raw_results.get("source_errors", [])
+        results = raw_results.get("sightings", [])
+        # Extract actual errors from source_stats (source_errors key doesn't exist)
+        for stat in raw_results.get("source_stats", []):
+            if stat.get("status") == "error" and stat.get("error"):
+                source_errors.append(f"{stat.get('source', 'Unknown')}: {stat['error']}")
     except Exception as exc:
         logger.error("Search failed for {}: {}", search_mpn, exc)
         error = f"Search error: {exc}"
