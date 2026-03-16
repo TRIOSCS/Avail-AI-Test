@@ -81,19 +81,19 @@ class TestLoginPageBranding:
     """Verify login page uses brand colors and logo (unauthenticated full page)."""
 
     def test_login_has_brand_bg(self, client: TestClient):
-        """Full page /v2 without session auth → login page with brand colors."""
+        """Full page / without session auth → login page with brand colors."""
         # Full page uses get_user() not require_user, so client fixture auth
         # doesn't apply. This returns the login page.
-        resp = client.get("/v2/requisitions")
+        resp = client.get("/requisitions")
         assert resp.status_code == 200
         assert "brand-900" in resp.text or "brand-800" in resp.text
 
     def test_login_has_logo(self, client: TestClient):
-        resp = client.get("/v2/requisitions")
+        resp = client.get("/requisitions")
         assert "avail_logo" in resp.text
 
     def test_login_no_cdn(self, client: TestClient):
-        resp = client.get("/v2/requisitions")
+        resp = client.get("/requisitions")
         assert "cdn.tailwindcss.com" not in resp.text
 
 
@@ -103,7 +103,7 @@ class TestBaseTemplateBranding:
     def test_partials_no_cdn_tailwind(self, client: TestClient):
         """Partial requests should not reference CDN."""
         resp = client.get(
-            "/v2/partials/requisitions",
+            "/partials/requisitions",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -114,15 +114,15 @@ class TestGlobalSearch:
     """Verify global search endpoint returns HTML."""
 
     def test_global_search_returns_200(self, client: TestClient):
-        resp = client.get("/v2/partials/search/global?q=test")
+        resp = client.get("/partials/search/global?q=test")
         assert resp.status_code == 200
 
     def test_global_search_short_query_returns_empty(self, client: TestClient):
-        resp = client.get("/v2/partials/search/global?q=a")
+        resp = client.get("/partials/search/global?q=a")
         assert resp.status_code == 200
 
     def test_global_search_finds_requisition(self, client: TestClient, test_requisition):
-        resp = client.get("/v2/partials/search/global?q=REQ-TEST")
+        resp = client.get("/partials/search/global?q=REQ-TEST")
         assert resp.status_code == 200
         assert "REQ-TEST" in resp.text
 
@@ -131,7 +131,7 @@ class TestViteManifestReader:
     """Test the _vite_assets() helper in htmx_views."""
 
     def test_vite_assets_returns_dict(self):
-        from app.routers.htmx_views import _vite_assets
+        from app.routers.htmx._helpers import _vite_assets
 
         result = _vite_assets()
         assert "js_file" in result

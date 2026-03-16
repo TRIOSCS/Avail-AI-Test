@@ -60,7 +60,7 @@ def _error_html(message: str) -> HTMLResponse:
 
 
 @router.post(
-    "/v2/partials/vendors/{vendor_id}/find-contacts",
+    "/partials/vendors/{vendor_id}/find-contacts",
     response_class=HTMLResponse,
 )
 async def htmx_ai_find_contacts(
@@ -118,7 +118,7 @@ async def htmx_ai_find_contacts(
 
 
 @router.get(
-    "/v2/partials/ai/prospect-contacts",
+    "/partials/ai/prospect-contacts",
     response_class=HTMLResponse,
 )
 async def htmx_list_prospect_contacts(
@@ -156,7 +156,7 @@ async def htmx_list_prospect_contacts(
 
 
 @router.post(
-    "/v2/partials/ai/prospect-contacts/{contact_id}/promote",
+    "/partials/ai/prospect-contacts/{contact_id}/promote",
     response_class=HTMLResponse,
 )
 async def htmx_promote_prospect_contact(
@@ -199,7 +199,7 @@ async def htmx_promote_prospect_contact(
 
 
 @router.post(
-    "/v2/partials/ai/parse-email",
+    "/partials/ai/parse-email",
     response_class=HTMLResponse,
 )
 async def htmx_parse_email(
@@ -253,7 +253,7 @@ async def htmx_parse_email(
 
 
 @router.get(
-    "/v2/partials/companies/{company_id}/intel",
+    "/partials/companies/{company_id}/intel",
     response_class=HTMLResponse,
 )
 async def htmx_company_intel(
@@ -299,7 +299,7 @@ async def htmx_company_intel(
 
 
 @router.post(
-    "/v2/partials/requisitions/{req_id}/ai-draft-rfq",
+    "/partials/requisitions/{req_id}/ai-draft-rfq",
     response_class=HTMLResponse,
 )
 async def htmx_ai_draft_rfq(

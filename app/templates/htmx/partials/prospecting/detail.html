@@ -6,7 +6,7 @@
 #}
 
 <div id="breadcrumb" hx-swap-oob="true">
-  <a href="/v2/prospecting" hx-get="/v2/partials/prospecting" hx-target="#main-content" hx-push-url="/v2/prospecting"
+  <a href="/prospecting" hx-get="/partials/prospecting" hx-target="#main-content" hx-push-url="/prospecting"
      class="text-brand-400 hover:text-brand-300">Prospecting</a>
   <span class="mx-1 text-gray-400">/</span>
   {{ prospect.name }}
@@ -44,18 +44,18 @@
       {# Action buttons #}
       <div class="flex gap-2">
         {% if prospect.status == 'suggested' %}
-        <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/claim"
+        <button hx-post="/partials/prospecting/{{ prospect.id }}/claim"
                 hx-target="#main-content"
                 class="px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600">
           Claim
         </button>
-        <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
+        <button hx-post="/partials/prospecting/{{ prospect.id }}/dismiss"
                 hx-target="#main-content"
                 class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50">
           Dismiss
         </button>
         {% endif %}
-        <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/enrich"
+        <button hx-post="/partials/prospecting/{{ prospect.id }}/enrich"
                 hx-target="#main-content"
                 class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50 htmx-indicator">
           <span class="htmx-indicator-content">Enrich</span>

@@ -1,6 +1,6 @@
 {#
   search_results.html — Dropdown partial showing global search results grouped by type.
-  Returned by GET /v2/partials/search/global as an HTMX partial.
+  Returned by GET /partials/search/global as an HTMX partial.
   Called by: topbar global search input in base.html
   Depends on: query (str), results (dict with requisitions, companies, vendors lists)
 #}
@@ -12,10 +12,10 @@
       <div>
         <p class="px-2 text-xs font-semibold text-gray-400 uppercase">Requisitions</p>
         {% for req in results.requisitions %}
-        <a href="/v2/requisitions/{{ req.id }}"
-           hx-get="/v2/partials/requisitions/{{ req.id }}"
+        <a href="/requisitions/{{ req.id }}"
+           hx-get="/partials/requisitions/{{ req.id }}"
            hx-target="#main-content"
-           hx-push-url="/v2/requisitions/{{ req.id }}"
+           hx-push-url="/requisitions/{{ req.id }}"
            class="block px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 rounded">
           <span class="font-medium">{{ req.name }}</span>
           {% if req.customer_name %}
@@ -30,10 +30,10 @@
       <div>
         <p class="px-2 text-xs font-semibold text-gray-400 uppercase">Companies</p>
         {% for co in results.companies %}
-        <a href="/v2/companies/{{ co.id }}"
-           hx-get="/v2/partials/companies/{{ co.id }}"
+        <a href="/companies/{{ co.id }}"
+           hx-get="/partials/companies/{{ co.id }}"
            hx-target="#main-content"
-           hx-push-url="/v2/companies/{{ co.id }}"
+           hx-push-url="/companies/{{ co.id }}"
            class="block px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 rounded">
           {{ co.name }}
         </a>
@@ -45,10 +45,10 @@
       <div>
         <p class="px-2 text-xs font-semibold text-gray-400 uppercase">Vendors</p>
         {% for v in results.vendors %}
-        <a href="/v2/vendors/{{ v.id }}"
-           hx-get="/v2/partials/vendors/{{ v.id }}"
+        <a href="/vendors/{{ v.id }}"
+           hx-get="/partials/vendors/{{ v.id }}"
            hx-target="#main-content"
-           hx-push-url="/v2/vendors/{{ v.id }}"
+           hx-push-url="/vendors/{{ v.id }}"
            class="block px-2 py-1.5 text-sm text-gray-700 hover:bg-brand-50 rounded">
           {{ v.display_name }}
         </a>

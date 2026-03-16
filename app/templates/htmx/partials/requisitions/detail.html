@@ -7,7 +7,7 @@
 
 {# OOB breadcrumb update #}
 <div id="breadcrumb" hx-swap-oob="true">
-  <a hx-get="/v2/partials/requisitions" hx-target="#main-content" hx-push-url="/v2/requisitions"
+  <a hx-get="/partials/requisitions" hx-target="#main-content" hx-push-url="/requisitions"
      preload="mouseover"
      class="text-brand-500 hover:text-brand-600 cursor-pointer">Requisitions</a>
   <span class="text-gray-500 mx-1">&gt;</span>
@@ -36,7 +36,7 @@
       </div>
       <div class="flex items-center gap-3">
         {# Action buttons #}
-        <button hx-get="/v2/partials/requisitions/{{ req.id }}/rfq-compose"
+        <button hx-get="/partials/requisitions/{{ req.id }}/rfq-compose"
                 hx-target="#tab-content" hx-swap="innerHTML"
                 data-loading-disable
                 class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600">
@@ -103,7 +103,7 @@
       <nav class="flex gap-6 -mb-px">
         {% for tab_id, tab_label in [('parts', 'Parts'), ('offers', 'Offers'), ('responses', 'Responses'), ('quotes', 'Quotes'), ('buy_plans', 'Buy Plans'), ('tasks', 'Tasks'), ('activity', 'Activity')] %}
         <button @click="activeTab = '{{ tab_id }}'"
-                hx-get="/v2/partials/requisitions/{{ req.id }}/tab/{{ tab_id }}"
+                hx-get="/partials/requisitions/{{ req.id }}/tab/{{ tab_id }}"
                 hx-target="#tab-content"
                 hx-trigger="click"
                 hx-swap="innerHTML"

@@ -7,9 +7,9 @@
 <div id="prospect-{{ prospect.id }}" class="bg-white border border-brand-200 rounded-lg p-4 hover:shadow-sm">
   {# Card body — clickable to detail #}
   <div class="cursor-pointer"
-       hx-get="/v2/partials/prospecting/{{ prospect.id }}"
+       hx-get="/partials/prospecting/{{ prospect.id }}"
        hx-target="#main-content"
-       hx-push-url="/v2/prospecting/{{ prospect.id }}">
+       hx-push-url="/prospecting/{{ prospect.id }}">
     <div class="flex items-start justify-between mb-2">
       <div class="min-w-0">
         <h3 class="text-sm font-bold text-gray-900 truncate">{{ prospect.name }}</h3>
@@ -63,13 +63,13 @@
   {# Quick action buttons — only for suggested #}
   {% if prospect.status == 'suggested' %}
   <div class="mt-3 pt-3 border-t border-gray-100 flex gap-2">
-    <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/claim"
+    <button hx-post="/partials/prospecting/{{ prospect.id }}/claim"
             hx-target="#prospect-{{ prospect.id }}"
             hx-swap="outerHTML"
             class="flex-1 px-2 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600">
       Claim
     </button>
-    <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
+    <button hx-post="/partials/prospecting/{{ prospect.id }}/dismiss"
             hx-target="#prospect-{{ prospect.id }}"
             hx-swap="outerHTML"
             class="flex-1 px-2 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50">

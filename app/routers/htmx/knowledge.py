@@ -21,7 +21,7 @@ from ...models import KnowledgeEntry, User
 from ._helpers import _base_ctx, router
 
 
-@router.get("/v2/partials/knowledge", response_class=HTMLResponse)
+@router.get("/partials/knowledge", response_class=HTMLResponse)
 async def knowledge_list_partial(
     request: Request,
     entity_type: str | None = Query(None),
@@ -62,7 +62,7 @@ async def knowledge_list_partial(
             f"<td>{created}</td>"
             f"<td>"
             f"<button class='btn btn-sm btn-outline-danger' "
-            f"hx-delete='/v2/partials/knowledge/{e.id}' "
+            f"hx-delete='/partials/knowledge/{e.id}' "
             f"hx-target='closest tr' hx-swap='outerHTML'>Delete</button>"
             f"</td></tr>"
         )
@@ -78,7 +78,7 @@ async def knowledge_list_partial(
     return HTMLResponse(html)
 
 
-@router.post("/v2/partials/knowledge", response_class=HTMLResponse)
+@router.post("/partials/knowledge", response_class=HTMLResponse)
 async def knowledge_create_partial(
     request: Request,
     title: str = Form(...),
@@ -124,7 +124,7 @@ async def knowledge_create_partial(
         )
 
 
-@router.put("/v2/partials/knowledge/{entry_id}", response_class=HTMLResponse)
+@router.put("/partials/knowledge/{entry_id}", response_class=HTMLResponse)
 async def knowledge_update_partial(
     request: Request,
     entry_id: int,
@@ -154,7 +154,7 @@ async def knowledge_update_partial(
             f"<td>{created}</td>"
             f"<td>"
             f"<button class='btn btn-sm btn-outline-danger' "
-            f"hx-delete='/v2/partials/knowledge/{updated.id}' "
+            f"hx-delete='/partials/knowledge/{updated.id}' "
             f"hx-target='closest tr' hx-swap='outerHTML'>Delete</button>"
             f"</td></tr>"
         )
@@ -169,7 +169,7 @@ async def knowledge_update_partial(
         )
 
 
-@router.delete("/v2/partials/knowledge/{entry_id}", response_class=HTMLResponse)
+@router.delete("/partials/knowledge/{entry_id}", response_class=HTMLResponse)
 async def knowledge_delete_partial(
     request: Request,
     entry_id: int,
@@ -196,7 +196,7 @@ async def knowledge_delete_partial(
         )
 
 
-@router.get("/v2/partials/{entity_type}/{entity_id}/insights", response_class=HTMLResponse)
+@router.get("/partials/{entity_type}/{entity_id}/insights", response_class=HTMLResponse)
 async def entity_insights_partial(
     request: Request,
     entity_type: str,
@@ -255,7 +255,7 @@ async def entity_insights_partial(
 
 
 @router.post(
-    "/v2/partials/{entity_type}/{entity_id}/insights/refresh",
+    "/partials/{entity_type}/{entity_id}/insights/refresh",
     response_class=HTMLResponse,
 )
 async def entity_insights_refresh_partial(

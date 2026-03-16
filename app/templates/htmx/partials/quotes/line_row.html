@@ -12,7 +12,7 @@
       <span>{{ line.mpn }}</span>
     </template>
     <template x-if="editing">
-      <form hx-put="/v2/partials/quotes/{{ line.quote_id }}/lines/{{ line.id }}"
+      <form hx-put="/partials/quotes/{{ line.quote_id }}/lines/{{ line.id }}"
             hx-target="#line-{{ line.id }}" hx-swap="outerHTML"
             class="flex gap-1 items-center">
         <input type="text" name="mpn" value="{{ line.mpn }}" class="w-28 px-1 py-0.5 text-sm border border-brand-200 rounded font-mono">
@@ -36,7 +36,7 @@
     </span>
   </td>
   <td class="px-4 py-3" x-show="!editing">
-    <button hx-delete="/v2/partials/quotes/{{ line.quote_id }}/lines/{{ line.id }}"
+    <button hx-delete="/partials/quotes/{{ line.quote_id }}/lines/{{ line.id }}"
             hx-target="#line-{{ line.id }}"
             hx-swap="delete"
             hx-confirm="Remove this line?"

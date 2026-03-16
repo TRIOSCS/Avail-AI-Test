@@ -1,4 +1,4 @@
-"""routers/htmx/core.py — V2 page shell, global search, dashboard, settings.
+"""routers/htmx/core.py — Page shell, global search, dashboard, settings.
 
 Handles full-page entry points (base.html with HTMX partial loading),
 global search across entities, dashboard stats, and settings tabs.
@@ -20,24 +20,23 @@ from ._helpers import _base_ctx, escape_like, router, templates
 # ── Full page entry points ──────────────────────────────────────────────
 
 
-@router.get("/v2", response_class=HTMLResponse)
-@router.get("/v2/requisitions", response_class=HTMLResponse)
-@router.get("/v2/requisitions/{req_id:int}", response_class=HTMLResponse)
-@router.get("/v2/search", response_class=HTMLResponse)
-@router.get("/v2/vendors", response_class=HTMLResponse)
-@router.get("/v2/vendors/{vendor_id:int}", response_class=HTMLResponse)
-@router.get("/v2/companies", response_class=HTMLResponse)
-@router.get("/v2/companies/{company_id:int}", response_class=HTMLResponse)
-@router.get("/v2/buy-plans", response_class=HTMLResponse)
-@router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
-@router.get("/v2/quotes", response_class=HTMLResponse)
-@router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
-@router.get("/v2/settings", response_class=HTMLResponse)
-@router.get("/v2/prospecting", response_class=HTMLResponse)
-@router.get("/v2/prospecting/{prospect_id:int}", response_class=HTMLResponse)
-@router.get("/v2/proactive", response_class=HTMLResponse)
-@router.get("/v2/strategic", response_class=HTMLResponse)
-async def v2_page(request: Request, db: Session = Depends(get_db)):
+@router.get("/requisitions", response_class=HTMLResponse)
+@router.get("/requisitions/{req_id:int}", response_class=HTMLResponse)
+@router.get("/search", response_class=HTMLResponse)
+@router.get("/vendors", response_class=HTMLResponse)
+@router.get("/vendors/{vendor_id:int}", response_class=HTMLResponse)
+@router.get("/companies", response_class=HTMLResponse)
+@router.get("/companies/{company_id:int}", response_class=HTMLResponse)
+@router.get("/buy-plans", response_class=HTMLResponse)
+@router.get("/buy-plans/{bp_id:int}", response_class=HTMLResponse)
+@router.get("/quotes", response_class=HTMLResponse)
+@router.get("/quotes/{quote_id:int}", response_class=HTMLResponse)
+@router.get("/settings", response_class=HTMLResponse)
+@router.get("/prospecting", response_class=HTMLResponse)
+@router.get("/prospecting/{prospect_id:int}", response_class=HTMLResponse)
+@router.get("/proactive", response_class=HTMLResponse)
+@router.get("/strategic", response_class=HTMLResponse)
+async def htmx_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
     user = get_user(request, db)
     if not user:
@@ -69,32 +68,32 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         current_view = "dashboard"
 
     # Determine the correct partial URL for initial content load
-    partial_url = f"/v2/partials/{current_view}"
+    partial_url = f"/partials/{current_view}"
     # Pass path params for detail views
     if current_view == "requisitions" and "/requisitions/" in path:
         parts = path.split("/requisitions/")
         if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/requisitions/{parts[1]}"
+            partial_url = f"/partials/requisitions/{parts[1]}"
     elif current_view == "vendors" and "/vendors/" in path:
         parts = path.split("/vendors/")
         if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/vendors/{parts[1]}"
+            partial_url = f"/partials/vendors/{parts[1]}"
     elif current_view == "companies" and "/companies/" in path:
         parts = path.split("/companies/")
         if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/companies/{parts[1]}"
+            partial_url = f"/partials/companies/{parts[1]}"
     elif current_view == "buy-plans" and "/buy-plans/" in path:
         parts = path.split("/buy-plans/")
         if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/buy-plans/{parts[1]}"
+            partial_url = f"/partials/buy-plans/{parts[1]}"
     elif current_view == "quotes" and "/quotes/" in path:
         parts = path.split("/quotes/")
         if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/quotes/{parts[1]}"
+            partial_url = f"/partials/quotes/{parts[1]}"
     elif current_view == "prospecting" and "/prospecting/" in path:
         parts = path.split("/prospecting/")
         if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/prospecting/{parts[1]}"
+            partial_url = f"/partials/prospecting/{parts[1]}"
 
     ctx = _base_ctx(request, user, current_view)
     ctx["partial_url"] = partial_url
@@ -104,7 +103,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
 # ── Global search ──────────────────────────────────────────────────────
 
 
-@router.get("/v2/partials/search/global", response_class=HTMLResponse)
+@router.get("/partials/search/global", response_class=HTMLResponse)
 async def global_search(
     request: Request,
     q: str = "",
@@ -137,7 +136,7 @@ async def global_search(
 # ── Dashboard partial ───────────────────────────────────────────────────
 
 
-@router.get("/v2/partials/dashboard", response_class=HTMLResponse)
+@router.get("/partials/dashboard", response_class=HTMLResponse)
 async def dashboard_partial(
     request: Request,
     user: User = Depends(require_user),
@@ -161,7 +160,7 @@ async def dashboard_partial(
 # ── Settings partials ────────────────────────────────────────────────
 
 
-@router.get("/v2/partials/settings", response_class=HTMLResponse)
+@router.get("/partials/settings", response_class=HTMLResponse)
 async def settings_partial(
     request: Request,
     tab: str = "sources",
@@ -175,7 +174,7 @@ async def settings_partial(
     return templates.TemplateResponse("htmx/partials/settings/index.html", ctx)
 
 
-@router.get("/v2/partials/settings/sources", response_class=HTMLResponse)
+@router.get("/partials/settings/sources", response_class=HTMLResponse)
 async def settings_sources_tab(
     request: Request,
     user: User = Depends(require_user),
@@ -188,7 +187,7 @@ async def settings_sources_tab(
     return templates.TemplateResponse("htmx/partials/settings/sources.html", ctx)
 
 
-@router.get("/v2/partials/settings/system", response_class=HTMLResponse)
+@router.get("/partials/settings/system", response_class=HTMLResponse)
 async def settings_system_tab(
     request: Request,
     user: User = Depends(require_user),
@@ -205,7 +204,7 @@ async def settings_system_tab(
     return templates.TemplateResponse("htmx/partials/settings/system.html", ctx)
 
 
-@router.get("/v2/partials/settings/profile", response_class=HTMLResponse)
+@router.get("/partials/settings/profile", response_class=HTMLResponse)
 async def settings_profile_tab(
     request: Request,
     user: User = Depends(require_user),
