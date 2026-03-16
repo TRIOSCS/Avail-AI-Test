@@ -1,8 +1,8 @@
-{# Inline edit cell — swapped into a <td> when user clicks to edit.
+{# Inline edit cell — swapped into a <td> when user double-clicks to edit.
    Returns a form with a single input that saves on blur or Enter.
 
    Called by: GET /requisitions2/{id}/edit/{field}
-   Depends on: HTMX, page.html styles
+   Depends on: HTMX, Alpine.js, Tailwind
 #}
 
 {% if field == 'name' %}
@@ -12,7 +12,7 @@
       hx-swap="outerHTML">
   <input type="hidden" name="field" value="name">
   <input type="text" name="value" value="{{ req.name }}"
-         class="rq2-inline-input"
+         class="w-full rounded-lg border border-brand-400 px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-brand-400"
          autofocus
          x-init="$el.focus(); $el.select()"
          x-on:blur="$el.form.requestSubmit()"
@@ -26,7 +26,8 @@
       hx-target-error="#rq2-error"
       hx-swap="outerHTML">
   <input type="hidden" name="field" value="status">
-  <select name="value" class="rq2-inline-select"
+  <select name="value"
+          class="rounded-lg border border-brand-400 px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-brand-400"
           autofocus
           x-init="$el.focus()"
           x-on:change="$el.form.requestSubmit()"
@@ -44,7 +45,8 @@
       hx-target-error="#rq2-error"
       hx-swap="outerHTML">
   <input type="hidden" name="field" value="urgency">
-  <select name="value" class="rq2-inline-select"
+  <select name="value"
+          class="rounded-lg border border-brand-400 px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-brand-400"
           autofocus
           x-init="$el.focus()"
           x-on:change="$el.form.requestSubmit()"
@@ -64,7 +66,7 @@
   <input type="hidden" name="field" value="deadline">
   <input type="date" name="value"
          value="{{ req.deadline if req.deadline and req.deadline != 'ASAP' else '' }}"
-         class="rq2-inline-input"
+         class="rounded-lg border border-brand-400 px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-brand-400"
          autofocus
          x-init="$el.focus()"
          x-on:change="$el.form.requestSubmit()"
@@ -78,7 +80,8 @@
       hx-target-error="#rq2-error"
       hx-swap="outerHTML">
   <input type="hidden" name="field" value="owner">
-  <select name="value" class="rq2-inline-select"
+  <select name="value"
+          class="rounded-lg border border-brand-400 px-2 py-1 text-sm outline-none focus:ring-1 focus:ring-brand-400"
           autofocus
           x-init="$el.focus()"
           x-on:change="$el.form.requestSubmit()"

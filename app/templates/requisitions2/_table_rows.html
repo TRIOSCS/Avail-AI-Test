@@ -1,101 +1,166 @@
+{#
+  _table_rows.html — Loop of requisition rows for the data table.
+  Called by: _table.html (include), GET /requisitions2/table/rows
+  Depends on: requisitions list, user object, HTMX, Alpine.js
+#}
+{% set status_styles = {
+  'active': 'bg-brand-100 text-brand-600',
+  'draft': 'bg-gray-100 text-gray-600',
+  'sourcing': 'bg-amber-50 text-amber-700',
+  'archived': 'bg-gray-100 text-gray-600',
+  'won': 'bg-emerald-50 text-emerald-700',
+  'lost': 'bg-rose-50 text-rose-700',
+  'closed': 'bg-gray-100 text-gray-600',
+} %}
+{% set urgency_styles = {
+  'hot': 'bg-amber-50 text-amber-700',
+  'critical': 'bg-rose-50 text-rose-700',
+} %}
+
 {% for req in requisitions %}
-<tr id="rq2-row-{{ req.id }}" class="rq2-row {{ 'rq2-urgent' if req.urgency == 'critical' else '' }}">
-  <td>
+<tr id="rq2-row-{{ req.id }}"
+    class="rq2-row group hover:bg-gray-50 transition-colors {{ 'border-l-2 border-rose-400' if req.urgency == 'critical' else '' }}">
+  <td class="px-4 py-3">
     <input type="checkbox" value="{{ req.id }}"
+           class="rounded border-gray-300 text-brand-500 focus:ring-brand-400"
            x-on:change="toggleSelection({{ req.id }}, $event.target.checked)"
            x-bind:checked="selectedIds.has({{ req.id }})">
   </td>
-  <td hx-get="/requisitions2/{{ req.id }}/edit/name"
-      hx-target="this"
-      hx-swap="innerHTML"
-      hx-trigger="dblclick"
-      class="rq2-editable"
+  <td class="px-4 py-3 rq2-editable"
+      hx-get="/requisitions2/{{ req.id }}/edit/name"
+      hx-target="this" hx-swap="innerHTML" hx-trigger="dblclick"
       title="Double-click to edit">
     <a hx-get="/requisitions2/{{ req.id }}/modal"
-       hx-target="#rq2-modal"
-       hx-swap="innerHTML"
+       hx-target="#rq2-modal" hx-swap="innerHTML"
        preload="mousedown"
-       style="cursor:pointer"
+       class="text-sm font-medium text-brand-500 hover:text-brand-600 hover:underline cursor-pointer"
        onclick="event.stopPropagation()">
       {{ req.name }}
     </a>
   </td>
-  <td hx-get="/requisitions2/{{ req.id }}/edit/status"
-      hx-target="this"
-      hx-swap="innerHTML"
-      hx-trigger="dblclick"
-      class="rq2-editable"
+  <td class="px-4 py-3 rq2-editable"
+      hx-get="/requisitions2/{{ req.id }}/edit/status"
+      hx-target="this" hx-swap="innerHTML" hx-trigger="dblclick"
       title="Double-click to edit">
-    <span class="badge badge-{{ req.status }}">{{ req.status }}</span>
+    <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_styles.get(req.status, 'bg-gray-100 text-gray-600') }}">
+      {{ req.status }}
+    </span>
   </td>
-  <td>{{ req.customer_display or '—' }}</td>
-  <td>{{ req.requirement_count }}</td>
-  <td>{{ req.offer_count }}</td>
-  <td hx-get="/requisitions2/{{ req.id }}/edit/owner"
-      hx-target="this"
-      hx-swap="innerHTML"
-      hx-trigger="dblclick"
-      class="rq2-editable"
+  <td class="px-4 py-3 text-sm text-gray-600">{{ req.customer_display or '—' }}</td>
+  <td class="px-4 py-3 text-sm text-right text-gray-800">{{ req.requirement_count }}</td>
+  <td class="px-4 py-3 text-sm text-right text-gray-800">{{ req.offer_count }}</td>
+  <td class="px-4 py-3 text-sm text-gray-600 rq2-editable"
+      hx-get="/requisitions2/{{ req.id }}/edit/owner"
+      hx-target="this" hx-swap="innerHTML" hx-trigger="dblclick"
       title="Double-click to edit">
     {{ req.created_by_name }}
   </td>
-  <td hx-get="/requisitions2/{{ req.id }}/edit/urgency"
-      hx-target="this"
-      hx-swap="innerHTML"
-      hx-trigger="dblclick"
-      class="rq2-editable"
+  <td class="px-4 py-3 rq2-editable"
+      hx-get="/requisitions2/{{ req.id }}/edit/urgency"
+      hx-target="this" hx-swap="innerHTML" hx-trigger="dblclick"
       title="Double-click to edit">
     {% if req.urgency and req.urgency != 'normal' %}
-    <span class="badge badge-{{ req.urgency }}">{{ req.urgency }}</span>
+    <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ urgency_styles.get(req.urgency, 'bg-gray-100 text-gray-600') }}">
+      {{ req.urgency }}
+    </span>
     {% else %}
-    <span class="rq2-edit-hint">—</span>
+    <span class="text-gray-300">—</span>
     {% endif %}
   </td>
-  <td>{{ req.created_at.strftime('%Y-%m-%d') if req.created_at else '—' }}</td>
-  <td class="rq2-actions" x-data="{ open: false }">
-    <div style="position:relative">
-      <button @click="open = !open" @click.outside="open = false" class="btn-sm" type="button">
-        &#x22EE;
+  <td class="px-4 py-3 text-sm text-gray-500">{{ req.created_at.strftime('%Y-%m-%d') if req.created_at else '—' }}</td>
+  <td class="px-4 py-3 text-right" x-data="{ open: false }">
+    <div class="relative inline-block">
+      <button @click="open = !open" @click.outside="open = false"
+              class="inline-flex items-center justify-center h-8 w-8 rounded-lg text-gray-400 hover:text-gray-600 hover:bg-gray-100 transition-colors"
+              type="button">
+        <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M10 6a2 2 0 110-4 2 2 0 010 4zM10 12a2 2 0 110-4 2 2 0 010 4zM10 18a2 2 0 110-4 2 2 0 010 4z"/>
+        </svg>
       </button>
-      <div x-show="open" x-cloak class="dropdown-menu" style="right:0;top:100%">
+      <div x-show="open" x-cloak
+           x-transition:enter="transition ease-out duration-100"
+           x-transition:enter-start="opacity-0 scale-95"
+           x-transition:enter-end="opacity-100 scale-100"
+           x-transition:leave="transition ease-in duration-75"
+           x-transition:leave-start="opacity-100 scale-100"
+           x-transition:leave-end="opacity-0 scale-95"
+           class="absolute right-0 top-full mt-1 w-44 rounded-lg border border-gray-200 bg-white py-1 shadow-lg z-10">
         {% if req.status != 'archived' %}
         <button hx-post="/requisitions2/{{ req.id }}/action/archive"
                 hx-target="#rq2-table" hx-target-error="#rq2-error" hx-include="#rq2-filters"
                 hx-confirm="Archive this requisition?"
-                class="dropdown-item">Archive</button>
+                class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+          <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"/>
+          </svg>
+          Archive
+        </button>
         {% else %}
         <button hx-post="/requisitions2/{{ req.id }}/action/activate"
                 hx-target="#rq2-table" hx-target-error="#rq2-error" hx-include="#rq2-filters"
-                class="dropdown-item">Activate</button>
+                class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+          <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/>
+          </svg>
+          Activate
+        </button>
         {% endif %}
         {% if not req.claimed_by_id and user.role in ('buyer','trader','manager','admin') %}
         <button hx-post="/requisitions2/{{ req.id }}/action/claim"
                 hx-target="#rq2-table" hx-target-error="#rq2-error" hx-include="#rq2-filters"
-                class="dropdown-item">Claim</button>
+                class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+          <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M7 11.5V14m0-2.5v-6a1.5 1.5 0 113 0m-3 6a1.5 1.5 0 00-3 0v2a7.5 7.5 0 0015 0v-5a1.5 1.5 0 00-3 0m-6-3V11m0-5.5v-1a1.5 1.5 0 013 0v1m0 0V11m0-5.5a1.5 1.5 0 013 0v3m0 0V11"/>
+          </svg>
+          Claim
+        </button>
         {% elif req.claimed_by_id == user.id %}
         <button hx-post="/requisitions2/{{ req.id }}/action/unclaim"
                 hx-target="#rq2-table" hx-target-error="#rq2-error" hx-include="#rq2-filters"
-                class="dropdown-item">Unclaim</button>
+                class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">Unclaim</button>
         {% endif %}
         {% if req.status in ('active', 'sourcing', 'offers', 'quoting', 'quoted', 'open', 'reopened') %}
         <button hx-post="/requisitions2/{{ req.id }}/action/won"
                 hx-target="#rq2-table" hx-target-error="#rq2-error" hx-include="#rq2-filters"
-                class="dropdown-item" style="color:#065f46">Mark Won</button>
+                class="flex w-full items-center gap-2 px-3 py-2 text-sm text-emerald-600 hover:bg-emerald-50 transition-colors">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          Mark Won
+        </button>
         {% endif %}
         {% if req.status in ('quoted',) %}
         <button hx-post="/requisitions2/{{ req.id }}/action/lost"
                 hx-target="#rq2-table" hx-target-error="#rq2-error" hx-include="#rq2-filters"
-                class="dropdown-item" style="color:#991b1b">Mark Lost</button>
+                class="flex w-full items-center gap-2 px-3 py-2 text-sm text-rose-600 hover:bg-rose-50 transition-colors">
+          <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M10 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2m7-2a9 9 0 11-18 0 9 9 0 0118 0z"/>
+          </svg>
+          Mark Lost
+        </button>
         {% endif %}
+        <div class="border-t border-gray-100 my-1"></div>
         <button hx-post="/requisitions2/{{ req.id }}/action/clone"
                 hx-target="#rq2-table" hx-target-error="#rq2-error" hx-include="#rq2-filters"
-                class="dropdown-item">Clone</button>
+                class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+          <svg class="h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z"/>
+          </svg>
+          Clone
+        </button>
       </div>
     </div>
   </td>
 </tr>
 {% else %}
 <tr>
-  <td colspan="10" class="rq2-empty">No requisitions found.</td>
+  <td colspan="10" class="px-4 py-12 text-center">
+    <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+      <path stroke-linecap="round" stroke-linejoin="round"
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+    </svg>
+    <p class="mt-2 text-sm text-gray-500">No requisitions found.</p>
+    <p class="text-xs text-gray-400 mt-1">Try adjusting your filters.</p>
+  </td>
 </tr>
 {% endfor %}

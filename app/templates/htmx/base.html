@@ -55,8 +55,17 @@
            x-show="!$store.sidebar.collapsed">Opportunity</p>
         <div x-show="$store.sidebar.collapsed" class="border-t border-brand-800 my-2 mx-2"></div>
 
+        {# Requisitions — full page nav to /requisitions2 (standalone redesigned page) #}
+        <a href="/requisitions2"
+           hx-boost="false"
+           @click="currentView = 'requisitions'"
+           :class="currentView === 'requisitions' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
+           class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
+          <svg class="h-5 w-5 flex-shrink-0" :class="$store.sidebar.collapsed ? '' : 'mr-3'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          <span x-show="!$store.sidebar.collapsed">Requisitions</span>
+        </a>
+
         {% set nav_items = [
-          ('requisitions', 'Requisitions', '/v2/requisitions', '/v2/partials/requisitions', 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'),
           ('search', 'Part Search', '/v2/search', '/v2/partials/search', 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
           ('proactive', 'Proactive', '/v2/proactive', '/v2/partials/proactive', 'M11 8a1 1 0 012 0v3h3a1 1 0 010 2h-3v3a1 1 0 01-2 0v-3H8a1 1 0 010-2h3V8zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z'),
           ('buy-plans', 'Buy Plans', '/v2/buy-plans', '/v2/partials/buy-plans', 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
@@ -152,8 +161,12 @@
           </button>
         </div>
         <nav class="px-3 py-4 space-y-1">
+          {# Requisitions — full page nav #}
+          <a href="/requisitions2" hx-boost="false"
+             @click="currentView = 'requisitions'; sidebarOpen = false"
+             :class="currentView === 'requisitions' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
+             class="flex items-center px-3 py-2 text-sm font-medium rounded-md">Requisitions</a>
           {% set mobile_items = [
-            ('requisitions', 'Requisitions', '/v2/requisitions', '/v2/partials/requisitions'),
             ('search', 'Part Search', '/v2/search', '/v2/partials/search'),
             ('proactive', 'Proactive', '/v2/proactive', '/v2/partials/proactive'),
             ('buy-plans', 'Buy Plans', '/v2/buy-plans', '/v2/partials/buy-plans'),
@@ -247,8 +260,15 @@
   {# ── Mobile bottom nav (5 items) ──────────────────────────── #}
   <nav class="lg:hidden fixed bottom-0 inset-x-0 bg-white border-t border-brand-200 z-40 flex justify-around items-center"
        style="padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));">
+    {# Requisitions — full page nav #}
+    <a href="/requisitions2" hx-boost="false"
+       @click="currentView = 'requisitions'"
+       :class="currentView === 'requisitions' ? 'text-brand-500' : 'text-gray-400'"
+       class="flex flex-col items-center justify-center py-2 px-1 min-h-[44px] min-w-[44px] text-xs font-medium">
+      <svg class="h-5 w-5 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+      <span>Reqs</span>
+    </a>
     {% set bottom_nav = [
-      ('requisitions', 'Reqs', '/v2/requisitions', '/v2/partials/requisitions', 'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'),
       ('search', 'Search', '/v2/search', '/v2/partials/search', 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
       ('buy-plans', 'Buy Plans', '/v2/buy-plans', '/v2/partials/buy-plans', 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
       ('vendors', 'Vendors', '/v2/vendors', '/v2/partials/vendors', 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4'),
