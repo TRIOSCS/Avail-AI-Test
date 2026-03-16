@@ -313,15 +313,14 @@ Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrumen
 async def csp_middleware(request: Request, call_next):
     """Add Content-Security-Policy header.
 
-    Uses 'unsafe-inline' for script-src because the app relies on inline onclick
-    handlers throughout the SPA template.  A nonce cannot be used alongside 'unsafe-
-    inline' — browsers that support nonces silently ignore 'unsafe-inline', which breaks
-    all inline event handlers.
+    'unsafe-inline' — needed for inline event handlers and <style> tags.
+    'unsafe-eval'   — required by Alpine.js which uses new Function() to evaluate
+                      x-data, x-show, @click and other directive expressions.
     """
     response = await call_next(request)
     csp = (
         "default-src 'self'; "
-        "script-src 'self' 'unsafe-inline' https://cdnjs.cloudflare.com https://unpkg.com https://cdn.jsdelivr.net https://cdn.tailwindcss.com; "
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdnjs.cloudflare.com https://unpkg.com https://cdn.jsdelivr.net https://cdn.tailwindcss.com; "
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com https://cdn.tailwindcss.com; "
         "font-src 'self' https://fonts.gstatic.com; "
         "img-src 'self' data:; "

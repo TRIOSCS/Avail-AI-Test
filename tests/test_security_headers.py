@@ -112,14 +112,22 @@ def test_csp_header_present_on_all_responses(client):
     assert "script-src" in csp
 
 
-def test_csp_script_src_allows_unsafe_inline(client):
-    """CSP script-src includes 'unsafe-inline' for inline event handlers."""
+def test_csp_script_src_allows_unsafe_inline_and_eval(client):
+    """CSP script-src includes 'unsafe-inline' and 'unsafe-eval'.
+
+    'unsafe-inline' is needed for inline event handlers.
+    'unsafe-eval' is required by Alpine.js which uses new Function() to
+    evaluate x-data, x-show, @click and other directive expressions.
+    """
     resp = client.get("/health")
     csp = resp.headers["Content-Security-Policy"]
     script_src = re.search(r"script-src\s+([^;]+)", csp)
     assert script_src, "CSP must have a script-src directive"
     script_src_value = script_src.group(1)
     assert "'unsafe-inline'" in script_src_value
+    assert "'unsafe-eval'" in script_src_value, (
+        "script-src must include 'unsafe-eval' — Alpine.js requires it"
+    )
     # Must NOT have a nonce — nonces cause browsers to ignore 'unsafe-inline',
     # which breaks all onclick/oninput/onchange handlers in the SPA template.
     nonce_match = re.search(r"'nonce-([A-Za-z0-9_-]+)'", script_src_value)
