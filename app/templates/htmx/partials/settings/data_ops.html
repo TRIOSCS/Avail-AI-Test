@@ -1,0 +1,110 @@
+{# data_ops.html — Admin data operations: vendor and company dedup/merge.
+   Receives: vendor_dupes (list[dict]), company_dupes (list[dict]).
+   Called by: htmx_views.py settings_data_ops endpoint.
+   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
+#}
+<div class="space-y-6">
+
+  {# ── Vendor Dedup ──────────────────────────────────────── #}
+  <div class="bg-white border border-brand-200 rounded-lg overflow-hidden">
+    <div class="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-gray-900">Vendor Duplicates</h2>
+      <button hx-get="/v2/partials/settings/data-ops"
+              hx-target="#settings-content"
+              class="px-3 py-1 text-xs font-medium text-brand-500 border border-brand-200 rounded hover:bg-brand-50">
+        Refresh
+      </button>
+    </div>
+
+    {% if vendor_dupes %}
+    <div class="divide-y divide-gray-100">
+      {% for pair in vendor_dupes %}
+      <div class="px-4 py-3 flex items-center gap-4" x-data="{ merged: false }">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 text-sm">
+            <span class="font-medium text-gray-900">{{ pair.name_a }}</span>
+            <span class="text-gray-400">&harr;</span>
+            <span class="font-medium text-gray-900">{{ pair.name_b }}</span>
+          </div>
+          <p class="text-xs text-gray-500 mt-0.5">
+            Score: {{ pair.score }}% match
+            &middot; {{ pair.sightings_a or 0 }} vs {{ pair.sightings_b or 0 }} sightings
+          </p>
+        </div>
+        <template x-if="!merged">
+          <div class="flex gap-2">
+            <button hx-post="/v2/partials/admin/vendor-merge"
+                    hx-vals='{"keep_id": {{ pair.id_a }}, "remove_id": {{ pair.id_b }}}'
+                    hx-target="closest div[x-data]"
+                    hx-swap="innerHTML"
+                    hx-confirm="Merge '{{ pair.name_b }}' into '{{ pair.name_a }}'?"
+                    class="px-2 py-1 text-xs bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
+              Keep "{{ pair.name_a|truncate(20) }}"
+            </button>
+            <button hx-post="/v2/partials/admin/vendor-merge"
+                    hx-vals='{"keep_id": {{ pair.id_b }}, "remove_id": {{ pair.id_a }}}'
+                    hx-target="closest div[x-data]"
+                    hx-swap="innerHTML"
+                    hx-confirm="Merge '{{ pair.name_a }}' into '{{ pair.name_b }}'?"
+                    class="px-2 py-1 text-xs bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
+              Keep "{{ pair.name_b|truncate(20) }}"
+            </button>
+          </div>
+        </template>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="px-4 py-8 text-center">
+      <p class="text-sm text-gray-500">No duplicate vendors found at the current threshold.</p>
+    </div>
+    {% endif %}
+  </div>
+
+  {# ── Company Dedup ─────────────────────────────────────── #}
+  <div class="bg-white border border-brand-200 rounded-lg overflow-hidden">
+    <div class="px-4 py-3 bg-gray-50 border-b">
+      <h2 class="text-lg font-semibold text-gray-900">Company Duplicates</h2>
+    </div>
+
+    {% if company_dupes %}
+    <div class="divide-y divide-gray-100">
+      {% for pair in company_dupes %}
+      <div class="px-4 py-3 flex items-center gap-4">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 text-sm">
+            <span class="font-medium text-gray-900">{{ pair.name_a }}</span>
+            <span class="text-gray-400">&harr;</span>
+            <span class="font-medium text-gray-900">{{ pair.name_b }}</span>
+          </div>
+          <p class="text-xs text-gray-500 mt-0.5">Score: {{ pair.score }}% match</p>
+        </div>
+        <div class="flex gap-2">
+          <button hx-post="/v2/partials/admin/company-merge"
+                  hx-vals='{"keep_id": {{ pair.id_a }}, "remove_id": {{ pair.id_b }}}'
+                  hx-target="closest div.flex.items-center"
+                  hx-swap="innerHTML"
+                  hx-confirm="Merge '{{ pair.name_b }}' into '{{ pair.name_a }}'?"
+                  class="px-2 py-1 text-xs bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
+            Keep "{{ pair.name_a|truncate(20) }}"
+          </button>
+          <button hx-post="/v2/partials/admin/company-merge"
+                  hx-vals='{"keep_id": {{ pair.id_b }}, "remove_id": {{ pair.id_a }}}'
+                  hx-target="closest div.flex.items-center"
+                  hx-swap="innerHTML"
+                  hx-confirm="Merge '{{ pair.name_a }}' into '{{ pair.name_b }}'?"
+                  class="px-2 py-1 text-xs bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
+            Keep "{{ pair.name_b|truncate(20) }}"
+          </button>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div class="px-4 py-8 text-center">
+      <p class="text-sm text-gray-500">No duplicate companies found at the current threshold.</p>
+    </div>
+    {% endif %}
+  </div>
+
+</div>

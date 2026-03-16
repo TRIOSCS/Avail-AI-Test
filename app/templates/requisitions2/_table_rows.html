@@ -52,39 +52,46 @@
     {% endif %}
   </td>
   <td>{{ req.created_at.strftime('%Y-%m-%d') if req.created_at else '—' }}</td>
-  <td class="rq2-actions">
-    {% if req.status != 'archived' %}
-    <button hx-post="/requisitions2/{{ req.id }}/action/archive"
-            hx-target="#rq2-table"
-            hx-target-error="#rq2-error"
-            hx-include="#rq2-filters"
-            hx-confirm="Archive this requisition?"
-            data-loading-aria-busy
-            class="btn-sm">Archive</button>
-    {% else %}
-    <button hx-post="/requisitions2/{{ req.id }}/action/activate"
-            hx-target="#rq2-table"
-            hx-target-error="#rq2-error"
-            hx-include="#rq2-filters"
-            data-loading-aria-busy
-            class="btn-sm">Activate</button>
-    {% endif %}
-
-    {% if not req.claimed_by_id and user.role in ('buyer','trader','manager','admin') %}
-    <button hx-post="/requisitions2/{{ req.id }}/action/claim"
-            hx-target="#rq2-table"
-            hx-target-error="#rq2-error"
-            hx-include="#rq2-filters"
-            data-loading-aria-busy
-            class="btn-sm btn-primary">Claim</button>
-    {% elif req.claimed_by_id == user.id %}
-    <button hx-post="/requisitions2/{{ req.id }}/action/unclaim"
-            hx-target="#rq2-table"
-            hx-target-error="#rq2-error"
-            hx-include="#rq2-filters"
-            data-loading-aria-busy
-            class="btn-sm">Unclaim</button>
-    {% endif %}
+  <td class="rq2-actions" x-data="{ open: false }">
+    <div style="position:relative">
+      <button @click="open = !open" @click.outside="open = false" class="btn-sm" type="button">
+        &#x22EE;
+      </button>
+      <div x-show="open" x-cloak class="dropdown-menu" style="right:0;top:100%">
+        {% if req.status != 'archived' %}
+        <button hx-post="/requisitions2/{{ req.id }}/action/archive"
+                hx-target="#rq2-table" hx-target-error="#rq2-error" hx-include="#rq2-filters"
+                hx-confirm="Archive this requisition?"
+                class="dropdown-item">Archive</button>
+        {% else %}
+        <button hx-post="/requisitions2/{{ req.id }}/action/activate"
+                hx-target="#rq2-table" hx-target-error="#rq2-error" hx-include="#rq2-filters"
+                class="dropdown-item">Activate</button>
+        {% endif %}
+        {% if not req.claimed_by_id and user.role in ('buyer','trader','manager','admin') %}
+        <button hx-post="/requisitions2/{{ req.id }}/action/claim"
+                hx-target="#rq2-table" hx-target-error="#rq2-error" hx-include="#rq2-filters"
+                class="dropdown-item">Claim</button>
+        {% elif req.claimed_by_id == user.id %}
+        <button hx-post="/requisitions2/{{ req.id }}/action/unclaim"
+                hx-target="#rq2-table" hx-target-error="#rq2-error" hx-include="#rq2-filters"
+                class="dropdown-item">Unclaim</button>
+        {% endif %}
+        {% if req.status in ('active', 'sourcing', 'offers', 'quoting', 'quoted', 'open', 'reopened') %}
+        <button hx-post="/requisitions2/{{ req.id }}/action/won"
+                hx-target="#rq2-table" hx-target-error="#rq2-error" hx-include="#rq2-filters"
+                class="dropdown-item" style="color:#065f46">Mark Won</button>
+        {% endif %}
+        {% if req.status in ('quoted',) %}
+        <button hx-post="/requisitions2/{{ req.id }}/action/lost"
+                hx-target="#rq2-table" hx-target-error="#rq2-error" hx-include="#rq2-filters"
+                class="dropdown-item" style="color:#991b1b">Mark Lost</button>
+        {% endif %}
+        <button hx-post="/requisitions2/{{ req.id }}/action/clone"
+                hx-target="#rq2-table" hx-target-error="#rq2-error" hx-include="#rq2-filters"
+                class="dropdown-item">Clone</button>
+      </div>
+    </div>
   </td>
 </tr>
 {% else %}

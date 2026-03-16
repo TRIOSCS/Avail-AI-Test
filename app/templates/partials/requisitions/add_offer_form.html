@@ -1,0 +1,99 @@
+{# add_offer_form.html — Manual offer entry form shown inline in offers tab.
+   Receives: req (Requisition), requirements (list[Requirement]).
+   Called by: htmx_views.py add_offer_form route.
+   Depends on: HTMX, Tailwind CSS with brand palette.
+#}
+<div class="bg-white border border-brand-200 rounded-lg p-4 mb-4">
+  <div class="flex items-center justify-between mb-3">
+    <h3 class="text-sm font-semibold text-gray-900">Add Manual Offer</h3>
+    <button hx-get="/v2/partials/requisitions/{{ req.id }}/tab/offers"
+            hx-target="#tab-content"
+            class="text-xs text-gray-500 hover:text-gray-700">Cancel</button>
+  </div>
+
+  <form hx-post="/v2/partials/requisitions/{{ req.id }}/add-offer"
+        hx-target="#tab-content"
+        class="space-y-3">
+
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Vendor Name *</label>
+        <input type="text" name="vendor_name" required
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               placeholder="e.g. Arrow Electronics">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">MPN *</label>
+        <input type="text" name="mpn" required
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               placeholder="e.g. LM317T">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Qty Available</label>
+        <input type="number" name="qty_available" min="1"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               placeholder="5000">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Unit Price (USD)</label>
+        <input type="number" name="unit_price" step="0.0001" min="0"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               placeholder="0.4500">
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Lead Time</label>
+        <input type="text" name="lead_time"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               placeholder="2-3 weeks">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Date Code</label>
+        <input type="text" name="date_code"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               placeholder="2025+">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Condition</label>
+        <select name="condition" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+          <option value="">—</option>
+          <option value="new">New</option>
+          <option value="refurbished">Refurbished</option>
+          <option value="used">Used</option>
+        </select>
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">MOQ</label>
+        <input type="number" name="moq" min="1"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               placeholder="1">
+      </div>
+    </div>
+
+    {% if requirements %}
+    <div>
+      <label class="block text-xs text-gray-500 mb-1">Linked Requirement</label>
+      <select name="requirement_id" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+        <option value="">— None —</option>
+        {% for r in requirements %}
+        <option value="{{ r.id }}">{{ r.primary_mpn }} (qty {{ r.target_qty or '—' }})</option>
+        {% endfor %}
+      </select>
+    </div>
+    {% endif %}
+
+    <div>
+      <label class="block text-xs text-gray-500 mb-1">Notes</label>
+      <textarea name="notes" rows="2"
+                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+                placeholder="Any additional details..."></textarea>
+    </div>
+
+    <button type="submit"
+            class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
+      Save Offer
+    </button>
+  </form>
+</div>

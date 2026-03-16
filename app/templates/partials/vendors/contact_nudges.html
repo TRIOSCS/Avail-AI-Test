@@ -1,0 +1,40 @@
+{# contact_nudges.html — Nudge suggestions for dormant vendor contacts.
+   Receives: nudges (list[VendorContact]), vendor (VendorCard).
+   Called by: htmx_views.py vendor_contact_nudges route.
+   Depends on: Tailwind CSS with brand palette.
+#}
+<div class="bg-amber-50 border border-amber-200 rounded-lg p-4">
+  <div class="flex items-center gap-2 mb-3">
+    <svg class="h-4 w-4 text-amber-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.405-1.405A2.032 2.032 0 0118 14.158V11a6.002 6.002 0 00-4-5.659V5a2 2 0 10-4 0v.341C7.67 6.165 6 8.388 6 11v3.159c0 .538-.214 1.055-.595 1.436L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/>
+    </svg>
+    <h3 class="text-sm font-semibold text-amber-800">Contact Nudges</h3>
+    <span class="text-xs text-amber-600">({{ nudges|length }} dormant)</span>
+  </div>
+
+  {% if nudges %}
+  <div class="space-y-2">
+    {% for c in nudges %}
+    <div class="flex items-center justify-between bg-white rounded border border-amber-100 px-3 py-2">
+      <div>
+        <p class="text-sm font-medium text-gray-900">{{ c.full_name or c.email or '—' }}</p>
+        <p class="text-xs text-gray-500">
+          {% if c.last_interaction_at %}
+          Last contacted {{ c.last_interaction_at.strftime('%b %d, %Y') }}
+          {% else %}
+          Never contacted
+          {% endif %}
+        </p>
+      </div>
+      {% if c.email %}
+      <a href="mailto:{{ c.email }}" class="text-xs text-brand-500 hover:text-brand-600 font-medium">
+        Send Email
+      </a>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-sm text-amber-700">All contacts have been contacted within the last 30 days.</p>
+  {% endif %}
+</div>

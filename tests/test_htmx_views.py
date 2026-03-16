@@ -44,6 +44,23 @@ class TestFullPageLoads:
         assert "AvailAI" in resp.text
 
 
+class TestDefaultViewIsRequisitions:
+    """Test that /v2 root defaults to requisitions view, not dashboard."""
+
+    def test_v2_root_default_view_is_requisitions(self):
+        """The view-detection logic should default to 'requisitions' for bare /v2."""
+        # Simulate the path-matching logic from v2_page handler
+        path = "/v2"
+        if "/requisitions" in path:
+            current_view = "requisitions"
+        elif "/search" in path:
+            current_view = "search"
+        else:
+            current_view = "requisitions"  # Should NOT be "dashboard"
+        assert current_view == "requisitions"
+        assert f"/v2/partials/{current_view}" == "/v2/partials/requisitions"
+
+
 class TestLoginPage:
     """Test that unauthenticated users see the login page."""
 

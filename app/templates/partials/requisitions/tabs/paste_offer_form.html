@@ -1,0 +1,40 @@
+{# paste_offer_form.html — Inline form for pasting freeform vendor text to parse.
+   Receives: req (Requisition).
+   Called by: GET /v2/partials/requisitions/{id}/paste-offer-form.
+   Depends on: HTMX, Alpine.js.
+#}
+<div class="bg-white rounded-lg border border-gray-200 p-4" x-data="{ parsing: false }">
+  <div class="flex items-center justify-between mb-3">
+    <h3 class="text-sm font-semibold text-gray-900">Paste Vendor Offer</h3>
+    <button @click="$el.closest('#parse-area').innerHTML = ''"
+            class="text-xs text-gray-400 hover:text-gray-600">Close</button>
+  </div>
+  <p class="text-xs text-gray-500 mb-3">Paste any vendor text (email, chat, spreadsheet rows). AI will extract offer lines matched against this RFQ's parts.</p>
+
+  <form hx-post="/v2/partials/requisitions/{{ req.id }}/parse-offer"
+        hx-target="#parse-area"
+        hx-swap="innerHTML"
+        @htmx:before-request="parsing = true"
+        @htmx:after-request="parsing = false">
+
+    <div class="mb-3">
+      <label class="text-xs text-gray-500 block mb-1">Vendor Text</label>
+      <textarea name="raw_text" rows="6" required
+                placeholder="Paste vendor offer text here..."
+                class="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500 focus:border-brand-500 font-mono"></textarea>
+    </div>
+
+    <div class="flex items-center gap-2">
+      <button type="submit" :disabled="parsing"
+              class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-50 inline-flex items-center gap-2">
+        <svg x-show="parsing" x-cloak class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span x-text="parsing ? 'Parsing...' : 'Parse Offers'"></span>
+      </button>
+      <button type="button" @click="$el.closest('#parse-area').innerHTML = ''"
+              class="px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700">Cancel</button>
+    </div>
+  </form>
+</div>

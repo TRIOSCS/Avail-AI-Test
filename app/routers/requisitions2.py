@@ -335,12 +335,19 @@ async def row_action(
         except ValueError as e:
             msg = str(e)
 
+    elif action_name == RowActionName.clone:
+        from ..services.requisition_service import clone_requisition
+
+        new_req = clone_requisition(db, req, user.id)
+        msg = f"Cloned '{req.name}' → REQ-{new_req.id:03d}"
+
     elif action_name == RowActionName.assign:
         if owner_id:
             req.created_by = owner_id
             msg = f"'{req.name}' reassigned"
 
-    db.commit()
+    if action_name != RowActionName.clone:
+        db.commit()
 
     # Return refreshed table
     filters = _parse_filters(request)

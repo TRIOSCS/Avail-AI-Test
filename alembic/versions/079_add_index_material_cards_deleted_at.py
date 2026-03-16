@@ -3,21 +3,24 @@
 Soft-delete queries (WHERE deleted_at IS NULL) run on every MaterialCard
 lookup. Without an index this causes full table scans.
 
-Revision ID: 078
-Revises: 077
+Revision ID: 079
+Revises: 078_add_company_id
 Create Date: 2026-03-15
 """
 
 from alembic import op
 
-revision = "078"
-down_revision = "077"
+revision = "079"
+down_revision = "078_add_company_id"
 branch_labels = None
 depends_on = None
 
 
 def upgrade():
-    op.create_index("ix_material_cards_deleted_at", "material_cards", ["deleted_at"])
+    op.execute("""
+        CREATE INDEX IF NOT EXISTS ix_material_cards_deleted_at
+        ON material_cards (deleted_at)
+    """)
 
 
 def downgrade():

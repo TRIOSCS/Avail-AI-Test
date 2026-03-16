@@ -1,0 +1,24 @@
+{# api_health.html — Connector health dashboard.
+   Receives: health (dict with connectors list).
+   Called by: htmx_views.py admin_api_health route.
+   Depends on: Tailwind CSS.
+#}
+<div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+  <h3 class="text-sm font-semibold text-gray-900 mb-3">Connector Health</h3>
+
+  {% if health.get('connectors') %}
+  <div class="space-y-2">
+    {% for c in health.connectors %}
+    <div class="flex items-center justify-between px-3 py-2 rounded border border-gray-100">
+      <span class="text-sm font-medium text-gray-900">{{ c.get('name', 'Unknown') }}</span>
+      {% set status_colors = {'healthy': 'bg-emerald-100 text-emerald-700', 'degraded': 'bg-amber-100 text-amber-700', 'down': 'bg-rose-100 text-rose-700'} %}
+      <span class="px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(c.get('status', ''), 'bg-gray-100 text-gray-600') }}">
+        {{ c.get('status', 'unknown')|title }}
+      </span>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-sm text-gray-400 text-center py-4">No connector data available.</p>
+  {% endif %}
+</div>

@@ -1,0 +1,14 @@
+{# phone_log_success.html — Confirmation after logging a phone call.
+   Receives: vendor_name (str), vendor_phone (str).
+   Called by: htmx_views.py log_phone_call route.
+   Depends on: Tailwind CSS.
+#}
+<div class="bg-emerald-50 border border-emerald-200 rounded-lg p-3 text-sm">
+  <div class="flex items-center gap-2">
+    <svg class="h-4 w-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+    </svg>
+    <span class="font-medium text-emerald-800">Phone call logged</span>
+  </div>
+  <p class="text-emerald-700 mt-1">{{ vendor_name }} — {{ vendor_phone }}</p>
+</div>

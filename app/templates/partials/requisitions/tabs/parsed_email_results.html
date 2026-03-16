@@ -1,0 +1,144 @@
+{# parsed_email_results.html — Editable cards for AI-parsed email quotes.
+   Receives: req (Requisition), quotes (list of dicts), overall_confidence (float),
+             email_type (str), vendor_name (str).
+   Called by: POST /v2/partials/requisitions/{id}/parse-email.
+   Depends on: HTMX, Alpine.js.
+#}
+<div class="space-y-4">
+
+  {# Summary banner #}
+  <div class="flex items-center justify-between bg-gray-50 rounded-lg border border-gray-200 px-4 py-3">
+    <div class="flex items-center gap-3">
+      <span class="text-sm font-medium text-gray-900">
+        Parsed {{ quotes|length }} offer{{ "s" if quotes|length != 1 }} from {{ email_type|replace('_', ' ')|capitalize }} email
+      </span>
+      {% set conf_pct = (overall_confidence * 100)|round|int %}
+      {% if conf_pct >= 80 %}
+      <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-emerald-50 text-emerald-700">{{ conf_pct }}% confidence</span>
+      {% elif conf_pct >= 50 %}
+      <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700">{{ conf_pct }}% confidence</span>
+      {% else %}
+      <span class="px-2 py-0.5 text-xs font-medium rounded-full bg-rose-50 text-rose-700">{{ conf_pct }}% confidence</span>
+      {% endif %}
+    </div>
+    <button @click="$el.closest('#parse-area').innerHTML = ''"
+            class="text-xs text-gray-400 hover:text-gray-600">Dismiss</button>
+  </div>
+
+  {% if quotes %}
+  {# Editable offer cards wrapped in a save form #}
+  <form hx-post="/v2/partials/requisitions/{{ req.id }}/save-parsed-offers"
+        hx-target="#parse-area"
+        hx-swap="innerHTML"
+        x-data="{ saving: false, cards: {{ quotes|length }} }">
+
+    <input type="hidden" name="vendor_name" value="{{ vendor_name }}">
+
+    <div class="space-y-3" id="parsed-cards">
+      {% for q in quotes %}
+      <div class="bg-white rounded-lg border border-gray-200 p-4 relative" id="parsed-card-{{ loop.index0 }}">
+        {# Confidence badge #}
+        {% set q_conf = ((q.confidence or 0.5) * 100)|round|int %}
+        <div class="absolute top-3 right-3">
+          {% if q_conf >= 80 %}
+          <span class="px-2 py-0.5 text-[10px] font-medium rounded-full bg-emerald-50 text-emerald-700">{{ q_conf }}%</span>
+          {% elif q_conf >= 50 %}
+          <span class="px-2 py-0.5 text-[10px] font-medium rounded-full bg-amber-50 text-amber-700">{{ q_conf }}%</span>
+          {% else %}
+          <span class="px-2 py-0.5 text-[10px] font-medium rounded-full bg-rose-50 text-rose-700">{{ q_conf }}%</span>
+          {% endif %}
+          <button type="button"
+                  @click="$el.closest('[id^=parsed-card]').remove(); cards--"
+                  class="ml-1 text-gray-400 hover:text-rose-500" title="Remove">
+            <svg class="h-4 w-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+          <div>
+            <label class="text-[10px] text-gray-500 uppercase block mb-0.5">Part Number</label>
+            <input type="text" name="offers[{{ loop.index0 }}].mpn"
+                   value="{{ q.part_number or '' }}"
+                   class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 font-mono">
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-500 uppercase block mb-0.5">Manufacturer</label>
+            <input type="text" name="offers[{{ loop.index0 }}].manufacturer"
+                   value="{{ q.manufacturer or '' }}"
+                   class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-500 uppercase block mb-0.5">Quantity</label>
+            <input type="number" name="offers[{{ loop.index0 }}].qty_available"
+                   value="{{ q.quantity_available or '' }}"
+                   class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-500 uppercase block mb-0.5">Unit Price</label>
+            <input type="number" step="0.0001" name="offers[{{ loop.index0 }}].unit_price"
+                   value="{{ q.unit_price or '' }}"
+                   class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-500 uppercase block mb-0.5">Lead Time</label>
+            <input type="text" name="offers[{{ loop.index0 }}].lead_time"
+                   value="{{ q.lead_time_text or '' }}"
+                   class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-500 uppercase block mb-0.5">Date Code</label>
+            <input type="text" name="offers[{{ loop.index0 }}].date_code"
+                   value="{{ q.date_code or '' }}"
+                   class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-500 uppercase block mb-0.5">Condition</label>
+            <input type="text" name="offers[{{ loop.index0 }}].condition"
+                   value="{{ q.condition or 'new' }}"
+                   class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
+          </div>
+          <div>
+            <label class="text-[10px] text-gray-500 uppercase block mb-0.5">MOQ</label>
+            <input type="number" name="offers[{{ loop.index0 }}].moq"
+                   value="{{ q.moq or '' }}"
+                   class="w-full px-2 py-1 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
+          </div>
+        </div>
+
+        {% if q.notes %}
+        <div class="mt-2">
+          <label class="text-[10px] text-gray-500 uppercase block mb-0.5">Notes</label>
+          <input type="text" name="offers[{{ loop.index0 }}].notes"
+                 value="{{ q.notes }}"
+                 class="w-full px-2 py-1 text-sm border border-gray-200 rounded text-gray-500">
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+
+    <div class="flex items-center gap-3 mt-4">
+      <button type="submit" :disabled="saving || cards === 0"
+              @htmx:before-request="saving = true"
+              @htmx:after-request="saving = false"
+              class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-50 inline-flex items-center gap-2">
+        <svg x-show="saving" x-cloak class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span x-text="saving ? 'Saving...' : 'Save ' + cards + ' Offer' + (cards !== 1 ? 's' : '')"></span>
+      </button>
+      <button type="button" @click="$el.closest('#parse-area').innerHTML = ''"
+              class="px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700">Cancel</button>
+    </div>
+  </form>
+
+  {% else %}
+  <div class="p-6 text-center bg-white rounded-lg border border-gray-200">
+    <p class="text-sm text-gray-500">No offers could be parsed from this email.</p>
+    <p class="text-xs text-gray-400 mt-1">Try pasting a different email or check the format.</p>
+  </div>
+  {% endif %}
+</div>

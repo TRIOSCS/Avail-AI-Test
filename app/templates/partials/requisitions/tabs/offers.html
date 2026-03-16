@@ -4,6 +4,41 @@
    Depends on: brand palette, HTMX, Alpine.js.
 #}
 <div x-data="{ selectedOffers: [] }">
+
+  {# ── AI Parse & Add Buttons ────────────────────────────── #}
+  <div class="flex items-center gap-2 mb-4">
+    <button hx-get="/v2/partials/requisitions/{{ req.id }}/add-offer-form"
+            hx-target="#parse-area"
+            hx-swap="innerHTML"
+            class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 inline-flex items-center gap-1.5">
+      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+      </svg>
+      Add Offer
+    </button>
+    <button hx-get="/v2/partials/requisitions/{{ req.id }}/parse-email-form"
+            hx-target="#parse-area"
+            hx-swap="innerHTML"
+            class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 inline-flex items-center gap-1.5">
+      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+      </svg>
+      Parse Email
+    </button>
+    <button hx-get="/v2/partials/requisitions/{{ req.id }}/paste-offer-form"
+            hx-target="#parse-area"
+            hx-swap="innerHTML"
+            class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 inline-flex items-center gap-1.5">
+      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
+      </svg>
+      Paste Offer
+    </button>
+  </div>
+
+  {# Area where parse forms and results appear #}
+  <div id="parse-area" class="mb-4"></div>
+
   {% if offers %}
   {# Action bar — appears when offers are selected #}
   <div class="flex items-center justify-between mb-4">
@@ -35,7 +70,7 @@
       <button x-show="selectedOffers.length > 0"
               hx-post="/partials/requisitions/{{ req.id }}/create-quote"
               hx-include="[name='offer_ids']"
-              hx-target="#tab-content"
+              hx-target="#main-content"
               class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600"
               x-cloak>
         Create Quote from Selected
@@ -91,20 +126,48 @@
               {{ (o.status or 'unknown')|replace('_', ' ')|capitalize }}
             </span>
           </td>
-          <td class="px-4 py-2 text-center">
-            <div class="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {% if o.status == "pending_review" %}
-              <button hx-post="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
-                      hx-vals='{"action": "approve"}'
-                      hx-target="#tab-content"
-                      class="text-xs text-emerald-600 hover:text-emerald-700 font-medium"
-                      @click.stop>Approve</button>
-              <button hx-post="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
-                      hx-vals='{"action": "reject"}'
-                      hx-target="#tab-content"
-                      class="text-xs text-rose-500 hover:text-rose-700 font-medium"
-                      @click.stop>Reject</button>
-              {% endif %}
+          <td class="px-4 py-2 text-center" x-data="{ open: false }">
+            <div class="relative inline-block">
+              <button @click.stop="open = !open" @click.outside="open = false"
+                      class="text-gray-400 hover:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity">
+                <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+                  <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/>
+                </svg>
+              </button>
+              <div x-show="open" x-cloak
+                   class="absolute right-0 top-full mt-1 w-36 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
+                <button hx-get="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/edit-form"
+                        hx-target="#parse-area" hx-swap="innerHTML"
+                        @click.stop="open = false"
+                        class="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">Edit</button>
+                {% if o.status == "pending_review" %}
+                <button hx-post="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
+                        hx-vals='{"action": "approve"}' hx-target="#tab-content"
+                        @click.stop="open = false"
+                        class="w-full text-left px-3 py-1.5 text-xs text-emerald-600 hover:bg-emerald-50">Approve</button>
+                <button hx-post="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
+                        hx-vals='{"action": "reject"}' hx-target="#tab-content"
+                        @click.stop="open = false"
+                        class="w-full text-left px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50">Reject</button>
+                {% elif o.status in ("active", "approved") %}
+                <button hx-post="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/reconfirm"
+                        hx-target="#tab-content"
+                        @click.stop="open = false"
+                        class="w-full text-left px-3 py-1.5 text-xs text-brand-600 hover:bg-brand-50">Reconfirm</button>
+                <button hx-post="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/mark-sold"
+                        hx-target="#tab-content" hx-confirm="Mark this offer as sold?"
+                        @click.stop="open = false"
+                        class="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">Mark Sold</button>
+                {% endif %}
+                <button hx-get="/partials/offers/{{ o.id }}/changelog"
+                        hx-target="#parse-area" hx-swap="innerHTML"
+                        @click.stop="open = false"
+                        class="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">History</button>
+                <button hx-delete="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}"
+                        hx-target="#tab-content" hx-confirm="Delete this offer? This cannot be undone."
+                        @click.stop="open = false"
+                        class="w-full text-left px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 border-t border-gray-100">Delete</button>
+              </div>
             </div>
           </td>
         </tr>

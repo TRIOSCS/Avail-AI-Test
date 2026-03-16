@@ -1,0 +1,14 @@
+{# convert_success.html — Proactive offer conversion confirmation.
+   Receives: offer (ProactiveOffer), result (dict).
+   Called by: htmx_views.py proactive_convert route.
+   Depends on: Tailwind CSS.
+#}
+<div class="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-sm">
+  <div class="flex items-center gap-2 mb-2">
+    <svg class="h-5 w-5 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+    </svg>
+    <span class="font-semibold text-emerald-800">Offer Converted Successfully</span>
+  </div>
+  <p class="text-emerald-700">Created requisition, quote, and buy plan from proactive offer #{{ offer.id }}.</p>
+</div>

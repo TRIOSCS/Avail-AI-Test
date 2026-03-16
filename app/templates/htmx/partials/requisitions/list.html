@@ -1,5 +1,6 @@
-{# Requisitions list partial — loaded via HTMX into #main-content.
-   Shows filterable, sortable table with bulk ops and brand palette.
+{# Requisitions list partial — two-panel master-detail layout.
+   Left panel: filterable, sortable table with bulk ops.
+   Right panel: detail view of selected requisition (or empty state).
    Receives: requisitions, q, status, owner, urgency, date_from, date_to, sort, dir, total, limit, offset, users, user_role.
    Called by: requisitions_list_partial route.
    Depends on: partials/requisitions/req_row.html, brand palette.
@@ -8,159 +9,149 @@
 {# OOB breadcrumb update #}
 <div id="breadcrumb" hx-swap-oob="true">Requisitions</div>
 
-<div class="max-w-7xl mx-auto" x-data="{ selectedIds: new Set() }">
-  {# Dark navy page header #}
-  <div class="bg-brand-700 text-white px-6 py-3 rounded-t-lg mb-6 flex items-center justify-between">
-    <div class="flex items-center gap-2 text-sm">
-      <span class="text-brand-300">Avail</span>
-      <span class="text-brand-400">&rsaquo;</span>
-      <span class="font-medium">Requisitions</span>
+<div class="flex gap-4 h-[calc(100vh-5rem)]" x-data="{ selectedIds: new Set(), activeReqId: null }">
+
+  {# ── Left panel: list ──────────────────────────────────────── #}
+  <div class="w-2/5 min-w-[380px] flex flex-col overflow-hidden">
+
+    {# Header #}
+    <div class="flex items-center justify-between mb-3 flex-shrink-0">
+      <div>
+        <h1 class="text-xl font-bold text-gray-900">Requisitions</h1>
+        <p class="text-xs text-gray-500">{{ total }} total</p>
+      </div>
+      <button @click="$dispatch('open-modal')"
+              hx-get="/partials/requisitions/create-form"
+              hx-target="#modal-content"
+              data-loading-disable
+              class="inline-flex items-center px-3 py-1.5 bg-brand-500 text-white text-xs font-medium rounded-lg hover:bg-brand-600 transition-colors">
+        <svg data-loading class="h-3.5 w-3.5 mr-1 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+        <svg data-loading-remove class="h-3.5 w-3.5 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        New Requisition
+      </button>
     </div>
-    <span class="text-xs text-brand-300">{{ total }} total</span>
-  </div>
 
-  {# Header #}
-  <div class="flex items-center justify-between mb-6">
-    <div>
-      <h1 class="text-2xl font-bold text-gray-900">Requisitions</h1>
-      <p class="text-sm text-gray-500 mt-1">{{ total }} total</p>
+    {# Filter bar #}
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-3 mb-3 flex-shrink-0">
+      <form id="req-filters" class="space-y-2">
+        <div class="flex flex-wrap gap-2 items-end">
+          {# Search #}
+          <div class="flex-1 min-w-[160px]">
+            <input type="text" name="q" value="{{ q }}" placeholder="Search name, customer..."
+                   hx-get="/partials/requisitions"
+                   hx-target="#main-content"
+                   hx-swap="morph"
+                   hx-push-url="true"
+                   hx-include="#req-filters"
+                   hx-trigger="keyup changed delay:300ms"
+                   class="w-full px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+          </div>
+
+          {# Status (hidden input driven by pills) #}
+          <input type="hidden" name="status" value="{{ status }}">
+          <input type="hidden" name="sort" value="{{ sort }}">
+          <input type="hidden" name="dir" value="{{ dir }}">
+
+          {# Owner dropdown (non-sales only) #}
+          {% if user_role != 'sales' %}
+          <div>
+            <select name="owner"
+                    hx-get="/partials/requisitions"
+                    hx-target="#main-content"
+                    hx-push-url="true"
+                    hx-include="#req-filters"
+                    class="px-2.5 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+              <option value="0">All owners</option>
+              {% for u in users %}
+              <option value="{{ u.id }}" {% if owner == u.id %}selected{% endif %}>{{ u.name }}</option>
+              {% endfor %}
+            </select>
+          </div>
+          {% endif %}
+
+          {# Date range #}
+          <div>
+            <input type="date" name="date_from" value="{{ date_from }}"
+                   hx-get="/partials/requisitions"
+                   hx-target="#main-content"
+                   hx-push-url="true"
+                   hx-include="#req-filters"
+                   class="px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                   title="From date">
+          </div>
+          <div>
+            <input type="date" name="date_to" value="{{ date_to }}"
+                   hx-get="/partials/requisitions"
+                   hx-target="#main-content"
+                   hx-push-url="true"
+                   hx-include="#req-filters"
+                   class="px-2 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                   title="To date">
+          </div>
+        </div>
+
+        {# Status pills #}
+        <div class="flex flex-wrap gap-1.5" x-data="{ currentStatus: '{{ status }}' }">
+          {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('awarded', 'Awarded'), ('archived', 'Archived')] %}
+          <button type="button"
+                  @click="currentStatus = '{{ s_val }}'; $el.closest('form').querySelector('[name=status]').value = '{{ s_val }}'; htmx.trigger($el.closest('form').querySelector('[name=q]'), 'changed')"
+                  :class="currentStatus === '{{ s_val }}' ? 'bg-brand-500 text-white' : 'bg-white text-gray-700 border border-gray-200 hover:bg-brand-50'"
+                  class="px-2.5 py-0.5 text-xs font-medium rounded-full transition-colors">
+            {{ s_label }}
+          </button>
+          {% endfor %}
+
+          <span class="text-gray-300 mx-1">|</span>
+
+          {# Urgency pills inline #}
+          <input type="hidden" name="urgency" value="{{ urgency }}">
+          {% for u_val, u_label in [('hot', 'Hot'), ('critical', 'Critical')] %}
+          <button type="button" x-data="{ active: '{{ urgency }}' === '{{ u_val }}' }"
+                  @click="let inp=$el.closest('form').querySelector('[name=urgency]'); inp.value = inp.value==='{{ u_val }}' ? '' : '{{ u_val }}'; active=inp.value==='{{ u_val }}'; htmx.trigger($el.closest('form').querySelector('[name=q]'), 'changed')"
+                  :class="active ? '{{ 'bg-amber-500 text-white' if u_val == 'hot' else 'bg-rose-500 text-white' }}' : 'bg-white text-gray-700 border border-gray-200 hover:bg-brand-50'"
+                  class="px-2.5 py-0.5 text-xs font-medium rounded-full transition-colors">
+            {{ u_label }}
+          </button>
+          {% endfor %}
+        </div>
+      </form>
     </div>
-    <button @click="$dispatch('open-modal')"
-            hx-get="/partials/requisitions/create-form"
-            hx-target="#modal-content"
-            data-loading-disable
-            class="inline-flex items-center px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors">
-      <svg data-loading class="h-4 w-4 mr-1.5 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
-      <svg data-loading-remove class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
-      New Requisition
-    </button>
-  </div>
 
-  {# Filter bar #}
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-4">
-    <form id="req-filters" class="space-y-3">
-      <div class="flex flex-wrap gap-3 items-end">
-        {# Search #}
-        <div class="flex-1 min-w-[200px]">
-          <label class="block text-xs font-medium text-gray-500 mb-1">Search</label>
-          <input type="text" name="q" value="{{ q }}" placeholder="Name, customer..."
-                 hx-get="/partials/requisitions"
-                 hx-target="#main-content"
-                 hx-swap="morph"
-                 hx-push-url="true"
-                 hx-include="#req-filters"
-                 hx-trigger="keyup changed delay:300ms"
-                 class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-        </div>
+    {# Bulk action bar #}
+    <div x-show="selectedIds.size > 0" x-collapse x-cloak
+         class="mb-3 p-2 bg-brand-50 rounded-lg border border-brand-200 flex items-center gap-2 flex-shrink-0">
+      <span class="text-xs font-medium text-brand-600" x-text="selectedIds.size + ' selected'"></span>
+      <button @click="fetch('/partials/requisitions/bulk/archive', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'ids='+Array.from(selectedIds).join(',')}).then(r=>r.text()).then(h=>{ htmx.ajax('GET', '/partials/requisitions', {target:'#main-content'}) })"
+              class="px-2 py-0.5 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Archive</button>
+      <button @click="fetch('/partials/requisitions/bulk/activate', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'ids='+Array.from(selectedIds).join(',')}).then(r=>r.text()).then(h=>{ htmx.ajax('GET', '/partials/requisitions', {target:'#main-content'}) })"
+              class="px-2 py-0.5 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Activate</button>
+    </div>
 
-        {# Status (hidden input driven by pills) #}
-        <input type="hidden" name="status" value="{{ status }}">
-        <input type="hidden" name="sort" value="{{ sort }}">
-        <input type="hidden" name="dir" value="{{ dir }}">
-
-        {# Owner dropdown (non-sales only) #}
-        {% if user_role != 'sales' %}
-        <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">Owner</label>
-          <select name="owner"
-                  hx-get="/partials/requisitions"
-                  hx-target="#main-content"
-                  hx-push-url="true"
-                  hx-include="#req-filters"
-                  class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-            <option value="0">All owners</option>
-            {% for u in users %}
-            <option value="{{ u.id }}" {% if owner == u.id %}selected{% endif %}>{{ u.name }}</option>
-            {% endfor %}
-          </select>
-        </div>
-        {% endif %}
-
-        {# Date range #}
-        <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">From</label>
-          <input type="date" name="date_from" value="{{ date_from }}"
-                 hx-get="/partials/requisitions"
-                 hx-target="#main-content"
-                 hx-push-url="true"
-                 hx-include="#req-filters"
-                 class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-        </div>
-        <div>
-          <label class="block text-xs font-medium text-gray-500 mb-1">To</label>
-          <input type="date" name="date_to" value="{{ date_to }}"
-                 hx-get="/partials/requisitions"
-                 hx-target="#main-content"
-                 hx-push-url="true"
-                 hx-include="#req-filters"
-                 class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-        </div>
-      </div>
-
-      {# Status pills #}
-      <div class="flex flex-wrap gap-2" x-data="{ currentStatus: '{{ status }}' }">
-        {% for s_val, s_label in [('', 'All'), ('active', 'Active'), ('open', 'Open'), ('awarded', 'Awarded'), ('archived', 'Archived')] %}
-        <button type="button"
-                @click="currentStatus = '{{ s_val }}'; $el.closest('form').querySelector('[name=status]').value = '{{ s_val }}'; htmx.trigger($el.closest('form').querySelector('[name=q]'), 'changed')"
-                :class="currentStatus === '{{ s_val }}' ? 'bg-brand-500 text-white' : 'bg-white text-gray-900 border border-gray-200 hover:bg-brand-50'"
-                class="px-3 py-1 text-xs font-medium rounded-full transition-colors">
-          {{ s_label }}
-        </button>
-        {% endfor %}
-      </div>
-
-      {# Urgency pills #}
-      <div class="flex flex-wrap gap-2" x-data="{ currentUrgency: '{{ urgency }}' }">
-        <span class="text-xs text-gray-500 self-center mr-1">Urgency:</span>
-        <input type="hidden" name="urgency" value="{{ urgency }}">
-        {% for u_val, u_label in [('', 'Any'), ('normal', 'Normal'), ('hot', 'Hot'), ('critical', 'Critical')] %}
-        <button type="button"
-                @click="currentUrgency = '{{ u_val }}'; $el.closest('form').querySelector('[name=urgency]').value = '{{ u_val }}'; htmx.trigger($el.closest('form').querySelector('[name=q]'), 'changed')"
-                :class="currentUrgency === '{{ u_val }}' ? 'bg-brand-500 text-white' : 'bg-white text-gray-900 border border-gray-200 hover:bg-brand-50'"
-                class="px-3 py-1 text-xs font-medium rounded-full transition-colors">
-          {{ u_label }}
-        </button>
-        {% endfor %}
-      </div>
-    </form>
-  </div>
-
-  {# Bulk action bar #}
-  <div x-show="selectedIds.size > 0" x-collapse x-cloak
-       class="mb-4 p-3 bg-brand-50 rounded-lg border border-brand-200 flex items-center gap-3">
-    <span class="text-sm font-medium text-brand-600" x-text="selectedIds.size + ' selected'"></span>
-    <button @click="fetch('/partials/requisitions/bulk/archive', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'ids='+Array.from(selectedIds).join(',')}).then(r=>r.text()).then(h=>{document.getElementById('main-content').innerHTML=h; selectedIds=new Set()})"
-            class="px-3 py-1 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Archive</button>
-    <button @click="fetch('/partials/requisitions/bulk/activate', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'ids='+Array.from(selectedIds).join(',')}).then(r=>r.text()).then(h=>{document.getElementById('main-content').innerHTML=h; selectedIds=new Set()})"
-            class="px-3 py-1 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Activate</button>
-  </div>
-
-  {# Table #}
-  <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
-    {% if requisitions %}
-    <div class="overflow-x-auto">
+    {# Table (scrollable) #}
+    <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden flex-1 overflow-y-auto">
+      {% if requisitions %}
       <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
+        <thead class="bg-gray-50 sticky top-0 z-10">
           <tr>
-            <th class="px-3 py-3 w-10">
-              <input type="checkbox" class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500"
+            <th class="px-2 py-2 w-8">
+              <input type="checkbox" class="h-3.5 w-3.5 rounded border-gray-200 text-brand-500 focus:ring-brand-500"
                      @change="if($event.target.checked){document.querySelectorAll('#req-table-body input[type=checkbox]').forEach(c=>{c.checked=true;selectedIds.add(parseInt(c.value))})}else{selectedIds=new Set();document.querySelectorAll('#req-table-body input[type=checkbox]').forEach(c=>c.checked=false)}; selectedIds=new Set(selectedIds)">
             </th>
-            {% for col_name, col_key in [('Name', 'name'), ('Customer', 'customer_name'), ('Owner', None), ('Parts', None), ('Offers', None), ('Status', 'status'), ('Urgency', 'urgency'), ('Created', 'created_at')] %}
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+            {% for col_name, col_key in [('Name', 'name'), ('Customer', 'customer_name'), ('Status', 'status'), ('Parts', None), ('Created', 'created_at')] %}
+            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {% if col_key %}
               <a hx-get="/partials/requisitions?sort={{ col_key }}&dir={{ 'asc' if sort == col_key and dir == 'desc' else 'desc' }}"
                  hx-target="#main-content"
                  hx-push-url="true"
                  hx-include="#req-filters"
                  class="cursor-pointer hover:text-brand-500 inline-flex items-center gap-1">
-                {{ col_name }}
-                {% if sort == col_key %}
-                <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-                  {% if dir == 'asc' %}<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/>
-                  {% else %}<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>{% endif %}
-                </svg>
-                {% endif %}
+                  {{ col_name }}
+                  {% if sort == col_key %}
+                  <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    {% if dir == 'asc' %}<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 15l7-7 7 7"/>
+                    {% else %}<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>{% endif %}
+                  </svg>
+                  {% endif %}
               </a>
               {% else %}
               {{ col_name }}
@@ -175,39 +166,51 @@
           {% endfor %}
         </tbody>
       </table>
+      {% else %}
+      <div class="p-8 text-center">
+        <svg class="mx-auto h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        <p class="mt-2 text-sm text-gray-500">No requisitions found</p>
+        <button @click="$dispatch('open-modal')"
+                hx-get="/partials/requisitions/create-form"
+                hx-target="#modal-content"
+                class="mt-2 text-sm text-brand-500 hover:text-brand-600">Create your first requisition</button>
+      </div>
+      {% endif %}
     </div>
-    {% else %}
-    <div class="p-12 text-center">
-      <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-      <p class="mt-2 text-sm text-gray-500">No requisitions found</p>
-      <button @click="$dispatch('open-modal')"
-              hx-get="/partials/requisitions/create-form"
-              hx-target="#modal-content"
-              class="mt-3 text-sm text-brand-500 hover:text-brand-600">Create your first requisition</button>
+
+    {# Pagination #}
+    {% if total > limit %}
+    <div class="mt-2 flex justify-center flex-shrink-0">
+      <nav class="flex gap-1 items-center">
+        {% if offset > 0 %}
+        <a hx-get="/partials/requisitions?offset={{ offset - limit }}"
+           hx-target="#main-content"
+           hx-include="#req-filters"
+           preload="mouseover"
+           class="px-2.5 py-1 text-xs bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
+        {% endif %}
+        <span class="px-2 py-1 text-xs text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
+        {% if offset + limit < total %}
+        <a hx-get="/partials/requisitions?offset={{ offset + limit }}"
+           hx-target="#main-content"
+           hx-include="#req-filters"
+           preload="mouseover"
+           class="px-2.5 py-1 text-xs bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
+        {% endif %}
+      </nav>
     </div>
     {% endif %}
   </div>
 
-  {# Pagination #}
-  {% if total > limit %}
-  <div class="mt-4 flex justify-center">
-    <nav class="flex gap-1 items-center">
-      {% if offset > 0 %}
-      <a hx-get="/partials/requisitions?offset={{ offset - limit }}"
-         hx-target="#main-content"
-         hx-include="#req-filters"
-         preload="mouseover"
-         class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
-      {% endif %}
-      <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
-      {% if offset + limit < total %}
-      <a hx-get="/partials/requisitions?offset={{ offset + limit }}"
-         hx-target="#main-content"
-         hx-include="#req-filters"
-         preload="mouseover"
-         class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
-      {% endif %}
-    </nav>
+  {# ── Right panel: detail ───────────────────────────────────── #}
+  <div id="req-detail-panel" class="flex-1 overflow-y-auto bg-white rounded-lg shadow border border-gray-200">
+    {# Empty state — shown until a requisition is selected #}
+    <div class="flex flex-col items-center justify-center h-full text-center p-8">
+      <svg class="h-16 w-16 text-gray-300 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+      </svg>
+      <p class="text-sm text-gray-500">Select a requisition to view details</p>
+    </div>
   </div>
-  {% endif %}
+
 </div>

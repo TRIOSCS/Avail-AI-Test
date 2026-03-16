@@ -1,25 +1,24 @@
-{# req_row.html — Single requisition table row.
+{# req_row.html — Single requisition table row (compact, for left panel).
    Receives: req (Requisition object with req_count, offer_count attrs).
    Called by: requisitions/list.html loop, create endpoint (prepend).
    Depends on: brand color palette from tailwind.config.js.
 #}
 <tr class="hover:bg-brand-50 cursor-pointer group"
     hx-get="/partials/requisitions/{{ req.id }}"
-    hx-target="#main-content"
-    hx-push-url="/requisitions/{{ req.id }}">
+    hx-target="#req-detail-panel"
+    hx-push-url="/requisitions/{{ req.id }}"
+    @click="activeReqId = {{ req.id }}"
+    :class="activeReqId === {{ req.id }} ? 'bg-brand-50' : ''">
   {# Checkbox (stops row click propagation) #}
-  <td class="px-3 py-3 w-10" @click.stop>
+  <td class="px-2 py-2 w-8" @click.stop>
     <input type="checkbox" :value="{{ req.id }}"
            @change="$event.target.checked ? selectedIds.add({{ req.id }}) : selectedIds.delete({{ req.id }}); selectedIds = new Set(selectedIds)"
            :checked="selectedIds.has({{ req.id }})"
-           class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500">
+           class="h-3.5 w-3.5 rounded border-gray-200 text-brand-500 focus:ring-brand-500">
   </td>
-  <td class="px-4 py-3 text-sm font-medium text-brand-500">{{ req.name }}</td>
-  <td class="px-4 py-3 text-sm text-gray-500">{{ req.customer_name or "\u2014" }}</td>
-  <td class="px-4 py-3 text-sm text-gray-500">{{ req.creator.name if req.creator else "\u2014" }}</td>
-  <td class="px-4 py-3 text-sm text-gray-500">{{ req.req_count }}</td>
-  <td class="px-4 py-3 text-sm text-gray-500">{{ req.offer_count|default(0) }}</td>
-  <td class="px-4 py-3">
+  <td class="px-3 py-2 text-sm font-medium text-brand-500 truncate max-w-[180px]">{{ req.name }}</td>
+  <td class="px-3 py-2 text-xs text-gray-500 truncate max-w-[120px]">{{ req.customer_name or "\u2014" }}</td>
+  <td class="px-3 py-2">
     {% set status_colors = {
       "active": "bg-emerald-50 text-emerald-700",
       "draft": "bg-brand-100 text-brand-600",
@@ -30,18 +29,15 @@
       "awarded": "bg-emerald-50 text-emerald-700",
       "open": "bg-emerald-50 text-emerald-700"
     } %}
-    <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(req.status, 'bg-gray-100 text-gray-600') }}">
+    <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ status_colors.get(req.status, 'bg-gray-100 text-gray-600') }}">
       {{ req.status|capitalize }}
     </span>
-  </td>
-  <td class="px-4 py-3">
     {% if req.urgency == "critical" %}
-      <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-rose-50 text-rose-700">Critical</span>
+      <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-rose-50 text-rose-700 ml-1">!</span>
     {% elif req.urgency == "hot" %}
-      <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full bg-amber-50 text-amber-700">Hot</span>
-    {% else %}
-      <span class="text-sm text-gray-500">Normal</span>
+      <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-50 text-amber-700 ml-1">!</span>
     {% endif %}
   </td>
-  <td class="px-4 py-3 text-sm text-gray-500">{{ req.created_at.strftime('%b %d, %Y') if req.created_at else "\u2014" }}</td>
+  <td class="px-3 py-2 text-xs text-gray-500">{{ req.req_count }}</td>
+  <td class="px-3 py-2 text-xs text-gray-400">{{ req.created_at.strftime('%b %d') if req.created_at else "\u2014" }}</td>
 </tr>

@@ -9,15 +9,6 @@
 
 <div class="max-w-7xl mx-auto">
 
-  {# Dark navy page header #}
-  <div class="bg-brand-700 text-white px-6 py-3 rounded-t-lg mb-6 flex items-center justify-between">
-    <div class="flex items-center gap-2 text-sm">
-      <span class="text-brand-300">Avail</span>
-      <span class="text-brand-400">&rsaquo;</span>
-      <span class="font-medium">Dashboard</span>
-    </div>
-  </div>
-
   {# Welcome message #}
   <h2 class="text-xl text-gray-900 text-center mb-8">Welcome back, {{ user_name }}</h2>
 
@@ -45,6 +36,12 @@
       <p class="mt-1 text-3xl font-bold text-brand-500">{{ stats.company_count }}</p>
     </div>
   </div>
+
+  {# Pipeline Insights — lazy-loaded #}
+  <div hx-get="/v2/partials/dashboard/pipeline-insights"
+       hx-trigger="load"
+       hx-swap="innerHTML"
+       class="mb-8"></div>
 
   {# Quick actions #}
   <div class="bg-white border border-brand-200 rounded-lg p-6">

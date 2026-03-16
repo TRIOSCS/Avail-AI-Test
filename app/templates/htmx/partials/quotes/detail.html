@@ -16,19 +16,6 @@
 
 <div class="max-w-7xl mx-auto" x-data="{ showMarkup: false }">
 
-  {# Dark navy page header #}
-  <div class="bg-brand-700 text-white px-6 py-3 rounded-t-lg mb-6 flex items-center justify-between">
-    <div class="flex items-center gap-2 text-sm">
-      <span class="text-brand-300">Avail</span>
-      <span class="text-brand-400">&rsaquo;</span>
-      <a href="/quotes" hx-get="/partials/quotes" hx-target="#main-content" hx-push-url="/quotes"
-         preload="mouseover"
-         class="text-brand-200 hover:text-white cursor-pointer">Quotes</a>
-      <span class="text-brand-400">&rsaquo;</span>
-      <span class="font-medium">{{ quote.quote_number }}</span>
-    </div>
-  </div>
-
   {# Header card #}
   <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
     <div class="flex items-start justify-between">
@@ -111,6 +98,15 @@
             class="px-4 py-2 bg-rose-600 text-white text-sm font-medium rounded-md hover:bg-rose-700">
       <svg data-loading class="h-4 w-4 mr-1 spinner inline" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
       Mark Lost
+    </button>
+    {% endif %}
+    {% if quote.status == 'won' %}
+    <button hx-post="/v2/partials/quotes/{{ quote.id }}/build-buy-plan"
+            hx-target="#main-content"
+            hx-confirm="Build a buy plan from this quote?"
+            class="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 flex items-center gap-1">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
+      Build Buy Plan
     </button>
     {% endif %}
     {% if quote.status == 'draft' %}

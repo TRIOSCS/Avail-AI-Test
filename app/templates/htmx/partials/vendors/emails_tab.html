@@ -1,0 +1,147 @@
+{# vendors/emails_tab.html — Email history tab for vendor detail.
+   Shows RFQ contacts and vendor responses from the database.
+   Receives: vendor (VendorCard), contacts (list[Contact]), responses (list[VendorResponse]).
+   Called by: htmx_views.py vendor_tab endpoint (tab=="emails").
+   Depends on: HTMX, Tailwind CSS with brand palette.
+#}
+<div class="space-y-4">
+
+  {# Summary stats #}
+  {% set total_sent = contacts|length if contacts else 0 %}
+  {% set total_responses = responses|length if responses else 0 %}
+  <div class="grid grid-cols-3 gap-3">
+    <div class="bg-white rounded-lg border border-gray-200 p-3 text-center">
+      <p class="text-lg font-bold text-brand-600">{{ total_sent }}</p>
+      <p class="text-xs text-gray-500">RFQs Sent</p>
+    </div>
+    <div class="bg-white rounded-lg border border-gray-200 p-3 text-center">
+      <p class="text-lg font-bold text-emerald-600">{{ total_responses }}</p>
+      <p class="text-xs text-gray-500">Responses</p>
+    </div>
+    <div class="bg-white rounded-lg border border-gray-200 p-3 text-center">
+      {% set response_rate = (total_responses / total_sent * 100) if total_sent > 0 else 0 %}
+      <p class="text-lg font-bold text-amber-600">{{ "%.0f"|format(response_rate) }}%</p>
+      <p class="text-xs text-gray-500">Response Rate</p>
+    </div>
+  </div>
+
+  {# Outbound RFQs #}
+  {% if contacts %}
+  <div class="bg-white rounded-lg border border-gray-200">
+    <div class="px-4 py-3 border-b border-gray-200 bg-gray-50">
+      <h3 class="text-sm font-semibold text-gray-900">Outbound RFQs</h3>
+    </div>
+    <div class="divide-y divide-gray-100">
+      {% for c in contacts %}
+      <div class="px-4 py-3 hover:bg-brand-50 transition-colors">
+        <div class="flex items-center justify-between mb-1">
+          <div class="flex items-center gap-2">
+            <svg class="h-4 w-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+            </svg>
+            <span class="text-sm font-medium text-gray-900">{{ c.subject or "RFQ" }}</span>
+          </div>
+          {% set st_colors = {
+            'sent': 'bg-blue-50 text-blue-700',
+            'opened': 'bg-amber-50 text-amber-700',
+            'responded': 'bg-emerald-50 text-emerald-700',
+            'quoted': 'bg-emerald-50 text-emerald-700',
+            'declined': 'bg-rose-50 text-rose-700',
+            'bounced': 'bg-rose-50 text-rose-600',
+            'failed': 'bg-rose-50 text-rose-700',
+          } %}
+          <span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ st_colors.get(c.status, 'bg-gray-100 text-gray-600') }}">
+            {{ (c.status or 'sent')|capitalize }}
+          </span>
+        </div>
+        <div class="flex items-center gap-3 text-xs text-gray-500">
+          <span>To: {{ c.vendor_contact or "" }}</span>
+          <span>{{ c.created_at.strftime('%b %d, %Y %H:%M') if c.created_at else "" }}</span>
+          {% if c.parts_included %}
+          <span class="truncate max-w-xs">Parts: {{ c.parts_included }}</span>
+          {% endif %}
+          {% if c.requisition_id %}
+          <a hx-get="/v2/partials/requisitions/{{ c.requisition_id }}"
+             hx-target="#main-content"
+             hx-push-url="/v2/requisitions/{{ c.requisition_id }}"
+             class="text-brand-500 hover:text-brand-600 cursor-pointer">Req #{{ c.requisition_id }}</a>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# Inbound Responses #}
+  {% if responses %}
+  <div class="bg-white rounded-lg border border-gray-200">
+    <div class="px-4 py-3 border-b border-gray-200 bg-gray-50">
+      <h3 class="text-sm font-semibold text-gray-900">Vendor Responses</h3>
+    </div>
+    <div class="divide-y divide-gray-100">
+      {% for r in responses %}
+      <div class="px-4 py-3 hover:bg-brand-50 transition-colors">
+        <div class="flex items-center justify-between mb-1">
+          <div class="flex items-center gap-2">
+            <svg class="h-4 w-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 10h10a8 8 0 018 8v2M3 10l6 6m-6-6l6-6"/>
+            </svg>
+            <span class="text-sm font-medium text-gray-900">{{ r.subject or "Reply" }}</span>
+          </div>
+          <div class="flex items-center gap-2">
+            {% set class_colors = {
+              "quote": "bg-emerald-50 text-emerald-700",
+              "decline": "bg-rose-50 text-rose-700",
+              "ooo": "bg-amber-50 text-amber-700",
+              "bounce": "bg-gray-100 text-gray-500",
+            } %}
+            {% if r.classification %}
+            <span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ class_colors.get(r.classification, 'bg-gray-100 text-gray-600') }}">
+              {{ r.classification|capitalize }}
+            </span>
+            {% endif %}
+            {% if r.confidence is not none %}
+            <span class="text-[10px] font-medium {{ 'text-emerald-600' if r.confidence >= 0.8 else 'text-amber-600' if r.confidence >= 0.5 else 'text-gray-400' }}">
+              {{ "%.0f"|format(r.confidence * 100) }}%
+            </span>
+            {% endif %}
+          </div>
+        </div>
+        <div class="flex items-center gap-3 text-xs text-gray-500">
+          <span>From: {{ r.vendor_email or "" }}</span>
+          <span>{{ r.received_at.strftime('%b %d, %Y %H:%M') if r.received_at else "" }}</span>
+          {% if r.requisition_id %}
+          <a hx-get="/v2/partials/requisitions/{{ r.requisition_id }}"
+             hx-target="#main-content"
+             hx-push-url="/v2/requisitions/{{ r.requisition_id }}"
+             class="text-brand-500 hover:text-brand-600 cursor-pointer">Req #{{ r.requisition_id }}</a>
+          {% endif %}
+        </div>
+        {% if r.parsed_data %}
+        <div class="mt-1 flex items-center gap-3 text-xs text-gray-400">
+          {% if r.parsed_data.get('parts') %}
+          <span>Parts: {{ r.parsed_data['parts']|join(', ') if r.parsed_data['parts'] is iterable and r.parsed_data['parts'] is not string else r.parsed_data['parts'] }}</span>
+          {% endif %}
+          {% if r.parsed_data.get('price') %}
+          <span>Price: ${{ r.parsed_data['price'] }}</span>
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# Empty state #}
+  {% if not contacts and not responses %}
+  <div class="bg-white rounded-lg border border-gray-200 p-8 text-center">
+    <svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
+    </svg>
+    <p class="text-sm text-gray-500 mb-1">No email history with this vendor.</p>
+    <p class="text-xs text-gray-400">Email history appears when RFQs are sent or responses are received.</p>
+  </div>
+  {% endif %}
+</div>

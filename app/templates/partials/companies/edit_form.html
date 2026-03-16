@@ -1,0 +1,63 @@
+{# edit_form.html — Inline edit form for company fields.
+   Receives: company (Company), users (list[User]).
+   Called by: htmx_views.py company_edit_form route.
+   Depends on: HTMX, Tailwind CSS with brand palette.
+#}
+<div class="max-w-2xl mx-auto">
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+    <h2 class="text-lg font-bold text-gray-900 mb-4">Edit Company</h2>
+
+    <form hx-post="/v2/partials/companies/{{ company.id }}/edit"
+          hx-target="#main-content"
+          class="space-y-4">
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
+        <input type="text" name="name" value="{{ company.name or '' }}"
+               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Website</label>
+        <input type="url" name="website" value="{{ company.website or '' }}"
+               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Industry</label>
+        <input type="text" name="industry" value="{{ company.industry or '' }}"
+               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Account Owner</label>
+        <select name="owner_id"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+          <option value="">— None —</option>
+          {% for u in users %}
+          <option value="{{ u.id }}" {{ 'selected' if company.account_owner_id == u.id else '' }}>{{ u.name }} ({{ u.role }})</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+        <textarea name="notes" rows="3"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">{{ company.notes or '' }}</textarea>
+      </div>
+
+      <div class="flex items-center gap-3 pt-2">
+        <button type="submit"
+                class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-md hover:bg-brand-600">
+          Save Changes
+        </button>
+        <button type="button"
+                hx-get="/v2/partials/companies/{{ company.id }}"
+                hx-target="#main-content"
+                class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200">
+          Cancel
+        </button>
+      </div>
+    </form>
+  </div>
+</div>

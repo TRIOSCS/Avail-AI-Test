@@ -1,0 +1,73 @@
+{# thread_viewer.html — Email thread viewer with all messages.
+   Receives: messages (list[dict]), conversation_id (str), error (str|None).
+   Called by: htmx_views.py email_thread_viewer route.
+   Depends on: HTMX, Tailwind CSS with brand palette.
+#}
+<div class="max-w-3xl mx-auto">
+  <div class="bg-white rounded-lg shadow border border-gray-200">
+    <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+      <h3 class="text-sm font-semibold text-gray-900">Email Thread</h3>
+      <button hx-get="/v2/partials/emails/thread/{{ conversation_id }}/summary"
+              hx-target="#thread-summary"
+              class="px-2 py-1 text-xs text-brand-600 bg-brand-50 border border-brand-200 rounded hover:bg-brand-100">
+        AI Summary
+      </button>
+    </div>
+
+    <div id="thread-summary"></div>
+
+    {% if error %}
+    <div class="p-4 bg-amber-50 border-b border-amber-200">
+      <p class="text-sm text-amber-700">{{ error }}</p>
+    </div>
+    {% endif %}
+
+    {% if messages %}
+    <div class="divide-y divide-gray-200">
+      {% for msg in messages %}
+      <div class="p-4">
+        <div class="flex items-center justify-between mb-2">
+          <div>
+            <span class="text-sm font-medium text-gray-900">{{ msg.get('from', {}).get('emailAddress', {}).get('name', 'Unknown') }}</span>
+            <span class="text-xs text-gray-500 ml-2">&lt;{{ msg.get('from', {}).get('emailAddress', {}).get('address', '') }}&gt;</span>
+          </div>
+          <span class="text-xs text-gray-400">{{ msg.get('receivedDateTime', '')[:16] }}</span>
+        </div>
+        {% if msg.get('subject') %}
+        <p class="text-xs text-gray-500 mb-2">{{ msg.subject }}</p>
+        {% endif %}
+        <div class="text-sm text-gray-700 prose prose-sm max-w-none">
+          {{ msg.get('body', {}).get('content', '')|safe }}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {# Reply form #}
+    <div class="p-4 bg-gray-50 border-t border-gray-200">
+      <form hx-post="/v2/partials/emails/reply"
+            hx-target="#reply-result"
+            class="space-y-2">
+        <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
+        {% if messages %}
+        <input type="hidden" name="to" value="{{ messages[-1].get('from', {}).get('emailAddress', {}).get('address', '') }}">
+        <input type="hidden" name="subject" value="Re: {{ messages[0].get('subject', '') }}">
+        {% endif %}
+        <textarea name="body" rows="3" placeholder="Type your reply..."
+                  class="w-full px-3 py-2 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"></textarea>
+        <div class="flex items-center gap-2">
+          <button type="submit"
+                  class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
+            Send Reply
+          </button>
+        </div>
+      </form>
+      <div id="reply-result" class="mt-2"></div>
+    </div>
+    {% else %}
+    <div class="p-8 text-center">
+      <p class="text-sm text-gray-400">No messages in this thread.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>
