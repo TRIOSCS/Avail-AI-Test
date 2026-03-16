@@ -52,7 +52,7 @@
       {% if draft_quote %}
       <button x-show="selectedOffers.length > 0"
               @click="
-                fetch('/partials/requisitions/{{ req.id }}/add-offers-to-quote', {
+                fetch('/v2/partials/requisitions/{{ req.id }}/add-offers-to-quote', {
                   method: 'POST',
                   headers: {'Content-Type': 'application/json'},
                   body: JSON.stringify({offer_ids: selectedOffers, quote_id: {{ draft_quote.id }}})
@@ -68,7 +68,7 @@
       </button>
       {% endif %}
       <button x-show="selectedOffers.length > 0"
-              hx-post="/partials/requisitions/{{ req.id }}/create-quote"
+              hx-post="/v2/partials/requisitions/{{ req.id }}/create-quote"
               hx-include="[name='offer_ids']"
               hx-target="#main-content"
               class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600"
@@ -136,34 +136,34 @@
               </button>
               <div x-show="open" x-cloak
                    class="absolute right-0 top-full mt-1 w-36 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
-                <button hx-get="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/edit-form"
+                <button hx-get="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/edit-form"
                         hx-target="#parse-area" hx-swap="innerHTML"
                         @click.stop="open = false"
                         class="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">Edit</button>
                 {% if o.status == "pending_review" %}
-                <button hx-post="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
+                <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
                         hx-vals='{"action": "approve"}' hx-target="#tab-content"
                         @click.stop="open = false"
                         class="w-full text-left px-3 py-1.5 text-xs text-emerald-600 hover:bg-emerald-50">Approve</button>
-                <button hx-post="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
+                <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
                         hx-vals='{"action": "reject"}' hx-target="#tab-content"
                         @click.stop="open = false"
                         class="w-full text-left px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50">Reject</button>
                 {% elif o.status in ("active", "approved") %}
-                <button hx-post="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/reconfirm"
+                <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/reconfirm"
                         hx-target="#tab-content"
                         @click.stop="open = false"
                         class="w-full text-left px-3 py-1.5 text-xs text-brand-600 hover:bg-brand-50">Reconfirm</button>
-                <button hx-post="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/mark-sold"
+                <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/mark-sold"
                         hx-target="#tab-content" hx-confirm="Mark this offer as sold?"
                         @click.stop="open = false"
                         class="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">Mark Sold</button>
                 {% endif %}
-                <button hx-get="/partials/offers/{{ o.id }}/changelog"
+                <button hx-get="/v2/partials/offers/{{ o.id }}/changelog"
                         hx-target="#parse-area" hx-swap="innerHTML"
                         @click.stop="open = false"
                         class="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">History</button>
-                <button hx-delete="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}"
+                <button hx-delete="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}"
                         hx-target="#tab-content" hx-confirm="Delete this offer? This cannot be undone."
                         @click.stop="open = false"
                         class="w-full text-left px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 border-t border-gray-100">Delete</button>

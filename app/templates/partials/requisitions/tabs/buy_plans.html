@@ -19,7 +19,7 @@
       <tbody class="divide-y divide-gray-200">
         {% for bp in buy_plans %}
         <tr class="hover:bg-brand-50 cursor-pointer"
-            hx-get="/partials/buy-plans/{{ bp.id }}"
+            hx-get="/v2/partials/buy-plans/{{ bp.id }}"
             hx-target="#main-content"
             hx-push-url="/buy-plans/{{ bp.id }}">
           <td class="px-4 py-2 text-sm font-medium text-brand-500">#{{ bp.id }}</td>

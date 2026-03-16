@@ -32,7 +32,7 @@
   <td class="px-4 py-2 text-sm text-gray-500 text-right" x-show="!editing">{{ r.sighting_count }}</td>
   <td class="px-4 py-2 text-center" x-show="!editing">
     <div class="flex items-center justify-center gap-2">
-      <button hx-post="/partials/search/run?requirement_id={{ r.id }}&mpn={{ r.primary_mpn or '' }}"
+      <button hx-post="/v2/partials/search/run?requirement_id={{ r.id }}&mpn={{ r.primary_mpn or '' }}"
               hx-target="#search-results-{{ r.id }}"
               hx-indicator="#spinner-{{ r.id }}"
               class="text-xs text-brand-500 hover:text-brand-600 font-medium"
@@ -42,7 +42,7 @@
           <svg class="inline h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
         </span>
       </button>
-      <button hx-delete="/partials/requisitions/{{ req.id }}/requirements/{{ r.id }}"
+      <button hx-delete="/v2/partials/requisitions/{{ req.id }}/requirements/{{ r.id }}"
               hx-target="#req-row-{{ r.id }}"
               hx-swap="delete"
               hx-confirm="Delete this requirement?"
@@ -55,7 +55,7 @@
 
   {# ── Edit mode (double-click) ───────────────────────────── #}
   <td colspan="7" x-show="editing" x-cloak>
-    <form hx-put="/partials/requisitions/{{ req.id }}/requirements/{{ r.id }}"
+    <form hx-put="/v2/partials/requisitions/{{ req.id }}/requirements/{{ r.id }}"
           hx-target="#req-row-{{ r.id }}" hx-swap="outerHTML"
           class="flex items-center gap-2 py-1">
       <input type="text" name="primary_mpn" value="{{ r.primary_mpn or '' }}" required

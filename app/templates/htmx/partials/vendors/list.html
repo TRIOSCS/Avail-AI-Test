@@ -20,7 +20,7 @@
     <form id="vendor-filters" class="flex flex-wrap gap-3 items-end">
       <div class="flex-1 min-w-[200px]">
         <input type="text" name="q" value="{{ q }}" placeholder="Search vendors..."
-               hx-get="/partials/vendors"
+               hx-get="/v2/partials/vendors"
                hx-target="#main-content"
                hx-swap="morph"
                hx-push-url="true"
@@ -52,7 +52,7 @@
             {% for col_name, col_key in [('Vendor', 'display_name'), ('Score', None), ('Sightings', 'sighting_count'), ('Win Rate', 'overall_win_rate'), ('Location', 'hq_country'), ('Industry', 'industry')] %}
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {% if col_key %}
-              <a hx-get="/partials/vendors?sort={{ col_key }}&dir={{ 'asc' if sort == col_key and dir == 'desc' else 'desc' }}"
+              <a hx-get="/v2/partials/vendors?sort={{ col_key }}&dir={{ 'asc' if sort == col_key and dir == 'desc' else 'desc' }}"
                  hx-target="#main-content"
                  hx-push-url="true"
                  hx-include="#vendor-filters"
@@ -75,9 +75,9 @@
         <tbody class="divide-y divide-gray-200">
           {% for v in vendors %}
           <tr class="{{ 'bg-rose-50' if v.is_blacklisted else '' }} hover:bg-brand-50 cursor-pointer"
-              hx-get="/partials/vendors/{{ v.id }}"
+              hx-get="/v2/partials/vendors/{{ v.id }}"
               hx-target="#main-content"
-              hx-push-url="/vendors/{{ v.id }}"
+              hx-push-url="/v2/vendors/{{ v.id }}"
               preload="mouseover">
             <td class="px-4 py-3">
               <div>
@@ -110,7 +110,7 @@
   <div class="mt-4 flex justify-center">
     <nav class="flex gap-1 items-center">
       {% if offset > 0 %}
-      <a hx-get="/partials/vendors?offset={{ offset - limit }}"
+      <a hx-get="/v2/partials/vendors?offset={{ offset - limit }}"
          hx-target="#main-content"
          hx-include="#vendor-filters"
          preload="mouseover"
@@ -118,7 +118,7 @@
       {% endif %}
       <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
       {% if offset + limit < total %}
-      <a hx-get="/partials/vendors?offset={{ offset + limit }}"
+      <a hx-get="/v2/partials/vendors?offset={{ offset + limit }}"
          hx-target="#main-content"
          hx-include="#vendor-filters"
          preload="mouseover"

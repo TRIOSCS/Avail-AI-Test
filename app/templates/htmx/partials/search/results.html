@@ -10,7 +10,7 @@
 <div class="p-4 bg-rose-50 text-rose-700 rounded-lg border border-rose-200">
   <p class="font-medium">Search failed</p>
   <p class="text-sm mt-1">{{ error }}</p>
-  <button hx-post="/partials/search/run"
+  <button hx-post="/v2/partials/search/run"
           hx-target="#search-results"
           hx-vals='{"mpn": "{{ mpn }}"}'
           class="mt-3 text-sm text-brand-500 hover:text-brand-600 font-medium">
@@ -56,7 +56,7 @@
   <div class="grid grid-cols-1 lg:grid-cols-2 gap-4">
     {% for s in results %}
     <div class="bg-white rounded-lg border border-gray-200 shadow-sm p-4 hover:shadow-md hover:border-brand-300 transition-all cursor-pointer"
-         hx-get="/partials/search/lead-detail?idx={{ loop.index0 }}&mpn={{ mpn|urlencode }}"
+         hx-get="/v2/partials/search/lead-detail?idx={{ loop.index0 }}&mpn={{ mpn|urlencode }}"
          hx-target="#lead-drawer-content"
          hx-on::after-request="document.getElementById('lead-drawer').dataset.open = 'true'">
 

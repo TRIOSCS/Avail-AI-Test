@@ -81,7 +81,7 @@
     {# Action buttons #}
     <div class="mt-3 flex flex-wrap gap-2">
       {% if quote is defined and quote %}
-      <button hx-post="/partials/quotes/{{ quote.id }}/add-offer/{{ offer.id }}"
+      <button hx-post="/v2/partials/quotes/{{ quote.id }}/add-offer/{{ offer.id }}"
               hx-target="#quote-lines-body"
               hx-swap="beforeend"
               class="px-2 py-1 text-xs bg-brand-500 text-white rounded hover:bg-brand-600">

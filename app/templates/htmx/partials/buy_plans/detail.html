@@ -119,7 +119,7 @@
     {% endif %}
 
     {% if bp.status in ('halted', 'cancelled') %}
-      <button hx-post="/partials/buy-plans/{{ bp.id }}/reset"
+      <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/reset"
               hx-target="#main-content"
               hx-confirm="Reset this buy plan to draft?"
               class="px-4 py-2 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50">
@@ -202,7 +202,7 @@
                     <div x-show="showPo" x-cloak class="mt-2 space-y-1">
                       <input x-model="poNum" type="text" placeholder="PO#" class="w-28 px-2 py-1 text-xs border border-brand-200 rounded">
                       <input x-model="shipDate" type="date" class="w-28 px-2 py-1 text-xs border border-brand-200 rounded">
-                      <button hx-post="/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/confirm-po"
+                      <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/confirm-po"
                               hx-target="#main-content"
                               :hx-vals="JSON.stringify({po_number: poNum, estimated_ship_date: shipDate})"
                               class="px-2 py-1 text-xs bg-brand-500 text-white rounded hover:bg-brand-600">
@@ -216,13 +216,13 @@
                   </div>
                 {% elif line.status == 'pending_verify' and is_ops_member %}
                   <div class="flex gap-1">
-                    <button hx-post="/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
+                    <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
                             hx-target="#main-content"
                             hx-vals='{"action": "approve"}'
                             class="px-2 py-1 text-xs bg-emerald-600 text-white rounded hover:bg-emerald-700">
                       Verify
                     </button>
-                    <button hx-post="/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
+                    <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
                             hx-target="#main-content"
                             hx-vals='{"action": "reject"}'
                             hx-confirm="Reject this PO?"
@@ -297,7 +297,7 @@
           </div>
           <div class="mt-4 flex justify-end gap-2">
             <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border border-brand-200 rounded-md hover:bg-gray-50">Cancel</button>
-            <button hx-post="/partials/buy-plans/{{ bp.id }}/submit"
+            <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/submit"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({sales_order_number: so, customer_po_number: cpo, salesperson_notes: notes})"
                     @click="showModal = false"
@@ -319,7 +319,7 @@
           </div>
           <div class="mt-4 flex justify-end gap-2">
             <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border border-brand-200 rounded-md hover:bg-gray-50">Cancel</button>
-            <button hx-post="/partials/buy-plans/{{ bp.id }}/approve"
+            <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({action: 'approve', notes: notes})"
                     @click="showModal = false"
@@ -342,7 +342,7 @@
           </div>
           <div class="mt-4 flex justify-end gap-2">
             <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border border-brand-200 rounded-md hover:bg-gray-50">Cancel</button>
-            <button hx-post="/partials/buy-plans/{{ bp.id }}/approve"
+            <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({action: 'reject', notes: notes})"
                     @click="showModal = false"
@@ -377,7 +377,7 @@
           </div>
           <div class="mt-4 flex justify-end gap-2">
             <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border border-brand-200 rounded-md hover:bg-gray-50">Cancel</button>
-            <button hx-post="/partials/buy-plans/{{ bp.id }}/verify-so"
+            <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/verify-so"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({action: action, rejection_note: note})"
                     @click="showModal = false"
@@ -399,7 +399,7 @@
           </div>
           <div class="mt-4 flex justify-end gap-2">
             <button @click="showModal = false" class="px-4 py-2 text-sm text-gray-700 border border-brand-200 rounded-md hover:bg-gray-50">Cancel</button>
-            <button hx-post="/partials/buy-plans/{{ bp.id }}/cancel"
+            <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/cancel"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({reason: reason})"
                     @click="showModal = false"

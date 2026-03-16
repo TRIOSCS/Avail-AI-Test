@@ -6,7 +6,7 @@
 <div>
   {# Inline add requirement form #}
   <div class="mb-4 p-4 bg-brand-50 rounded-lg border border-brand-200">
-    <form hx-post="/partials/requisitions/{{ req.id }}/requirements"
+    <form hx-post="/v2/partials/requisitions/{{ req.id }}/requirements"
           hx-target="#parts-tbody"
           hx-swap="afterbegin"
           @htmx:after-request.camel="if(event.detail.successful) { $el.reset(); Alpine.store('toast').message='Requirement added'; Alpine.store('toast').type='success'; Alpine.store('toast').show=true; }"

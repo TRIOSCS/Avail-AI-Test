@@ -6,7 +6,7 @@
 
 {# OOB breadcrumb update #}
 <div id="breadcrumb" hx-swap-oob="true">
-  <a hx-get="/partials/companies" hx-target="#main-content" hx-push-url="/companies"
+  <a hx-get="/v2/partials/companies" hx-target="#main-content" hx-push-url="/v2/companies"
      preload="mouseover"
      class="text-brand-500 hover:text-brand-600 cursor-pointer">Companies</a>
   <span class="text-gray-500 mx-1">&gt;</span>
@@ -93,7 +93,7 @@
       <nav class="flex gap-6 -mb-px">
         {% for tab_id, tab_label in [('sites', 'Sites'), ('contacts', 'Contacts'), ('requisitions', 'Requisitions'), ('activity', 'Activity')] %}
         <button @click="activeTab = '{{ tab_id }}'"
-                hx-get="/partials/companies/{{ company.id }}/tab/{{ tab_id }}"
+                hx-get="/v2/partials/companies/{{ company.id }}/tab/{{ tab_id }}"
                 hx-target="#company-tab-content"
                 hx-trigger="click"
                 hx-swap="innerHTML"
