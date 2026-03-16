@@ -1,0 +1,111 @@
+{# lead_row.html — Compact lead row for workspace split-panel left panel.
+   Dense single-line row with safety dot, vendor, confidence bar, price, freshness.
+   Second optional line for source badges and reason summary.
+   Called by: partials/sourcing/workspace.html (loop)
+   Depends on: partials/shared/source_badge.html
+   Context vars: lead (SourcingLead), lead_sighting_data (dict keyed by lead.id),
+                 selected_lead_id (int|None) — currently selected lead for highlight #}
+
+{% set sighting = lead_sighting_data.get(lead.id, {}) %}
+{% set is_selected = (selected_lead_id|default(0)|int == lead.id) %}
+
+<div id="lead-row-{{ lead.id }}"
+     class="px-3 py-2 border-b border-gray-100 cursor-pointer transition-colors
+            {% if is_selected %}bg-brand-50 border-l-2 border-l-brand-500{% elif lead.buyer_status == 'contacted' or lead.buyer_status == 'has_stock' %}border-l-2 border-l-teal-400{% else %}border-l-2 border-l-transparent{% endif %}
+            hover:bg-gray-50 group"
+     hx-get="/v2/partials/sourcing/leads/{{ lead.id }}/panel"
+     hx-target="#split-right-sourcing"
+     hx-swap="innerHTML"
+     @click="selectedLead = {{ lead.id }}"
+     :class="{ 'bg-brand-50 !border-l-brand-500': selectedLead === {{ lead.id }} }">
+
+  {# Row 1: Safety dot + Vendor + Confidence + Price + Freshness + Actions #}
+  <div class="flex items-center gap-2 min-h-[28px]">
+    {# Safety dot #}
+    {% set dot_color = {'low_risk': 'bg-emerald-500', 'medium_risk': 'bg-amber-500', 'high_risk': 'bg-rose-500'} %}
+    <span class="w-2 h-2 rounded-full flex-shrink-0 {{ dot_color.get(lead.vendor_safety_band, 'bg-gray-400') }}"
+          title="{{ lead.vendor_safety_band|replace('_', ' ')|title if lead.vendor_safety_band else 'Unknown' }}"></span>
+
+    {# Vendor name #}
+    <span class="text-sm font-medium text-gray-900 truncate min-w-0 flex-1"
+          title="{{ lead.vendor_name }}">{{ lead.vendor_name }}</span>
+
+    {# Buyer status badge (only if not 'new') #}
+    {% if lead.buyer_status and lead.buyer_status != 'new' %}
+    {% set status_colors = {
+      'contacted': 'text-amber-600',
+      'has_stock': 'text-emerald-600',
+      'bad_lead': 'text-gray-400 line-through',
+    } %}
+    <span class="text-[10px] font-medium {{ status_colors.get(lead.buyer_status, 'text-gray-500') }} flex-shrink-0">
+      {{ lead.buyer_status|replace('_', ' ')|title }}
+    </span>
+    {% endif %}
+
+    {# Confidence: percentage + thin bar #}
+    <div class="flex items-center gap-1 flex-shrink-0 w-[72px]">
+      <span class="text-[11px] font-semibold tabular-nums
+        {% if lead.confidence_score >= 70 %}text-emerald-600
+        {% elif lead.confidence_score >= 40 %}text-amber-600
+        {% else %}text-rose-600{% endif %}">
+        {{ '%.0f'|format(lead.confidence_score) }}%
+      </span>
+      <div class="w-10 bg-gray-200 rounded-full h-1">
+        <div class="h-1 rounded-full
+          {% if lead.confidence_score >= 70 %}bg-emerald-500
+          {% elif lead.confidence_score >= 40 %}bg-amber-500
+          {% else %}bg-rose-500{% endif %}"
+             style="width: {{ [lead.confidence_score, 100]|min }}%"></div>
+      </div>
+    </div>
+
+    {# Price #}
+    <span class="text-[11px] font-medium text-gray-700 flex-shrink-0 w-[60px] text-right tabular-nums">
+      {% if sighting.unit_price %}${{ '%.4f'|format(sighting.unit_price) }}{% else %}RFQ{% endif %}
+    </span>
+
+    {# Freshness #}
+    <span class="text-[10px] text-gray-400 flex-shrink-0 w-[40px] text-right">
+      {% if lead.source_last_seen_at %}{{ lead.source_last_seen_at | timesince }}{% else %}--{% endif %}
+    </span>
+
+    {# Quick actions (visible on hover) #}
+    <div class="flex gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" @click.stop>
+      <button hx-post="/v2/partials/sourcing/leads/{{ lead.id }}/status"
+              hx-vals='{"status": "contacted"}'
+              hx-target="#lead-row-{{ lead.id }}"
+              hx-swap="outerHTML"
+              class="p-1 text-brand-500 hover:bg-brand-50 rounded" title="Claim">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+        </svg>
+      </button>
+      <button hx-post="/v2/partials/sourcing/leads/{{ lead.id }}/status"
+              hx-vals='{"status": "bad_lead"}'
+              hx-target="#lead-row-{{ lead.id }}"
+              hx-swap="outerHTML"
+              class="p-1 text-gray-400 hover:bg-gray-100 rounded" title="Dismiss">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+
+  {# Row 2: Source badge + reason summary + corroboration (optional, compact) #}
+  {% if lead.primary_source_type or lead.reason_summary or lead.corroborated %}
+  <div class="flex items-center gap-2 mt-0.5 pl-4">
+    {% if lead.primary_source_type %}
+    <span class="flex-shrink-0">
+      {% with source_type=lead.primary_source_type %}{% include "partials/shared/source_badge.html" %}{% endwith %}
+    </span>
+    {% endif %}
+    {% if lead.reason_summary %}
+    <span class="text-[10px] text-gray-400 truncate">{{ lead.reason_summary }}</span>
+    {% endif %}
+    {% if lead.corroborated %}
+    <span class="text-[10px] text-emerald-600 font-medium flex-shrink-0">✓ {{ lead.evidence_count }}</span>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
