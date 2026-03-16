@@ -912,6 +912,205 @@ async def requisitions_bulk_action(
     )
 
 
+@router.get("/v2/partials/requisitions/{req_id}/edit/{field}", response_class=HTMLResponse)
+async def requisition_inline_edit_cell(
+    request: Request,
+    req_id: int,
+    field: str,
+    context: str = Query("row"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return an inline edit form for a single cell (list row or detail header).
+
+    Args:
+        field: One of name, status, urgency, deadline, owner.
+        context: 'row' for list view, 'header' for detail header.
+    """
+    from ..dependencies import get_req_for_user
+
+    valid_fields = {"name", "status", "urgency", "deadline", "owner"}
+    if field not in valid_fields:
+        return HTMLResponse("Invalid field", status_code=400)
+
+    req = get_req_for_user(db, user, req_id, options=[])
+    if not req:
+        return HTMLResponse("Not found", status_code=404)
+    users = db.query(User).order_by(User.name).all() if field == "owner" else []
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update({"req": req, "field": field, "users": users, "context": context})
+    return templates.TemplateResponse(
+        "htmx/partials/requisitions/inline_cell.html", ctx
+    )
+
+
+@router.patch("/v2/partials/requisitions/{req_id}/inline", response_class=HTMLResponse)
+async def requisition_inline_save(
+    request: Request,
+    req_id: int,
+    field: str = Form(...),
+    value: str = Form(default=""),
+    context: str = Form(default="row"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save an inline edit and return the updated element.
+
+    For context='row', returns the full table row.
+    For context='header', returns the updated header card.
+    """
+    from ..dependencies import get_req_for_user
+
+    req = get_req_for_user(db, user, req_id, options=[])
+    if not req:
+        return HTMLResponse("Not found", status_code=404)
+
+    msg = "Updated"
+
+    if field == "name":
+        clean = value.strip()
+        if clean:
+            req.name = clean
+            msg = f"Renamed to '{clean}'"
+    elif field == "status":
+        from ..services.requisition_state import transition
+
+        try:
+            transition(req, value, user, db)
+            msg = f"Status → {value}"
+        except ValueError as e:
+            msg = str(e)
+    elif field == "urgency":
+        if value in ("normal", "hot", "critical"):
+            req.urgency = value
+            msg = f"Urgency → {value}"
+    elif field == "deadline":
+        req.deadline = value if value else None
+        msg = f"Deadline {'→ ' + value if value else 'cleared'}"
+    elif field == "owner":
+        if value and value.isdigit():
+            req.created_by = int(value)
+            msg = "Owner reassigned"
+
+    from datetime import datetime, timezone
+
+    req.updated_at = datetime.now(timezone.utc)
+    req.updated_by_id = user.id
+    db.commit()
+    db.refresh(req)
+
+    if context == "header":
+        # Re-fetch with relationships for detail header
+        req = (
+            db.query(Requisition)
+            .options(
+                joinedload(Requisition.creator),
+                joinedload(Requisition.requirements),
+                joinedload(Requisition.offers),
+            )
+            .filter(Requisition.id == req_id)
+            .first()
+        )
+        requirements = req.requirements or []
+        req.offer_count = len(req.offers) if req.offers else 0
+        users = db.query(User).order_by(User.name).all()
+        ctx = _base_ctx(request, user, "requisitions")
+        ctx.update({"req": req, "requirements": requirements, "users": users})
+        response = templates.TemplateResponse(
+            "htmx/partials/requisitions/detail_header.html", ctx
+        )
+    else:
+        # Row context — re-fetch ORM object with relationships
+        req = (
+            db.query(Requisition)
+            .options(
+                joinedload(Requisition.creator),
+                joinedload(Requisition.requirements),
+                joinedload(Requisition.offers),
+            )
+            .filter(Requisition.id == req_id)
+            .first()
+        )
+        req.req_count = len(req.requirements) if req.requirements else 0
+        req.offer_count = len(req.offers) if req.offers else 0
+        ctx = _base_ctx(request, user, "requisitions")
+        ctx.update({"req": req, "user_role": getattr(user, "role", "sales"), "user": user})
+        response = templates.TemplateResponse(
+            "partials/requisitions/req_row.html", ctx
+        )
+
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
+    return response
+
+
+@router.post("/v2/partials/requisitions/{req_id}/action/{action_name}", response_class=HTMLResponse)
+async def requisition_row_action(
+    request: Request,
+    req_id: int,
+    action_name: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Execute a row-level action (archive, activate, claim, unclaim, won, lost, clone)."""
+    from ..dependencies import get_req_for_user
+
+    valid_actions = {"archive", "activate", "claim", "unclaim", "won", "lost", "clone"}
+    if action_name not in valid_actions:
+        return HTMLResponse("Invalid action", status_code=400)
+
+    req = get_req_for_user(db, user, req_id, options=[])
+    if not req:
+        return HTMLResponse("Not found", status_code=404)
+
+    msg = "Action completed"
+    form = await request.form()
+
+    if action_name in ("archive", "activate", "won", "lost"):
+        from ..services.requisition_state import transition
+
+        target = {"archive": "archived", "activate": "active"}.get(action_name, action_name)
+        try:
+            transition(req, target, user, db)
+            msg = f"'{req.name}' → {target}"
+        except ValueError as e:
+            msg = str(e)
+    elif action_name == "claim":
+        from ..services.requirement_status import claim_requisition
+
+        try:
+            claim_requisition(req, user, db)
+            msg = f"Claimed '{req.name}'"
+        except ValueError as e:
+            msg = str(e)
+    elif action_name == "unclaim":
+        from ..services.requirement_status import unclaim_requisition
+
+        unclaim_requisition(req, db, actor=user)
+        msg = f"Unclaimed '{req.name}'"
+    elif action_name == "clone":
+        from ..services.requisition_service import clone_requisition
+
+        new_req = clone_requisition(db, req, user.id)
+        msg = f"Cloned → REQ-{new_req.id:03d}"
+
+    if action_name != "clone":
+        db.commit()
+
+    # Return refreshed list
+    return_format = form.get("return", "list")
+    if return_format == "list":
+        response = await requisitions_list_partial(
+            request=request, q="", status="", owner=0, urgency="",
+            date_from="", date_to="", sort="created_at", dir="desc",
+            limit=50, offset=0, user=user, db=db,
+        )
+    else:
+        response = HTMLResponse("")
+
+    response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
+    return response
+
+
 @router.post("/v2/partials/requisitions/{req_id}/create-quote", response_class=HTMLResponse)
 async def create_quote_from_offers(
     request: Request,
