@@ -40,9 +40,21 @@
       <p x-show="!$store.sidebar.collapsed" x-cloak
          class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-brand-400">Opportunity</p>
       <ul class="space-y-1">
+        {# Requisitions links to standalone /requisitions2 page (full nav, not HTMX partial) #}
+        <li>
+          <a href="/requisitions2"
+             hx-boost="false"
+             class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors
+                    {{ 'bg-brand-900 text-white' if current_view == 'requisitions' else 'text-brand-200 hover:bg-brand-800 hover:text-white' }}">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none"
+                 viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+            </svg>
+            <span x-show="!$store.sidebar.collapsed" x-cloak>Requisitions</span>
+          </a>
+        </li>
         {% set opportunity_items = [
-          ('requisitions', 'Requisitions', '/v2/requisitions', '/v2/partials/requisitions',
-           'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'),
           ('search', 'Part Search', '/v2/search', '/v2/partials/search',
            'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
           ('proactive', 'Proactive', '/v2/proactive', '/v2/partials/proactive',
