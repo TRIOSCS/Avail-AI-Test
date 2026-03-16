@@ -17,7 +17,7 @@
       {% if draft_quote %}
       <button x-show="selectedOffers.length > 0"
               @click="
-                fetch('/v2/partials/requisitions/{{ req.id }}/add-offers-to-quote', {
+                fetch('/partials/requisitions/{{ req.id }}/add-offers-to-quote', {
                   method: 'POST',
                   headers: {'Content-Type': 'application/json'},
                   body: JSON.stringify({offer_ids: selectedOffers, quote_id: {{ draft_quote.id }}})
@@ -33,7 +33,7 @@
       </button>
       {% endif %}
       <button x-show="selectedOffers.length > 0"
-              hx-post="/v2/partials/requisitions/{{ req.id }}/create-quote"
+              hx-post="/partials/requisitions/{{ req.id }}/create-quote"
               hx-include="[name='offer_ids']"
               hx-target="#tab-content"
               class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600"
@@ -94,12 +94,12 @@
           <td class="px-4 py-2 text-center">
             <div class="flex items-center justify-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
               {% if o.status == "pending_review" %}
-              <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
+              <button hx-post="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
                       hx-vals='{"action": "approve"}'
                       hx-target="#tab-content"
                       class="text-xs text-emerald-600 hover:text-emerald-700 font-medium"
                       @click.stop>Approve</button>
-              <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
+              <button hx-post="/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
                       hx-vals='{"action": "reject"}'
                       hx-target="#tab-content"
                       class="text-xs text-rose-500 hover:text-rose-700 font-medium"

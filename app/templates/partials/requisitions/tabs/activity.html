@@ -36,7 +36,7 @@
     </div>
 
     <form x-show="showForm" x-cloak
-          hx-post="/v2/partials/requisitions/{{ req.id }}/log-activity"
+          hx-post="/partials/requisitions/{{ req.id }}/log-activity"
           hx-target="#activity-tab-content"
           hx-swap="innerHTML"
           class="mt-3 space-y-3 p-3 bg-gray-50 rounded-lg border border-gray-200">

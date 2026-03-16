@@ -81,7 +81,7 @@ def req_with_activity(db_session: Session, test_user: User):
 def test_activity_tab_renders_rfq_contacts(client, req_with_activity):
     """Activity tab shows RFQ contact history."""
     req = req_with_activity["req"]
-    resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/activity")
+    resp = client.get(f"/partials/requisitions/{req.id}/tab/activity")
     assert resp.status_code == 200
     html = resp.text
     assert "Vendor A" in html
@@ -92,7 +92,7 @@ def test_activity_tab_renders_rfq_contacts(client, req_with_activity):
 def test_activity_tab_shows_status_badges(client, req_with_activity):
     """Activity tab shows status badges on RFQ contacts."""
     req = req_with_activity["req"]
-    resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/activity")
+    resp = client.get(f"/partials/requisitions/{req.id}/tab/activity")
     html = resp.text
     assert "Sent" in html
     assert "Responded" in html
@@ -101,7 +101,7 @@ def test_activity_tab_shows_status_badges(client, req_with_activity):
 def test_activity_tab_renders_activity_logs(client, req_with_activity):
     """Activity tab shows manually logged activities."""
     req = req_with_activity["req"]
-    resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/activity")
+    resp = client.get(f"/partials/requisitions/{req.id}/tab/activity")
     html = resp.text
     assert "Phone Call" in html
     assert "Called about pricing" in html
@@ -110,7 +110,7 @@ def test_activity_tab_renders_activity_logs(client, req_with_activity):
 def test_activity_tab_shows_summary_counts(client, req_with_activity):
     """Activity tab has summary bar with counts."""
     req = req_with_activity["req"]
-    resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/activity")
+    resp = client.get(f"/partials/requisitions/{req.id}/tab/activity")
     html = resp.text
     assert "RFQs Sent" in html
     assert "Responses" in html
@@ -120,10 +120,10 @@ def test_activity_tab_shows_summary_counts(client, req_with_activity):
 def test_activity_tab_has_log_form(client, req_with_activity):
     """Activity tab has a log activity form."""
     req = req_with_activity["req"]
-    resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/activity")
+    resp = client.get(f"/partials/requisitions/{req.id}/tab/activity")
     html = resp.text
     assert "Log Activity" in html
-    assert f'hx-post="/v2/partials/requisitions/{req.id}/log-activity"' in html
+    assert f'hx-post="/partials/requisitions/{req.id}/log-activity"' in html
     assert 'name="activity_type"' in html
     assert 'name="notes"' in html
 
@@ -148,7 +148,7 @@ def test_activity_tab_empty_state(client, db_session, test_user):
     db_session.add(req)
     db_session.commit()
 
-    resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/activity")
+    resp = client.get(f"/partials/requisitions/{req.id}/tab/activity")
     assert resp.status_code == 200
     assert "No activity recorded" in resp.text
 
@@ -157,7 +157,7 @@ def test_log_activity_creates_record(client, db_session, req_with_activity):
     """POST log-activity creates an ActivityLog and returns refreshed tab."""
     req = req_with_activity["req"]
     resp = client.post(
-        f"/v2/partials/requisitions/{req.id}/log-activity",
+        f"/partials/requisitions/{req.id}/log-activity",
         data={
             "activity_type": "note",
             "vendor_name": "Test Vendor",
@@ -186,7 +186,7 @@ def test_log_activity_phone_call(client, db_session, req_with_activity):
     """Logging a phone call sets correct channel."""
     req = req_with_activity["req"]
     resp = client.post(
-        f"/v2/partials/requisitions/{req.id}/log-activity",
+        f"/partials/requisitions/{req.id}/log-activity",
         data={
             "activity_type": "phone_call",
             "vendor_name": "Call Vendor",
@@ -210,7 +210,7 @@ def test_log_activity_phone_call(client, db_session, req_with_activity):
 def test_log_activity_404_for_missing_req(client):
     """Log activity returns 404 for non-existent requisition."""
     resp = client.post(
-        "/v2/partials/requisitions/99999/log-activity",
+        "/partials/requisitions/99999/log-activity",
         data={"activity_type": "note", "notes": "test"},
     )
     assert resp.status_code == 404
@@ -223,12 +223,12 @@ def test_log_activity_404_for_missing_req(client):
 
 
 class TestClickToCallLogging:
-    """POST /v2/partials/activity/call — click-to-call logging."""
+    """POST /partials/activity/call — click-to-call logging."""
 
     def test_call_logging_generic(self, client, db_session, test_user):
         """Logging a call without company or vendor uses generic log_call_activity."""
         resp = client.post(
-            "/v2/partials/activity/call",
+            "/partials/activity/call",
             data={"phone_number": "+15551234567"},
         )
         assert resp.status_code == 200
@@ -245,7 +245,7 @@ class TestClickToCallLogging:
     def test_call_logging_with_company(self, client, db_session, test_user, test_company):
         """Logging a call with company_id routes to log_company_call."""
         resp = client.post(
-            "/v2/partials/activity/call",
+            "/partials/activity/call",
             data={"phone_number": "+15559999999", "company_id": str(test_company.id)},
         )
         assert resp.status_code == 200
@@ -264,7 +264,7 @@ class TestClickToCallLogging:
     def test_call_logging_with_vendor(self, client, db_session, test_user, test_vendor_card):
         """Logging a call with vendor_card_id routes to log_vendor_call."""
         resp = client.post(
-            "/v2/partials/activity/call",
+            "/partials/activity/call",
             data={
                 "phone_number": "+15558888888",
                 "vendor_card_id": str(test_vendor_card.id),
@@ -286,7 +286,7 @@ class TestClickToCallLogging:
     def test_call_logging_with_origin(self, client, db_session, test_user, test_company):
         """Origin param is captured in the notes field."""
         resp = client.post(
-            "/v2/partials/activity/call",
+            "/partials/activity/call",
             data={
                 "phone_number": "+15557777777",
                 "company_id": str(test_company.id),
@@ -305,7 +305,7 @@ class TestClickToCallLogging:
 
 
 class TestCompanyActivityTimeline:
-    """GET /v2/partials/companies/{company_id}/tab/activity — company timeline."""
+    """GET /partials/companies/{company_id}/tab/activity — company timeline."""
 
     def test_returns_html_table(self, client, db_session, test_user, test_company):
         """Endpoint returns HTML with activity table."""
@@ -321,7 +321,7 @@ class TestCompanyActivityTimeline:
         db_session.add(activity)
         db_session.commit()
 
-        resp = client.get(f"/v2/partials/companies/{test_company.id}/tab/activity")
+        resp = client.get(f"/partials/companies/{test_company.id}/tab/activity")
         assert resp.status_code == 200
         assert "<table" in resp.text
         assert "Jane Vendor" in resp.text
@@ -329,7 +329,7 @@ class TestCompanyActivityTimeline:
 
     def test_empty_state(self, client, db_session, test_user, test_company):
         """Empty company shows no-activity message."""
-        resp = client.get(f"/v2/partials/companies/{test_company.id}/tab/activity")
+        resp = client.get(f"/partials/companies/{test_company.id}/tab/activity")
         assert resp.status_code == 200
         assert "No activity recorded" in resp.text
 
@@ -349,7 +349,7 @@ class TestCompanyActivityTimeline:
         db_session.commit()
 
         resp = client.get(
-            f"/v2/partials/companies/{test_company.id}/tab/activity?channel=email"
+            f"/partials/companies/{test_company.id}/tab/activity?channel=email"
         )
         assert resp.status_code == 200
         assert "Test email" in resp.text
@@ -357,7 +357,7 @@ class TestCompanyActivityTimeline:
 
     def test_404_for_missing_company(self, client):
         """Non-existent company returns 404."""
-        resp = client.get("/v2/partials/companies/99999/tab/activity")
+        resp = client.get("/partials/companies/99999/tab/activity")
         assert resp.status_code == 404
 
     def test_pagination(self, client, db_session, test_user, test_company):
@@ -376,14 +376,14 @@ class TestCompanyActivityTimeline:
         db_session.commit()
 
         resp = client.get(
-            f"/v2/partials/companies/{test_company.id}/tab/activity?limit=2&offset=0"
+            f"/partials/companies/{test_company.id}/tab/activity?limit=2&offset=0"
         )
         assert resp.status_code == 200
         assert "<table" in resp.text
 
 
 class TestVendorActivityTimeline:
-    """GET /v2/partials/vendors/{vendor_id}/activity — vendor timeline."""
+    """GET /partials/vendors/{vendor_id}/activity — vendor timeline."""
 
     def test_returns_html_table(self, client, db_session, test_user, test_vendor_card):
         """Endpoint returns HTML with activity table for a vendor."""
@@ -400,25 +400,25 @@ class TestVendorActivityTimeline:
         db_session.add(activity)
         db_session.commit()
 
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/activity")
+        resp = client.get(f"/partials/vendors/{test_vendor_card.id}/activity")
         assert resp.status_code == 200
         assert "<table" in resp.text
         assert "Bob Sales" in resp.text
 
     def test_empty_vendor_timeline(self, client, db_session, test_user, test_vendor_card):
         """Empty vendor shows no-activity message."""
-        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/activity")
+        resp = client.get(f"/partials/vendors/{test_vendor_card.id}/activity")
         assert resp.status_code == 200
         assert "No activity recorded" in resp.text
 
     def test_404_for_missing_vendor(self, client):
         """Non-existent vendor returns 404."""
-        resp = client.get("/v2/partials/vendors/99999/activity")
+        resp = client.get("/partials/vendors/99999/activity")
         assert resp.status_code == 404
 
 
 class TestContactTimeline:
-    """GET /v2/partials/contacts/{contact_id}/timeline — contact timeline."""
+    """GET /partials/contacts/{contact_id}/timeline — contact timeline."""
 
     def test_returns_html_list(self, client, db_session, test_user, test_vendor_contact):
         """Contact timeline returns HTML list items."""
@@ -433,20 +433,20 @@ class TestContactTimeline:
         db_session.add(activity)
         db_session.commit()
 
-        resp = client.get(f"/v2/partials/contacts/{test_vendor_contact.id}/timeline")
+        resp = client.get(f"/partials/contacts/{test_vendor_contact.id}/timeline")
         assert resp.status_code == 200
         assert "<ul" in resp.text
         assert "Called John Sales" in resp.text
 
     def test_empty_contact_timeline(self, client, db_session, test_user):
         """Contact with no activities shows empty message."""
-        resp = client.get("/v2/partials/contacts/99999/timeline")
+        resp = client.get("/partials/contacts/99999/timeline")
         assert resp.status_code == 200
         assert "No activity recorded" in resp.text
 
 
 class TestCompanyEnrichment:
-    """POST /v2/partials/companies/{company_id}/enrich — company enrichment."""
+    """POST /partials/companies/{company_id}/enrich — company enrichment."""
 
     def test_enrich_success(self, client, db_session, test_user, test_company, monkeypatch):
         """Successful enrichment returns a result card."""
@@ -474,7 +474,7 @@ class TestCompanyEnrichment:
             _mock_enrich,
         )
 
-        resp = client.post(f"/v2/partials/companies/{test_company.id}/enrich")
+        resp = client.post(f"/partials/companies/{test_company.id}/enrich")
         assert resp.status_code == 200
         html = resp.text
         assert "Enrichment complete" in html
@@ -495,19 +495,19 @@ class TestCompanyEnrichment:
             _mock_fail,
         )
 
-        resp = client.post(f"/v2/partials/companies/{test_company.id}/enrich")
+        resp = client.post(f"/partials/companies/{test_company.id}/enrich")
         assert resp.status_code == 500
         assert "Enrichment failed" in resp.text
         assert "Apollo API key not configured" in resp.text
 
     def test_enrich_404_for_missing_company(self, client):
         """Non-existent company returns 404."""
-        resp = client.post("/v2/partials/companies/99999/enrich")
+        resp = client.post("/partials/companies/99999/enrich")
         assert resp.status_code == 404
 
 
 class TestVendorEnrichment:
-    """POST /v2/partials/vendors/{vendor_id}/enrich — vendor enrichment."""
+    """POST /partials/vendors/{vendor_id}/enrich — vendor enrichment."""
 
     def test_enrich_success(self, client, db_session, test_user, test_vendor_card, monkeypatch):
         """Successful vendor enrichment returns a result card."""
@@ -529,7 +529,7 @@ class TestVendorEnrichment:
             _mock_enrich,
         )
 
-        resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/enrich")
+        resp = client.post(f"/partials/vendors/{test_vendor_card.id}/enrich")
         assert resp.status_code == 200
         html = resp.text
         assert "Enrichment complete" in html
@@ -547,11 +547,11 @@ class TestVendorEnrichment:
             _mock_fail,
         )
 
-        resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/enrich")
+        resp = client.post(f"/partials/vendors/{test_vendor_card.id}/enrich")
         assert resp.status_code == 500
         assert "Enrichment failed" in resp.text
 
     def test_enrich_404_for_missing_vendor(self, client):
         """Non-existent vendor returns 404."""
-        resp = client.post("/v2/partials/vendors/99999/enrich")
+        resp = client.post("/partials/vendors/99999/enrich")
         assert resp.status_code == 404

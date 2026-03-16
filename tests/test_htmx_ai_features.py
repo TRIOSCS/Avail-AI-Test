@@ -103,7 +103,7 @@ def prospect(db_session: Session, ai_vendor: VendorCard) -> ProspectContact:
 
 
 class TestFindContacts:
-    """POST /v2/partials/vendors/{id}/find-contacts"""
+    """POST /partials/vendors/{id}/find-contacts"""
 
     @patch("app.routers.htmx.ai_features.settings")
     @patch("app.routers.htmx.ai_features.enrich_contacts_websearch", new_callable=AsyncMock, create=True)
@@ -133,7 +133,7 @@ class TestFindContacts:
                 mock_enrich,
             ):
                 resp = client.post(
-                    f"/v2/partials/vendors/{ai_vendor.id}/find-contacts"
+                    f"/partials/vendors/{ai_vendor.id}/find-contacts"
                 )
 
         assert resp.status_code == 200
@@ -145,7 +145,7 @@ class TestFindContacts:
     ):
         mock_settings.ai_features_enabled = "off"
         resp = client.post(
-            f"/v2/partials/vendors/{ai_vendor.id}/find-contacts"
+            f"/partials/vendors/{ai_vendor.id}/find-contacts"
         )
         assert resp.status_code == 200
         assert "not enabled" in resp.text
@@ -153,7 +153,7 @@ class TestFindContacts:
     def test_find_contacts_vendor_not_found(self, client: TestClient):
         with patch("app.routers.htmx.ai_features.settings") as mock_s:
             mock_s.ai_features_enabled = "all"
-            resp = client.post("/v2/partials/vendors/99999/find-contacts")
+            resp = client.post("/partials/vendors/99999/find-contacts")
         assert resp.status_code == 404
 
 
@@ -161,19 +161,19 @@ class TestFindContacts:
 
 
 class TestListProspectContacts:
-    """GET /v2/partials/ai/prospect-contacts"""
+    """GET /partials/ai/prospect-contacts"""
 
     def test_list_by_vendor(
         self, client: TestClient, prospect: ProspectContact, ai_vendor: VendorCard
     ):
         resp = client.get(
-            f"/v2/partials/ai/prospect-contacts?vendor_id={ai_vendor.id}"
+            f"/partials/ai/prospect-contacts?vendor_id={ai_vendor.id}"
         )
         assert resp.status_code == 200
         assert "Jane Doe" in resp.text
 
     def test_list_empty(self, client: TestClient):
-        resp = client.get("/v2/partials/ai/prospect-contacts?vendor_id=0")
+        resp = client.get("/partials/ai/prospect-contacts?vendor_id=0")
         assert resp.status_code == 200
         assert "No prospect contacts" in resp.text or "0 prospect" in resp.text
 
@@ -182,7 +182,7 @@ class TestListProspectContacts:
 
 
 class TestPromoteProspectContact:
-    """POST /v2/partials/ai/prospect-contacts/{id}/promote"""
+    """POST /partials/ai/prospect-contacts/{id}/promote"""
 
     @patch("app.services.ai_offer_service.promote_prospect_contact")
     def test_promote_success(
@@ -193,7 +193,7 @@ class TestPromoteProspectContact:
             "promoted_to_id": 42,
         }
         resp = client.post(
-            f"/v2/partials/ai/prospect-contacts/{prospect.id}/promote"
+            f"/partials/ai/prospect-contacts/{prospect.id}/promote"
         )
         assert resp.status_code == 200
         assert "vendor_contact" in resp.text
@@ -203,7 +203,7 @@ class TestPromoteProspectContact:
     def test_promote_not_found(self, mock_promote, client: TestClient):
         mock_promote.side_effect = ValueError("Prospect contact not found")
         resp = client.post(
-            "/v2/partials/ai/prospect-contacts/99999/promote"
+            "/partials/ai/prospect-contacts/99999/promote"
         )
         assert resp.status_code == 200
         assert "not found" in resp.text
@@ -213,7 +213,7 @@ class TestPromoteProspectContact:
 
 
 class TestParseEmail:
-    """POST /v2/partials/ai/parse-email"""
+    """POST /partials/ai/parse-email"""
 
     @patch("app.routers.htmx.ai_features.settings")
     def test_parse_email_success(self, mock_settings, client: TestClient):
@@ -232,7 +232,7 @@ class TestParseEmail:
             return_value=mock_result,
         ):
             resp = client.post(
-                "/v2/partials/ai/parse-email",
+                "/partials/ai/parse-email",
                 data={
                     "email_body": "We can offer LM317T at $0.45 each for 1000pcs.",
                     "vendor_name": "Arrow",
@@ -245,7 +245,7 @@ class TestParseEmail:
     def test_parse_email_ai_disabled(self, mock_settings, client: TestClient):
         mock_settings.ai_features_enabled = "off"
         resp = client.post(
-            "/v2/partials/ai/parse-email",
+            "/partials/ai/parse-email",
             data={"email_body": "some text"},
         )
         assert resp.status_code == 200
@@ -260,7 +260,7 @@ class TestParseEmail:
             return_value=None,
         ):
             resp = client.post(
-                "/v2/partials/ai/parse-email",
+                "/partials/ai/parse-email",
                 data={"email_body": "gibberish text that cannot be parsed"},
             )
         assert resp.status_code == 200
@@ -271,7 +271,7 @@ class TestParseEmail:
 
 
 class TestCompanyIntel:
-    """GET /v2/partials/companies/{id}/intel"""
+    """GET /partials/companies/{id}/intel"""
 
     @patch("app.routers.htmx.ai_features.settings")
     def test_company_intel_success(
@@ -294,7 +294,7 @@ class TestCompanyIntel:
             return_value=mock_intel,
         ):
             resp = client.get(
-                f"/v2/partials/companies/{ai_company.id}/intel"
+                f"/partials/companies/{ai_company.id}/intel"
             )
         assert resp.status_code == 200
         assert "AI Test Corp" in resp.text
@@ -303,7 +303,7 @@ class TestCompanyIntel:
     @patch("app.routers.htmx.ai_features.settings")
     def test_company_intel_not_found(self, mock_settings, client: TestClient):
         mock_settings.ai_features_enabled = "all"
-        resp = client.get("/v2/partials/companies/99999/intel")
+        resp = client.get("/partials/companies/99999/intel")
         assert resp.status_code == 404
 
 
@@ -311,7 +311,7 @@ class TestCompanyIntel:
 
 
 class TestAiDraftRfq:
-    """POST /v2/partials/requisitions/{id}/ai-draft-rfq"""
+    """POST /partials/requisitions/{id}/ai-draft-rfq"""
 
     @patch("app.routers.htmx.ai_features.settings")
     def test_draft_rfq_success(
@@ -329,7 +329,7 @@ class TestAiDraftRfq:
             return_value=mock_body,
         ):
             resp = client.post(
-                f"/v2/partials/requisitions/{ai_requisition.id}/ai-draft-rfq",
+                f"/partials/requisitions/{ai_requisition.id}/ai-draft-rfq",
                 data={"vendor_name": "Mouser Electronics"},
             )
         assert resp.status_code == 200
@@ -339,7 +339,7 @@ class TestAiDraftRfq:
     def test_draft_rfq_not_found(self, mock_settings, client: TestClient):
         mock_settings.ai_features_enabled = "all"
         resp = client.post(
-            "/v2/partials/requisitions/99999/ai-draft-rfq",
+            "/partials/requisitions/99999/ai-draft-rfq",
             data={"vendor_name": "Test"},
         )
         assert resp.status_code == 404
@@ -350,7 +350,7 @@ class TestAiDraftRfq:
     ):
         mock_settings.ai_features_enabled = "off"
         resp = client.post(
-            f"/v2/partials/requisitions/{ai_requisition.id}/ai-draft-rfq",
+            f"/partials/requisitions/{ai_requisition.id}/ai-draft-rfq",
             data={"vendor_name": "Test"},
         )
         assert resp.status_code == 200

@@ -28,7 +28,7 @@
   <div class="mb-4">
     <input type="text" name="q" value="{{ q }}" placeholder="Search by name or domain..."
            class="w-full sm:w-80 px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500"
-           hx-get="/v2/partials/prospecting"
+           hx-get="/partials/prospecting"
            hx-trigger="keyup changed delay:300ms"
            hx-target="#main-content"
            hx-include="[name='q']">
@@ -39,7 +39,7 @@
     {% for val, label in [('', 'All'), ('suggested', 'Suggested'), ('claimed', 'Claimed'), ('dismissed', 'Dismissed')] %}
     <button class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors
                    {% if status == val %}bg-brand-500 text-white{% else %}bg-brand-100 text-brand-600 hover:bg-brand-200{% endif %}"
-            hx-get="/v2/partials/prospecting?status={{ val }}&sort={{ sort }}"
+            hx-get="/partials/prospecting?status={{ val }}&sort={{ sort }}"
             hx-target="#main-content"
             hx-push-url="true">
       {{ label }}
@@ -48,7 +48,7 @@
 
     <div class="ml-auto">
       <select class="px-3 py-1.5 border border-brand-200 rounded-md text-sm focus:ring-brand-500"
-              hx-get="/v2/partials/prospecting"
+              hx-get="/partials/prospecting"
               hx-trigger="change"
               hx-target="#main-content"
               hx-include="[name='q']"
@@ -81,13 +81,13 @@
   <div class="mt-6 flex justify-center">
     <nav class="flex gap-1">
       {% if page > 1 %}
-      <a hx-get="/v2/partials/prospecting?page={{ page - 1 }}&status={{ status }}&sort={{ sort }}&q={{ q }}"
+      <a hx-get="/partials/prospecting?page={{ page - 1 }}&status={{ status }}&sort={{ sort }}&q={{ q }}"
          hx-target="#main-content"
          class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-gray-50 cursor-pointer">Prev</a>
       {% endif %}
       <span class="px-3 py-1.5 text-sm text-gray-500">Page {{ page }} of {{ total_pages }}</span>
       {% if page < total_pages %}
-      <a hx-get="/v2/partials/prospecting?page={{ page + 1 }}&status={{ status }}&sort={{ sort }}&q={{ q }}"
+      <a hx-get="/partials/prospecting?page={{ page + 1 }}&status={{ status }}&sort={{ sort }}&q={{ q }}"
          hx-target="#main-content"
          class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-gray-50 cursor-pointer">Next</a>
       {% endif %}

@@ -1,5 +1,5 @@
 {# Part Search form — large input with search button and empty state.
-   Loaded via HTMX GET /v2/partials/search into #main-content.
+   Loaded via HTMX GET /partials/search into #main-content.
    Called by: htmx_views.search_form_partial
    Depends on: partials/search/results.html (loaded into #search-results by form post) #}
 
@@ -10,7 +10,7 @@
   <h1 class="text-2xl font-bold text-gray-900">Part Search</h1>
 
   {# Search form #}
-  <form hx-post="/v2/partials/search/run"
+  <form hx-post="/partials/search/run"
         hx-target="#search-results"
         hx-indicator="#search-spinner">
     <div class="flex gap-3">

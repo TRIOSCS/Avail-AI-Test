@@ -26,7 +26,7 @@ from ...models import ApiSource, Company, CustomerSite, User, VendorCard
 from ._helpers import router
 
 
-@router.get("/v2/partials/admin/vendor-dedup", response_class=HTMLResponse)
+@router.get("/partials/admin/vendor-dedup", response_class=HTMLResponse)
 async def admin_vendor_dedup_partial(
     request: Request,
     threshold: int = Query(85, ge=70, le=100),
@@ -64,7 +64,7 @@ async def admin_vendor_dedup_partial(
             f"<td>{score}</td>"
             f"<td>"
             f"<button class='btn btn-sm btn-warning' "
-            f"hx-post='/v2/partials/admin/vendor-merge' "
+            f"hx-post='/partials/admin/vendor-merge' "
             f"hx-vals='{{\"keep_id\": {keep_id}, \"remove_id\": {remove_id}}}' "
             f"hx-target='closest tr' hx-swap='outerHTML' "
             f"hx-confirm='Merge {name_b} into {name_a}?'>"
@@ -81,7 +81,7 @@ async def admin_vendor_dedup_partial(
     return HTMLResponse(html)
 
 
-@router.post("/v2/partials/admin/vendor-merge", response_class=HTMLResponse)
+@router.post("/partials/admin/vendor-merge", response_class=HTMLResponse)
 async def admin_vendor_merge_partial(
     request: Request,
     keep_id: int = Form(...),
@@ -114,7 +114,7 @@ async def admin_vendor_merge_partial(
         )
 
 
-@router.get("/v2/partials/admin/company-dedup", response_class=HTMLResponse)
+@router.get("/partials/admin/company-dedup", response_class=HTMLResponse)
 async def admin_company_dedup_partial(
     request: Request,
     threshold: int = Query(85, ge=70, le=100),
@@ -152,7 +152,7 @@ async def admin_company_dedup_partial(
             f"<td>{score}</td>"
             f"<td>"
             f"<button class='btn btn-sm btn-warning' "
-            f"hx-post='/v2/partials/admin/company-merge' "
+            f"hx-post='/partials/admin/company-merge' "
             f"hx-vals='{{\"keep_id\": {keep_id}, \"remove_id\": {remove_id}}}' "
             f"hx-target='closest tr' hx-swap='outerHTML' "
             f"hx-confirm='Merge {name_b} into {name_a}?'>"
@@ -169,7 +169,7 @@ async def admin_company_dedup_partial(
     return HTMLResponse(html)
 
 
-@router.post("/v2/partials/admin/company-merge", response_class=HTMLResponse)
+@router.post("/partials/admin/company-merge", response_class=HTMLResponse)
 async def admin_company_merge_partial(
     request: Request,
     keep_id: int = Form(...),
@@ -202,7 +202,7 @@ async def admin_company_merge_partial(
         )
 
 
-@router.get("/v2/partials/admin/health", response_class=HTMLResponse)
+@router.get("/partials/admin/health", response_class=HTMLResponse)
 async def admin_health_partial(
     request: Request,
     user: User = Depends(require_admin),
@@ -254,7 +254,7 @@ async def admin_health_partial(
         )
 
 
-@router.post("/v2/partials/admin/import/customers", response_class=HTMLResponse)
+@router.post("/partials/admin/import/customers", response_class=HTMLResponse)
 async def admin_import_customers_partial(
     request: Request,
     file: UploadFile = File(...),
@@ -330,7 +330,7 @@ async def admin_import_customers_partial(
         )
 
 
-@router.post("/v2/partials/admin/import/vendors", response_class=HTMLResponse)
+@router.post("/partials/admin/import/vendors", response_class=HTMLResponse)
 async def admin_import_vendors_partial(
     request: Request,
     file: UploadFile = File(...),
@@ -397,7 +397,7 @@ async def admin_import_vendors_partial(
         )
 
 
-@router.get("/v2/partials/settings/sources/{source_id}/test", response_class=HTMLResponse)
+@router.get("/partials/settings/sources/{source_id}/test", response_class=HTMLResponse)
 async def admin_test_source_partial(
     request: Request,
     source_id: int,

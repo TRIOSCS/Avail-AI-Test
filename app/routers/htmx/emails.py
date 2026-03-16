@@ -63,7 +63,7 @@ def _thread_row(thread: dict) -> str:
     )
     return (
         f'<tr class="hover:bg-brand-50 cursor-pointer"'
-        f' hx-get="/v2/partials/emails/thread/{conv_id}"'
+        f' hx-get="/partials/emails/thread/{conv_id}"'
         f' hx-target="#email-thread-detail" hx-swap="innerHTML">'
         f'<td class="px-4 py-2 text-sm font-medium">{subject}{badge}</td>'
         f'<td class="px-4 py-2 text-sm text-gray-500">{safe_participants}</td>'
@@ -143,7 +143,7 @@ def _toast_html(message: str, variant: str = "success") -> str:
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@router.get("/v2/partials/requisitions/{req_id}/tab/emails", response_class=HTMLResponse)
+@router.get("/partials/requisitions/{req_id}/tab/emails", response_class=HTMLResponse)
 async def requirement_emails_tab(
     req_id: int,
     request: Request,
@@ -167,7 +167,7 @@ async def requirement_emails_tab(
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@router.get("/v2/partials/emails/thread/{conversation_id}", response_class=HTMLResponse)
+@router.get("/partials/emails/thread/{conversation_id}", response_class=HTMLResponse)
 async def thread_messages_partial(
     conversation_id: str,
     request: Request,
@@ -199,7 +199,7 @@ async def thread_messages_partial(
     safe_conv_id = escape(conversation_id)
 
     reply_form = (
-        f'<form hx-post="/v2/partials/emails/reply" hx-target="#email-toast" '
+        f'<form hx-post="/partials/emails/reply" hx-target="#email-toast" '
         f'hx-swap="outerHTML" class="mt-4 border-t pt-4">'
         f'<input type="hidden" name="conversation_id" value="{safe_conv_id}">'
         f'<input type="hidden" name="message_id" value="{last_msg_id}">'
@@ -214,7 +214,7 @@ async def thread_messages_partial(
     )
 
     summary_btn = (
-        f'<button hx-get="/v2/partials/emails/thread/{safe_conv_id}/summary"'
+        f'<button hx-get="/partials/emails/thread/{safe_conv_id}/summary"'
         f' hx-target="#thread-summary" hx-swap="innerHTML"'
         f' class="mb-3 text-sm text-blue-600 hover:text-blue-800 underline">'
         f"Summarize with AI"
@@ -237,7 +237,7 @@ async def thread_messages_partial(
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@router.post("/v2/partials/emails/reply", response_class=HTMLResponse)
+@router.post("/partials/emails/reply", response_class=HTMLResponse)
 async def send_reply_partial(
     request: Request,
     conversation_id: str = Form(...),
@@ -283,7 +283,7 @@ async def send_reply_partial(
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@router.get("/v2/partials/vendors/{vendor_id}/emails", response_class=HTMLResponse)
+@router.get("/partials/vendors/{vendor_id}/emails", response_class=HTMLResponse)
 async def vendor_emails_partial(
     vendor_id: int,
     request: Request,
@@ -307,7 +307,7 @@ async def vendor_emails_partial(
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@router.get("/v2/partials/emails/thread/{conversation_id}/summary", response_class=HTMLResponse)
+@router.get("/partials/emails/thread/{conversation_id}/summary", response_class=HTMLResponse)
 async def thread_summary_partial(
     conversation_id: str,
     request: Request,
@@ -369,7 +369,7 @@ async def thread_summary_partial(
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@router.get("/v2/partials/email-intelligence", response_class=HTMLResponse)
+@router.get("/partials/email-intelligence", response_class=HTMLResponse)
 async def email_intelligence_partial(
     request: Request,
     days: int = 7,

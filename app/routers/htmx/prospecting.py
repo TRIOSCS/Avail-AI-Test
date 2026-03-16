@@ -26,7 +26,7 @@ from ._helpers import _base_ctx, router, templates
 # ── Prospecting partials ──────────────────────────────────────────────
 
 
-@router.get("/v2/partials/prospecting", response_class=HTMLResponse)
+@router.get("/partials/prospecting", response_class=HTMLResponse)
 async def prospecting_list_partial(
     request: Request,
     q: str = "",
@@ -71,7 +71,7 @@ async def prospecting_list_partial(
     return templates.TemplateResponse("htmx/partials/prospecting/list.html", ctx)
 
 
-@router.get("/v2/partials/prospecting/{prospect_id}", response_class=HTMLResponse)
+@router.get("/partials/prospecting/{prospect_id}", response_class=HTMLResponse)
 async def prospecting_detail_partial(
     request: Request,
     prospect_id: int,
@@ -96,7 +96,7 @@ async def prospecting_detail_partial(
     return templates.TemplateResponse("htmx/partials/prospecting/detail.html", ctx)
 
 
-@router.post("/v2/partials/prospecting/{prospect_id}/claim", response_class=HTMLResponse)
+@router.post("/partials/prospecting/{prospect_id}/claim", response_class=HTMLResponse)
 async def claim_prospect_htmx(
     request: Request,
     prospect_id: int,
@@ -123,7 +123,7 @@ async def claim_prospect_htmx(
     return templates.TemplateResponse("htmx/partials/prospecting/_card.html", ctx)
 
 
-@router.post("/v2/partials/prospecting/{prospect_id}/dismiss", response_class=HTMLResponse)
+@router.post("/partials/prospecting/{prospect_id}/dismiss", response_class=HTMLResponse)
 async def dismiss_prospect_htmx(
     request: Request,
     prospect_id: int,
@@ -145,7 +145,7 @@ async def dismiss_prospect_htmx(
     return templates.TemplateResponse("htmx/partials/prospecting/_card.html", ctx)
 
 
-@router.post("/v2/partials/prospecting/{prospect_id}/enrich", response_class=HTMLResponse)
+@router.post("/partials/prospecting/{prospect_id}/enrich", response_class=HTMLResponse)
 async def enrich_prospect_htmx(
     request: Request,
     prospect_id: int,
@@ -185,7 +185,7 @@ async def enrich_prospect_htmx(
 # ── Proactive Part Match ─────────────────────────────────────────────
 
 
-@router.get("/v2/partials/proactive", response_class=HTMLResponse)
+@router.get("/partials/proactive", response_class=HTMLResponse)
 async def proactive_list_partial(
     request: Request,
     tab: str = "matches",
@@ -205,7 +205,7 @@ async def proactive_list_partial(
     return templates.TemplateResponse("htmx/partials/proactive/list.html", ctx)
 
 
-@router.post("/v2/partials/proactive/{match_id}/dismiss", response_class=HTMLResponse)
+@router.post("/partials/proactive/{match_id}/dismiss", response_class=HTMLResponse)
 async def proactive_dismiss(
     match_id: int,
     request: Request,
@@ -236,7 +236,7 @@ async def proactive_dismiss(
 # ── Strategic Vendors (My Vendors) ───────────────────────────────────
 
 
-@router.get("/v2/partials/strategic", response_class=HTMLResponse)
+@router.get("/partials/strategic", response_class=HTMLResponse)
 async def strategic_list_partial(
     request: Request,
     search: str = "",
@@ -259,7 +259,7 @@ async def strategic_list_partial(
     return templates.TemplateResponse("htmx/partials/strategic/list.html", ctx)
 
 
-@router.post("/v2/partials/strategic/claim/{vendor_card_id}", response_class=HTMLResponse)
+@router.post("/partials/strategic/claim/{vendor_card_id}", response_class=HTMLResponse)
 async def strategic_claim(
     vendor_card_id: int,
     request: Request,
@@ -284,7 +284,7 @@ async def strategic_claim(
     return templates.TemplateResponse("htmx/partials/strategic/list.html", ctx)
 
 
-@router.delete("/v2/partials/strategic/{vendor_card_id}/drop", response_class=HTMLResponse)
+@router.delete("/partials/strategic/{vendor_card_id}/drop", response_class=HTMLResponse)
 async def strategic_drop(
     vendor_card_id: int,
     request: Request,

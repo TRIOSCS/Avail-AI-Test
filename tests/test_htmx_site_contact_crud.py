@@ -20,7 +20,7 @@ from app.models.crm import SiteContact
 class TestSiteCreate:
     def test_create_site_success(self, client, test_company, db_session: Session):
         resp = client.post(
-            f"/v2/partials/companies/{test_company.id}/sites",
+            f"/partials/companies/{test_company.id}/sites",
             data={"site_name": "West Coast Warehouse", "city": "Portland", "state": "OR"},
         )
         assert resp.status_code == 200
@@ -34,7 +34,7 @@ class TestSiteCreate:
 
     def test_create_site_blank_name_fails(self, client, test_company):
         resp = client.post(
-            f"/v2/partials/companies/{test_company.id}/sites",
+            f"/partials/companies/{test_company.id}/sites",
             data={"site_name": "   "},
         )
         assert resp.status_code == 422
@@ -42,14 +42,14 @@ class TestSiteCreate:
 
     def test_create_site_nonexistent_company(self, client):
         resp = client.post(
-            "/v2/partials/companies/99999/sites",
+            "/partials/companies/99999/sites",
             data={"site_name": "Ghost Site"},
         )
         assert resp.status_code == 404
 
     def test_create_site_has_hx_trigger(self, client, test_company):
         resp = client.post(
-            f"/v2/partials/companies/{test_company.id}/sites",
+            f"/partials/companies/{test_company.id}/sites",
             data={"site_name": "Triggered Site"},
         )
         assert resp.status_code == 200
@@ -59,7 +59,7 @@ class TestSiteCreate:
 class TestSiteUpdate:
     def test_update_site_fields(self, client, test_customer_site, db_session: Session):
         resp = client.put(
-            f"/v2/partials/sites/{test_customer_site.id}",
+            f"/partials/sites/{test_customer_site.id}",
             data={"city": "Austin", "state": "TX", "payment_terms": "Net 30"},
         )
         assert resp.status_code == 200
@@ -70,18 +70,18 @@ class TestSiteUpdate:
 
     def test_update_site_blank_name_fails(self, client, test_customer_site):
         resp = client.put(
-            f"/v2/partials/sites/{test_customer_site.id}",
+            f"/partials/sites/{test_customer_site.id}",
             data={"site_name": "   "},
         )
         assert resp.status_code == 422
 
     def test_update_site_nonexistent(self, client):
-        resp = client.put("/v2/partials/sites/99999", data={"city": "Nowhere"})
+        resp = client.put("/partials/sites/99999", data={"city": "Nowhere"})
         assert resp.status_code == 404
 
     def test_update_site_has_hx_trigger(self, client, test_customer_site):
         resp = client.put(
-            f"/v2/partials/sites/{test_customer_site.id}",
+            f"/partials/sites/{test_customer_site.id}",
             data={"notes": "Updated notes"},
         )
         assert resp.status_code == 200
@@ -93,20 +93,20 @@ class TestSiteUpdate:
 
 class TestSiteContactAddForm:
     def test_returns_form_html(self, client, test_customer_site):
-        resp = client.get(f"/v2/partials/sites/{test_customer_site.id}/contacts/add-form")
+        resp = client.get(f"/partials/sites/{test_customer_site.id}/contacts/add-form")
         assert resp.status_code == 200
         assert "full_name" in resp.text
         assert "hx-post" in resp.text
 
     def test_nonexistent_site_returns_404(self, client):
-        resp = client.get("/v2/partials/sites/99999/contacts/add-form")
+        resp = client.get("/partials/sites/99999/contacts/add-form")
         assert resp.status_code == 404
 
 
 class TestSiteContactCreate:
     def test_create_contact_success(self, client, test_customer_site, db_session: Session):
         resp = client.post(
-            f"/v2/partials/sites/{test_customer_site.id}/contacts",
+            f"/partials/sites/{test_customer_site.id}/contacts",
             data={"full_name": "Bob Smith", "email": "bob@acme.com", "title": "Buyer"},
         )
         assert resp.status_code == 200
@@ -119,7 +119,7 @@ class TestSiteContactCreate:
 
     def test_create_contact_blank_name_fails(self, client, test_customer_site):
         resp = client.post(
-            f"/v2/partials/sites/{test_customer_site.id}/contacts",
+            f"/partials/sites/{test_customer_site.id}/contacts",
             data={"full_name": "  "},
         )
         assert resp.status_code == 422
@@ -138,7 +138,7 @@ class TestSiteContactCreate:
 
         # Try creating with same email
         resp = client.post(
-            f"/v2/partials/sites/{test_customer_site.id}/contacts",
+            f"/partials/sites/{test_customer_site.id}/contacts",
             data={"full_name": "New Contact", "email": "dupe@acme.com"},
         )
         assert resp.status_code == 422
@@ -158,7 +158,7 @@ class TestSiteContactCreate:
 
         # Create new primary
         resp = client.post(
-            f"/v2/partials/sites/{test_customer_site.id}/contacts",
+            f"/partials/sites/{test_customer_site.id}/contacts",
             data={"full_name": "New Primary", "email": "new@acme.com", "is_primary": "true"},
         )
         assert resp.status_code == 200
@@ -167,7 +167,7 @@ class TestSiteContactCreate:
 
     def test_create_contact_has_hx_trigger(self, client, test_customer_site):
         resp = client.post(
-            f"/v2/partials/sites/{test_customer_site.id}/contacts",
+            f"/partials/sites/{test_customer_site.id}/contacts",
             data={"full_name": "Trigger Test"},
         )
         assert resp.status_code == 200
@@ -175,7 +175,7 @@ class TestSiteContactCreate:
 
     def test_create_contact_nonexistent_site(self, client):
         resp = client.post(
-            "/v2/partials/sites/99999/contacts",
+            "/partials/sites/99999/contacts",
             data={"full_name": "Ghost"},
         )
         assert resp.status_code == 404
@@ -197,7 +197,7 @@ class TestSiteContactUpdate:
     def test_update_contact_fields(self, client, test_customer_site, db_session: Session):
         contact = self._make_contact(db_session, test_customer_site.id)
         resp = client.put(
-            f"/v2/partials/sites/{test_customer_site.id}/contacts/{contact.id}",
+            f"/partials/sites/{test_customer_site.id}/contacts/{contact.id}",
             data={"title": "Director", "phone": "555-1234"},
         )
         assert resp.status_code == 200
@@ -208,7 +208,7 @@ class TestSiteContactUpdate:
     def test_update_contact_blank_name_fails(self, client, test_customer_site, db_session: Session):
         contact = self._make_contact(db_session, test_customer_site.id)
         resp = client.put(
-            f"/v2/partials/sites/{test_customer_site.id}/contacts/{contact.id}",
+            f"/partials/sites/{test_customer_site.id}/contacts/{contact.id}",
             data={"full_name": "   "},
         )
         assert resp.status_code == 422
@@ -225,7 +225,7 @@ class TestSiteContactUpdate:
         new = self._make_contact(db_session, test_customer_site.id)
 
         resp = client.put(
-            f"/v2/partials/sites/{test_customer_site.id}/contacts/{new.id}",
+            f"/partials/sites/{test_customer_site.id}/contacts/{new.id}",
             data={"is_primary": "true"},
         )
         assert resp.status_code == 200
@@ -236,7 +236,7 @@ class TestSiteContactUpdate:
 
     def test_update_nonexistent_contact(self, client, test_customer_site):
         resp = client.put(
-            f"/v2/partials/sites/{test_customer_site.id}/contacts/99999",
+            f"/partials/sites/{test_customer_site.id}/contacts/99999",
             data={"title": "Ghost"},
         )
         assert resp.status_code == 404
@@ -254,7 +254,7 @@ class TestSiteContactDelete:
         cid = contact.id
 
         resp = client.delete(
-            f"/v2/partials/sites/{test_customer_site.id}/contacts/{cid}"
+            f"/partials/sites/{test_customer_site.id}/contacts/{cid}"
         )
         assert resp.status_code == 200
         assert resp.text == ""
@@ -263,6 +263,6 @@ class TestSiteContactDelete:
 
     def test_delete_nonexistent_contact(self, client, test_customer_site):
         resp = client.delete(
-            f"/v2/partials/sites/{test_customer_site.id}/contacts/99999"
+            f"/partials/sites/{test_customer_site.id}/contacts/99999"
         )
         assert resp.status_code == 404

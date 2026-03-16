@@ -205,7 +205,7 @@ Alpine.data('sourcingProgress', (requirementId, totalSources) => ({
     },
     handleSearchComplete(data) {
         setTimeout(function() {
-            htmx.ajax('GET', '/v2/partials/sourcing/' + requirementId, '#main-content');
+            htmx.ajax('GET', '/partials/sourcing/' + requirementId, '#main-content');
         }, 500);
     }
 }));

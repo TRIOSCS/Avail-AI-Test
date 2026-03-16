@@ -26,7 +26,7 @@
       <p class="text-sm text-gray-500 mt-1">{{ total }} total</p>
     </div>
     <button @click="$dispatch('open-modal')"
-            hx-get="/v2/partials/requisitions/create-form"
+            hx-get="/partials/requisitions/create-form"
             hx-target="#modal-content"
             data-loading-disable
             class="inline-flex items-center px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors">
@@ -44,7 +44,7 @@
         <div class="flex-1 min-w-[200px]">
           <label class="block text-xs font-medium text-gray-500 mb-1">Search</label>
           <input type="text" name="q" value="{{ q }}" placeholder="Name, customer..."
-                 hx-get="/v2/partials/requisitions"
+                 hx-get="/partials/requisitions"
                  hx-target="#main-content"
                  hx-swap="morph"
                  hx-push-url="true"
@@ -63,7 +63,7 @@
         <div>
           <label class="block text-xs font-medium text-gray-500 mb-1">Owner</label>
           <select name="owner"
-                  hx-get="/v2/partials/requisitions"
+                  hx-get="/partials/requisitions"
                   hx-target="#main-content"
                   hx-push-url="true"
                   hx-include="#req-filters"
@@ -80,7 +80,7 @@
         <div>
           <label class="block text-xs font-medium text-gray-500 mb-1">From</label>
           <input type="date" name="date_from" value="{{ date_from }}"
-                 hx-get="/v2/partials/requisitions"
+                 hx-get="/partials/requisitions"
                  hx-target="#main-content"
                  hx-push-url="true"
                  hx-include="#req-filters"
@@ -89,7 +89,7 @@
         <div>
           <label class="block text-xs font-medium text-gray-500 mb-1">To</label>
           <input type="date" name="date_to" value="{{ date_to }}"
-                 hx-get="/v2/partials/requisitions"
+                 hx-get="/partials/requisitions"
                  hx-target="#main-content"
                  hx-push-url="true"
                  hx-include="#req-filters"
@@ -129,9 +129,9 @@
   <div x-show="selectedIds.size > 0" x-collapse x-cloak
        class="mb-4 p-3 bg-brand-50 rounded-lg border border-brand-200 flex items-center gap-3">
     <span class="text-sm font-medium text-brand-600" x-text="selectedIds.size + ' selected'"></span>
-    <button @click="fetch('/v2/partials/requisitions/bulk/archive', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'ids='+Array.from(selectedIds).join(',')}).then(r=>r.text()).then(h=>{document.getElementById('main-content').innerHTML=h; selectedIds=new Set()})"
+    <button @click="fetch('/partials/requisitions/bulk/archive', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'ids='+Array.from(selectedIds).join(',')}).then(r=>r.text()).then(h=>{document.getElementById('main-content').innerHTML=h; selectedIds=new Set()})"
             class="px-3 py-1 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Archive</button>
-    <button @click="fetch('/v2/partials/requisitions/bulk/activate', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'ids='+Array.from(selectedIds).join(',')}).then(r=>r.text()).then(h=>{document.getElementById('main-content').innerHTML=h; selectedIds=new Set()})"
+    <button @click="fetch('/partials/requisitions/bulk/activate', {method:'POST', headers:{'Content-Type':'application/x-www-form-urlencoded'}, body:'ids='+Array.from(selectedIds).join(',')}).then(r=>r.text()).then(h=>{document.getElementById('main-content').innerHTML=h; selectedIds=new Set()})"
             class="px-3 py-1 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Activate</button>
   </div>
 
@@ -149,7 +149,7 @@
             {% for col_name, col_key in [('Name', 'name'), ('Customer', 'customer_name'), ('Owner', None), ('Parts', None), ('Offers', None), ('Status', 'status'), ('Urgency', 'urgency'), ('Created', 'created_at')] %}
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {% if col_key %}
-              <a hx-get="/v2/partials/requisitions?sort={{ col_key }}&dir={{ 'asc' if sort == col_key and dir == 'desc' else 'desc' }}"
+              <a hx-get="/partials/requisitions?sort={{ col_key }}&dir={{ 'asc' if sort == col_key and dir == 'desc' else 'desc' }}"
                  hx-target="#main-content"
                  hx-push-url="true"
                  hx-include="#req-filters"
@@ -181,7 +181,7 @@
       <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
       <p class="mt-2 text-sm text-gray-500">No requisitions found</p>
       <button @click="$dispatch('open-modal')"
-              hx-get="/v2/partials/requisitions/create-form"
+              hx-get="/partials/requisitions/create-form"
               hx-target="#modal-content"
               class="mt-3 text-sm text-brand-500 hover:text-brand-600">Create your first requisition</button>
     </div>
@@ -193,7 +193,7 @@
   <div class="mt-4 flex justify-center">
     <nav class="flex gap-1 items-center">
       {% if offset > 0 %}
-      <a hx-get="/v2/partials/requisitions?offset={{ offset - limit }}"
+      <a hx-get="/partials/requisitions?offset={{ offset - limit }}"
          hx-target="#main-content"
          hx-include="#req-filters"
          preload="mouseover"
@@ -201,7 +201,7 @@
       {% endif %}
       <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
       {% if offset + limit < total %}
-      <a hx-get="/v2/partials/requisitions?offset={{ offset + limit }}"
+      <a hx-get="/partials/requisitions?offset={{ offset + limit }}"
          hx-target="#main-content"
          hx-include="#req-filters"
          preload="mouseover"
