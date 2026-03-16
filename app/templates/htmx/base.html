@@ -5,9 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}AvailAI{% endblock %}</title>
   {% for css_file in vite_css|default([]) %}
-  <link rel="stylesheet" href="/static/dist/{{ css_file }}">
+  <link rel="stylesheet" href="/static/{{ css_file }}">
   {% endfor %}
-  <script type="module" src="/static/dist/{{ vite_js|default('assets/htmx_app.js') }}"></script>
+  <script type="module" src="/static/{{ vite_js|default('assets/htmx_app.js') }}"></script>
   <style>
     [x-cloak] { display: none !important; }
     .htmx-indicator { display: none; }
@@ -36,7 +36,7 @@
       {# Logo #}
       <div class="flex items-center h-16 px-4 border-b border-brand-800">
         <div class="flex flex-col" x-show="!$store.sidebar.collapsed" x-cloak>
-          <img src="/static/public/avail_logo.png" alt="AVAIL" class="h-9 w-auto">
+          <img src="/static/avail_logo.png" alt="AVAIL" class="h-9 w-auto">
           <span class="text-[10px] text-brand-300 tracking-wider mt-0.5">Opportunity Management</span>
         </div>
         <span class="text-xl font-bold text-white" x-show="$store.sidebar.collapsed" x-cloak>A</span>
@@ -136,7 +136,7 @@
       <button @click="sidebarOpen = !sidebarOpen" class="text-brand-200 hover:text-white">
         <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
       </button>
-      <img src="/static/public/avail_logo.png" alt="AVAIL" class="ml-3 h-6 w-auto">
+      <img src="/static/avail_logo.png" alt="AVAIL" class="ml-3 h-6 w-auto">
     </div>
 
     {# Mobile sidebar overlay #}
@@ -144,7 +144,7 @@
       <div class="fixed inset-0 bg-black/50"></div>
       <aside class="fixed inset-y-0 left-0 w-64 bg-brand-700 shadow-xl z-50 overflow-y-auto">
         <div class="flex items-center justify-between h-14 px-4 border-b border-brand-800">
-          <img src="/static/public/avail_logo.png" alt="AVAIL" class="h-6 w-auto">
+          <img src="/static/avail_logo.png" alt="AVAIL" class="h-6 w-auto">
           <button @click="sidebarOpen = false" class="text-brand-300 hover:text-white">
             <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
           </button>
