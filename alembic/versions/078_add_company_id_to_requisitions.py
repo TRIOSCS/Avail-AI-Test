@@ -1,22 +1,21 @@
-"""Add company_id FK to requisitions and unique site owner constraint.
+"""Add company_id FK to requisitions.
 
 Revision ID: 078_add_company_id
-Revises: 077_sourcing_lead_foundation
+Revises: 077
 Create Date: 2026-03-15
 
 Adds:
 - company_id FK column on requisitions (nullable, with index)
 - Backfills company_id from customer_name matching companies.name
-- Unique constraint on customer_sites(owner_id) for one-owner-per-site rule
 """
 
-from alembic import op
 import sqlalchemy as sa
 
+from alembic import op
 
 # revision identifiers
 revision = "078_add_company_id"
-down_revision = "077_sourcing_lead_foundation"
+down_revision = "077"
 branch_labels = None
 depends_on = None
 
@@ -50,17 +49,7 @@ def upgrade():
           AND r.customer_site_id = cs.id
     """)
 
-    # 3. Add unique constraint on customer_sites owner_id
-    # Only one site per owner (a user can own one site per company at most)
-    # Note: This is a partial unique index — only enforced when owner_id is not null
-    op.execute("""
-        CREATE UNIQUE INDEX uq_customer_sites_owner_id
-        ON customer_sites (owner_id)
-        WHERE owner_id IS NOT NULL
-    """)
-
 
 def downgrade():
-    op.execute("DROP INDEX IF EXISTS uq_customer_sites_owner_id")
     op.drop_index("ix_requisitions_company_id", table_name="requisitions")
     op.drop_column("requisitions", "company_id")
