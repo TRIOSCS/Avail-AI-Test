@@ -36,6 +36,13 @@
             hx-target="#settings-content">
       System
     </button>
+    <button @click="tab = 'data_ops'"
+            :class="tab === 'data_ops' ? 'bg-brand-500 text-white' : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
+            class="px-4 py-2 text-sm font-medium rounded-md transition-colors"
+            hx-get="/v2/partials/settings/data-ops"
+            hx-target="#settings-content">
+      Data Ops
+    </button>
     {% endif %}
     <button @click="tab = 'profile'"
             :class="tab === 'profile' ? 'bg-brand-500 text-white' : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"

@@ -1,0 +1,75 @@
+{# site_contacts.html — Contact list for a site with add/delete.
+   Receives: site (CustomerSite), contacts (list[SiteContact]), company (Company).
+   Called by: GET /v2/partials/companies/{id}/sites/{sid}/contacts.
+   Depends on: HTMX, Alpine.js.
+#}
+<div x-data="{ showAdd: false }">
+  {# Add contact form #}
+  <div class="flex items-center justify-between mb-2">
+    <span class="text-xs text-gray-500">{{ contacts|length }} contact{{ "s" if contacts|length != 1 }}</span>
+    <button @click="showAdd = !showAdd"
+            class="text-xs text-brand-500 hover:text-brand-600"
+            x-text="showAdd ? 'Cancel' : '+ Add'">+ Add</button>
+  </div>
+
+  <form x-show="showAdd" x-cloak
+        hx-post="/v2/partials/companies/{{ company.id }}/sites/{{ site.id }}/contacts"
+        hx-target="#site-{{ site.id }}-contacts"
+        hx-swap="innerHTML"
+        class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3 p-2 bg-gray-50 rounded border border-gray-200">
+    <input type="text" name="full_name" required placeholder="Full Name"
+           class="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
+    <input type="email" name="email" placeholder="Email"
+           class="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
+    <input type="text" name="title" placeholder="Title"
+           class="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
+    <input type="text" name="phone" placeholder="Phone"
+           class="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
+    <button type="submit"
+            class="px-2 py-1 text-xs font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
+      Add
+    </button>
+  </form>
+
+  {# Contacts list #}
+  {% if contacts %}
+  <div class="space-y-1">
+    {% for c in contacts %}
+    <div id="site-contact-{{ c.id }}" class="flex items-center justify-between py-1.5 px-2 rounded hover:bg-brand-50 group">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="text-xs font-medium text-gray-900">{{ c.full_name }}</span>
+          {% if c.is_primary %}
+          <span class="px-1 py-0.5 text-[9px] font-medium rounded bg-emerald-50 text-emerald-700">Primary</span>
+          {% endif %}
+        </div>
+        <div class="flex items-center gap-3 text-[11px] text-gray-500">
+          {% if c.title %}<span>{{ c.title }}</span>{% endif %}
+          {% if c.email %}<a href="mailto:{{ c.email }}" class="text-brand-500">{{ c.email }}</a>{% endif %}
+          {% if c.phone %}<a href="tel:{{ c.phone }}" class="text-brand-500">{{ c.phone }}</a>{% endif %}
+        </div>
+      </div>
+      <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        {% if not c.is_primary %}
+        <button hx-post="/v2/partials/companies/{{ company.id }}/sites/{{ site.id }}/contacts/{{ c.id }}/primary"
+                hx-target="#site-{{ site.id }}-contacts"
+                hx-swap="innerHTML"
+                class="text-[10px] text-brand-500 hover:text-brand-700" title="Set as primary">
+          Primary
+        </button>
+        {% endif %}
+        <button hx-delete="/v2/partials/companies/{{ company.id }}/sites/{{ site.id }}/contacts/{{ c.id }}"
+                hx-target="#site-contact-{{ c.id }}"
+                hx-swap="outerHTML"
+                hx-confirm="Delete contact {{ c.full_name }}?"
+                class="text-[10px] text-rose-500 hover:text-rose-700" title="Delete">
+          Delete
+        </button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-xs text-gray-400 text-center py-2">No contacts. Click "+ Add" above.</p>
+  {% endif %}
+</div>

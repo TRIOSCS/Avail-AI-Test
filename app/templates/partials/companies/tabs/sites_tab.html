@@ -1,0 +1,70 @@
+{# sites_tab.html — Sites tab for company detail with add/expand/contacts.
+   Receives: company (Company), sites (list[CustomerSite]), users (list[User]).
+   Called by: company_tab route (tab=="sites") in htmx_views.py.
+   Depends on: HTMX, Alpine.js, brand palette.
+#}
+<div class="space-y-4">
+
+  {# ── Add Site Form ──────────────────────────────────────── #}
+  <div class="bg-white rounded-lg border border-gray-200 p-4" x-data="{ showForm: false }">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-semibold text-gray-900">Sites ({{ sites|length }})</h3>
+      <button @click="showForm = !showForm"
+              class="px-3 py-1 text-xs font-medium text-brand-500 border border-brand-300 rounded hover:bg-brand-50"
+              x-text="showForm ? 'Cancel' : '+ Add Site'">
+        + Add Site
+      </button>
+    </div>
+
+    <form x-show="showForm" x-cloak
+          hx-post="/v2/partials/companies/{{ company.id }}/sites"
+          hx-target="#sites-list"
+          hx-swap="beforeend"
+          @htmx:after-request="if(event.detail.successful) { this.reset(); showForm = false }"
+          class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+      <input type="text" name="site_name" required placeholder="Site Name"
+             class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500">
+      <select name="site_type"
+              class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500">
+        <option value="">Type</option>
+        <option value="hq">HQ</option>
+        <option value="branch">Branch</option>
+        <option value="warehouse">Warehouse</option>
+        <option value="manufacturing">Manufacturing</option>
+        <option value="other">Other</option>
+      </select>
+      <input type="text" name="city" placeholder="City"
+             class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500">
+      <input type="text" name="country" placeholder="Country"
+             class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500">
+      <select name="owner_id"
+              class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500 col-span-2">
+        <option value="">Owner (optional)</option>
+        {% for u in users %}
+        <option value="{{ u.id }}">{{ u.name or u.email }}</option>
+        {% endfor %}
+      </select>
+      <button type="submit"
+              class="px-3 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600 col-span-2">
+        Add Site
+      </button>
+    </form>
+  </div>
+
+  {# ── Sites List ─────────────────────────────────────────── #}
+  <div id="sites-list" class="space-y-3">
+    {% if sites %}
+      {% for s in sites %}
+      {% include "partials/companies/tabs/site_card.html" %}
+      {% endfor %}
+    {% else %}
+    <div class="p-8 text-center bg-white rounded-lg border border-gray-200">
+      <svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4"/>
+      </svg>
+      <p class="text-sm text-gray-500 mb-1">No sites for this company.</p>
+      <p class="text-xs text-gray-400">Click "+ Add Site" above to add one.</p>
+    </div>
+    {% endif %}
+  </div>
+</div>

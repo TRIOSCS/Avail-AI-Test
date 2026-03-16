@@ -1,0 +1,67 @@
+{# create_form.html — Create new company form.
+   Receives: users (list[User]).
+   Called by: htmx_views.py company_create_form route.
+   Depends on: HTMX, Tailwind CSS with brand palette.
+#}
+<div class="max-w-2xl mx-auto">
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
+    <h2 class="text-lg font-bold text-gray-900 mb-4">Create Company</h2>
+
+    <form hx-post="/v2/partials/companies/create"
+          hx-target="#main-content"
+          class="space-y-4">
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Company Name *</label>
+        <input type="text" name="name" required
+               hx-get="/v2/partials/companies/check-duplicate"
+               hx-trigger="keyup changed delay:500ms"
+               hx-target="#dup-warning"
+               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+        <div id="dup-warning" class="mt-1"></div>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Website</label>
+        <input type="url" name="website" placeholder="https://..."
+               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Industry</label>
+        <input type="text" name="industry" placeholder="e.g. Electronic Components"
+               class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Account Owner</label>
+        <select name="owner_id"
+                class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500">
+          <option value="">— None —</option>
+          {% for u in users %}
+          <option value="{{ u.id }}">{{ u.name }} ({{ u.role }})</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <div>
+        <label class="block text-sm font-medium text-gray-700 mb-1">Notes</label>
+        <textarea name="notes" rows="3"
+                  class="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500"></textarea>
+      </div>
+
+      <div class="flex items-center gap-3 pt-2">
+        <button type="submit"
+                class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-md hover:bg-brand-600">
+          Create Company
+        </button>
+        <button type="button"
+                hx-get="/v2/partials/companies"
+                hx-target="#main-content"
+                class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200">
+          Cancel
+        </button>
+      </div>
+    </form>
+  </div>
+</div>

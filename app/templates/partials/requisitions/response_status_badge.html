@@ -1,0 +1,14 @@
+{# response_status_badge.html — Updated status badge for a vendor response.
+   Receives: response (VendorResponse).
+   Called by: htmx_views.py update_response_status route.
+   Depends on: Tailwind CSS.
+#}
+{% set status_colors = {
+  'new': 'bg-blue-50 text-blue-700',
+  'reviewed': 'bg-emerald-50 text-emerald-700',
+  'rejected': 'bg-rose-50 text-rose-700',
+  'flagged': 'bg-amber-50 text-amber-700',
+} %}
+<span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(response.status, 'bg-gray-100 text-gray-600') }}">
+  {{ response.status|capitalize }}
+</span>

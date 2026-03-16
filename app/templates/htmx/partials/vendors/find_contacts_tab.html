@@ -1,0 +1,70 @@
+{# find_contacts_tab.html — AI-powered contact finder inline in vendor detail.
+   Shows existing prospect contacts and a button to trigger AI web search.
+   Receives: vendor (VendorCard), prospects (list[ProspectContact]).
+   Called by: vendor_tab route (tab=="find_contacts") in htmx_views.py.
+   Depends on: /v2/partials/vendors/{id}/ai/find-contacts POST endpoint.
+#}
+<div class="space-y-4" x-data="{ searching: false }">
+
+  {# ── Header + Find Button ──────────────────────────────── #}
+  <div class="bg-white rounded-lg border border-gray-200 p-4">
+    <div class="flex items-center justify-between mb-2">
+      <div>
+        <h3 class="text-sm font-semibold text-gray-900">AI Contact Finder</h3>
+        <p class="text-xs text-gray-500 mt-0.5">Uses AI web search to find contacts at {{ vendor.display_name }}</p>
+      </div>
+      <button hx-post="/v2/partials/vendors/{{ vendor.id }}/ai/find-contacts"
+              hx-target="#prospect-results"
+              hx-swap="innerHTML"
+              @htmx:before-request="searching = true"
+              @htmx:after-request="searching = false"
+              :disabled="searching"
+              class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2">
+        <svg x-show="!searching" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+        </svg>
+        <svg x-show="searching" x-cloak class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span x-text="searching ? 'Searching...' : 'Find Contacts'"></span>
+      </button>
+    </div>
+
+    {# Optional title keywords filter #}
+    <form id="find-contacts-form" class="mt-3 pt-3 border-t border-gray-100">
+      <label class="text-xs text-gray-500 block mb-1">Filter by job titles (optional)</label>
+      <input type="text" name="title_keywords" value="procurement, purchasing, buyer, supply chain, sourcing"
+             placeholder="e.g. procurement, buyer, sales"
+             class="w-full px-3 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+    </form>
+  </div>
+
+  {# ── Results area ──────────────────────────────────────── #}
+  <div id="prospect-results">
+
+    {# Existing prospects #}
+    {% if prospects %}
+    <div class="bg-white rounded-lg border border-gray-200 overflow-hidden">
+      <div class="px-4 py-3 bg-gray-50 border-b border-gray-200 flex items-center justify-between">
+        <h3 class="text-sm font-semibold text-gray-900">Found Contacts ({{ prospects|length }})</h3>
+        <span class="text-xs text-gray-400">Previously discovered via AI</span>
+      </div>
+      <div class="divide-y divide-gray-200" id="prospect-list">
+        {% for p in prospects %}
+        {% include "htmx/partials/vendors/prospect_card.html" %}
+        {% endfor %}
+      </div>
+    </div>
+    {% else %}
+    <div class="p-8 text-center bg-white rounded-lg border border-gray-200">
+      <svg class="mx-auto h-10 w-10 text-gray-300 mb-3" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/>
+      </svg>
+      <p class="text-sm text-gray-500 mb-1">No AI-discovered contacts yet.</p>
+      <p class="text-xs text-gray-400">Click "Find Contacts" above to search with AI.</p>
+    </div>
+    {% endif %}
+
+  </div>
+</div>

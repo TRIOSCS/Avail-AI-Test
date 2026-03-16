@@ -37,6 +37,7 @@ class Requisition(Base):
     name = Column(String(255), nullable=False)
     customer_name = Column(String(255))  # Legacy — kept for migration
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"))
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
     status = Column(String(50), default="active")
     cloned_from_id = Column(Integer, ForeignKey("requisitions.id"))
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
@@ -61,6 +62,7 @@ class Requisition(Base):
     claimed_by = relationship("User", foreign_keys=[claimed_by_id])
     updated_by = relationship("User", foreign_keys=[updated_by_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
+    company = relationship("Company", foreign_keys=[company_id])
     requirements = relationship("Requirement", back_populates="requisition", cascade="all, delete-orphan")
     attachments = relationship("RequisitionAttachment", back_populates="requisition", cascade="all, delete-orphan")
     contacts = relationship("Contact", back_populates="requisition", cascade="all, delete-orphan")

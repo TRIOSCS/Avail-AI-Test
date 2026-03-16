@@ -1,0 +1,17 @@
+{# reply_result.html — Email reply result confirmation.
+   Receives: to (str), error (str|None), conversation_id (str).
+   Called by: htmx_views.py send_email_reply route.
+   Depends on: Tailwind CSS.
+#}
+{% if error %}
+<div class="bg-rose-50 border border-rose-200 rounded p-2 text-sm text-rose-700">
+  {{ error }}
+</div>
+{% else %}
+<div class="bg-emerald-50 border border-emerald-200 rounded p-2 text-sm text-emerald-700">
+  Reply sent to {{ to }}.
+  <button hx-get="/v2/partials/emails/thread/{{ conversation_id }}"
+          hx-target="#main-content"
+          class="ml-2 text-xs text-brand-600 underline">Refresh thread</button>
+</div>
+{% endif %}

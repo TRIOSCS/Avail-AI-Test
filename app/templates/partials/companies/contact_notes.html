@@ -1,0 +1,41 @@
+{# contact_notes.html — Notes timeline for a site contact.
+   Receives: contact (SiteContact), notes (list[ActivityLog]), company_id, site_id.
+   Called by: htmx_views.py get_site_contact_notes / add_site_contact_note routes.
+   Depends on: HTMX, Tailwind CSS with brand palette.
+#}
+<div class="space-y-3">
+  <h4 class="text-sm font-semibold text-gray-900">
+    Notes for {{ contact.full_name or contact.email or 'Contact' }}
+  </h4>
+
+  {# Add note form #}
+  <form hx-post="/v2/partials/companies/{{ company_id }}/sites/{{ site_id }}/contacts/{{ contact.id }}/notes"
+        hx-target="closest div.space-y-3"
+        hx-swap="outerHTML"
+        class="flex gap-2">
+    <input type="text" name="notes" placeholder="Add a note..."
+           class="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+    <button type="submit"
+            class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
+      Add
+    </button>
+  </form>
+
+  {% if notes %}
+  <div class="space-y-2">
+    {% for n in notes %}
+    <div class="bg-gray-50 rounded border border-gray-200 px-3 py-2">
+      <div class="flex items-center gap-2 mb-1">
+        <span class="text-xs font-medium text-gray-700">{{ n.user.name if n.user else 'System' }}</span>
+        {% if n.created_at %}
+        <span class="text-xs text-gray-400">{{ n.created_at.strftime('%b %d, %Y %H:%M') }}</span>
+        {% endif %}
+      </div>
+      <p class="text-sm text-gray-600">{{ n.notes }}</p>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="text-sm text-gray-400 text-center py-2">No notes yet.</p>
+  {% endif %}
+</div>

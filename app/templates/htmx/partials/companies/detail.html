@@ -94,6 +94,12 @@
     </div>
   </div>
 
+  {# AI Insights — lazy-loaded #}
+  <div hx-get="/v2/partials/companies/{{ company.id }}/insights"
+       hx-trigger="load"
+       hx-swap="innerHTML"
+       class="mb-6"></div>
+
   {# Tabs #}
   <div x-data="{ activeTab: 'sites' }">
     <div class="border-b border-gray-200 mb-4">

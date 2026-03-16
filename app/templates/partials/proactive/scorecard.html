@@ -1,0 +1,26 @@
+{# scorecard.html — Proactive selling metrics panel.
+   Receives: stats (dict with total_sent, total_converted, conversion_rate, total_revenue).
+   Called by: htmx_views.py proactive_scorecard route.
+   Depends on: Tailwind CSS.
+#}
+<div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+  <h3 class="text-sm font-semibold text-gray-900 mb-3">Proactive Scorecard</h3>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div class="text-center">
+      <p class="text-xs text-gray-500">Sent</p>
+      <p class="text-xl font-bold text-gray-900">{{ stats.get('total_sent', 0) }}</p>
+    </div>
+    <div class="text-center">
+      <p class="text-xs text-gray-500">Converted</p>
+      <p class="text-xl font-bold text-emerald-600">{{ stats.get('total_converted', 0) }}</p>
+    </div>
+    <div class="text-center">
+      <p class="text-xs text-gray-500">Conversion Rate</p>
+      <p class="text-xl font-bold text-brand-600">{{ "%.0f%%"|format(stats.get('conversion_rate', 0) * 100) }}</p>
+    </div>
+    <div class="text-center">
+      <p class="text-xs text-gray-500">Revenue</p>
+      <p class="text-xl font-bold text-gray-900">${{ "{:,.0f}".format(stats.get('total_revenue', 0)) }}</p>
+    </div>
+  </div>
+</div>

@@ -1,0 +1,94 @@
+{# follow_ups/list.html — Cross-requisition follow-up queue.
+   Receives: follow_ups (list of dicts), total (int).
+   Called by: htmx_views.py follow_ups_list_partial endpoint.
+   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
+#}
+
+<div id="breadcrumb" hx-swap-oob="true">Follow-Ups</div>
+
+<div class="max-w-7xl mx-auto">
+  {# Dark navy page header #}
+  <div class="bg-brand-700 text-white px-6 py-3 rounded-t-lg mb-6 flex items-center justify-between">
+    <div class="flex items-center gap-2 text-sm">
+      <span class="text-brand-300">Avail</span>
+      <span class="text-brand-400">&rsaquo;</span>
+      <span class="font-medium">Follow-Ups</span>
+    </div>
+    <span class="text-xs text-brand-300">{{ total }} pending</span>
+  </div>
+
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Follow-Up Queue</h1>
+    <span class="text-sm text-gray-500">{{ total }} contact{{ "s" if total != 1 }} needing follow-up</span>
+  </div>
+
+  {% if follow_ups %}
+  <div class="space-y-3">
+    {% for fu in follow_ups %}
+    <div id="follow-up-{{ fu.contact_id }}" class="bg-white rounded-lg border border-gray-200 p-4 hover:border-brand-300 transition-colors"
+         x-data="{ showForm: false }">
+      <div class="flex items-start justify-between">
+        <div class="flex-1 min-w-0">
+          <div class="flex items-center gap-2 mb-1">
+            <h4 class="text-sm font-semibold text-gray-900">{{ fu.vendor_name or "Unknown Vendor" }}</h4>
+            <span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-50 text-amber-700">
+              {{ fu.days_waiting }} day{{ "s" if fu.days_waiting != 1 }} waiting
+            </span>
+            {% set st_colors = {
+              'sent': 'bg-blue-50 text-blue-700',
+              'opened': 'bg-amber-50 text-amber-700',
+            } %}
+            <span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ st_colors.get(fu.status, 'bg-gray-100 text-gray-600') }}">
+              {{ fu.status|capitalize }}
+            </span>
+          </div>
+          <p class="text-xs text-gray-500">{{ fu.vendor_email or "" }}</p>
+          {% if fu.parts %}
+          <p class="text-xs text-gray-400 mt-1 truncate">Parts: {{ fu.parts if fu.parts is string else fu.parts|join(', ') }}</p>
+          {% endif %}
+          <p class="text-xs text-gray-400 mt-0.5">
+            Req:
+            <a hx-get="/v2/partials/requisitions/{{ fu.requisition_id }}"
+               hx-target="#main-content" hx-push-url="/v2/requisitions/{{ fu.requisition_id }}"
+               class="text-brand-500 hover:text-brand-400 cursor-pointer">{{ fu.requisition_name or "Req #" ~ fu.requisition_id }}</a>
+          </p>
+        </div>
+        <div class="flex items-center gap-2 ml-4">
+          <button @click="showForm = !showForm"
+                  class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded hover:bg-brand-100"
+                  x-text="showForm ? 'Cancel' : 'Send Follow-Up'">
+            Send Follow-Up
+          </button>
+        </div>
+      </div>
+
+      {# Follow-up compose form #}
+      <form x-show="showForm" x-cloak x-transition
+            hx-post="/v2/partials/follow-ups/{{ fu.contact_id }}/send"
+            hx-target="#follow-up-{{ fu.contact_id }}"
+            hx-swap="outerHTML"
+            class="mt-3 space-y-2 p-3 bg-gray-50 rounded-lg border border-gray-200">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Follow-Up Message (optional — uses default if blank)</label>
+          <textarea name="body" rows="3"
+                    placeholder="Hi, following up on our RFQ regarding {{ fu.parts if fu.parts is string else fu.parts|join(', ') if fu.parts else 'your parts' }}..."
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500"></textarea>
+        </div>
+        <button type="submit"
+                class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
+          Send
+        </button>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="bg-white rounded-lg border border-gray-200 p-12 text-center">
+    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M5 13l4 4L19 7"/>
+    </svg>
+    <p class="mt-2 text-sm text-gray-500">No follow-ups needed!</p>
+    <p class="text-xs text-gray-400 mt-1">All RFQ contacts have been responded to or are still within the follow-up window.</p>
+  </div>
+  {% endif %}
+</div>

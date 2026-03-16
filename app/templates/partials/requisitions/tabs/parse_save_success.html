@@ -1,0 +1,22 @@
+{# parse_save_success.html — Success message after saving parsed offers.
+   Receives: req (Requisition), saved_count (int).
+   Called by: POST /v2/partials/requisitions/{id}/save-parsed-offers.
+   Depends on: brand palette.
+#}
+<div class="bg-emerald-50 border border-emerald-200 rounded-lg p-4 flex items-center gap-3">
+  <svg class="h-5 w-5 text-emerald-500 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+  </svg>
+  <div>
+    <p class="text-sm font-medium text-emerald-700">
+      {{ saved_count }} offer{{ "s" if saved_count != 1 }} saved to this requisition.
+    </p>
+    <p class="text-xs text-emerald-600 mt-0.5">
+      Switch to the Offers tab to see them, or
+      <button hx-get="/v2/partials/requisitions/{{ req.id }}/tab/offers"
+              hx-target="#tab-content"
+              hx-swap="innerHTML"
+              class="underline hover:text-emerald-800">reload offers</button>.
+    </p>
+  </div>
+</div>

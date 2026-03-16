@@ -1,0 +1,46 @@
+{# data_ops.html — Admin data operations panel.
+   Receives: vendor_count (int), company_count (int), material_count (int).
+   Called by: htmx_views.py admin_data_ops route.
+   Depends on: HTMX, Tailwind CSS.
+#}
+<div class="max-w-3xl mx-auto">
+  <h2 class="text-lg font-bold text-gray-900 mb-4">Data Operations</h2>
+
+  <div class="grid grid-cols-3 gap-4 mb-6">
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
+      <p class="text-xs text-gray-500">Vendors</p>
+      <p class="text-xl font-bold text-gray-900">{{ "{:,}".format(vendor_count) }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
+      <p class="text-xs text-gray-500">Companies</p>
+      <p class="text-xl font-bold text-gray-900">{{ "{:,}".format(company_count) }}</p>
+    </div>
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4 text-center">
+      <p class="text-xs text-gray-500">Materials</p>
+      <p class="text-xl font-bold text-gray-900">{{ "{:,}".format(material_count) }}</p>
+    </div>
+  </div>
+
+  {# Vendor CSV Import #}
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-4">
+    <h3 class="text-sm font-semibold text-gray-900 mb-3">Import Vendors (CSV)</h3>
+    <form hx-post="/v2/partials/admin/import/vendors"
+          hx-target="#import-result"
+          hx-encoding="multipart/form-data"
+          class="flex items-center gap-3">
+      <input type="file" name="file" accept=".csv"
+             class="text-sm text-gray-500 file:mr-2 file:py-1 file:px-3 file:rounded file:border-0 file:text-xs file:font-medium file:bg-brand-50 file:text-brand-600 hover:file:bg-brand-100">
+      <button type="submit"
+              class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
+        Import
+      </button>
+    </form>
+    <div id="import-result" class="mt-2"></div>
+  </div>
+
+  {# API Health #}
+  <div hx-get="/v2/partials/admin/api-health"
+       hx-trigger="load"
+       hx-swap="innerHTML"
+       class="mb-4"></div>
+</div>

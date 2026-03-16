@@ -1,0 +1,21 @@
+{# batch_result.html — Result after sending batch follow-ups.
+   Receives: sent_count (int).
+   Called by: htmx_views.py send_batch_follow_up route.
+   Depends on: Tailwind CSS.
+#}
+<div class="bg-emerald-50 border border-emerald-200 rounded-lg p-4 text-center">
+  <svg class="mx-auto h-8 w-8 text-emerald-600 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
+  </svg>
+  <p class="text-sm font-medium text-emerald-800">
+    {% if sent_count > 0 %}
+    Batch follow-up sent to {{ sent_count }} contact{{ "s" if sent_count != 1 }}.
+    {% else %}
+    No contacts needed follow-up.
+    {% endif %}
+  </p>
+  <button hx-get="/v2/partials/follow-ups" hx-target="#main-content"
+          class="mt-2 px-3 py-1 text-xs text-brand-600 bg-white border border-brand-200 rounded hover:bg-brand-50">
+    Refresh List
+  </button>
+</div>
