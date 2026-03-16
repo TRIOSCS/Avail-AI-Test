@@ -8,23 +8,6 @@
 <div id="breadcrumb" hx-swap-oob="true">Proactive Part Match</div>
 
 <div class="max-w-7xl mx-auto">
-  {# Dark navy page header #}
-  <div class="bg-brand-700 text-white px-6 py-3 rounded-t-lg mb-6 flex items-center justify-between">
-    <div class="flex items-center gap-2 text-sm">
-      <span class="text-brand-300">Avail</span>
-      <span class="text-brand-400">&rsaquo;</span>
-      <span class="font-medium">Proactive Part Match</span>
-    </div>
-    <button hx-post="/api/proactive/refresh"
-            hx-target="#main-content"
-            hx-swap="none"
-            data-loading-disable
-            class="text-xs bg-brand-600 hover:bg-brand-500 text-white px-3 py-1 rounded transition-colors">
-      <svg data-loading class="h-3 w-3 mr-1 spinner inline" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
-      Refresh Matches
-    </button>
-  </div>
-
   {# Tab bar #}
   <div class="flex gap-2 mb-6">
     <a hx-get="/v2/partials/proactive?tab=matches" hx-target="#main-content"
