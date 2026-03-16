@@ -27,7 +27,7 @@ from ._helpers import _base_ctx, router, templates
 # ── Search partials ─────────────────────────────────────────────────────
 
 
-@router.get("/v2/partials/search", response_class=HTMLResponse)
+@router.get("/partials/search", response_class=HTMLResponse)
 async def search_form_partial(
     request: Request,
     user: User = Depends(require_user),
@@ -38,7 +38,7 @@ async def search_form_partial(
     return templates.TemplateResponse("partials/search/form.html", ctx)
 
 
-@router.post("/v2/partials/search/run", response_class=HTMLResponse)
+@router.post("/partials/search/run", response_class=HTMLResponse)
 async def search_run(
     request: Request,
     mpn: str = Form(default=""),
@@ -137,7 +137,7 @@ async def search_run(
     return templates.TemplateResponse("partials/search/results.html", ctx)
 
 
-@router.get("/v2/partials/search/lead-detail", response_class=HTMLResponse)
+@router.get("/partials/search/lead-detail", response_class=HTMLResponse)
 async def search_lead_detail(
     request: Request,
     idx: int = Query(0, ge=0),
@@ -244,29 +244,29 @@ async def search_lead_detail(
 # ── Sourcing partials ──────────────────────────────────────────────────
 
 
-@router.get("/v2/sourcing/{requirement_id}", response_class=HTMLResponse)
+@router.get("/sourcing/{requirement_id}", response_class=HTMLResponse)
 async def v2_sourcing_page(request: Request, requirement_id: int, db: Session = Depends(get_db)):
     """Full page load for sourcing results."""
     user = get_user(request, db)
     if not user:
         return templates.TemplateResponse("htmx/login.html", {"request": request})
     ctx = _base_ctx(request, user, "requisitions")
-    ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}"
+    ctx["partial_url"] = f"/partials/sourcing/{requirement_id}"
     return templates.TemplateResponse("htmx/base_page.html", ctx)
 
 
-@router.get("/v2/sourcing/leads/{lead_id}", response_class=HTMLResponse)
+@router.get("/sourcing/leads/{lead_id}", response_class=HTMLResponse)
 async def v2_lead_detail_page(request: Request, lead_id: int, db: Session = Depends(get_db)):
     """Full page load for lead detail."""
     user = get_user(request, db)
     if not user:
         return templates.TemplateResponse("htmx/login.html", {"request": request})
     ctx = _base_ctx(request, user, "requisitions")
-    ctx["partial_url"] = f"/v2/partials/sourcing/leads/{lead_id}"
+    ctx["partial_url"] = f"/partials/sourcing/leads/{lead_id}"
     return templates.TemplateResponse("htmx/base_page.html", ctx)
 
 
-@router.get("/v2/partials/sourcing/{requirement_id}/stream")
+@router.get("/partials/sourcing/{requirement_id}/stream")
 async def sourcing_stream(
     request: Request,
     requirement_id: int,
@@ -299,7 +299,7 @@ async def sourcing_stream(
     return EventSourceResponse(event_generator())
 
 
-@router.post("/v2/partials/sourcing/{requirement_id}/search", response_class=HTMLResponse)
+@router.post("/partials/sourcing/{requirement_id}/search", response_class=HTMLResponse)
 async def sourcing_search_trigger(
     request: Request,
     requirement_id: int,
@@ -362,10 +362,10 @@ async def sourcing_search_trigger(
         channel, "search-complete", json.dumps({"total": len(all_sightings), "requirement_id": requirement_id})
     )
 
-    return HTMLResponse(status_code=200, headers={"HX-Redirect": f"/v2/sourcing/{requirement_id}"})
+    return HTMLResponse(status_code=200, headers={"HX-Redirect": f"/sourcing/{requirement_id}"})
 
 
-@router.get("/v2/partials/sourcing/{requirement_id}", response_class=HTMLResponse)
+@router.get("/partials/sourcing/{requirement_id}", response_class=HTMLResponse)
 async def sourcing_results_partial(
     request: Request,
     requirement_id: int,
@@ -485,7 +485,7 @@ async def sourcing_results_partial(
     return templates.TemplateResponse("partials/sourcing/results.html", ctx)
 
 
-@router.get("/v2/partials/sourcing/leads/{lead_id}", response_class=HTMLResponse)
+@router.get("/partials/sourcing/leads/{lead_id}", response_class=HTMLResponse)
 async def lead_detail_partial(
     request: Request,
     lead_id: int,
@@ -555,7 +555,7 @@ async def lead_detail_partial(
     return templates.TemplateResponse("partials/sourcing/lead_detail.html", ctx)
 
 
-@router.post("/v2/partials/sourcing/leads/{lead_id}/status", response_class=HTMLResponse)
+@router.post("/partials/sourcing/leads/{lead_id}/status", response_class=HTMLResponse)
 async def lead_status_update(
     request: Request,
     lead_id: int,
@@ -612,7 +612,7 @@ async def lead_status_update(
     return templates.TemplateResponse("partials/sourcing/lead_card.html", ctx)
 
 
-@router.post("/v2/partials/sourcing/leads/{lead_id}/feedback", response_class=HTMLResponse)
+@router.post("/partials/sourcing/leads/{lead_id}/feedback", response_class=HTMLResponse)
 async def lead_feedback(
     request: Request,
     lead_id: int,

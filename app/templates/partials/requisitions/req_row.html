@@ -4,9 +4,9 @@
    Depends on: brand color palette from tailwind.config.js.
 #}
 <tr class="hover:bg-brand-50 cursor-pointer group"
-    hx-get="/v2/partials/requisitions/{{ req.id }}"
+    hx-get="/partials/requisitions/{{ req.id }}"
     hx-target="#req-detail-panel"
-    hx-push-url="/v2/requisitions/{{ req.id }}"
+    hx-push-url="/requisitions/{{ req.id }}"
     @click="activeReqId = {{ req.id }}"
     :class="activeReqId === {{ req.id }} ? 'bg-brand-50' : ''">
   {# Checkbox (stops row click propagation) #}

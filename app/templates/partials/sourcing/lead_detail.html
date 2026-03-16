@@ -8,18 +8,18 @@
 
 {# OOB breadcrumb #}
 <div id="breadcrumb" hx-swap-oob="true">
-  <a href="/v2/requisitions" hx-get="/v2/partials/requisitions" hx-target="#main-content"
+  <a href="/requisitions" hx-get="/partials/requisitions" hx-target="#main-content"
      hx-push-url="true" class="text-brand-500 hover:text-brand-600">Requisitions</a>
   <span class="text-gray-400 mx-1">/</span>
-  <a href="/v2/requisitions/{{ lead.requisition_id }}"
-     hx-get="/v2/partials/requisitions/{{ lead.requisition_id }}"
+  <a href="/requisitions/{{ lead.requisition_id }}"
+     hx-get="/partials/requisitions/{{ lead.requisition_id }}"
      hx-target="#main-content" hx-push-url="true"
      class="text-brand-500 hover:text-brand-600">
     {{ requirement.requisition.name if requirement and requirement.requisition else '' }}
   </a>
   <span class="text-gray-400 mx-1">/</span>
-  <a href="/v2/sourcing/{{ lead.requirement_id }}"
-     hx-get="/v2/partials/sourcing/{{ lead.requirement_id }}"
+  <a href="/sourcing/{{ lead.requirement_id }}"
+     hx-get="/partials/sourcing/{{ lead.requirement_id }}"
      hx-target="#main-content" hx-push-url="true"
      class="text-brand-500 hover:text-brand-600">
     {{ requirement.primary_mpn if requirement else '' }}
@@ -263,7 +263,7 @@
     <h2 class="text-sm font-semibold text-gray-900">Buyer Actions</h2>
 
     {# Status update form #}
-    <form hx-post="/v2/partials/sourcing/leads/{{ lead.id }}/status"
+    <form hx-post="/partials/sourcing/leads/{{ lead.id }}/status"
           hx-target="#main-content"
           class="space-y-3">
       <div class="flex gap-3">
@@ -305,7 +305,7 @@
         </button>
         {% endif %}
         <button type="button"
-                hx-post="/v2/partials/sourcing/leads/{{ lead.id }}/status"
+                hx-post="/partials/sourcing/leads/{{ lead.id }}/status"
                 hx-vals='{"status": "contacted"}'
                 hx-target="#main-content"
                 class="px-4 py-2 bg-brand-50 text-brand-600 text-sm font-medium rounded-lg
@@ -313,7 +313,7 @@
           Claim
         </button>
         <button type="button"
-                hx-post="/v2/partials/sourcing/leads/{{ lead.id }}/status"
+                hx-post="/partials/sourcing/leads/{{ lead.id }}/status"
                 hx-vals='{"status": "bad_lead"}'
                 hx-target="#main-content"
                 class="px-4 py-2 bg-gray-100 text-gray-600 text-sm font-medium rounded-lg

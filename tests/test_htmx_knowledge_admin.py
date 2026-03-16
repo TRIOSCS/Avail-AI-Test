@@ -97,16 +97,16 @@ def api_source(db_session: Session):
 
 
 def test_knowledge_list_empty(client: TestClient):
-    """GET /v2/partials/knowledge returns table with no rows when empty."""
-    resp = client.get("/v2/partials/knowledge")
+    """GET /partials/knowledge returns table with no rows when empty."""
+    resp = client.get("/partials/knowledge")
     assert resp.status_code == 200
     assert "<table" in resp.text
     assert "<thead>" in resp.text
 
 
 def test_knowledge_list_with_entries(client: TestClient, knowledge_entries):
-    """GET /v2/partials/knowledge returns rows for existing entries."""
-    resp = client.get("/v2/partials/knowledge")
+    """GET /partials/knowledge returns rows for existing entries."""
+    resp = client.get("/partials/knowledge")
     assert resp.status_code == 200
     for entry in knowledge_entries:
         assert f"data-entry-id='{entry.id}'" in resp.text
@@ -115,7 +115,7 @@ def test_knowledge_list_with_entries(client: TestClient, knowledge_entries):
 def test_knowledge_list_filter_by_entity(
     client: TestClient, db_session: Session, test_user: User, test_vendor_card: VendorCard
 ):
-    """GET /v2/partials/knowledge with entity_type/entity_id filters results."""
+    """GET /partials/knowledge with entity_type/entity_id filters results."""
     entry = KnowledgeEntry(
         entry_type="note",
         content="Vendor-specific note",
@@ -128,15 +128,15 @@ def test_knowledge_list_filter_by_entity(
     db_session.add(entry)
     db_session.commit()
 
-    resp = client.get(f"/v2/partials/knowledge?entity_type=vendors&entity_id={test_vendor_card.id}")
+    resp = client.get(f"/partials/knowledge?entity_type=vendors&entity_id={test_vendor_card.id}")
     assert resp.status_code == 200
     assert "Vendor-specific note" in resp.text
 
 
 def test_knowledge_create(client: TestClient):
-    """POST /v2/partials/knowledge creates an entry and returns success."""
+    """POST /partials/knowledge creates an entry and returns success."""
     resp = client.post(
-        "/v2/partials/knowledge",
+        "/partials/knowledge",
         data={"title": "Test Note", "content": "Some body text"},
     )
     assert resp.status_code == 200
@@ -145,9 +145,9 @@ def test_knowledge_create(client: TestClient):
 
 
 def test_knowledge_create_with_entity(client: TestClient, test_company):
-    """POST /v2/partials/knowledge links entry to an entity."""
+    """POST /partials/knowledge links entry to an entity."""
     resp = client.post(
-        "/v2/partials/knowledge",
+        "/partials/knowledge",
         data={
             "title": "Company Note",
             "content": "Body",
@@ -160,10 +160,10 @@ def test_knowledge_create_with_entity(client: TestClient, test_company):
 
 
 def test_knowledge_update(client: TestClient, knowledge_entries):
-    """PUT /v2/partials/knowledge/{id} updates the entry content."""
+    """PUT /partials/knowledge/{id} updates the entry content."""
     entry = knowledge_entries[0]
     resp = client.put(
-        f"/v2/partials/knowledge/{entry.id}",
+        f"/partials/knowledge/{entry.id}",
         data={"title": "Updated Title", "content": "Updated body"},
     )
     assert resp.status_code == 200
@@ -171,26 +171,26 @@ def test_knowledge_update(client: TestClient, knowledge_entries):
 
 
 def test_knowledge_update_not_found(client: TestClient):
-    """PUT /v2/partials/knowledge/99999 returns 404."""
+    """PUT /partials/knowledge/99999 returns 404."""
     resp = client.put(
-        "/v2/partials/knowledge/99999",
+        "/partials/knowledge/99999",
         data={"title": "X", "content": "Y"},
     )
     assert resp.status_code == 404
 
 
 def test_knowledge_delete(client: TestClient, knowledge_entries):
-    """DELETE /v2/partials/knowledge/{id} removes the entry."""
+    """DELETE /partials/knowledge/{id} removes the entry."""
     entry = knowledge_entries[0]
-    resp = client.delete(f"/v2/partials/knowledge/{entry.id}")
+    resp = client.delete(f"/partials/knowledge/{entry.id}")
     assert resp.status_code == 200
     assert resp.headers.get("HX-Trigger") == "knowledgeChanged"
     assert resp.text == ""
 
 
 def test_knowledge_delete_not_found(client: TestClient):
-    """DELETE /v2/partials/knowledge/99999 returns 404."""
-    resp = client.delete("/v2/partials/knowledge/99999")
+    """DELETE /partials/knowledge/99999 returns 404."""
+    resp = client.delete("/partials/knowledge/99999")
     assert resp.status_code == 404
 
 
@@ -198,14 +198,14 @@ def test_knowledge_delete_not_found(client: TestClient):
 
 
 def test_insights_get_empty(client: TestClient):
-    """GET /v2/partials/requisitions/1/insights returns placeholder when no insights."""
-    resp = client.get("/v2/partials/requisitions/1/insights")
+    """GET /partials/requisitions/1/insights returns placeholder when no insights."""
+    resp = client.get("/partials/requisitions/1/insights")
     assert resp.status_code == 200
     assert "No insights yet" in resp.text
 
 
 def test_insights_get_with_data(client: TestClient, db_session: Session, test_user: User, test_requisition):
-    """GET /v2/partials/requisitions/{id}/insights returns insight cards."""
+    """GET /partials/requisitions/{id}/insights returns insight cards."""
     entry = KnowledgeEntry(
         entry_type="ai_insight",
         content="Price trending down for LM317T",
@@ -219,22 +219,22 @@ def test_insights_get_with_data(client: TestClient, db_session: Session, test_us
     db_session.add(entry)
     db_session.commit()
 
-    resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/insights")
+    resp = client.get(f"/partials/requisitions/{test_requisition.id}/insights")
     assert resp.status_code == 200
     assert "Price trending down" in resp.text
     assert "85%" in resp.text
 
 
 def test_insights_invalid_entity_type(client: TestClient):
-    """GET /v2/partials/invalid/1/insights returns 400."""
-    resp = client.get("/v2/partials/invalid/1/insights")
+    """GET /partials/invalid/1/insights returns 400."""
+    resp = client.get("/partials/invalid/1/insights")
     assert resp.status_code == 400
 
 
 def test_insights_refresh(client: TestClient):
-    """POST /v2/partials/requisitions/1/insights/refresh handles gracefully."""
+    """POST /partials/requisitions/1/insights/refresh handles gracefully."""
     with patch("app.services.knowledge_service.generate_insights", return_value=[]):
-        resp = client.post("/v2/partials/requisitions/1/insights/refresh")
+        resp = client.post("/partials/requisitions/1/insights/refresh")
         assert resp.status_code == 200
         assert "No insights could be generated" in resp.text
 
@@ -243,36 +243,36 @@ def test_insights_refresh(client: TestClient):
 
 
 def test_vendor_dedup_partial(client: TestClient):
-    """GET /v2/partials/admin/vendor-dedup returns HTML."""
+    """GET /partials/admin/vendor-dedup returns HTML."""
     with patch(
         "app.vendor_utils.find_vendor_dedup_candidates",
         return_value=[
             {"id_a": 1, "id_b": 2, "name_a": "Arrow", "name_b": "Arow", "score": 90},
         ],
     ):
-        resp = client.get("/v2/partials/admin/vendor-dedup")
+        resp = client.get("/partials/admin/vendor-dedup")
         assert resp.status_code == 200
         assert "Arrow" in resp.text
         assert "Merge" in resp.text
 
 
 def test_vendor_dedup_empty(client: TestClient):
-    """GET /v2/partials/admin/vendor-dedup with no dupes shows info message."""
+    """GET /partials/admin/vendor-dedup with no dupes shows info message."""
     with patch("app.vendor_utils.find_vendor_dedup_candidates", return_value=[]):
-        resp = client.get("/v2/partials/admin/vendor-dedup")
+        resp = client.get("/partials/admin/vendor-dedup")
         assert resp.status_code == 200
         assert "No duplicate vendors" in resp.text
 
 
 def test_vendor_merge_partial(client: TestClient, vendor_pair):
-    """POST /v2/partials/admin/vendor-merge merges and returns success."""
+    """POST /partials/admin/vendor-merge merges and returns success."""
     v1, v2 = vendor_pair
     with patch(
         "app.services.vendor_merge_service.merge_vendor_cards",
         return_value={"kept": v1.id, "removed": v2.id},
     ):
         resp = client.post(
-            "/v2/partials/admin/vendor-merge",
+            "/partials/admin/vendor-merge",
             data={"keep_id": str(v1.id), "remove_id": str(v2.id)},
         )
         assert resp.status_code == 200
@@ -280,13 +280,13 @@ def test_vendor_merge_partial(client: TestClient, vendor_pair):
 
 
 def test_vendor_merge_error(client: TestClient):
-    """POST /v2/partials/admin/vendor-merge with bad IDs returns error."""
+    """POST /partials/admin/vendor-merge with bad IDs returns error."""
     with patch(
         "app.services.vendor_merge_service.merge_vendor_cards",
         side_effect=ValueError("Vendor not found"),
     ):
         resp = client.post(
-            "/v2/partials/admin/vendor-merge",
+            "/partials/admin/vendor-merge",
             data={"keep_id": "999", "remove_id": "998"},
         )
         assert resp.status_code == 400
@@ -294,27 +294,27 @@ def test_vendor_merge_error(client: TestClient):
 
 
 def test_company_dedup_partial(client: TestClient):
-    """GET /v2/partials/admin/company-dedup returns HTML table."""
+    """GET /partials/admin/company-dedup returns HTML table."""
     with patch(
         "app.company_utils.find_company_dedup_candidates",
         return_value=[
             {"id_a": 1, "id_b": 2, "name_a": "Acme", "name_b": "ACME Corp", "score": 92},
         ],
     ):
-        resp = client.get("/v2/partials/admin/company-dedup")
+        resp = client.get("/partials/admin/company-dedup")
         assert resp.status_code == 200
         assert "Acme" in resp.text
 
 
 def test_company_merge_partial(client: TestClient, company_pair):
-    """POST /v2/partials/admin/company-merge merges and returns success."""
+    """POST /partials/admin/company-merge merges and returns success."""
     c1, c2 = company_pair
     with patch(
         "app.services.company_merge_service.merge_companies",
         return_value={"kept": c1.id, "removed": c2.id},
     ):
         resp = client.post(
-            "/v2/partials/admin/company-merge",
+            "/partials/admin/company-merge",
             data={"keep_id": str(c1.id), "remove_id": str(c2.id)},
         )
         assert resp.status_code == 200
@@ -325,8 +325,8 @@ def test_company_merge_partial(client: TestClient, company_pair):
 
 
 def test_health_dashboard(client: TestClient):
-    """GET /v2/partials/admin/health returns row counts."""
-    resp = client.get("/v2/partials/admin/health")
+    """GET /partials/admin/health returns row counts."""
+    resp = client.get("/partials/admin/health")
     assert resp.status_code == 200
     assert "System Health" in resp.text
     assert "Users" in resp.text
@@ -338,10 +338,10 @@ def test_health_dashboard(client: TestClient):
 
 
 def test_import_customers_csv(client: TestClient, db_session: Session):
-    """POST /v2/partials/admin/import/customers parses CSV and creates companies."""
+    """POST /partials/admin/import/customers parses CSV and creates companies."""
     csv_content = "name,website,industry\nNewCo Inc,https://newco.com,Electronics\n,,\n"
     resp = client.post(
-        "/v2/partials/admin/import/customers",
+        "/partials/admin/import/customers",
         files={"file": ("customers.csv", io.BytesIO(csv_content.encode()), "text/csv")},
     )
     assert resp.status_code == 200
@@ -360,7 +360,7 @@ def test_import_customers_dedup(client: TestClient, db_session: Session):
 
     csv_content = "name\nexisting co\nBrand New Co\n"
     resp = client.post(
-        "/v2/partials/admin/import/customers",
+        "/partials/admin/import/customers",
         files={"file": ("customers.csv", io.BytesIO(csv_content.encode()), "text/csv")},
     )
     assert resp.status_code == 200
@@ -369,10 +369,10 @@ def test_import_customers_dedup(client: TestClient, db_session: Session):
 
 
 def test_import_vendors_csv(client: TestClient, db_session: Session):
-    """POST /v2/partials/admin/import/vendors parses CSV and creates vendor cards."""
+    """POST /partials/admin/import/vendors parses CSV and creates vendor cards."""
     csv_content = "name,domain,country\nNew Vendor,newvendor.com,US\n"
     resp = client.post(
-        "/v2/partials/admin/import/vendors",
+        "/partials/admin/import/vendors",
         files={"file": ("vendors.csv", io.BytesIO(csv_content.encode()), "text/csv")},
     )
     assert resp.status_code == 200
@@ -395,7 +395,7 @@ def test_import_vendors_dedup(client: TestClient, db_session: Session):
 
     csv_content = "name\nOld Vendor\nFresh Vendor\n"
     resp = client.post(
-        "/v2/partials/admin/import/vendors",
+        "/partials/admin/import/vendors",
         files={"file": ("vendors.csv", io.BytesIO(csv_content.encode()), "text/csv")},
     )
     assert resp.status_code == 200
@@ -407,14 +407,14 @@ def test_import_vendors_dedup(client: TestClient, db_session: Session):
 
 
 def test_source_test_healthy(client: TestClient, api_source):
-    """GET /v2/partials/settings/sources/{id}/test returns healthy badge."""
-    resp = client.get(f"/v2/partials/settings/sources/{api_source.id}/test")
+    """GET /partials/settings/sources/{id}/test returns healthy badge."""
+    resp = client.get(f"/partials/settings/sources/{api_source.id}/test")
     assert resp.status_code == 200
     assert "healthy" in resp.text
     assert "bg-success" in resp.text
 
 
 def test_source_test_not_found(client: TestClient):
-    """GET /v2/partials/settings/sources/99999/test returns 404."""
-    resp = client.get("/v2/partials/settings/sources/99999/test")
+    """GET /partials/settings/sources/99999/test returns 404."""
+    resp = client.get("/partials/settings/sources/99999/test")
     assert resp.status_code == 404

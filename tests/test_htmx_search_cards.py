@@ -105,7 +105,7 @@ MOCK_RESULTS = [
 def test_search_results_render_lead_cards(client):
     """Search results render as lead cards, not table rows."""
     with patch("app.search_service.quick_search_mpn", return_value=MOCK_RESULTS):
-        resp = client.post("/v2/partials/search/run", data={"mpn": "LM317T"})
+        resp = client.post("/partials/search/run", data={"mpn": "LM317T"})
     assert resp.status_code == 200
     # Should have lead cards, not table
     assert "<table" not in resp.text
@@ -116,7 +116,7 @@ def test_search_results_render_lead_cards(client):
 def test_search_results_show_confidence_badges(client):
     """Each lead card displays a confidence badge."""
     with patch("app.search_service.quick_search_mpn", return_value=MOCK_RESULTS):
-        resp = client.post("/v2/partials/search/run", data={"mpn": "LM317T"})
+        resp = client.post("/partials/search/run", data={"mpn": "LM317T"})
     assert resp.status_code == 200
     assert "Confidence" in resp.text
 
@@ -124,7 +124,7 @@ def test_search_results_show_confidence_badges(client):
 def test_search_results_show_reason_summary(client):
     """Each lead card contains an explain_lead reason summary."""
     with patch("app.search_service.quick_search_mpn", return_value=MOCK_RESULTS):
-        resp = client.post("/v2/partials/search/run", data={"mpn": "LM317T"})
+        resp = client.post("/partials/search/run", data={"mpn": "LM317T"})
     assert resp.status_code == 200
     # Acme has price + qty, so reason should mention them
     assert "5,000 pcs" in resp.text or "Acme Electronics" in resp.text
@@ -133,7 +133,7 @@ def test_search_results_show_reason_summary(client):
 def test_search_results_show_source_badges(client):
     """Lead cards show source attribution badges."""
     with patch("app.search_service.quick_search_mpn", return_value=MOCK_RESULTS):
-        resp = client.post("/v2/partials/search/run", data={"mpn": "LM317T"})
+        resp = client.post("/partials/search/run", data={"mpn": "LM317T"})
     assert resp.status_code == 200
     assert "Live Stock" in resp.text  # brokerbin → "Live Stock" badge
 
@@ -141,7 +141,7 @@ def test_search_results_show_source_badges(client):
 def test_search_results_show_contact_preview(client):
     """Lead cards show contact info when available."""
     with patch("app.search_service.quick_search_mpn", return_value=MOCK_RESULTS):
-        resp = client.post("/v2/partials/search/run", data={"mpn": "LM317T"})
+        resp = client.post("/partials/search/run", data={"mpn": "LM317T"})
     assert resp.status_code == 200
     assert "sales@acme.com" in resp.text
     assert "No contact info" in resp.text  # Budget Parts has no contact
@@ -150,7 +150,7 @@ def test_search_results_show_contact_preview(client):
 def test_search_results_show_evidence_tier(client):
     """Lead cards show evidence tier badge for results that have one."""
     with patch("app.search_service.quick_search_mpn", return_value=MOCK_RESULTS):
-        resp = client.post("/v2/partials/search/run", data={"mpn": "LM317T"})
+        resp = client.post("/partials/search/run", data={"mpn": "LM317T"})
     assert resp.status_code == 200
     assert "Direct Source" in resp.text  # T2 → Direct Source
 
@@ -158,7 +158,7 @@ def test_search_results_show_evidence_tier(client):
 def test_search_results_empty_state(client):
     """Empty search shows helpful empty state message."""
     with patch("app.search_service.quick_search_mpn", return_value=[]):
-        resp = client.post("/v2/partials/search/run", data={"mpn": "ZZZZZZZ"})
+        resp = client.post("/partials/search/run", data={"mpn": "ZZZZZZZ"})
     assert resp.status_code == 200
     assert "No leads found" in resp.text
 
@@ -167,7 +167,7 @@ def test_search_results_null_data_no_crash(client):
     """Search doesn't crash when result has all null fields."""
     sparse_result = [{"vendor_name": "Unknown", "source_type": "nexar"}]
     with patch("app.search_service.quick_search_mpn", return_value=sparse_result):
-        resp = client.post("/v2/partials/search/run", data={"mpn": "TEST"})
+        resp = client.post("/partials/search/run", data={"mpn": "TEST"})
     assert resp.status_code == 200
     assert "Unknown" in resp.text
 
@@ -176,9 +176,9 @@ def test_search_results_null_data_no_crash(client):
 
 
 def test_lead_detail_drawer_returns_200(client):
-    """GET /v2/partials/search/lead-detail returns drawer content."""
+    """GET /partials/search/lead-detail returns drawer content."""
     with patch("app.search_service.quick_search_mpn", return_value=MOCK_RESULTS):
-        resp = client.get("/v2/partials/search/lead-detail?idx=0&mpn=LM317T")
+        resp = client.get("/partials/search/lead-detail?idx=0&mpn=LM317T")
     assert resp.status_code == 200
     assert "Acme Electronics" in resp.text
     assert "Why This Lead" in resp.text
@@ -190,7 +190,7 @@ def test_lead_detail_drawer_returns_200(client):
 def test_lead_detail_drawer_shows_safety_review(client):
     """Lead detail drawer includes the safety review component."""
     with patch("app.search_service.quick_search_mpn", return_value=MOCK_RESULTS):
-        resp = client.get("/v2/partials/search/lead-detail?idx=0&mpn=LM317T")
+        resp = client.get("/partials/search/lead-detail?idx=0&mpn=LM317T")
     assert resp.status_code == 200
     assert "Safety Review" in resp.text or "safety" in resp.text.lower()
 
@@ -198,7 +198,7 @@ def test_lead_detail_drawer_shows_safety_review(client):
 def test_lead_detail_drawer_shows_score_breakdown(client):
     """Lead detail drawer shows the score component breakdown."""
     with patch("app.search_service.quick_search_mpn", return_value=MOCK_RESULTS):
-        resp = client.get("/v2/partials/search/lead-detail?idx=0&mpn=LM317T")
+        resp = client.get("/partials/search/lead-detail?idx=0&mpn=LM317T")
     assert resp.status_code == 200
     assert "Score Breakdown" in resp.text
 
@@ -206,14 +206,14 @@ def test_lead_detail_drawer_shows_score_breakdown(client):
 def test_lead_detail_drawer_out_of_bounds(client):
     """Requesting an index beyond results shows error."""
     with patch("app.search_service.quick_search_mpn", return_value=MOCK_RESULTS):
-        resp = client.get("/v2/partials/search/lead-detail?idx=99&mpn=LM317T")
+        resp = client.get("/partials/search/lead-detail?idx=99&mpn=LM317T")
     assert resp.status_code == 200
     assert "Lead not found" in resp.text
 
 
 def test_lead_detail_drawer_no_mpn(client):
     """Missing mpn parameter shows error."""
-    resp = client.get("/v2/partials/search/lead-detail?idx=0&mpn=")
+    resp = client.get("/partials/search/lead-detail?idx=0&mpn=")
     assert resp.status_code == 200
     assert "No part number" in resp.text
 
@@ -222,7 +222,7 @@ def test_lead_detail_null_fields_no_crash(client):
     """Detail drawer handles result with minimal data."""
     sparse = [{"vendor_name": "Minimal", "source_type": "nexar"}]
     with patch("app.search_service.quick_search_mpn", return_value=sparse):
-        resp = client.get("/v2/partials/search/lead-detail?idx=0&mpn=TEST")
+        resp = client.get("/partials/search/lead-detail?idx=0&mpn=TEST")
     assert resp.status_code == 200
     assert "Minimal" in resp.text
 
@@ -252,7 +252,7 @@ def test_search_results_weak_leads_warning(client):
         },
     ]
     with patch("app.search_service.quick_search_mpn", return_value=weak_results):
-        resp = client.post("/v2/partials/search/run", data={"mpn": "ZZTEST"})
+        resp = client.post("/partials/search/run", data={"mpn": "ZZTEST"})
     assert resp.status_code == 200
     assert "low confidence" in resp.text
 
@@ -282,7 +282,7 @@ def test_search_results_no_weak_warning_when_strong(client):
         },
     ]
     with patch("app.search_service.quick_search_mpn", return_value=mixed_results):
-        resp = client.post("/v2/partials/search/run", data={"mpn": "LM317T"})
+        resp = client.post("/partials/search/run", data={"mpn": "LM317T"})
     assert resp.status_code == 200
     assert "low confidence" not in resp.text
 
@@ -296,7 +296,7 @@ def test_search_results_source_errors_warning(client):
             "source_errors": ["BrokerBin timed out", "DigiKey rate limited"],
         },
     ):
-        resp = client.post("/v2/partials/search/run", data={"mpn": "LM317T"})
+        resp = client.post("/partials/search/run", data={"mpn": "LM317T"})
     assert resp.status_code == 200
     assert "Some sources failed" in resp.text
     assert "BrokerBin timed out" in resp.text

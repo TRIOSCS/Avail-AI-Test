@@ -23,7 +23,7 @@ from ...utils.sql_helpers import escape_like
 from ._helpers import _base_ctx, router, templates
 
 
-@router.get("/v2/partials/quotes", response_class=HTMLResponse)
+@router.get("/partials/quotes", response_class=HTMLResponse)
 async def quotes_list_partial(
     request: Request,
     q: str = "",
@@ -51,7 +51,7 @@ async def quotes_list_partial(
     return templates.TemplateResponse("htmx/partials/quotes/list.html", ctx)
 
 
-@router.get("/v2/partials/quotes/{quote_id}", response_class=HTMLResponse)
+@router.get("/partials/quotes/{quote_id}", response_class=HTMLResponse)
 async def quote_detail_partial(
     request: Request,
     quote_id: int,
@@ -80,7 +80,7 @@ async def quote_detail_partial(
     return templates.TemplateResponse("htmx/partials/quotes/detail.html", ctx)
 
 
-@router.put("/v2/partials/quotes/{quote_id}/lines/{line_id}", response_class=HTMLResponse)
+@router.put("/partials/quotes/{quote_id}/lines/{line_id}", response_class=HTMLResponse)
 async def update_quote_line(
     request: Request,
     quote_id: int,
@@ -120,7 +120,7 @@ async def update_quote_line(
     return templates.TemplateResponse("htmx/partials/quotes/line_row.html", ctx)
 
 
-@router.delete("/v2/partials/quotes/{quote_id}/lines/{line_id}", response_class=HTMLResponse)
+@router.delete("/partials/quotes/{quote_id}/lines/{line_id}", response_class=HTMLResponse)
 async def delete_quote_line(
     request: Request,
     quote_id: int,
@@ -137,7 +137,7 @@ async def delete_quote_line(
     return HTMLResponse("")
 
 
-@router.post("/v2/partials/quotes/{quote_id}/lines", response_class=HTMLResponse)
+@router.post("/partials/quotes/{quote_id}/lines", response_class=HTMLResponse)
 async def add_quote_line(
     request: Request,
     quote_id: int,
@@ -173,7 +173,7 @@ async def add_quote_line(
     return templates.TemplateResponse("htmx/partials/quotes/line_row.html", ctx)
 
 
-@router.post("/v2/partials/quotes/{quote_id}/add-offer/{offer_id}", response_class=HTMLResponse)
+@router.post("/partials/quotes/{quote_id}/add-offer/{offer_id}", response_class=HTMLResponse)
 async def add_offer_to_quote(
     request: Request,
     quote_id: int,
@@ -206,7 +206,7 @@ async def add_offer_to_quote(
     return templates.TemplateResponse("htmx/partials/quotes/line_row.html", ctx)
 
 
-@router.post("/v2/partials/quotes/{quote_id}/send", response_class=HTMLResponse)
+@router.post("/partials/quotes/{quote_id}/send", response_class=HTMLResponse)
 async def send_quote_htmx(
     request: Request,
     quote_id: int,
@@ -224,7 +224,7 @@ async def send_quote_htmx(
     return await quote_detail_partial(request, quote_id, user, db)
 
 
-@router.post("/v2/partials/quotes/{quote_id}/result", response_class=HTMLResponse)
+@router.post("/partials/quotes/{quote_id}/result", response_class=HTMLResponse)
 async def quote_result_htmx(
     request: Request,
     quote_id: int,
@@ -248,7 +248,7 @@ async def quote_result_htmx(
     return await quote_detail_partial(request, quote_id, user, db)
 
 
-@router.post("/v2/partials/quotes/{quote_id}/revise", response_class=HTMLResponse)
+@router.post("/partials/quotes/{quote_id}/revise", response_class=HTMLResponse)
 async def revise_quote_htmx(
     request: Request,
     quote_id: int,
@@ -283,7 +283,7 @@ async def revise_quote_htmx(
     return await quote_detail_partial(request, new_quote.id, user, db)
 
 
-@router.post("/v2/partials/quotes/{quote_id}/apply-markup", response_class=HTMLResponse)
+@router.post("/partials/quotes/{quote_id}/apply-markup", response_class=HTMLResponse)
 async def apply_markup_htmx(
     request: Request,
     quote_id: int,

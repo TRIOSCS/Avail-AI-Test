@@ -1,7 +1,7 @@
 """
 routers/htmx/requisitions.py — HTMX partials for requisition management.
 
-Handles all /v2/partials/requisitions/ routes: listing, creating, detail view,
+Handles all /partials/requisitions/ routes: listing, creating, detail view,
 tab loading, bulk actions, offer review, RFQ compose/send, and requirement CRUD.
 
 Called by: main.py (via router mount from _helpers)
@@ -33,7 +33,7 @@ from ._helpers import _base_ctx, escape_like, router, templates
 _DASH = "\u2014"
 
 
-@router.get("/v2/partials/requisitions", response_class=HTMLResponse)
+@router.get("/partials/requisitions", response_class=HTMLResponse)
 async def requisitions_list_partial(
     request: Request,
     q: str = "",
@@ -128,7 +128,7 @@ async def requisitions_list_partial(
     return templates.TemplateResponse("htmx/partials/requisitions/list.html", ctx)
 
 
-@router.get("/v2/partials/requisitions/create-form", response_class=HTMLResponse)
+@router.get("/partials/requisitions/create-form", response_class=HTMLResponse)
 async def requisition_create_form(
     request: Request,
     user: User = Depends(require_user),
@@ -139,7 +139,7 @@ async def requisition_create_form(
     return templates.TemplateResponse("partials/requisitions/create_modal.html", ctx)
 
 
-@router.get("/v2/partials/requisitions/{req_id}", response_class=HTMLResponse)
+@router.get("/partials/requisitions/{req_id}", response_class=HTMLResponse)
 async def requisition_detail_partial(
     request: Request,
     req_id: int,
@@ -174,7 +174,7 @@ async def requisition_detail_partial(
     return templates.TemplateResponse("htmx/partials/requisitions/detail.html", ctx)
 
 
-@router.post("/v2/partials/requisitions/create", response_class=HTMLResponse)
+@router.post("/partials/requisitions/create", response_class=HTMLResponse)
 async def requisition_create(
     request: Request,
     name: str = Form(...),
@@ -237,7 +237,7 @@ async def requisition_create(
     return response
 
 
-@router.post("/v2/partials/requisitions/{req_id}/requirements", response_class=HTMLResponse)
+@router.post("/partials/requisitions/{req_id}/requirements", response_class=HTMLResponse)
 async def add_requirement(
     request: Request,
     req_id: int,
@@ -271,7 +271,7 @@ async def add_requirement(
     return templates.TemplateResponse("partials/requisitions/tabs/req_row.html", ctx)
 
 
-@router.get("/v2/partials/requisitions/{req_id}/tab/{tab}", response_class=HTMLResponse)
+@router.get("/partials/requisitions/{req_id}/tab/{tab}", response_class=HTMLResponse)
 async def requisition_tab(
     request: Request,
     req_id: int,
@@ -384,7 +384,7 @@ async def requisition_tab(
         return templates.TemplateResponse("partials/requisitions/tabs/activity.html", ctx)
 
 
-@router.post("/v2/partials/requisitions/bulk/{action}", response_class=HTMLResponse)
+@router.post("/partials/requisitions/bulk/{action}", response_class=HTMLResponse)
 async def requisitions_bulk_action(
     request: Request,
     action: str,
@@ -447,7 +447,7 @@ async def requisitions_bulk_action(
     )
 
 
-@router.post("/v2/partials/requisitions/{req_id}/create-quote", response_class=HTMLResponse)
+@router.post("/partials/requisitions/{req_id}/create-quote", response_class=HTMLResponse)
 async def create_quote_from_offers(
     request: Request,
     req_id: int,
@@ -525,7 +525,7 @@ async def create_quote_from_offers(
     return templates.TemplateResponse("htmx/partials/quotes/detail.html", ctx)
 
 
-@router.post("/v2/partials/requisitions/{req_id}/offers/{offer_id}/review", response_class=HTMLResponse)
+@router.post("/partials/requisitions/{req_id}/offers/{offer_id}/review", response_class=HTMLResponse)
 async def review_offer(
     request: Request,
     req_id: int,
@@ -560,7 +560,7 @@ async def review_offer(
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
 
-@router.post("/v2/partials/requisitions/{req_id}/log-activity", response_class=HTMLResponse)
+@router.post("/partials/requisitions/{req_id}/log-activity", response_class=HTMLResponse)
 async def log_activity(
     request: Request,
     req_id: int,
@@ -597,7 +597,7 @@ async def log_activity(
     return await requisition_tab(request=request, req_id=req_id, tab="activity", user=user, db=db)
 
 
-@router.get("/v2/partials/requisitions/{req_id}/rfq-compose", response_class=HTMLResponse)
+@router.get("/partials/requisitions/{req_id}/rfq-compose", response_class=HTMLResponse)
 async def rfq_compose(
     request: Request,
     req_id: int,
@@ -622,7 +622,7 @@ async def rfq_compose(
     return templates.TemplateResponse("partials/requisitions/rfq_compose.html", ctx)
 
 
-@router.post("/v2/partials/requisitions/{req_id}/rfq-send", response_class=HTMLResponse)
+@router.post("/partials/requisitions/{req_id}/rfq-send", response_class=HTMLResponse)
 async def rfq_send(
     request: Request,
     req_id: int,
@@ -655,7 +655,7 @@ async def rfq_send(
     return templates.TemplateResponse("partials/requisitions/rfq_results.html", ctx)
 
 
-@router.delete("/v2/partials/requisitions/{req_id}/requirements/{item_id}", response_class=HTMLResponse)
+@router.delete("/partials/requisitions/{req_id}/requirements/{item_id}", response_class=HTMLResponse)
 async def delete_requirement(
     request: Request,
     req_id: int,
@@ -675,7 +675,7 @@ async def delete_requirement(
     return HTMLResponse("")
 
 
-@router.put("/v2/partials/requisitions/{req_id}/requirements/{item_id}", response_class=HTMLResponse)
+@router.put("/partials/requisitions/{req_id}/requirements/{item_id}", response_class=HTMLResponse)
 async def update_requirement(
     request: Request,
     req_id: int,

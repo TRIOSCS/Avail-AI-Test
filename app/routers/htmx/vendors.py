@@ -1,7 +1,7 @@
 """
 routers/htmx/vendors.py — Vendor list, detail, tab partials, and CRUD.
 
-Handles all /v2/partials/vendors/ routes: vendor listing with search/sort,
+Handles all /partials/vendors/ routes: vendor listing with search/sort,
 vendor detail with safety data, per-vendor tab content (overview, contacts,
 analytics, offers), inline edit form, update, blacklist toggle, delete,
 and typeahead search.
@@ -25,7 +25,7 @@ from ...models.vendors import VendorContact
 from ._helpers import _DASH, _base_ctx, escape_like, router, templates
 
 
-@router.get("/v2/partials/vendors", response_class=HTMLResponse)
+@router.get("/partials/vendors", response_class=HTMLResponse)
 async def vendors_list_partial(
     request: Request,
     q: str = "",
@@ -77,7 +77,7 @@ async def vendors_list_partial(
     return templates.TemplateResponse("htmx/partials/vendors/list.html", ctx)
 
 
-@router.get("/v2/partials/vendors/typeahead")
+@router.get("/partials/vendors/typeahead")
 async def vendor_typeahead(
     q: str = Query("", min_length=2),
     user: User = Depends(require_user),
@@ -106,7 +106,7 @@ async def vendor_typeahead(
     return JSONResponse(results)
 
 
-@router.get("/v2/partials/vendors/{vendor_id}", response_class=HTMLResponse)
+@router.get("/partials/vendors/{vendor_id}", response_class=HTMLResponse)
 async def vendor_detail_partial(
     request: Request,
     vendor_id: int,
@@ -169,7 +169,7 @@ async def vendor_detail_partial(
     return templates.TemplateResponse("htmx/partials/vendors/detail.html", ctx)
 
 
-@router.get("/v2/partials/vendors/{vendor_id}/tab/{tab}", response_class=HTMLResponse)
+@router.get("/partials/vendors/{vendor_id}/tab/{tab}", response_class=HTMLResponse)
 async def vendor_tab(
     request: Request,
     vendor_id: int,
@@ -273,7 +273,7 @@ async def vendor_tab(
 # ── Vendor CRUD endpoints ────────────────────────────────────────────
 
 
-@router.get("/v2/partials/vendors/{vendor_id}/edit", response_class=HTMLResponse)
+@router.get("/partials/vendors/{vendor_id}/edit", response_class=HTMLResponse)
 async def vendor_edit_form(
     request: Request,
     vendor_id: int,
@@ -291,7 +291,7 @@ async def vendor_edit_form(
     emails_str = ", ".join(vendor.emails) if vendor.emails else ""
     phones_str = ", ".join(vendor.phones) if vendor.phones else ""
 
-    html = f"""<form hx-put="/v2/partials/vendors/{vendor.id}" hx-target="#main-content" class="space-y-4 p-6 bg-white rounded-lg border border-gray-200">
+    html = f"""<form hx-put="/partials/vendors/{vendor.id}" hx-target="#main-content" class="space-y-4 p-6 bg-white rounded-lg border border-gray-200">
   <h3 class="text-lg font-semibold text-gray-900">Edit Vendor</h3>
   <div>
     <label class="block text-sm font-medium text-gray-700 mb-1">Display Name</label>
@@ -319,7 +319,7 @@ async def vendor_edit_form(
       Save Changes
     </button>
     <button type="button"
-            hx-get="/v2/partials/vendors/{vendor.id}" hx-target="#main-content"
+            hx-get="/partials/vendors/{vendor.id}" hx-target="#main-content"
             class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200">
       Cancel
     </button>
@@ -328,7 +328,7 @@ async def vendor_edit_form(
     return HTMLResponse(html)
 
 
-@router.put("/v2/partials/vendors/{vendor_id}", response_class=HTMLResponse)
+@router.put("/partials/vendors/{vendor_id}", response_class=HTMLResponse)
 async def vendor_update(
     request: Request,
     vendor_id: int,
@@ -376,11 +376,11 @@ async def vendor_update(
         raise HTTPException(500, "Failed to update vendor")
 
     response = HTMLResponse("")
-    response.headers["HX-Redirect"] = f"/v2/partials/vendors/{vendor_id}"
+    response.headers["HX-Redirect"] = f"/partials/vendors/{vendor_id}"
     return response
 
 
-@router.post("/v2/partials/vendors/{vendor_id}/blacklist", response_class=HTMLResponse)
+@router.post("/partials/vendors/{vendor_id}/blacklist", response_class=HTMLResponse)
 async def vendor_toggle_blacklist(
     request: Request,
     vendor_id: int,
@@ -427,7 +427,7 @@ async def vendor_toggle_blacklist(
     return response
 
 
-@router.delete("/v2/partials/vendors/{vendor_id}")
+@router.delete("/partials/vendors/{vendor_id}")
 async def vendor_delete(
     request: Request,
     vendor_id: int,
@@ -449,14 +449,14 @@ async def vendor_delete(
         raise HTTPException(500, "Failed to delete vendor")
 
     response = HTMLResponse("")
-    response.headers["HX-Redirect"] = "/v2/partials/vendors"
+    response.headers["HX-Redirect"] = "/partials/vendors"
     return response
 
 
 # ── Vendor Contact CRUD endpoints ────────────────────────────────────
 
 
-@router.get("/v2/partials/vendors/{vendor_id}/contacts/add-form", response_class=HTMLResponse)
+@router.get("/partials/vendors/{vendor_id}/contacts/add-form", response_class=HTMLResponse)
 async def vendor_contact_add_form(
     request: Request,
     vendor_id: int,
@@ -468,7 +468,7 @@ async def vendor_contact_add_form(
     if not vendor:
         raise HTTPException(404, "Vendor not found")
 
-    html = f"""<form hx-post="/v2/partials/vendors/{vendor_id}/contacts"
+    html = f"""<form hx-post="/partials/vendors/{vendor_id}/contacts"
       hx-target="#contacts-tab-content" hx-swap="innerHTML"
       class="space-y-4 p-6 bg-white rounded-lg border border-gray-200">
   <h3 class="text-lg font-semibold text-gray-900">Add Contact</h3>
@@ -503,7 +503,7 @@ async def vendor_contact_add_form(
       Add Contact
     </button>
     <button type="button"
-            hx-get="/v2/partials/vendors/{vendor_id}/tab/contacts" hx-target="#contacts-tab-content"
+            hx-get="/partials/vendors/{vendor_id}/tab/contacts" hx-target="#contacts-tab-content"
             class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200">
       Cancel
     </button>
@@ -512,7 +512,7 @@ async def vendor_contact_add_form(
     return HTMLResponse(html)
 
 
-@router.post("/v2/partials/vendors/{vendor_id}/contacts", response_class=HTMLResponse)
+@router.post("/partials/vendors/{vendor_id}/contacts", response_class=HTMLResponse)
 async def vendor_contact_create(
     request: Request,
     vendor_id: int,
@@ -598,7 +598,7 @@ async def vendor_contact_create(
     return response
 
 
-@router.get("/v2/partials/vendors/{vendor_id}/contacts/{contact_id}/edit", response_class=HTMLResponse)
+@router.get("/partials/vendors/{vendor_id}/contacts/{contact_id}/edit", response_class=HTMLResponse)
 async def vendor_contact_edit_form(
     request: Request,
     vendor_id: int,
@@ -618,7 +618,7 @@ async def vendor_contact_edit_form(
     if not contact:
         raise HTTPException(404, "Contact not found")
 
-    html = f"""<form hx-put="/v2/partials/vendors/{vendor_id}/contacts/{contact_id}"
+    html = f"""<form hx-put="/partials/vendors/{vendor_id}/contacts/{contact_id}"
       hx-target="#contact-row-{contact_id}" hx-swap="outerHTML"
       class="space-y-4 p-6 bg-white rounded-lg border border-gray-200">
   <h3 class="text-lg font-semibold text-gray-900">Edit Contact</h3>
@@ -653,7 +653,7 @@ async def vendor_contact_edit_form(
       Save Changes
     </button>
     <button type="button"
-            hx-get="/v2/partials/vendors/{vendor_id}/tab/contacts" hx-target="#contacts-tab-content"
+            hx-get="/partials/vendors/{vendor_id}/tab/contacts" hx-target="#contacts-tab-content"
             class="px-4 py-2 bg-gray-100 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-200">
       Cancel
     </button>
@@ -662,7 +662,7 @@ async def vendor_contact_edit_form(
     return HTMLResponse(html)
 
 
-@router.put("/v2/partials/vendors/{vendor_id}/contacts/{contact_id}", response_class=HTMLResponse)
+@router.put("/partials/vendors/{vendor_id}/contacts/{contact_id}", response_class=HTMLResponse)
 async def vendor_contact_update(
     request: Request,
     vendor_id: int,
@@ -749,10 +749,10 @@ async def vendor_contact_update(
   <td class="px-4 py-2 text-sm text-gray-500">{phone_str}</td>
   <td class="px-4 py-2 text-sm text-gray-500">{contact.label or ""}</td>
   <td class="px-4 py-2 text-sm">
-    <button hx-get="/v2/partials/vendors/{vendor_id}/contacts/{contact.id}/edit"
+    <button hx-get="/partials/vendors/{vendor_id}/contacts/{contact.id}/edit"
             hx-target="#contact-row-{contact.id}" hx-swap="outerHTML"
             class="text-brand-600 hover:text-brand-800 text-xs font-medium">Edit</button>
-    <button hx-delete="/v2/partials/vendors/{vendor_id}/contacts/{contact.id}"
+    <button hx-delete="/partials/vendors/{vendor_id}/contacts/{contact.id}"
             hx-confirm="Delete this contact?"
             class="text-red-600 hover:text-red-800 text-xs font-medium ml-2">Delete</button>
   </td>
@@ -760,7 +760,7 @@ async def vendor_contact_update(
     return HTMLResponse(updated_html)
 
 
-@router.delete("/v2/partials/vendors/{vendor_id}/contacts/{contact_id}")
+@router.delete("/partials/vendors/{vendor_id}/contacts/{contact_id}")
 async def vendor_contact_delete(
     request: Request,
     vendor_id: int,

@@ -2,8 +2,8 @@
 routers/htmx/companies.py — HTMX partials for the Companies section.
 
 Serves server-rendered HTML partials for company list, detail, and tab views.
-Routes: /v2/partials/companies, /v2/partials/companies/{id},
-        /v2/partials/companies/{id}/tab/{tab}
+Routes: /partials/companies, /partials/companies/{id},
+        /partials/companies/{id}/tab/{tab}
 
 Called by: main.py via the shared htmx router
 Depends on: models (Company, Requisition, CustomerSite, User),
@@ -23,7 +23,7 @@ from ...models.crm import SiteContact
 from ._helpers import _DASH, _base_ctx, escape_like, router, templates
 
 
-@router.get("/v2/partials/companies", response_class=HTMLResponse)
+@router.get("/partials/companies", response_class=HTMLResponse)
 async def companies_list_partial(
     request: Request,
     search: str = "",
@@ -47,7 +47,7 @@ async def companies_list_partial(
     return templates.TemplateResponse("htmx/partials/companies/list.html", ctx)
 
 
-@router.get("/v2/partials/companies/create-form", response_class=HTMLResponse)
+@router.get("/partials/companies/create-form", response_class=HTMLResponse)
 async def company_create_form(
     request: Request,
     user: User = Depends(require_user),
@@ -61,7 +61,7 @@ async def company_create_form(
     html = f"""
     <div class="max-w-2xl mx-auto p-6">
       <h2 class="text-xl font-semibold text-gray-900 mb-6">Create New Company</h2>
-      <form hx-post="/v2/partials/companies/create" hx-target="#main-content"
+      <form hx-post="/partials/companies/create" hx-target="#main-content"
             class="space-y-4">
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Company Name *</label>
@@ -107,7 +107,7 @@ async def company_create_form(
         </div>
         <div class="flex justify-end gap-3 pt-4">
           <button type="button"
-                  hx-get="/v2/partials/companies" hx-target="#main-content"
+                  hx-get="/partials/companies" hx-target="#main-content"
                   class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
             Cancel
           </button>
@@ -122,7 +122,7 @@ async def company_create_form(
     return HTMLResponse(html)
 
 
-@router.get("/v2/partials/companies/typeahead", response_class=JSONResponse)
+@router.get("/partials/companies/typeahead", response_class=JSONResponse)
 async def company_typeahead(
     request: Request,
     q: str = Query("", min_length=0),
@@ -155,7 +155,7 @@ async def company_typeahead(
     return JSONResponse(results)
 
 
-@router.get("/v2/partials/companies/{company_id}", response_class=HTMLResponse)
+@router.get("/partials/companies/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
     company_id: int,
@@ -197,7 +197,7 @@ async def company_detail_partial(
     return templates.TemplateResponse("htmx/partials/companies/detail.html", ctx)
 
 
-@router.get("/v2/partials/companies/{company_id}/tab/{tab}", response_class=HTMLResponse)
+@router.get("/partials/companies/{company_id}/tab/{tab}", response_class=HTMLResponse)
 async def company_tab(
     request: Request,
     company_id: int,
@@ -288,9 +288,9 @@ async def company_tab(
         for r in reqs:
             date_str = r.created_at.strftime("%b %d, %Y") if r.created_at else "\u2014"
             rows.append(f"""<tr class="hover:bg-brand-50 cursor-pointer"
-                hx-get="/v2/partials/requisitions/{r.id}"
+                hx-get="/partials/requisitions/{r.id}"
                 hx-target="#main-content"
-                hx-push-url="/v2/requisitions/{r.id}">
+                hx-push-url="/requisitions/{r.id}">
               <td class="px-4 py-2 text-sm font-medium text-brand-500">{r.name}</td>
               <td class="px-4 py-2 text-sm text-gray-500">{r.status or _DASH}</td>
               <td class="px-4 py-2 text-sm text-gray-500">{date_str}</td>
@@ -317,7 +317,7 @@ async def company_tab(
         return HTMLResponse(html)
 
 
-@router.post("/v2/partials/companies/create", response_class=HTMLResponse)
+@router.post("/partials/companies/create", response_class=HTMLResponse)
 async def company_create(
     request: Request,
     user: User = Depends(require_user),
@@ -378,7 +378,7 @@ async def company_create(
     return response
 
 
-@router.get("/v2/partials/companies/{company_id}/edit", response_class=HTMLResponse)
+@router.get("/partials/companies/{company_id}/edit", response_class=HTMLResponse)
 async def company_edit_form(
     request: Request,
     company_id: int,
@@ -408,7 +408,7 @@ async def company_edit_form(
     html = f"""
     <div class="max-w-2xl mx-auto p-6">
       <h2 class="text-xl font-semibold text-gray-900 mb-6">Edit Company: {_v(company.name)}</h2>
-      <form hx-put="/v2/partials/companies/{company.id}" hx-target="#main-content"
+      <form hx-put="/partials/companies/{company.id}" hx-target="#main-content"
             class="space-y-4">
         <div>
           <label class="block text-sm font-medium text-gray-700 mb-1">Company Name</label>
@@ -477,7 +477,7 @@ async def company_edit_form(
         </div>
         <div class="flex justify-end gap-3 pt-4">
           <button type="button"
-                  hx-get="/v2/partials/companies/{company.id}" hx-target="#main-content"
+                  hx-get="/partials/companies/{company.id}" hx-target="#main-content"
                   class="px-4 py-2 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
             Cancel
           </button>
@@ -492,7 +492,7 @@ async def company_edit_form(
     return HTMLResponse(html)
 
 
-@router.put("/v2/partials/companies/{company_id}", response_class=HTMLResponse)
+@router.put("/partials/companies/{company_id}", response_class=HTMLResponse)
 async def company_update(
     request: Request,
     company_id: int,
@@ -592,7 +592,7 @@ def _v(val):
     return str(val).replace("&", "&amp;").replace('"', "&quot;").replace("<", "&lt;").replace(">", "&gt;")
 
 
-@router.post("/v2/partials/companies/{company_id}/sites", response_class=HTMLResponse)
+@router.post("/partials/companies/{company_id}/sites", response_class=HTMLResponse)
 async def site_create(
     request: Request,
     company_id: int,
@@ -647,7 +647,7 @@ async def site_create(
     return response
 
 
-@router.put("/v2/partials/sites/{site_id}", response_class=HTMLResponse)
+@router.put("/partials/sites/{site_id}", response_class=HTMLResponse)
 async def site_update(
     request: Request,
     site_id: int,
@@ -710,7 +710,7 @@ async def site_update(
 # ── Site Contact CRUD ────────────────────────────────────────────────
 
 
-@router.get("/v2/partials/sites/{site_id}/contacts/add-form", response_class=HTMLResponse)
+@router.get("/partials/sites/{site_id}/contacts/add-form", response_class=HTMLResponse)
 async def site_contact_add_form(
     request: Request,
     site_id: int,
@@ -725,7 +725,7 @@ async def site_contact_add_form(
     html = f"""
     <div class="p-4 border border-gray-200 rounded-md bg-gray-50 mt-4">
       <h3 class="text-sm font-semibold text-gray-900 mb-3">Add Contact to {_v(site.site_name)}</h3>
-      <form hx-post="/v2/partials/sites/{site.id}/contacts" hx-target="closest div" hx-swap="outerHTML"
+      <form hx-post="/partials/sites/{site.id}/contacts" hx-target="closest div" hx-swap="outerHTML"
             class="space-y-3">
         <div class="grid grid-cols-2 gap-3">
           <div>
@@ -757,7 +757,7 @@ async def site_contact_add_form(
           <label for="is_primary_{site.id}" class="text-sm text-gray-700">Primary contact</label>
         </div>
         <div class="flex justify-end gap-3 pt-2">
-          <button type="button" hx-get="/v2/partials/companies/{site.company_id}/tab/contacts"
+          <button type="button" hx-get="/partials/companies/{site.company_id}/tab/contacts"
                   hx-target="#tab-content"
                   class="px-3 py-1.5 text-sm font-medium text-gray-700 bg-white border border-gray-300 rounded-md hover:bg-gray-50">
             Cancel
@@ -773,7 +773,7 @@ async def site_contact_add_form(
     return HTMLResponse(html)
 
 
-@router.post("/v2/partials/sites/{site_id}/contacts", response_class=HTMLResponse)
+@router.post("/partials/sites/{site_id}/contacts", response_class=HTMLResponse)
 async def site_contact_create(
     request: Request,
     site_id: int,
@@ -854,7 +854,7 @@ async def site_contact_create(
     return response
 
 
-@router.put("/v2/partials/sites/{site_id}/contacts/{contact_id}", response_class=HTMLResponse)
+@router.put("/partials/sites/{site_id}/contacts/{contact_id}", response_class=HTMLResponse)
 async def site_contact_update(
     request: Request,
     site_id: int,
@@ -927,7 +927,7 @@ async def site_contact_update(
     return response
 
 
-@router.delete("/v2/partials/sites/{site_id}/contacts/{contact_id}", response_class=HTMLResponse)
+@router.delete("/partials/sites/{site_id}/contacts/{contact_id}", response_class=HTMLResponse)
 async def site_contact_delete(
     request: Request,
     site_id: int,

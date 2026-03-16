@@ -1,5 +1,5 @@
 {# Sourcing results view — lead cards grid with filter bar for a requirement.
-   Loaded via HTMX GET /v2/partials/sourcing/{requirement_id} into #main-content.
+   Loaded via HTMX GET /partials/sourcing/{requirement_id} into #main-content.
    Called by: htmx_views.sourcing_results_partial
    Depends on: partials/sourcing/lead_card.html, partials/shared/source_badge.html, partials/shared/pagination.html
    Context vars: requirement, leads, lead_sighting_data, total, page, total_pages, per_page,
@@ -7,11 +7,11 @@
 
 {# OOB breadcrumb update #}
 <div id="breadcrumb" hx-swap-oob="true">
-  <a href="/v2/requisitions" hx-get="/v2/partials/requisitions" hx-target="#main-content" hx-push-url="true"
+  <a href="/requisitions" hx-get="/partials/requisitions" hx-target="#main-content" hx-push-url="true"
      class="text-brand-500 hover:text-brand-600">Requisitions</a>
   <span class="text-gray-400 mx-1">/</span>
-  <a href="/v2/requisitions/{{ requirement.requisition_id }}"
-     hx-get="/v2/partials/requisitions/{{ requirement.requisition_id }}"
+  <a href="/requisitions/{{ requirement.requisition_id }}"
+     hx-get="/partials/requisitions/{{ requirement.requisition_id }}"
      hx-target="#main-content" hx-push-url="true"
      class="text-brand-500 hover:text-brand-600">{{ requirement.requisition.name if requirement.requisition else '' }}</a>
   <span class="text-gray-400 mx-1">/</span>
@@ -31,7 +31,7 @@
         {{ total }} lead{{ 's' if total != 1 }} found
       </p>
     </div>
-    <button hx-post="/v2/partials/sourcing/{{ requirement.id }}/search"
+    <button hx-post="/partials/sourcing/{{ requirement.id }}/search"
             hx-target="#main-content"
             class="px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg
                    hover:bg-brand-600 flex items-center gap-2">
@@ -55,7 +55,7 @@
         <div class="flex items-center gap-2">
           <span class="text-xs text-gray-500 font-medium">Confidence:</span>
           {% for band, label in [('high', 'High'), ('medium', 'Medium'), ('low', 'Low')] %}
-          <a hx-get="/v2/partials/sourcing/{{ requirement.id }}?confidence={{ band }}&safety={{ f_safety }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ f_status }}&contactability={{ f_contactability }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
+          <a hx-get="/partials/sourcing/{{ requirement.id }}?confidence={{ band }}&safety={{ f_safety }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ f_status }}&contactability={{ f_contactability }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
              hx-target="#main-content" hx-push-url="true"
              class="px-2.5 py-1 text-xs rounded-full border cursor-pointer
                {{ 'bg-brand-500 text-white border-brand-500' if band == f_confidence else 'bg-white text-gray-600 border-gray-300 hover:border-brand-300' }}">
@@ -67,7 +67,7 @@
         <div class="flex items-center gap-2">
           <span class="text-xs text-gray-500 font-medium">Safety:</span>
           {% for band, label in [('low_risk', 'Low Risk'), ('medium_risk', 'Medium'), ('high_risk', 'High Risk')] %}
-          <a hx-get="/v2/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ band }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ f_status }}&contactability={{ f_contactability }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
+          <a hx-get="/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ band }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ f_status }}&contactability={{ f_contactability }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
              hx-target="#main-content" hx-push-url="true"
              class="px-2.5 py-1 text-xs rounded-full border cursor-pointer
                {{ 'bg-brand-500 text-white border-brand-500' if band == f_safety else 'bg-white text-gray-600 border-gray-300 hover:border-brand-300' }}">
@@ -79,7 +79,7 @@
         <div class="flex items-center gap-2">
           <span class="text-xs text-gray-500 font-medium">Freshness:</span>
           {% for val, label in [('24h', '24h'), ('7d', '7 days'), ('30d', '30 days'), ('all', 'All')] %}
-          <a hx-get="/v2/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ f_safety }}&freshness={{ val }}&source={{ f_source }}&status={{ f_status }}&contactability={{ f_contactability }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
+          <a hx-get="/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ f_safety }}&freshness={{ val }}&source={{ f_source }}&status={{ f_status }}&contactability={{ f_contactability }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
              hx-target="#main-content" hx-push-url="true"
              class="px-2.5 py-1 text-xs rounded-full border cursor-pointer
                {{ 'bg-brand-500 text-white border-brand-500' if val == f_freshness else 'bg-white text-gray-600 border-gray-300 hover:border-brand-300' }}">
@@ -97,7 +97,7 @@
           <label class="flex items-center gap-1 text-xs cursor-pointer">
             <input type="checkbox" name="source" value="{{ src }}"
                    {{ 'checked' if src in f_source }}
-                   hx-get="/v2/partials/sourcing/{{ requirement.id }}"
+                   hx-get="/partials/sourcing/{{ requirement.id }}"
                    hx-target="#main-content" hx-push-url="true"
                    hx-include="#sourcing-filters"
                    class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
@@ -112,7 +112,7 @@
         <div class="flex items-center gap-2">
           <span class="text-xs text-gray-500 font-medium">Status:</span>
           {% for val, label in [('new', 'New'), ('contacted', 'Contacted'), ('has_stock', 'Has Stock'), ('bad_lead', 'Bad Lead'), ('', 'All')] %}
-          <a hx-get="/v2/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ f_safety }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ val }}&contactability={{ f_contactability }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
+          <a hx-get="/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ f_safety }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ val }}&contactability={{ f_contactability }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
              hx-target="#main-content" hx-push-url="true"
              class="px-2.5 py-1 text-xs rounded-full border cursor-pointer
                {{ 'bg-brand-500 text-white border-brand-500' if val == f_status else 'bg-white text-gray-600 border-gray-300 hover:border-brand-300' }}">
@@ -124,7 +124,7 @@
         <div class="flex items-center gap-2">
           <span class="text-xs text-gray-500 font-medium">Contact:</span>
           {% for val, label in [('has_email', 'Has Email'), ('has_phone', 'Has Phone'), ('', 'Any')] %}
-          <a hx-get="/v2/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ f_safety }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ f_status }}&contactability={{ val }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
+          <a hx-get="/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ f_safety }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ f_status }}&contactability={{ val }}&corroborated={{ f_corroborated }}&sort={{ f_sort }}"
              hx-target="#main-content" hx-push-url="true"
              class="px-2.5 py-1 text-xs rounded-full border cursor-pointer
                {{ 'bg-brand-500 text-white border-brand-500' if val == f_contactability else 'bg-white text-gray-600 border-gray-300 hover:border-brand-300' }}">
@@ -136,7 +136,7 @@
         <div class="flex items-center gap-2">
           <span class="text-xs text-gray-500 font-medium">Corroborated:</span>
           {% for val, label in [('yes', 'Yes'), ('no', 'No'), ('', 'All')] %}
-          <a hx-get="/v2/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ f_safety }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ f_status }}&contactability={{ f_contactability }}&corroborated={{ val }}&sort={{ f_sort }}"
+          <a hx-get="/partials/sourcing/{{ requirement.id }}?confidence={{ f_confidence }}&safety={{ f_safety }}&freshness={{ f_freshness }}&source={{ f_source }}&status={{ f_status }}&contactability={{ f_contactability }}&corroborated={{ val }}&sort={{ f_sort }}"
              hx-target="#main-content" hx-push-url="true"
              class="px-2.5 py-1 text-xs rounded-full border cursor-pointer
                {{ 'bg-brand-500 text-white border-brand-500' if val == f_corroborated else 'bg-white text-gray-600 border-gray-300 hover:border-brand-300' }}">
@@ -149,7 +149,7 @@
       {# Sort dropdown #}
       <div class="flex items-center gap-2">
         <span class="text-xs text-gray-500 font-medium">Sort:</span>
-        <select hx-get="/v2/partials/sourcing/{{ requirement.id }}"
+        <select hx-get="/partials/sourcing/{{ requirement.id }}"
                 hx-target="#main-content" hx-push-url="true"
                 hx-include="#sourcing-filters"
                 name="sort"
@@ -186,7 +186,7 @@
 
   {# Pagination #}
   {% if total_pages > 1 %}
-    {% with target_id="main-content", url="/v2/partials/sourcing/" ~ requirement.id %}
+    {% with target_id="main-content", url="/partials/sourcing/" ~ requirement.id %}
       {% include "partials/shared/pagination.html" %}
     {% endwith %}
   {% endif %}

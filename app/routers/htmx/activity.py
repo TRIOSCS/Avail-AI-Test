@@ -81,11 +81,11 @@ def _activity_table(activities: list[ActivityLog], empty_msg: str = "No activity
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  1. POST /v2/partials/activity/call — click-to-call logging
+#  1. POST /partials/activity/call — click-to-call logging
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@router.post("/v2/partials/activity/call", response_class=HTMLResponse)
+@router.post("/partials/activity/call", response_class=HTMLResponse)
 def log_call_click(
     request: Request,
     phone_number: str = Form(...),
@@ -152,11 +152,11 @@ def log_call_click(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  2. GET /v2/partials/companies/{company_id}/tab/activity — company timeline
+#  2. GET /partials/companies/{company_id}/tab/activity — company timeline
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@router.get("/v2/partials/companies/{company_id}/tab/activity", response_class=HTMLResponse)
+@router.get("/partials/companies/{company_id}/tab/activity", response_class=HTMLResponse)
 def company_activity_tab(
     request: Request,
     company_id: int,
@@ -187,7 +187,7 @@ def company_activity_tab(
         next_offset = offset + limit
         html += (
             f'<div class="text-center py-2">'
-            f'<button hx-get="/v2/partials/companies/{company_id}/tab/activity?limit={limit}&offset={next_offset}'
+            f'<button hx-get="/partials/companies/{company_id}/tab/activity?limit={limit}&offset={next_offset}'
             f'{"&channel=" + escape(channel) if channel else ""}"'
             f' hx-target="closest div" hx-swap="outerHTML"'
             f' class="text-brand-600 text-sm hover:underline">Load more</button>'
@@ -198,11 +198,11 @@ def company_activity_tab(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  3. GET /v2/partials/vendors/{vendor_id}/activity — vendor timeline
+#  3. GET /partials/vendors/{vendor_id}/activity — vendor timeline
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@router.get("/v2/partials/vendors/{vendor_id}/activity", response_class=HTMLResponse)
+@router.get("/partials/vendors/{vendor_id}/activity", response_class=HTMLResponse)
 def vendor_activity_tab(
     request: Request,
     vendor_id: int,
@@ -230,11 +230,11 @@ def vendor_activity_tab(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  4. GET /v2/partials/contacts/{contact_id}/timeline — contact timeline
+#  4. GET /partials/contacts/{contact_id}/timeline — contact timeline
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@router.get("/v2/partials/contacts/{contact_id}/timeline", response_class=HTMLResponse)
+@router.get("/partials/contacts/{contact_id}/timeline", response_class=HTMLResponse)
 def contact_timeline(
     request: Request,
     contact_id: int,
@@ -280,11 +280,11 @@ def contact_timeline(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  5. POST /v2/partials/companies/{company_id}/enrich — company enrichment
+#  5. POST /partials/companies/{company_id}/enrich — company enrichment
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@router.post("/v2/partials/companies/{company_id}/enrich", response_class=HTMLResponse)
+@router.post("/partials/companies/{company_id}/enrich", response_class=HTMLResponse)
 async def enrich_company(
     request: Request,
     company_id: int,
@@ -324,11 +324,11 @@ async def enrich_company(
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  6. POST /v2/partials/vendors/{vendor_id}/enrich — vendor enrichment
+#  6. POST /partials/vendors/{vendor_id}/enrich — vendor enrichment
 # ═══════════════════════════════════════════════════════════════════════
 
 
-@router.post("/v2/partials/vendors/{vendor_id}/enrich", response_class=HTMLResponse)
+@router.post("/partials/vendors/{vendor_id}/enrich", response_class=HTMLResponse)
 async def enrich_vendor(
     request: Request,
     vendor_id: int,

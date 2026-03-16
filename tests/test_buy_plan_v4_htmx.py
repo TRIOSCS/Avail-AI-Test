@@ -87,10 +87,10 @@ def _make_draft_plan(db, test_quote, test_user, *, total_cost=500.0):
 
 class TestHTMXListView:
     def test_list_returns_html(self, db_session: Session, test_quote: Quote, test_user: User):
-        """GET /v2/partials/buy-plans returns HTML with plan data."""
+        """GET /partials/buy-plans returns HTML with plan data."""
         _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
-        r = c.get("/v2/partials/buy-plans")
+        r = c.get("/partials/buy-plans")
         assert r.status_code == 200
         assert "text/html" in r.headers["content-type"]
         assert "Buy Plans" in r.text
@@ -99,24 +99,24 @@ class TestHTMXListView:
         """Status filter works."""
         _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
-        r = c.get("/v2/partials/buy-plans?status=draft")
+        r = c.get("/partials/buy-plans?status=draft")
         assert r.status_code == 200
         assert "draft" in r.text.lower()
 
     def test_list_empty(self, db_session: Session, test_user: User):
         """Empty list shows 'no buy plans' message."""
         c = _make_client(db_session, test_user)
-        r = c.get("/v2/partials/buy-plans")
+        r = c.get("/partials/buy-plans")
         assert r.status_code == 200
         assert "No buy plans found" in r.text
 
 
 class TestHTMXDetailView:
     def test_detail_returns_html(self, db_session: Session, test_quote: Quote, test_user: User):
-        """GET /v2/partials/buy-plans/{id} returns HTML detail."""
+        """GET /partials/buy-plans/{id} returns HTML detail."""
         plan, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
-        r = c.get(f"/v2/partials/buy-plans/{plan.id}")
+        r = c.get(f"/partials/buy-plans/{plan.id}")
         assert r.status_code == 200
         assert "text/html" in r.headers["content-type"]
         assert f"Buy Plan #{plan.id}" in r.text
@@ -124,14 +124,14 @@ class TestHTMXDetailView:
     def test_detail_not_found(self, db_session: Session, test_user: User):
         """Nonexistent plan returns 404."""
         c = _make_client(db_session, test_user)
-        r = c.get("/v2/partials/buy-plans/99999")
+        r = c.get("/partials/buy-plans/99999")
         assert r.status_code == 404
 
     def test_detail_shows_lines(self, db_session: Session, test_quote: Quote, test_user: User):
         """Detail view shows line items."""
         plan, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
-        r = c.get(f"/v2/partials/buy-plans/{plan.id}")
+        r = c.get(f"/partials/buy-plans/{plan.id}")
         assert "LM317T" in r.text or "Arrow" in r.text
         assert "Line Items" in r.text
 
@@ -142,7 +142,7 @@ class TestHTMXSubmit:
         plan, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/v2/partials/buy-plans/{plan.id}/submit",
+            f"/partials/buy-plans/{plan.id}/submit",
             data={"sales_order_number": "SO-001"},
         )
         assert r.status_code == 200
@@ -153,7 +153,7 @@ class TestHTMXSubmit:
         plan, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/v2/partials/buy-plans/{plan.id}/submit",
+            f"/partials/buy-plans/{plan.id}/submit",
             data={"sales_order_number": ""},
         )
         assert r.status_code == 400
@@ -165,7 +165,7 @@ class TestHTMXCancel:
         plan, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
         r = c.post(
-            f"/v2/partials/buy-plans/{plan.id}/cancel",
+            f"/partials/buy-plans/{plan.id}/cancel",
             data={"reason": "No longer needed"},
         )
         assert r.status_code == 200
@@ -180,23 +180,23 @@ class TestHTMXReset:
         db_session.commit()
 
         c = _make_client(db_session, test_user)
-        r = c.post(f"/v2/partials/buy-plans/{plan.id}/reset")
+        r = c.post(f"/partials/buy-plans/{plan.id}/reset")
         assert r.status_code == 200
         assert "DRAFT" in r.text
 
 
 class TestFullPageLoad:
     def test_buy_plans_full_page(self, db_session: Session, test_user: User):
-        """GET /v2/buy-plans returns full page HTML."""
+        """GET /buy-plans returns full page HTML."""
         c = _make_client(db_session, test_user)
-        r = c.get("/v2/buy-plans")
+        r = c.get("/buy-plans")
         assert r.status_code == 200
         assert "text/html" in r.headers["content-type"]
 
     def test_buy_plan_detail_full_page(self, db_session: Session, test_quote: Quote, test_user: User):
-        """GET /v2/buy-plans/{id} returns full page HTML."""
+        """GET /buy-plans/{id} returns full page HTML."""
         plan, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
-        r = c.get(f"/v2/buy-plans/{plan.id}")
+        r = c.get(f"/buy-plans/{plan.id}")
         assert r.status_code == 200
         assert "text/html" in r.headers["content-type"]

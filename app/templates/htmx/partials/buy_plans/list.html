@@ -18,7 +18,7 @@
     <button class="px-3 py-1.5 text-sm font-medium rounded-md transition-colors"
             :class="status === '{{ s }}' ? 'bg-brand-500 text-white' : 'bg-brand-100 text-brand-600 hover:bg-brand-200'"
             @click="status = '{{ s }}'"
-            hx-get="/v2/partials/buy-plans?status={{ s }}"
+            hx-get="/partials/buy-plans?status={{ s }}"
             hx-target="#main-content"
             hx-include="[name='bp-search']">
       {{ label }}
@@ -28,7 +28,7 @@
     <label class="ml-4 flex items-center gap-1.5 text-sm text-gray-600 cursor-pointer select-none">
       <input type="checkbox" x-model="mine" name="mine_toggle"
              class="rounded border-gray-300 text-brand-500 focus:ring-brand-500 accent-brand-500"
-             hx-get="/v2/partials/buy-plans"
+             hx-get="/partials/buy-plans"
              hx-trigger="change"
              hx-target="#main-content"
              hx-include="[name='bp-search']"
@@ -42,7 +42,7 @@
     <input type="search" name="bp-search" value="{{ q }}"
            placeholder="Search by SO#, customer, quote..."
            class="w-full sm:w-80 px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-brand-500 focus:border-brand-500"
-           hx-get="/v2/partials/buy-plans"
+           hx-get="/partials/buy-plans"
            hx-trigger="keyup changed delay:300ms"
            hx-target="#main-content"
            :hx-vals="JSON.stringify({status: status, mine: mine})">
@@ -69,9 +69,9 @@
         {% if buy_plans %}
           {% for bp in buy_plans %}
           <tr class="hover:bg-gray-50 cursor-pointer"
-              hx-get="/v2/partials/buy-plans/{{ bp.id }}"
+              hx-get="/partials/buy-plans/{{ bp.id }}"
               hx-target="#main-content"
-              hx-push-url="/v2/buy-plans/{{ bp.id }}"
+              hx-push-url="/buy-plans/{{ bp.id }}"
               preload="mouseover">
             <td class="px-4 py-3 text-sm font-medium text-gray-900">{{ bp.customer_name or '-' }}</td>
             <td class="px-4 py-3 text-sm text-gray-600 font-mono">{{ bp.quote_number or '-' }}</td>

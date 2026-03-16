@@ -33,7 +33,7 @@ def _is_ops_member(user: User, db: Session) -> bool:
     return db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first() is not None
 
 
-@router.get("/v2/partials/buy-plans", response_class=HTMLResponse)
+@router.get("/partials/buy-plans", response_class=HTMLResponse)
 async def buy_plans_list_partial(
     request: Request,
     q: str = "",
@@ -107,7 +107,7 @@ async def buy_plans_list_partial(
     return templates.TemplateResponse("htmx/partials/buy_plans/list.html", ctx)
 
 
-@router.get("/v2/partials/buy-plans/{plan_id}", response_class=HTMLResponse)
+@router.get("/partials/buy-plans/{plan_id}", response_class=HTMLResponse)
 async def buy_plan_detail_partial(
     request: Request,
     plan_id: int,
@@ -144,7 +144,7 @@ async def buy_plan_detail_partial(
     return templates.TemplateResponse("htmx/partials/buy_plans/detail.html", ctx)
 
 
-@router.post("/v2/partials/buy-plans/{plan_id}/submit", response_class=HTMLResponse)
+@router.post("/partials/buy-plans/{plan_id}/submit", response_class=HTMLResponse)
 async def buy_plan_submit_partial(
     request: Request,
     plan_id: int,
@@ -184,7 +184,7 @@ async def buy_plan_submit_partial(
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
-@router.post("/v2/partials/buy-plans/{plan_id}/approve", response_class=HTMLResponse)
+@router.post("/partials/buy-plans/{plan_id}/approve", response_class=HTMLResponse)
 async def buy_plan_approve_partial(
     request: Request,
     plan_id: int,
@@ -218,7 +218,7 @@ async def buy_plan_approve_partial(
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
-@router.post("/v2/partials/buy-plans/{plan_id}/verify-so", response_class=HTMLResponse)
+@router.post("/partials/buy-plans/{plan_id}/verify-so", response_class=HTMLResponse)
 async def buy_plan_verify_so_partial(
     request: Request,
     plan_id: int,
@@ -255,7 +255,7 @@ async def buy_plan_verify_so_partial(
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
-@router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/confirm-po", response_class=HTMLResponse)
+@router.post("/partials/buy-plans/{plan_id}/lines/{line_id}/confirm-po", response_class=HTMLResponse)
 async def buy_plan_confirm_po_partial(
     request: Request,
     plan_id: int,
@@ -295,7 +295,7 @@ async def buy_plan_confirm_po_partial(
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
-@router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/verify-po", response_class=HTMLResponse)
+@router.post("/partials/buy-plans/{plan_id}/lines/{line_id}/verify-po", response_class=HTMLResponse)
 async def buy_plan_verify_po_partial(
     request: Request,
     plan_id: int,
@@ -323,7 +323,7 @@ async def buy_plan_verify_po_partial(
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
-@router.post("/v2/partials/buy-plans/{plan_id}/lines/{line_id}/issue", response_class=HTMLResponse)
+@router.post("/partials/buy-plans/{plan_id}/lines/{line_id}/issue", response_class=HTMLResponse)
 async def buy_plan_flag_issue_partial(
     request: Request,
     plan_id: int,
@@ -347,7 +347,7 @@ async def buy_plan_flag_issue_partial(
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
-@router.post("/v2/partials/buy-plans/{plan_id}/cancel", response_class=HTMLResponse)
+@router.post("/partials/buy-plans/{plan_id}/cancel", response_class=HTMLResponse)
 async def buy_plan_cancel_partial(
     request: Request,
     plan_id: int,
@@ -373,7 +373,7 @@ async def buy_plan_cancel_partial(
     return await buy_plan_detail_partial(request, plan_id, user, db)
 
 
-@router.post("/v2/partials/buy-plans/{plan_id}/reset", response_class=HTMLResponse)
+@router.post("/partials/buy-plans/{plan_id}/reset", response_class=HTMLResponse)
 async def buy_plan_reset_partial(
     request: Request,
     plan_id: int,
