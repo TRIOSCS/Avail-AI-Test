@@ -11,6 +11,7 @@ Depends on: app/routers/htmx/ sub-modules
 
 # Import the shared router — sub-module imports register their routes on it.
 # Import each domain module to trigger route registration on the shared router.
+from .htmx import activity as _activity  # noqa: F401
 from .htmx import buy_plans as _buy_plans  # noqa: F401
 from .htmx import companies as _companies  # noqa: F401
 from .htmx import core as _core  # noqa: F401
