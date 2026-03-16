@@ -1,13 +1,22 @@
-{# Empty state placeholder — used when a list has no items. #}
-<div class="flex flex-col items-center justify-center py-16 text-gray-400">
-    <svg class="h-12 w-12 mb-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
-    </svg>
-    <p class="text-lg">{{ message | default("No items found.") }}</p>
-    {% if action_url %}
-    <button hx-get="{{ action_url }}" hx-target="#main-content"
-            class="mt-4 px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600">
-      {{ action_label | default("Create one") }}
-    </button>
-    {% endif %}
+{#
+  empty_state.html — Centered placeholder shown when a list has no items.
+  Renders inside a white card with a gray icon, message, and optional CTA button.
+  Called by: any list partial that can be empty (requisitions, vendors, companies, etc.)
+  Depends on: HTMX (optional, for action_url)
+  Context vars: message (str), action_url (str, optional), action_label (str, optional)
+#}
+<div class="mx-auto max-w-sm rounded-xl bg-white p-12 text-center shadow-sm border border-gray-100">
+  <svg class="mx-auto mb-4 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+    <path stroke-linecap="round" stroke-linejoin="round"
+          d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
+  </svg>
+  <p class="text-base font-medium text-gray-500">{{ message|default("No items found.") }}</p>
+  {% if action_url %}
+  <a href="{{ action_url }}"
+     hx-get="{{ action_url }}"
+     hx-target="#main-content"
+     class="mt-6 inline-flex items-center gap-2 rounded-lg bg-brand-500 px-4 py-2 text-sm font-medium text-white shadow-sm hover:bg-brand-600 transition-colors">
+    {{ action_label|default("Create one") }}
+  </a>
+  {% endif %}
 </div>

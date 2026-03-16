@@ -1,62 +1,52 @@
 {#
-  topbar.html — Top bar with breadcrumb, global search, user menu, and notification bell.
-  Global search uses hx-get with debounce to return results as an HTML partial.
-  Called by: app/templates/base.html (via include)
-  Depends on: Alpine.js, HTMX, app/routers/views.py (GET /search endpoint)
+  topbar.html — Top bar with breadcrumb, global search, and user name display.
+  Global search uses HTMX with debounce to return results as an HTML partial.
+  Called by: app/templates/base.html (via {% include %})
+  Depends on: Alpine.js, HTMX, /v2/partials/search/global endpoint
+  Context vars: user_name (str)
 #}
-<header class="topbar" x-data="{ userMenuOpen: false, searchFocused: false }">
-    <div class="topbar-left">
-        <nav class="breadcrumb" aria-label="Breadcrumb">
-            <ol>
-                <li><a href="/app" hx-boost="true">Home</a></li>
-                {% block breadcrumb %}{% endblock %}
-            </ol>
-        </nav>
-    </div>
+<header class="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b border-brand-200 bg-white px-4 sm:px-6"
+        x-data="{ searchOpen: false }">
 
-    <div class="topbar-center">
-        <div class="global-search" :class="{ 'focused': searchFocused }">
-            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-                 fill="none" stroke="currentColor" stroke-width="2" class="search-icon">
-                <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-            </svg>
-            <input type="search"
-                   name="q"
-                   placeholder="Search requisitions, companies, vendors..."
-                   autocomplete="off"
-                   class="search-input"
-                   hx-get="/search"
-                   hx-trigger="keyup changed delay:300ms"
-                   hx-target="#search-results"
-                   @focus="searchFocused = true"
-                   @blur="setTimeout(() => searchFocused = false, 200)"
-                   @keydown.escape="$el.blur(); searchFocused = false">
-            <div id="search-results" class="search-results-dropdown" x-show="searchFocused"></div>
-        </div>
-    </div>
+  {# Left: Breadcrumb (OOB swap target) #}
+  <div id="breadcrumb" class="flex items-center text-sm text-gray-600">
+    <span class="font-medium text-gray-900">Dashboard</span>
+  </div>
 
-    <div class="topbar-right">
-        <button class="topbar-icon-btn notification-bell" aria-label="Notifications">
-            <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24"
-                 fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                <path d="M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9"/>
-                <path d="M13.73 21a2 2 0 01-3.46 0"/>
-            </svg>
-        </button>
-
-        <div class="user-menu" x-data="{ open: false }">
-            <button @click="open = !open" class="user-menu-trigger" aria-label="User menu">
-                <span class="user-avatar">{{ user.name[0] if user and user.name else 'U' }}</span>
-                <span class="user-name">{{ user.name if user else 'User' }}</span>
-                <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24"
-                     fill="none" stroke="currentColor" stroke-width="2">
-                    <path d="M6 9l6 6 6-6"/>
-                </svg>
-            </button>
-            <div x-show="open" @click.outside="open = false" x-transition class="user-dropdown">
-                <a href="/settings" hx-boost="true" hx-target="#main-content" class="dropdown-item">Settings</a>
-                <a href="/auth/logout" class="dropdown-item">Sign Out</a>
-            </div>
-        </div>
+  {# Center/Right: Global search #}
+  <div class="relative mx-auto w-full max-w-md">
+    <div class="relative">
+      <svg xmlns="http://www.w3.org/2000/svg" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+           fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <circle cx="11" cy="11" r="8"/>
+        <path d="M21 21l-4.35-4.35"/>
+      </svg>
+      <input type="search"
+             name="q"
+             placeholder="Search requisitions, companies, vendors..."
+             autocomplete="off"
+             class="w-full rounded-lg border border-brand-200 bg-gray-50 py-2 pl-10 pr-4 text-sm text-gray-900 placeholder-gray-400 outline-none transition-colors focus:border-brand-400 focus:bg-white focus:ring-1 focus:ring-brand-400"
+             hx-get="/v2/partials/search/global"
+             hx-trigger="keyup changed delay:300ms"
+             hx-target="#global-search-results"
+             @focus="searchOpen = true"
+             @blur="setTimeout(() => searchOpen = false, 200)"
+             @keydown.escape="$el.blur(); searchOpen = false">
     </div>
+    <div id="global-search-results"
+         x-show="searchOpen" x-cloak
+         x-transition:enter="transition ease-out duration-100"
+         x-transition:enter-start="opacity-0 -translate-y-1"
+         x-transition:enter-end="opacity-100 translate-y-0"
+         x-transition:leave="transition ease-in duration-75"
+         x-transition:leave-start="opacity-100 translate-y-0"
+         x-transition:leave-end="opacity-0 -translate-y-1"
+         class="absolute left-0 right-0 top-full mt-1 max-h-80 overflow-y-auto rounded-lg border border-brand-200 bg-white shadow-lg">
+    </div>
+  </div>
+
+  {# Far right: User name #}
+  <div class="flex-shrink-0 text-sm font-medium text-gray-700">
+    {{ user_name or 'User' }}
+  </div>
 </header>
