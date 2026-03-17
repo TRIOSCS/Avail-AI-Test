@@ -3,7 +3,7 @@
 Handles query/filter parsing, pagination, and action validation
 for the server-rendered requisitions list.
 
-Called by: app/routers/requisitions2.py
+Called by: app/services/requisition_list_service.py
 Depends on: pydantic
 """
 

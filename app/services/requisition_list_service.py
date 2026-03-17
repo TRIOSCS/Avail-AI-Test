@@ -1,9 +1,9 @@
 """Service for querying the requisitions list with filters, search, sort, pagination.
 
 Reuses the proven 22-subquery pattern from app/routers/requisitions/core.py
-but exposed as a reusable service for the HTMX requisitions2 page.
+but exposed as a reusable service for the requisitions views.
 
-Called by: app/routers/requisitions2.py
+Called by: app/routers/htmx_views.py
 Depends on: app/models/sourcing.py, app/models/offers.py, SQLAlchemy
 """
 
@@ -499,7 +499,7 @@ def get_requisition_detail(
 def get_row_context(db: Session, req: Requisition, user) -> dict:
     """Build template context for a single row after inline edit.
 
-    Called by: app/routers/requisitions2.py (inline_save)
+    Called by: app/routers/htmx_views.py (inline_save)
     Depends on: Requisition model, User model
     """
     # Requirement count

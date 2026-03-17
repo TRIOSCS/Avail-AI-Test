@@ -313,9 +313,9 @@ Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrumen
 async def csp_middleware(request: Request, call_next):
     """Add Content-Security-Policy header.
 
-    'unsafe-inline' — needed for inline event handlers and <style> tags.
-    'unsafe-eval'   — required by Alpine.js which uses new Function() to evaluate
-                      x-data, x-show, @click and other directive expressions.
+    'unsafe-inline' — needed for inline event handlers and <style> tags. 'unsafe-eval' —
+    required by Alpine.js which uses new Function() to evaluate x-data, x-show, @click
+    and other directive expressions.
     """
     response = await call_next(request)
     csp = (
@@ -617,7 +617,6 @@ from .routers.proactive import router as proactive_router
 from .routers.prospect_pool import router as prospect_pool_router
 from .routers.prospect_suggested import router as prospect_suggested_router
 from .routers.requisitions import router as reqs_router
-from .routers.requisitions2 import router as rq2_router
 from .routers.rfq import router as rfq_router
 from .routers.sources import router as sources_router
 from .routers.strategic import router as strategic_router
@@ -652,7 +651,6 @@ app.include_router(proactive_router)
 app.include_router(prospect_pool_router)
 app.include_router(prospect_suggested_router)
 app.include_router(reqs_router)
-app.include_router(rq2_router)
 app.include_router(rfq_router)
 app.include_router(sources_router)
 app.include_router(strategic_router)
