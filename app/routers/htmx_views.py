@@ -130,8 +130,8 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/search", response_class=HTMLResponse)
 @router.get("/v2/vendors", response_class=HTMLResponse)
 @router.get("/v2/vendors/{vendor_id:int}", response_class=HTMLResponse)
-@router.get("/v2/companies", response_class=HTMLResponse)
-@router.get("/v2/companies/{company_id:int}", response_class=HTMLResponse)
+@router.get("/v2/customers", response_class=HTMLResponse)
+@router.get("/v2/customers/{company_id:int}", response_class=HTMLResponse)
 @router.get("/v2/buy-plans", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
 @router.get("/v2/quotes", response_class=HTMLResponse)
@@ -169,8 +169,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         current_view = "follow-ups"
     elif "/vendors" in path:
         current_view = "vendors"
-    elif "/companies" in path:
-        current_view = "companies"
+    elif "/customers" in path:
+        current_view = "customers"
     elif "/search" in path:
         current_view = "search"
     elif "/requisitions" in path:
@@ -193,10 +193,10 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         parts = path.split("/vendors/")
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/vendors/{parts[1]}"
-    elif current_view == "companies" and "/companies/" in path:
-        parts = path.split("/companies/")
+    elif current_view == "customers" and "/customers/" in path:
+        parts = path.split("/customers/")
         if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/companies/{parts[1]}"
+            partial_url = f"/v2/partials/customers/{parts[1]}"
     elif current_view == "buy-plans" and "/buy-plans/" in path:
         parts = path.split("/buy-plans/")
         if len(parts) > 1 and parts[1].isdigit():
@@ -3048,10 +3048,19 @@ async def vendor_prospect_delete(
     return HTMLResponse("")
 
 
-# ── Company partials ────────────────────────────────────────────────────
+# ── Company/Customer partials ──────────────────────────────────────────
+
+# Redirect old /v2/companies URLs to /v2/customers
+@router.get("/v2/companies", response_class=HTMLResponse)
+@router.get("/v2/companies/{path:path}", response_class=HTMLResponse)
+async def companies_redirect(request: Request, path: str = ""):
+    """Redirect old /v2/companies URLs to /v2/customers."""
+    from fastapi.responses import RedirectResponse
+    new_url = f"/v2/customers/{path}" if path else "/v2/customers"
+    return RedirectResponse(url=new_url, status_code=301)
 
 
-@router.get("/v2/partials/companies", response_class=HTMLResponse)
+@router.get("/v2/partials/customers", response_class=HTMLResponse)
 async def companies_list_partial(
     request: Request,
     search: str = "",
@@ -3070,15 +3079,15 @@ async def companies_list_partial(
     total = query.count()
     companies = query.order_by(Company.name).offset(offset).limit(limit).all()
 
-    ctx = _base_ctx(request, user, "companies")
+    ctx = _base_ctx(request, user, "customers")
     ctx.update({"companies": companies, "search": search, "total": total, "limit": limit, "offset": offset})
-    return templates.TemplateResponse("htmx/partials/companies/list.html", ctx)
+    return templates.TemplateResponse("htmx/partials/customers/list.html", ctx)
 
 
 # ── Sprint 4: Company CRUD (static routes — must precede {company_id}) ──
 
 
-@router.get("/v2/partials/companies/create-form", response_class=HTMLResponse)
+@router.get("/v2/partials/customers/create-form", response_class=HTMLResponse)
 async def company_create_form(
     request: Request,
     user: User = Depends(require_user),
@@ -3087,12 +3096,12 @@ async def company_create_form(
     """Return create company form."""
     users = db.query(User).filter(User.role.in_(("buyer", "trader", "manager", "admin"))).all()
     return templates.TemplateResponse(
-        "htmx/partials/companies/create_form.html",
+        "htmx/partials/customers/create_form.html",
         {"request": request, "users": users},
     )
 
 
-@router.post("/v2/partials/companies/create", response_class=HTMLResponse)
+@router.post("/v2/partials/customers/create", response_class=HTMLResponse)
 async def create_company(
     request: Request,
     user: User = Depends(require_user),
@@ -3136,7 +3145,7 @@ async def create_company(
     return await company_detail_partial(request=request, company_id=company.id, user=user, db=db)
 
 
-@router.get("/v2/partials/companies/typeahead", response_class=HTMLResponse)
+@router.get("/v2/partials/customers/typeahead", response_class=HTMLResponse)
 async def company_typeahead(
     request: Request,
     q: str = "",
@@ -3159,7 +3168,7 @@ async def company_typeahead(
     return HTMLResponse("\n".join(rows))
 
 
-@router.get("/v2/partials/companies/check-duplicate", response_class=HTMLResponse)
+@router.get("/v2/partials/customers/check-duplicate", response_class=HTMLResponse)
 async def check_company_duplicate(
     request: Request,
     name: str = "",
@@ -3185,7 +3194,7 @@ async def check_company_duplicate(
     return HTMLResponse("")
 
 
-@router.get("/v2/partials/companies/{company_id}", response_class=HTMLResponse)
+@router.get("/v2/partials/customers/{company_id}", response_class=HTMLResponse)
 async def company_detail_partial(
     request: Request,
     company_id: int,
@@ -3220,7 +3229,7 @@ async def company_detail_partial(
         or 0
     )
 
-    ctx = _base_ctx(request, user, "companies")
+    ctx = _base_ctx(request, user, "customers")
     ctx.update(
         {
             "company": company,
@@ -3229,10 +3238,10 @@ async def company_detail_partial(
             "user": user,
         }
     )
-    return templates.TemplateResponse("htmx/partials/companies/detail.html", ctx)
+    return templates.TemplateResponse("htmx/partials/customers/detail.html", ctx)
 
 
-@router.get("/v2/partials/companies/{company_id}/tab/{tab}", response_class=HTMLResponse)
+@router.get("/v2/partials/customers/{company_id}/tab/{tab}", response_class=HTMLResponse)
 async def company_tab(
     request: Request,
     company_id: int,
@@ -3259,11 +3268,11 @@ async def company_tab(
             .all()
         )
         users = db.query(User).order_by(User.name).all()
-        ctx = _base_ctx(request, user, "companies")
+        ctx = _base_ctx(request, user, "customers")
         ctx["company"] = company
         ctx["sites"] = sites
         ctx["users"] = users
-        return templates.TemplateResponse("htmx/partials/companies/tabs/sites_tab.html", ctx)
+        return templates.TemplateResponse("htmx/partials/customers/tabs/sites_tab.html", ctx)
 
     elif tab == "contacts":
         # Get all SiteContact records across all sites for this company
@@ -3436,7 +3445,7 @@ async def company_tab(
             .all()
         )
 
-        ctx = _base_ctx(request, user, "companies")
+        ctx = _base_ctx(request, user, "customers")
         ctx.update(
             {
                 "company": company,
@@ -3446,13 +3455,13 @@ async def company_tab(
                 "req_map": req_map,
             }
         )
-        return templates.TemplateResponse("htmx/partials/companies/tabs/activity_tab.html", ctx)
+        return templates.TemplateResponse("htmx/partials/customers/tabs/activity_tab.html", ctx)
 
 
 # ── Sites & Site Contacts CRUD (Phase 4) ───────────────────────────────
 
 
-@router.post("/v2/partials/companies/{company_id}/sites", response_class=HTMLResponse)
+@router.post("/v2/partials/customers/{company_id}/sites", response_class=HTMLResponse)
 async def create_site(
     request: Request,
     company_id: int,
@@ -3506,13 +3515,13 @@ async def create_site(
     if site.owner_id:
         _ = site.owner
 
-    ctx = _base_ctx(request, user, "companies")
+    ctx = _base_ctx(request, user, "customers")
     ctx["company"] = company
     ctx["s"] = site
-    return templates.TemplateResponse("htmx/partials/companies/tabs/site_card.html", ctx)
+    return templates.TemplateResponse("htmx/partials/customers/tabs/site_card.html", ctx)
 
 
-@router.delete("/v2/partials/companies/{company_id}/sites/{site_id}", response_class=HTMLResponse)
+@router.delete("/v2/partials/customers/{company_id}/sites/{site_id}", response_class=HTMLResponse)
 async def delete_site(
     request: Request,
     company_id: int,
@@ -3530,7 +3539,7 @@ async def delete_site(
 
 
 @router.get(
-    "/v2/partials/companies/{company_id}/sites/{site_id}/contacts",
+    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts",
     response_class=HTMLResponse,
 )
 async def site_contacts_list(
@@ -3552,15 +3561,15 @@ async def site_contacts_list(
         .all()
     )
     company = db.query(Company).filter(Company.id == company_id).first()
-    ctx = _base_ctx(request, user, "companies")
+    ctx = _base_ctx(request, user, "customers")
     ctx["site"] = site
     ctx["contacts"] = contacts
     ctx["company"] = company
-    return templates.TemplateResponse("htmx/partials/companies/tabs/site_contacts.html", ctx)
+    return templates.TemplateResponse("htmx/partials/customers/tabs/site_contacts.html", ctx)
 
 
 @router.post(
-    "/v2/partials/companies/{company_id}/sites/{site_id}/contacts",
+    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts",
     response_class=HTMLResponse,
 )
 async def create_site_contact(
@@ -3625,15 +3634,15 @@ async def create_site_contact(
         .all()
     )
     company = db.query(Company).filter(Company.id == company_id).first()
-    ctx = _base_ctx(request, user, "companies")
+    ctx = _base_ctx(request, user, "customers")
     ctx["site"] = site
     ctx["contacts"] = contacts
     ctx["company"] = company
-    return templates.TemplateResponse("htmx/partials/companies/tabs/site_contacts.html", ctx)
+    return templates.TemplateResponse("htmx/partials/customers/tabs/site_contacts.html", ctx)
 
 
 @router.delete(
-    "/v2/partials/companies/{company_id}/sites/{site_id}/contacts/{contact_id}",
+    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}",
     response_class=HTMLResponse,
 )
 async def delete_site_contact(
@@ -3656,7 +3665,7 @@ async def delete_site_contact(
 
 
 @router.post(
-    "/v2/partials/companies/{company_id}/sites/{site_id}/contacts/{contact_id}/primary",
+    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/primary",
     response_class=HTMLResponse,
 )
 async def set_primary_contact(
@@ -3692,17 +3701,17 @@ async def set_primary_contact(
     )
     site = db.query(CustomerSite).filter(CustomerSite.id == site_id).first()
     company = db.query(Company).filter(Company.id == company_id).first()
-    ctx = _base_ctx(request, user, "companies")
+    ctx = _base_ctx(request, user, "customers")
     ctx["site"] = site
     ctx["contacts"] = contacts
     ctx["company"] = company
-    return templates.TemplateResponse("htmx/partials/companies/tabs/site_contacts.html", ctx)
+    return templates.TemplateResponse("htmx/partials/customers/tabs/site_contacts.html", ctx)
 
 
 # ── Sprint 4: Company CRUD (parameterized routes) ──────────────────────
 
 
-@router.get("/v2/partials/companies/{company_id}/edit-form", response_class=HTMLResponse)
+@router.get("/v2/partials/customers/{company_id}/edit-form", response_class=HTMLResponse)
 async def company_edit_form(
     request: Request,
     company_id: int,
@@ -3715,12 +3724,12 @@ async def company_edit_form(
         raise HTTPException(404, "Company not found")
     users = db.query(User).filter(User.role.in_(("buyer", "trader", "manager", "admin"))).all()
     return templates.TemplateResponse(
-        "htmx/partials/companies/edit_form.html",
+        "htmx/partials/customers/edit_form.html",
         {"request": request, "company": company, "users": users},
     )
 
 
-@router.post("/v2/partials/companies/{company_id}/edit", response_class=HTMLResponse)
+@router.post("/v2/partials/customers/{company_id}/edit", response_class=HTMLResponse)
 async def edit_company(
     request: Request,
     company_id: int,
@@ -3755,7 +3764,7 @@ async def edit_company(
     return await company_detail_partial(request=request, company_id=company_id, user=user, db=db)
 
 
-@router.post("/v2/partials/companies/{company_id}/sites/{site_id}/edit", response_class=HTMLResponse)
+@router.post("/v2/partials/customers/{company_id}/sites/{site_id}/edit", response_class=HTMLResponse)
 async def edit_site(
     request: Request,
     company_id: int,
@@ -3782,7 +3791,7 @@ async def edit_site(
 
 
 @router.post(
-    "/v2/partials/companies/{company_id}/sites/{site_id}/contacts/{contact_id}/notes",
+    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/notes",
     response_class=HTMLResponse,
 )
 async def add_site_contact_note(
@@ -3831,7 +3840,7 @@ async def add_site_contact_note(
 
 
 @router.get(
-    "/v2/partials/companies/{company_id}/sites/{site_id}/contacts/{contact_id}/notes",
+    "/v2/partials/customers/{company_id}/sites/{site_id}/contacts/{contact_id}/notes",
     response_class=HTMLResponse,
 )
 async def get_site_contact_notes(
@@ -3867,7 +3876,7 @@ async def get_site_contact_notes(
     )
 
     return templates.TemplateResponse(
-        "htmx/partials/companies/contact_notes.html",
+        "htmx/partials/customers/contact_notes.html",
         {"request": request, "contact": contact, "notes": notes, "company_id": company_id, "site_id": site_id},
     )
 
@@ -4480,7 +4489,7 @@ async def vendor_insights_refresh(
     return _render_insights(request, user, insights, "vendors", vendor_id)
 
 
-@router.get("/v2/partials/companies/{company_id}/insights", response_class=HTMLResponse)
+@router.get("/v2/partials/customers/{company_id}/insights", response_class=HTMLResponse)
 async def company_insights_panel(
     request: Request,
     company_id: int,
@@ -4491,10 +4500,10 @@ async def company_insights_panel(
     from ..services.knowledge_service import get_cached_company_insights
 
     insights = get_cached_company_insights(db, company_id)
-    return _render_insights(request, user, insights, "companies", company_id)
+    return _render_insights(request, user, insights, "customers", company_id)
 
 
-@router.post("/v2/partials/companies/{company_id}/insights/refresh", response_class=HTMLResponse)
+@router.post("/v2/partials/customers/{company_id}/insights/refresh", response_class=HTMLResponse)
 async def company_insights_refresh(
     request: Request,
     company_id: int,
@@ -4509,7 +4518,7 @@ async def company_insights_refresh(
     except Exception as e:
         logger.warning(f"Insight generation failed for company {company_id}: {e}")
     insights = get_cached_company_insights(db, company_id)
-    return _render_insights(request, user, insights, "companies", company_id)
+    return _render_insights(request, user, insights, "customers", company_id)
 
 
 @router.get("/v2/partials/dashboard/pipeline-insights", response_class=HTMLResponse)
