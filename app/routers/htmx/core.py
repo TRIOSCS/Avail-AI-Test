@@ -38,12 +38,18 @@ from ._helpers import _base_ctx, _vite_assets, escape_like, router, templates
 @router.get("/strategic", response_class=HTMLResponse)
 async def htmx_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
+    from fastapi.responses import RedirectResponse
+
+    # Redirect /requisitions to the redesigned standalone page
+    path = request.url.path
+    if path in ("/requisitions", "/requisitions/"):
+        return RedirectResponse(url="/requisitions2", status_code=302)
+
     user = get_user(request, db)
     if not user:
         return templates.TemplateResponse("htmx/login.html", {"request": request, **_vite_assets()})
 
     # Determine which view to load based on URL path
-    path = request.url.path
     if "/buy-plans" in path:
         current_view = "buy-plans"
     elif "/quotes" in path:
