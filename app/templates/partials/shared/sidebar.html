@@ -40,10 +40,8 @@
       <p x-show="!$store.sidebar.collapsed" x-cloak
          class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-brand-400">Opportunity</p>
       <ul class="space-y-1">
-        {# Requisitions links to standalone /requisitions2 page (full nav, not HTMX partial) #}
         <li>
-          <a href="/requisitions2"
-             hx-boost="false"
+          <a href="/v2/requisitions"
              class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors
                     {{ 'bg-brand-900 text-white' if current_view == 'requisitions' else 'text-brand-200 hover:bg-brand-800 hover:text-white' }}">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none"
