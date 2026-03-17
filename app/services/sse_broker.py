@@ -4,7 +4,7 @@ Manages a set of connected SSE clients per channel. When a change
 event fires (e.g. requisition status change), all listeners on
 that channel receive a push notification.
 
-Called by: SSE endpoints for real-time updates
+Called by: app/routers/requisitions2.py (stream endpoint + action endpoints)
 Depends on: asyncio
 """
 
