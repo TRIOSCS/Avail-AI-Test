@@ -146,7 +146,6 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/follow-ups", response_class=HTMLResponse)
 async def v2_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
-    from fastapi.responses import RedirectResponse
 
     path = request.url.path
     user = get_user(request, db)
@@ -244,7 +243,7 @@ async def global_search(
             .all()
         )
     return templates.TemplateResponse(
-        "partials/shared/search_results.html",
+        "htmx/partials/shared/search_results.html",
         {**_base_ctx(request, user), "results": results, "query": q},
     )
 
@@ -369,7 +368,7 @@ async def requisition_create_form(
 ):
     """Return the create requisition modal form."""
     ctx = _base_ctx(request, user, "requisitions")
-    return templates.TemplateResponse("partials/requisitions/create_modal.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/create_modal.html", ctx)
 
 
 @router.get("/v2/partials/requisitions/{req_id}", response_class=HTMLResponse)
@@ -465,7 +464,7 @@ async def requisition_create(
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
-    response = templates.TemplateResponse("partials/requisitions/req_row.html", ctx)
+    response = templates.TemplateResponse("htmx/partials/requisitions/req_row.html", ctx)
     response.headers["HX-Trigger"] = "showToast"
     return response
 
@@ -501,7 +500,7 @@ async def add_requirement(
     ctx = _base_ctx(request, user, "requisitions")
     ctx["r"] = r
     ctx["req"] = req
-    return templates.TemplateResponse("partials/requisitions/tabs/req_row.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/tabs/req_row.html", ctx)
 
 
 @router.get("/v2/partials/requisitions/{req_id}/tab/{tab}", response_class=HTMLResponse)
@@ -529,7 +528,7 @@ async def requisition_tab(
         for r in requirements:
             r.sighting_count = len(r.sightings) if r.sightings else 0
         ctx["requirements"] = requirements
-        return templates.TemplateResponse("partials/requisitions/tabs/parts.html", ctx)
+        return templates.TemplateResponse("htmx/partials/requisitions/tabs/parts.html", ctx)
 
     elif tab == "offers":
         offers = (
@@ -544,14 +543,14 @@ async def requisition_tab(
         )
         ctx["offers"] = offers
         ctx["draft_quote"] = draft_quote
-        return templates.TemplateResponse("partials/requisitions/tabs/offers.html", ctx)
+        return templates.TemplateResponse("htmx/partials/requisitions/tabs/offers.html", ctx)
 
     elif tab == "quotes":
         quotes = (
             db.query(Quote).filter(Quote.requisition_id == req_id).order_by(Quote.created_at.desc().nullslast()).all()
         )
         ctx["quotes"] = quotes
-        return templates.TemplateResponse("partials/requisitions/tabs/quotes.html", ctx)
+        return templates.TemplateResponse("htmx/partials/requisitions/tabs/quotes.html", ctx)
 
     elif tab == "buy_plans":
         buy_plans = (
@@ -562,7 +561,7 @@ async def requisition_tab(
             .all()
         )
         ctx["buy_plans"] = buy_plans
-        return templates.TemplateResponse("partials/requisitions/tabs/buy_plans.html", ctx)
+        return templates.TemplateResponse("htmx/partials/requisitions/tabs/buy_plans.html", ctx)
 
     elif tab == "tasks":
         tasks = (
@@ -575,7 +574,7 @@ async def requisition_tab(
         users = db.query(User).order_by(User.name).all()
         ctx["tasks"] = tasks
         ctx["users"] = users
-        return templates.TemplateResponse("partials/requisitions/tabs/tasks.html", ctx)
+        return templates.TemplateResponse("htmx/partials/requisitions/tabs/tasks.html", ctx)
 
     elif tab == "responses":
         # Fetch vendor responses for this requisition
@@ -588,7 +587,7 @@ async def requisition_tab(
             .all()
         )
         ctx["responses"] = responses
-        return templates.TemplateResponse("partials/requisitions/tabs/responses.html", ctx)
+        return templates.TemplateResponse("htmx/partials/requisitions/tabs/responses.html", ctx)
 
     else:  # activity
         from ..models.intelligence import ActivityLog
@@ -609,7 +608,7 @@ async def requisition_tab(
         ctx["contacts"] = contacts
         ctx["activities"] = activities
         ctx["req"] = req
-        return templates.TemplateResponse("partials/requisitions/tabs/activity.html", ctx)
+        return templates.TemplateResponse("htmx/partials/requisitions/tabs/activity.html", ctx)
 
 
 # ── AI Parsing in Requisition Offers (Phase 3B) ───────────────────────
@@ -628,7 +627,7 @@ async def parse_email_form(
         raise HTTPException(404, "Requisition not found")
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
-    return templates.TemplateResponse("partials/requisitions/tabs/parse_email_form.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/tabs/parse_email_form.html", ctx)
 
 
 @router.get("/v2/partials/requisitions/{req_id}/paste-offer-form", response_class=HTMLResponse)
@@ -644,7 +643,7 @@ async def paste_offer_form(
         raise HTTPException(404, "Requisition not found")
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
-    return templates.TemplateResponse("partials/requisitions/tabs/paste_offer_form.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/tabs/paste_offer_form.html", ctx)
 
 
 @router.post("/v2/partials/requisitions/{req_id}/parse-email", response_class=HTMLResponse)
@@ -697,7 +696,7 @@ async def parse_email_action(
             f"Parse failed: {exc}</div>"
         )
 
-    return templates.TemplateResponse("partials/requisitions/tabs/parsed_email_results.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/tabs/parsed_email_results.html", ctx)
 
 
 @router.post("/v2/partials/requisitions/{req_id}/parse-offer", response_class=HTMLResponse)
@@ -741,7 +740,7 @@ async def parse_offer_action(
             f"Parse failed: {exc}</div>"
         )
 
-    return templates.TemplateResponse("partials/requisitions/tabs/parsed_offer_results.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/tabs/parsed_offer_results.html", ctx)
 
 
 @router.post("/v2/partials/requisitions/{req_id}/save-parsed-offers", response_class=HTMLResponse)
@@ -848,7 +847,7 @@ async def save_parsed_offers(
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
     ctx["saved_count"] = saved_count
-    return templates.TemplateResponse("partials/requisitions/tabs/parse_save_success.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/tabs/parse_save_success.html", ctx)
 
 
 def _safe_int(val) -> int | None:
@@ -957,9 +956,7 @@ async def requisition_inline_edit_cell(
     users = db.query(User).order_by(User.name).all() if field == "owner" else []
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update({"req": req, "field": field, "users": users, "context": context})
-    return templates.TemplateResponse(
-        "htmx/partials/requisitions/inline_cell.html", ctx
-    )
+    return templates.TemplateResponse("htmx/partials/requisitions/inline_cell.html", ctx)
 
 
 @router.patch("/v2/partials/requisitions/{req_id}/inline", response_class=HTMLResponse)
@@ -974,8 +971,8 @@ async def requisition_inline_save(
 ):
     """Save an inline edit and return the updated element.
 
-    For context='row', returns the full table row.
-    For context='header', returns the updated header card.
+    For context='row', returns the full table row. For context='header', returns the
+    updated header card.
     """
     from ..dependencies import get_req_for_user
 
@@ -1034,9 +1031,7 @@ async def requisition_inline_save(
         users = db.query(User).order_by(User.name).all()
         ctx = _base_ctx(request, user, "requisitions")
         ctx.update({"req": req, "requirements": requirements, "users": users})
-        response = templates.TemplateResponse(
-            "htmx/partials/requisitions/detail_header.html", ctx
-        )
+        response = templates.TemplateResponse("htmx/partials/requisitions/detail_header.html", ctx)
     else:
         # Row context — re-fetch ORM object with relationships
         req = (
@@ -1053,9 +1048,7 @@ async def requisition_inline_save(
         req.offer_count = len(req.offers) if req.offers else 0
         ctx = _base_ctx(request, user, "requisitions")
         ctx.update({"req": req, "user_role": getattr(user, "role", "sales"), "user": user})
-        response = templates.TemplateResponse(
-            "partials/requisitions/req_row.html", ctx
-        )
+        response = templates.TemplateResponse("htmx/partials/requisitions/req_row.html", ctx)
 
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
     return response
@@ -1069,7 +1062,8 @@ async def requisition_row_action(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Execute a row-level action (archive, activate, claim, unclaim, won, lost, clone)."""
+    """Execute a row-level action (archive, activate, claim, unclaim, won, lost,
+    clone)."""
     from ..dependencies import get_req_for_user
 
     valid_actions = {"archive", "activate", "claim", "unclaim", "won", "lost", "clone"}
@@ -1118,9 +1112,19 @@ async def requisition_row_action(
     return_format = form.get("return", "list")
     if return_format == "list":
         response = await requisitions_list_partial(
-            request=request, q="", status="", owner=0, urgency="",
-            date_from="", date_to="", sort="created_at", dir="desc",
-            limit=50, offset=0, user=user, db=db,
+            request=request,
+            q="",
+            status="",
+            owner=0,
+            urgency="",
+            date_from="",
+            date_to="",
+            sort="created_at",
+            dir="desc",
+            limit=50,
+            offset=0,
+            user=user,
+            db=db,
         )
     else:
         response = HTMLResponse("")
@@ -1260,7 +1264,7 @@ async def add_offer_form(
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
     ctx["requirements"] = requirements
-    return templates.TemplateResponse("partials/requisitions/add_offer_form.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/add_offer_form.html", ctx)
 
 
 @router.post("/v2/partials/requisitions/{req_id}/add-offer", response_class=HTMLResponse)
@@ -1357,7 +1361,7 @@ async def edit_offer_form(
         raise HTTPException(404, "Offer not found")
     requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
     return templates.TemplateResponse(
-        "partials/requisitions/edit_offer_form.html",
+        "htmx/partials/requisitions/edit_offer_form.html",
         {"request": request, "offer": offer, "req_id": req_id, "requirements": requirements},
     )
 
@@ -1485,7 +1489,7 @@ async def offer_review_queue(
     """Render the offer review queue page — medium-confidence AI-parsed offers."""
     offers = db.query(Offer).filter(Offer.status == "pending_review").order_by(Offer.created_at.desc()).limit(100).all()
     return templates.TemplateResponse(
-        "partials/offers/review_queue.html",
+        "htmx/partials/offers/review_queue.html",
         {"request": request, "offers": offers, "user": user},
     )
 
@@ -1560,7 +1564,7 @@ async def offer_changelog(
         .all()
     )
     return templates.TemplateResponse(
-        "partials/offers/changelog.html",
+        "htmx/partials/offers/changelog.html",
         {"request": request, "offer": offer, "changes": rows},
     )
 
@@ -1661,7 +1665,7 @@ async def rfq_compose(
     ctx["req"] = req
     ctx["parts"] = parts
     ctx["vendors"] = vendors
-    return templates.TemplateResponse("partials/requisitions/rfq_compose.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/rfq_compose.html", ctx)
 
 
 @router.post("/v2/partials/requisitions/{req_id}/ai-draft-rfq", response_class=HTMLResponse)
@@ -1701,7 +1705,7 @@ async def ai_draft_rfq(
         logger.error(f"AI draft RFQ error for req {req_id}: {exc}")
         ctx["draft_body"] = ""
 
-    return templates.TemplateResponse("partials/requisitions/rfq_draft_result.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/rfq_draft_result.html", ctx)
 
 
 @router.post("/v2/partials/requisitions/{req_id}/rfq-send", response_class=HTMLResponse)
@@ -1831,7 +1835,7 @@ async def rfq_send(
     ctx["failed_results"] = failed
     ctx["total_sent"] = len(sent)
     ctx["total_failed"] = len(failed)
-    return templates.TemplateResponse("partials/requisitions/rfq_results.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/rfq_results.html", ctx)
 
 
 # ── Follow-ups & Response Review (Phase 6) ───────────────────────────
@@ -1999,7 +2003,7 @@ async def review_response_htmx(
     ctx = _base_ctx(request, user, "requisitions")
     ctx["r"] = vr
     ctx["req"] = req
-    return templates.TemplateResponse("partials/requisitions/tabs/response_card.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/tabs/response_card.html", ctx)
 
 
 @router.post("/v2/partials/requisitions/{req_id}/poll-inbox", response_class=HTMLResponse)
@@ -2079,7 +2083,7 @@ async def update_requirement(
     ctx = _base_ctx(request, user, "requisitions")
     ctx["r"] = item
     ctx["req"] = req
-    return templates.TemplateResponse("partials/requisitions/tabs/req_row.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/tabs/req_row.html", ctx)
 
 
 # ── Search partials ─────────────────────────────────────────────────────
@@ -2093,7 +2097,7 @@ async def search_form_partial(
 ):
     """Return the search form partial."""
     ctx = _base_ctx(request, user, "search")
-    return templates.TemplateResponse("partials/search/form.html", ctx)
+    return templates.TemplateResponse("htmx/partials/search/form.html", ctx)
 
 
 @router.post("/v2/partials/search/run", response_class=HTMLResponse)
@@ -2192,7 +2196,7 @@ async def search_run(
             "source_errors": source_errors,
         }
     )
-    return templates.TemplateResponse("partials/search/results.html", ctx)
+    return templates.TemplateResponse("htmx/partials/search/results.html", ctx)
 
 
 @router.get("/v2/partials/search/lead-detail", response_class=HTMLResponse)
@@ -2307,7 +2311,7 @@ async def search_lead_detail(
             "material_card_id": material_card_id,
         }
     )
-    return templates.TemplateResponse("partials/search/lead_detail.html", ctx)
+    return templates.TemplateResponse("htmx/partials/search/lead_detail.html", ctx)
 
 
 # ── Vendor partials ─────────────────────────────────────────────────────
@@ -2508,7 +2512,7 @@ async def vendor_tab(
         )
         ctx["contacts"] = contacts
         ctx["vendor"] = vendor
-        return templates.TemplateResponse("partials/vendors/tabs/contacts.html", ctx)
+        return templates.TemplateResponse("htmx/partials/vendors/tabs/contacts.html", ctx)
 
     elif tab == "find_contacts":
         prospects = (
@@ -2642,7 +2646,7 @@ async def vendor_edit_form(
     if not vendor:
         raise HTTPException(404, "Vendor not found")
     return templates.TemplateResponse(
-        "partials/vendors/edit_vendor_form.html",
+        "htmx/partials/vendors/edit_vendor_form.html",
         {"request": request, "vendor": vendor},
     )
 
@@ -2738,7 +2742,7 @@ async def contact_timeline(
     )
 
     return templates.TemplateResponse(
-        "partials/vendors/contact_timeline.html",
+        "htmx/partials/vendors/contact_timeline.html",
         {"request": request, "contact": contact, "activities": activities, "vendor_id": vendor_id},
     )
 
@@ -2770,7 +2774,7 @@ async def vendor_contact_nudges(
             if last < cutoff:
                 nudges.append(c)
     return templates.TemplateResponse(
-        "partials/vendors/contact_nudges.html",
+        "htmx/partials/vendors/contact_nudges.html",
         {"request": request, "nudges": nudges, "vendor": vendor},
     )
 
@@ -2798,7 +2802,7 @@ async def vendor_reviews(
         .all()
     )
     return templates.TemplateResponse(
-        "partials/vendors/reviews.html",
+        "htmx/partials/vendors/reviews.html",
         {"request": request, "reviews": reviews, "vendor": vendor, "user": user},
     )
 
@@ -3083,7 +3087,7 @@ async def company_create_form(
     """Return create company form."""
     users = db.query(User).filter(User.role.in_(("buyer", "trader", "manager", "admin"))).all()
     return templates.TemplateResponse(
-        "partials/companies/create_form.html",
+        "htmx/partials/companies/create_form.html",
         {"request": request, "users": users},
     )
 
@@ -3259,7 +3263,7 @@ async def company_tab(
         ctx["company"] = company
         ctx["sites"] = sites
         ctx["users"] = users
-        return templates.TemplateResponse("partials/companies/tabs/sites_tab.html", ctx)
+        return templates.TemplateResponse("htmx/partials/companies/tabs/sites_tab.html", ctx)
 
     elif tab == "contacts":
         # Get all SiteContact records across all sites for this company
@@ -3442,7 +3446,7 @@ async def company_tab(
                 "req_map": req_map,
             }
         )
-        return templates.TemplateResponse("partials/companies/tabs/activity_tab.html", ctx)
+        return templates.TemplateResponse("htmx/partials/companies/tabs/activity_tab.html", ctx)
 
 
 # ── Sites & Site Contacts CRUD (Phase 4) ───────────────────────────────
@@ -3505,7 +3509,7 @@ async def create_site(
     ctx = _base_ctx(request, user, "companies")
     ctx["company"] = company
     ctx["s"] = site
-    return templates.TemplateResponse("partials/companies/tabs/site_card.html", ctx)
+    return templates.TemplateResponse("htmx/partials/companies/tabs/site_card.html", ctx)
 
 
 @router.delete("/v2/partials/companies/{company_id}/sites/{site_id}", response_class=HTMLResponse)
@@ -3552,7 +3556,7 @@ async def site_contacts_list(
     ctx["site"] = site
     ctx["contacts"] = contacts
     ctx["company"] = company
-    return templates.TemplateResponse("partials/companies/tabs/site_contacts.html", ctx)
+    return templates.TemplateResponse("htmx/partials/companies/tabs/site_contacts.html", ctx)
 
 
 @router.post(
@@ -3625,7 +3629,7 @@ async def create_site_contact(
     ctx["site"] = site
     ctx["contacts"] = contacts
     ctx["company"] = company
-    return templates.TemplateResponse("partials/companies/tabs/site_contacts.html", ctx)
+    return templates.TemplateResponse("htmx/partials/companies/tabs/site_contacts.html", ctx)
 
 
 @router.delete(
@@ -3692,7 +3696,7 @@ async def set_primary_contact(
     ctx["site"] = site
     ctx["contacts"] = contacts
     ctx["company"] = company
-    return templates.TemplateResponse("partials/companies/tabs/site_contacts.html", ctx)
+    return templates.TemplateResponse("htmx/partials/companies/tabs/site_contacts.html", ctx)
 
 
 # ── Sprint 4: Company CRUD (parameterized routes) ──────────────────────
@@ -3711,7 +3715,7 @@ async def company_edit_form(
         raise HTTPException(404, "Company not found")
     users = db.query(User).filter(User.role.in_(("buyer", "trader", "manager", "admin"))).all()
     return templates.TemplateResponse(
-        "partials/companies/edit_form.html",
+        "htmx/partials/companies/edit_form.html",
         {"request": request, "company": company, "users": users},
     )
 
@@ -3863,7 +3867,7 @@ async def get_site_contact_notes(
     )
 
     return templates.TemplateResponse(
-        "partials/companies/contact_notes.html",
+        "htmx/partials/companies/contact_notes.html",
         {"request": request, "contact": contact, "notes": notes, "company_id": company_id, "site_id": site_id},
     )
 
@@ -3884,7 +3888,7 @@ async def preview_quote(
         raise HTTPException(404, "Quote not found")
 
     return templates.TemplateResponse(
-        "partials/quotes/preview.html",
+        "htmx/partials/quotes/preview.html",
         {"request": request, "quote": quote},
     )
 
@@ -3986,7 +3990,7 @@ async def pricing_history(
     )
 
     return templates.TemplateResponse(
-        "partials/quotes/pricing_history.html",
+        "htmx/partials/quotes/pricing_history.html",
         {"request": request, "offers": offers, "mpn": mpn},
     )
 
@@ -4086,7 +4090,7 @@ async def rfq_prepare_panel(
         )
 
     return templates.TemplateResponse(
-        "partials/requisitions/rfq_prepare.html",
+        "htmx/partials/requisitions/rfq_prepare.html",
         {"request": request, "req": req, "vendors": vendors, "mpns": mpns, "total_contacted": len(contacted_norms)},
     )
 
@@ -4139,7 +4143,7 @@ async def log_phone_call(
     logger.info("Phone call logged for req {} vendor {} by {}", req_id, vendor_name, user.email)
 
     return templates.TemplateResponse(
-        "partials/requisitions/phone_log_success.html",
+        "htmx/partials/requisitions/phone_log_success.html",
         {"request": request, "vendor_name": vendor_name, "vendor_phone": vendor_phone},
     )
 
@@ -4177,7 +4181,7 @@ async def send_batch_follow_up(
     logger.info("Batch follow-up: {} contacts marked by {}", sent_count, user.email)
 
     return templates.TemplateResponse(
-        "partials/follow_ups/batch_result.html",
+        "htmx/partials/follow_ups/batch_result.html",
         {"request": request, "sent_count": sent_count},
     )
 
@@ -4242,7 +4246,7 @@ async def update_response_status(
     logger.info("Response {} status → {} by {}", response_id, new_status, user.email)
 
     return templates.TemplateResponse(
-        "partials/requisitions/response_status_badge.html",
+        "htmx/partials/requisitions/response_status_badge.html",
         {"request": request, "response": vr},
     )
 
@@ -4273,7 +4277,7 @@ async def email_thread_viewer(
         error = f"Could not load thread: {str(exc)[:100]}"
 
     return templates.TemplateResponse(
-        "partials/emails/thread_viewer.html",
+        "htmx/partials/emails/thread_viewer.html",
         {"request": request, "messages": messages, "conversation_id": conversation_id, "error": error},
     )
 
@@ -4321,7 +4325,7 @@ async def send_email_reply(
         error = f"Send failed: {str(exc)[:100]}"
 
     return templates.TemplateResponse(
-        "partials/emails/reply_result.html",
+        "htmx/partials/emails/reply_result.html",
         {"request": request, "to": to, "error": error, "conversation_id": conversation_id},
     )
 
@@ -4351,7 +4355,7 @@ async def email_thread_summary(
         error = f"Summary failed: {str(exc)[:100]}"
 
     return templates.TemplateResponse(
-        "partials/emails/thread_summary.html",
+        "htmx/partials/emails/thread_summary.html",
         {"request": request, "summary": summary, "error": error},
     )
 
@@ -4371,7 +4375,7 @@ async def email_intelligence_partial(
     dashboard = get_email_intelligence_dashboard(db, user.id, days=7)
 
     return templates.TemplateResponse(
-        "partials/emails/intelligence_dashboard.html",
+        "htmx/partials/emails/intelligence_dashboard.html",
         {"request": request, "items": items, "dashboard": dashboard, "classification": classification},
     )
 
@@ -4409,7 +4413,7 @@ def _render_insights(request, user, insights, entity_type, entity_id):
     ctx["insights"] = insights
     ctx["entity_type"] = entity_type
     ctx["entity_id"] = entity_id
-    return templates.TemplateResponse("partials/shared/insights_panel.html", ctx)
+    return templates.TemplateResponse("htmx/partials/shared/insights_panel.html", ctx)
 
 
 @router.get("/v2/partials/requisitions/{req_id}/insights", response_class=HTMLResponse)
@@ -5139,7 +5143,7 @@ async def sourcing_results_partial(
             "f_sort": sort,
         }
     )
-    return templates.TemplateResponse("partials/sourcing/results.html", ctx)
+    return templates.TemplateResponse("htmx/partials/sourcing/results.html", ctx)
 
 
 @router.get("/v2/partials/sourcing/leads/{lead_id}", response_class=HTMLResponse)
@@ -5209,7 +5213,7 @@ async def lead_detail_partial(
             "best_sighting": best_sighting,
         }
     )
-    return templates.TemplateResponse("partials/sourcing/lead_detail.html", ctx)
+    return templates.TemplateResponse("htmx/partials/sourcing/lead_detail.html", ctx)
 
 
 @router.post("/v2/partials/sourcing/leads/{lead_id}/status", response_class=HTMLResponse)
@@ -5274,7 +5278,7 @@ async def lead_status_update(
             }
         ctx = _base_ctx(request, user, "requisitions")
         ctx.update({"lead": lead, "lead_sighting_data": lead_sighting_data, "selected_lead_id": 0})
-        return templates.TemplateResponse("partials/sourcing/lead_row.html", ctx)
+        return templates.TemplateResponse("htmx/partials/sourcing/lead_row.html", ctx)
 
     # Default: card view (results grid)
     best_sighting = (
@@ -5295,7 +5299,7 @@ async def lead_status_update(
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update({"lead": lead, "lead_sighting_data": lead_sighting_data})
-    return templates.TemplateResponse("partials/sourcing/lead_card.html", ctx)
+    return templates.TemplateResponse("htmx/partials/sourcing/lead_card.html", ctx)
 
 
 @router.post("/v2/partials/sourcing/leads/{lead_id}/feedback", response_class=HTMLResponse)
@@ -5363,9 +5367,9 @@ async def sourcing_workspace_partial(
 ):
     """Return sourcing workspace split-panel layout.
 
-    Reuses the same filtering/sorting logic as sourcing_results_partial but
-    renders lead rows in a split-panel instead of card grid. Optional lead=ID
-    param pre-selects a lead in the right panel.
+    Reuses the same filtering/sorting logic as sourcing_results_partial but renders lead
+    rows in a split-panel instead of card grid. Optional lead=ID param pre-selects a
+    lead in the right panel.
     """
     from ..models.sourcing_lead import SourcingLead
 
@@ -5456,7 +5460,7 @@ async def sourcing_workspace_partial(
             "selected_lead_id": lead if lead else 0,
         }
     )
-    return templates.TemplateResponse("partials/sourcing/workspace.html", ctx)
+    return templates.TemplateResponse("htmx/partials/sourcing/workspace.html", ctx)
 
 
 @router.get("/v2/partials/sourcing/{requirement_id}/workspace-list", response_class=HTMLResponse)
@@ -5477,8 +5481,8 @@ async def sourcing_workspace_list_partial(
 ):
     """Return just the lead list rows for the workspace left panel.
 
-    Used when filters change — swaps only #lead-list-content without
-    touching the right panel or overall layout.
+    Used when filters change — swaps only #lead-list-content without touching the right
+    panel or overall layout.
     """
     from ..models.sourcing_lead import SourcingLead
 
@@ -5573,9 +5577,7 @@ async def sourcing_workspace_list_partial(
     html_parts = []
     if leads:
         for ld in leads:
-            rendered = templates.get_template("partials/sourcing/lead_row.html").render(
-                {**ctx, "lead": ld}
-            )
+            rendered = templates.get_template("htmx/partials/sourcing/lead_row.html").render({**ctx, "lead": ld})
             html_parts.append(rendered)
     else:
         html_parts.append(
@@ -5595,9 +5597,9 @@ async def lead_panel_partial(
 ):
     """Return condensed lead detail for workspace right panel.
 
-    Same data as lead_detail_partial but uses lead_panel.html template
-    (no breadcrumb, collapsible sections, denser layout). Includes OOB
-    swap of the lead row in the left panel for highlight update.
+    Same data as lead_detail_partial but uses lead_panel.html template (no breadcrumb,
+    collapsible sections, denser layout). Includes OOB swap of the lead row in the left
+    panel for highlight update.
     """
     from ..models.sourcing_lead import LeadEvidence, SourcingLead
     from ..services.sourcing_leads import _source_category
@@ -5653,7 +5655,7 @@ async def lead_panel_partial(
             "best_sighting": best_sighting,
         }
     )
-    return templates.TemplateResponse("partials/sourcing/lead_panel.html", ctx)
+    return templates.TemplateResponse("htmx/partials/sourcing/lead_panel.html", ctx)
 
 
 # ── Materials partials ────────────────────────────────────────────────
@@ -6230,7 +6232,7 @@ async def prospecting_stats(
     )
 
     return templates.TemplateResponse(
-        "partials/prospecting/stats.html",
+        "htmx/partials/prospecting/stats.html",
         {"request": request, "total": total, "buyer_ready": buyer_ready},
     )
 
@@ -6605,7 +6607,7 @@ async def proactive_draft(
         )
 
     return templates.TemplateResponse(
-        "partials/proactive/draft_form.html",
+        "htmx/partials/proactive/draft_form.html",
         {"request": request, "match": match, "draft_subject": draft_subject, "draft_body": draft_body},
     )
 
@@ -6637,7 +6639,7 @@ async def proactive_send(
     logger.info("Proactive match {} sent by {}", match_id, user.email)
 
     return templates.TemplateResponse(
-        "partials/proactive/send_success.html",
+        "htmx/partials/proactive/send_success.html",
         {"request": request, "match": match},
     )
 
@@ -6661,7 +6663,7 @@ async def proactive_convert(
 
         result = convert_proactive_offer(db, offer, user)
         return templates.TemplateResponse(
-            "partials/proactive/convert_success.html",
+            "htmx/partials/proactive/convert_success.html",
             {"request": request, "offer": offer, "result": result},
         )
     except (ImportError, RuntimeError, Exception) as exc:
@@ -6684,7 +6686,7 @@ async def proactive_scorecard(
         stats = {"total_sent": 0, "total_converted": 0, "conversion_rate": 0, "total_revenue": 0}
 
     return templates.TemplateResponse(
-        "partials/proactive/scorecard.html",
+        "htmx/partials/proactive/scorecard.html",
         {"request": request, "stats": stats},
     )
 
@@ -6758,7 +6760,7 @@ async def enrich_material(
 
     # Placeholder enrichment — in production this would call AI service
     return templates.TemplateResponse(
-        "partials/materials/enrich_result.html",
+        "htmx/partials/materials/enrich_result.html",
         {"request": request, "material": mc},
     )
 
@@ -6791,7 +6793,7 @@ async def material_insights(
     )
 
     return templates.TemplateResponse(
-        "partials/materials/insights.html",
+        "htmx/partials/materials/insights.html",
         {"request": request, "material": mc, "offers": offers},
     )
 
@@ -6813,7 +6815,7 @@ async def knowledge_list(
     entries = query.order_by(KnowledgeEntry.created_at.desc()).limit(50).all()
 
     return templates.TemplateResponse(
-        "partials/knowledge/list.html",
+        "htmx/partials/knowledge/list.html",
         {"request": request, "entries": entries, "q": q},
     )
 
@@ -6863,7 +6865,7 @@ async def admin_api_health(
         health = {"connectors": [], "overall_status": "unknown"}
 
     return templates.TemplateResponse(
-        "partials/admin/api_health.html",
+        "htmx/partials/admin/api_health.html",
         {"request": request, "health": health},
     )
 
@@ -6928,7 +6930,7 @@ async def admin_data_ops(
     material_count = db.query(sqlfunc.count(MaterialCard.id)).scalar() or 0
 
     return templates.TemplateResponse(
-        "partials/admin/data_ops.html",
+        "htmx/partials/admin/data_ops.html",
         {
             "request": request,
             "vendor_count": vendor_count,
@@ -7018,8 +7020,17 @@ async def strategic_drop(
 
 # Default columns shown when user has no saved preference
 _DEFAULT_PARTS_COLUMNS = [
-    "mpn", "brand", "qty", "target_price", "status",
-    "requisition", "customer", "offers", "best_price", "owner", "created",
+    "mpn",
+    "brand",
+    "qty",
+    "target_price",
+    "status",
+    "requisition",
+    "customer",
+    "offers",
+    "best_price",
+    "owner",
+    "created",
 ]
 
 # All available columns for the column picker
@@ -7121,9 +7132,7 @@ async def parts_list_partial(
             db.query(
                 Offer.requirement_id,
                 sqlfunc.count(Offer.id).label("cnt"),
-                sqlfunc.min(
-                    case((Offer.status == "active", Offer.unit_price), else_=None)
-                ).label("best"),
+                sqlfunc.min(case((Offer.status == "active", Offer.unit_price), else_=None)).label("best"),
             )
             .filter(Offer.requirement_id.in_(req_ids))
             .group_by(Offer.requirement_id)
@@ -7139,28 +7148,30 @@ async def parts_list_partial(
     users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
 
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({
-        "requirements": requirements,
-        "offer_stats": offer_stats,
-        "q": q,
-        "requisition_name": requisition_name,
-        "customer": customer,
-        "brand": brand,
-        "status": status,
-        "owner": owner,
-        "date_from": date_from,
-        "date_to": date_to,
-        "include_archived": include_archived,
-        "sort": sort,
-        "dir": dir,
-        "offset": offset,
-        "limit": limit,
-        "total": total,
-        "users": users_list,
-        "visible_cols": visible_cols,
-        "all_columns": _ALL_PARTS_COLUMNS,
-        "user_role": user.role,
-    })
+    ctx.update(
+        {
+            "requirements": requirements,
+            "offer_stats": offer_stats,
+            "q": q,
+            "requisition_name": requisition_name,
+            "customer": customer,
+            "brand": brand,
+            "status": status,
+            "owner": owner,
+            "date_from": date_from,
+            "date_to": date_to,
+            "include_archived": include_archived,
+            "sort": sort,
+            "dir": dir,
+            "offset": offset,
+            "limit": limit,
+            "total": total,
+            "users": users_list,
+            "visible_cols": visible_cols,
+            "all_columns": _ALL_PARTS_COLUMNS,
+            "user_role": user.role,
+        }
+    )
     return templates.TemplateResponse("htmx/partials/parts/list.html", ctx)
 
 
@@ -7196,12 +7207,7 @@ async def part_tab_offers(
     if not req:
         raise HTTPException(404, "Part not found")
 
-    offers = (
-        db.query(Offer)
-        .filter(Offer.requirement_id == requirement_id)
-        .order_by(Offer.created_at.desc())
-        .all()
-    )
+    offers = db.query(Offer).filter(Offer.requirement_id == requirement_id).order_by(Offer.created_at.desc()).all()
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update({"requirement": req, "offers": offers})
@@ -7276,10 +7282,7 @@ async def part_tab_comms(
         .options(joinedload(RequisitionTask.assignee), joinedload(RequisitionTask.creator))
         .filter(
             (RequisitionTask.requisition_id == req.requisition_id)
-            & (
-                (RequisitionTask.requirement_id == requirement_id)
-                | (RequisitionTask.requirement_id.is_(None))
-            )
+            & ((RequisitionTask.requirement_id == requirement_id) | (RequisitionTask.requirement_id.is_(None)))
         )
         .order_by(
             RequisitionTask.status.asc(),  # pending before done
