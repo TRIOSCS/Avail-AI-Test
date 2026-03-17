@@ -4,10 +4,12 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}AvailAI{% endblock %}</title>
+  <link rel="stylesheet" href="/static/styles.css">
+  <link rel="stylesheet" href="/static/htmx_mobile.css">
   {% for css_file in vite_css|default([]) %}
   <link rel="stylesheet" href="/static/{{ css_file }}">
   {% endfor %}
-  <script type="module" src="/static/{{ vite_js|default('assets/htmx_app.js') }}"></script>
+  <script type="module" src="/static/{{ vite_js|default('htmx_app.js') }}"></script>
   <style>
     [x-cloak] { display: none !important; }
     .htmx-indicator { display: none; }
