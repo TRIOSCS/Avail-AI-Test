@@ -198,7 +198,7 @@ def test_sourcing_sort_options(client, db_session, sample_requisition_with_leads
 def test_sourcing_full_page(client, db_session, sample_requisition_with_leads):
     """GET /sourcing/{req_id} returns a 200 page (login or base_page)."""
     req_id = sample_requisition_with_leads.id
-    resp = client.get(f"/sourcing/{req_id}")
+    resp = client.get(f"/v2/sourcing/{req_id}")
     assert resp.status_code == 200
     # Full page uses get_user (session cookie), so in tests returns login or base_page
     assert "AvailAI" in resp.text
@@ -225,7 +225,7 @@ def test_lead_detail_not_found(client):
 
 def test_lead_detail_full_page(client, db_session, sample_lead):
     """GET /sourcing/leads/{id} returns a 200 page (login or base_page)."""
-    resp = client.get(f"/sourcing/leads/{sample_lead.id}")
+    resp = client.get(f"/v2/sourcing/leads/{sample_lead.id}")
     assert resp.status_code == 200
     # Full page uses get_user (session cookie), so in tests returns login or base_page
     assert "AvailAI" in resp.text

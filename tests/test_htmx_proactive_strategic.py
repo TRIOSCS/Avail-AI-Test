@@ -17,7 +17,7 @@ class TestProactivePages:
     """Test Proactive Part Match HTMX views."""
 
     def test_v2_proactive_full_page(self, client: TestClient):
-        resp = client.get("/proactive")
+        resp = client.get("/v2/proactive")
         assert resp.status_code == 200
         assert "AvailAI" in resp.text
 
@@ -69,7 +69,7 @@ class TestStrategicPages:
     """Test My Vendors (Strategic) HTMX views."""
 
     def test_v2_strategic_full_page(self, client: TestClient):
-        resp = client.get("/strategic")
+        resp = client.get("/v2/strategic")
         assert resp.status_code == 200
         assert "AvailAI" in resp.text
 

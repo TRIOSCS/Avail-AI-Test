@@ -189,14 +189,14 @@ class TestFullPageLoad:
     def test_buy_plans_full_page(self, db_session: Session, test_user: User):
         """GET /buy-plans returns full page HTML."""
         c = _make_client(db_session, test_user)
-        r = c.get("/buy-plans")
+        r = c.get("/v2/buy-plans")
         assert r.status_code == 200
         assert "text/html" in r.headers["content-type"]
 
     def test_buy_plan_detail_full_page(self, db_session: Session, test_quote: Quote, test_user: User):
-        """GET /buy-plans/{id} returns full page HTML."""
+        """GET /v2/buy-plans/{id} returns full page HTML."""
         plan, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
-        r = c.get(f"/buy-plans/{plan.id}")
+        r = c.get(f"/v2/buy-plans/{plan.id}")
         assert r.status_code == 200
         assert "text/html" in r.headers["content-type"]

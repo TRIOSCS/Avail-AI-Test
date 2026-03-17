@@ -301,19 +301,19 @@ def test_dashboard_partial(client):
 
 def test_v2_quotes_full_page(client):
     """Full page /quotes loads base page HTML."""
-    resp = client.get("/quotes")
+    resp = client.get("/v2/quotes")
     assert resp.status_code == 200
 
 
 def test_v2_prospecting_full_page(client):
-    """Full page /prospecting loads base page HTML."""
-    resp = client.get("/prospecting")
+    """Full page /v2/prospecting loads base page HTML."""
+    resp = client.get("/v2/prospecting")
     assert resp.status_code == 200
 
 
 def test_v2_settings_full_page(client):
-    """Full page /settings loads base page HTML."""
-    resp = client.get("/settings")
+    """Full page /v2/settings loads base page HTML."""
+    resp = client.get("/v2/settings")
     assert resp.status_code == 200
 
 

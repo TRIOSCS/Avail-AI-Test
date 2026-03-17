@@ -84,16 +84,16 @@ class TestLoginPageBranding:
         """Full page / without session auth → login page with brand colors."""
         # Full page uses get_user() not require_user, so client fixture auth
         # doesn't apply. This returns the login page.
-        resp = client.get("/requisitions")
+        resp = client.get("/v2/requisitions")
         assert resp.status_code == 200
         assert "brand-900" in resp.text or "brand-800" in resp.text
 
     def test_login_has_logo(self, client: TestClient):
-        resp = client.get("/requisitions")
+        resp = client.get("/v2/requisitions")
         assert "avail_logo" in resp.text
 
     def test_login_no_cdn(self, client: TestClient):
-        resp = client.get("/requisitions")
+        resp = client.get("/v2/requisitions")
         assert "cdn.tailwindcss.com" not in resp.text
 
 
