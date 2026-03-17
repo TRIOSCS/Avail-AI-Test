@@ -47,7 +47,7 @@ async def index(request: Request):
     """Redirect root to the HTMX frontend."""
     from fastapi.responses import RedirectResponse
 
-    return RedirectResponse(url="/requisitions2", status_code=302)
+    return RedirectResponse(url="/v2/requisitions", status_code=302)
 
 
 @router.get("/auth/login")

@@ -1,0 +1,65 @@
+{# Sourcing tab — sightings/leads for a specific part number.
+   Called by: GET /v2/partials/parts/{id}/tab/sourcing
+   Depends on: requirement, sightings
+#}
+
+<div>
+  <div class="flex items-center justify-between mb-3">
+    <div>
+      <h3 class="text-lg font-semibold text-gray-900">Sourcing — {{ requirement.primary_mpn or 'Part' }}</h3>
+      <p class="text-xs text-gray-500">{{ sightings|length }} sighting{{ 's' if sightings|length != 1 else '' }}</p>
+    </div>
+    <a hx-get="/v2/partials/sourcing/{{ requirement.id }}/search"
+       hx-target="#part-detail"
+       class="px-3 py-1.5 text-xs font-medium bg-brand-500 text-white rounded-lg hover:bg-brand-600 cursor-pointer">
+      Run Search
+    </a>
+  </div>
+
+  {% if sightings %}
+  <div class="overflow-x-auto rounded-lg border border-gray-200">
+    <table class="min-w-full divide-y divide-gray-200 text-sm">
+      <thead class="bg-gray-50">
+        <tr>
+          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
+          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
+          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
+          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
+          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Score</th>
+          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tier</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100">
+        {% for s in sightings %}
+        <tr class="hover:bg-gray-50 {{ 'opacity-50' if s.is_unavailable else '' }}">
+          <td class="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{{ s.vendor_name or '—' }}</td>
+          <td class="px-3 py-2 whitespace-nowrap">
+            <span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">{{ s.source_type or '—' }}</span>
+          </td>
+          <td class="px-3 py-2 whitespace-nowrap">{{ '${:,.4f}'.format(s.unit_price) if s.unit_price else '—' }}</td>
+          <td class="px-3 py-2 whitespace-nowrap">{{ '{:,}'.format(s.qty_available) if s.qty_available else '—' }}</td>
+          <td class="px-3 py-2 whitespace-nowrap">
+            {% if s.score %}
+              {% set score_pct = (s.score * 100)|int %}
+              <span class="{{ 'text-green-600' if score_pct >= 70 else 'text-amber-600' if score_pct >= 40 else 'text-gray-500' }}">
+                {{ score_pct }}%
+              </span>
+            {% else %}—{% endif %}
+          </td>
+          <td class="px-3 py-2 whitespace-nowrap">
+            {% if s.evidence_tier %}
+              <span class="px-1.5 py-0.5 text-xs font-mono rounded bg-gray-100">{{ s.evidence_tier }}</span>
+            {% else %}—{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="p-8 text-center text-gray-400 border border-dashed border-gray-200 rounded-lg">
+    <p class="text-sm">No sightings yet</p>
+    <p class="text-xs mt-1">Run a search to find suppliers</p>
+  </div>
+  {% endif %}
+</div>
