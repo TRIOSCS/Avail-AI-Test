@@ -36,16 +36,17 @@
     <aside class="hidden lg:flex lg:flex-col lg:fixed lg:inset-y-0 bg-brand-700 transition-all duration-200"
            :class="$store.sidebar.collapsed ? 'lg:w-16' : 'lg:w-64'">
       {# Logo #}
-      <div class="flex items-center h-16 px-4 border-b border-brand-800">
-        <div class="flex flex-col" x-show="!$store.sidebar.collapsed" x-cloak>
-          <img src="/static/avail_logo.png" alt="AVAIL" class="h-9 w-auto">
-          <span class="text-[10px] text-brand-300 tracking-wider mt-0.5">Opportunity Management</span>
-        </div>
-        <span class="text-xl font-bold text-white" x-show="$store.sidebar.collapsed" x-cloak>A</span>
+      <div class="flex h-16 items-center justify-between px-4 border-b border-brand-800">
+        <a href="/v2" hx-get="/v2/partials/parts/workspace" hx-target="#main-content" hx-push-url="/v2"
+           class="flex items-center gap-2 overflow-hidden">
+          <img x-show="!$store.sidebar.collapsed" src="/static/avail_logo.png" alt="AVAIL" class="h-8">
+          <span x-show="$store.sidebar.collapsed" x-cloak
+                class="flex h-8 w-8 items-center justify-center rounded-md bg-brand-800 text-sm font-bold text-white">A</span>
+        </a>
         <button @click="$store.sidebar.collapsed = !$store.sidebar.collapsed"
-                class="ml-auto text-brand-300 hover:text-white" aria-label="Toggle sidebar">
-          <svg x-show="!$store.sidebar.collapsed" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
-          <svg x-show="$store.sidebar.collapsed" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+                class="flex h-7 w-7 items-center justify-center rounded-md text-brand-300 hover:bg-brand-800 hover:text-white" aria-label="Toggle sidebar">
+          <svg x-show="!$store.sidebar.collapsed" x-cloak class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+          <svg x-show="$store.sidebar.collapsed" x-cloak class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
         </button>
       </div>
 
