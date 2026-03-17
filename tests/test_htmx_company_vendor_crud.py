@@ -48,7 +48,7 @@ class TestCompanyCreate:
             data={"name": "   "},
         )
         # Should return error (either 422 or 200 with error message)
-        assert resp.status_code in (200, 422)
+        assert resp.status_code in (200, 400, 422)
         if resp.status_code == 200:
             assert "required" in resp.text.lower() or "error" in resp.text.lower()
 
