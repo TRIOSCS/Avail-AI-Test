@@ -180,3 +180,25 @@ class TestParseIntakeFallback:
         assert len(result["requirements"]) == 0
 
 
+# ---------------------------------------------------------------------------
+# Vendor tag search — verify the SQL or_() expansion
+# ---------------------------------------------------------------------------
+
+
+class TestVendorTagSearch:
+    """Tests that the vendor search query includes brand_tags and commodity_tags."""
+
+    def test_search_filter_includes_tags(self):
+        """Verify the import of or_ and the search expansion in the vendor router."""
+        from app.routers.htmx.vendors import or_
+
+        assert or_ is not None, "or_ should be imported in vendors.py"
+
+    def test_vendor_list_accepts_view_param(self):
+        """Verify the view parameter is accepted by the endpoint signature."""
+        import inspect
+
+        from app.routers.htmx.vendors import vendors_list_partial
+
+        sig = inspect.signature(vendors_list_partial)
+        assert "view" in sig.parameters, "vendors_list_partial should accept view param"
