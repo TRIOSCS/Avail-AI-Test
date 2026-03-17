@@ -148,13 +148,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
     from fastapi.responses import RedirectResponse
 
-    # Redirect /v2 and /v2/requisitions to the redesigned standalone page
     path = request.url.path
-    if path in ("/v2", "/v2/") or path.startswith("/v2/requisitions"):
-        # Preserve detail view path: /v2/requisitions/123 is still handled by HTMX detail
-        if "/v2/requisitions/" not in path:
-            return RedirectResponse(url="/requisitions2", status_code=302)
-
     user = get_user(request, db)
     if not user:
         return templates.TemplateResponse("htmx/login.html", {"request": request, **_vite_assets()})
@@ -186,7 +180,11 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         current_view = "requisitions"
 
     # Determine the correct partial URL for initial content load
-    partial_url = f"/v2/partials/{current_view}"
+    if current_view == "requisitions":
+        # Split-panel workspace is the new default for requisitions
+        partial_url = "/v2/partials/parts/workspace"
+    else:
+        partial_url = f"/v2/partials/{current_view}"
     # Pass path params for detail views
     if current_view == "requisitions" and "/requisitions/" in path:
         parts = path.split("/requisitions/")
@@ -249,6 +247,20 @@ async def global_search(
         "partials/shared/search_results.html",
         {**_base_ctx(request, user), "results": results, "query": q},
     )
+
+
+# ── Parts workspace (split-panel entry point) ─────────────────────────
+
+
+@router.get("/v2/partials/parts/workspace", response_class=HTMLResponse)
+async def parts_workspace_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the split-panel parts workspace shell."""
+    ctx = _base_ctx(request, user, "requisitions")
+    return templates.TemplateResponse("htmx/partials/parts/workspace.html", ctx)
 
 
 # ── Requisition partials ────────────────────────────────────────────────
@@ -7000,3 +7012,374 @@ async def strategic_drop(
     ctx["open_total"] = open_total
     ctx["search"] = ""
     return templates.TemplateResponse("htmx/partials/strategic/list.html", ctx)
+
+
+# ── Parts Workspace (split-panel) ────────────────────────────────────────────
+
+# Default columns shown when user has no saved preference
+_DEFAULT_PARTS_COLUMNS = [
+    "mpn", "brand", "qty", "target_price", "status",
+    "requisition", "customer", "offers", "best_price", "owner", "created",
+]
+
+# All available columns for the column picker
+_ALL_PARTS_COLUMNS = [
+    ("mpn", "MPN"),
+    ("brand", "Brand"),
+    ("qty", "Qty Needed"),
+    ("target_price", "Target Price"),
+    ("status", "Status"),
+    ("requisition", "Requisition"),
+    ("customer", "Customer"),
+    ("offers", "Offers"),
+    ("best_price", "Best Price"),
+    ("owner", "Owner"),
+    ("created", "Created"),
+    ("date_codes", "Date Codes"),
+    ("condition", "Condition"),
+    ("packaging", "Packaging"),
+    ("notes", "Notes"),
+]
+
+
+@router.get("/v2/partials/parts", response_class=HTMLResponse)
+async def parts_list_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+    q: str = "",
+    requisition_name: str = "",
+    customer: str = "",
+    brand: str = "",
+    status: str = "",
+    owner: int = 0,
+    date_from: str = "",
+    date_to: str = "",
+    include_archived: bool = False,
+    sort: str = "created",
+    dir: str = "desc",
+    offset: int = 0,
+    limit: int = 50,
+):
+    """Return parts (requirements) list as HTML partial with filters and sorting."""
+    from sqlalchemy import case
+
+    query = db.query(Requirement).join(Requisition, Requirement.requisition_id == Requisition.id)
+
+    # Default: active requisitions only
+    if not include_archived:
+        query = query.filter(Requisition.status.in_(["active", "open", "sourcing"]))
+
+    # Filters
+    if q:
+        pattern = f"%{escape_like(q)}%"
+        query = query.filter(
+            (Requirement.primary_mpn.ilike(pattern))
+            | (Requirement.brand.ilike(pattern))
+            | (Requisition.name.ilike(pattern))
+            | (Requisition.customer_name.ilike(pattern))
+        )
+    if requisition_name:
+        query = query.filter(Requisition.name.ilike(f"%{escape_like(requisition_name)}%"))
+    if customer:
+        query = query.filter(Requisition.customer_name.ilike(f"%{escape_like(customer)}%"))
+    if brand:
+        query = query.filter(Requirement.brand.ilike(f"%{escape_like(brand)}%"))
+    if status:
+        query = query.filter(Requirement.sourcing_status == status)
+    if owner:
+        query = query.filter(Requisition.claimed_by_id == owner)
+    if date_from:
+        query = query.filter(Requirement.created_at >= date_from)
+    if date_to:
+        query = query.filter(Requirement.created_at <= date_to)
+
+    total = query.count()
+
+    # Sorting
+    sort_map = {
+        "mpn": Requirement.primary_mpn,
+        "brand": Requirement.brand,
+        "qty": Requirement.target_qty,
+        "target_price": Requirement.target_price,
+        "status": Requirement.sourcing_status,
+        "requisition": Requisition.name,
+        "customer": Requisition.customer_name,
+        "created": Requirement.created_at,
+    }
+    sort_col = sort_map.get(sort, Requirement.created_at)
+    query = query.order_by(sort_col.desc() if dir == "desc" else sort_col.asc())
+    query = query.offset(offset).limit(limit)
+
+    requirements = query.options(joinedload(Requirement.requisition)).all()
+
+    # Aggregate offer count + best price per requirement
+    req_ids = [r.id for r in requirements]
+    offer_stats = {}
+    if req_ids:
+        stats = (
+            db.query(
+                Offer.requirement_id,
+                sqlfunc.count(Offer.id).label("cnt"),
+                sqlfunc.min(
+                    case((Offer.status == "active", Offer.unit_price), else_=None)
+                ).label("best"),
+            )
+            .filter(Offer.requirement_id.in_(req_ids))
+            .group_by(Offer.requirement_id)
+            .all()
+        )
+        for row in stats:
+            offer_stats[row.requirement_id] = {"count": row.cnt, "best_price": row.best}
+
+    # User column prefs
+    visible_cols = user.parts_column_prefs or _DEFAULT_PARTS_COLUMNS
+
+    # Team users for owner filter
+    users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update({
+        "requirements": requirements,
+        "offer_stats": offer_stats,
+        "q": q,
+        "requisition_name": requisition_name,
+        "customer": customer,
+        "brand": brand,
+        "status": status,
+        "owner": owner,
+        "date_from": date_from,
+        "date_to": date_to,
+        "include_archived": include_archived,
+        "sort": sort,
+        "dir": dir,
+        "offset": offset,
+        "limit": limit,
+        "total": total,
+        "users": users_list,
+        "visible_cols": visible_cols,
+        "all_columns": _ALL_PARTS_COLUMNS,
+        "user_role": user.role,
+    })
+    return templates.TemplateResponse("htmx/partials/parts/list.html", ctx)
+
+
+@router.post("/v2/partials/parts/column-prefs", response_class=HTMLResponse)
+async def save_column_prefs(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save user's visible column preferences and return updated parts list."""
+    form = await request.form()
+    cols = [c for c in form.getlist("columns") if c in dict(_ALL_PARTS_COLUMNS)]
+    if not cols:
+        cols = _DEFAULT_PARTS_COLUMNS
+
+    user.parts_column_prefs = cols
+    db.commit()
+    logger.info("Column prefs saved for user {}: {}", user.email, cols)
+
+    # Re-render the parts list with new columns
+    return await parts_list_partial(request=request, user=user, db=db)
+
+
+@router.get("/v2/partials/parts/{requirement_id}/tab/offers", response_class=HTMLResponse)
+async def part_tab_offers(
+    requirement_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return offers table for a specific part number."""
+    req = db.query(Requirement).options(joinedload(Requirement.requisition)).get(requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+
+    offers = (
+        db.query(Offer)
+        .filter(Offer.requirement_id == requirement_id)
+        .order_by(Offer.created_at.desc())
+        .all()
+    )
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update({"requirement": req, "offers": offers})
+    return templates.TemplateResponse("htmx/partials/parts/tabs/offers.html", ctx)
+
+
+@router.get("/v2/partials/parts/{requirement_id}/tab/sourcing", response_class=HTMLResponse)
+async def part_tab_sourcing(
+    requirement_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return sightings/leads table for a specific part number."""
+    req = db.query(Requirement).options(joinedload(Requirement.requisition)).get(requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+
+    sightings = (
+        db.query(Sighting)
+        .filter(Sighting.requirement_id == requirement_id)
+        .order_by(Sighting.score.desc().nullslast(), Sighting.id.desc())
+        .all()
+    )
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update({"requirement": req, "sightings": sightings})
+    return templates.TemplateResponse("htmx/partials/parts/tabs/sourcing.html", ctx)
+
+
+@router.get("/v2/partials/parts/{requirement_id}/tab/activity", response_class=HTMLResponse)
+async def part_tab_activity(
+    requirement_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return activity timeline for the parent requisition of this part."""
+    from ..models.intelligence import ActivityLog
+
+    req = db.query(Requirement).get(requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+
+    activities = (
+        db.query(ActivityLog)
+        .filter(ActivityLog.requisition_id == req.requisition_id)
+        .order_by(ActivityLog.created_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update({"requirement": req, "activities": activities})
+    return templates.TemplateResponse("htmx/partials/parts/tabs/activity.html", ctx)
+
+
+@router.get("/v2/partials/parts/{requirement_id}/tab/comms", response_class=HTMLResponse)
+async def part_tab_comms(
+    requirement_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return communications tab — notes and tasks for this part."""
+    req = db.query(Requirement).options(joinedload(Requirement.requisition)).get(requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+
+    tasks = (
+        db.query(RequisitionTask)
+        .options(joinedload(RequisitionTask.assignee), joinedload(RequisitionTask.creator))
+        .filter(
+            (RequisitionTask.requisition_id == req.requisition_id)
+            & (
+                (RequisitionTask.requirement_id == requirement_id)
+                | (RequisitionTask.requirement_id.is_(None))
+            )
+        )
+        .order_by(
+            RequisitionTask.status.asc(),  # pending before done
+            RequisitionTask.due_at.asc().nullslast(),
+            RequisitionTask.created_at.desc(),
+        )
+        .all()
+    )
+
+    users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update({"requirement": req, "tasks": tasks, "users": users_list})
+    return templates.TemplateResponse("htmx/partials/parts/tabs/comms.html", ctx)
+
+
+@router.post("/v2/partials/parts/{requirement_id}/tasks", response_class=HTMLResponse)
+async def create_part_task(
+    requirement_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a task for a specific part number."""
+    req = db.query(Requirement).get(requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+
+    form = await request.form()
+    title = (form.get("title") or "").strip()
+    if not title:
+        raise HTTPException(422, "Title is required")
+
+    task = RequisitionTask(
+        requisition_id=req.requisition_id,
+        requirement_id=requirement_id,
+        title=title,
+        description=(form.get("notes") or "").strip() or None,
+        assigned_to_id=int(form["assigned_to"]) if form.get("assigned_to") else None,
+        created_by=user.id,
+        due_at=form.get("due_date") or None,
+        status="todo",
+        source="manual",
+    )
+    db.add(task)
+    db.commit()
+    logger.info("Task '{}' created for requirement {} by {}", title, requirement_id, user.email)
+
+    # Return refreshed comms tab
+    return await part_tab_comms(requirement_id, request, user, db)
+
+
+@router.post("/v2/partials/parts/tasks/{task_id}/done", response_class=HTMLResponse)
+async def mark_task_done(
+    task_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Mark a task as done."""
+    from datetime import datetime, timezone
+
+    task = db.query(RequisitionTask).get(task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+
+    task.status = "done"
+    task.completed_at = datetime.now(timezone.utc)
+    db.commit()
+    logger.info("Task {} marked done by {}", task_id, user.email)
+
+    # Return refreshed comms tab for the requirement
+    req_id = task.requirement_id
+    if req_id:
+        return await part_tab_comms(req_id, request, user, db)
+
+    # Fallback — return just the updated task row
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["task"] = task
+    return HTMLResponse('<div class="text-sm text-green-600">Task completed</div>')
+
+
+@router.post("/v2/partials/parts/tasks/{task_id}/reopen", response_class=HTMLResponse)
+async def reopen_task(
+    task_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Reopen a completed task."""
+    task = db.query(RequisitionTask).get(task_id)
+    if not task:
+        raise HTTPException(404, "Task not found")
+
+    task.status = "todo"
+    task.completed_at = None
+    db.commit()
+    logger.info("Task {} reopened by {}", task_id, user.email)
+
+    req_id = task.requirement_id
+    if req_id:
+        return await part_tab_comms(req_id, request, user, db)
+    return HTMLResponse('<div class="text-sm text-amber-600">Task reopened</div>')

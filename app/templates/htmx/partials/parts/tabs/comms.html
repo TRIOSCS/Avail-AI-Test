@@ -1,0 +1,128 @@
+{# Communications tab — tasks and notes for a part number.
+   Called by: GET /v2/partials/parts/{id}/tab/comms
+   Depends on: requirement, tasks, users
+#}
+
+<div>
+  <div class="mb-4">
+    <h3 class="text-lg font-semibold text-gray-900">Communications — {{ requirement.primary_mpn or 'Part' }}</h3>
+  </div>
+
+  {# ── Create task form ──────────────────────────────────── #}
+  <div class="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
+    <form hx-post="/v2/partials/parts/{{ requirement.id }}/tasks"
+          hx-target="#part-detail"
+          hx-swap="innerHTML"
+          class="space-y-2">
+      <div class="flex gap-2">
+        <input type="text" name="title" placeholder="New task or note..."
+               required
+               class="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+        <button type="submit"
+                class="px-3 py-1.5 text-sm font-medium bg-brand-500 text-white rounded-lg hover:bg-brand-600">
+          Add
+        </button>
+      </div>
+      <div class="flex gap-2 flex-wrap">
+        <select name="assigned_to" class="px-2 py-1 text-xs border border-gray-200 rounded-lg">
+          <option value="">Assign to...</option>
+          {% for u in users %}
+          <option value="{{ u.id }}">{{ u.name or u.email }}</option>
+          {% endfor %}
+        </select>
+        <input type="date" name="due_date"
+               class="px-2 py-1 text-xs border border-gray-200 rounded-lg">
+        <input type="text" name="notes" placeholder="Notes (optional)"
+               class="flex-1 min-w-[120px] px-2 py-1 text-xs border border-gray-200 rounded-lg">
+      </div>
+    </form>
+  </div>
+
+  {# ── Task list ─────────────────────────────────────────── #}
+  {% set pending_tasks = tasks|selectattr('status', 'ne', 'done')|list %}
+  {% set done_tasks = tasks|selectattr('status', 'eq', 'done')|list %}
+
+  {% if pending_tasks %}
+  <div class="mb-4">
+    <h4 class="text-xs font-medium text-gray-500 uppercase mb-2">Open ({{ pending_tasks|length }})</h4>
+    <div class="space-y-2">
+      {% for task in pending_tasks %}
+      <div class="flex items-start gap-3 p-3 rounded-lg border border-gray-200 bg-white hover:border-brand-200">
+        <button hx-post="/v2/partials/parts/tasks/{{ task.id }}/done"
+                hx-target="#part-detail"
+                class="mt-0.5 h-5 w-5 rounded border-2 border-gray-300 hover:border-brand-500 flex-shrink-0 transition-colors"
+                title="Mark done">
+        </button>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm font-medium text-gray-900">{{ task.title }}</p>
+          {% if task.description %}
+            <p class="text-xs text-gray-500 mt-0.5">{{ task.description }}</p>
+          {% endif %}
+          <div class="flex items-center gap-3 mt-1.5 text-xs text-gray-400 flex-wrap">
+            {% if task.assignee %}
+              <span class="inline-flex items-center gap-1">
+                <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z"/></svg>
+                {{ task.assignee.name or task.assignee.email }}
+              </span>
+            {% endif %}
+            {% if task.due_at %}
+              {% set overdue = task.due_at.date() < today if today else false %}
+              <span class="{{ 'text-rose-500 font-medium' if overdue else '' }}">
+                Due {{ task.due_at.strftime('%m/%d/%y') }}
+              </span>
+            {% endif %}
+            {% if task.creator %}
+              <span>by {{ task.creator.name or task.creator.email }}</span>
+            {% endif %}
+            <span>{{ task.created_at.strftime('%m/%d/%y') if task.created_at else '' }}</span>
+          </div>
+        </div>
+        {% if task.priority >= 3 %}
+          <span class="px-1.5 py-0.5 text-xs font-medium rounded bg-rose-100 text-rose-600 flex-shrink-0">High</span>
+        {% endif %}
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if done_tasks %}
+  <div x-data="{ showDone: false }">
+    <button @click="showDone = !showDone"
+            class="text-xs text-gray-400 hover:text-gray-600 mb-2 inline-flex items-center gap-1">
+      <svg class="h-3 w-3 transition-transform" :class="showDone ? 'rotate-90' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
+      </svg>
+      Completed ({{ done_tasks|length }})
+    </button>
+    <div x-show="showDone" x-cloak class="space-y-2">
+      {% for task in done_tasks %}
+      <div class="flex items-start gap-3 p-3 rounded-lg border border-gray-100 bg-gray-50 opacity-60">
+        <button hx-post="/v2/partials/parts/tasks/{{ task.id }}/reopen"
+                hx-target="#part-detail"
+                class="mt-0.5 h-5 w-5 rounded border-2 border-green-400 bg-green-100 flex-shrink-0 flex items-center justify-center"
+                title="Reopen">
+          <svg class="h-3 w-3 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+          </svg>
+        </button>
+        <div class="flex-1 min-w-0">
+          <p class="text-sm text-gray-500 line-through">{{ task.title }}</p>
+          <div class="flex items-center gap-2 mt-1 text-xs text-gray-400">
+            {% if task.assignee %}<span>{{ task.assignee.name or task.assignee.email }}</span>{% endif %}
+            {% if task.completed_at %}<span>Done {{ task.completed_at.strftime('%m/%d/%y') }}</span>{% endif %}
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  {% if not pending_tasks and not done_tasks %}
+  <div class="p-8 text-center text-gray-400 border border-dashed border-gray-200 rounded-lg">
+    <p class="text-sm">No tasks yet</p>
+    <p class="text-xs mt-1">Add a task above to coordinate with your team</p>
+  </div>
+  {% endif %}
+</div>

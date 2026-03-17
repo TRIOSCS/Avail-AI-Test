@@ -17,13 +17,13 @@ class TestProactivePages:
     """Test Proactive Part Match HTMX views."""
 
     def test_v2_proactive_full_page(self, client: TestClient):
-        resp = client.get("/proactive")
+        resp = client.get("/v2/proactive")
         assert resp.status_code == 200
         assert "AvailAI" in resp.text
 
     def test_proactive_partial_matches_tab(self, client: TestClient):
         resp = client.get(
-            "/partials/proactive?tab=matches",
+            "/v2/partials/proactive?tab=matches",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -31,7 +31,7 @@ class TestProactivePages:
 
     def test_proactive_partial_sent_tab(self, client: TestClient):
         resp = client.get(
-            "/partials/proactive?tab=sent",
+            "/v2/partials/proactive?tab=sent",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -41,7 +41,7 @@ class TestProactivePages:
         self, client: TestClient, test_proactive_offer: ProactiveOffer
     ):
         resp = client.get(
-            "/partials/proactive?tab=sent",
+            "/v2/partials/proactive?tab=sent",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -50,14 +50,14 @@ class TestProactivePages:
 
     def test_proactive_invalid_tab_defaults_gracefully(self, client: TestClient):
         resp = client.get(
-            "/partials/proactive?tab=nonexistent",
+            "/v2/partials/proactive?tab=nonexistent",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
 
     def test_proactive_matches_tab_empty_state(self, client: TestClient):
         resp = client.get(
-            "/partials/proactive?tab=matches",
+            "/v2/partials/proactive?tab=matches",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -69,13 +69,13 @@ class TestStrategicPages:
     """Test My Vendors (Strategic) HTMX views."""
 
     def test_v2_strategic_full_page(self, client: TestClient):
-        resp = client.get("/strategic")
+        resp = client.get("/v2/strategic")
         assert resp.status_code == 200
         assert "AvailAI" in resp.text
 
     def test_strategic_partial(self, client: TestClient):
         resp = client.get(
-            "/partials/strategic",
+            "/v2/partials/strategic",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -83,7 +83,7 @@ class TestStrategicPages:
 
     def test_strategic_partial_with_search(self, client: TestClient):
         resp = client.get(
-            "/partials/strategic?search=test",
+            "/v2/partials/strategic?search=test",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -91,7 +91,7 @@ class TestStrategicPages:
 
     def test_strategic_search_no_results_shows_empty(self, client: TestClient):
         resp = client.get(
-            "/partials/strategic?search=zzz_nonexistent_vendor_zzz",
+            "/v2/partials/strategic?search=zzz_nonexistent_vendor_zzz",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -100,7 +100,7 @@ class TestStrategicPages:
 
     def test_strategic_page_renders_structure(self, client: TestClient):
         resp = client.get(
-            "/partials/strategic",
+            "/v2/partials/strategic",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200

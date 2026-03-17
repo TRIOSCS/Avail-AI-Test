@@ -53,7 +53,7 @@ def vendor_with_contacts(db_session: Session):
 def test_contacts_tab_renders_contacts(client, vendor_with_contacts):
     """Contacts tab shows contact rows with CRUD buttons."""
     vendor = vendor_with_contacts["vendor"]
-    resp = client.get(f"/partials/vendors/{vendor.id}/tab/contacts")
+    resp = client.get(f"/v2/partials/vendors/{vendor.id}/tab/contacts")
     assert resp.status_code == 200
     html = resp.text
     assert "John Doe" in html
@@ -65,7 +65,7 @@ def test_contacts_tab_renders_contacts(client, vendor_with_contacts):
 def test_contacts_tab_has_add_form(client, vendor_with_contacts):
     """Contacts tab includes an add contact form."""
     vendor = vendor_with_contacts["vendor"]
-    resp = client.get(f"/partials/vendors/{vendor.id}/tab/contacts")
+    resp = client.get(f"/v2/partials/vendors/{vendor.id}/tab/contacts")
     html = resp.text
     assert "Add Contact" in html
     assert f'hx-post="/api/vendors/{vendor.id}/contacts"' in html
@@ -76,7 +76,7 @@ def test_contacts_tab_has_add_form(client, vendor_with_contacts):
 def test_contacts_tab_has_edit_buttons(client, vendor_with_contacts):
     """Contacts tab rows have Edit and Delete buttons."""
     vendor = vendor_with_contacts["vendor"]
-    resp = client.get(f"/partials/vendors/{vendor.id}/tab/contacts")
+    resp = client.get(f"/v2/partials/vendors/{vendor.id}/tab/contacts")
     html = resp.text
     assert "Edit" in html
     assert "Delete" in html
@@ -89,7 +89,7 @@ def test_contacts_tab_has_inline_edit_form(client, vendor_with_contacts):
     """Contacts tab rows have inline edit form with hx-put."""
     vendor = vendor_with_contacts["vendor"]
     c = vendor_with_contacts["contacts"][0]
-    resp = client.get(f"/partials/vendors/{vendor.id}/tab/contacts")
+    resp = client.get(f"/v2/partials/vendors/{vendor.id}/tab/contacts")
     html = resp.text
     assert f'hx-put="/api/vendors/{vendor.id}/contacts/{c.id}"' in html
 
@@ -97,7 +97,7 @@ def test_contacts_tab_has_inline_edit_form(client, vendor_with_contacts):
 def test_contacts_tab_has_delete_confirm(client, vendor_with_contacts):
     """Delete button has hx-confirm for safety."""
     vendor = vendor_with_contacts["vendor"]
-    resp = client.get(f"/partials/vendors/{vendor.id}/tab/contacts")
+    resp = client.get(f"/v2/partials/vendors/{vendor.id}/tab/contacts")
     html = resp.text
     assert 'hx-confirm="Delete this contact?"' in html
 
@@ -106,7 +106,7 @@ def test_contacts_tab_has_log_call(client, vendor_with_contacts):
     """Each contact has a log call button."""
     vendor = vendor_with_contacts["vendor"]
     c = vendor_with_contacts["contacts"][0]
-    resp = client.get(f"/partials/vendors/{vendor.id}/tab/contacts")
+    resp = client.get(f"/v2/partials/vendors/{vendor.id}/tab/contacts")
     html = resp.text
     assert f"/api/vendors/{vendor.id}/contacts/{c.id}/log-call" in html
 
@@ -121,7 +121,7 @@ def test_contacts_tab_empty_state(client, db_session):
     db_session.add(vendor)
     db_session.commit()
 
-    resp = client.get(f"/partials/vendors/{vendor.id}/tab/contacts")
+    resp = client.get(f"/v2/partials/vendors/{vendor.id}/tab/contacts")
     assert resp.status_code == 200
     assert "No contacts found" in resp.text
 
@@ -129,7 +129,7 @@ def test_contacts_tab_empty_state(client, db_session):
 def test_contacts_tab_shows_interaction_count(client, vendor_with_contacts):
     """Contact rows show interaction count."""
     vendor = vendor_with_contacts["vendor"]
-    resp = client.get(f"/partials/vendors/{vendor.id}/tab/contacts")
+    resp = client.get(f"/v2/partials/vendors/{vendor.id}/tab/contacts")
     html = resp.text
     # Jane has 12 interactions
     assert "12" in html

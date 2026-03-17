@@ -1,128 +1,194 @@
-# Buy Plan V4 Unification Plan
+# Plan: Part-Number-Centric Split-Panel Requisitions UI
 
-## Overview
-Unify V1 (JSON line_items on `buy_plans` table) and V3 (structured `buy_plans_v3` + `buy_plan_lines` tables) into a single V4 system. V4 reuses the V3 data model (it's already the right design) but renames tables to `buy_plans` / `buy_plan_lines`, drops the V1 model entirely, and adds a full HTMX/Alpine frontend under `/v2/buy-plans`.
+## What we're building
+A resizable two-panel layout where the **left panel** shows all part numbers (requirements) across active requisitions in a configurable table, and the **right panel** shows detail tabs for the selected part.
 
-## What V4 Keeps from Each Version
+## Layout
 
-**From V3 (keep everything):**
-- BuyPlanV3 header + BuyPlanLine structured tables
-- Dual approval tracks (manager + ops SO verification)
-- Per-line status machine (awaiting_po → pending_verify → verified)
-- AI scoring, builder, flags
-- Split lines, buyer assignment, PO tracking
-- Token-based approval, favoritism detection, case reports
-- All workflow functions (submit, approve, verify_so, confirm_po, verify_po, flag_issue, check_completion)
-- Notification service
+```
+┌─────────────────────────────────────────────────────────────┐
+│ Sidebar │  LEFT PANEL (resizable)  ║  RIGHT PANEL           │
+│         │                          ║                         │
+│         │  Part numbers table      ║  Tabs:                  │
+│         │  - Filterable            ║  [Offers] [Sourcing]    │
+│         │  - Sortable columns      ║  [Activity] [Comms]     │
+│         │  - Configurable columns  ║                         │
+│         │  - Horiz scroll          ║  Detail content for     │
+│         │  - Click to select →     ║  selected part number   │
+│         │                          ║                         │
+│         │  ◄══ drag bar ══►        ║                         │
+└─────────────────────────────────────────────────────────────┘
+```
 
-**From V1 (nothing new — V3 already absorbed everything useful):**
-- The V1→V3 migration (076) already converted all V1 data
-- The V1 compat shim in `routers/crm/buy_plans.py` can be removed
+## Decisions (confirmed by user)
+1. **Default scope**: Active requisitions only, with toggle to include archived
+2. **Tasks**: Separate Task model — title, notes, assigned_to, assigned_by, status (pending/done), due_date, linked to requisition + requirement
+3. **Column prefs**: Saved per-user in database (persists across devices)
 
-## Steps
+## Left Panel — Parts Table
 
-### Step 1: Rename V3 → V4 (model layer)
-**Files:** `app/models/buy_plan.py`, `app/models/__init__.py`
+**Primary entity**: `Requirement` (one row per part number)
 
-- Rename class `BuyPlanV3` → `BuyPlan` (keep table name `buy_plans_v3` — no schema change needed yet, table rename is risky and unnecessary)
-- Update enum/class docstrings to say "V4"
-- Remove old `BuyPlan` class from `app/models/quotes.py` (the V1 model)
-- Update `app/models/__init__.py` imports
+**Default columns** (user can show/hide via column picker):
+- MPN (primary_mpn)
+- Brand
+- Qty Needed (target_qty)
+- Target Price
+- Sourcing Status (sourcing_status)
+- Requisition Name (from parent requisition)
+- Customer (from parent requisition)
+- Offers count
+- Best Price (lowest active offer)
+- Owner (requisition claimed_by)
+- Created
 
-### Step 2: Update service layer references
-**Files:** `app/services/buyplan_workflow.py`, `app/services/buyplan_builder.py`, `app/services/buyplan_scoring.py`, `app/services/buy_plan_v3_service.py`, `app/services/buyplan_v3_notifications.py`
+**Filters** (above the table):
+- Requisition name
+- Customer name
+- Brand
+- Sourcing status (open/sourcing/offered/quoted/won/lost)
+- Owner
+- Date range
 
-- Replace all `BuyPlanV3` references with `BuyPlan`
-- Keep all business logic exactly as-is
+**Behaviors**:
+- Horizontal scroll for wide tables
+- Column picker (gear icon) — show/hide columns, saved per-user in DB
+- Click a row → right panel populates with that part's detail
+- Highlight selected row
+- Offset-based pagination (Prev/Next)
+- Default: only parts from active requisitions (toggle for archived)
 
-### Step 3: Rename API router (V3 → unified)
-**Files:** `app/routers/crm/buy_plans_v3.py` → keep file, update paths
+## Right Panel — Part Detail Tabs
 
-- Change API paths from `/api/buy-plans-v3/...` to `/api/buy-plans/...`
-- Remove old V1 compat router `app/routers/crm/buy_plans.py`
-- Update `app/main.py` router registration
+Shows when a part is selected. Empty state message when nothing selected.
 
-### Step 4: Update schemas
-**Files:** `app/schemas/buy_plan.py`
+**Tab 1: Offers** (default)
+- Table of all offers for this requirement (historical + active)
+- Columns: Vendor, Price, Qty, Date Code, Condition, Lead Time, Status, Created
+- Button to add offer manually
 
-- Rename `BuyPlanV3Submit` → `BuyPlanSubmit`, `BuyPlanV3Approval` → `BuyPlanApproval`, `BuyPlanV3Response` → `BuyPlanResponse`, etc.
-- Keep all fields and validators as-is
+**Tab 2: Sourcing**
+- Sightings/leads for this part number
+- Source type, vendor, price, qty, confidence score
+- Link to run new search
 
-### Step 5: HTMX/Alpine frontend — List view
-**New file:** `app/templates/htmx/partials/buy_plans/list.html`
+**Tab 3: Activity**
+- ActivityLog entries linked to the parent requisition
+- Buyer efforts: calls, emails, notes
+- Timeline format
 
-- Status filter tabs (All, Draft, Pending, Active, Completed, Cancelled)
-- "My Only" toggle
-- Sortable table: Customer, Quote, Lines, Total, Margin, Status, SO Status, Submitted By, Date
-- Each row clicks to detail view via hx-get
-- Search bar with debounce
+**Tab 4: Communications**
+- Notes (free text between sales and buyer)
+- Tasks with: title, notes, assigned_to, assigned_by, status (pending/done), due_date
+- Create task form inline
+- Mark done button on each task
 
-### Step 6: HTMX/Alpine frontend — Detail view
-**New file:** `app/templates/htmx/partials/buy_plans/detail.html`
+## Implementation Steps
 
-- Header: customer, quote#, SO#, financials, status badges
-- AI summary + flags (color-coded by severity)
-- Context-sensitive action bar based on status:
-  - **Draft**: Submit button (opens SO# form)
-  - **Pending**: Approve / Reject buttons (manager only)
-  - **Active**: Halt / Cancel buttons; line-level PO entry
-  - **Halted/Cancelled**: Reset to Draft button
-- Line items table with per-line actions:
-  - **awaiting_po**: PO# input + ship date → confirm
-  - **pending_verify**: Approve/Reject PO (ops only)
-  - **issue**: Issue badge + note
-  - **verified**: Green checkmark
-- SO verification panel (ops only, when active)
-- Offer comparison modal (per-requirement)
+### Step 1: New Task model + user_preferences column + migration
+**Files**: `app/models/tasks.py`, `app/models/__init__.py`, new Alembic migration
 
-### Step 7: HTMX/Alpine frontend — Submit modal
-**New file:** `app/templates/htmx/partials/buy_plans/submit_modal.html`
+Task model:
+- id (PK)
+- title (string, required)
+- notes (text, optional)
+- assigned_to_id (FK → users)
+- assigned_by_id (FK → users)
+- requisition_id (FK → requisitions)
+- requirement_id (FK → requirements, optional)
+- status (string: pending/done)
+- due_date (date, optional)
+- completed_at (datetime, optional)
+- created_at (datetime)
 
-- SO# input (required)
-- Customer PO# input (optional)
-- Salesperson notes textarea
-- Line edits section (optional vendor swaps)
+User model addition:
+- parts_column_prefs (JSON) — list of visible column keys
 
-### Step 8: HTMX view router endpoints
-**File:** `app/routers/htmx_views.py`
+Migration: creates tasks table + adds parts_column_prefs to users.
 
-Add endpoints:
-- `GET /v2/buy-plans` — full page entry
-- `GET /v2/partials/buy-plans` — list partial
-- `GET /v2/partials/buy-plans/{plan_id}` — detail partial
-- `POST /v2/partials/buy-plans/{plan_id}/submit` — submit form handler (returns updated detail)
-- `POST /v2/partials/buy-plans/{plan_id}/approve` — approve/reject (returns updated detail)
-- `POST /v2/partials/buy-plans/{plan_id}/verify-so` — SO verification
-- `POST /v2/partials/buy-plans/{plan_id}/lines/{line_id}/confirm-po` — PO confirm
-- `POST /v2/partials/buy-plans/{plan_id}/lines/{line_id}/verify-po` — PO verify
-- `POST /v2/partials/buy-plans/{plan_id}/lines/{line_id}/issue` — flag issue
-- `POST /v2/partials/buy-plans/{plan_id}/cancel` — cancel plan
+### Step 2: Backend — Parts list endpoint
+**File**: `app/routers/htmx_views.py`
 
-### Step 9: Add sidebar nav link
-**File:** `app/templates/htmx/base.html`
+- New route: `GET /v2/partials/parts`
+- Query: Requirement joined to Requisition (WHERE requisition.status = 'active' by default)
+- Subqueries: offer count, best price per requirement
+- Filter params: q, requisition_name, customer, brand, status, owner, date_from, date_to, include_archived
+- Sort params: sort, dir
+- Pagination: offset, limit
+- Reads user.parts_column_prefs for visible columns
+- Returns HTML partial
+- ~100 lines
 
-- Add "Buy Plans" link under Command Center section
+### Step 3: Backend — Part detail tab endpoints
+**File**: `app/routers/htmx_views.py`
 
-### Step 10: Tests
-**New file:** `tests/test_buy_plan_v4.py`
+- `GET /v2/partials/parts/{requirement_id}/tab/offers` — offers table
+- `GET /v2/partials/parts/{requirement_id}/tab/sourcing` — sightings table
+- `GET /v2/partials/parts/{requirement_id}/tab/activity` — activity timeline
+- `GET /v2/partials/parts/{requirement_id}/tab/comms` — notes + tasks list + create form
+- `POST /v2/partials/parts/{requirement_id}/tasks` — create task
+- `POST /v2/partials/parts/tasks/{task_id}/done` — mark task done
+- `POST /v2/partials/parts/column-prefs` — save column preferences
+- Each tab ~40-60 lines
 
-- Test model rename (BuyPlan replaces BuyPlanV3)
-- Test all workflow transitions: draft→submit→approve→po_confirm→po_verify→complete
-- Test auto-approve path
-- Test rejection + resubmit
-- Test SO verification
-- Test issue flagging
-- Test cancel + reset to draft
-- Test HTMX list/detail endpoints return HTML
+### Step 4: Frontend — Split panel workspace template
+**New file**: `app/templates/htmx/partials/parts/workspace.html`
 
-### Step 11: Clean up old code
-- Remove `app/routers/crm/buy_plans.py` (V1 compat shim)
-- Remove `BuyPlan` class from `app/models/quotes.py`
-- Remove V1 notification service `app/services/buyplan_notifications.py`
-- Remove V1 PO service `app/services/buyplan_po.py`
-- Update any remaining imports
+- CSS Grid layout with resizable divider (Alpine.js for drag logic)
+- Left: filter bar + parts table + pagination
+- Right: tab bar + detail content area
+- Empty state for right panel when no part selected
+- Divider saves width to localStorage (instant UX, no DB roundtrip for layout)
+- ~100 lines
 
-## Not Changing
-- **Database tables**: `buy_plans_v3` and `buy_plan_lines` table names stay — renaming tables in production is unnecessary risk for zero benefit
-- **Business logic**: All workflow, scoring, builder, notification logic stays exactly as-is
-- **JSON API**: The `/api/buy-plans/...` endpoints remain as JSON APIs (for mobile/future use); HTMX endpoints are separate under `/v2/partials/buy-plans/...`
+### Step 5: Frontend — Column picker
+**Inline in workspace.html or small partial**
+
+- Gear icon dropdown with checkboxes for each column
+- On save, POST to /v2/partials/parts/column-prefs, then re-fetch table
+- ~40 lines
+
+### Step 6: Frontend — Detail tab templates
+**New files**:
+- `app/templates/htmx/partials/parts/tabs/offers.html`
+- `app/templates/htmx/partials/parts/tabs/sourcing.html`
+- `app/templates/htmx/partials/parts/tabs/activity.html`
+- `app/templates/htmx/partials/parts/tabs/comms.html`
+- Each ~50-70 lines
+
+### Step 7: Wire up routing + nav
+**Files**: `app/routers/htmx_views.py`, `app/templates/htmx/base.html`, `app/routers/auth.py`
+
+- `GET /v2/requisitions` loads the split-panel workspace
+- Update sidebar nav link
+- Update auth redirect to `/v2/requisitions`
+
+### Step 8: Tests
+**New file**: `tests/test_htmx_parts_workspace.py`
+
+- Parts list: filters, sorting, pagination, active-only default
+- Part detail tabs: each returns correct HTML
+- Task CRUD: create, mark done
+- Column prefs: save and respect visible columns
+- Empty state: right panel shows message when no part selected
+- ~25 tests
+
+## Files that will change/be created
+- `app/models/tasks.py` — NEW (Task model)
+- `app/models/__init__.py` — add Task import
+- `app/models/users.py` — add parts_column_prefs column
+- `alembic/versions/xxx_add_tasks_and_column_prefs.py` — NEW migration
+- `app/routers/htmx_views.py` — new endpoints (~250 lines)
+- `app/templates/htmx/partials/parts/workspace.html` — NEW
+- `app/templates/htmx/partials/parts/tabs/offers.html` — NEW
+- `app/templates/htmx/partials/parts/tabs/sourcing.html` — NEW
+- `app/templates/htmx/partials/parts/tabs/activity.html` — NEW
+- `app/templates/htmx/partials/parts/tabs/comms.html` — NEW
+- `app/templates/htmx/base.html` — nav link update
+- `app/routers/auth.py` — redirect update
+- `tests/test_htmx_parts_workspace.py` — NEW
+
+## What stays unchanged
+- Existing requisitions2 and v2 requisitions code stays until this is working
+- All existing API endpoints unchanged
+- No changes to existing models (only additions)

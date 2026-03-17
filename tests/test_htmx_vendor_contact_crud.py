@@ -51,7 +51,7 @@ def vendor_for_contacts(db_session: Session):
 def test_add_form_returns_html(client, vendor_for_contacts):
     """GET add-form returns an HTML form with required fields."""
     vendor = vendor_for_contacts["vendor"]
-    resp = client.get(f"/partials/vendors/{vendor.id}/contacts/add-form")
+    resp = client.get(f"/v2/partials/vendors/{vendor.id}/contacts/add-form")
     assert resp.status_code == 200
     html = resp.text
     assert "Add Contact" in html
@@ -60,12 +60,12 @@ def test_add_form_returns_html(client, vendor_for_contacts):
     assert 'name="phone"' in html
     assert 'name="title"' in html
     assert 'name="label"' in html
-    assert f'hx-post="/partials/vendors/{vendor.id}/contacts"' in html
+    assert f'hx-post="/v2/partials/vendors/{vendor.id}/contacts"' in html
 
 
 def test_add_form_vendor_not_found(client):
     """GET add-form for non-existent vendor returns 404."""
-    resp = client.get("/partials/vendors/99999/contacts/add-form")
+    resp = client.get("/v2/partials/vendors/99999/contacts/add-form")
     assert resp.status_code == 404
 
 
@@ -76,7 +76,7 @@ def test_create_contact_success(client, vendor_for_contacts, db_session):
     """POST creates a new contact with source=manual and confidence=100."""
     vendor = vendor_for_contacts["vendor"]
     resp = client.post(
-        f"/partials/vendors/{vendor.id}/contacts",
+        f"/v2/partials/vendors/{vendor.id}/contacts",
         data={
             "full_name": "New Person",
             "email": "new@crudvendor.com",
@@ -105,7 +105,7 @@ def test_create_contact_syncs_email_to_vendor(client, vendor_for_contacts, db_se
     """Creating a contact syncs the email into vendor.emails."""
     vendor = vendor_for_contacts["vendor"]
     client.post(
-        f"/partials/vendors/{vendor.id}/contacts",
+        f"/v2/partials/vendors/{vendor.id}/contacts",
         data={"full_name": "Sync Test", "email": "synced@crudvendor.com"},
     )
     db_session.refresh(vendor)
@@ -116,7 +116,7 @@ def test_create_contact_email_dedup(client, vendor_for_contacts):
     """Creating a contact with a duplicate email returns 409."""
     vendor = vendor_for_contacts["vendor"]
     resp = client.post(
-        f"/partials/vendors/{vendor.id}/contacts",
+        f"/v2/partials/vendors/{vendor.id}/contacts",
         data={"full_name": "Duplicate", "email": "existing@crudvendor.com"},
     )
     assert resp.status_code == 409
@@ -127,7 +127,7 @@ def test_create_contact_missing_name(client, vendor_for_contacts):
     """Creating a contact without full_name returns 422."""
     vendor = vendor_for_contacts["vendor"]
     resp = client.post(
-        f"/partials/vendors/{vendor.id}/contacts",
+        f"/v2/partials/vendors/{vendor.id}/contacts",
         data={"full_name": "", "email": "noname@test.com"},
     )
     assert resp.status_code == 422
@@ -136,7 +136,7 @@ def test_create_contact_missing_name(client, vendor_for_contacts):
 def test_create_contact_vendor_not_found(client):
     """POST to non-existent vendor returns 404."""
     resp = client.post(
-        "/partials/vendors/99999/contacts",
+        "/v2/partials/vendors/99999/contacts",
         data={"full_name": "Ghost"},
     )
     assert resp.status_code == 404
@@ -150,7 +150,7 @@ def test_edit_form_prefilled(client, vendor_for_contacts):
     vendor = vendor_for_contacts["vendor"]
     contact = vendor_for_contacts["contact"]
     resp = client.get(
-        f"/partials/vendors/{vendor.id}/contacts/{contact.id}/edit"
+        f"/v2/partials/vendors/{vendor.id}/contacts/{contact.id}/edit"
     )
     assert resp.status_code == 200
     html = resp.text
@@ -158,14 +158,14 @@ def test_edit_form_prefilled(client, vendor_for_contacts):
     assert "Existing Contact" in html
     assert "existing@crudvendor.com" in html
     assert "Director" in html
-    assert f'hx-put="/partials/vendors/{vendor.id}/contacts/{contact.id}"' in html
+    assert f'hx-put="/v2/partials/vendors/{vendor.id}/contacts/{contact.id}"' in html
 
 
 def test_edit_form_contact_not_found(client, vendor_for_contacts):
     """GET edit form for non-existent contact returns 404."""
     vendor = vendor_for_contacts["vendor"]
     resp = client.get(
-        f"/partials/vendors/{vendor.id}/contacts/99999/edit"
+        f"/v2/partials/vendors/{vendor.id}/contacts/99999/edit"
     )
     assert resp.status_code == 404
 
@@ -178,7 +178,7 @@ def test_update_contact_success(client, vendor_for_contacts, db_session):
     vendor = vendor_for_contacts["vendor"]
     contact = vendor_for_contacts["contact"]
     resp = client.put(
-        f"/partials/vendors/{vendor.id}/contacts/{contact.id}",
+        f"/v2/partials/vendors/{vendor.id}/contacts/{contact.id}",
         data={
             "full_name": "Updated Name",
             "email": "updated@crudvendor.com",
@@ -210,7 +210,7 @@ def test_update_contact_email_dedup(client, vendor_for_contacts, db_session):
     db_session.commit()
 
     resp = client.put(
-        f"/partials/vendors/{vendor.id}/contacts/{contact.id}",
+        f"/v2/partials/vendors/{vendor.id}/contacts/{contact.id}",
         data={"full_name": "Existing Contact", "email": "other@crudvendor.com"},
     )
     assert resp.status_code == 409
@@ -221,7 +221,7 @@ def test_update_contact_syncs_email_to_vendor(client, vendor_for_contacts, db_se
     vendor = vendor_for_contacts["vendor"]
     contact = vendor_for_contacts["contact"]
     client.put(
-        f"/partials/vendors/{vendor.id}/contacts/{contact.id}",
+        f"/v2/partials/vendors/{vendor.id}/contacts/{contact.id}",
         data={"full_name": "Existing Contact", "email": "newemail@crudvendor.com"},
     )
     db_session.refresh(vendor)
@@ -233,7 +233,7 @@ def test_update_contact_not_found(client, vendor_for_contacts):
     """PUT to non-existent contact returns 404."""
     vendor = vendor_for_contacts["vendor"]
     resp = client.put(
-        f"/partials/vendors/{vendor.id}/contacts/99999",
+        f"/v2/partials/vendors/{vendor.id}/contacts/99999",
         data={"full_name": "Nobody"},
     )
     assert resp.status_code == 404
@@ -247,7 +247,7 @@ def test_delete_contact_success(client, vendor_for_contacts, db_session):
     vendor = vendor_for_contacts["vendor"]
     contact = vendor_for_contacts["contact"]
     resp = client.delete(
-        f"/partials/vendors/{vendor.id}/contacts/{contact.id}"
+        f"/v2/partials/vendors/{vendor.id}/contacts/{contact.id}"
     )
     assert resp.status_code == 200
     assert resp.headers.get("HX-Trigger") == "refreshContacts"
@@ -260,7 +260,7 @@ def test_delete_contact_removes_email_from_vendor(client, vendor_for_contacts, d
     """Deleting a contact also removes the email from vendor.emails."""
     vendor = vendor_for_contacts["vendor"]
     contact = vendor_for_contacts["contact"]
-    client.delete(f"/partials/vendors/{vendor.id}/contacts/{contact.id}")
+    client.delete(f"/v2/partials/vendors/{vendor.id}/contacts/{contact.id}")
     db_session.refresh(vendor)
     assert "existing@crudvendor.com" not in (vendor.emails or [])
 
@@ -269,6 +269,6 @@ def test_delete_contact_not_found(client, vendor_for_contacts):
     """DELETE non-existent contact returns 404."""
     vendor = vendor_for_contacts["vendor"]
     resp = client.delete(
-        f"/partials/vendors/{vendor.id}/contacts/99999"
+        f"/v2/partials/vendors/{vendor.id}/contacts/99999"
     )
     assert resp.status_code == 404

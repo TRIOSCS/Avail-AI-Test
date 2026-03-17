@@ -30,6 +30,7 @@ class RequisitionTask(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True)
     title = Column(String(255), nullable=False)
     description = Column(Text, nullable=True)
 
@@ -67,6 +68,7 @@ class RequisitionTask(Base):
 
     # Relationships
     requisition = relationship("Requisition", foreign_keys=[requisition_id])
+    requirement = relationship("Requirement", foreign_keys=[requirement_id])
     assignee = relationship("User", foreign_keys=[assigned_to_id])
     creator = relationship("User", foreign_keys=[created_by])
 
@@ -75,4 +77,5 @@ class RequisitionTask(Base):
         Index("ix_rt_assignee_status", "assigned_to_id", "status"),
         Index("ix_rt_status_due", "status", "due_at"),
         Index("ix_rt_creator_status", "created_by", "status"),
+        Index("ix_rt_requirement", "requirement_id"),
     )

@@ -82,7 +82,7 @@ def sample_req_with_offers(db_session: Session, test_user: User):
 def test_offers_tab_shows_action_buttons(client, db_session, sample_req_with_offers):
     """Offers tab renders checkboxes and action buttons."""
     req = sample_req_with_offers
-    resp = client.get(f"/partials/requisitions/{req.id}/tab/offers")
+    resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/offers")
     assert resp.status_code == 200
     assert "Acme Electronics" in resp.text
     assert "Budget Parts" in resp.text
@@ -93,7 +93,7 @@ def test_offers_tab_shows_action_buttons(client, db_session, sample_req_with_off
 def test_offers_tab_shows_review_buttons(client, db_session, sample_req_with_offers):
     """Offers with pending_review status show approve/reject buttons."""
     req = sample_req_with_offers
-    resp = client.get(f"/partials/requisitions/{req.id}/tab/offers")
+    resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/offers")
     assert resp.status_code == 200
     assert "Approve" in resp.text
     assert "Reject" in resp.text
@@ -109,7 +109,7 @@ def test_create_quote_from_offers(client, db_session, sample_req_with_offers):
     offer_ids = [str(o.id) for o in offers]
 
     resp = client.post(
-        f"/partials/requisitions/{req.id}/create-quote",
+        f"/v2/partials/requisitions/{req.id}/create-quote",
         data={"offer_ids": offer_ids},
     )
     assert resp.status_code == 200
@@ -128,7 +128,7 @@ def test_create_quote_no_offers_returns_400(client, db_session, sample_req_with_
     """POST create-quote with no offer_ids returns 400."""
     req = sample_req_with_offers
     resp = client.post(
-        f"/partials/requisitions/{req.id}/create-quote",
+        f"/v2/partials/requisitions/{req.id}/create-quote",
         data={},
     )
     assert resp.status_code == 400
@@ -145,7 +145,7 @@ def test_approve_offer(client, db_session, sample_req_with_offers):
     )
 
     resp = client.post(
-        f"/partials/requisitions/{req.id}/offers/{pending_offer.id}/review",
+        f"/v2/partials/requisitions/{req.id}/offers/{pending_offer.id}/review",
         data={"action": "approve"},
     )
     assert resp.status_code == 200
@@ -161,7 +161,7 @@ def test_reject_offer(client, db_session, sample_req_with_offers):
     )
 
     resp = client.post(
-        f"/partials/requisitions/{req.id}/offers/{pending_offer.id}/review",
+        f"/v2/partials/requisitions/{req.id}/offers/{pending_offer.id}/review",
         data={"action": "reject"},
     )
     assert resp.status_code == 200
@@ -175,7 +175,7 @@ def test_reject_offer(client, db_session, sample_req_with_offers):
 def test_responses_tab_renders(client, db_session, sample_req_with_offers):
     """GET responses tab returns 200 even with no responses."""
     req = sample_req_with_offers
-    resp = client.get(f"/partials/requisitions/{req.id}/tab/responses")
+    resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/responses")
     assert resp.status_code == 200
     assert "No vendor responses yet" in resp.text
 
@@ -196,7 +196,7 @@ def test_responses_tab_shows_responses(client, db_session, sample_req_with_offer
     db_session.add(vr)
     db_session.commit()
 
-    resp = client.get(f"/partials/requisitions/{req.id}/tab/responses")
+    resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/responses")
     assert resp.status_code == 200
     assert "Acme Electronics" in resp.text
     assert "Quote" in resp.text  # classification badge
@@ -210,7 +210,7 @@ def test_responses_tab_shows_responses(client, db_session, sample_req_with_offer
 def test_requisition_detail_has_pdf_button(client, db_session, sample_req_with_offers):
     """Requisition detail shows Download PDF button."""
     req = sample_req_with_offers
-    resp = client.get(f"/partials/requisitions/{req.id}")
+    resp = client.get(f"/v2/partials/requisitions/{req.id}")
     assert resp.status_code == 200
     assert "Download PDF" in resp.text
     assert f"/api/requisitions/{req.id}/pdf" in resp.text
@@ -219,6 +219,6 @@ def test_requisition_detail_has_pdf_button(client, db_session, sample_req_with_o
 def test_requisition_detail_has_responses_tab(client, db_session, sample_req_with_offers):
     """Requisition detail has a Responses tab in nav."""
     req = sample_req_with_offers
-    resp = client.get(f"/partials/requisitions/{req.id}")
+    resp = client.get(f"/v2/partials/requisitions/{req.id}")
     assert resp.status_code == 200
     assert "Responses" in resp.text

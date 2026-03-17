@@ -55,9 +55,9 @@
            x-show="!$store.sidebar.collapsed">Opportunity</p>
         <div x-show="$store.sidebar.collapsed" class="border-t border-brand-800 my-2 mx-2"></div>
 
-        {# Requisitions — HTMX partial swap inside v2 shell #}
+        {# Requisitions — split-panel parts workspace #}
         <a href="/v2/requisitions"
-           hx-get="/v2/partials/requisitions"
+           hx-get="/v2/partials/parts/workspace"
            hx-target="#main-content"
            hx-push-url="/v2/requisitions"
            preload="mouseover"
@@ -166,7 +166,7 @@
         <nav class="px-3 py-4 space-y-1">
           {# Requisitions — HTMX partial swap inside v2 shell #}
           <a href="/v2/requisitions"
-             hx-get="/v2/partials/requisitions"
+             hx-get="/v2/partials/parts/workspace"
              hx-target="#main-content"
              hx-push-url="/v2/requisitions"
              @click="currentView = 'requisitions'; sidebarOpen = false"
@@ -268,7 +268,7 @@
        style="padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));">
     {# Requisitions — HTMX partial swap inside v2 shell #}
     <a href="/v2/requisitions"
-       hx-get="/v2/partials/requisitions"
+       hx-get="/v2/partials/parts/workspace"
        hx-target="#main-content"
        hx-push-url="/v2/requisitions"
        @click="currentView = 'requisitions'"

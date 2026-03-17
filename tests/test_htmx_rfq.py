@@ -109,7 +109,7 @@ def req_with_vendors(db_session: Session, test_user: User):
 def test_rfq_compose_renders_vendors(client, req_with_vendors):
     """RFQ compose form shows vendors with sightings."""
     req = req_with_vendors["req"]
-    resp = client.get(f"/partials/requisitions/{req.id}/rfq-compose")
+    resp = client.get(f"/v2/partials/requisitions/{req.id}/rfq-compose")
     assert resp.status_code == 200
     html = resp.text
     assert "Arrow Electronics" in html
@@ -120,7 +120,7 @@ def test_rfq_compose_renders_vendors(client, req_with_vendors):
 def test_rfq_compose_shows_parts(client, req_with_vendors):
     """RFQ compose form shows parts summary."""
     req = req_with_vendors["req"]
-    resp = client.get(f"/partials/requisitions/{req.id}/rfq-compose")
+    resp = client.get(f"/v2/partials/requisitions/{req.id}/rfq-compose")
     html = resp.text
     assert "TPS54331" in html
     assert "Parts to Quote" in html
@@ -129,7 +129,7 @@ def test_rfq_compose_shows_parts(client, req_with_vendors):
 def test_rfq_compose_shows_vendor_emails(client, req_with_vendors):
     """RFQ compose form shows vendor contact emails."""
     req = req_with_vendors["req"]
-    resp = client.get(f"/partials/requisitions/{req.id}/rfq-compose")
+    resp = client.get(f"/v2/partials/requisitions/{req.id}/rfq-compose")
     html = resp.text
     assert "sales@arrow.com" in html
     assert "quotes@digikey.com" in html
@@ -153,14 +153,14 @@ def test_rfq_compose_already_asked_warning(client, db_session, req_with_vendors)
     db_session.add(prev)
     db_session.commit()
 
-    resp = client.get(f"/partials/requisitions/{req.id}/rfq-compose")
+    resp = client.get(f"/v2/partials/requisitions/{req.id}/rfq-compose")
     html = resp.text
     assert "Already Asked" in html
 
 
 def test_rfq_compose_404_for_missing_req(client):
     """RFQ compose returns 404 for non-existent requisition."""
-    resp = client.get("/partials/requisitions/99999/rfq-compose")
+    resp = client.get("/v2/partials/requisitions/99999/rfq-compose")
     assert resp.status_code == 404
 
 
@@ -168,7 +168,7 @@ def test_rfq_send_creates_contacts(client, db_session, req_with_vendors):
     """Sending RFQ creates Contact records."""
     req = req_with_vendors["req"]
     resp = client.post(
-        f"/partials/requisitions/{req.id}/rfq-send",
+        f"/v2/partials/requisitions/{req.id}/rfq-send",
         data={
             "vendor_names": ["Arrow Electronics", "DigiKey"],
             "vendor_emails": ["sales@arrow.com", "quotes@digikey.com"],
@@ -197,7 +197,7 @@ def test_rfq_send_no_vendors_400(client, req_with_vendors):
     """Sending RFQ with no vendors returns 400."""
     req = req_with_vendors["req"]
     resp = client.post(
-        f"/partials/requisitions/{req.id}/rfq-send",
+        f"/v2/partials/requisitions/{req.id}/rfq-send",
         data={"subject": "RFQ", "parts_summary": "TPS54331"},
     )
     assert resp.status_code == 400
@@ -207,7 +207,7 @@ def test_rfq_send_results_summary(client, req_with_vendors):
     """RFQ send results show per-vendor status table."""
     req = req_with_vendors["req"]
     resp = client.post(
-        f"/partials/requisitions/{req.id}/rfq-send",
+        f"/v2/partials/requisitions/{req.id}/rfq-send",
         data={
             "vendor_names": ["Arrow Electronics"],
             "vendor_emails": ["sales@arrow.com"],
@@ -242,8 +242,8 @@ def test_send_rfq_button_in_detail(client, db_session, test_user):
     db_session.add(req)
     db_session.commit()
 
-    resp = client.get(f"/partials/requisitions/{req.id}")
+    resp = client.get(f"/v2/partials/requisitions/{req.id}")
     assert resp.status_code == 200
     html = resp.text
     assert "Send RFQ" in html
-    assert f"/partials/requisitions/{req.id}/rfq-compose" in html
+    assert f"/v2/partials/requisitions/{req.id}/rfq-compose" in html
