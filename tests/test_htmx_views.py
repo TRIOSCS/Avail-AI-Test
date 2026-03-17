@@ -160,6 +160,48 @@ class TestRequisitionPartials:
         assert resp.status_code == 404
 
 
+class TestBulkActions:
+    """Test bulk actions on requisitions."""
+
+    def test_bulk_archive(self, client: TestClient, test_requisition: Requisition):
+        resp = client.post(
+            "/v2/partials/requisitions/bulk/archive",
+            data={"ids": str(test_requisition.id)},
+        )
+        assert resp.status_code == 200
+
+    def test_bulk_activate(self, client: TestClient, test_requisition: Requisition):
+        resp = client.post(
+            "/v2/partials/requisitions/bulk/activate",
+            data={"ids": str(test_requisition.id)},
+        )
+        assert resp.status_code == 200
+
+    def test_bulk_assign(self, client: TestClient, test_requisition: Requisition, db_session):
+        """Bulk assign changes the owner of selected requisitions."""
+        from app.models import User
+        owner = db_session.query(User).first()
+        resp = client.post(
+            "/v2/partials/requisitions/bulk/assign",
+            data={"ids": str(test_requisition.id), "owner_id": str(owner.id)},
+        )
+        assert resp.status_code == 200
+
+    def test_bulk_invalid_action(self, client: TestClient, test_requisition: Requisition):
+        resp = client.post(
+            "/v2/partials/requisitions/bulk/invalid",
+            data={"ids": str(test_requisition.id)},
+        )
+        assert resp.status_code == 400
+
+    def test_bulk_no_ids(self, client: TestClient):
+        resp = client.post(
+            "/v2/partials/requisitions/bulk/archive",
+            data={"ids": ""},
+        )
+        assert resp.status_code == 400
+
+
 # ── Search partials ─────────────────────────────────────────────────────
 
 
