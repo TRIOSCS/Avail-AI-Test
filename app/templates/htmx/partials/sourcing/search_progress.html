@@ -28,7 +28,7 @@
     <div class="flex items-center justify-between py-2" id="source-row-{{ source|lower }}-{{ requirement_id }}">
       <div class="flex items-center gap-2">
         {% with source_type=source|lower %}
-          {% include "partials/shared/source_badge.html" %}
+          {% include "htmx/partials/shared/source_badge.html" %}
         {% endwith %}
       </div>
       <div class="flex items-center gap-3">

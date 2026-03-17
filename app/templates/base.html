@@ -15,16 +15,16 @@
     {% block head %}{% endblock %}
 </head>
 <body hx-boost="true" x-data>
-    {% include "partials/shared/topbar.html" %}
+    {% include "htmx/partials/shared/topbar.html" %}
     <div class="app-layout">
-        {% include "partials/shared/sidebar.html" %}
+        {% include "htmx/partials/shared/sidebar.html" %}
         <main id="main-content" class="main-content" hx-target="this" hx-swap="innerHTML">
             {% block content %}{% endblock %}
         </main>
     </div>
-    {% include "partials/shared/mobile_nav.html" %}
-    {% include "partials/shared/toast.html" %}
-    {% include "partials/shared/modal.html" %}
+    {% include "htmx/partials/shared/mobile_nav.html" %}
+    {% include "htmx/partials/shared/toast.html" %}
+    {% include "htmx/partials/shared/modal.html" %}
 
     <script src="/static/htmx_app.js" type="module"></script>
     {% block scripts %}{% endblock %}

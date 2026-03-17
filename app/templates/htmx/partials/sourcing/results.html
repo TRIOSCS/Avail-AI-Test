@@ -50,7 +50,7 @@
 
   {# Filter bar (shared component) #}
   {% with filter_target='#main-content', compact=false %}
-    {% include "partials/sourcing/filter_bar.html" %}
+    {% include "htmx/partials/sourcing/filter_bar.html" %}
   {% endwith %}
 
   {# Warning: all leads are weak #}
@@ -71,14 +71,14 @@
   {% if leads %}
   <div class="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4" id="lead-cards">
     {% for lead in leads %}
-      {% include "partials/sourcing/lead_card.html" %}
+      {% include "htmx/partials/sourcing/lead_card.html" %}
     {% endfor %}
   </div>
 
   {# Pagination #}
   {% if total_pages > 1 %}
     {% with target_id="main-content", url="/v2/partials/sourcing/" ~ requirement.id %}
-      {% include "partials/shared/pagination.html" %}
+      {% include "htmx/partials/shared/pagination.html" %}
     {% endwith %}
   {% endif %}
 

@@ -55,7 +55,7 @@
   {# Filter bar #}
   <div class="flex-shrink-0 px-3 py-2 bg-gray-50 border-b border-gray-200">
     {% with filter_target='#lead-list-content', compact=true %}
-      {% include "partials/sourcing/filter_bar.html" %}
+      {% include "htmx/partials/sourcing/filter_bar.html" %}
     {% endwith %}
   </div>
 
@@ -82,7 +82,7 @@
       <div id="lead-list-content">
         {% if leads %}
         {% for lead in leads %}
-          {% include "partials/sourcing/lead_row.html" %}
+          {% include "htmx/partials/sourcing/lead_row.html" %}
         {% endfor %}
 
         {# Pagination #}

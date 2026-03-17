@@ -84,7 +84,7 @@
                  hx-target="{{ target }}" hx-push-url="true"
                  hx-include="#sourcing-filters"
                  class="rounded border-gray-300 text-brand-500 focus:ring-brand-500 w-3 h-3">
-          {% with source_type=src %}{% include "partials/shared/source_badge.html" %}{% endwith %}
+          {% with source_type=src %}{% include "htmx/partials/shared/source_badge.html" %}{% endwith %}
         </label>
         {% endfor %}
       </div>

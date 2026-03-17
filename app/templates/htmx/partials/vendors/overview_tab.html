@@ -7,7 +7,7 @@
 
   {# Safety review block #}
   {% if safety_band %}
-    {% include "partials/shared/safety_review.html" %}
+    {% include "htmx/partials/shared/safety_review.html" %}
   {% else %}
     <div class="bg-white rounded-xl border border-gray-200 p-5">
       <h3 class="text-base font-semibold text-gray-900 mb-2">Vendor Trust & Safety Review</h3>
@@ -131,7 +131,7 @@
           <td class="px-4 py-2.5 text-sm text-right tabular-nums {{ 'text-emerald-700 font-medium' if s.unit_price else 'text-gray-500' }}">{{ "$%.4f"|format(s.unit_price) if s.unit_price else "—" }}</td>
           <td class="px-4 py-2.5">
             {% set source_name = s.source_type %}
-            {% include "partials/shared/source_badge.html" %}
+            {% include "htmx/partials/shared/source_badge.html" %}
           </td>
           <td class="px-4 py-2.5 text-sm text-gray-500">{{ s.created_at.strftime('%b %d, %Y') if s.created_at else "—" }}</td>
         </tr>

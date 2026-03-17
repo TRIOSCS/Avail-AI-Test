@@ -58,7 +58,7 @@
       </thead>
       <tbody id="parts-tbody" class="divide-y divide-gray-200">
         {% for r in requirements %}
-          {% include "partials/requisitions/tabs/req_row.html" %}
+          {% include "htmx/partials/requisitions/tabs/req_row.html" %}
         {% endfor %}
       </tbody>
     </table>
@@ -66,6 +66,6 @@
   <p class="mt-2 text-xs text-gray-400">Double-click any row to edit inline. {{ requirements|length }} requirement{{ "s" if requirements|length != 1 }}.</p>
   {% else %}
   {% set message = "No requirements yet. Add parts using the form above." %}
-  {% include "partials/shared/empty_state.html" %}
+  {% include "htmx/partials/shared/empty_state.html" %}
   {% endif %}
 </div>

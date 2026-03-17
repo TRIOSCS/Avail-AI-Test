@@ -262,7 +262,7 @@
         <div class="px-3 py-2 flex items-start gap-2">
           <div class="flex-1 min-w-0">
             <div class="flex items-center gap-1.5">
-              {% with source_type=ev.source_type %}{% include "partials/shared/source_badge.html" %}{% endwith %}
+              {% with source_type=ev.source_type %}{% include "htmx/partials/shared/source_badge.html" %}{% endwith %}
               <span class="text-[10px] text-gray-400">{{ ev.signal_type|replace('_', ' ')|title }}</span>
               {% if ev.confidence_impact %}
               <span class="text-[10px] font-medium {% if ev.confidence_impact > 0 %}text-emerald-600{% else %}text-rose-600{% endif %}">
@@ -305,7 +305,7 @@
         <div class="flex flex-wrap gap-1">
           {% for ev in items %}
           <div class="inline-flex items-center gap-1 px-1.5 py-0.5 bg-gray-50 rounded text-[10px]">
-            {% with source_type=ev.source_type %}{% include "partials/shared/source_badge.html" %}{% endwith %}
+            {% with source_type=ev.source_type %}{% include "htmx/partials/shared/source_badge.html" %}{% endwith %}
             <span class="text-gray-500">{{ ev.signal_type|replace('_', ' ') }}</span>
           </div>
           {% endfor %}
@@ -329,7 +329,7 @@
               safety_score=lead.vendor_safety_score,
               safety_summary=lead.vendor_safety_summary,
               safety_flags=lead.vendor_safety_flags %}
-        {% include "partials/shared/safety_review.html" %}
+        {% include "htmx/partials/shared/safety_review.html" %}
       {% endwith %}
     </div>
   </div>

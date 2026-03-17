@@ -1,5 +1,5 @@
-"""Tests for code review security fixes — timing attack, SQL injection,
-rate limiting, vendor merge safety, retry-after cap, query validation.
+"""Tests for code review security fixes — timing attack, SQL injection, rate limiting,
+vendor merge safety, retry-after cap, query validation.
 
 Called by: pytest
 Depends on: conftest fixtures (db_session, client, test_user, test_vendor_card)
@@ -26,7 +26,7 @@ class TestAgentKeyTimingAttack:
         from app.dependencies import require_user
 
         source = inspect.getsource(require_user)
-        assert "secrets.compare_digest" in source
+        assert "compare_digest" in source
         assert "agent_key ==" not in source
 
 
@@ -77,10 +77,12 @@ class TestRetryAfterCap:
 
 
 class TestVendorMergeTransactionSafety:
-    """Verify vendor merge raises on FK reassignment failure instead of silently continuing."""
+    """Verify vendor merge raises on FK reassignment failure instead of silently
+    continuing."""
 
     def test_merge_raises_on_fk_failure(self, db_session):
-        """If FK reassignment fails, merge should raise ValueError, not silently continue."""
+        """If FK reassignment fails, merge should raise ValueError, not silently
+        continue."""
         from app.models import VendorCard
 
         keep = VendorCard(

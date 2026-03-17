@@ -97,7 +97,7 @@
   <div class="flex items-center gap-2 mt-0.5 pl-4">
     {% if lead.primary_source_type %}
     <span class="flex-shrink-0">
-      {% with source_type=lead.primary_source_type %}{% include "partials/shared/source_badge.html" %}{% endwith %}
+      {% with source_type=lead.primary_source_type %}{% include "htmx/partials/shared/source_badge.html" %}{% endwith %}
     </span>
     {% endif %}
     {% if lead.reason_summary %}

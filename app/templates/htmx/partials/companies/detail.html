@@ -55,7 +55,7 @@
         {% endif %}
         {% set entity_type = "company" %}
         {% set entity_id = company.id %}
-        {% include "partials/shared/enrich_button.html" %}
+        {% include "htmx/partials/shared/enrich_button.html" %}
       </div>
     </div>
 
@@ -182,7 +182,7 @@
       </div>
       {% else %}
       {% set message = "No sites found for this company." %}
-      {% include "partials/shared/empty_state.html" %}
+      {% include "htmx/partials/shared/empty_state.html" %}
       {% endif %}
     </div>
   </div>

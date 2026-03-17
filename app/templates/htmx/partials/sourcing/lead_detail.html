@@ -234,7 +234,7 @@
         <div class="flex-1 min-w-0">
           <div class="flex items-center gap-2">
             {% with source_type=ev.source_type %}
-              {% include "partials/shared/source_badge.html" %}
+              {% include "htmx/partials/shared/source_badge.html" %}
             {% endwith %}
             <span class="text-xs text-gray-400">{{ ev.signal_type|replace('_', ' ')|title }}</span>
           </div>
@@ -284,7 +284,7 @@
           {% for ev in items %}
           <div class="inline-flex items-center gap-1.5 px-2 py-1 bg-gray-50 rounded text-xs">
             {% with source_type=ev.source_type %}
-              {% include "partials/shared/source_badge.html" %}
+              {% include "htmx/partials/shared/source_badge.html" %}
             {% endwith %}
             <span class="text-gray-500">{{ ev.signal_type|replace('_', ' ') }}</span>
           </div>
@@ -343,7 +343,7 @@
           safety_score=lead.vendor_safety_score,
           safety_summary=lead.vendor_safety_summary,
           safety_flags=lead.vendor_safety_flags %}
-    {% include "partials/shared/safety_review.html" %}
+    {% include "htmx/partials/shared/safety_review.html" %}
   {% endwith %}
 
   {# ===== Buyer Actions Panel ===== #}

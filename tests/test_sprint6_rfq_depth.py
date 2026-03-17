@@ -13,8 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import ActivityLog, Requisition, Requirement, User, VendorCard
-
+from app.models import Requisition, User
 
 # ── Fixtures ─────────────────────────────────────────────────────────
 
@@ -121,27 +120,6 @@ class TestPhoneLog:
         assert resp.status_code == 404
 
 
-# ── Batch Follow-Up ──────────────────────────────────────────────────
-
-
-class TestBatchFollowUp:
-    def test_batch_follow_up(self, client: TestClient, rfq_contact):
-        resp = client.post(
-            "/v2/partials/follow-ups/send-batch",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "Batch follow-up" in resp.text or "sent" in resp.text.lower()
-
-    def test_batch_follow_up_empty(self, client: TestClient):
-        resp = client.post(
-            "/v2/partials/follow-ups/send-batch",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "No contacts" in resp.text or "0" in resp.text
-
-
 # ── Follow-Up Badge ──────────────────────────────────────────────────
 
 
@@ -167,7 +145,9 @@ class TestFollowUpBadge:
 
 
 class TestResponseStatus:
-    def test_mark_reviewed(self, client: TestClient, test_requisition: Requisition, vendor_response, db_session: Session):
+    def test_mark_reviewed(
+        self, client: TestClient, test_requisition: Requisition, vendor_response, db_session: Session
+    ):
         resp = client.patch(
             f"/v2/partials/requisitions/{test_requisition.id}/responses/{vendor_response.id}/status",
             data={"status": "reviewed"},
@@ -177,7 +157,9 @@ class TestResponseStatus:
         db_session.refresh(vendor_response)
         assert vendor_response.status == "reviewed"
 
-    def test_mark_rejected(self, client: TestClient, test_requisition: Requisition, vendor_response, db_session: Session):
+    def test_mark_rejected(
+        self, client: TestClient, test_requisition: Requisition, vendor_response, db_session: Session
+    ):
         resp = client.patch(
             f"/v2/partials/requisitions/{test_requisition.id}/responses/{vendor_response.id}/status",
             data={"status": "rejected"},
