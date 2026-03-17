@@ -85,7 +85,7 @@ def test_api_source(db_session):
 def test_quotes_list_partial(client):
     """Quotes list endpoint returns 200 with 'Quotes' header."""
     resp = client.get(
-        "/partials/quotes",
+        "/v2/partials/quotes",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -95,7 +95,7 @@ def test_quotes_list_partial(client):
 def test_quotes_list_filter_by_status(client):
     """Quotes list with status filter returns 200."""
     resp = client.get(
-        "/partials/quotes?status=draft",
+        "/v2/partials/quotes?status=draft",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -104,7 +104,7 @@ def test_quotes_list_filter_by_status(client):
 def test_quote_detail_partial(client, test_quote):
     """Quote detail endpoint returns 200 with quote number."""
     resp = client.get(
-        f"/partials/quotes/{test_quote.id}",
+        f"/v2/partials/quotes/{test_quote.id}",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -114,7 +114,7 @@ def test_quote_detail_partial(client, test_quote):
 def test_quote_detail_not_found(client):
     """Quote detail returns 404 for nonexistent quote."""
     resp = client.get(
-        "/partials/quotes/99999",
+        "/v2/partials/quotes/99999",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 404
@@ -123,7 +123,7 @@ def test_quote_detail_not_found(client):
 def test_update_quote_line(client, test_quote, test_quote_line):
     """Inline edit a quote line updates sell_price and recalculates margin."""
     resp = client.put(
-        f"/partials/quotes/{test_quote.id}/lines/{test_quote_line.id}",
+        f"/v2/partials/quotes/{test_quote.id}/lines/{test_quote_line.id}",
         data={"sell_price": "15.00", "cost_price": "10.00"},
         headers={"HX-Request": "true"},
     )
@@ -133,7 +133,7 @@ def test_update_quote_line(client, test_quote, test_quote_line):
 def test_delete_quote_line(client, test_quote, test_quote_line):
     """Delete a quote line returns empty response."""
     resp = client.delete(
-        f"/partials/quotes/{test_quote.id}/lines/{test_quote_line.id}",
+        f"/v2/partials/quotes/{test_quote.id}/lines/{test_quote_line.id}",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -143,7 +143,7 @@ def test_delete_quote_line(client, test_quote, test_quote_line):
 def test_add_quote_line(client, test_quote):
     """Add a new line item to a quote."""
     resp = client.post(
-        f"/partials/quotes/{test_quote.id}/lines",
+        f"/v2/partials/quotes/{test_quote.id}/lines",
         data={"mpn": "NE555P", "manufacturer": "TI", "qty": "500", "cost_price": "0.10", "sell_price": "0.25"},
         headers={"HX-Request": "true"},
     )
@@ -154,7 +154,7 @@ def test_add_quote_line(client, test_quote):
 def test_send_quote(client, test_quote):
     """Marking a quote as sent returns 200."""
     resp = client.post(
-        f"/partials/quotes/{test_quote.id}/send",
+        f"/v2/partials/quotes/{test_quote.id}/send",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -163,7 +163,7 @@ def test_send_quote(client, test_quote):
 def test_quote_result_won(client, test_quote):
     """Marking a quote as won returns 200."""
     resp = client.post(
-        f"/partials/quotes/{test_quote.id}/result",
+        f"/v2/partials/quotes/{test_quote.id}/result",
         data={"result": "won"},
         headers={"HX-Request": "true"},
     )
@@ -173,7 +173,7 @@ def test_quote_result_won(client, test_quote):
 def test_quote_result_invalid(client, test_quote):
     """Invalid result value returns 400."""
     resp = client.post(
-        f"/partials/quotes/{test_quote.id}/result",
+        f"/v2/partials/quotes/{test_quote.id}/result",
         data={"result": "invalid"},
         headers={"HX-Request": "true"},
     )
@@ -183,7 +183,7 @@ def test_quote_result_invalid(client, test_quote):
 def test_add_offer_to_quote(client, test_quote, test_offer):
     """Adding an offer as a quote line returns 200."""
     resp = client.post(
-        f"/partials/quotes/{test_quote.id}/add-offer/{test_offer.id}",
+        f"/v2/partials/quotes/{test_quote.id}/add-offer/{test_offer.id}",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -196,7 +196,7 @@ def test_add_offer_to_quote(client, test_quote, test_offer):
 def test_prospecting_list_partial(client):
     """Prospecting list endpoint returns 200 with 'Prospecting' header."""
     resp = client.get(
-        "/partials/prospecting",
+        "/v2/partials/prospecting",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -206,7 +206,7 @@ def test_prospecting_list_partial(client):
 def test_prospecting_filter_by_status(client):
     """Prospecting list with status filter returns 200."""
     resp = client.get(
-        "/partials/prospecting?status=suggested",
+        "/v2/partials/prospecting?status=suggested",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -215,7 +215,7 @@ def test_prospecting_filter_by_status(client):
 def test_prospecting_detail_partial(client, test_prospect):
     """Prospect detail endpoint returns 200 with prospect name."""
     resp = client.get(
-        f"/partials/prospecting/{test_prospect.id}",
+        f"/v2/partials/prospecting/{test_prospect.id}",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -225,7 +225,7 @@ def test_prospecting_detail_partial(client, test_prospect):
 def test_prospecting_detail_not_found(client):
     """Prospect detail returns 404 for nonexistent prospect."""
     resp = client.get(
-        "/partials/prospecting/99999",
+        "/v2/partials/prospecting/99999",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 404
@@ -234,7 +234,7 @@ def test_prospecting_detail_not_found(client):
 def test_dismiss_prospect(client, test_prospect):
     """Dismissing a prospect returns 200 and updates status."""
     resp = client.post(
-        f"/partials/prospecting/{test_prospect.id}/dismiss",
+        f"/v2/partials/prospecting/{test_prospect.id}/dismiss",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -243,7 +243,7 @@ def test_dismiss_prospect(client, test_prospect):
 def test_dismiss_prospect_not_found(client):
     """Dismissing nonexistent prospect returns 404."""
     resp = client.post(
-        "/partials/prospecting/99999/dismiss",
+        "/v2/partials/prospecting/99999/dismiss",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 404
@@ -255,7 +255,7 @@ def test_dismiss_prospect_not_found(client):
 def test_settings_partial(client):
     """Settings page returns 200 with 'Settings' header."""
     resp = client.get(
-        "/partials/settings",
+        "/v2/partials/settings",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -265,7 +265,7 @@ def test_settings_partial(client):
 def test_settings_sources_tab(client, test_api_source):
     """Sources tab returns 200 with source table."""
     resp = client.get(
-        "/partials/settings/sources",
+        "/v2/partials/settings/sources",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -275,7 +275,7 @@ def test_settings_sources_tab(client, test_api_source):
 def test_settings_profile_tab(client):
     """Profile tab returns 200 with user profile."""
     resp = client.get(
-        "/partials/settings/profile",
+        "/v2/partials/settings/profile",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200
@@ -288,7 +288,7 @@ def test_settings_profile_tab(client):
 def test_dashboard_partial(client):
     """Dashboard returns 200 with welcome message and stat cards."""
     resp = client.get(
-        "/partials/dashboard",
+        "/v2/partials/dashboard",
         headers={"HX-Request": "true"},
     )
     assert resp.status_code == 200

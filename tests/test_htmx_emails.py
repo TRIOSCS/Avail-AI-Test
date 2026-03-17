@@ -102,7 +102,7 @@ def test_requirement_emails_tab_success(mock_fetch, client, test_requisition):
     req_id = test_requisition.requirements[0].id
     mock_fetch.return_value = SAMPLE_THREADS
 
-    resp = client.get(f"/partials/requisitions/{req_id}/tab/emails")
+    resp = client.get(f"/v2/partials/requisitions/{req_id}/tab/emails")
 
     assert resp.status_code == 200
     html = resp.text
@@ -119,7 +119,7 @@ def test_requirement_emails_tab_empty(mock_fetch, client, test_requisition):
     req_id = test_requisition.requirements[0].id
     mock_fetch.return_value = []
 
-    resp = client.get(f"/partials/requisitions/{req_id}/tab/emails")
+    resp = client.get(f"/v2/partials/requisitions/{req_id}/tab/emails")
 
     assert resp.status_code == 200
     assert "No email threads found" in resp.text
@@ -131,7 +131,7 @@ def test_requirement_emails_tab_error(mock_fetch, client, test_requisition):
     req_id = test_requisition.requirements[0].id
     mock_fetch.side_effect = RuntimeError("Graph API timeout")
 
-    resp = client.get(f"/partials/requisitions/{req_id}/tab/emails")
+    resp = client.get(f"/v2/partials/requisitions/{req_id}/tab/emails")
 
     assert resp.status_code == 200
     assert "Could not load emails" in resp.text
@@ -147,7 +147,7 @@ def test_thread_messages_success(mock_fetch, client):
     """GET /partials/emails/thread/{id} returns chat bubble HTML."""
     mock_fetch.return_value = SAMPLE_MESSAGES
 
-    resp = client.get("/partials/emails/thread/conv-abc-123")
+    resp = client.get("/v2/partials/emails/thread/conv-abc-123")
 
     assert resp.status_code == 200
     html = resp.text
@@ -165,7 +165,7 @@ def test_thread_messages_empty(mock_fetch, client):
     """Empty thread shows empty state."""
     mock_fetch.return_value = []
 
-    resp = client.get("/partials/emails/thread/conv-empty")
+    resp = client.get("/v2/partials/emails/thread/conv-empty")
 
     assert resp.status_code == 200
     assert "No messages in this thread" in resp.text
@@ -176,7 +176,7 @@ def test_thread_messages_error(mock_fetch, client):
     """Service failure returns error HTML."""
     mock_fetch.side_effect = ConnectionError("Network error")
 
-    resp = client.get("/partials/emails/thread/conv-fail")
+    resp = client.get("/v2/partials/emails/thread/conv-fail")
 
     assert resp.status_code == 200
     assert "Could not load thread messages" in resp.text
@@ -197,7 +197,7 @@ def test_send_reply_success(mock_build, mock_gc_cls, mock_clear, client):
     mock_gc_cls.return_value = mock_gc
 
     resp = client.post(
-        "/partials/emails/reply",
+        "/v2/partials/emails/reply",
         data={
             "conversation_id": "conv-abc-123",
             "message_id": "msg-003",
@@ -221,7 +221,7 @@ def test_send_reply_graph_error(mock_build, mock_gc_cls, mock_clear, client):
     mock_gc_cls.return_value = mock_gc
 
     resp = client.post(
-        "/partials/emails/reply",
+        "/v2/partials/emails/reply",
         data={
             "conversation_id": "conv-abc",
             "message_id": "msg-001",
@@ -243,7 +243,7 @@ def test_send_reply_network_error(mock_build, mock_gc_cls, client):
     mock_gc_cls.return_value = mock_gc
 
     resp = client.post(
-        "/partials/emails/reply",
+        "/v2/partials/emails/reply",
         data={
             "conversation_id": "conv-abc",
             "message_id": "msg-001",
@@ -266,7 +266,7 @@ def test_vendor_emails_success(mock_fetch, client, test_vendor_card):
     """GET /partials/vendors/{id}/emails returns thread table."""
     mock_fetch.return_value = SAMPLE_THREADS
 
-    resp = client.get(f"/partials/vendors/{test_vendor_card.id}/emails")
+    resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/emails")
 
     assert resp.status_code == 200
     assert "RFQ for LM317T" in resp.text
@@ -278,7 +278,7 @@ def test_vendor_emails_empty(mock_fetch, client, test_vendor_card):
     """Empty vendor threads show vendor-specific empty message."""
     mock_fetch.return_value = []
 
-    resp = client.get(f"/partials/vendors/{test_vendor_card.id}/emails")
+    resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/emails")
 
     assert resp.status_code == 200
     assert "No email threads with this vendor" in resp.text
@@ -289,7 +289,7 @@ def test_vendor_emails_error(mock_fetch, client, test_vendor_card):
     """Vendor email service failure returns error HTML."""
     mock_fetch.side_effect = OSError("DNS resolution failed")
 
-    resp = client.get(f"/partials/vendors/{test_vendor_card.id}/emails")
+    resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/emails")
 
     assert resp.status_code == 200
     assert "Could not load vendor emails" in resp.text
@@ -305,7 +305,7 @@ def test_thread_summary_success(mock_summarize, client):
     """GET /partials/emails/thread/{id}/summary returns AI summary card."""
     mock_summarize.return_value = SAMPLE_SUMMARY
 
-    resp = client.get("/partials/emails/thread/conv-abc-123/summary")
+    resp = client.get("/v2/partials/emails/thread/conv-abc-123/summary")
 
     assert resp.status_code == 200
     html = resp.text
@@ -320,7 +320,7 @@ def test_thread_summary_none(mock_summarize, client):
     """Null summary returns fallback message."""
     mock_summarize.return_value = None
 
-    resp = client.get("/partials/emails/thread/conv-abc-123/summary")
+    resp = client.get("/v2/partials/emails/thread/conv-abc-123/summary")
 
     assert resp.status_code == 200
     assert "Could not generate a summary" in resp.text
@@ -331,7 +331,7 @@ def test_thread_summary_error(mock_summarize, client):
     """AI service failure returns error HTML."""
     mock_summarize.side_effect = RuntimeError("AI service unavailable")
 
-    resp = client.get("/partials/emails/thread/conv-abc-123/summary")
+    resp = client.get("/v2/partials/emails/thread/conv-abc-123/summary")
 
     assert resp.status_code == 200
     assert "Could not generate summary" in resp.text
@@ -347,7 +347,7 @@ def test_email_intelligence_dashboard_success(mock_dashboard, client):
     """GET /partials/email-intelligence returns stats dashboard."""
     mock_dashboard.return_value = SAMPLE_DASHBOARD
 
-    resp = client.get("/partials/email-intelligence")
+    resp = client.get("/v2/partials/email-intelligence")
 
     assert resp.status_code == 200
     html = resp.text
@@ -365,7 +365,7 @@ def test_email_intelligence_dashboard_error(mock_dashboard, client):
     """Dashboard service failure returns error HTML."""
     mock_dashboard.side_effect = Exception("DB connection lost")
 
-    resp = client.get("/partials/email-intelligence")
+    resp = client.get("/v2/partials/email-intelligence")
 
     assert resp.status_code == 200
     assert "Could not load email intelligence" in resp.text
@@ -376,7 +376,7 @@ def test_email_intelligence_dashboard_custom_days(mock_dashboard, client):
     """Custom days parameter is passed through to service."""
     mock_dashboard.return_value = SAMPLE_DASHBOARD
 
-    resp = client.get("/partials/email-intelligence?days=30")
+    resp = client.get("/v2/partials/email-intelligence?days=30")
 
     assert resp.status_code == 200
     mock_dashboard.assert_called_once()

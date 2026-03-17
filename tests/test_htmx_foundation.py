@@ -103,7 +103,7 @@ class TestBaseTemplateBranding:
     def test_partials_no_cdn_tailwind(self, client: TestClient):
         """Partial requests should not reference CDN."""
         resp = client.get(
-            "/partials/requisitions",
+            "/v2/partials/requisitions",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -114,15 +114,15 @@ class TestGlobalSearch:
     """Verify global search endpoint returns HTML."""
 
     def test_global_search_returns_200(self, client: TestClient):
-        resp = client.get("/partials/search/global?q=test")
+        resp = client.get("/v2/partials/search/global?q=test")
         assert resp.status_code == 200
 
     def test_global_search_short_query_returns_empty(self, client: TestClient):
-        resp = client.get("/partials/search/global?q=a")
+        resp = client.get("/v2/partials/search/global?q=a")
         assert resp.status_code == 200
 
     def test_global_search_finds_requisition(self, client: TestClient, test_requisition):
-        resp = client.get("/partials/search/global?q=REQ-TEST")
+        resp = client.get("/v2/partials/search/global?q=REQ-TEST")
         assert resp.status_code == 200
         assert "REQ-TEST" in resp.text
 

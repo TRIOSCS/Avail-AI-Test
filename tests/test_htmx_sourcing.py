@@ -108,7 +108,7 @@ def sample_lead(db_session: Session, sample_requisition_with_leads):
 
 def test_search_form_partial(client):
     """GET /partials/search returns search form HTML."""
-    resp = client.get("/partials/search")
+    resp = client.get("/v2/partials/search")
     assert resp.status_code == 200
     assert "Search All Sources" in resp.text
     assert 'name="mpn"' in resp.text
@@ -131,7 +131,7 @@ def test_search_run_returns_results(client, db_session):
         ],
     ):
         resp = client.post(
-            "/partials/search/run",
+            "/v2/partials/search/run",
             data={"mpn": "LM317T"},
         )
     assert resp.status_code == 200
@@ -143,7 +143,7 @@ def test_search_run_returns_results(client, db_session):
 
 def test_search_run_empty_mpn(client):
     """POST /partials/search/run with empty mpn shows error."""
-    resp = client.post("/partials/search/run", data={"mpn": ""})
+    resp = client.post("/v2/partials/search/run", data={"mpn": ""})
     assert resp.status_code == 200
     assert "Please enter a part number" in resp.text
 
@@ -154,7 +154,7 @@ def test_search_run_empty_mpn(client):
 def test_sourcing_results_partial(client, db_session, sample_requisition_with_leads):
     """GET /partials/sourcing/{req_id} returns lead cards."""
     req_id = sample_requisition_with_leads.id
-    resp = client.get(f"/partials/sourcing/{req_id}")
+    resp = client.get(f"/v2/partials/sourcing/{req_id}")
     assert resp.status_code == 200
     assert "lead-card-" in resp.text
     assert "Test Vendor" in resp.text
@@ -162,7 +162,7 @@ def test_sourcing_results_partial(client, db_session, sample_requisition_with_le
 
 def test_sourcing_results_not_found(client):
     """GET /partials/sourcing/99999 returns 404."""
-    resp = client.get("/partials/sourcing/99999")
+    resp = client.get("/v2/partials/sourcing/99999")
     assert resp.status_code == 404
 
 
@@ -170,11 +170,11 @@ def test_sourcing_filter_confidence(client, db_session, sample_requisition_with_
     """Confidence filter restricts leads by band."""
     req_id = sample_requisition_with_leads.id
     # Lead has confidence_band="medium", so high filter should exclude it
-    resp = client.get(f"/partials/sourcing/{req_id}?confidence=high")
+    resp = client.get(f"/v2/partials/sourcing/{req_id}?confidence=high")
     assert resp.status_code == 200
     assert "lead-card-" not in resp.text
 
-    resp = client.get(f"/partials/sourcing/{req_id}?confidence=medium")
+    resp = client.get(f"/v2/partials/sourcing/{req_id}?confidence=medium")
     assert resp.status_code == 200
     assert "lead-card-" in resp.text
 
@@ -182,7 +182,7 @@ def test_sourcing_filter_confidence(client, db_session, sample_requisition_with_
 def test_sourcing_filter_safety(client, db_session, sample_requisition_with_leads):
     """Safety filter restricts leads by band."""
     req_id = sample_requisition_with_leads.id
-    resp = client.get(f"/partials/sourcing/{req_id}?safety=low_risk")
+    resp = client.get(f"/v2/partials/sourcing/{req_id}?safety=low_risk")
     assert resp.status_code == 200
     assert "lead-card-" not in resp.text  # Lead is medium_risk
 
@@ -191,7 +191,7 @@ def test_sourcing_sort_options(client, db_session, sample_requisition_with_leads
     """Sort options work without errors."""
     req_id = sample_requisition_with_leads.id
     for sort_val in ["best", "freshest", "safest", "contact", "proven"]:
-        resp = client.get(f"/partials/sourcing/{req_id}?sort={sort_val}")
+        resp = client.get(f"/v2/partials/sourcing/{req_id}?sort={sort_val}")
         assert resp.status_code == 200
 
 
@@ -209,7 +209,7 @@ def test_sourcing_full_page(client, db_session, sample_requisition_with_leads):
 
 def test_lead_detail_partial(client, db_session, sample_lead):
     """GET /partials/sourcing/leads/{id} returns lead detail."""
-    resp = client.get(f"/partials/sourcing/leads/{sample_lead.id}")
+    resp = client.get(f"/v2/partials/sourcing/leads/{sample_lead.id}")
     assert resp.status_code == 200
     assert sample_lead.vendor_name in resp.text
     assert "Evidence" in resp.text
@@ -219,7 +219,7 @@ def test_lead_detail_partial(client, db_session, sample_lead):
 
 def test_lead_detail_not_found(client):
     """GET /partials/sourcing/leads/99999 returns 404."""
-    resp = client.get("/partials/sourcing/leads/99999")
+    resp = client.get("/v2/partials/sourcing/leads/99999")
     assert resp.status_code == 404
 
 
@@ -237,7 +237,7 @@ def test_lead_detail_full_page(client, db_session, sample_lead):
 def test_lead_status_update(client, db_session, sample_lead):
     """POST status update changes buyer_status and creates feedback event."""
     resp = client.post(
-        f"/partials/sourcing/leads/{sample_lead.id}/status",
+        f"/v2/partials/sourcing/leads/{sample_lead.id}/status",
         data={"status": "contacted", "note": "Called vendor"},
     )
     assert resp.status_code == 200
@@ -249,7 +249,7 @@ def test_lead_status_update(client, db_session, sample_lead):
 def test_lead_status_invalid(client, db_session, sample_lead):
     """Invalid status returns 400."""
     resp = client.post(
-        f"/partials/sourcing/leads/{sample_lead.id}/status",
+        f"/v2/partials/sourcing/leads/{sample_lead.id}/status",
         data={"status": "invalid_status"},
     )
     assert resp.status_code == 400
@@ -258,7 +258,7 @@ def test_lead_status_invalid(client, db_session, sample_lead):
 def test_lead_status_not_found(client):
     """Status update on nonexistent lead returns 404."""
     resp = client.post(
-        "/partials/sourcing/leads/99999/status",
+        "/v2/partials/sourcing/leads/99999/status",
         data={"status": "contacted"},
     )
     assert resp.status_code == 404
@@ -270,7 +270,7 @@ def test_lead_status_not_found(client):
 def test_lead_feedback(client, db_session, sample_lead):
     """POST feedback adds event without changing status."""
     resp = client.post(
-        f"/partials/sourcing/leads/{sample_lead.id}/feedback",
+        f"/v2/partials/sourcing/leads/{sample_lead.id}/feedback",
         data={"note": "Vendor confirmed stock", "contact_method": "email"},
     )
     assert resp.status_code == 200
@@ -281,7 +281,7 @@ def test_lead_feedback(client, db_session, sample_lead):
 def test_lead_feedback_not_found(client):
     """Feedback on nonexistent lead returns 404."""
     resp = client.post(
-        "/partials/sourcing/leads/99999/feedback",
+        "/v2/partials/sourcing/leads/99999/feedback",
         data={"note": "test"},
     )
     assert resp.status_code == 404
@@ -295,7 +295,7 @@ def test_sourcing_lead_card_shows_buyer_status(client, db_session, sample_lead):
     sample_lead.buyer_status = "contacted"
     db_session.commit()
     req_id = sample_lead.requirement_id
-    resp = client.get(f"/partials/sourcing/{req_id}")
+    resp = client.get(f"/v2/partials/sourcing/{req_id}")
     assert resp.status_code == 200
     assert "Contacted" in resp.text
 
@@ -305,7 +305,7 @@ def test_sourcing_lead_card_hides_new_status(client, db_session, sample_lead):
     sample_lead.buyer_status = "new"
     db_session.commit()
     req_id = sample_lead.requirement_id
-    resp = client.get(f"/partials/sourcing/{req_id}")
+    resp = client.get(f"/v2/partials/sourcing/{req_id}")
     assert resp.status_code == 200
     # The word "New" appears in filter bar but NOT as a buyer status badge
     assert "lead-card-" in resp.text
@@ -316,7 +316,7 @@ def test_sourcing_lead_card_shows_risk_flags(client, db_session, sample_lead):
     sample_lead.risk_flags = ["limited_business_footprint", "positive:contact_channels_present"]
     db_session.commit()
     req_id = sample_lead.requirement_id
-    resp = client.get(f"/partials/sourcing/{req_id}")
+    resp = client.get(f"/v2/partials/sourcing/{req_id}")
     assert resp.status_code == 200
     assert "Limited Business Footprint" in resp.text
     assert "Contact Channels Present" in resp.text
@@ -327,7 +327,7 @@ def test_sourcing_lead_card_shows_reason_summary(client, db_session, sample_lead
     sample_lead.reason_summary = "Strong BrokerBin listing with verified stock"
     db_session.commit()
     req_id = sample_lead.requirement_id
-    resp = client.get(f"/partials/sourcing/{req_id}")
+    resp = client.get(f"/v2/partials/sourcing/{req_id}")
     assert resp.status_code == 200
     assert "Strong BrokerBin listing with verified stock" in resp.text
 
@@ -338,7 +338,7 @@ def test_sourcing_results_weak_leads_warning(client, db_session, sample_lead):
     sample_lead.confidence_score = 15.0
     db_session.commit()
     req_id = sample_lead.requirement_id
-    resp = client.get(f"/partials/sourcing/{req_id}")
+    resp = client.get(f"/v2/partials/sourcing/{req_id}")
     assert resp.status_code == 200
     assert "Only weak leads found" in resp.text
 
@@ -351,7 +351,7 @@ def test_requirement_inline_update(client, db_session, sample_requisition_with_l
     requirement = sample_requisition_with_leads
     req_id = requirement.requisition_id
     resp = client.put(
-        f"/partials/requisitions/{req_id}/requirements/{requirement.id}",
+        f"/v2/partials/requisitions/{req_id}/requirements/{requirement.id}",
         data={
             "primary_mpn": "LM358N",
             "target_qty": "500",
@@ -372,7 +372,7 @@ def test_requirement_inline_update(client, db_session, sample_requisition_with_l
 def test_requirement_inline_update_not_found(client):
     """PUT on nonexistent requirement returns 404."""
     resp = client.put(
-        "/partials/requisitions/99999/requirements/99999",
+        "/v2/partials/requisitions/99999/requirements/99999",
         data={"primary_mpn": "TEST", "target_qty": "1"},
     )
     assert resp.status_code == 404
@@ -383,7 +383,7 @@ def test_requirement_row_has_edit_support(client, db_session, sample_requisition
     requirement = sample_requisition_with_leads
     req_id = requirement.requisition_id
     # Load the parts tab
-    resp = client.get(f"/partials/requisitions/{req_id}/tab/parts")
+    resp = client.get(f"/v2/partials/requisitions/{req_id}/tab/parts")
     assert resp.status_code == 200
     assert "x-data" in resp.text
     assert "editing" in resp.text
@@ -394,7 +394,7 @@ def test_add_requirement_returns_template_row(client, db_session, sample_requisi
     """POST add requirement returns a proper template row (not inline HTML)."""
     req_id = sample_requisition_with_leads.requisition_id
     resp = client.post(
-        f"/partials/requisitions/{req_id}/requirements",
+        f"/v2/partials/requisitions/{req_id}/requirements",
         data={"primary_mpn": "STM32F407", "target_qty": "10", "brand": "ST"},
     )
     assert resp.status_code == 200
