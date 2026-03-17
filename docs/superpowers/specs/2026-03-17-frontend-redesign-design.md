@@ -27,7 +27,7 @@ The frontend has three routing layers and two template trees:
 
 ### Target State
 
-- **One routing system:** `htmx_views.py` for page shells + `htmx/*.py` modules for domain partials/actions. All under `/v2` prefix.
+- **One routing file:** `htmx_views.py` (monolithic, all `/v2` routes). The `htmx/*.py` sub-modules are unused dead code and will be deleted — we can re-extract domain modules from the monolith later when needed.
 - **One template tree:** `app/templates/htmx/` — all partials consolidated here.
 - **No requisitions2:** Fully replaced by `/v2/requisitions` + parts workspace.
 
@@ -79,14 +79,9 @@ After all moves, delete `app/templates/partials/` entirely.
 - All template references in routers
 - Test files: update URLs in `test_htmx_company_vendor_crud.py`, `test_htmx_core_pages.py`, etc.
 
-### Step 1d: Route Prefix Consolidation
+### Step 1d: Delete Unused htmx/ Sub-modules
 
-The `htmx/*.py` sub-modules currently have NO prefix. They need `/v2` added:
-
-- Update the shared router in `_helpers.py`: `router = APIRouter(prefix="/v2", tags=["htmx-views"])`
-- OR add prefix when including in `main.py`: `app.include_router(htmx_router, prefix="/v2")`
-- Audit all 136 routes in htmx/*.py to ensure no path conflicts with htmx_views.py
-- Update all test URLs accordingly
+The `app/routers/htmx/*.py` sub-modules (6,444 lines, 13 files) are never imported or mounted. Delete the entire directory. Domain extraction from the monolith can be done later as a separate refactoring effort.
 
 ### Keep (do NOT delete)
 

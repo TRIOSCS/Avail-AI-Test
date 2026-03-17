@@ -91,7 +91,7 @@ Expected: All remaining tests pass (deleted tests won't run).
 - [ ] **Step 9: Commit**
 
 ```bash
-git add -A && git commit -m "cleanup: delete legacy requisitions2 router, templates, JS, and tests"
+git add -u && git commit -m "cleanup: delete legacy requisitions2 router, templates, JS, and tests"
 ```
 
 ---
@@ -129,7 +129,7 @@ Expected: All tests pass.
 - [ ] **Step 4: Commit**
 
 ```bash
-git add -A && git commit -m "cleanup: delete unused htmx/ sub-modules (6,444 lines of dead code)"
+git add -u && git commit -m "cleanup: delete unused htmx/ sub-modules (6,444 lines of dead code)"
 ```
 
 ---
@@ -201,7 +201,7 @@ Expected: All tests pass.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add -A && git commit -m "cleanup: consolidate all templates into htmx/partials/ tree"
+git add -u && git commit -m "cleanup: consolidate all templates into htmx/partials/ tree"
 ```
 
 ---
@@ -289,7 +289,7 @@ Expected: All tests pass.
 - [ ] **Step 9: Commit**
 
 ```bash
-git add -A && git commit -m "rename: Companies → Customers across routes, templates, and tests"
+git add -u && git commit -m "rename: Companies → Customers across routes, templates, and tests"
 ```
 
 ---
@@ -318,7 +318,7 @@ rm app/templates/base.html
 
 ```bash
 TESTING=1 PYTHONPATH=/root/availai pytest tests/ -v --tb=short 2>&1 | tail -30
-git add -A && git commit -m "cleanup: delete unused legacy base.html template"
+git add -u && git commit -m "cleanup: delete unused legacy base.html template"
 ```
 
 ---

@@ -51,7 +51,23 @@ SYSTEM:
   - Settings    → /v2/settings
 ```
 
-Secondary pages (Buy Plans, Materials, Follow-ups, Knowledge, Emails, Admin, Activity) remain accessible via their `/v2/` routes but are not in primary sidebar nav. They can be accessed through settings or contextual links within pages.
+Secondary pages need a "More" section at the bottom of the SYSTEM nav group:
+
+```
+SYSTEM:
+  - Prospecting → /v2/prospecting
+  - Strategic   → /v2/strategic
+  - Settings    → /v2/settings
+  - More ▾      (Alpine.js collapsible)
+    - Buy Plans   → /v2/buy-plans
+    - Materials   → /v2/materials
+    - Follow-ups  → /v2/follow-ups
+    - Knowledge   → /v2/knowledge
+    - Emails      → /v2/emails
+    - Admin       → /v2/admin (if is_admin)
+```
+
+Use Alpine.js `x-show` with `$persist` to remember collapsed/expanded state.
 
 - [ ] **Step 3: Preserve Alpine.js sidebar state**
 
