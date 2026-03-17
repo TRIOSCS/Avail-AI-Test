@@ -1,8 +1,9 @@
-"""test_buy_plan_router.py — Buy Plan (unified) API Endpoint Tests.
+"""test_buy_plan_router.py — Buy Plan V1 Compatibility Layer Tests.
 
-Covers all buy plan endpoints via TestClient: build, get, list, submit,
-approve, verify-so, confirm-po, verify-po, flag-issue, resubmit, offer
-comparison, and verification group CRUD.
+Covers the V1 adapter endpoints: GET list/detail return V1-shaped statuses,
+deprecated mutations return 410 Gone, operational endpoints (verify-so,
+confirm-po, verify-po, flag-issue) keep working, token endpoints keep working,
+and service-layer intelligence tests.
 
 Called by: pytest
 Depends on: conftest.py fixtures, app.routers.crm.buy_plans
@@ -109,47 +110,149 @@ def _make_ops_member(db, user):
     return member
 
 
-# ── Build ────────────────────────────────────────────────────────────
+# ── Deprecated Mutations → 410 Gone ─────────────────────────────────
 
 
-class TestBuildEndpoint:
-    def test_build_creates_draft(self, db_session: Session, test_quote: Quote, test_user: User):
-        """POST build → returns draft plan with lines."""
-        req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
-        _make_offer(
-            db_session,
-            test_quote.requisition_id,
-            req.id,
-            entered_by_id=test_user.id,
-        )
-        db_session.commit()
+class TestDeprecatedMutations:
+    """V1 workflow mutations (build, submit, approve, resubmit, reset-to-draft) should
+    return 410 Gone directing consumers to the V3 API."""
 
+    def test_build_returns_410(self, db_session: Session, test_quote: Quote, test_user: User):
         c = _make_client(db_session, test_user)
         r = c.post(f"/api/quotes/{test_quote.id}/buy-plan/build")
-        assert r.status_code == 200
+        assert r.status_code == 410
         data = r.json()
-        assert data["status"] == "draft"
-        assert data["quote_id"] == test_quote.id
-        assert len(data["lines"]) >= 1
+        assert "deprecated" in data["error"].lower()
+        assert "v3" in data["v3_endpoint"].lower() or "v3" in data["error"].lower()
+        assert data["status_code"] == 410
 
-    def test_build_invalid_quote(self, db_session: Session, test_user: User):
+    def test_submit_returns_410(self, db_session: Session, test_quote: Quote, test_user: User):
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
-        r = c.post("/api/quotes/99999/buy-plan/build")
-        assert r.status_code == 400
+        r = c.post(
+            f"/api/buy-plans/{plan.id}/submit",
+            json={"sales_order_number": "SO-2026-001"},
+        )
+        assert r.status_code == 410
+        assert r.json()["status_code"] == 410
+
+    def test_approve_returns_410(self, db_session: Session, test_quote: Quote, test_user: User, manager_user: User):
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        c = _make_client(db_session, manager_user)
+        r = c.post(
+            f"/api/buy-plans/{plan.id}/approve",
+            json={"action": "approve"},
+        )
+        assert r.status_code == 410
+
+    def test_resubmit_returns_410(self, db_session: Session, test_quote: Quote, test_user: User):
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        c = _make_client(db_session, test_user)
+        r = c.post(
+            f"/api/buy-plans/{plan.id}/resubmit",
+            json={"sales_order_number": "SO-FIXED"},
+        )
+        assert r.status_code == 410
+
+    def test_reset_to_draft_returns_410(self, db_session: Session, test_quote: Quote, test_user: User):
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        c = _make_client(db_session, test_user)
+        r = c.post(f"/api/buy-plans/{plan.id}/reset-to-draft")
+        assert r.status_code == 410
 
 
-# ── Get / List ───────────────────────────────────────────────────────
+# ── Get / List (V1 status mapping) ──────────────────────────────────
 
 
 class TestGetListEndpoints:
-    def test_get_plan(self, db_session: Session, test_quote: Quote, test_user: User):
+    def test_get_plan_draft(self, db_session: Session, test_quote: Quote, test_user: User):
+        """GET detail for a draft plan returns V1 status 'draft'."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
         r = c.get(f"/api/buy-plans/{plan.id}")
         assert r.status_code == 200
         data = r.json()
         assert data["id"] == plan.id
+        assert data["status"] == "draft"
         assert len(data["lines"]) == 1
+        # V1 compat: line_items alias present
+        assert "line_items" in data
+
+    def test_get_plan_pending_maps_to_pending_approval(self, db_session: Session, test_quote: Quote, test_user: User):
+        """V3 status 'pending' maps to V1 status 'pending_approval'."""
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.pending.value
+        db_session.commit()
+
+        c = _make_client(db_session, test_user)
+        r = c.get(f"/api/buy-plans/{plan.id}")
+        assert r.status_code == 200
+        assert r.json()["status"] == "pending_approval"
+
+    def test_get_plan_active_maps_to_approved(self, db_session: Session, test_quote: Quote, test_user: User):
+        """V3 status 'active' with no POs maps to V1 status 'approved'."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        # No PO on line → maps to 'approved'
+        db_session.commit()
+
+        c = _make_client(db_session, test_user)
+        r = c.get(f"/api/buy-plans/{plan.id}")
+        assert r.status_code == 200
+        assert r.json()["status"] == "approved"
+
+    def test_get_plan_active_with_po_maps_to_po_entered(self, db_session: Session, test_quote: Quote, test_user: User):
+        """V3 active with PO but awaiting_po status → V1 'po_entered'."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        line.po_number = "PO-001"
+        line.status = BuyPlanLineStatus.awaiting_po.value
+        db_session.commit()
+
+        c = _make_client(db_session, test_user)
+        r = c.get(f"/api/buy-plans/{plan.id}")
+        assert r.status_code == 200
+        assert r.json()["status"] == "po_entered"
+
+    def test_get_plan_active_with_verified_po_maps_to_po_confirmed(
+        self, db_session: Session, test_quote: Quote, test_user: User
+    ):
+        """V3 active with all PO lines pending_verify/verified → V1 'po_confirmed'."""
+        plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.active.value
+        line.po_number = "PO-001"
+        line.status = BuyPlanLineStatus.pending_verify.value
+        db_session.commit()
+
+        c = _make_client(db_session, test_user)
+        r = c.get(f"/api/buy-plans/{plan.id}")
+        assert r.status_code == 200
+        assert r.json()["status"] == "po_confirmed"
+
+    def test_get_plan_completed_maps_to_complete(self, db_session: Session, test_quote: Quote, test_user: User):
+        """V3 status 'completed' maps to V1 status 'complete'."""
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.completed.value
+        db_session.commit()
+
+        c = _make_client(db_session, test_user)
+        r = c.get(f"/api/buy-plans/{plan.id}")
+        assert r.status_code == 200
+        assert r.json()["status"] == "complete"
+
+    def test_get_plan_draft_with_rejection_maps_to_rejected(
+        self, db_session: Session, test_quote: Quote, test_user: User
+    ):
+        """V3 draft with cancellation_reason → V1 'rejected'."""
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.draft.value
+        plan.cancellation_reason = "Fix margin"
+        db_session.commit()
+
+        c = _make_client(db_session, test_user)
+        r = c.get(f"/api/buy-plans/{plan.id}")
+        assert r.status_code == 200
+        assert r.json()["status"] == "rejected"
 
     def test_get_not_found(self, db_session: Session, test_user: User):
         c = _make_client(db_session, test_user)
@@ -166,6 +269,7 @@ class TestGetListEndpoints:
         assert len(data["items"]) >= 1
 
     def test_list_filter_status(self, db_session: Session, test_quote: Quote, test_user: User):
+        """V1 status filter 'draft' works for draft plans."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
         r = c.get("/api/buy-plans?status=draft")
@@ -174,6 +278,20 @@ class TestGetListEndpoints:
 
         r2 = c.get("/api/buy-plans?status=completed")
         assert r2.json()["count"] == 0
+
+    def test_list_filter_v1_status_pending_approval(self, db_session: Session, test_quote: Quote, test_user: User):
+        """V1 status filter 'pending_approval' translates to V3 'pending' for
+        querying."""
+        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
+        plan.status = BuyPlanStatus.pending.value
+        db_session.commit()
+
+        c = _make_client(db_session, test_user)
+        r = c.get("/api/buy-plans?status=pending_approval")
+        assert r.status_code == 200
+        assert r.json()["count"] >= 1
+        # Status in response should be V1-mapped
+        assert r.json()["items"][0]["status"] == "pending_approval"
 
     def test_list_filter_quote_id(self, db_session: Session, test_quote: Quote, test_user: User):
         _make_draft_plan(db_session, test_quote, test_user)
@@ -186,106 +304,7 @@ class TestGetListEndpoints:
         assert r2.json()["count"] == 0
 
 
-# ── Submit ───────────────────────────────────────────────────────────
-
-
-class TestSubmitEndpoint:
-    def test_submit_auto_approve(self, db_session: Session, test_quote: Quote, test_user: User):
-        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        c = _make_client(db_session, test_user)
-        r = c.post(
-            f"/api/buy-plans/{plan.id}/submit",
-            json={"sales_order_number": "SO-2026-001"},
-        )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["ok"] is True
-        assert data["status"] == "active"
-        assert data["auto_approved"] is True
-
-    def test_submit_needs_approval(self, db_session: Session, test_quote: Quote, test_user: User):
-        plan, _, _, _ = _make_draft_plan(
-            db_session,
-            test_quote,
-            test_user,
-            total_cost=10000.0,
-        )
-        c = _make_client(db_session, test_user)
-        r = c.post(
-            f"/api/buy-plans/{plan.id}/submit",
-            json={"sales_order_number": "SO-BIG"},
-        )
-        assert r.status_code == 200
-        assert r.json()["status"] == "pending"
-
-    def test_submit_blank_so_rejected(self, db_session: Session, test_quote: Quote, test_user: User):
-        """Blank SO# rejected by Pydantic — returns 422."""
-        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        c = _make_client(db_session, test_user)
-        resp = c.post(
-            f"/api/buy-plans/{plan.id}/submit",
-            json={"sales_order_number": ""},
-        )
-        assert resp.status_code == 422
-
-
-# ── Approve ──────────────────────────────────────────────────────────
-
-
-class TestApproveEndpoint:
-    def test_approve(
-        self,
-        db_session: Session,
-        test_quote: Quote,
-        test_user: User,
-        manager_user: User,
-    ):
-        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.pending.value
-        db_session.commit()
-
-        c = _make_client(db_session, manager_user)
-        r = c.post(
-            f"/api/buy-plans/{plan.id}/approve",
-            json={"action": "approve", "notes": "LGTM"},
-        )
-        assert r.status_code == 200
-        assert r.json()["status"] == "active"
-
-    def test_reject(
-        self,
-        db_session: Session,
-        test_quote: Quote,
-        test_user: User,
-        manager_user: User,
-    ):
-        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.pending.value
-        db_session.commit()
-
-        c = _make_client(db_session, manager_user)
-        r = c.post(
-            f"/api/buy-plans/{plan.id}/approve",
-            json={"action": "reject", "notes": "Fix margin"},
-        )
-        assert r.status_code == 200
-        assert r.json()["status"] == "draft"
-
-    def test_non_manager_rejected(self, db_session: Session, test_quote: Quote, test_user: User):
-        """Sales/buyer cannot approve."""
-        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.pending.value
-        db_session.commit()
-
-        c = _make_client(db_session, test_user)  # buyer role
-        r = c.post(
-            f"/api/buy-plans/{plan.id}/approve",
-            json={"action": "approve"},
-        )
-        assert r.status_code == 403
-
-
-# ── Verify SO ────────────────────────────────────────────────────────
+# ── Verify SO (kept — operational) ──────────────────────────────────
 
 
 class TestVerifySOEndpoint:
@@ -345,7 +364,7 @@ class TestVerifySOEndpoint:
         assert r.status_code == 403
 
 
-# ── Confirm PO ───────────────────────────────────────────────────────
+# ── Confirm PO (kept — operational) ─────────────────────────────────
 
 
 class TestConfirmPOEndpoint:
@@ -382,7 +401,7 @@ class TestConfirmPOEndpoint:
         assert r.status_code == 400
 
 
-# ── Verify PO ────────────────────────────────────────────────────────
+# ── Verify PO (kept — operational) ──────────────────────────────────
 
 
 class TestVerifyPOEndpoint:
@@ -428,7 +447,7 @@ class TestVerifyPOEndpoint:
         assert r.json()["status"] == "awaiting_po"
 
 
-# ── Flag Issue ───────────────────────────────────────────────────────
+# ── Flag Issue (kept — operational) ─────────────────────────────────
 
 
 class TestFlagIssueEndpoint:
@@ -457,22 +476,6 @@ class TestFlagIssueEndpoint:
             json={"issue_type": "other"},
         )
         assert resp.status_code == 422
-
-
-# ── Resubmit ─────────────────────────────────────────────────────────
-
-
-class TestResubmitEndpoint:
-    def test_resubmit(self, db_session: Session, test_quote: Quote, test_user: User):
-        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        # Stays in draft (simulating manager rejection)
-        c = _make_client(db_session, test_user)
-        r = c.post(
-            f"/api/buy-plans/{plan.id}/resubmit",
-            json={"sales_order_number": "SO-FIXED"},
-        )
-        assert r.status_code == 200
-        assert r.json()["ok"] is True
 
 
 # ── Offer Comparison ─────────────────────────────────────────────────
@@ -548,7 +551,7 @@ class TestVerificationGroup:
 class TestEnhancedAIFlags:
     def test_stale_offer_flag(self, db_session: Session, test_quote: Quote, test_user: User):
         """Offers older than threshold trigger a stale_offer flag."""
-        from app.services.buy_plan_service import generate_ai_flags
+        from app.services.buyplan_service import generate_ai_flags
 
         req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
         old_offer = _make_offer(
@@ -586,7 +589,7 @@ class TestEnhancedAIFlags:
 
     def test_low_margin_flag(self, db_session: Session, test_quote: Quote, test_user: User):
         """Lines with margin below threshold trigger a low_margin flag."""
-        from app.services.buy_plan_service import generate_ai_flags
+        from app.services.buyplan_service import generate_ai_flags
 
         req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
         offer = _make_offer(db_session, test_quote.requisition_id, req.id)
@@ -619,7 +622,7 @@ class TestEnhancedAIFlags:
 
     def test_better_offer_flag(self, db_session: Session, test_quote: Quote, test_user: User):
         """When a cheaper alternative exists, a better_offer flag is raised."""
-        from app.services.buy_plan_service import generate_ai_flags
+        from app.services.buyplan_service import generate_ai_flags
 
         req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
         expensive = _make_offer(
@@ -665,7 +668,7 @@ class TestEnhancedAIFlags:
 
     def test_quantity_gap_flag(self, db_session: Session, test_quote: Quote, test_user: User):
         """When allocated qty < required qty, a quantity_gap flag is raised."""
-        from app.services.buy_plan_service import generate_ai_flags
+        from app.services.buyplan_service import generate_ai_flags
 
         req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
         req.target_qty = 1000
@@ -712,7 +715,7 @@ class TestFavoritism:
         admin_user: User,
     ):
         """When one buyer gets >60% of lines, favoritism is flagged."""
-        from app.services.buy_plan_service import detect_favoritism
+        from app.services.buyplan_service import detect_favoritism
 
         req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
         offer = _make_offer(db_session, test_quote.requisition_id, req.id)
@@ -751,7 +754,7 @@ class TestFavoritism:
         admin_user: User,
     ):
         """Less than 3 plans returns no findings."""
-        from app.services.buy_plan_service import detect_favoritism
+        from app.services.buyplan_service import detect_favoritism
 
         findings = detect_favoritism(admin_user.id, db_session)
         assert findings == []
@@ -790,7 +793,7 @@ class TestCaseReport:
         test_user: User,
     ):
         """Case report is generated when plan auto-completes."""
-        from app.services.buy_plan_service import check_completion
+        from app.services.buyplan_service import check_completion
 
         req = db_session.query(Requirement).filter_by(requisition_id=test_quote.requisition_id).first()
         offer = _make_offer(db_session, test_quote.requisition_id, req.id)
@@ -945,11 +948,11 @@ class TestFavoritismEdgeCases:
         assert r.status_code == 404
 
 
-# ── List V3 Filter Edge Cases ──────────────────────────────────────
+# ── List V1 Filter Edge Cases ──────────────────────────────────────
 
 
-class TestListV3Filters:
-    """Cover lines 366, 368, 374: status, so_status, buyer_id filters."""
+class TestListV1Filters:
+    """Cover so_status, buyer_id, sales-user filters."""
 
     def test_filter_by_so_status(
         self,
@@ -957,7 +960,7 @@ class TestListV3Filters:
         test_quote: Quote,
         test_user: User,
     ):
-        """Filter by so_status (line 366)."""
+        """Filter by so_status."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.so_status = "approved"
         db_session.commit()
@@ -973,7 +976,7 @@ class TestListV3Filters:
         test_quote: Quote,
         test_user: User,
     ):
-        """Filter by buyer_id (line 368)."""
+        """Filter by buyer_id."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
 
         c = _make_client(db_session, test_user)
@@ -988,7 +991,7 @@ class TestListV3Filters:
         test_user: User,
         sales_user,
     ):
-        """Sales user only sees own plans (line 374)."""
+        """Sales user only sees own plans."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.submitted_by_id = test_user.id
         db_session.commit()
@@ -1001,164 +1004,10 @@ class TestListV3Filters:
         assert r.json()["count"] == 0
 
 
-# ── Submit V3 Edge Cases ──────────────────────────────────────────
+# ── Verify SO Edge Cases ───────────────────────────────────────────
 
 
-class TestSubmitV3EdgeCases:
-    """Cover lines 419, 428-429: line_edits, ValueError."""
-
-    def test_submit_with_line_edits(
-        self,
-        db_session: Session,
-        test_quote: Quote,
-        test_user: User,
-    ):
-        """Submit with line_edits provided (line 419)."""
-        plan, line, offer, req = _make_draft_plan(db_session, test_quote, test_user)
-        c = _make_client(db_session, test_user)
-        r = c.post(
-            f"/api/buy-plans/{plan.id}/submit",
-            json={
-                "sales_order_number": "SO-EDIT",
-                "line_edits": [
-                    {
-                        "requirement_id": req.id,
-                        "offer_id": offer.id,
-                        "quantity": 500,
-                    }
-                ],
-            },
-        )
-        assert r.status_code == 200
-        assert r.json()["ok"] is True
-
-    def test_submit_value_error(
-        self,
-        db_session: Session,
-        test_quote: Quote,
-        test_user: User,
-    ):
-        """Submit on non-draft plan → ValueError → 400 (lines 428-429)."""
-        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        db_session.commit()
-
-        c = _make_client(db_session, test_user)
-        r = c.post(
-            f"/api/buy-plans/{plan.id}/submit",
-            json={"sales_order_number": "SO-FAIL"},
-        )
-        assert r.status_code == 400
-
-
-# ── Approve V3 Edge Cases ──────────────────────────────────────────
-
-
-class TestApproveV3EdgeCases:
-    """Cover lines 457, 464-465: line_overrides, ValueError."""
-
-    def test_approve_with_line_overrides(
-        self,
-        db_session: Session,
-        test_quote: Quote,
-        test_user: User,
-        manager_user: User,
-    ):
-        """Approve with line_overrides (line 457)."""
-        plan, line, offer, req = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.pending.value
-        db_session.commit()
-
-        c = _make_client(db_session, manager_user)
-        r = c.post(
-            f"/api/buy-plans/{plan.id}/approve",
-            json={
-                "action": "approve",
-                "line_overrides": [
-                    {
-                        "line_id": line.id,
-                        "quantity": 750,
-                        "manager_note": "Adjusted quantity",
-                    }
-                ],
-            },
-        )
-        assert r.status_code == 200
-        assert r.json()["status"] == "active"
-
-    def test_approve_value_error(
-        self,
-        db_session: Session,
-        test_quote: Quote,
-        test_user: User,
-        manager_user: User,
-    ):
-        """Approve non-pending plan → ValueError → 400 (lines 464-465)."""
-        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        # Status is draft, not pending
-        c = _make_client(db_session, manager_user)
-        r = c.post(
-            f"/api/buy-plans/{plan.id}/approve",
-            json={"action": "approve"},
-        )
-        assert r.status_code == 400
-
-
-# ── Resubmit V3 Edge Cases ────────────────────────────────────────
-
-
-class TestResubmitV3EdgeCases:
-    """Cover lines 492-493, 499: ValueError, auto_approved=False."""
-
-    def test_resubmit_value_error(
-        self,
-        db_session: Session,
-        test_quote: Quote,
-        test_user: User,
-    ):
-        """Resubmit non-draft plan → ValueError → 400 (lines 492-493)."""
-        plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        db_session.commit()
-
-        c = _make_client(db_session, test_user)
-        r = c.post(
-            f"/api/buy-plans/{plan.id}/resubmit",
-            json={"sales_order_number": "SO-FAIL"},
-        )
-        assert r.status_code == 400
-
-    def test_resubmit_needs_approval(
-        self,
-        db_session: Session,
-        test_quote: Quote,
-        test_user: User,
-    ):
-        """Resubmit where cost > threshold → auto_approved=False (line 499)."""
-        plan, _, _, _ = _make_draft_plan(
-            db_session,
-            test_quote,
-            test_user,
-            total_cost=10000.0,
-        )
-        # Plan stays in draft for resubmit
-        c = _make_client(db_session, test_user)
-        r = c.post(
-            f"/api/buy-plans/{plan.id}/resubmit",
-            json={"sales_order_number": "SO-BIG-RESUB"},
-        )
-        assert r.status_code == 200
-        data = r.json()
-        assert data["auto_approved"] is False
-        assert data["status"] == "pending"
-
-
-# ── Verify SO V3 Edge Cases ───────────────────────────────────────
-
-
-class TestVerifySOV3EdgeCases:
-    """Cover line 521: ValueError handling."""
-
+class TestVerifySOEdgeCases:
     def test_verify_so_value_error(
         self,
         db_session: Session,
@@ -1166,10 +1015,8 @@ class TestVerifySOV3EdgeCases:
         test_user: User,
         admin_user: User,
     ):
-        """Verify SO on non-active plan → ValueError → 400 (line 521)."""
+        """Verify SO on already-verified SO → ValueError → 400."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        # Plan is draft, not active — but SO is "pending", so the service
-        # may raise for plan not in correct status. Let's use already-verified SO.
         plan.status = BuyPlanStatus.active.value
         plan.so_status = "approved"  # Already verified
         _make_ops_member(db_session, admin_user)
@@ -1182,12 +1029,10 @@ class TestVerifySOV3EdgeCases:
         assert r.status_code == 400
 
 
-# ── Verify PO V3 Edge Cases ───────────────────────────────────────
+# ── Verify PO Edge Cases ───────────────────────────────────────────
 
 
-class TestVerifyPOV3EdgeCases:
-    """Cover lines 577-580, 586-587: ValueError/PermissionError, auto-complete."""
-
+class TestVerifyPOEdgeCases:
     def test_verify_po_value_error(
         self,
         db_session: Session,
@@ -1195,8 +1040,7 @@ class TestVerifyPOV3EdgeCases:
         test_user: User,
         admin_user: User,
     ):
-        """Verify PO on line not in pending_verify → ValueError → 400 (lines
-        577-578)."""
+        """Verify PO on line not in pending_verify → ValueError → 400."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.active.value
         line.status = BuyPlanLineStatus.awaiting_po.value  # not pending_verify
@@ -1215,13 +1059,12 @@ class TestVerifyPOV3EdgeCases:
         test_quote: Quote,
         test_user: User,
     ):
-        """Verify PO by non-ops user → PermissionError → 403 (lines 579-580)."""
+        """Verify PO by non-ops user → PermissionError → 403."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.active.value
         line.status = BuyPlanLineStatus.pending_verify.value
         line.po_number = "PO-001"
         db_session.commit()
-        # No ops member for test_user
 
         c = _make_client(db_session, test_user)
         r = c.post(
@@ -1237,7 +1080,7 @@ class TestVerifyPOV3EdgeCases:
         test_user: User,
         admin_user: User,
     ):
-        """Verify last PO → auto-complete plan (lines 586-587)."""
+        """Verify last PO → auto-complete plan."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         plan.status = BuyPlanStatus.active.value
         plan.so_status = SOVerificationStatus.approved.value
@@ -1262,12 +1105,10 @@ class TestVerifyPOV3EdgeCases:
         assert plan.status == "completed"
 
 
-# ── Flag Issue V3 Edge Cases ──────────────────────────────────────
+# ── Flag Issue Edge Cases ──────────────────────────────────────────
 
 
-class TestFlagIssueV3EdgeCases:
-    """Cover lines 608-609: ValueError handling."""
-
+class TestFlagIssueEdgeCases:
     def test_flag_issue_value_error(
         self,
         db_session: Session,
@@ -1290,14 +1131,12 @@ class TestFlagIssueV3EdgeCases:
 
 
 class TestOfferComparisonEdgeCases:
-    """Cover lines 630, 634: plan/requirement not found."""
-
     def test_offer_comparison_plan_not_found(
         self,
         db_session: Session,
         test_user: User,
     ):
-        """Offer comparison for nonexistent plan → 404 (line 630)."""
+        """Offer comparison for nonexistent plan → 404."""
         c = _make_client(db_session, test_user)
         r = c.get("/api/buy-plans/99999/offers/1")
         assert r.status_code == 404
@@ -1308,7 +1147,7 @@ class TestOfferComparisonEdgeCases:
         test_quote: Quote,
         test_user: User,
     ):
-        """Offer comparison for nonexistent requirement → 404 (line 634)."""
+        """Offer comparison for nonexistent requirement → 404."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
         c = _make_client(db_session, test_user)
         r = c.get(f"/api/buy-plans/{plan.id}/offers/99999")

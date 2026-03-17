@@ -4,7 +4,7 @@ Purpose: Tracks risk flags attached to buy plan lines and offers.
          Replaces ad-hoc JSON ai_flags with queryable, auditable records.
          Enables surfacing risk signals during offer review (not just in buy plans).
 
-Called by: services/buy_plan_service.py, routers/crm/offers.py, routers/crm/quotes.py
+Called by: services/buyplan_service.py, routers/crm/offers.py, routers/crm/quotes.py
 Depends on: models.base, models.buy_plan, models.offers
 """
 

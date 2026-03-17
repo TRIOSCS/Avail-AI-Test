@@ -2168,11 +2168,11 @@ class TestBuyPlansAdditional:
         self, client, db_session, test_requisition, test_quote, test_offer, test_user
     ):
         self._make_bp(db_session, test_requisition, test_quote, test_offer, test_user, status="approved")
-        # V4 uses 'active' status (V1 'approved' maps to V4 'active')
+        # V1 compat layer: filter by V3 status 'active', response shows V1 'approved'
         resp = client.get("/api/buy-plans", params={"status": "active"})
         assert resp.status_code == 200
         data = resp.json()
-        assert all(bp["status"] == "active" for bp in data["items"])
+        assert all(bp["status"] == "approved" for bp in data["items"])
 
     def test_list_buy_plans_sales_filter(
         self, sales_client, db_session, test_requisition, test_quote, test_offer, sales_user
@@ -2294,36 +2294,35 @@ class TestBuyPlansAdditional:
 
     # ── Authenticated approve/reject (all return 404 now) ──
 
-    def test_approve_buy_plan_admin_not_found(self, admin_client):
-        """V4 approve with non-existent plan returns 400 (plan not found in service)."""
+    def test_approve_buy_plan_admin_returns_410(self, admin_client):
+        """V1 approve endpoint is deprecated — returns 410 Gone."""
         resp = admin_client.post("/api/buy-plans/1/approve", json={"action": "approve", "notes": "ok"})
-        assert resp.status_code == 400
+        assert resp.status_code == 410
 
-    def test_approve_buy_plan_not_admin(self, client):
-        """V4 approve requires manager/admin role."""
+    def test_approve_buy_plan_not_admin_returns_410(self, client):
+        """V1 approve endpoint is deprecated — returns 410 Gone."""
         resp = client.post("/api/buy-plans/1/approve", json={"action": "approve", "notes": "ok"})
-        assert resp.status_code == 403
+        assert resp.status_code == 410
 
-    def test_approve_buy_plan_not_found(self, admin_client):
-        """V4 approve with non-existent plan returns 400."""
+    def test_approve_buy_plan_not_found_returns_410(self, admin_client):
+        """V1 approve endpoint is deprecated — returns 410 Gone."""
         resp = admin_client.post("/api/buy-plans/99999/approve", json={"action": "approve", "notes": "ok"})
-        assert resp.status_code == 400
+        assert resp.status_code == 410
 
-    def test_reject_buy_plan_via_approve_endpoint(self, admin_client):
-        """V4 reject is done via POST /approve with action=reject."""
+    def test_reject_buy_plan_via_approve_returns_410(self, admin_client):
+        """V1 approve/reject endpoint is deprecated — returns 410 Gone."""
         resp = admin_client.post("/api/buy-plans/1/approve", json={"action": "reject", "notes": "Bad deal"})
-        # Plan doesn't exist, service raises ValueError -> 400
-        assert resp.status_code == 400
+        assert resp.status_code == 410
 
-    def test_reject_buy_plan_not_admin(self, client):
-        """V4 reject via approve endpoint requires manager/admin role."""
+    def test_reject_buy_plan_not_admin_returns_410(self, client):
+        """V1 approve/reject endpoint is deprecated — returns 410 Gone."""
         resp = client.post("/api/buy-plans/1/approve", json={"action": "reject", "notes": "x"})
-        assert resp.status_code == 403
+        assert resp.status_code == 410
 
-    def test_reject_buy_plan_not_found(self, admin_client):
-        """V4 reject via approve endpoint with non-existent plan returns 400."""
+    def test_reject_buy_plan_not_found_returns_410(self, admin_client):
+        """V1 approve/reject endpoint is deprecated — returns 410 Gone."""
         resp = admin_client.post("/api/buy-plans/99999/approve", json={"action": "reject", "notes": "x"})
-        assert resp.status_code == 400
+        assert resp.status_code == 410
 
     # ── PO entry (all return 404 now) ──
 
@@ -2375,15 +2374,15 @@ class TestBuyPlansAdditional:
 
     # ── Resubmit (all return 404 now) ──
 
-    def test_resubmit_rejected_not_found(self, client):
-        """V4 resubmit with non-existent plan returns 400."""
+    def test_resubmit_returns_410(self, client):
+        """V1 resubmit endpoint is deprecated — returns 410 Gone."""
         resp = client.post("/api/buy-plans/1/resubmit", json={"sales_order_number": "SO-123"})
-        assert resp.status_code == 400
+        assert resp.status_code == 410
 
-    def test_resubmit_not_found(self, client):
-        """V4 resubmit with non-existent plan returns 400."""
+    def test_resubmit_not_found_returns_410(self, client):
+        """V1 resubmit endpoint is deprecated — returns 410 Gone."""
         resp = client.post("/api/buy-plans/99999/resubmit", json={"sales_order_number": "SO-123"})
-        assert resp.status_code == 400
+        assert resp.status_code == 410
 
     # ── Bulk PO (all return 404 now) ──
 
@@ -2837,8 +2836,8 @@ class TestOffersWithRatings:
 class TestBuyPlanApproveEdgeCases:
     """V1 buy plan mutation endpoints always return 404 now."""
 
-    def test_approve_with_line_overrides_not_found(self, admin_client):
-        """V4 approve with line_overrides on non-existent plan returns 400."""
+    def test_approve_with_line_overrides_returns_410(self, admin_client):
+        """V1 approve endpoint is deprecated — returns 410 Gone."""
         resp = admin_client.post(
             "/api/buy-plans/1/approve",
             json={
@@ -2846,7 +2845,7 @@ class TestBuyPlanApproveEdgeCases:
                 "notes": "Reduced qty",
             },
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 410
 
     def test_approve_token_with_manager_notes_returns_404(self, client):
         """V1 token-based approve always returns 404."""

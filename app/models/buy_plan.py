@@ -160,6 +160,9 @@ class BuyPlan(Base):
     approval_token = Column(String(100), unique=True)
     token_expires_at = Column(DateTime)
 
+    # ── Migration tracking
+    migrated_from_v1 = Column(Boolean, default=False)
+
     # ── Timestamps
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(

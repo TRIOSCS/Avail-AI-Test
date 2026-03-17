@@ -300,7 +300,7 @@ class TestCommodityRouting:
         }
 
         with patch("app.services.buyplan_scoring._get_routing_maps", return_value=routing_maps):
-            from app.services.buy_plan_service import assign_buyer
+            from app.services.buyplan_service import assign_buyer
 
             assigned, reason = assign_buyer(offer, vc, db_session)
 
@@ -336,7 +336,7 @@ class TestCommodityRouting:
         }
 
         with patch("app.services.buyplan_scoring._get_routing_maps", return_value=routing_maps):
-            from app.services.buy_plan_service import assign_buyer
+            from app.services.buyplan_service import assign_buyer
 
             assigned, reason = assign_buyer(offer, vc, db_session)
 
@@ -366,7 +366,7 @@ class TestCommodityRouting:
             manufacturer="TI",
         )
 
-        from app.services.buy_plan_service import assign_buyer
+        from app.services.buyplan_service import assign_buyer
 
         assigned, reason = assign_buyer(offer, None, db_session)
         assert assigned.id == buyer1.id

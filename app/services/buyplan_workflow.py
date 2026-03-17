@@ -854,3 +854,118 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
 
     db.commit()
     return results
+
+
+# ── Workflow: V3 PO Verification Scanning ──────────────────────────
+
+
+async def verify_po_sent_v3(plan: "BuyPlan", db: "Session") -> dict:
+    """Scan buyer Outlook sent folders for PO emails matching each BuyPlanLine.
+
+    Iterates plan.lines where po_number is set and status is pending_verify.
+    For each line, looks up the buyer's Graph token and searches Sent Items
+    for the PO number. On match: marks the line verified with timestamp.
+    After the loop, checks if all verifiable lines are verified and auto-completes
+    the plan if so.
+
+    Called by: routers/crm/buy_plans.py GET /api/buy-plans/{plan_id}/verify-po
+    Depends on: utils.graph_client.GraphClient, utils.token_manager.get_valid_token
+
+    Returns:
+        dict of {po_number: {verified, recipient, sent_at, reason}}
+    """
+    from ..utils.graph_client import GraphClient
+    from ..utils.token_manager import get_valid_token
+
+    results: dict[str, dict] = {}
+
+    for line in plan.lines:
+        if not line.po_number:
+            continue
+        if line.status != BuyPlanLineStatus.pending_verify.value:
+            continue
+
+        # Skip lines without a buyer
+        if not line.buyer_id:
+            results[line.po_number] = {
+                "verified": False,
+                "recipient": None,
+                "sent_at": None,
+                "reason": "no_buyer",
+            }
+            logger.debug("PO %s skipped — no buyer assigned (line %d)", line.po_number, line.id)
+            continue
+
+        # Look up buyer for their azure_id
+        buyer = db.get(User, line.buyer_id)
+        if not buyer:
+            results[line.po_number] = {
+                "verified": False,
+                "recipient": None,
+                "sent_at": None,
+                "reason": "buyer_not_found",
+            }
+            logger.warning("PO %s skipped — buyer %d not found (line %d)", line.po_number, line.buyer_id, line.id)
+            continue
+
+        try:
+            token = await get_valid_token()
+            if not token:
+                results[line.po_number] = {
+                    "verified": False,
+                    "recipient": None,
+                    "sent_at": None,
+                    "reason": "no_token",
+                }
+                continue
+
+            client = GraphClient(token)
+            messages = await client.search_sent_messages(
+                query=line.po_number,
+                user_id=str(buyer.azure_id) if buyer.azure_id else None,
+            )
+
+            if messages:
+                msg = messages[0]  # most recent match
+                recipient = None
+                recipients = msg.get("toRecipients", [])
+                if recipients:
+                    addr = recipients[0].get("emailAddress", {})
+                    recipient = addr.get("address")
+
+                line.status = BuyPlanLineStatus.verified.value
+                line.po_verified_at = datetime.now(timezone.utc)
+                logger.info("PO %s verified via Graph — line %d (plan %d)", line.po_number, line.id, plan.id)
+
+                results[line.po_number] = {
+                    "verified": True,
+                    "recipient": recipient,
+                    "sent_at": msg.get("sentDateTime"),
+                    "reason": None,
+                }
+            else:
+                results[line.po_number] = {
+                    "verified": False,
+                    "recipient": None,
+                    "sent_at": None,
+                    "reason": "not_found_in_sent",
+                }
+
+        except Exception as e:
+            logger.error("Graph API error verifying PO %s (line %d): %s", line.po_number, line.id, e)
+            results[line.po_number] = {
+                "verified": False,
+                "recipient": None,
+                "sent_at": None,
+                "reason": f"graph_error: {e}",
+            }
+
+    # Auto-complete if all PO lines are now verified
+    po_lines = [ln for ln in plan.lines if ln.po_number]
+    if po_lines and all(ln.status == BuyPlanLineStatus.verified.value for ln in po_lines):
+        plan.status = BuyPlanStatus.completed.value
+        plan.completed_at = datetime.now(timezone.utc)
+        logger.info("Buy plan %d auto-completed — all PO lines verified", plan.id)
+
+    db.flush()
+    return results

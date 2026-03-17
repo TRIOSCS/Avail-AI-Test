@@ -1,11 +1,15 @@
-"""Buy Plan Service Layer — re-export façade.
+"""buyplan_service.py — Buy Plan Service Layer re-export façade.
 
 Split into domain modules:
   - buyplan_scoring: offer scoring, lead time parsing, buyer assignment, routing maps
   - buyplan_builder: plan building, AI summary, AI flags
   - buyplan_workflow: submit, approve, verify, complete, intelligence
+  - buyplan_notifications: notification service for state transitions
 
 All public names re-exported here for backward compatibility.
+
+Called by: routers/crm/buy_plans.py, tests
+Depends on: buyplan_builder, buyplan_scoring, buyplan_workflow, buyplan_notifications
 """
 
 # Re-export settings for test patching compatibility
@@ -27,6 +31,9 @@ from app.services.buyplan_builder import (  # noqa: F401
 from app.services.buyplan_notifications import (  # noqa: F401
     log_buyplan_activity,
     notify_stock_sale_approved,
+    notify_token_approved,
+    notify_token_rejected,
+    run_v3_notify_bg,
 )
 
 # ── Scoring & Routing ────────────────────────────────────────────────
@@ -60,5 +67,6 @@ from app.services.buyplan_workflow import (  # noqa: F401
     submit_buy_plan,
     verify_po,
     verify_po_sent,
+    verify_po_sent_v3,
     verify_so,
 )

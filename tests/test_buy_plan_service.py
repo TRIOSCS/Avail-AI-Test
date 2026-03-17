@@ -4,7 +4,7 @@ Phase 3: Offer scoring, auto-split, buyer assignment, AI flags, summary.
 Phase 4: Submit, approve, verify SO/PO, flag issues, completion, resubmit.
 
 Called by: pytest
-Depends on: conftest.py fixtures, app.services.buy_plan_service
+Depends on: conftest.py fixtures, app.services.buyplan_service
 """
 
 from datetime import datetime, timedelta, timezone
@@ -23,7 +23,7 @@ from app.models.buy_plan import (
     SOVerificationStatus,
     VerificationGroupMember,
 )
-from app.services.buy_plan_service import (
+from app.services.buyplan_service import (
     _apply_line_edits,
     _apply_line_overrides,
     _check_better_offer,

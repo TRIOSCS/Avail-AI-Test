@@ -115,7 +115,7 @@ class TestGetPlanByToken:
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == pending_plan.id
-        assert data["status"] == "pending"
+        assert data["status"] == "pending_approval"
 
     def test_invalid_token_404(self, noauth_client: TestClient, pending_plan: BuyPlan):
         resp = noauth_client.get("/api/buy-plans/token/nonexistent-token")
@@ -139,7 +139,7 @@ class TestApproveByToken:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "active"
+        assert data["status"] == "approved"
         assert data["sales_order_number"] == "SO-12345"
         assert data["approval_notes"] == "Looks good"
 
@@ -164,7 +164,7 @@ class TestApproveByToken:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "completed"
+        assert data["status"] == "complete"
         assert data["completed_at"] is not None
 
     def test_wrong_status_400(self, noauth_client: TestClient, db_session: Session, pending_plan: BuyPlan):
@@ -198,7 +198,7 @@ class TestRejectByToken:
         )
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "draft"
+        assert data["status"] == "rejected"
         # Token should be invalidated
         resp2 = noauth_client.get(f"/api/buy-plans/token/{pending_plan.approval_token}")
         assert resp2.status_code == 404

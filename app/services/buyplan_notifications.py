@@ -1,4 +1,4 @@
-"""buyplan_notifications.py — Buy Plan notification service.
+"""buyplan_notifications.py — Unified buy plan notification service.
 
 Handles notifications for all buy plan state transitions:
 - Submit  → email + Teams + in-app to managers
@@ -10,9 +10,12 @@ Handles notifications for all buy plan state transitions:
 - Issue Flagged → in-app + Teams to manager
 - Completed → email + Teams + in-app to salesperson
 - Resubmit → email + in-app to managers
+- Stock Sale Approved → email to logistics/accounting + in-app + Teams
+- Token Approved → in-app + Teams (no user session, approved via email token)
+- Token Rejected → in-app (rejected via email token)
 
-Called by: routers/crm/buy_plans.py
-Depends on: models, config, utils/graph_client, teams_notifications (post_teams_channel, send_teams_dm)
+Called by: routers/crm/buy_plans.py, routers/htmx_views.py, buyplan_service.py
+Depends on: models, config, utils/graph_client, teams_notifications
 """
 
 import asyncio
@@ -28,7 +31,7 @@ from ..models.buy_plan import BuyPlan
 # ── Background runner ────────────────────────────────────────────────
 
 
-def run_notify_bg(coro_factory, plan_id: int, **kwargs):
+def run_v3_notify_bg(coro_factory, plan_id: int, **kwargs):
     """Fire-and-forget a notification coroutine with its own DB session."""
 
     async def _run():
@@ -45,6 +48,10 @@ def run_notify_bg(coro_factory, plan_id: int, **kwargs):
             bg_db.close()
 
     asyncio.create_task(_run())
+
+
+# Backward-compatible alias
+run_notify_bg = run_v3_notify_bg
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -134,7 +141,7 @@ async def _send_email(user: User, subject: str, html_body: str, db: Session):
         logger.error("Failed to send buy plan email to %s: %s", user.email, e)
 
 
-# ── Reuse V1 Teams helpers ───────────────────────────────────────────
+# ── Reuse Teams helpers ──────────────────────────────────────────────
 
 
 async def _teams_channel(message: str):
@@ -163,8 +170,7 @@ def log_buyplan_activity(
 ):
     """Create an ActivityLog entry for a buy plan state change.
 
-    Adapted from V1 log_buyplan_activity for BuyPlan. Unlike V1 which stores plan
-    linkage in notes this version uses the plan id directly in subject and notes fields.
+    Stores plan linkage via subject and notes fields, with requisition_id FK.
     """
     db.add(
         ActivityLog(
@@ -459,9 +465,8 @@ async def notify_completed(plan: BuyPlan, db: Session):
 async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
     """Notify logistics/accounting that a stock sale was approved (no PO required).
 
-    Ported from V1 notify_stock_sale_approved. For stock sales that auto-complete, sends
-    an email to the stock_sale_notify_emails list and creates an in-app notification for
-    the submitter. Also posts to the Teams channel.
+    For stock sales that auto-complete, sends an email to the stock_sale_notify_emails
+    list and creates an in-app notification for the submitter. Also posts to Teams.
     """
     from ..scheduler import get_valid_token
     from ..utils.graph_client import GraphClient
@@ -542,3 +547,75 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
         f"Submitted by: {ctx['submitter_name']}\n"
         f"Total: ${total:,.2f} | Type: Stock Sale (no PO required)"
     )
+
+
+async def notify_token_approved(plan: BuyPlan, db: Session):
+    """Notification when a buy plan is approved via email token (no user session).
+
+    Creates in-app notification for submitter and posts to Teams channel. Unlike normal
+    approval, there is no logged-in user context — the approval came from clicking an
+    approve link in an email.
+    """
+    ctx = _plan_context(plan, db)
+    approver = db.get(User, plan.approved_by_id) if plan.approved_by_id else None
+    approver_name = (approver.name or approver.email) if approver else "Manager (email token)"
+
+    # In-app notification to submitter
+    if ctx["submitter"]:
+        db.add(
+            ActivityLog(
+                user_id=ctx["submitter"].id,
+                activity_type="buyplan_approved",
+                channel="system",
+                requisition_id=plan.requisition_id,
+                subject=f"Buy plan #{plan.id} approved via email by {approver_name}",
+            )
+        )
+
+    # In-app notification to approver
+    if approver:
+        db.add(
+            ActivityLog(
+                user_id=approver.id,
+                activity_type="buyplan_approved",
+                channel="system",
+                requisition_id=plan.requisition_id,
+                subject=f"You approved buy plan #{plan.id} via email token",
+            )
+        )
+
+    db.commit()
+
+    # Teams channel post
+    _, total = _lines_html(plan)
+    await _teams_channel(
+        f"**Buy Plan #{plan.id} — Approved via Email Token**\n\n"
+        f"Approved by: {approver_name}\n"
+        f"Customer: {ctx['customer_name']} | Total: ${total:,.2f}"
+    )
+
+
+async def notify_token_rejected(plan: BuyPlan, db: Session):
+    """Notification when a buy plan is rejected via email token (no user session).
+
+    Creates in-app notification for submitter. Unlike normal rejection, there is no
+    logged-in user context — the rejection came from clicking a reject link.
+    """
+    ctx = _plan_context(plan, db)
+    approver = db.get(User, plan.approved_by_id) if plan.approved_by_id else None
+    approver_name = (approver.name or approver.email) if approver else "Manager (email token)"
+
+    # In-app notification to submitter
+    if ctx["submitter"]:
+        reason = plan.approval_notes or "No reason given"
+        db.add(
+            ActivityLog(
+                user_id=ctx["submitter"].id,
+                activity_type="buyplan_rejected",
+                channel="system",
+                requisition_id=plan.requisition_id,
+                subject=f"Buy plan #{plan.id} rejected via email by {approver_name}: {reason}",
+            )
+        )
+
+    db.commit()

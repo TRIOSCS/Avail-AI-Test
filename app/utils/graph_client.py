@@ -86,6 +86,37 @@ class GraphClient:
             params = None  # nextLink has params baked in
         return items[:max_items]
 
+    # ── Sent folder search ─────────────────────────────────────────
+
+    async def search_sent_messages(
+        self,
+        query: str,
+        user_id: str | None = None,
+        max_results: int = 10,
+    ) -> list[dict]:
+        """Search a user's Sent Items folder for messages matching a query string.
+
+        Args:
+            query: Search term (e.g. PO number) to find in sent messages.
+            user_id: Azure AD user ID. If None, searches /me.
+            max_results: Max messages to return.
+
+        Returns:
+            List of message dicts with id, subject, toRecipients, sentDateTime.
+        """
+        base = f"/users/{user_id}" if user_id else "/me"
+        path = f"{base}/mailFolders/SentItems/messages"
+        params = {
+            "$filter": f"contains(subject,'{query}') or contains(body/content,'{query}')",
+            "$select": "id,subject,toRecipients,sentDateTime",
+            "$top": str(max_results),
+            "$orderby": "sentDateTime desc",
+        }
+        data = await self.get_json(path, params=params)
+        if isinstance(data, dict) and "error" in data:
+            raise RuntimeError(f"Graph API error searching sent messages: {data}")
+        return data.get("value", [])
+
     # ── H8: Delta Query ─────────────────────────────────────────────
 
     async def delta_query(
