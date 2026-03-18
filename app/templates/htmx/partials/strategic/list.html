@@ -6,9 +6,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
-<div id="breadcrumb" hx-swap-oob="true">
-  <span class="text-brand-600 font-medium">My Vendors</span>
-</div>
+<div id="breadcrumb" class="hidden" hx-swap-oob="true">My Vendors</div>
 
 <div class="max-w-7xl mx-auto" x-data="{ showPool: false }">
   {# Header with slot info #}

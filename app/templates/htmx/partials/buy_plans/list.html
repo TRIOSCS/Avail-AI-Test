@@ -6,7 +6,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 {# OOB breadcrumb update #}
-<div id="breadcrumb" hx-swap-oob="true">Buy Plans</div>
+<div id="breadcrumb" class="hidden" hx-swap-oob="true">Buy Plans</div>
 <title hx-swap-oob="true">Buy Plans — AvailAI</title>
 
 <div class="max-w-7xl mx-auto" x-data="{ status: '{{ status }}', mine: {{ 'true' if mine else 'false' }} }">

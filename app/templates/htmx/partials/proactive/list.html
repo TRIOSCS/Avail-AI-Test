@@ -5,9 +5,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
-<div id="breadcrumb" hx-swap-oob="true">
-  <span class="text-brand-600 font-medium">Proactive</span>
-</div>
+<div id="breadcrumb" class="hidden" hx-swap-oob="true">Proactive</div>
 
 <div class="max-w-7xl mx-auto" x-data="{ showScorecard: false }">
   {# Header #}

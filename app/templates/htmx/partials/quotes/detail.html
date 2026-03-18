@@ -6,7 +6,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
-<div id="breadcrumb" hx-swap-oob="true">
+<div id="breadcrumb" class="hidden" hx-swap-oob="true">
   <a href="/v2/quotes" hx-get="/v2/partials/quotes" hx-target="#main-content" hx-push-url="/v2/quotes"
      preload="mouseover"
      class="text-brand-400 hover:text-brand-300">Quotes</a>
