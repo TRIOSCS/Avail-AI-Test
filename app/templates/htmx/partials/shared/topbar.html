@@ -4,12 +4,12 @@
   Depends on: Alpine.js, HTMX, /v2/partials/search/global endpoint
   Context vars: user_name (str)
 #}
-<header class="sticky top-0 z-20 flex h-14 items-center justify-between gap-4 border-b border-brand-200 bg-white px-4 sm:px-6">
+<header class="sticky top-0 z-20 flex h-16 items-center justify-between gap-4 border-b border-brand-200 bg-white px-4 sm:px-6">
 
   {# Left: Logo #}
   <a href="/v2" hx-get="/v2/partials/dashboard" hx-target="#main-content" hx-push-url="/v2"
      class="flex-shrink-0">
-    <img src="/static/avail_logo.png" alt="AVAIL" class="h-7">
+    <img src="/static/avail_logo.png" alt="AVAIL" style="height:52px">
   </a>
 
   {# Center: Global search #}

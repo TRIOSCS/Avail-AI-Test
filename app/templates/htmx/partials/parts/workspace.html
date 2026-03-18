@@ -7,7 +7,7 @@
 {# OOB breadcrumb #}
 <div id="breadcrumb" hx-swap-oob="true">Requisitions</div>
 
-<div class="h-[calc(100vh-3.5rem)] flex"
+<div class="h-[calc(100vh-4rem)] flex"
      x-data="{
        splitRatio: parseFloat(localStorage.getItem('parts-split') || '0.45'),
        dragging: false,
@@ -40,8 +40,9 @@
      @mouseup.window="stopDrag()">
 
   {# ── Left Panel: Parts Table ──────────────────────────────── #}
-  <div class="overflow-hidden flex flex-col" :style="'width: ' + (splitRatio * 100) + '%'">
+  <div class="flex flex-col overflow-hidden" :style="'width: ' + (splitRatio * 100) + '%'">
     <div id="parts-list" class="flex-1 overflow-auto"
+         style="overflow-x: auto;"
          hx-get="/v2/partials/parts"
          hx-trigger="load"
          hx-target="#parts-list"
