@@ -18,6 +18,8 @@ from .sources import BaseConnector
 class OEMSecretsConnector(BaseConnector):
     """OEMSecrets Part Search API — JSON endpoint."""
 
+    source_name: str = "oemsecrets"
+
     # Docs: https://oemsecretsapi.com/documentation/
     SEARCH_URL = "https://oemsecretsapi.com/partsearch"
 

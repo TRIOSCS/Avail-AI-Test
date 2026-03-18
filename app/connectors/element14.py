@@ -20,6 +20,8 @@ from .sources import BaseConnector
 class Element14Connector(BaseConnector):
     """Element14 Product Search — API key auth, Newark US store."""
 
+    source_name: str = "element14"
+
     SEARCH_URL = "https://api.element14.com/catalog/products"
 
     def __init__(self, api_key: str):

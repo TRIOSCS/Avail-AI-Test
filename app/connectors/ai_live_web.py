@@ -56,6 +56,8 @@ _SEARCH_SCHEMA_HINT = {
 class AIWebSearchConnector(BaseConnector):
     """Live internet search for sourcing offers via Claude web search."""
 
+    source_name: str = "ai_live_web"
+
     def __init__(self, api_key: str):
         super().__init__(timeout=30.0, max_retries=0)
         self.api_key = api_key

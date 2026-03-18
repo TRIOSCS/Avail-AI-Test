@@ -20,6 +20,8 @@ from .sources import BaseConnector, _parse_retry_after
 class DigiKeyConnector(BaseConnector):
     """DigiKey Product Search v4 — OAuth2 client credentials."""
 
+    source_name: str = "digikey"
+
     # DigiKey uses a two-legged OAuth for product data (client_credentials)
     TOKEN_URL = "https://api.digikey.com/v1/oauth2/token"
     SEARCH_URL = "https://api.digikey.com/products/v4/search/keyword"

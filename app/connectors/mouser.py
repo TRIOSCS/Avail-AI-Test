@@ -17,6 +17,8 @@ from .sources import BaseConnector
 class MouserConnector(BaseConnector):
     """Mouser Search API — simple API key auth."""
 
+    source_name: str = "mouser"
+
     SEARCH_URL = "https://api.mouser.com/api/v2/search/keyword"
 
     def __init__(self, api_key: str):

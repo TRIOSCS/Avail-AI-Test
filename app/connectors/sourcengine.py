@@ -10,6 +10,8 @@ from .sources import BaseConnector
 class SourcengineConnector(BaseConnector):
     """Sourcengine REST API — search by MPN across suppliers."""
 
+    source_name: str = "sourcengine"
+
     # Docs: https://dev.sourcengine.com/
     SEARCH_URL = "https://api.sourcengine.com/v1/search"
 

@@ -76,6 +76,8 @@ def _get_connector_semaphore(name: str) -> asyncio.Semaphore:
 
 
 class BaseConnector(ABC):
+    source_name: str = "unknown"
+
     def __init__(self, timeout: float = 20.0, max_retries: int = 2):
         self.timeout = timeout
         self.max_retries = max_retries
@@ -163,6 +165,8 @@ def _parse_retry_after(response: httpx.Response) -> float:
 
 class NexarConnector(BaseConnector):
     """Nexar/Octopart API — full seller data via GraphQL or REST v4."""
+
+    source_name: str = "nexar"
 
     TOKEN_URL = "https://identity.nexar.com/connect/token"
     API_URL = "https://api.nexar.com/graphql"
@@ -548,6 +552,8 @@ class BrokerBinConnector(BaseConnector):
     Endpoint: GET https://search.brokerbin.com/api/v2/part/search?query={mpn}&size=100
     Response: { meta: {...}, data: [{ company, country, part, mfg, cond, description, price, qty, age_in_days }] }
     """
+
+    source_name: str = "brokerbin"
 
     API_URL = "https://search.brokerbin.com/api/v2/part/search"
 

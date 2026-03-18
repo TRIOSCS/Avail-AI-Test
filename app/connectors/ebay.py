@@ -13,6 +13,8 @@ from .sources import BaseConnector
 class EbayConnector(BaseConnector):
     """EBay Browse API — OAuth client credentials flow."""
 
+    source_name: str = "ebay"
+
     TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
     SEARCH_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
 
