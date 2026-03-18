@@ -7,7 +7,7 @@
   <link rel="icon" type="image/png" href="/static/avail_logo_cropped.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..800;1,9..40,300..800&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..800;1,9..40,300..800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   {% for css_file in vite_css|default([]) %}
   <link rel="stylesheet" href="/static/{{ css_file }}">
   {% endfor %}
@@ -35,39 +35,41 @@
   {% block body %}
 
   {# ── Topbar: logo + centered search ──────────────────────────── #}
-  <header class="sticky top-0 z-30 border-b-2 border-brand-200 px-4 lg:px-6 bg-white grid items-center" style="height:64px; grid-template-columns: auto 1fr auto;">
-    {# Left: Logo #}
-    <a href="/v2" hx-get="/v2/partials/parts/workspace" hx-target="#main-content" hx-push-url="/v2/requisitions"
-       @click="currentView = 'requisitions'"
-       class="flex-shrink-0">
-      <img src="/static/avail_logo_cropped.png" alt="AVAIL" style="height:52px">
-    </a>
+  <header class="sticky top-0 z-30 border-b-2 border-brand-200 bg-white" style="height:52px;">
+    <div class="h-full grid items-center px-4" style="grid-template-columns: 140px 1fr 140px;">
+      {# Left: Logo #}
+      <a href="/v2" hx-get="/v2/partials/parts/workspace" hx-target="#main-content" hx-push-url="/v2/requisitions"
+         @click="currentView = 'requisitions'"
+         class="flex items-center">
+        <img src="/static/avail_logo_cropped.png" alt="AVAIL" style="height:36px">
+      </a>
 
-    {# Center: Global search — truly centered in the page #}
-    <div class="relative mx-auto w-full max-w-xl px-4" x-data="{ searchOpen: false }">
-      <div class="relative">
-        <svg xmlns="http://www.w3.org/2000/svg" class="pointer-events-none absolute left-8 top-1/2 h-5 w-5 -translate-y-1/2 text-brand-400"
-             fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-        </svg>
-        <input type="search" name="q" placeholder="Search requisitions, companies, vendors..."
-               autocomplete="off"
-               class="w-full rounded-xl border-2 border-brand-200 bg-white py-2 pl-12 pr-4 text-sm text-gray-900 placeholder-gray-400 outline-none transition-all shadow-sm focus:border-brand-500 focus:shadow-md focus:shadow-brand-100"
-               hx-get="/v2/partials/search/global"
-               hx-trigger="keyup changed delay:300ms"
-               hx-target="#global-search-results"
-               @focus="searchOpen = true"
-               @blur="setTimeout(() => searchOpen = false, 200)"
-               @keydown.escape="$el.blur(); searchOpen = false">
+      {# Center: Global search — truly centered #}
+      <div class="relative mx-auto w-full max-w-lg" x-data="{ searchOpen: false }">
+        <div class="relative">
+          <svg xmlns="http://www.w3.org/2000/svg" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400"
+               fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+          </svg>
+          <input type="search" name="q" placeholder="Search MPN, company, vendor..."
+                 autocomplete="off"
+                 class="w-full rounded-md border border-gray-300 bg-gray-50 py-1.5 pl-9 pr-3 text-xs text-gray-900 placeholder-gray-400 outline-none transition-all focus:border-brand-500 focus:bg-white focus:ring-1 focus:ring-brand-500 font-data"
+                 hx-get="/v2/partials/search/global"
+                 hx-trigger="keyup changed delay:300ms"
+                 hx-target="#global-search-results"
+                 @focus="searchOpen = true"
+                 @blur="setTimeout(() => searchOpen = false, 200)"
+                 @keydown.escape="$el.blur(); searchOpen = false">
+        </div>
+        <div id="global-search-results" x-show="searchOpen" x-cloak
+             x-transition
+             class="absolute left-0 right-0 top-full mt-1 max-h-80 overflow-y-auto rounded-md border border-gray-300 bg-white shadow-lg z-50">
+        </div>
       </div>
-      <div id="global-search-results" x-show="searchOpen" x-cloak
-           x-transition
-           class="absolute left-4 right-4 top-full mt-2 max-h-96 overflow-y-auto rounded-xl border-2 border-brand-200 bg-white shadow-xl z-50">
-      </div>
+
+      {# Right: spacer #}
+      <div></div>
     </div>
-
-    {# Right: empty spacer to balance the grid #}
-    <div></div>
   </header>
   {# Breadcrumb sink — absorbs OOB swaps, always hidden #}
   <div id="breadcrumb" class="hidden" aria-hidden="true"></div>
@@ -78,44 +80,44 @@
 
   {# ── Main content (full width, bottom padding for nav) ───────── #}
   <main>
-    <div id="main-content" class="p-4 lg:p-6 pb-20">
+    <div id="main-content" class="pb-14">
       {% block content %}{% endblock %}
     </div>
   </main>
 
   {# ── Bottom navigation bar (all screen sizes) ───────────────── #}
-  <nav class="fixed bottom-0 inset-x-0 bg-white border-t-2 border-brand-200 z-40 shadow-[0_-2px_12px_rgba(0,0,0,0.06)]"
+  <nav class="fixed bottom-0 inset-x-0 bg-white border-t-2 border-brand-200 z-40"
        style="padding-bottom: env(safe-area-inset-bottom, 0px);">
-    <div class="mx-auto max-w-4xl flex items-stretch justify-around">
+    <div class="mx-auto flex items-stretch justify-around">
       {# Requisitions #}
       <a href="/v2/requisitions"
          hx-get="/v2/partials/parts/workspace"
          hx-target="#main-content"
          hx-push-url="/v2/requisitions"
          @click="currentView = 'requisitions'"
-         :class="currentView === 'requisitions' ? 'text-brand-600 font-semibold' : 'text-gray-500 hover:text-gray-700'"
-         class="flex flex-1 flex-col items-center justify-center py-2 min-h-[48px] text-center transition-colors">
-        <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-        <span class="text-[10px] font-medium leading-tight mt-0.5">Reqs</span>
+         :class="currentView === 'requisitions' ? 'text-brand-600 border-t-2 border-brand-500 -mt-[2px]' : 'text-gray-400 hover:text-gray-600'"
+         class="flex flex-1 flex-col items-center justify-center py-1 min-h-[36px] text-center transition-colors">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        <span class="text-[8px] font-semibold leading-tight mt-0.5 uppercase tracking-wider">Reqs</span>
       </a>
 
       {% set bottom_items = [
         ('search', 'Search', '/v2/search', '/v2/partials/search', 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
-        ('buy-plans', 'Buy Plans', '/v2/buy-plans', '/v2/partials/buy-plans', 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
+        ('buy-plans', 'Buys', '/v2/buy-plans', '/v2/partials/buy-plans', 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
         ('vendors', 'Vendors', '/v2/vendors', '/v2/partials/vendors', 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4'),
-        ('companies', 'Companies', '/v2/companies', '/v2/partials/companies', 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z'),
-        ('proactive', 'Proactive', '/v2/proactive', '/v2/partials/proactive', 'M13 10V3L4 14h7v7l9-11h-7z'),
+        ('companies', 'Cos', '/v2/companies', '/v2/partials/companies', 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z'),
+        ('proactive', 'Proact', '/v2/proactive', '/v2/partials/proactive', 'M13 10V3L4 14h7v7l9-11h-7z'),
         ('quotes', 'Quotes', '/v2/quotes', '/v2/partials/quotes', 'M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z'),
-        ('prospecting', 'Prospecting', '/v2/prospecting', '/v2/partials/prospecting', 'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7'),
-        ('settings', 'Settings', '/v2/settings', '/v2/partials/settings', 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z'),
+        ('prospecting', 'Prospect', '/v2/prospecting', '/v2/partials/prospecting', 'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7'),
+        ('settings', 'Config', '/v2/settings', '/v2/partials/settings', 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z'),
       ] %}
       {% for id, label, href, partial, icon in bottom_items %}
       <a href="{{ href }}" hx-get="{{ partial }}" hx-target="#main-content" hx-push-url="{{ href }}"
          @click="currentView = '{{ id }}'"
-         :class="currentView === '{{ id }}' ? 'text-brand-600 font-semibold' : 'text-gray-500 hover:text-gray-700'"
-         class="flex flex-1 flex-col items-center justify-center py-1.5 min-h-[44px] text-center transition-colors">
-        <svg style="height:18px;width:18px" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{ icon }}"/></svg>
-        <span class="text-[9px] font-medium leading-tight mt-0.5">{{ label }}</span>
+         :class="currentView === '{{ id }}' ? 'text-brand-600 border-t-2 border-brand-500 -mt-[2px]' : 'text-gray-400 hover:text-gray-600'"
+         class="flex flex-1 flex-col items-center justify-center py-1 min-h-[36px] text-center transition-colors">
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{ icon }}"/></svg>
+        <span class="text-[8px] font-semibold leading-tight mt-0.5 uppercase tracking-wider">{{ label }}</span>
       </a>
       {% endfor %}
     </div>

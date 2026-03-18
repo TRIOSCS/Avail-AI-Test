@@ -303,3 +303,210 @@ hr { border-color: #c8d5e2; }
   scrollbar-width: thin;
   scrollbar-color: #8baac5 #edf1f6;
 }
+
+/* ── JetBrains Mono for data cells ─────────────────────────────── */
+.font-data {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+  letter-spacing: -0.01em;
+}
+
+/* ── Top scrollbar — mirror scrollbar above table content ──────── */
+.top-scroll-wrapper {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  flex: 1;
+}
+.top-scroll-bar {
+  overflow-x: auto;
+  overflow-y: hidden;
+  flex-shrink: 0;
+  height: 10px;
+}
+.top-scroll-bar::-webkit-scrollbar {
+  height: 10px;
+}
+.top-scroll-bar::-webkit-scrollbar-track {
+  background: #e8eef4;
+  border-radius: 5px;
+}
+.top-scroll-bar::-webkit-scrollbar-thumb {
+  background: #3d6895;
+  border-radius: 5px;
+  border: 2px solid #e8eef4;
+}
+.top-scroll-bar::-webkit-scrollbar-thumb:hover {
+  background: #2b4c6e;
+}
+/* Firefox */
+.top-scroll-bar {
+  scrollbar-width: thin;
+  scrollbar-color: #3d6895 #e8eef4;
+}
+.top-scroll-content {
+  overflow-x: auto;
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+/* Hide the bottom scrollbar on the content since we have top one */
+.top-scroll-content::-webkit-scrollbar:horizontal {
+  height: 0;
+  display: none;
+}
+
+/* ── Compact table — Bloomberg density ─────────────────────────── */
+.compact-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 12px;
+}
+.compact-table th {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #5a7a9a;
+  background: #f0f4f8;
+  border-bottom: 2px solid #b7c7d8;
+  padding: 6px 10px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  white-space: nowrap;
+  user-select: none;
+}
+.compact-table td {
+  padding: 4px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  color: #1e293b;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
+}
+.compact-table td.td-label {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 12px;
+}
+.compact-table tbody tr {
+  transition: background-color 0.1s;
+  cursor: pointer;
+}
+.compact-table tbody tr:hover td {
+  background: rgba(61, 104, 149, 0.06);
+}
+.compact-table tbody tr.row-selected td {
+  background: rgba(61, 104, 149, 0.12);
+  box-shadow: inset 2px 0 0 #3d6895;
+}
+.compact-table tbody tr:nth-child(even) td {
+  background: #fafbfd;
+}
+.compact-table tbody tr:nth-child(even):hover td {
+  background: rgba(61, 104, 149, 0.06);
+}
+.compact-table tbody tr:nth-child(even).row-selected td {
+  background: rgba(61, 104, 149, 0.12);
+  box-shadow: inset 2px 0 0 #3d6895;
+}
+
+/* ── Badge tiers ───────────────────────────────────────────────── */
+/* Primary badges — status, high visibility */
+.badge-primary {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 8px;
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  border-radius: 3px;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+/* Secondary badges — type, classification, low-key */
+.badge-secondary {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  border-radius: 2px;
+  color: #64748b;
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
+/* ── Panel chrome — workspace panels ───────────────────────────── */
+.panel-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: #f0f4f8;
+  border-bottom: 2px solid #b7c7d8;
+  flex-shrink: 0;
+}
+.panel-title {
+  font-family: 'DM Sans', system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #3d6895;
+}
+
+/* ── Workspace tabs — compact, industrial ──────────────────────── */
+.ws-tab {
+  padding: 6px 14px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #64748b;
+  border-bottom: 2px solid transparent;
+  transition: all 0.15s;
+  white-space: nowrap;
+  font-family: 'DM Sans', system-ui, sans-serif;
+}
+.ws-tab:hover {
+  color: #3d6895;
+  background: rgba(61, 104, 149, 0.04);
+}
+.ws-tab-active {
+  color: #3d6895;
+  border-bottom-color: #3d6895;
+}
+
+/* ── Column picker dropdown ────────────────────────────────────── */
+.col-picker {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 4px;
+  width: 200px;
+  background: white;
+  border: 1px solid #c8d5e2;
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+  z-index: 30;
+  padding: 8px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+.col-picker label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 3px 4px;
+  font-size: 11px;
+  color: #374151;
+  border-radius: 3px;
+  cursor: pointer;
+}
+.col-picker label:hover {
+  background: #f0f4f8;
+}
