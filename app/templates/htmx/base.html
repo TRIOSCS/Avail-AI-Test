@@ -34,19 +34,19 @@
       x-data="{ currentView: '{{ current_view|default("requisitions") }}' }"
   {% block body %}
 
-  {# ── Topbar: logo + search ───────────────────────────────────── #}
-  <header class="sticky top-0 z-30 border-b-2 border-brand-200 px-4 lg:px-6 flex items-center gap-4 bg-white" style="height:64px">
-    {# Logo #}
+  {# ── Topbar: logo + centered search ──────────────────────────── #}
+  <header class="sticky top-0 z-30 border-b-2 border-brand-200 px-4 lg:px-6 bg-white grid items-center" style="height:64px; grid-template-columns: auto 1fr auto;">
+    {# Left: Logo #}
     <a href="/v2" hx-get="/v2/partials/parts/workspace" hx-target="#main-content" hx-push-url="/v2/requisitions"
        @click="currentView = 'requisitions'"
        class="flex-shrink-0">
       <img src="/static/avail_logo_cropped.png" alt="AVAIL" style="height:52px">
     </a>
 
-    {# Global search — fills remaining space, vertically centered with logo #}
-    <div class="relative flex-1 max-w-xl" x-data="{ searchOpen: false }">
+    {# Center: Global search — truly centered in the page #}
+    <div class="relative mx-auto w-full max-w-xl px-4" x-data="{ searchOpen: false }">
       <div class="relative">
-        <svg xmlns="http://www.w3.org/2000/svg" class="pointer-events-none absolute left-4 top-1/2 h-5 w-5 -translate-y-1/2 text-brand-400"
+        <svg xmlns="http://www.w3.org/2000/svg" class="pointer-events-none absolute left-8 top-1/2 h-5 w-5 -translate-y-1/2 text-brand-400"
              fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
         </svg>
@@ -62,12 +62,15 @@
       </div>
       <div id="global-search-results" x-show="searchOpen" x-cloak
            x-transition
-           class="absolute left-0 right-0 top-full mt-2 max-h-96 overflow-y-auto rounded-xl border-2 border-brand-200 bg-white shadow-xl z-50">
+           class="absolute left-4 right-4 top-full mt-2 max-h-96 overflow-y-auto rounded-xl border-2 border-brand-200 bg-white shadow-xl z-50">
       </div>
     </div>
+
+    {# Right: empty spacer to balance the grid #}
+    <div></div>
   </header>
-  {# Hidden breadcrumb target so OOB swaps don't error #}
-  <div id="breadcrumb" style="display:none"></div>
+  {# Breadcrumb sink — absorbs OOB swaps, always hidden #}
+  <div id="breadcrumb" class="hidden" aria-hidden="true"></div>
 
   {# ── Page-level loading bar ──────────────────────────────────── #}
   <div id="page-loading-bar" class="fixed top-0 left-0 right-0 h-0.5 z-50 bg-brand-500 origin-left scale-x-0 transition-transform duration-300"
