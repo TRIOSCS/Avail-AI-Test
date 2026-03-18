@@ -163,7 +163,7 @@ def fast_search(query: str, db: Session) -> dict:
     groups["site_contacts"] = [_to_dict(r, ["full_name", "email", "phone", "title"], "site_contact") for r in rows]
     all_results.extend(groups["site_contacts"])
 
-    # --- Parts (Requirements) ---
+    # --- Parts (Requirements) — dedup by normalized_mpn so same part across reqs shows once ---
     q = db.query(Requirement).filter(
         Requirement.primary_mpn.ilike(pattern)
         | Requirement.normalized_mpn.ilike(pattern)
@@ -171,18 +171,36 @@ def fast_search(query: str, db: Session) -> dict:
     )
     if use_pg:
         q = q.order_by(func.similarity(Requirement.primary_mpn, query).desc())
-    rows = q.limit(RESULT_LIMIT).all()
-    groups["parts"] = [_to_dict(r, ["primary_mpn", "normalized_mpn", "brand", "requisition_id"], "part") for r in rows]
+    rows = q.limit(RESULT_LIMIT * 3).all()  # fetch extra to dedup from
+    seen_mpns: set[str] = set()
+    deduped_parts = []
+    for r in rows:
+        mpn_key = (r.normalized_mpn or r.primary_mpn or "").lower()
+        if mpn_key not in seen_mpns:
+            seen_mpns.add(mpn_key)
+            deduped_parts.append(_to_dict(r, ["primary_mpn", "normalized_mpn", "brand", "requisition_id"], "part"))
+            if len(deduped_parts) >= RESULT_LIMIT:
+                break
+    groups["parts"] = deduped_parts
     all_results.extend(groups["parts"])
 
-    # --- Offers ---
+    # --- Offers — dedup by (mpn, vendor_name) so same offer combo shows once ---
     q = db.query(Offer).filter(Offer.vendor_name.ilike(pattern) | Offer.mpn.ilike(pattern))
     if use_pg:
         q = q.order_by(func.similarity(Offer.mpn, query).desc())
-    rows = q.limit(RESULT_LIMIT).all()
-    groups["offers"] = [
-        _to_dict(r, ["vendor_name", "mpn", "unit_price", "qty_available", "requisition_id"], "offer") for r in rows
-    ]
+    rows = q.limit(RESULT_LIMIT * 3).all()
+    seen_offers: set[tuple[str, str]] = set()
+    deduped_offers = []
+    for r in rows:
+        offer_key = ((r.mpn or "").lower(), (r.vendor_name or "").lower())
+        if offer_key not in seen_offers:
+            seen_offers.add(offer_key)
+            deduped_offers.append(
+                _to_dict(r, ["vendor_name", "mpn", "unit_price", "qty_available", "requisition_id"], "offer")
+            )
+            if len(deduped_offers) >= RESULT_LIMIT:
+                break
+    groups["offers"] = deduped_offers
     all_results.extend(groups["offers"])
 
     # --- Best match: first result from first non-empty group ---
@@ -365,6 +383,33 @@ def _run_intent_query(search_op: dict, db: Session) -> tuple[str, list[dict]]:
         else:
             # Exact-ish match via ILIKE for text filters
             q = q.filter(col.ilike(f"%{escape_like(str(filter_value))}%"))
+
+    # Dedup parts by normalized_mpn, offers by (mpn, vendor_name)
+    if entity_type == "part":
+        rows = q.limit(RESULT_LIMIT * 3).all()
+        seen: set[str] = set()
+        deduped = []
+        for r in rows:
+            mpn_key = (getattr(r, "normalized_mpn", None) or getattr(r, "primary_mpn", None) or "").lower()
+            if mpn_key not in seen:
+                seen.add(mpn_key)
+                deduped.append(_to_dict(r, display_fields, entity_type))
+                if len(deduped) >= RESULT_LIMIT:
+                    break
+        return (group_key, deduped)
+
+    if entity_type == "offer":
+        rows = q.limit(RESULT_LIMIT * 3).all()
+        seen_offers: set[tuple[str, str]] = set()
+        deduped = []
+        for r in rows:
+            key = ((getattr(r, "mpn", None) or "").lower(), (getattr(r, "vendor_name", None) or "").lower())
+            if key not in seen_offers:
+                seen_offers.add(key)
+                deduped.append(_to_dict(r, display_fields, entity_type))
+                if len(deduped) >= RESULT_LIMIT:
+                    break
+        return (group_key, deduped)
 
     rows = q.limit(RESULT_LIMIT).all()
     return (group_key, [_to_dict(r, display_fields, entity_type) for r in rows])
