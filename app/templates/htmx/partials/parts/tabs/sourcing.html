@@ -1,13 +1,13 @@
-{# Sourcing tab — sightings/leads for a specific part number.
+{# Sourcing tab — vendor-level sighting summaries for a specific part number.
    Called by: GET /v2/partials/parts/{id}/tab/sourcing
-   Depends on: requirement, sightings
+   Depends on: requirement, summaries (VendorSightingSummary list), raw_sightings_by_vendor (dict)
 #}
 
 <div>
   <div class="flex items-center justify-between mb-3">
     <div>
       <h3 class="text-lg font-semibold text-gray-900">Sourcing — {{ requirement.primary_mpn or 'Part' }}</h3>
-      <p class="text-xs text-gray-500">{{ sightings|length }} sighting{{ 's' if sightings|length != 1 else '' }}</p>
+      <p class="text-xs text-gray-500">{{ summaries|length }} vendor{{ 's' if summaries|length != 1 else '' }}</p>
     </div>
     <a hx-get="/v2/partials/sourcing/{{ requirement.id }}/search"
        hx-target="#part-detail"
@@ -16,39 +16,110 @@
     </a>
   </div>
 
-  {% if sightings %}
+  {% if summaries %}
   <div class="overflow-x-auto rounded-lg border border-gray-200">
     <table class="min-w-full divide-y divide-gray-200 text-sm">
       <thead class="bg-gray-50">
         <tr>
           <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
-          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Source</th>
-          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
+          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
           <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
-          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Score</th>
-          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tier</th>
+          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
+          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase relative cursor-help"
+              x-data="{ showTip: false }" @mouseenter="showTip = true" @mouseleave="showTip = false">
+            Score
+            <div x-show="showTip" x-cloak
+                 class="absolute z-50 left-0 top-full mt-1 w-64 p-3 bg-white border border-gray-200 rounded-lg shadow-lg text-xs text-gray-600 font-normal normal-case">
+              <p class="font-semibold text-gray-900 mb-1">Sighting Score (0-100)</p>
+              <ul class="space-y-0.5">
+                <li>Trust: 30% — vendor reliability</li>
+                <li>Price: 25% — competitiveness vs median</li>
+                <li>Qty: 20% — coverage vs target</li>
+                <li>Freshness: 15% — listing age</li>
+                <li>Completeness: 10% — data fields present</li>
+              </ul>
+            </div>
+          </th>
+          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase relative cursor-help"
+              x-data="{ showTip: false }" @mouseenter="showTip = true" @mouseleave="showTip = false">
+            Tier
+            <div x-show="showTip" x-cloak
+                 class="absolute z-50 left-0 top-full mt-1 w-48 p-3 bg-white border border-gray-200 rounded-lg shadow-lg text-xs text-gray-600 font-normal normal-case">
+              <p class="font-semibold text-gray-900 mb-1">Quality Tiers</p>
+              <ul class="space-y-0.5">
+                <li><span class="text-green-600 font-medium">Excellent</span> 70-100</li>
+                <li><span class="text-amber-600 font-medium">Good</span> 40-69</li>
+                <li><span class="text-gray-500 font-medium">Fair</span> 20-39</li>
+                <li><span class="text-red-500 font-medium">Poor</span> 0-19</li>
+              </ul>
+            </div>
+          </th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-100">
-        {% for s in sightings %}
-        <tr class="hover:bg-gray-50 {{ 'opacity-50' if s.is_unavailable else '' }}">
+        {% for s in summaries %}
+        <tr class="hover:bg-gray-50">
           <td class="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{{ s.vendor_name or '—' }}</td>
-          <td class="px-3 py-2 whitespace-nowrap">
-            <span class="px-2 py-0.5 text-xs rounded-full bg-gray-100 text-gray-600">{{ s.source_type or '—' }}</span>
+          <td class="px-3 py-2 whitespace-nowrap text-xs">
+            {% if s.vendor_phone %}
+              <a href="tel:{{ s.vendor_phone }}" class="text-brand-500 hover:underline">{{ s.vendor_phone }}</a>
+            {% else %}—{% endif %}
           </td>
-          <td class="px-3 py-2 whitespace-nowrap">{{ '${:,.4f}'.format(s.unit_price) if s.unit_price else '—' }}</td>
-          <td class="px-3 py-2 whitespace-nowrap">{{ '{:,}'.format(s.qty_available) if s.qty_available else '—' }}</td>
+          {# Qty cell — click for breakdown popover #}
+          <td class="px-3 py-2 whitespace-nowrap relative" x-data="{ showQty: false }">
+            <span @click="showQty = !showQty" class="cursor-pointer hover:text-brand-500">
+              {{ '{:,}'.format(s.estimated_qty) if s.estimated_qty else '—' }}
+              {% if s.listing_count > 1 %}<span class="text-[10px] text-gray-400 ml-0.5">({{ s.listing_count }})</span>{% endif %}
+            </span>
+            <div x-show="showQty" @click.away="showQty = false" x-cloak
+                 class="absolute z-50 mt-1 w-64 p-3 bg-white border border-gray-200 rounded-lg shadow-lg text-xs">
+              <p class="font-semibold text-gray-900 mb-1">Qty Breakdown ({{ s.listing_count }} listing{{ 's' if s.listing_count != 1 else '' }})</p>
+              <table class="w-full text-xs">
+                <thead><tr><th class="text-left text-gray-500">Source</th><th class="text-right text-gray-500">Qty</th></tr></thead>
+                <tbody>
+                  {% for raw in raw_sightings_by_vendor.get(s.vendor_name, []) %}
+                  <tr><td>{{ raw.source_type or '—' }}</td><td class="text-right">{{ '{:,}'.format(raw.qty_available) if raw.qty_available else '—' }}</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </td>
+          {# Price cell — click for breakdown popover #}
+          <td class="px-3 py-2 whitespace-nowrap relative" x-data="{ showPrice: false }">
+            <span @click="showPrice = !showPrice" class="cursor-pointer hover:text-brand-500">
+              {{ '${:,.4f}'.format(s.avg_price) if s.avg_price else '—' }}
+            </span>
+            <div x-show="showPrice" @click.away="showPrice = false" x-cloak
+                 class="absolute z-50 mt-1 w-64 p-3 bg-white border border-gray-200 rounded-lg shadow-lg text-xs">
+              <p class="font-semibold text-gray-900 mb-1">Price Breakdown</p>
+              <p class="text-gray-500 mb-1">Best: {{ '${:,.4f}'.format(s.best_price) if s.best_price else '—' }} | Avg: {{ '${:,.4f}'.format(s.avg_price) if s.avg_price else '—' }}</p>
+              <table class="w-full text-xs">
+                <thead><tr><th class="text-left text-gray-500">Source</th><th class="text-right text-gray-500">Price</th></tr></thead>
+                <tbody>
+                  {% for raw in raw_sightings_by_vendor.get(s.vendor_name, []) %}
+                  <tr><td>{{ raw.source_type or '—' }}</td><td class="text-right">{{ '${:,.4f}'.format(raw.unit_price) if raw.unit_price else '—' }}</td></tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </td>
           <td class="px-3 py-2 whitespace-nowrap">
-            {% if s.score %}
-              {% set score_pct = (s.score * 100)|int %}
-              <span class="{{ 'text-green-600' if score_pct >= 70 else 'text-amber-600' if score_pct >= 40 else 'text-gray-500' }}">
+            {% if s.score is not none %}
+              {% set score_pct = s.score|int %}
+              <span class="{{ 'text-green-600' if score_pct >= 70 else 'text-amber-600' if score_pct >= 40 else 'text-gray-500' if score_pct >= 20 else 'text-red-500' }}">
                 {{ score_pct }}%
               </span>
             {% else %}—{% endif %}
           </td>
           <td class="px-3 py-2 whitespace-nowrap">
-            {% if s.evidence_tier %}
-              <span class="px-1.5 py-0.5 text-xs font-mono rounded bg-gray-100">{{ s.evidence_tier }}</span>
+            {% if s.tier %}
+              <span class="px-1.5 py-0.5 text-xs font-medium rounded
+                {{ 'bg-green-50 text-green-700' if s.tier == 'Excellent' else
+                   'bg-amber-50 text-amber-700' if s.tier == 'Good' else
+                   'bg-gray-100 text-gray-600' if s.tier == 'Fair' else
+                   'bg-red-50 text-red-700' }}">
+                {{ s.tier }}
+              </span>
             {% else %}—{% endif %}
           </td>
         </tr>

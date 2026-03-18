@@ -44,6 +44,7 @@ from ..models import (
 from ..models.buy_plan import BuyPlanStatus
 from ..models.enrichment import ProspectContact
 from ..models.prospect_account import ProspectAccount
+from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorContact
 from ..scoring import classify_lead, explain_lead, score_unified
 from ..utils.sql_helpers import escape_like
@@ -7240,20 +7241,35 @@ async def part_tab_sourcing(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return sightings/leads table for a specific part number."""
-    req = db.query(Requirement).options(joinedload(Requirement.requisition)).get(requirement_id)
+    """Return vendor-level sighting summaries for a specific part number."""
+    req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
 
-    sightings = (
-        db.query(Sighting)
-        .filter(Sighting.requirement_id == requirement_id)
-        .order_by(Sighting.score.desc().nullslast(), Sighting.id.desc())
+    summaries = (
+        db.query(VendorSightingSummary)
+        .filter(VendorSightingSummary.requirement_id == requirement_id)
+        .order_by(VendorSightingSummary.score.desc(), VendorSightingSummary.id.desc())
         .all()
     )
 
+    # Raw sightings grouped by vendor for popover breakdowns
+    raw_sightings = (
+        db.query(Sighting).filter(Sighting.requirement_id == requirement_id).order_by(Sighting.score.desc()).all()
+    )
+    raw_by_vendor: dict[str, list] = {}
+    for s in raw_sightings:
+        vn = (s.vendor_name or "unknown").lower().strip()
+        raw_by_vendor.setdefault(vn, []).append(s)
+
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({"requirement": req, "sightings": sightings})
+    ctx.update(
+        {
+            "requirement": req,
+            "summaries": summaries,
+            "raw_sightings_by_vendor": raw_by_vendor,
+        }
+    )
     return templates.TemplateResponse("htmx/partials/parts/tabs/sourcing.html", ctx)
 
 
