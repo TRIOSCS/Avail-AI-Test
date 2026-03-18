@@ -41,28 +41,38 @@
       <a href="/v2" hx-get="/v2/partials/parts/workspace" hx-target="#main-content" hx-push-url="/v2/requisitions"
          @click="currentView = 'requisitions'"
          class="flex items-center">
-        <img src="/static/avail_logo_cropped.png" alt="AVAIL" style="height:36px">
+        <img src="/static/avail_logo_cropped.png" alt="AVAIL" style="height:47px">
       </a>
 
       {# Center: Global omni search #}
-      <div class="relative mx-auto w-full max-w-xl px-4" x-data="{ searchOpen: false }">
+      <div class="relative mx-auto w-full max-w-xl px-4" x-data="{ searchOpen: false, aiSearching: false }">
         <div class="relative">
-          <svg xmlns="http://www.w3.org/2000/svg" class="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-brand-400"
+          <svg xmlns="http://www.w3.org/2000/svg" x-show="!aiSearching"
+               class="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-brand-400"
                fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
           </svg>
-          <input type="search" name="q" placeholder="Search MPN, company, vendor..."
+          {# AI search spinner — shown while waiting for AI response #}
+          <svg x-show="aiSearching" x-cloak
+               class="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-brand-500 animate-spin"
+               xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+          <input type="search" name="q" placeholder="Search MPN, company, vendor... (Enter for AI)"
                  autocomplete="off"
                  class="w-full rounded-xl border-2 border-brand-200 bg-white py-2 pl-10 pr-4 text-sm text-gray-900 placeholder-gray-400 outline-none transition-all shadow-sm focus:border-brand-500 focus:shadow-md focus:shadow-brand-100"
                  hx-get="/v2/partials/search/global"
                  hx-trigger="keyup changed delay:300ms"
                  hx-target="#global-search-results"
                  @focus="searchOpen = true"
-                 @blur="setTimeout(() => searchOpen = false, 200)"
-                 @keydown.escape="$el.blur(); searchOpen = false">
+                 @blur="if (!aiSearching) setTimeout(() => searchOpen = false, 200)"
+                 @keydown.escape="$el.blur(); searchOpen = false; aiSearching = false"
+                 @keydown.enter.prevent="if (!aiSearching && $el.value.trim().length >= 2) { aiSearching = true; searchOpen = true; htmx.ajax('POST', '/v2/partials/search/ai', {target:'#global-search-results', values:{q: $el.value}}) }">
         </div>
         <div id="global-search-results" x-show="searchOpen" x-cloak
              x-transition
+             @htmx:after-swap.camel="aiSearching = false"
              class="absolute left-4 right-4 top-full mt-2 max-h-96 overflow-y-auto rounded-xl border-2 border-brand-200 bg-white shadow-xl z-50">
         </div>
       </div>
@@ -80,7 +90,7 @@
 
   {# ── Main content (full width, bottom padding for nav) ───────── #}
   <main>
-    <div id="main-content" class="pb-14">
+    <div id="main-content" class="pb-16">
       {% block content %}{% endblock %}
     </div>
   </main>
@@ -96,9 +106,9 @@
          hx-push-url="/v2/requisitions"
          @click="currentView = 'requisitions'"
          :class="currentView === 'requisitions' ? 'text-brand-600 border-t-2 border-brand-500 -mt-[2px]' : 'text-gray-400 hover:text-gray-600'"
-         class="flex flex-col items-center justify-center py-1 px-3 min-h-[36px] text-center transition-colors">
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-        <span class="text-[8px] font-semibold leading-tight mt-0.5 uppercase tracking-wider">Reqs</span>
+         class="flex flex-col items-center justify-center py-1.5 px-3 min-h-[48px] text-center transition-colors">
+        <svg class="h-[21px] w-[21px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+        <span class="text-[10px] font-semibold leading-tight mt-0.5 uppercase tracking-wider">Reqs</span>
       </a>
 
       {% set bottom_items = [
@@ -115,9 +125,9 @@
       <a href="{{ href }}" hx-get="{{ partial }}" hx-target="#main-content" hx-push-url="{{ href }}"
          @click="currentView = '{{ id }}'"
          :class="currentView === '{{ id }}' ? 'text-brand-600 border-t-2 border-brand-500 -mt-[2px]' : 'text-gray-400 hover:text-gray-600'"
-         class="flex flex-col items-center justify-center py-1 px-3 min-h-[36px] text-center transition-colors">
-        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{ icon }}"/></svg>
-        <span class="text-[8px] font-semibold leading-tight mt-0.5 uppercase tracking-wider">{{ label }}</span>
+         class="flex flex-col items-center justify-center py-1.5 px-3 min-h-[48px] text-center transition-colors">
+        <svg class="h-[21px] w-[21px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{ icon }}"/></svg>
+        <span class="text-[10px] font-semibold leading-tight mt-0.5 uppercase tracking-wider">{{ label }}</span>
       </a>
       {% endfor %}
     </div>
