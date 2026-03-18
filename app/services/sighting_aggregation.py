@@ -18,6 +18,7 @@ from sqlalchemy.orm import Session
 from app.models.sourcing import Sighting
 from app.models.vendor_sighting_summary import VendorSightingSummary
 from app.models.vendors import VendorCard
+from app.vendor_utils import normalize_vendor_name
 
 
 def _score_to_tier(score: float | None) -> str:
@@ -161,3 +162,26 @@ def rebuild_vendor_summaries(
         requirement_id,
     )
     return results
+
+
+def rebuild_vendor_summaries_from_sightings(
+    db: Session,
+    requirement_id: int,
+    sightings: list,
+) -> None:
+    """Extract normalized vendor names from sightings and rebuild summaries.
+
+    Silently catches errors so callers don't need try/except boilerplate.
+    """
+    try:
+        vendor_names = list(
+            {
+                normalize_vendor_name(s.vendor_name)
+                for s in sightings
+                if s.vendor_name and normalize_vendor_name(s.vendor_name)
+            }
+        )
+        if vendor_names:
+            rebuild_vendor_summaries(db, requirement_id, vendor_names=vendor_names)
+    except Exception:
+        logger.debug("Vendor summary rebuild failed for requirement {}", requirement_id, exc_info=True)

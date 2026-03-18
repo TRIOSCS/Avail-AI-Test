@@ -1074,6 +1074,11 @@ def _save_sightings(
     except Exception:
         logger.debug("Tag propagation failed for sightings", exc_info=True)
 
+    # Rebuild vendor-level sighting summaries for aggregated display
+    from .services.sighting_aggregation import rebuild_vendor_summaries_from_sightings
+
+    rebuild_vendor_summaries_from_sightings(db, req.id, sightings)
+
     return sightings
 
 

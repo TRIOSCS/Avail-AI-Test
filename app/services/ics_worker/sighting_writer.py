@@ -92,6 +92,10 @@ def save_ics_sightings(
 
     if created:
         db.commit()
+        # Rebuild vendor-level summaries
+        from app.services.sighting_aggregation import rebuild_vendor_summaries_from_sightings
+
+        rebuild_vendor_summaries_from_sightings(db, req.id, ics_sightings)
     logger.info(
         "ICS sighting writer: created {} sightings for requirement {} (from {} parsed)",
         created,

@@ -106,6 +106,10 @@ def save_nc_sightings(
 
     if created:
         db.commit()
+        # Rebuild vendor-level summaries
+        from app.services.sighting_aggregation import rebuild_vendor_summaries_from_sightings
+
+        rebuild_vendor_summaries_from_sightings(db, req.id, nc_sightings)
     logger.info(
         "NC sighting writer: created {} sightings for requirement {} (from {} parsed)",
         created,
