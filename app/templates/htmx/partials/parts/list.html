@@ -10,17 +10,8 @@
   <div class="panel-header flex-wrap gap-y-2">
     <form id="parts-filters" class="flex flex-col gap-1.5 w-full">
       <div class="flex gap-2 items-center">
-        {# Search #}
-        <div class="flex-1 min-w-[120px]">
-          <input type="text" name="q" value="{{ q }}" placeholder="Search MPN, brand..."
-                 hx-get="/v2/partials/parts"
-                 hx-target="#parts-list"
-                 hx-include="#parts-filters"
-                 hx-trigger="keyup changed delay:300ms"
-                 class="w-full px-2.5 py-1 text-xs border border-gray-300 rounded bg-white focus:ring-1 focus:ring-brand-500 focus:border-brand-500 font-data placeholder-gray-400">
-        </div>
-
         {# Status pills #}
+        <input type="hidden" name="q" value="{{ q }}">
         <input type="hidden" name="status" value="{{ status }}">
         <input type="hidden" name="sort" value="{{ sort }}">
         <input type="hidden" name="dir" value="{{ dir }}">
