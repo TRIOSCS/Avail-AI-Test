@@ -40,9 +40,8 @@
      @mouseup.window="stopDrag()">
 
   {# ── Left Panel: Parts Table ──────────────────────────────── #}
-  <div class="flex flex-col overflow-hidden" :style="'width: ' + (splitRatio * 100) + '%'">
+  <div class="flex flex-col min-w-0" :style="'width: ' + (splitRatio * 100) + '%'">
     <div id="parts-list" class="flex-1 overflow-auto"
-         style="overflow-x: auto;"
          hx-get="/v2/partials/parts"
          hx-trigger="load"
          hx-target="#parts-list"
@@ -64,7 +63,7 @@
   </div>
 
   {# ── Right Panel: Detail Tabs ─────────────────────────────── #}
-  <div class="flex-1 overflow-hidden flex flex-col bg-white border-l border-gray-200">
+  <div class="flex-1 min-w-0 flex flex-col bg-white border-l border-gray-200">
 
     {# Tab bar #}
     <template x-if="selectedPartId">
