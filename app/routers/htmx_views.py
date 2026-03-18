@@ -7300,6 +7300,23 @@ async def part_tab_sourcing(
     return templates.TemplateResponse("htmx/partials/parts/tabs/sourcing.html", ctx)
 
 
+@router.get("/v2/partials/parts/{requirement_id}/header", response_class=HTMLResponse)
+async def part_header(
+    requirement_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the part detail header strip (display mode)."""
+    req = db.get(Requirement, requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["requirement"] = req
+    return templates.TemplateResponse("htmx/partials/parts/header.html", ctx)
+
+
 @router.get("/v2/partials/parts/{requirement_id}/tab/activity", response_class=HTMLResponse)
 async def part_tab_activity(
     requirement_id: int,

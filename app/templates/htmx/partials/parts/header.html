@@ -1,0 +1,88 @@
+{# Part detail header — persistent context strip above tabs.
+   Called by: GET /v2/partials/parts/{id}/header
+   Depends on: requirement (Requirement model with joined Requisition)
+#}
+
+{% set status_colors = {
+  'open': 'bg-blue-100 text-blue-700',
+  'sourcing': 'bg-amber-100 text-amber-700',
+  'offered': 'bg-emerald-100 text-emerald-700',
+  'quoted': 'bg-violet-100 text-violet-700',
+  'won': 'bg-emerald-200 text-emerald-800',
+  'lost': 'bg-gray-200 text-gray-600',
+  'archived': 'bg-gray-300 text-gray-600'
+} %}
+
+<div class="px-3 py-2 border-b border-gray-200 bg-white flex-shrink-0">
+  <div class="flex items-center justify-between gap-4">
+
+    {# Left: MPN + Brand + Requisition context #}
+    <div class="min-w-0">
+      <div class="flex items-baseline gap-2">
+        <span class="text-lg font-bold text-gray-900 truncate">{{ requirement.primary_mpn or '—' }}</span>
+        {# Brand — inline editable #}
+        <span id="hdr-brand"
+              hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/brand"
+              hx-target="#hdr-brand" hx-swap="outerHTML"
+              class="text-sm text-gray-500 cursor-pointer hover:text-brand-500 truncate"
+              title="Click to edit brand">
+          {{ requirement.brand or 'No brand' }}
+        </span>
+      </div>
+      <p class="text-xs text-gray-400 truncate mt-0.5">
+        {{ requirement.requisition.name if requirement.requisition else '—' }}
+        {% if requirement.requisition and requirement.requisition.customer_name %}
+          · {{ requirement.requisition.customer_name }}
+        {% endif %}
+      </p>
+    </div>
+
+    {# Right: Status + Condition + Qty + Price #}
+    <div class="flex items-center gap-3 flex-shrink-0">
+
+      {# Status badge — inline editable #}
+      <span id="hdr-sourcing_status"
+            hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/sourcing_status"
+            hx-target="#hdr-sourcing_status" hx-swap="outerHTML"
+            class="px-2 py-0.5 text-xs font-medium rounded-full cursor-pointer hover:ring-1 hover:ring-brand-300
+                   {{ status_colors.get(requirement.sourcing_status, 'bg-gray-100 text-gray-600') }}"
+            title="Click to change status">
+        {{ (requirement.sourcing_status or 'open')|capitalize }}
+      </span>
+
+      {# Condition — inline editable #}
+      <span id="hdr-condition"
+            hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/condition"
+            hx-target="#hdr-condition" hx-swap="outerHTML"
+            class="text-xs text-gray-500 cursor-pointer hover:text-brand-500"
+            title="Click to edit condition">
+        {{ requirement.condition or '—' }}
+      </span>
+
+      {# Target Qty — inline editable #}
+      <div class="text-right">
+        <span id="hdr-target_qty"
+              hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/target_qty"
+              hx-target="#hdr-target_qty" hx-swap="outerHTML"
+              class="text-sm font-medium text-gray-900 cursor-pointer hover:text-brand-500"
+              title="Click to edit qty">
+          {{ '{:,}'.format(requirement.target_qty) if requirement.target_qty else '—' }}
+        </span>
+        <span class="text-[10px] text-gray-400 block">qty</span>
+      </div>
+
+      {# Target Price — inline editable #}
+      <div class="text-right">
+        <span id="hdr-target_price"
+              hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/target_price"
+              hx-target="#hdr-target_price" hx-swap="outerHTML"
+              class="text-sm font-medium text-gray-900 cursor-pointer hover:text-brand-500"
+              title="Click to edit target price">
+          {{ '${:,.4f}'.format(requirement.target_price) if requirement.target_price else '—' }}
+        </span>
+        <span class="text-[10px] text-gray-400 block">target</span>
+      </div>
+
+    </div>
+  </div>
+</div>
