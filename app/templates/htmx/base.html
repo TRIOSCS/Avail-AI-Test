@@ -4,6 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}AvailAI{% endblock %}</title>
+  <link rel="icon" type="image/png" href="/static/avail_logo_cropped.png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..800;1,9..40,300..800&display=swap" rel="stylesheet">
@@ -34,12 +35,12 @@
   {% block body %}
 
   {# ── Topbar: logo + search + breadcrumb ──────────────────────── #}
-  <header class="sticky top-0 z-30 border-b-2 border-brand-200 px-4 lg:px-6 flex items-center justify-between gap-4 bg-white" style="height:48px">
+  <header class="sticky top-0 z-30 border-b-2 border-brand-200 px-4 lg:px-6 flex items-center justify-between gap-4 bg-white" style="height:64px">
     {# Left: Logo — cropped version fills space better #}
     <a href="/v2" hx-get="/v2/partials/parts/workspace" hx-target="#main-content" hx-push-url="/v2/requisitions"
        @click="currentView = 'requisitions'"
        class="flex-shrink-0">
-      <img src="/static/avail_logo_cropped.png" alt="AVAIL" style="height:36px">
+      <img src="/static/avail_logo_cropped.png" alt="AVAIL" style="height:52px">
     </a>
 
     {# Center: Global search #}
