@@ -7448,7 +7448,9 @@ async def archive_single_part(
     db.commit()
     logger.info("Part {} archived by {}", requirement_id, user.email)
 
-    return await parts_list_partial(request=request, user=user, db=db)
+    response = await parts_list_partial(request=request, user=user, db=db)
+    response.headers["HX-Trigger"] = json.dumps({"part-archived": {"id": requirement_id}})
+    return response
 
 
 @router.patch("/v2/partials/parts/{requirement_id}/unarchive", response_class=HTMLResponse)

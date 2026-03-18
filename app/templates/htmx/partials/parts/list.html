@@ -281,6 +281,7 @@
         });
       },
       bulkUnarchive: function() {
+        if (!confirm('Unarchive ' + this.selectedIds.length + ' selected items?')) return;
         var ids = this.selectedIds.slice();
         htmx.ajax('POST', '/v2/partials/parts/bulk-unarchive', {
           target: '#parts-list',
