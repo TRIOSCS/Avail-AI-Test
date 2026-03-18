@@ -1,8 +1,11 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ['./app/templates/**/*.html'],
+  content: ['./app/templates/**/*.html', './app/static/styles.css'],
   theme: {
     extend: {
+      fontFamily: {
+        sans: ['DM Sans', 'system-ui', '-apple-system', 'sans-serif'],
+      },
       colors: {
         brand: {
           50: '#f0f4f8',

@@ -1,16 +1,19 @@
 {#
-  mobile_nav.html — Fixed bottom navigation bar for mobile viewports.
-  5 items with SVG icons, 44px min touch targets, safe area padding.
+  mobile_nav.html — Fixed bottom navigation bar for all screen sizes.
+  6 slots: 5 primary nav items + "More" menu with remaining items.
   Active state via current_view template variable.
   Called by: app/templates/base.html (via {% include %})
-  Depends on: HTMX, Tailwind
-  Context vars: current_view (str)
+  Depends on: Alpine.js, HTMX, Tailwind
+  Context vars: current_view (str), user_name (str), user_email (str)
 #}
-<nav class="fixed bottom-0 left-0 right-0 z-40 border-t border-gray-200 bg-white md:hidden"
+<nav class="fixed bottom-0 left-0 right-0 z-40 border-t border-gray-200 bg-white"
      style="padding-bottom: env(safe-area-inset-bottom, 0px);"
-     aria-label="Mobile navigation">
-  <div class="flex items-stretch justify-around">
-    {% set mobile_items = [
+     x-data="{ moreOpen: false }"
+     @click.outside="moreOpen = false"
+     @keydown.escape.window="moreOpen = false"
+     aria-label="Main navigation">
+  <div class="mx-auto flex max-w-3xl items-stretch justify-around">
+    {% set nav_items = [
       ('requisitions', 'Reqs', '/v2/requisitions', '/v2/partials/requisitions',
        'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'),
       ('search', 'Search', '/v2/search', '/v2/partials/search',
@@ -22,13 +25,13 @@
       ('companies', 'Companies', '/v2/companies', '/v2/partials/companies',
        'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z')
     ] %}
-    {% for id, label, href, partial, icon_path in mobile_items %}
+    {% for id, label, href, partial, icon_path in nav_items %}
     <a href="{{ href }}"
        hx-get="{{ partial }}"
        hx-target="#main-content"
        hx-push-url="{{ href }}"
-       class="flex min-h-[44px] min-w-[44px] flex-1 flex-col items-center justify-center gap-0.5 py-2 text-center transition-colors
-              {{ 'text-brand-500' if current_view == id else 'text-gray-500 hover:text-gray-700' }}">
+       class="flex min-h-[48px] flex-1 flex-col items-center justify-center gap-0.5 py-2 text-center transition-colors
+              {{ 'text-brand-600 font-semibold' if current_view == id else 'text-gray-500 hover:text-gray-700' }}">
       <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none"
            viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">
@@ -37,5 +40,80 @@
       <span class="text-[10px] font-medium leading-tight">{{ label }}</span>
     </a>
     {% endfor %}
+
+    {# More button #}
+    <div class="relative flex flex-1 items-stretch">
+      <button @click="moreOpen = !moreOpen"
+              class="flex w-full flex-col items-center justify-center gap-0.5 py-2 text-center transition-colors
+                     text-gray-500 hover:text-gray-700"
+              :class="moreOpen && 'text-brand-600'"
+              aria-label="More options">
+        <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none"
+             viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+             stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 6h16M4 12h16M4 18h16"/>
+        </svg>
+        <span class="text-[10px] font-medium leading-tight">More</span>
+      </button>
+
+      {# More menu — slides up #}
+      <div x-show="moreOpen" x-cloak
+           x-transition:enter="transition ease-out duration-150"
+           x-transition:enter-start="opacity-0 translate-y-2"
+           x-transition:enter-end="opacity-100 translate-y-0"
+           x-transition:leave="transition ease-in duration-100"
+           x-transition:leave-start="opacity-100 translate-y-0"
+           x-transition:leave-end="opacity-0 translate-y-2"
+           class="absolute bottom-full right-0 mb-2 w-56 rounded-xl border border-gray-200 bg-white py-2 shadow-xl">
+
+        {# User info header #}
+        <div class="border-b border-gray-100 px-4 py-3">
+          <p class="text-sm font-medium text-gray-900">{{ user_name or 'User' }}</p>
+          <p class="text-xs text-gray-500">{{ user_email or '' }}</p>
+        </div>
+
+        {% set more_items = [
+          ('proactive', 'Proactive', '/v2/proactive', '/v2/partials/proactive',
+           'M13 10V3L4 14h7v7l9-11h-7z'),
+          ('my-vendors', 'My Vendors', '/v2/my-vendors', '/v2/partials/my-vendors',
+           'M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z'),
+          ('quotes', 'Quotes', '/v2/quotes', '/v2/partials/quotes',
+           'M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z'),
+          ('prospecting', 'Prospecting', '/v2/prospecting', '/v2/partials/prospecting',
+           'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7'),
+          ('settings', 'Settings', '/v2/settings', '/v2/partials/settings',
+           'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z')
+        ] %}
+        {% for id, label, href, partial, icon_path in more_items %}
+        <a href="{{ href }}"
+           hx-get="{{ partial }}"
+           hx-target="#main-content"
+           hx-push-url="{{ href }}"
+           @click="moreOpen = false"
+           class="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors
+                  {{ 'text-brand-600 font-medium' if current_view == id else 'text-gray-700 hover:bg-gray-50' }}">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0 {{ 'text-brand-500' if current_view == id else 'text-gray-400' }}" fill="none"
+               viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+               stroke-linecap="round" stroke-linejoin="round">
+            <path d="{{ icon_path }}"/>
+          </svg>
+          {{ label }}
+        </a>
+        {% endfor %}
+
+        {# Sign out #}
+        <div class="border-t border-gray-100 mt-1 pt-1">
+          <a href="/auth/logout"
+             class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0 text-gray-400" fill="none"
+                 viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
+                 stroke-linecap="round" stroke-linejoin="round">
+              <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>
+            </svg>
+            Sign out
+          </a>
+        </div>
+      </div>
+    </div>
   </div>
 </nav>

@@ -210,10 +210,7 @@
         padding: 0 4px;
     }
 
-    /* Reserve space at bottom so content isn't hidden behind nav */
-    .main-content {
-        padding-bottom: calc(70px + env(safe-area-inset-bottom, 0px));
-    }
+    /* Bottom padding for mobile handled by base.html inline style */
 
     /* "More" overflow menu — slides up from bottom nav */
     .mobile-more-menu {
@@ -346,14 +343,12 @@
 
 
 /* ============================================================
-   6. Sidebar — hidden on mobile (bottom nav replaces it)
+   6. Sidebar — hidden on all screens (bottom nav replaces it)
    ============================================================ */
-@media (max-width: 768px) {
-    .sidebar {
-        display: none;
-    }
+.sidebar {
+    display: none !important;
+}
 
-    .app-layout {
-        margin-left: 0;
-    }
+.app-layout {
+    margin-left: 0 !important;
 }

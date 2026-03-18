@@ -2324,13 +2324,25 @@ async def vendors_list_partial(
     hide_blacklisted: bool = True,
     sort: str = "sighting_count",
     dir: str = "desc",
+    my_only: bool = False,
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Return vendor list as HTML partial with blacklisted toggle and sorting."""
+    from ..models.strategic import StrategicVendor
+
     query = db.query(VendorCard)
+
+    # Filter to user's strategic vendors if "My Vendors" tab is active
+    if my_only:
+        my_vendor_ids = (
+            db.query(StrategicVendor.vendor_card_id)
+            .filter(StrategicVendor.user_id == user.id, StrategicVendor.status == "active")
+            .subquery()
+        )
+        query = query.filter(VendorCard.id.in_(my_vendor_ids))
 
     if hide_blacklisted:
         query = query.filter(VendorCard.is_blacklisted.is_(False))
@@ -2364,6 +2376,7 @@ async def vendors_list_partial(
             "total": total,
             "limit": limit,
             "offset": offset,
+            "my_only": my_only,
         }
     )
     return templates.TemplateResponse("htmx/partials/vendors/list.html", ctx)

@@ -102,12 +102,16 @@
       </div>
 
       {# Status pills #}
-      <div class="flex flex-wrap gap-2" x-data="{ currentStatus: '{{ status }}' }">
+      <div class="flex flex-wrap gap-2">
         {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('awarded', 'Awarded'), ('archived', 'Archived')] %}
         <button type="button"
-                @click="currentStatus = '{{ s_val }}'; $el.closest('form').querySelector('[name=status]').value = '{{ s_val }}'; htmx.trigger($el.closest('form').querySelector('[name=q]'), 'changed')"
-                :class="currentStatus === '{{ s_val }}' ? 'bg-brand-500 text-white' : 'bg-white text-gray-700 border border-gray-200 hover:bg-brand-50'"
-                class="px-3 py-1 text-xs font-medium rounded-full transition-colors">
+                hx-get="/v2/partials/requisitions"
+                hx-target="#main-content"
+                hx-push-url="true"
+                hx-include="#req-filters"
+                hx-vals='{"status": "{{ s_val }}"}'
+                class="px-3 py-1 text-xs font-medium rounded-full transition-colors
+                       {{ 'bg-brand-500 text-white' if status == s_val else 'bg-white text-gray-700 border border-gray-200 hover:bg-brand-50' }}">
           {{ s_label }}
         </button>
         {% endfor %}
@@ -170,10 +174,10 @@
   <p class="text-xs text-gray-400 mb-2">Double-click cells to edit inline</p>
 
   {# Table #}
-  <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+  <div class="bg-white rounded-lg shadow border border-gray-200">
     {% if requisitions %}
-    <div class="overflow-x-auto">
-      <table class="min-w-full divide-y divide-gray-200">
+    <div class="avail-scroll">
+      <table style="min-width:1400px" class="w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
             <th class="px-3 py-3 w-10">

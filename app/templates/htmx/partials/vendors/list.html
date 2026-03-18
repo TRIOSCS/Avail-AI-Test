@@ -15,6 +15,26 @@
     </div>
   </div>
 
+  {# Tab bar: All Vendors / My Vendors #}
+  <div class="flex gap-1 mb-4 border-b-2 border-gray-200">
+    <a href="/v2/vendors"
+       hx-get="/v2/partials/vendors"
+       hx-target="#main-content"
+       hx-push-url="/v2/vendors"
+       class="px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-[2px]
+              {{ 'text-brand-600 border-brand-500' if not my_only else 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300' }}">
+      All Vendors
+    </a>
+    <a href="/v2/vendors?my_only=1"
+       hx-get="/v2/partials/vendors?my_only=1"
+       hx-target="#main-content"
+       hx-push-url="/v2/vendors?my_only=1"
+       class="px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-[2px]
+              {{ 'text-brand-600 border-brand-500' if my_only else 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300' }}">
+      My Vendors
+    </a>
+  </div>
+
   {# Filter bar #}
   <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6"
        x-data="{ view: '{{ view|default('table') }}' }">
@@ -29,6 +49,7 @@
                hx-trigger="keyup changed delay:300ms"
                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
       </div>
+      {% if my_only %}<input type="hidden" name="my_only" value="1">{% endif %}
       <input type="hidden" name="sort" value="{{ sort }}">
       <input type="hidden" name="dir" value="{{ dir }}">
       <input type="hidden" name="view" :value="view">

@@ -1,6 +1,6 @@
 {#
-  base.html — App shell for HTMX + Alpine.js frontend.
-  Loaded when USE_HTMX=true. Contains nav, sidebar, content area.
+  base.html — App shell with top bar, bottom nav, and full-width content area.
+  Bottom nav pattern on all screen sizes for maximum content width.
   Called by: app/routers/views.py
   Depends on: htmx.org, alpinejs (via htmx_app.js bundle)
 #}
@@ -16,12 +16,10 @@
 </head>
 <body hx-boost="true" x-data>
     {% include "htmx/partials/shared/topbar.html" %}
-    <div class="app-layout">
-        {% include "htmx/partials/shared/sidebar.html" %}
-        <main id="main-content" class="main-content" hx-target="this" hx-swap="innerHTML">
-            {% block content %}{% endblock %}
-        </main>
-    </div>
+    <main id="main-content" class="main-content" hx-target="this" hx-swap="innerHTML"
+          style="padding-bottom: 70px;">
+        {% block content %}{% endblock %}
+    </main>
     {% include "htmx/partials/shared/mobile_nav.html" %}
     {% include "htmx/partials/shared/toast.html" %}
     {% include "htmx/partials/shared/modal.html" %}
