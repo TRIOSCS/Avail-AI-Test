@@ -1,6 +1,6 @@
 {#
-  buy_plans/list.html — Buy plans list view with status filter tabs, My Only toggle,
-  search, and sortable table with margin color-coding.
+  buy_plans/list.html — Buy plans list view with 7-column compact layout,
+  mini progress bars, status filter tabs, My Only toggle, and search.
   Receives: buy_plans (list of dicts), q (str), status (str), mine (bool), total (int).
   Called by: htmx_views.py buy_plans_list_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
@@ -65,31 +65,74 @@
       <thead class="bg-gray-50">
         <tr>
           <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Quote #</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SO#</th>
-          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Lines</th>
-          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Cost</th>
-          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Margin %</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SO Verification</th>
-          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Submitted by</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">SO# / Quote</th>
+          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Value</th>
+          <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Margin</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Progress</th>
+          <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">By</th>
           <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date</th>
         </tr>
       </thead>
       <tbody class="divide-y divide-gray-200">
         {% if buy_plans %}
           {% for bp in buy_plans %}
+          {# Progress bar logic #}
+          {% set segments = 1 %}
+          {% set bar_label = 'Draft' %}
+          {% set label_color = 'text-gray-500' %}
+
+          {% if bp.status == 'pending' or bp.status == 'pending_approval' %}
+            {% set segments = 2 %}
+            {% set bar_label = 'Pending Approval' %}
+            {% set label_color = 'text-amber-600' %}
+          {% elif bp.status in ('active', 'approved', 'po_entered', 'po_confirmed') %}
+            {% set segments = 3 %}
+            {% set bar_label = 'PO Execution' %}
+            {% set label_color = 'text-amber-600' %}
+          {% elif bp.status in ('completed', 'complete') %}
+            {% set segments = 5 %}
+            {% set bar_label = 'Complete' %}
+            {% set label_color = 'text-emerald-600' %}
+          {% elif bp.status == 'halted' %}
+            {% set segments = 3 %}
+            {% set bar_label = 'Halted' %}
+            {% set label_color = 'text-rose-600' %}
+          {% elif bp.status == 'cancelled' %}
+            {% set segments = 0 %}
+            {% set bar_label = 'Cancelled' %}
+            {% set label_color = 'text-gray-400' %}
+          {% endif %}
+
           <tr class="hover:bg-brand-50/40 cursor-pointer transition-colors"
               hx-get="/v2/partials/buy-plans/{{ bp.id }}"
               hx-target="#main-content"
               hx-push-url="/v2/buy-plans/{{ bp.id }}"
               preload="mouseover">
-            <td class="px-4 py-3 text-sm font-medium text-gray-900">{{ bp.customer_name or '-' }}</td>
-            <td class="px-4 py-3 text-sm text-brand-600 font-mono font-medium">{{ bp.quote_number or '-' }}</td>
-            <td class="px-4 py-3 text-sm text-gray-700">{{ bp.sales_order_number or '-' }}</td>
-            <td class="px-4 py-3 text-sm text-gray-600 text-right">{{ bp.line_count }}</td>
-            <td class="px-4 py-3 text-sm text-gray-900 text-right font-medium">${{ '{:,.2f}'.format(bp.total_cost or 0) }}</td>
-            <td class="px-4 py-3 text-sm text-right">
+            {# Customer #}
+            <td class="px-4 py-3 text-sm font-bold text-gray-900">
+              {{ bp.customer_name or '-' }}
+              {% if bp.is_stock_sale %}
+              <span class="ml-1 inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded bg-purple-50 text-purple-600">stock</span>
+              {% endif %}
+            </td>
+            {# SO# / Quote #}
+            <td class="px-4 py-3">
+              {% if bp.sales_order_number %}
+              <div class="text-sm font-mono font-medium text-gray-900">{{ bp.sales_order_number }}</div>
+              {% else %}
+              <div class="text-sm text-gray-400">No SO#</div>
+              {% endif %}
+              {% if bp.quote_number %}
+              <div class="text-xs text-gray-400">{{ bp.quote_number }}</div>
+              {% endif %}
+            </td>
+            {# Value #}
+            <td class="px-4 py-3 text-right">
+              <div class="text-sm font-semibold text-gray-900">${{ '{:,.2f}'.format(bp.total_cost or 0) }}</div>
+              <div class="text-xs text-gray-400">{{ bp.line_count }} line{{ 's' if bp.line_count != 1 else '' }}</div>
+            </td>
+            {# Margin #}
+            <td class="px-4 py-3 text-right">
               {% set bm = bp.total_margin_pct or 0 %}
               <span class="inline-flex px-2 py-0.5 rounded-full text-xs font-medium
                            {% if bm >= 30 %}bg-emerald-50 text-emerald-700
@@ -98,39 +141,43 @@
                 {{ '{:.1f}'.format(bm) }}%
               </span>
             </td>
+            {# Progress #}
             <td class="px-4 py-3">
-              {% set status_colors = {
-                'draft': 'bg-brand-100 text-brand-600',
-                'pending': 'bg-amber-50 text-amber-700',
-                'active': 'bg-emerald-50 text-emerald-700',
-                'completed': 'bg-emerald-50 text-emerald-700',
-                'halted': 'bg-rose-50 text-rose-700',
-                'cancelled': 'bg-gray-100 text-gray-600'
-              } %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_colors.get(bp.status, 'bg-gray-100 text-gray-700') }}">
-                {{ bp.status|capitalize }}
-              </span>
-              {% if bp.auto_approved %}
-              <span class="ml-1 inline-flex px-1.5 py-0.5 text-xs rounded bg-emerald-50 text-emerald-600" title="Auto-approved">auto</span>
-              {% endif %}
+              <div class="flex gap-[2px] w-20 mb-1">
+                {% for i in range(1, 6) %}
+                <div class="flex-1 h-[3px] {{ 'rounded-l' if i == 1 else '' }} {{ 'rounded-r' if i == 5 else '' }}
+                  {%- if bp.status == 'cancelled' -%}
+                    {{ ' bg-gray-300' if i <= segments else ' bg-gray-200' }}
+                  {%- elif bp.status == 'halted' -%}
+                    {%- if i < segments %} bg-rose-500
+                    {%- elif i == segments %} bg-amber-400
+                    {%- else %} bg-gray-200
+                    {%- endif %}
+                  {%- else -%}
+                    {%- if i < segments %} bg-emerald-500
+                    {%- elif i == segments %} bg-amber-400
+                    {%- else %} bg-gray-200
+                    {%- endif %}
+                  {%- endif -%}
+                "></div>
+                {% endfor %}
+              </div>
+              <div class="flex items-center gap-1">
+                <span class="text-[9px] font-medium {{ label_color }}">{{ bar_label }}</span>
+                {% if bp.auto_approved %}
+                <span class="inline-flex px-1 py-0 text-[9px] rounded bg-emerald-50 text-emerald-600 font-medium">auto</span>
+                {% endif %}
+              </div>
             </td>
-            <td class="px-4 py-3">
-              {% set so_colors = {
-                'pending': 'bg-amber-50 text-amber-700',
-                'approved': 'bg-emerald-50 text-emerald-700',
-                'rejected': 'bg-rose-50 text-rose-700'
-              } %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ so_colors.get(bp.so_status, 'bg-gray-100 text-gray-600') }}">
-                {{ bp.so_status|capitalize if bp.so_status else '-' }}
-              </span>
-            </td>
+            {# By #}
             <td class="px-4 py-3 text-sm text-gray-600">{{ bp.submitted_by_name or '-' }}</td>
+            {# Date #}
             <td class="px-4 py-3 text-sm text-gray-500">{{ bp.created_at[:10] if bp.created_at else '-' }}</td>
           </tr>
           {% endfor %}
         {% else %}
           <tr>
-            <td colspan="10" class="px-4 py-12 text-center">
+            <td colspan="7" class="px-4 py-12 text-center">
               <svg class="mx-auto h-12 w-12 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
               </svg>

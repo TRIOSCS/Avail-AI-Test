@@ -1,6 +1,6 @@
 {#
-  buy_plans/detail.html — Buy plan detail with 6-stat grid, SO verification, AI summary,
-  AI flags, workflow action bar, line items with PO confirmation and verify/reject.
+  buy_plans/detail.html — Buy plan detail with compact header, progress stepper,
+  role-aware action banner, simplified line items, collapsible secondary sections.
   Receives: bp (BuyPlan ORM object), lines (list), user, is_admin, is_ops_member.
   Called by: htmx_views.py buy_plan_detail_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
@@ -15,37 +15,76 @@
 </div>
 <title hx-swap-oob="true">Buy Plan #{{ bp.id }} — AvailAI</title>
 
-<div class="max-w-7xl mx-auto" x-data="{ showModal: false, modalType: '' }">
+{# ── Compute variables used throughout ── #}
+{% set status_colors = {
+  'draft': 'bg-brand-100 text-brand-600',
+  'pending': 'bg-amber-50 text-amber-700',
+  'active': 'bg-emerald-50 text-emerald-700',
+  'completed': 'bg-emerald-50 text-emerald-700',
+  'halted': 'bg-rose-50 text-rose-700',
+  'cancelled': 'bg-gray-100 text-gray-500'
+} %}
+{% set margin = bp.total_margin_pct|float if bp.total_margin_pct else 0 %}
+{% set total_cost = bp.total_cost|float if bp.total_cost else 0 %}
+{% set unique_vendors = lines|map(attribute='offer')|select('defined')|selectattr('vendor_name')|map(attribute='vendor_name')|unique|list %}
+{% set awaiting_po_lines = lines|selectattr('status', 'eq', 'awaiting_po')|list %}
+{% set pending_verify_lines = lines|selectattr('status', 'eq', 'pending_verify')|list %}
+{% set my_awaiting_lines = awaiting_po_lines|selectattr('buyer_id', 'eq', user.id)|list if user else [] %}
 
-  {# Header #}
-  <div class="mb-6">
-    <div class="flex flex-wrap items-center gap-3">
-      <h1 class="text-2xl font-bold text-gray-900">Buy Plan #{{ bp.id }}</h1>
-      {% set status_colors = {
-        'draft': 'bg-brand-100 text-brand-600',
-        'pending': 'bg-amber-50 text-amber-700',
-        'active': 'bg-emerald-50 text-emerald-700',
-        'completed': 'bg-emerald-50 text-emerald-700',
-        'halted': 'bg-rose-50 text-rose-700',
-        'cancelled': 'bg-gray-100 text-gray-500'
-      } %}
-      <span class="inline-flex px-2.5 py-1 text-xs font-semibold rounded-full {{ status_colors.get(bp.status, 'bg-gray-100 text-gray-700') }}">
-        {{ bp.status|upper }}
-      </span>
-      {% if bp.is_stock_sale %}
-      <span class="inline-flex px-2.5 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
-        <svg class="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
-        Stock Sale
-      </span>
-      {% endif %}
+{# Determine if action banner handles actions (suppresses standalone action bar) #}
+{% set show_buyer_banner = my_awaiting_lines|length > 0 and bp.status == 'active' %}
+{% set show_approval_banner = bp.status == 'pending' and (is_admin or user.role in ['manager', 'admin']) %}
+{% set show_so_banner = bp.status == 'active' and is_ops_member and bp.so_status == 'pending' %}
+{% set show_verify_banner = bp.status == 'active' and is_ops_member and pending_verify_lines|length > 0 %}
+{% set show_rejected_banner = bp.status == 'draft' and bp.cancellation_reason %}
+{% set show_draft_banner = bp.status == 'draft' and not bp.cancellation_reason %}
+{% set has_action_banner = show_buyer_banner or show_approval_banner or show_so_banner or show_verify_banner or show_rejected_banner or show_draft_banner %}
+
+<div class="max-w-7xl mx-auto" x-data="{ showModal: false, modalType: '', showAi: false, showNotes: false, showSo: false }">
+
+  {# ═══ 1. COMPACT HEADER WITH INLINE STATS ═══ #}
+  <div class="mb-4">
+    <div class="flex flex-wrap items-center justify-between gap-3">
+      <div class="flex items-center gap-3">
+        <h1 class="text-2xl font-bold text-gray-900">Buy Plan #{{ bp.id }}</h1>
+        <span class="inline-flex px-2.5 py-1 text-xs font-semibold rounded-full {{ status_colors.get(bp.status, 'bg-gray-100 text-gray-700') }}">
+          {{ bp.status|upper }}
+        </span>
+        {% if bp.is_stock_sale %}
+        <span class="inline-flex px-2.5 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
+          <svg class="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
+          Stock Sale
+        </span>
+        {% endif %}
+      </div>
+      <div class="flex items-center gap-4 text-sm text-gray-600">
+        <span class="font-semibold text-gray-900">${{ '{:,.2f}'.format(total_cost) }}</span>
+        <span class="{% if margin >= 30 %}text-emerald-700{% elif margin >= 15 %}text-amber-700{% else %}text-rose-700{% endif %} font-semibold">
+          {{ '{:.1f}'.format(margin) }}%
+        </span>
+        <span>{{ lines|length }} line{{ 's' if lines|length != 1 }}</span>
+        <span>{{ unique_vendors|length }} vendor{{ 's' if unique_vendors|length != 1 }}</span>
+        {# Cancel/Reset only shown here when NOT in action banner #}
+        {% if not has_action_banner %}
+          {% if bp.status in ('halted', 'cancelled') %}
+          <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/reset"
+                  hx-target="#main-content"
+                  hx-confirm="Reset this buy plan to draft?"
+                  class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-xs font-medium rounded-md hover:bg-brand-50 transition-colors">
+            Reset to Draft
+          </button>
+          {% endif %}
+          {% if bp.status not in ('completed', 'cancelled') %}
+          <button @click="modalType = 'cancel'; showModal = true"
+                  class="px-3 py-1.5 bg-white border border-gray-300 text-gray-600 text-xs font-medium rounded-md hover:bg-gray-50 transition-colors">
+            Cancel
+          </button>
+          {% endif %}
+        {% endif %}
+      </div>
     </div>
-  </div>
-
-  {# 6-stat grid #}
-  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-6">
-    <div class="bg-white rounded-lg shadow-sm p-4 border border-brand-200">
-      <div class="text-xs text-gray-400 uppercase tracking-wider">Customer</div>
-      <div class="mt-1 text-sm font-medium text-gray-900 truncate">
+    <div class="mt-1 text-sm text-gray-500 flex flex-wrap gap-x-4">
+      <span>
         {% if bp.requisition and bp.requisition.customer_name %}
           {{ bp.requisition.customer_name }}
         {% elif bp.quote and bp.quote.customer_site and bp.quote.customer_site.company %}
@@ -53,155 +92,168 @@
         {% else %}
           -
         {% endif %}
-      </div>
-    </div>
-    <div class="bg-white rounded-lg shadow-sm p-4 border border-brand-200">
-      <div class="text-xs text-gray-400 uppercase tracking-wider">Quote #</div>
-      <div class="mt-1 text-sm font-mono font-medium text-brand-600">
+      </span>
+      <span>
+        Quote:
         {% if bp.quote %}
         <a hx-get="/v2/partials/quotes/{{ bp.quote.id }}"
            hx-target="#main-content"
            hx-push-url="/v2/quotes/{{ bp.quote.id }}"
            preload="mouseover"
-           class="hover:text-brand-500 cursor-pointer">{{ bp.quote.quote_number }}</a>
+           class="font-mono text-brand-600 hover:text-brand-500 cursor-pointer">{{ bp.quote.quote_number }}</a>
+        {% else %}-{% endif %}
+      </span>
+      <span>SO: <span class="font-mono">{{ bp.sales_order_number or '-' }}</span></span>
+      {% if bp.customer_po_number %}
+      <span>CPO: <span class="font-mono">{{ bp.customer_po_number }}</span></span>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ═══ 2. PROGRESS BAR STEPPER ═══ #}
+  {# Determine stepper state #}
+  {% set steps = ['Draft', 'Submit', 'Approve', 'PO Exec', 'Complete'] %}
+  {% if bp.status == 'draft' %}
+    {% set filled = 1 %}
+    {% set step_label = 'Draft' %}
+  {% elif bp.status == 'pending' %}
+    {% set filled = 2 %}
+    {% set step_label = 'Pending Approval' %}
+  {% elif bp.status == 'active' and bp.so_status == 'pending' %}
+    {% set filled = 3 %}
+    {% set step_label = 'Active (SO Pending)' %}
+  {% elif bp.status == 'active' and awaiting_po_lines|length == lines|length %}
+    {% set filled = 3 %}
+    {% set step_label = 'PO Execution' %}
+  {% elif bp.status == 'active' %}
+    {% set filled = 4 %}
+    {% set step_label = 'PO Execution' %}
+  {% elif bp.status == 'completed' %}
+    {% set filled = 5 %}
+    {% set step_label = 'Complete' %}
+  {% elif bp.status == 'halted' %}
+    {% set filled = 3 %}
+    {% set step_label = 'Halted' %}
+  {% elif bp.status == 'cancelled' %}
+    {% set filled = 0 %}
+    {% set step_label = 'Cancelled' %}
+  {% else %}
+    {% set filled = 1 %}
+    {% set step_label = bp.status|capitalize %}
+  {% endif %}
+
+  <div class="mb-5">
+    <div class="flex gap-1">
+      {% for i in range(1, 6) %}
+        {% if bp.status == 'cancelled' %}
+          <div class="flex-1 h-1 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-full bg-gray-300"></div>
+        {% elif bp.status == 'halted' and i == 3 %}
+          <div class="flex-1 h-1 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-full bg-rose-500"></div>
+        {% elif i <= filled %}
+          <div class="flex-1 h-1 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-full bg-emerald-600"></div>
+        {% elif i == filled + 1 %}
+          <div class="flex-1 h-1 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-full bg-amber-400"></div>
         {% else %}
-          -
+          <div class="flex-1 h-1 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-full bg-gray-200"></div>
         {% endif %}
-      </div>
+      {% endfor %}
     </div>
-    <div class="bg-white rounded-lg shadow-sm p-4 border border-brand-200">
-      <div class="text-xs text-gray-400 uppercase tracking-wider">SO#</div>
-      <div class="mt-1 text-sm font-medium text-gray-900">{{ bp.sales_order_number or '-' }}</div>
+    <div class="flex justify-between mt-1">
+      {% for s in steps %}
+        <span class="text-[10px] text-gray-400 {% if loop.index == filled %}text-gray-700 font-semibold{% endif %}">{{ s }}</span>
+      {% endfor %}
     </div>
-    <div class="bg-white rounded-lg shadow-sm p-4 border border-brand-200">
-      <div class="text-xs text-gray-400 uppercase tracking-wider">Total Cost</div>
-      <div class="mt-1 text-sm font-semibold text-gray-900">${{ '{:,.2f}'.format(bp.total_cost|float if bp.total_cost else 0) }}</div>
-    </div>
-    <div class="bg-white rounded-lg shadow-sm p-4 border border-brand-200">
-      <div class="text-xs text-gray-400 uppercase tracking-wider">Revenue</div>
-      <div class="mt-1 text-sm font-semibold text-gray-900">${{ '{:,.2f}'.format(bp.total_revenue|float if bp.total_revenue else 0) }}</div>
-    </div>
-    <div class="bg-white rounded-lg shadow-sm p-4 border border-brand-200">
-      <div class="text-xs text-gray-400 uppercase tracking-wider">Margin</div>
-      {% set margin = bp.total_margin_pct|float if bp.total_margin_pct else 0 %}
-      <div class="mt-1 text-sm font-semibold {% if margin >= 30 %}text-emerald-700{% elif margin >= 15 %}text-amber-700{% else %}text-rose-700{% endif %}">
-        {{ '{:.1f}'.format(margin) }}%
-      </div>
-    </div>
+    <div class="text-xs text-gray-500 mt-0.5">{{ step_label }}</div>
   </div>
 
-  {# SO Verification status #}
-  <div class="mb-4 bg-white border border-brand-200 rounded-lg p-4 flex items-center gap-3">
-    <span class="text-sm font-medium text-gray-700">SO Verification:</span>
-    {% set so_colors = {
-      'pending': 'bg-amber-50 text-amber-700 border-amber-200',
-      'approved': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-      'rejected': 'bg-rose-50 text-rose-700 border-rose-200'
-    } %}
-    <span class="inline-flex px-2.5 py-0.5 text-xs font-semibold rounded-full {{ so_colors.get(bp.so_status, 'bg-gray-100 text-gray-600') }}">
-      {{ bp.so_status|capitalize if bp.so_status else 'Pending' }}
-    </span>
-    {% if bp.so_rejection_note %}
-    <span class="text-sm text-rose-600 flex items-center gap-1">
-      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
-      {{ bp.so_rejection_note }}
-    </span>
-    {% endif %}
-  </div>
+  {# ═══ 3. ROLE-AWARE ACTION BANNER ═══ #}
 
-  {# AI Summary #}
-  {% if bp.ai_summary %}
-  <div class="mb-4 bg-brand-50 border border-brand-200 rounded-lg p-4">
-    <h3 class="text-sm font-semibold text-brand-800 mb-2 flex items-center gap-1.5">
-      <svg class="w-4 h-4 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
-      AI Summary
-    </h3>
-    <p class="text-sm text-brand-700 leading-relaxed">{{ bp.ai_summary }}</p>
+  {# Buyer: lines awaiting PO assigned to them #}
+  {% if show_buyer_banner %}
+  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center gap-3">
+    <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">{{ my_awaiting_lines|length }}</span>
+    <span class="text-sm text-blue-800">
+      PO{{ 's' if my_awaiting_lines|length != 1 }} need{{ '' if my_awaiting_lines|length != 1 else 's' }} to be cut.
+      {% for l in my_awaiting_lines[:5] %}{{ l.requirement.primary_mpn if l.requirement else 'Line ' ~ l.id }}{% if not loop.last %}, {% endif %}{% endfor %}{% if my_awaiting_lines|length > 5 %} +{{ my_awaiting_lines|length - 5 }} more{% endif %}
+    </span>
   </div>
   {% endif %}
 
-  {# AI Flags #}
-  {% if bp.ai_flags %}
-  <div class="mb-4 space-y-2">
-    {% for flag in bp.ai_flags %}
-    {% set flag_colors = {
-      'critical': 'bg-rose-50 text-rose-700 border-rose-200',
-      'warning': 'bg-amber-50 text-amber-700 border-amber-200',
-      'info': 'bg-brand-50 text-brand-600 border-brand-200'
-    } %}
-    {% set flag_icons = {
-      'critical': '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>',
-      'warning': '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>',
-      'info': '<path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>'
-    } %}
-    <div class="border rounded-lg p-3 flex items-start gap-2 {{ flag_colors.get(flag.severity, flag_colors.info) }}">
-      <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor">{{ flag_icons.get(flag.severity, flag_icons.info) }}</svg>
-      <div class="text-sm">
-        <span class="font-semibold uppercase text-xs tracking-wider">{{ flag.severity }}</span>
-        <span class="ml-1">{{ flag.message }}</span>
-      </div>
+  {# Manager/Admin: plan pending approval #}
+  {% if show_approval_banner %}
+  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+    <div class="flex items-center gap-3">
+      <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">!</span>
+      <span class="text-sm text-blue-800">This plan needs your approval. ${{ '{:,.2f}'.format(total_cost) }} total.</span>
     </div>
-    {% endfor %}
+    <div class="flex gap-2 flex-shrink-0">
+      <button @click="modalType = 'approve'; showModal = true"
+              class="px-3 py-1.5 bg-emerald-600 text-white text-xs font-medium rounded-md hover:bg-emerald-700 transition-colors">
+        Approve
+      </button>
+      <button @click="modalType = 'reject'; showModal = true"
+              class="px-3 py-1.5 bg-rose-600 text-white text-xs font-medium rounded-md hover:bg-rose-700 transition-colors">
+        Reject
+      </button>
+    </div>
   </div>
   {% endif %}
 
-  {# Workflow Action Bar #}
-  <div class="mb-6 bg-white border border-brand-200 rounded-lg p-4">
-    <div class="flex flex-wrap gap-2">
-      {% if bp.status == 'draft' %}
-        <button @click="modalType = 'submit'; showModal = true"
-                class="px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600 flex items-center gap-1.5 transition-colors">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-          Submit for Approval
-        </button>
-      {% endif %}
-
-      {% if bp.status == 'pending' and (is_admin or user.role in ['manager', 'admin']) %}
-        <button @click="modalType = 'approve'; showModal = true"
-                class="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 flex items-center gap-1.5 transition-colors">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-          Approve
-        </button>
-        <button @click="modalType = 'reject'; showModal = true"
-                class="px-4 py-2 bg-rose-600 text-white text-sm font-medium rounded-md hover:bg-rose-700 flex items-center gap-1.5 transition-colors">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
-          Reject
-        </button>
-      {% endif %}
-
-      {% if bp.status == 'active' and is_ops_member %}
-        {% if bp.so_status == 'pending' %}
-        <button @click="modalType = 'verify-so'; showModal = true"
-                class="px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-md hover:bg-brand-600 flex items-center gap-1.5 transition-colors">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
-          Verify SO
-        </button>
-        {% endif %}
-      {% endif %}
-
-      {% if bp.status in ('halted', 'cancelled') %}
-        <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/reset"
-                hx-target="#main-content"
-                hx-confirm="Reset this buy plan to draft?"
-                class="px-4 py-2 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50 flex items-center gap-1.5 transition-colors">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
-          Reset to Draft
-        </button>
-      {% endif %}
-
-      {% if bp.status not in ('completed', 'cancelled') %}
-        <button @click="modalType = 'cancel'; showModal = true"
-                class="px-4 py-2 bg-white border border-gray-300 text-gray-700 text-sm font-medium rounded-md hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636"/></svg>
-          Cancel
-        </button>
-      {% endif %}
+  {# Ops: SO needs verification #}
+  {% if show_so_banner %}
+  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+    <div class="flex items-center gap-3">
+      <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">!</span>
+      <span class="text-sm text-blue-800">Sales Order {{ bp.sales_order_number or '#' }} needs verification.</span>
     </div>
+    <button @click="modalType = 'verify-so'; showModal = true"
+            class="flex-shrink-0 px-3 py-1.5 bg-brand-500 text-white text-xs font-medium rounded-md hover:bg-brand-600 transition-colors">
+      Verify SO
+    </button>
   </div>
+  {% endif %}
 
-  {# Line Items Table #}
+  {# Ops: POs pending verification #}
+  {% if show_verify_banner and not show_so_banner %}
+  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center gap-3">
+    <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">{{ pending_verify_lines|length }}</span>
+    <span class="text-sm text-blue-800">{{ pending_verify_lines|length }} PO{{ 's' if pending_verify_lines|length != 1 }} need{{ '' if pending_verify_lines|length != 1 else 's' }} verification.</span>
+  </div>
+  {% endif %}
+
+  {# Submitter: plan was rejected #}
+  {% if show_rejected_banner %}
+  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+    <div class="flex items-center gap-3">
+      <span class="flex-shrink-0 w-6 h-6 rounded-full bg-rose-500 text-white text-xs font-bold flex items-center justify-center">!</span>
+      <span class="text-sm text-blue-800">Plan was rejected. Review notes and resubmit.</span>
+    </div>
+    <button @click="modalType = 'submit'; showModal = true"
+            class="flex-shrink-0 px-3 py-1.5 bg-brand-500 text-white text-xs font-medium rounded-md hover:bg-brand-600 transition-colors">
+      Submit
+    </button>
+  </div>
+  {% endif %}
+
+  {# Submitter: draft ready to submit #}
+  {% if show_draft_banner %}
+  <div class="mb-4 bg-blue-50 border border-blue-200 rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+    <div class="flex items-center gap-3">
+      <span class="flex-shrink-0 w-6 h-6 rounded-full bg-blue-600 text-white text-xs font-bold flex items-center justify-center">
+        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
+      </span>
+      <span class="text-sm text-blue-800">Ready to submit. Add SO# to proceed.</span>
+    </div>
+    <button @click="modalType = 'submit'; showModal = true"
+            class="flex-shrink-0 px-3 py-1.5 bg-brand-500 text-white text-xs font-medium rounded-md hover:bg-brand-600 transition-colors">
+      Submit
+    </button>
+  </div>
+  {% endif %}
+
+  {# ═══ 4. SIMPLIFIED LINE ITEMS TABLE ═══ #}
   <div class="bg-white rounded-lg shadow-sm overflow-hidden border border-brand-200 mb-6">
-    <div class="px-4 py-3 bg-gray-50 border-b border-brand-200 flex items-center justify-between">
+    <div class="px-4 py-3 bg-gray-50 border-b border-brand-200">
       <h2 class="text-lg font-semibold text-gray-900">Line Items
         <span class="ml-1 text-sm font-normal text-gray-500">({{ lines|length }})</span>
       </h2>
@@ -210,43 +262,33 @@
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MPN</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Part</th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
             <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
             <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Cost</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Sell</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Margin</th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Buyer</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">PO#</th>
-            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Action</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-200">
           {% for line in lines %}
           <tr id="bp-line-{{ line.id }}" class="hover:bg-brand-50/40 transition-colors">
+            {# Part (MPN) #}
             <td class="px-4 py-3 text-sm font-mono font-medium text-gray-900">
               {{ line.requirement.primary_mpn if line.requirement else '-' }}
             </td>
-            <td class="px-4 py-3 text-sm text-gray-600">
-              {{ line.offer.vendor_name if line.offer else '-' }}
-            </td>
-            <td class="px-4 py-3 text-sm text-gray-600 text-right">{{ '{:,}'.format(line.quantity) }}</td>
-            <td class="px-4 py-3 text-sm text-gray-600 text-right">${{ '{:,.4f}'.format(line.unit_cost|float) if line.unit_cost else '-' }}</td>
-            <td class="px-4 py-3 text-sm text-gray-600 text-right">${{ '{:,.4f}'.format(line.unit_sell|float) if line.unit_sell else '-' }}</td>
-            <td class="px-4 py-3 text-sm text-right">
-              {% set lm = line.margin_pct|float if line.margin_pct else 0 %}
-              {% if line.margin_pct %}
-              <span class="inline-flex px-1.5 py-0.5 rounded text-xs font-medium
-                           {% if lm >= 30 %}bg-emerald-50 text-emerald-700
-                           {% elif lm >= 15 %}bg-amber-50 text-amber-700
-                           {% else %}bg-rose-50 text-rose-700{% endif %}">
-                {{ '{:.1f}'.format(lm) }}%
-              </span>
-              {% else %}
-              <span class="text-gray-400">-</span>
+            {# Vendor + buyer below #}
+            <td class="px-4 py-3">
+              <div class="text-sm text-gray-900">{{ line.offer.vendor_name if line.offer else '-' }}</div>
+              {% if line.buyer %}
+              <div class="text-xs text-gray-400">{{ line.buyer.name }}</div>
               {% endif %}
             </td>
+            {# Qty #}
+            <td class="px-4 py-3 text-sm text-gray-600 text-right">{{ '{:,}'.format(line.quantity) }}</td>
+            {# Unit Cost #}
+            <td class="px-4 py-3 text-sm text-gray-600 text-right">${{ '{:,.4f}'.format(line.unit_cost|float) if line.unit_cost else '-' }}</td>
+            {# Status + PO# #}
             <td class="px-4 py-3">
               {% set line_colors = {
                 'awaiting_po': 'bg-amber-50 text-amber-700',
@@ -258,36 +300,19 @@
               <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ line_colors.get(line.status, 'bg-gray-100 text-gray-600') }}">
                 {{ line.status|replace('_', ' ')|capitalize }}
               </span>
-              {% if line.issue_type %}
-              <span class="block mt-1 text-xs text-rose-600">
-                <svg class="w-3 h-3 inline mr-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01"/></svg>
-                {{ line.issue_type }}: {{ line.issue_note or '' }}
-              </span>
-              {% endif %}
-            </td>
-            <td class="px-4 py-3 text-sm text-gray-600">{{ line.buyer.name if line.buyer else '-' }}</td>
-            <td class="px-4 py-3 text-sm text-gray-600">
               {% if line.po_number %}
-                <span class="font-mono">{{ line.po_number }}</span>
-                {% if line.po_confirmed_at %}
-                <span class="block text-xs text-emerald-600 font-medium mt-0.5">
-                  <svg class="w-3 h-3 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
-                  confirmed
-                </span>
-                {% endif %}
-              {% else %}
-                <span class="text-gray-400">-</span>
+              <div class="font-mono text-xs text-gray-500 mt-0.5">{{ line.po_number }}</div>
               {% endif %}
             </td>
-            <td class="px-4 py-3 text-center">
+            {# Action #}
+            <td class="px-4 py-3">
               {% if bp.status == 'active' %}
                 {% if line.status == 'awaiting_po' %}
                   <div x-data="{ showPo: false, poNum: '', shipDate: '' }">
-                    <button @click="showPo = !showPo"
-                            class="text-xs text-brand-500 hover:text-brand-600 font-medium transition-colors">
-                      Enter PO
-                    </button>
-                    <div x-show="showPo" x-cloak x-collapse class="mt-2 space-y-1.5 text-left">
+                    <a @click="showPo = !showPo" class="text-sm text-brand-500 hover:text-brand-600 font-medium cursor-pointer">
+                      Enter PO &rarr;
+                    </a>
+                    <div x-show="showPo" x-cloak x-collapse class="mt-2 space-y-1.5">
                       <div>
                         <input x-model="poNum" type="text" placeholder="PO#"
                                class="w-28 px-2 py-1 text-xs border border-brand-200 rounded-md focus:ring-brand-500">
@@ -303,7 +328,7 @@
                                 class="px-2 py-1 text-xs bg-brand-500 text-white rounded-md hover:bg-brand-600 transition-colors">
                           Confirm
                         </button>
-                        <button @click="modalType = 'issue-{{ line.id }}'; showModal = true"
+                        <button @click="$dispatch('open-modal', { type: 'issue-{{ line.id }}' }); modalType = 'issue-{{ line.id }}'; showModal = true"
                                 class="px-2 py-1 text-xs text-rose-600 border border-rose-200 rounded-md hover:bg-rose-50 transition-colors">
                           Issue
                         </button>
@@ -311,7 +336,7 @@
                     </div>
                   </div>
                 {% elif line.status == 'pending_verify' and is_ops_member %}
-                  <div class="flex gap-1 justify-center">
+                  <div class="flex gap-1">
                     <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
                             hx-target="#main-content"
                             hx-vals='{"action": "approve"}'
@@ -327,10 +352,12 @@
                     </button>
                   </div>
                 {% elif line.status == 'verified' %}
-                  <span class="text-xs text-emerald-600 font-medium flex items-center justify-center gap-0.5">
+                  <span class="text-xs text-emerald-600 font-medium flex items-center gap-0.5">
                     <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
                     Done
                   </span>
+                {% elif line.status == 'issue' %}
+                  <span class="text-xs text-rose-600 font-medium">{{ line.issue_type|replace('_', ' ')|capitalize if line.issue_type else 'Issue' }}</span>
                 {% endif %}
               {% endif %}
             </td>
@@ -338,7 +365,7 @@
           {% endfor %}
           {% if not lines %}
           <tr>
-            <td colspan="10" class="px-4 py-12 text-center">
+            <td colspan="6" class="px-4 py-12 text-center">
               <svg class="mx-auto h-8 w-8 text-gray-300 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                 <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4"/>
               </svg>
@@ -351,40 +378,124 @@
     </div>
   </div>
 
-  {# Notes sections #}
-  {% if bp.salesperson_notes or bp.approval_notes or bp.case_report %}
-  <div class="space-y-4 mb-6">
-    {% if bp.salesperson_notes %}
-    <div class="bg-white rounded-lg shadow-sm p-4 border border-brand-200">
-      <h3 class="text-sm font-semibold text-gray-700 mb-1.5 flex items-center gap-1.5">
-        <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
-        Salesperson Notes
-      </h3>
-      <p class="text-sm text-gray-600 leading-relaxed">{{ bp.salesperson_notes }}</p>
+  {# ═══ 5. COLLAPSIBLE SECONDARY SECTIONS ═══ #}
+
+  {# AI Insights #}
+  {% set flag_count = bp.ai_flags|length if bp.ai_flags else 0 %}
+  {% if bp.ai_summary or flag_count > 0 %}
+  <div class="border-t border-gray-100">
+    <button @click="showAi = !showAi" class="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-gray-50 transition-colors">
+      <div class="flex items-center gap-2">
+        <svg class="w-4 h-4 text-brand-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z"/></svg>
+        <span class="text-sm font-semibold text-gray-700">AI Insights</span>
+        {% if flag_count > 0 %}
+        <span class="inline-flex items-center justify-center w-5 h-5 rounded-full bg-amber-100 text-amber-700 text-[10px] font-bold">{{ flag_count }}</span>
+        {% endif %}
+      </div>
+      <svg class="w-4 h-4 text-gray-400 transition-transform" :class="showAi && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </button>
+    <div x-show="showAi" x-cloak x-collapse class="px-4 pb-4 space-y-3">
+      {% if bp.ai_summary %}
+      <div class="bg-brand-50 border border-brand-200 rounded-lg p-3">
+        <p class="text-sm text-brand-700 leading-relaxed">{{ bp.ai_summary }}</p>
+      </div>
+      {% endif %}
+      {% if bp.ai_flags %}
+        {% for flag in bp.ai_flags %}
+        {% set flag_colors = {
+          'critical': 'bg-rose-50 text-rose-700 border-rose-200',
+          'warning': 'bg-amber-50 text-amber-700 border-amber-200',
+          'info': 'bg-brand-50 text-brand-600 border-brand-200'
+        } %}
+        <div class="border rounded-lg p-3 flex items-start gap-2 {{ flag_colors.get(flag.severity, flag_colors.info) }}">
+          {% if flag.severity == 'critical' or flag.severity == 'warning' %}
+          <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+          {% else %}
+          <svg class="w-4 h-4 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
+          {% endif %}
+          <div class="text-sm">
+            <span class="font-semibold uppercase text-xs tracking-wider">{{ flag.severity }}</span>
+            <span class="ml-1">{{ flag.message }}</span>
+          </div>
+        </div>
+        {% endfor %}
+      {% endif %}
     </div>
-    {% endif %}
-    {% if bp.approval_notes %}
-    <div class="bg-white rounded-lg shadow-sm p-4 border border-brand-200">
-      <h3 class="text-sm font-semibold text-gray-700 mb-1.5 flex items-center gap-1.5">
-        <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
-        Approval Notes
-      </h3>
-      <p class="text-sm text-gray-600 leading-relaxed">{{ bp.approval_notes }}</p>
-    </div>
-    {% endif %}
-    {% if bp.case_report %}
-    <div class="bg-white rounded-lg shadow-sm p-4 border border-brand-200">
-      <h3 class="text-sm font-semibold text-gray-700 mb-1.5 flex items-center gap-1.5">
-        <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 17v-2m3 2v-4m3 4v-6m2 10H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
-        Case Report
-      </h3>
-      <pre class="text-xs text-gray-600 whitespace-pre-wrap font-mono bg-gray-50 rounded p-3 leading-relaxed">{{ bp.case_report }}</pre>
-    </div>
-    {% endif %}
   </div>
   {% endif %}
 
-  {# Modal overlay #}
+  {# Notes #}
+  {% if bp.salesperson_notes or bp.approval_notes or bp.case_report %}
+  <div class="border-t border-gray-100">
+    <button @click="showNotes = !showNotes" class="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-gray-50 transition-colors">
+      <div class="flex items-center gap-2">
+        <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"/></svg>
+        <span class="text-sm font-semibold text-gray-700">Notes</span>
+      </div>
+      <svg class="w-4 h-4 text-gray-400 transition-transform" :class="showNotes && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </button>
+    <div x-show="showNotes" x-cloak x-collapse class="px-4 pb-4 space-y-3">
+      {% if bp.salesperson_notes %}
+      <div>
+        <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Salesperson Notes</div>
+        <p class="text-sm text-gray-600 leading-relaxed">{{ bp.salesperson_notes }}</p>
+      </div>
+      {% endif %}
+      {% if bp.approval_notes %}
+      <div>
+        <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Approval Notes</div>
+        <p class="text-sm text-gray-600 leading-relaxed">{{ bp.approval_notes }}</p>
+      </div>
+      {% endif %}
+      {% if bp.case_report %}
+      <div>
+        <div class="text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Case Report</div>
+        <pre class="text-xs text-gray-600 whitespace-pre-wrap font-mono bg-gray-50 rounded p-3 leading-relaxed">{{ bp.case_report }}</pre>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  {# SO Verification #}
+  <div class="border-t border-gray-100">
+    <button @click="showSo = !showSo" class="w-full px-4 py-2 flex items-center justify-between text-left hover:bg-gray-50 transition-colors">
+      <div class="flex items-center gap-2">
+        <svg class="w-4 h-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"/></svg>
+        <span class="text-sm font-semibold text-gray-700">SO Verification</span>
+        {% if bp.so_status == 'approved' %}
+        <svg class="w-4 h-4 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        {% else %}
+        <span class="inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded-full bg-amber-50 text-amber-700">pending</span>
+        {% endif %}
+      </div>
+      <svg class="w-4 h-4 text-gray-400 transition-transform" :class="showSo && 'rotate-180'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+    </button>
+    <div x-show="showSo" x-cloak x-collapse class="px-4 pb-4">
+      <div class="flex items-center gap-3 text-sm">
+        {% set so_colors = {
+          'pending': 'bg-amber-50 text-amber-700 border-amber-200',
+          'approved': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+          'rejected': 'bg-rose-50 text-rose-700 border-rose-200'
+        } %}
+        <span class="text-gray-600">Status:</span>
+        <span class="inline-flex px-2.5 py-0.5 text-xs font-semibold rounded-full {{ so_colors.get(bp.so_status, 'bg-gray-100 text-gray-600') }}">
+          {{ bp.so_status|capitalize if bp.so_status else 'Pending' }}
+        </span>
+        {% if bp.so_verified_by %}
+        <span class="text-gray-500">by {{ bp.so_verified_by.name }}</span>
+        {% endif %}
+      </div>
+      {% if bp.so_rejection_note %}
+      <div class="mt-2 text-sm text-rose-600 flex items-center gap-1">
+        <svg class="w-4 h-4 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/></svg>
+        {{ bp.so_rejection_note }}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# ═══ 6. MODALS ═══ #}
   <div x-show="showModal" x-cloak
        class="fixed inset-0 z-50 flex items-center justify-center bg-black/50"
        @keydown.escape.window="showModal = false"
