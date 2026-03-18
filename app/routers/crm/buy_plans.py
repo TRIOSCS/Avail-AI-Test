@@ -28,7 +28,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import JSONResponse
 from loguru import logger
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin
@@ -227,6 +227,8 @@ def _v3_to_v1_list_item(plan: BuyPlan) -> dict:
 
     v1_status = _map_v3_status_to_v1(plan)
     flags = plan.ai_flags or []
+    lines = plan.lines or []
+    vendor_names = {ln.offer.vendor_name.lower() for ln in lines if ln.offer and ln.offer.vendor_name}
 
     return {
         "id": plan.id,
@@ -240,8 +242,8 @@ def _v3_to_v1_list_item(plan: BuyPlan) -> dict:
         "total_cost": float(plan.total_cost) if plan.total_cost else None,
         "total_revenue": float(plan.total_revenue) if plan.total_revenue else None,
         "total_margin_pct": float(plan.total_margin_pct) if plan.total_margin_pct else None,
-        "line_count": len(plan.lines) if plan.lines else 0,
-        "vendor_count": 0,
+        "line_count": len(lines),
+        "vendor_count": len(vendor_names),
         "ai_flag_count": len(flags),
         "submitted_by_name": plan.submitted_by.name if plan.submitted_by else None,
         "approved_by_name": plan.approved_by.name if plan.approved_by else None,
@@ -435,7 +437,7 @@ async def regenerate_case_report(
     )
     if not plan:
         raise HTTPException(404, "Buy plan not found")
-    if plan.status != "completed":
+    if plan.status != BuyPlanStatus.completed.value:
         raise HTTPException(400, "Case report only available for completed plans")
     plan.case_report = generate_case_report(plan, db)
     db.commit()
@@ -475,7 +477,16 @@ async def list_buy_plans(
         joinedload(BuyPlan.quote),
         joinedload(BuyPlan.submitted_by),
         joinedload(BuyPlan.approved_by),
-        joinedload(BuyPlan.lines),
+        selectinload(BuyPlan.lines)
+        .load_only(
+            BuyPlanLine.id,
+            BuyPlanLine.status,
+            BuyPlanLine.po_number,
+            BuyPlanLine.offer_id,
+            BuyPlanLine.buy_plan_id,
+        )
+        .joinedload(BuyPlanLine.offer)
+        .load_only(Offer.id, Offer.vendor_name),
     )
 
     # Accept both V1 and V3 status filter values
@@ -676,7 +687,7 @@ async def verify_po(
     db.commit()
     # Check if all lines verified → auto-complete
     updated_plan = check_completion(plan_id, db)
-    if updated_plan and updated_plan.status == "completed":
+    if updated_plan and updated_plan.status == BuyPlanStatus.completed.value:
         db.commit()
         run_notify_bg(notify_completed, plan_id)
     return {"ok": True, "line_id": line.id, "status": line.status}

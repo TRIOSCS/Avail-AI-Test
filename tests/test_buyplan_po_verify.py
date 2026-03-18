@@ -31,6 +31,7 @@ def _make_plan(db: Session, buyer: User, quote: Quote, requisition: Requisition)
         quote_id=quote.id,
         requisition_id=requisition.id,
         status=BuyPlanStatus.active.value,
+        so_status="approved",
         created_at=datetime.now(timezone.utc),
     )
     db.add(plan)

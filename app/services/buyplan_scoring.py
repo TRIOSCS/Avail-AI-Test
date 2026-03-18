@@ -7,6 +7,7 @@ Depends on: models (Offer, Requirement, VendorCard, User, VerificationGroupMembe
 """
 
 import json
+import re
 from pathlib import Path
 
 from sqlalchemy import func as sqlfunc
@@ -141,8 +142,6 @@ def _parse_lead_time_days(lead_time: str | None) -> int | None:
     if lt in ("stock", "in stock", "immediate", "same day"):
         return 0
     # Try to extract a number
-    import re
-
     nums = re.findall(r"\d+", lt)
     if not nums:
         return None
@@ -221,18 +220,18 @@ def assign_buyer(
             if region_buyers:
                 buyers = region_buyers
 
-    # Priority 4: Lowest active workload
-    workloads = {}
-    for buyer in buyers:
-        count = (
-            db.query(sqlfunc.count(BuyPlanLine.id))
-            .filter(
-                BuyPlanLine.buyer_id == buyer.id,
-                BuyPlanLine.status == BuyPlanLineStatus.awaiting_po.value,
-            )
-            .scalar()
-        ) or 0
-        workloads[buyer.id] = count
+    # Priority 4: Lowest active workload (single grouped query)
+    buyer_ids = [b.id for b in buyers]
+    workload_rows = (
+        db.query(BuyPlanLine.buyer_id, sqlfunc.count(BuyPlanLine.id))
+        .filter(
+            BuyPlanLine.buyer_id.in_(buyer_ids),
+            BuyPlanLine.status == BuyPlanLineStatus.awaiting_po.value,
+        )
+        .group_by(BuyPlanLine.buyer_id)
+        .all()
+    )
+    workloads = dict(workload_rows)
 
     best = min(buyers, key=lambda b: workloads.get(b.id, 0))
     return best, "workload"

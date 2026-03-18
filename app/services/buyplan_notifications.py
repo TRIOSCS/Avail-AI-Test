@@ -607,7 +607,7 @@ async def notify_token_rejected(plan: BuyPlan, db: Session):
 
     # In-app notification to submitter
     if ctx["submitter"]:
-        reason = plan.approval_notes or "No reason given"
+        reason = plan.cancellation_reason or plan.approval_notes or "No reason given"
         db.add(
             ActivityLog(
                 user_id=ctx["submitter"].id,

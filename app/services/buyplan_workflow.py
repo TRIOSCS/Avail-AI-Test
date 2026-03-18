@@ -322,8 +322,6 @@ def check_completion(plan_id: int, db: Session) -> BuyPlan:
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
     if not plan or plan.status != BuyPlanStatus.active.value:
         return plan
-    if plan.status == BuyPlanStatus.completed.value:
-        return plan  # idempotency guard
 
     if not plan.lines:
         return plan
@@ -569,9 +567,7 @@ def _is_stock_sale(plan: BuyPlan, db: Session) -> bool:
     if not plan.lines:
         return False
     for line in plan.lines:
-        if not line.offer_id:
-            return False
-        offer = db.get(Offer, line.offer_id)
+        offer = line.offer or (db.get(Offer, line.offer_id) if line.offer_id else None)
         if not offer:
             return False
         vendor = (offer.vendor_name or "").strip().lower()
@@ -599,7 +595,13 @@ def detect_favoritism(salesperson_id: int, db: Session) -> list[dict]:
         db.query(BuyPlan)
         .filter(
             BuyPlan.submitted_by_id == salesperson_id,
-            BuyPlan.status.in_(["active", "completed", "pending"]),
+            BuyPlan.status.in_(
+                [
+                    BuyPlanStatus.active.value,
+                    BuyPlanStatus.completed.value,
+                    BuyPlanStatus.pending.value,
+                ]
+            ),
         )
         .options(joinedload(BuyPlan.lines))
         .all()
@@ -846,11 +848,8 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
             logger.error(f"PO verification failed for line {line.id}: {e}")
             results.append({"line_id": line.id, "po_number": line.po_number, "found": False, "error": str(e)})
 
-    # If all lines with POs are now verified, auto-complete the plan
-    po_lines = [line for line in plan.lines if line.po_number]
-    if po_lines and all(line.status == BuyPlanLineStatus.verified.value for line in po_lines):
-        plan.status = BuyPlanStatus.completed.value
-        plan.completed_at = datetime.now(timezone.utc)
+    # Use centralized completion check (respects SO verification requirement)
+    check_completion(plan.id, db)
 
     db.commit()
     return results
@@ -960,12 +959,8 @@ async def verify_po_sent_v3(plan: "BuyPlan", db: "Session") -> dict:
                 "reason": f"graph_error: {e}",
             }
 
-    # Auto-complete if all PO lines are now verified
-    po_lines = [ln for ln in plan.lines if ln.po_number]
-    if po_lines and all(ln.status == BuyPlanLineStatus.verified.value for ln in po_lines):
-        plan.status = BuyPlanStatus.completed.value
-        plan.completed_at = datetime.now(timezone.utc)
-        logger.info("Buy plan %d auto-completed — all PO lines verified", plan.id)
+    # Use centralized completion check (respects SO verification requirement)
+    check_completion(plan.id, db)
 
     db.flush()
     return results
