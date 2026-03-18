@@ -253,3 +253,69 @@ class TestGetErrorReport:
         resp = client.get(f"/api/trouble-tickets/{sample_report.id}")
         assert resp.status_code == 200
         assert resp.json()["title"] == "Button not working"
+
+    def test_get_detail_includes_resolution_fields(self, client, sample_report):
+        resp = client.get(f"/api/error-reports/{sample_report.id}")
+        data = resp.json()
+        assert "resolution_notes" in data
+        assert "resolved_at" in data
+
+
+# ── Update (PATCH) ──────────────────────────────────────────────────
+
+
+class TestUpdateTicket:
+    def test_resolve_ticket(self, client, sample_report):
+        resp = client.patch(
+            f"/api/trouble-tickets/{sample_report.id}",
+            json={"status": "resolved", "resolution_notes": "Fixed the button onclick handler"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "resolved"
+
+    def test_resolve_sets_resolved_at(self, client, sample_report, db_session):
+        client.patch(
+            f"/api/trouble-tickets/{sample_report.id}",
+            json={"status": "resolved"},
+        )
+        db_session.expire_all()
+        ticket = db_session.get(TroubleTicket, sample_report.id)
+        assert ticket.resolved_at is not None
+
+    def test_update_status_to_in_progress(self, client, sample_report):
+        resp = client.patch(
+            f"/api/trouble-tickets/{sample_report.id}",
+            json={"status": "in_progress"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "in_progress"
+
+    def test_update_resolution_notes_only(self, client, sample_report):
+        resp = client.patch(
+            f"/api/trouble-tickets/{sample_report.id}",
+            json={"resolution_notes": "Investigating..."},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "submitted"
+
+    def test_invalid_status_rejected(self, client, sample_report):
+        resp = client.patch(
+            f"/api/trouble-tickets/{sample_report.id}",
+            json={"status": "invalid_status"},
+        )
+        assert resp.status_code == 422
+
+    def test_update_not_found(self, client):
+        resp = client.patch(
+            "/api/trouble-tickets/99999",
+            json={"status": "resolved"},
+        )
+        assert resp.status_code == 404
+
+    def test_update_via_error_reports_path(self, client, sample_report):
+        resp = client.patch(
+            f"/api/error-reports/{sample_report.id}",
+            json={"status": "wont_fix"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "wont_fix"

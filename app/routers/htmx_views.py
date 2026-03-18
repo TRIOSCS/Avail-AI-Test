@@ -1668,44 +1668,50 @@ async def rfq_compose(
     return templates.TemplateResponse("htmx/partials/requisitions/rfq_compose.html", ctx)
 
 
-@router.post("/v2/partials/requisitions/{req_id}/ai-draft-rfq", response_class=HTMLResponse)
-async def ai_draft_rfq(
+@router.post("/v2/partials/requisitions/{req_id}/ai-cleanup-email", response_class=HTMLResponse)
+async def ai_cleanup_email(
     request: Request,
     req_id: int,
-    vendor_names: str = Form(""),
-    parts_summary: str = Form(""),
+    body: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Generate AI-personalized RFQ email body for the first selected vendor."""
+    """Clean up user-written email — fix grammar, tone, and formatting."""
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
     if not req:
         raise HTTPException(404, "Requisition not found")
 
-    # Take the first vendor name from the form
-    vendor_name = vendor_names.strip() if vendor_names else "Vendor"
-    parts = [p.strip() for p in parts_summary.split(",") if p.strip()]
-
-    ctx = _base_ctx(request, user, "requisitions")
-    ctx["vendor_name"] = vendor_name
+    user_text = body.strip()
+    if not user_text:
+        return HTMLResponse('<p class="text-xs text-amber-600 mt-1">Write your email first, then click Clean Up.</p>')
 
     try:
-        from app.routers.ai import _build_vendor_history
-        from app.services.ai_service import draft_rfq
+        from app.utils.claude_client import claude_text
 
-        vendor_history = _build_vendor_history(vendor_name, db)
-        draft = await draft_rfq(
-            vendor_name=vendor_name,
-            parts=parts,
-            vendor_history=vendor_history,
-            user_name=user.name or "",
+        result = await claude_text(
+            prompt=(
+                f"Clean up this RFQ email: fix grammar, spelling, punctuation. "
+                f"Improve clarity and professional tone. Keep it concise. "
+                f"Do NOT add information the user didn't include. "
+                f"Do NOT change the meaning or add new requests. "
+                f"Return ONLY the cleaned-up email text, nothing else.\n\n"
+                f"---\n{user_text}\n---"
+            ),
+            system="You are an email editor for a professional electronic components buyer.",
+            model_tier="fast",
+            max_tokens=1000,
         )
-        ctx["draft_body"] = draft or ""
+        cleaned = result.strip() if result else user_text
     except Exception as exc:
-        logger.error(f"AI draft RFQ error for req {req_id}: {exc}")
-        ctx["draft_body"] = ""
+        logger.error("AI cleanup error for req %d: %s", req_id, exc)
+        cleaned = user_text
 
-    return templates.TemplateResponse("htmx/partials/requisitions/rfq_draft_result.html", ctx)
+    # Return a script that replaces the textarea content with the cleaned text
+    escaped = cleaned.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$")
+    return HTMLResponse(
+        f'<script>document.getElementById("rfq-body-textarea").value = `{escaped}`;</script>'
+        '<p class="text-xs text-green-600 mt-1">Email cleaned up. Review and edit as needed.</p>'
+    )
 
 
 @router.post("/v2/partials/requisitions/{req_id}/rfq-send", response_class=HTMLResponse)

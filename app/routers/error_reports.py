@@ -33,6 +33,11 @@ class ErrorReportCreate(BaseModel):
     screenshot: Optional[str] = Field(None, max_length=MAX_SCREENSHOT_B64_BYTES)
 
 
+class TicketUpdate(BaseModel):
+    status: Optional[str] = Field(None, pattern="^(submitted|in_progress|resolved|wont_fix)$")
+    resolution_notes: Optional[str] = Field(None, max_length=5000)
+
+
 def _next_ticket_number(db: Session) -> str:
     last = db.query(func.max(TroubleTicket.id)).scalar() or 0
     return f"TT-{last + 1:04d}"
@@ -121,5 +126,35 @@ async def get_error_report(
         "risk_tier": ticket.risk_tier,
         "category": ticket.category,
         "current_page": ticket.current_page,
+        "resolution_notes": ticket.resolution_notes,
         "created_at": ticket.created_at.isoformat() if ticket.created_at else None,
+        "resolved_at": ticket.resolved_at.isoformat() if ticket.resolved_at else None,
     }
+
+
+@router.patch("/api/error-reports/{report_id}")
+@router.patch("/api/trouble-tickets/{report_id}")
+async def update_ticket(
+    report_id: int,
+    body: TicketUpdate,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update a trouble ticket status or add resolution notes."""
+    ticket = db.get(TroubleTicket, report_id)
+    if not ticket:
+        raise HTTPException(status_code=404, detail="Ticket not found")
+
+    if body.status:
+        ticket.status = body.status
+        if body.status == "resolved":
+            ticket.resolved_at = datetime.now(timezone.utc)
+            ticket.resolved_by_id = user.id
+    if body.resolution_notes is not None:
+        ticket.resolution_notes = body.resolution_notes
+
+    ticket.updated_at = datetime.now(timezone.utc)
+    db.commit()
+
+    logger.info("Ticket %s updated to %s by user %d", ticket.ticket_number, ticket.status, user.id)
+    return {"id": ticket.id, "status": ticket.status}
