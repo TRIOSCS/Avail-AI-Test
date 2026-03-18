@@ -7317,6 +7317,128 @@ async def part_header(
     return templates.TemplateResponse("htmx/partials/parts/header.html", ctx)
 
 
+_PART_HEADER_EDITABLE = {
+    "brand",
+    "target_qty",
+    "target_price",
+    "condition",
+    "sourcing_status",
+    "notes",
+    "date_codes",
+    "packaging",
+}
+_CONDITION_CHOICES = ["New", "Used", "Refurbished", "Any"]
+
+
+@router.get("/v2/partials/parts/{requirement_id}/header/edit/{field}", response_class=HTMLResponse)
+async def part_header_edit_cell(
+    requirement_id: int,
+    field: str,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return an inline edit input for a single header field."""
+    if field not in _PART_HEADER_EDITABLE:
+        return HTMLResponse("Invalid field", status_code=400)
+
+    req = db.get(Requirement, requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+
+    current = getattr(req, field, "") or ""
+    cell_id = f"hdr-{field}"
+    cancel_url = f"/v2/partials/parts/{requirement_id}/header"
+    save_url = f"/v2/partials/parts/{requirement_id}/header"
+
+    if field == "sourcing_status":
+        statuses = ["open", "sourcing", "offered", "quoted", "won", "lost", "archived"]
+        options = "".join(
+            f'<option value="{s}" {"selected" if s == current else ""}>{s.capitalize()}</option>' for s in statuses
+        )
+        return HTMLResponse(
+            f'<select name="value" id="{cell_id}" '
+            f'hx-patch="{save_url}" hx-target="#part-header-wrap" hx-swap="innerHTML" '
+            f'hx-vals=\'{{"field": "{field}"}}\' '
+            f'class="text-xs px-1.5 py-0.5 rounded border border-brand-300 focus:ring-1 focus:ring-brand-500" '
+            f"@keydown.escape=\"htmx.ajax('GET', '{cancel_url}', {{target: '#part-header-wrap', swap: 'innerHTML'}})\">"
+            f"{options}</select>",
+        )
+
+    if field == "condition":
+        options = "".join(
+            f'<option value="{c}" {"selected" if c == current else ""}>{c}</option>' for c in _CONDITION_CHOICES
+        )
+        return HTMLResponse(
+            f'<select name="value" id="{cell_id}" '
+            f'hx-patch="{save_url}" hx-target="#part-header-wrap" hx-swap="innerHTML" '
+            f'hx-vals=\'{{"field": "{field}"}}\' '
+            f'class="text-xs px-1.5 py-0.5 rounded border border-brand-300 focus:ring-1 focus:ring-brand-500" '
+            f"@keydown.escape=\"htmx.ajax('GET', '{cancel_url}', {{target: '#part-header-wrap', swap: 'innerHTML'}})\">"
+            f"{options}</select>",
+        )
+
+    input_type = "number" if field in ("target_qty", "target_price") else "text"
+    step = ' step="0.0001"' if field == "target_price" else ""
+
+    return HTMLResponse(
+        f'<input type="{input_type}" name="value" id="{cell_id}" value="{current}" '
+        f'hx-patch="{save_url}" hx-target="#part-header-wrap" hx-swap="innerHTML" '
+        f'hx-vals=\'{{"field": "{field}"}}\' '
+        f"hx-trigger=\"keyup[key=='Enter']\" "
+        f"@keydown.escape=\"htmx.ajax('GET', '{cancel_url}', {{target: '#part-header-wrap', swap: 'innerHTML'}})\" "
+        f'class="text-sm px-1.5 py-0.5 rounded border border-brand-300 focus:ring-1 focus:ring-brand-500 w-24"'
+        f"{step} autofocus />",
+    )
+
+
+@router.patch("/v2/partials/parts/{requirement_id}/header", response_class=HTMLResponse)
+async def part_header_save(
+    requirement_id: int,
+    request: Request,
+    field: str = Form(...),
+    value: str = Form(default=""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save an inline header field edit and return the refreshed header."""
+    if field not in _PART_HEADER_EDITABLE:
+        return HTMLResponse("Invalid field", status_code=400)
+
+    req = db.get(Requirement, requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+
+    if field == "sourcing_status":
+        from app.services.requirement_status import transition_requirement
+
+        ok = transition_requirement(req, value, db, user)
+        if not ok:
+            logger.warning(
+                "Status transition rejected: {} → {} for part {}", req.sourcing_status, value, requirement_id
+            )
+    elif field == "target_qty":
+        req.target_qty = int(value) if value else None
+    elif field == "target_price":
+        from decimal import Decimal, InvalidOperation
+
+        try:
+            req.target_price = Decimal(value) if value else None
+        except InvalidOperation:
+            req.target_price = None
+    else:
+        setattr(req, field, value.strip() if value else None)
+
+    db.commit()
+    logger.info("Part {} header field '{}' updated by {}", requirement_id, field, user.email)
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["requirement"] = req
+    response = templates.TemplateResponse("htmx/partials/parts/header.html", ctx)
+    response.headers["HX-Trigger"] = json.dumps({"part-updated": {"id": requirement_id}})
+    return response
+
+
 @router.get("/v2/partials/parts/{requirement_id}/tab/activity", response_class=HTMLResponse)
 async def part_tab_activity(
     requirement_id: int,
