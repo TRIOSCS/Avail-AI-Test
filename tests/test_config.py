@@ -38,6 +38,11 @@ class TestDefaults:
             s = _make()
         assert s.rate_limit_enabled is True
 
+    def test_default_rate_limit_ai_search(self):
+        with patch.dict(os.environ, {}, clear=True):
+            s = _make()
+        assert s.rate_limit_ai_search == "10/minute"
+
     def test_default_admin_emails_empty(self):
         with patch.dict(os.environ, {}, clear=True):
             s = _make()

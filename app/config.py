@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     rate_limit_default: str = "120/minute"
     rate_limit_search: str = "20/minute"
     rate_limit_enabled: bool = True
+    rate_limit_ai_search: str = "10/minute"
 
     # --- Redis ---
     redis_url: str = "redis://redis:6379/0"
