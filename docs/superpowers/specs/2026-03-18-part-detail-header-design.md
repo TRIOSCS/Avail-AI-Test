@@ -28,7 +28,11 @@ Additional editable fields accessible but not shown by default: `notes`, `date_c
 
 ### Interaction Pattern
 
-Click any editable field → inline edit cell appears (input or select) → Enter saves via PATCH, Escape cancels → field refreshes to display mode. This matches the existing inline edit pattern used for requisition inline editing (`htmx_views.py:954`), vendor headers (`htmx_views.py:2684`), and company headers (`htmx_views.py:3752`).
+Click any editable field → inline edit cell appears (input or select) → Enter saves via PATCH, Escape cancels → field refreshes to display mode. This matches the existing per-field inline edit pattern used for requisition inline editing (`htmx_views.py:954` — `requisition_inline_edit_cell` and `requisition_inline_save`). Follow that pattern exclusively — the vendor and company header edits are full-form replacements, not per-field.
+
+**Cancel behavior:** Escape re-fetches just the individual field cell (via `hx-get` targeting the cell's own container), NOT the entire header. This matches the requisition inline pattern.
+
+**Status display:** The model stores lowercase values (`open`, `sourcing`, `offered`). Templates capitalize for display (`Open`, `Sourcing`, `Offered`).
 
 ---
 
@@ -47,10 +51,14 @@ When a buyer clicks a part row in the left panel:
 
 ```
 #part-detail (right panel)
-  ├── #part-header        ← NEW: fixed position, does not scroll
-  ├── tab bar             ← existing, unchanged
-  └── #tab-content        ← existing, scrollable
+  <template x-if="selectedPartId">   ← existing conditional
+    ├── #part-header        ← NEW: fixed position, does not scroll
+    ├── tab bar             ← existing, unchanged
+    └── #tab-content        ← existing, scrollable
+  </template>
 ```
+
+**Important:** `#part-header` must be INSIDE the `<template x-if="selectedPartId">` conditional in workspace.html, so it only renders when a part is selected. When no part is selected, the empty state ("Select a part") shows instead.
 
 ### Tab Content Cleanup
 
@@ -101,7 +109,7 @@ PATCH /v2/partials/parts/{requirement_id}/header
 - Saves to Requirement model
 - Returns refreshed `header.html` in display mode
 - Sets `HX-Trigger: {"part-updated": {"id": requirement_id}}` header so the left panel table row refreshes in sync
-- For `sourcing_status` changes: validates against `ALLOWED_TRANSITIONS` in `requirement_status.py`
+- For `sourcing_status` changes: call `transition_requirement()` from `requirement_status.py` rather than checking ALLOWED_TRANSITIONS directly — this preserves activity logging and transition validation in one call
 
 ### Left Panel Sync
 
