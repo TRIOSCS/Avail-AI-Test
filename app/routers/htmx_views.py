@@ -7529,26 +7529,24 @@ async def bulk_archive(
     requirement_ids = body.get("requirement_ids", [])
     requisition_ids = body.get("requisition_ids", [])
 
-    archived_parts = 0
-    archived_reqs = 0
+    # Bulk-update parts in a single query instead of N+1
+    if requirement_ids:
+        db.query(Requirement).filter(
+            Requirement.id.in_(requirement_ids),
+        ).update({"sourcing_status": "archived"}, synchronize_session="fetch")
 
-    for rid in requirement_ids:
-        part = db.get(Requirement, rid)
-        if part:
-            part.sourcing_status = "archived"
-            archived_parts += 1
-
-    for rid in requisition_ids:
-        requisition = db.get(Requisition, rid)
-        if requisition:
+    # Archive requisitions and cascade to their children
+    if requisition_ids:
+        reqs = db.query(Requisition).filter(Requisition.id.in_(requisition_ids)).all()
+        for requisition in reqs:
             requisition.status = "archived"
-            archived_reqs += 1
-            for child in requisition.requirements:
-                child.sourcing_status = "archived"
-                archived_parts += 1
+        # Cascade: archive all children of these requisitions
+        db.query(Requirement).filter(
+            Requirement.requisition_id.in_(requisition_ids),
+        ).update({"sourcing_status": "archived"}, synchronize_session="fetch")
 
     db.commit()
-    logger.info("Bulk archive by {}: {} parts, {} requisitions", user.email, archived_parts, archived_reqs)
+    logger.info("Bulk archive by {}: {} parts, {} requisitions", user.email, len(requirement_ids), len(requisition_ids))
 
     return await parts_list_partial(request=request, user=user, db=db)
 
@@ -7567,26 +7565,27 @@ async def bulk_unarchive(
     requirement_ids = body.get("requirement_ids", [])
     requisition_ids = body.get("requisition_ids", [])
 
-    restored_parts = 0
-    restored_reqs = 0
+    # Bulk-update parts in a single query instead of N+1
+    if requirement_ids:
+        db.query(Requirement).filter(
+            Requirement.id.in_(requirement_ids),
+            Requirement.sourcing_status == "archived",
+        ).update({"sourcing_status": "open"}, synchronize_session="fetch")
 
-    for rid in requirement_ids:
-        part = db.get(Requirement, rid)
-        if part and part.sourcing_status == "archived":
-            part.sourcing_status = "open"
-            restored_parts += 1
-
-    for rid in requisition_ids:
-        requisition = db.get(Requisition, rid)
-        if requisition:
+    # Unarchive requisitions and cascade to their children
+    if requisition_ids:
+        reqs = db.query(Requisition).filter(Requisition.id.in_(requisition_ids)).all()
+        for requisition in reqs:
             requisition.status = "active"
-            restored_reqs += 1
-            for child in requisition.requirements:
-                if child.sourcing_status == "archived":
-                    child.sourcing_status = "open"
-                    restored_parts += 1
+        # Cascade: restore archived children of these requisitions
+        db.query(Requirement).filter(
+            Requirement.requisition_id.in_(requisition_ids),
+            Requirement.sourcing_status == "archived",
+        ).update({"sourcing_status": "open"}, synchronize_session="fetch")
 
     db.commit()
-    logger.info("Bulk unarchive by {}: {} parts, {} requisitions", user.email, restored_parts, restored_reqs)
+    logger.info(
+        "Bulk unarchive by {}: {} parts, {} requisitions", user.email, len(requirement_ids), len(requisition_ids)
+    )
 
     return await parts_list_partial(request=request, user=user, db=db)
