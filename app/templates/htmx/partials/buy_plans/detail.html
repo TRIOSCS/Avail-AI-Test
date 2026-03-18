@@ -142,28 +142,28 @@
     {% set step_label = bp.status|capitalize %}
   {% endif %}
 
-  <div class="mb-5">
-    <div class="flex gap-1">
+  <div class="mb-5 bg-white rounded-lg border border-brand-200 px-5 py-4">
+    <div class="flex gap-1.5">
       {% for i in range(1, 6) %}
         {% if bp.status == 'cancelled' %}
-          <div class="flex-1 h-1 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-full bg-gray-300"></div>
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-gray-300"></div>
         {% elif bp.status == 'halted' and i == 3 %}
-          <div class="flex-1 h-1 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-full bg-rose-500"></div>
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-rose-500"></div>
         {% elif i <= filled %}
-          <div class="flex-1 h-1 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-full bg-emerald-600"></div>
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-emerald-500"></div>
         {% elif i == filled + 1 %}
-          <div class="flex-1 h-1 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-full bg-amber-400"></div>
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-amber-400"></div>
         {% else %}
-          <div class="flex-1 h-1 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-full bg-gray-200"></div>
+          <div class="flex-1 h-2.5 rounded-{% if i == 1 %}l{% elif i == 5 %}r{% endif %}-md bg-gray-200"></div>
         {% endif %}
       {% endfor %}
     </div>
-    <div class="flex justify-between mt-1">
+    <div class="flex justify-between mt-2">
       {% for s in steps %}
-        <span class="text-[10px] text-gray-400 {% if loop.index == filled %}text-gray-700 font-semibold{% endif %}">{{ s }}</span>
+        <span class="text-xs {% if loop.index <= filled %}text-gray-700 font-semibold{% elif loop.index == filled + 1 %}text-amber-600 font-medium{% else %}text-gray-400{% endif %}">{{ s }}</span>
       {% endfor %}
     </div>
-    <div class="text-xs text-gray-500 mt-0.5">{{ step_label }}</div>
+    <div class="text-sm font-medium mt-1 {% if bp.status == 'completed' %}text-emerald-600{% elif bp.status == 'halted' %}text-rose-600{% elif bp.status == 'cancelled' %}text-gray-400{% else %}text-gray-600{% endif %}">{{ step_label }}</div>
   </div>
 
   {# ═══ 3. ROLE-AWARE ACTION BANNER ═══ #}

@@ -143,9 +143,9 @@
             </td>
             {# Progress #}
             <td class="px-4 py-3">
-              <div class="flex gap-[2px] w-20 mb-1">
+              <div class="flex gap-[2px] w-28 mb-1.5">
                 {% for i in range(1, 6) %}
-                <div class="flex-1 h-[3px] {{ 'rounded-l' if i == 1 else '' }} {{ 'rounded-r' if i == 5 else '' }}
+                <div class="flex-1 h-[6px] {{ 'rounded-l-sm' if i == 1 else '' }} {{ 'rounded-r-sm' if i == 5 else '' }}
                   {%- if bp.status == 'cancelled' -%}
                     {{ ' bg-gray-300' if i <= segments else ' bg-gray-200' }}
                   {%- elif bp.status == 'halted' -%}
@@ -163,7 +163,7 @@
                 {% endfor %}
               </div>
               <div class="flex items-center gap-1">
-                <span class="text-[9px] font-medium {{ label_color }}">{{ bar_label }}</span>
+                <span class="text-[11px] font-semibold {{ label_color }}">{{ bar_label }}</span>
                 {% if bp.auto_approved %}
                 <span class="inline-flex px-1 py-0 text-[9px] rounded bg-emerald-50 text-emerald-600 font-medium">auto</span>
                 {% endif %}
