@@ -71,7 +71,7 @@ def transition_requirement(
         )
         db.add(log_entry)
     except Exception as e:
-        logger.debug("Failed to log part status transition: %s", e)
+        logger.warning("Failed to log part status transition: %s", e)
 
     return True
 
@@ -150,7 +150,7 @@ def claim_requisition(requisition: Requisition, buyer: User, db: Session) -> boo
         )
         db.add(log_entry)
     except Exception as e:
-        logger.debug("Failed to log requisition claim: %s", e)
+        logger.warning("Failed to log requisition claim: %s", e)
 
     return True
 
@@ -175,6 +175,6 @@ def unclaim_requisition(requisition: Requisition, db: Session, actor: User | Non
         )
         db.add(log_entry)
     except Exception as e:
-        logger.debug("Failed to log requisition unclaim: %s", e)
+        logger.warning("Failed to log requisition unclaim: %s", e)
 
     return True
