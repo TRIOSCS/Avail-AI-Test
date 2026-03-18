@@ -1,6 +1,6 @@
 """Tests for app/enums.py — verify enum values match expected strings."""
 
-from app.enums import OfferStatus, QuoteStatus, RequisitionStatus, UserRole
+from app.enums import OfferStatus, QuoteStatus, RequirementSourcingStatus, RequisitionStatus, UserRole
 
 
 def test_requisition_status_values():
@@ -37,6 +37,11 @@ def test_user_role_values():
     assert UserRole.trader == "trader"
     assert UserRole.manager == "manager"
     assert UserRole.admin == "admin"
+
+
+def test_requirement_sourcing_status_has_archived():
+    assert RequirementSourcingStatus.archived == "archived"
+    assert "archived" in [s.value for s in RequirementSourcingStatus]
 
 
 def test_enum_is_str():

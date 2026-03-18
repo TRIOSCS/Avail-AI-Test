@@ -51,6 +51,7 @@ class RequirementSourcingStatus(str, enum.Enum):
     quoted = "quoted"  # Part included in a customer quote
     won = "won"  # Customer accepted quote for this part
     lost = "lost"  # Customer declined / no stock found
+    archived = "archived"  # Part archived — excluded from active views
 
 
 class ContactStatus(str, enum.Enum):
