@@ -226,25 +226,46 @@ async def global_search(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Global search across requisitions, companies, vendors."""
-    results = {"requisitions": [], "companies": [], "vendors": []}
-    if q and len(q) >= 2:
-        safe = escape_like(q.strip())
-        results["requisitions"] = (
-            db.query(Requisition)
-            .filter(Requisition.name.ilike(f"%{safe}%") | Requisition.customer_name.ilike(f"%{safe}%"))
-            .limit(5)
-            .all()
-        )
-        results["companies"] = db.query(Company).filter(Company.name.ilike(f"%{safe}%")).limit(5).all()
-        results["vendors"] = (
-            db.query(VendorCard)
-            .filter(VendorCard.display_name.ilike(f"%{safe}%") | VendorCard.normalized_name.ilike(f"%{safe}%"))
-            .limit(5)
-            .all()
-        )
+    """Global search across all entity types (type-ahead)."""
+    from app.services.global_search_service import fast_search
+
+    results = fast_search(q, db)
     return templates.TemplateResponse(
         "htmx/partials/shared/search_results.html",
+        {**_base_ctx(request, user), "results": results, "query": q},
+    )
+
+
+@router.post("/v2/partials/search/ai", response_class=HTMLResponse)
+async def ai_search_endpoint(
+    request: Request,
+    q: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """AI-powered search — triggered by Enter key."""
+    from app.services.global_search_service import ai_search
+
+    results = await ai_search(q, db)
+    return templates.TemplateResponse(
+        "htmx/partials/shared/search_results.html",
+        {**_base_ctx(request, user), "results": results, "query": q, "ai_search": True},
+    )
+
+
+@router.get("/v2/partials/search/results", response_class=HTMLResponse)
+async def search_results_page(
+    request: Request,
+    q: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Full search results page."""
+    from app.services.global_search_service import fast_search
+
+    results = fast_search(q, db) if q else None
+    return templates.TemplateResponse(
+        "htmx/partials/search/full_results.html",
         {**_base_ctx(request, user), "results": results, "query": q},
     )
 

@@ -175,3 +175,26 @@ async def test_ai_search_with_filters(search_db):
 
     # Should find the Raytheon requisition (customer_name filter matches)
     assert result["total_count"] >= 0  # may or may not match depending on status
+
+
+# ── Endpoint tests ────────────────────────────────────────────────────
+
+
+def test_global_search_endpoint_returns_200(client, search_db):
+    resp = client.get("/v2/partials/search/global?q=LM358")
+    assert resp.status_code == 200
+
+
+def test_ai_search_endpoint_returns_200(client, search_db):
+    with (
+        patch("app.services.global_search_service.claude_structured", new_callable=AsyncMock, return_value=None),
+        patch("app.services.global_search_service._get_ai_cache", return_value=None),
+        patch("app.services.global_search_service._set_ai_cache"),
+    ):
+        resp = client.post("/v2/partials/search/ai", data={"q": "LM358"})
+    assert resp.status_code == 200
+
+
+def test_full_results_endpoint_returns_200(client, search_db):
+    resp = client.get("/v2/partials/search/results?q=LM358")
+    assert resp.status_code == 200
