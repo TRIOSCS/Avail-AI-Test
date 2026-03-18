@@ -20,12 +20,13 @@ from ..models import ActivityLog, Requirement, Requisition, User
 
 # Valid per-part status transitions
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
-    "open": {"sourcing", "offered", "quoted", "won", "lost"},
-    "sourcing": {"offered", "quoted", "won", "lost", "open"},
-    "offered": {"quoted", "won", "lost", "sourcing"},
-    "quoted": {"won", "lost", "offered"},
-    "won": {"lost"},
-    "lost": {"open", "sourcing"},
+    "open": {"sourcing", "offered", "quoted", "won", "lost", "archived"},
+    "sourcing": {"offered", "quoted", "won", "lost", "open", "archived"},
+    "offered": {"quoted", "won", "lost", "sourcing", "archived"},
+    "quoted": {"won", "lost", "offered", "archived"},
+    "won": {"lost", "archived"},
+    "lost": {"open", "sourcing", "archived"},
+    "archived": {"open"},
 }
 
 

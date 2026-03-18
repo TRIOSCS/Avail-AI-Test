@@ -7097,9 +7097,15 @@ async def parts_list_partial(
 
     query = db.query(Requirement).join(Requisition, Requirement.requisition_id == Requisition.id)
 
-    # Default: active requisitions only
-    if not include_archived:
+    # Archive visibility logic:
+    # - status=archived  → show only archived parts (any requisition status)
+    # - include_archived → show everything (no filtering)
+    # - default          → exclude archived parts AND archived requisitions
+    if status == "archived":
+        query = query.filter(Requirement.sourcing_status == "archived")
+    elif not include_archived:
         query = query.filter(Requisition.status.in_(["active", "open", "sourcing"]))
+        query = query.filter(Requirement.sourcing_status != "archived")
 
     # Filters
     if q:
@@ -7116,7 +7122,7 @@ async def parts_list_partial(
         query = query.filter(Requisition.customer_name.ilike(f"%{escape_like(customer)}%"))
     if brand:
         query = query.filter(Requirement.brand.ilike(f"%{escape_like(brand)}%"))
-    if status:
+    if status and status != "archived":
         query = query.filter(Requirement.sourcing_status == status)
     if owner:
         query = query.filter(Requisition.claimed_by_id == owner)
@@ -7421,3 +7427,164 @@ async def reopen_task(
     if req_id:
         return await part_tab_comms(req_id, request, user, db)
     return HTMLResponse('<div class="text-sm text-amber-600">Task reopened</div>')
+
+
+# ── Archive system ────────────────────────────────────────────────────
+
+
+@router.patch("/v2/partials/parts/{requirement_id}/archive", response_class=HTMLResponse)
+async def archive_single_part(
+    requirement_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Archive a single part (requirement) by setting sourcing_status to archived."""
+    part = db.get(Requirement, requirement_id)
+    if not part:
+        raise HTTPException(404, "Part not found")
+
+    part.sourcing_status = "archived"
+    db.commit()
+    logger.info("Part {} archived by {}", requirement_id, user.email)
+
+    return await parts_list_partial(request=request, user=user, db=db)
+
+
+@router.patch("/v2/partials/parts/{requirement_id}/unarchive", response_class=HTMLResponse)
+async def unarchive_single_part(
+    requirement_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Unarchive a single part — restores sourcing_status to open."""
+    part = db.get(Requirement, requirement_id)
+    if not part:
+        raise HTTPException(404, "Part not found")
+
+    part.sourcing_status = "open"
+    db.commit()
+    logger.info("Part {} unarchived by {}", requirement_id, user.email)
+
+    return await parts_list_partial(request=request, user=user, db=db)
+
+
+@router.patch("/v2/partials/requisitions/{req_id}/archive", response_class=HTMLResponse)
+async def archive_requisition(
+    req_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Archive a whole requisition and cascade to all its requirements."""
+    requisition = db.get(Requisition, req_id)
+    if not requisition:
+        raise HTTPException(404, "Requisition not found")
+
+    requisition.status = "archived"
+    for child in requisition.requirements:
+        child.sourcing_status = "archived"
+    db.commit()
+    logger.info("Requisition {} ({} parts) archived by {}", req_id, len(requisition.requirements), user.email)
+
+    return await parts_list_partial(request=request, user=user, db=db)
+
+
+@router.patch("/v2/partials/requisitions/{req_id}/unarchive", response_class=HTMLResponse)
+async def unarchive_requisition(
+    req_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Unarchive a requisition and restore all its requirements to open."""
+    requisition = db.get(Requisition, req_id)
+    if not requisition:
+        raise HTTPException(404, "Requisition not found")
+
+    requisition.status = "active"
+    for child in requisition.requirements:
+        if child.sourcing_status == "archived":
+            child.sourcing_status = "open"
+    db.commit()
+    logger.info("Requisition {} unarchived by {}", req_id, user.email)
+
+    return await parts_list_partial(request=request, user=user, db=db)
+
+
+@router.post("/v2/partials/parts/bulk-archive", response_class=HTMLResponse)
+async def bulk_archive(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Bulk-archive parts and/or requisitions.
+
+    Body: {"requirement_ids": [], "requisition_ids": []}.
+    """
+    body = await request.json()
+    requirement_ids = body.get("requirement_ids", [])
+    requisition_ids = body.get("requisition_ids", [])
+
+    archived_parts = 0
+    archived_reqs = 0
+
+    for rid in requirement_ids:
+        part = db.get(Requirement, rid)
+        if part:
+            part.sourcing_status = "archived"
+            archived_parts += 1
+
+    for rid in requisition_ids:
+        requisition = db.get(Requisition, rid)
+        if requisition:
+            requisition.status = "archived"
+            archived_reqs += 1
+            for child in requisition.requirements:
+                child.sourcing_status = "archived"
+                archived_parts += 1
+
+    db.commit()
+    logger.info("Bulk archive by {}: {} parts, {} requisitions", user.email, archived_parts, archived_reqs)
+
+    return await parts_list_partial(request=request, user=user, db=db)
+
+
+@router.post("/v2/partials/parts/bulk-unarchive", response_class=HTMLResponse)
+async def bulk_unarchive(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Bulk-unarchive parts and/or requisitions.
+
+    Body: {"requirement_ids": [], "requisition_ids": []}.
+    """
+    body = await request.json()
+    requirement_ids = body.get("requirement_ids", [])
+    requisition_ids = body.get("requisition_ids", [])
+
+    restored_parts = 0
+    restored_reqs = 0
+
+    for rid in requirement_ids:
+        part = db.get(Requirement, rid)
+        if part and part.sourcing_status == "archived":
+            part.sourcing_status = "open"
+            restored_parts += 1
+
+    for rid in requisition_ids:
+        requisition = db.get(Requisition, rid)
+        if requisition:
+            requisition.status = "active"
+            restored_reqs += 1
+            for child in requisition.requirements:
+                if child.sourcing_status == "archived":
+                    child.sourcing_status = "open"
+                    restored_parts += 1
+
+    db.commit()
+    logger.info("Bulk unarchive by {}: {} parts, {} requisitions", user.email, restored_parts, restored_reqs)
+
+    return await parts_list_partial(request=request, user=user, db=db)

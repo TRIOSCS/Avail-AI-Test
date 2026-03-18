@@ -4,7 +4,7 @@
    Depends on: requirements, offer_stats, visible_cols, filters, pagination context
 #}
 
-<div class="flex flex-col h-full">
+<div class="flex flex-col h-full" x-data="partsListSelection()">
 
   {# ── Filter bar + top scrollbar ──────────────────────────── #}
   <div class="panel-header flex-wrap gap-y-1">
@@ -17,7 +17,7 @@
         <input type="hidden" name="dir" value="{{ dir }}">
         <input type="hidden" name="include_archived" value="{{ 'true' if include_archived else '' }}">
 
-        {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('sourcing', 'Src'), ('offered', 'Ofd'), ('quoted', 'Qtd')] %}
+        {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('sourcing', 'Src'), ('offered', 'Ofd'), ('quoted', 'Qtd'), ('archived', 'Arc')] %}
         <button type="button"
                 hx-get="/v2/partials/parts?status={{ s_val }}"
                 hx-target="#parts-list"
@@ -27,17 +27,6 @@
           {{ s_label }}
         </button>
         {% endfor %}
-
-        {# Archived toggle #}
-        <label class="flex items-center gap-1 text-[10px] text-gray-400 cursor-pointer flex-shrink-0" title="Include archived">
-          <input type="checkbox" name="include_archived" value="true"
-                 {% if include_archived %}checked{% endif %}
-                 hx-get="/v2/partials/parts"
-                 hx-target="#parts-list"
-                 hx-include="#parts-filters"
-                 class="h-3 w-3 rounded border-gray-300 text-brand-500">
-          Arc
-        </label>
 
         {# Column picker #}
         <div x-data="{ showCols: false }" class="relative flex-shrink-0">
@@ -77,11 +66,36 @@
     </form>
   </div>
 
+  {# ── Bulk action bar (visible when items selected) ─────── #}
+  <div x-show="selectedIds.length > 0" x-cloak
+       class="px-3 py-1.5 bg-brand-50 border-b border-brand-200 flex items-center gap-2 flex-shrink-0">
+    <span class="text-[10px] font-semibold text-brand-700" x-text="selectedIds.length + ' selected'"></span>
+    {% if status == 'archived' %}
+    <button type="button" @click="bulkUnarchive()"
+            class="px-2 py-0.5 text-[10px] font-semibold bg-brand-500 text-white rounded hover:bg-brand-600">
+      Unarchive
+    </button>
+    {% else %}
+    <button type="button" @click="bulkArchive()"
+            class="px-2 py-0.5 text-[10px] font-semibold bg-gray-500 text-white rounded hover:bg-gray-600">
+      Archive
+    </button>
+    {% endif %}
+    <button type="button" @click="clearSelection()"
+            class="px-2 py-0.5 text-[10px] font-semibold text-gray-500 hover:text-gray-700">
+      Clear
+    </button>
+  </div>
+
   {% if requirements %}
   <div class="top-scroll-content flex-1 min-h-0" id="left-table-content">
       <table class="compact-table">
         <thead>
           <tr>
+            <th class="w-6">
+              <input type="checkbox" class="h-3 w-3 rounded border-gray-300 text-brand-500"
+                     @change="toggleAll($event)" :checked="allSelected">
+            </th>
             {% set col_defs = {
               'mpn': ('MPN', 'mpn'),
               'brand': ('Brand', 'brand'),
@@ -127,44 +141,49 @@
           {% set stats = offer_stats.get(req.id, {}) %}
           <tr :class="selectedPartId === {{ req.id }} ? 'row-selected' : ''"
               @click="selectPart({{ req.id }}); htmx.ajax('GET', '/v2/partials/parts/{{ req.id }}/tab/' + activeTab, {target: '#part-detail'})">
+            <td class="w-6" @click.stop>
+              <input type="checkbox" class="h-3 w-3 rounded border-gray-300 text-brand-500"
+                     :checked="selectedIds.includes({{ req.id }})"
+                     @change="toggleId({{ req.id }}, $event)">
+            </td>
             {% for col_key in visible_cols %}
               <td{% if col_key in ('requisition', 'customer', 'owner', 'notes') %} class="td-label"{% endif %}>
                 {% if col_key == 'mpn' %}
-                  <span class="font-semibold text-gray-900">{{ req.primary_mpn or '—' }}</span>
+                  <span class="font-semibold text-gray-900">{{ req.primary_mpn or '\u2014' }}</span>
                 {% elif col_key == 'brand' %}
-                  {{ req.brand or '—' }}
+                  {{ req.brand or '\u2014' }}
                 {% elif col_key == 'qty' %}
-                  {{ '{:,}'.format(req.target_qty) if req.target_qty else '—' }}
+                  {{ '{:,}'.format(req.target_qty) if req.target_qty else '\u2014' }}
                 {% elif col_key == 'target_price' %}
-                  {{ '${:,.4f}'.format(req.target_price) if req.target_price else '—' }}
+                  {{ '${:,.4f}'.format(req.target_price) if req.target_price else '\u2014' }}
                 {% elif col_key == 'status' %}
-                  {% set sc = {'open': 'bg-blue-600 text-white', 'sourcing': 'bg-amber-500 text-white', 'offered': 'bg-emerald-600 text-white', 'quoted': 'bg-violet-600 text-white', 'won': 'bg-emerald-700 text-white', 'lost': 'bg-gray-400 text-white'} %}
+                  {% set sc = {'open': 'bg-blue-600 text-white', 'sourcing': 'bg-amber-500 text-white', 'offered': 'bg-emerald-600 text-white', 'quoted': 'bg-violet-600 text-white', 'won': 'bg-emerald-700 text-white', 'lost': 'bg-gray-400 text-white', 'archived': 'bg-gray-300 text-gray-600'} %}
                   <span class="badge-primary {{ sc.get(req.sourcing_status, 'bg-gray-400 text-white') }}">
                     {{ req.sourcing_status or 'open' }}
                   </span>
                 {% elif col_key == 'requisition' %}
-                  {{ req.requisition.name if req.requisition else '—' }}
+                  {{ req.requisition.name if req.requisition else '\u2014' }}
                 {% elif col_key == 'customer' %}
-                  {{ req.requisition.customer_name if req.requisition else '—' }}
+                  {{ req.requisition.customer_name if req.requisition else '\u2014' }}
                 {% elif col_key == 'offers' %}
                   {% set cnt = stats.get('count', 0) %}
-                  {% if cnt > 0 %}<span class="text-emerald-600 font-semibold">{{ cnt }}</span>{% else %}—{% endif %}
+                  {% if cnt > 0 %}<span class="text-emerald-600 font-semibold">{{ cnt }}</span>{% else %}\u2014{% endif %}
                 {% elif col_key == 'best_price' %}
-                  {% if stats.get('best_price') %}<span class="text-emerald-600">${{ '{:,.4f}'.format(stats.get('best_price')) }}</span>{% else %}—{% endif %}
+                  {% if stats.get('best_price') %}<span class="text-emerald-600">${{ '{:,.4f}'.format(stats.get('best_price')) }}</span>{% else %}\u2014{% endif %}
                 {% elif col_key == 'owner' %}
                   {% if req.requisition and req.requisition.claimed_by %}
                     <span class="inline-flex items-center justify-center h-5 w-5 rounded-full bg-brand-100 text-brand-600 text-[9px] font-bold" title="{{ req.requisition.claimed_by.name }}">{{ req.requisition.claimed_by.name[:1] }}</span>
-                  {% else %}—{% endif %}
+                  {% else %}\u2014{% endif %}
                 {% elif col_key == 'created' %}
-                  {{ req.created_at.strftime('%m/%d') if req.created_at else '—' }}
+                  {{ req.created_at.strftime('%m/%d') if req.created_at else '\u2014' }}
                 {% elif col_key == 'date_codes' %}
-                  {{ req.date_codes or '—' }}
+                  {{ req.date_codes or '\u2014' }}
                 {% elif col_key == 'condition' %}
-                  {{ req.condition or '—' }}
+                  {{ req.condition or '\u2014' }}
                 {% elif col_key == 'packaging' %}
-                  {{ req.packaging or '—' }}
+                  {{ req.packaging or '\u2014' }}
                 {% elif col_key == 'notes' %}
-                  <span class="max-w-[120px] truncate block text-gray-500">{{ req.notes or '—' }}</span>
+                  <span class="max-w-[120px] truncate block text-gray-500">{{ req.notes or '\u2014' }}</span>
                 {% endif %}
               </td>
             {% endfor %}
@@ -186,7 +205,7 @@
   {# ── Pagination ──────────────────────────────────────────── #}
   {% if total > limit %}
   <div class="px-3 py-1.5 border-t-2 border-brand-200 bg-gray-50 flex-shrink-0 flex items-center justify-between">
-    <span class="text-[10px] text-gray-400 font-data">{{ offset + 1 }}–{{ [offset + limit, total]|min }} / {{ total }}</span>
+    <span class="text-[10px] text-gray-400 font-data">{{ offset + 1 }}\u2013{{ [offset + limit, total]|min }} / {{ total }}</span>
     <div class="flex gap-1">
       {% if offset > 0 %}
       <button hx-get="/v2/partials/parts?offset={{ offset - limit }}"
@@ -203,9 +222,18 @@
     </div>
   </div>
   {% endif %}
+
+  {# ── Undo toast for archive actions ──────────────────────── #}
+  <div x-data="undoToast()" @part-archived.window="showUndo($event.detail)"
+       x-show="visible" x-cloak
+       class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-gray-800 text-white px-4 py-2 rounded-lg shadow-lg flex items-center gap-3 text-xs">
+    <span x-text="message"></span>
+    <button @click="undo()" class="font-semibold text-brand-300 hover:text-brand-100 underline">Undo</button>
+    <span class="text-gray-400 text-[10px]" x-text="countdown + 's'"></span>
+  </div>
 </div>
 
-{# ── Initialize left panel scroll sync ───────────────────── #}
+{# ── Initialize left panel scroll sync + Alpine components ── #}
 <script>
   requestAnimationFrame(function() {
     var bar = document.getElementById('left-top-scroll');
@@ -218,4 +246,81 @@
     bar.onscroll = function() { content.scrollLeft = bar.scrollLeft; };
     content.onscroll = function() { bar.scrollLeft = content.scrollLeft; };
   });
+
+  /* Parts list multi-select + bulk actions */
+  function partsListSelection() {
+    return {
+      selectedIds: [],
+      get allSelected() {
+        var rows = {{ requirements|length }};
+        return rows > 0 && this.selectedIds.length === rows;
+      },
+      toggleId(id, ev) {
+        if (ev.target.checked) {
+          if (!this.selectedIds.includes(id)) this.selectedIds.push(id);
+        } else {
+          this.selectedIds = this.selectedIds.filter(function(x) { return x !== id; });
+        }
+      },
+      toggleAll(ev) {
+        if (ev.target.checked) {
+          this.selectedIds = [{% for req in requirements %}{{ req.id }}{% if not loop.last %},{% endif %}{% endfor %}];
+        } else {
+          this.selectedIds = [];
+        }
+      },
+      clearSelection: function() { this.selectedIds = []; },
+      bulkArchive: function() {
+        if (!confirm('Archive ' + this.selectedIds.length + ' selected part(s)?')) return;
+        var ids = this.selectedIds.slice();
+        htmx.ajax('POST', '/v2/partials/parts/bulk-archive', {
+          target: '#parts-list',
+          swap: 'innerHTML',
+          values: JSON.stringify({requirement_ids: ids, requisition_ids: []}),
+          headers: {'Content-Type': 'application/json'}
+        });
+      },
+      bulkUnarchive: function() {
+        var ids = this.selectedIds.slice();
+        htmx.ajax('POST', '/v2/partials/parts/bulk-unarchive', {
+          target: '#parts-list',
+          swap: 'innerHTML',
+          values: JSON.stringify({requirement_ids: ids, requisition_ids: []}),
+          headers: {'Content-Type': 'application/json'}
+        });
+      }
+    };
+  }
+
+  /* Undo toast — dispatched via @part-archived event */
+  function undoToast() {
+    return {
+      visible: false,
+      message: '',
+      countdown: 5,
+      _timer: null,
+      _partId: null,
+      showUndo: function(detail) {
+        this._partId = detail.id;
+        this.message = 'Part archived';
+        this.countdown = 5;
+        this.visible = true;
+        clearInterval(this._timer);
+        var self = this;
+        this._timer = setInterval(function() {
+          self.countdown--;
+          if (self.countdown <= 0) { self.visible = false; clearInterval(self._timer); }
+        }, 1000);
+      },
+      undo: function() {
+        clearInterval(this._timer);
+        this.visible = false;
+        if (!this._partId) return;
+        htmx.ajax('PATCH', '/v2/partials/parts/' + this._partId + '/unarchive', {
+          target: '#parts-list',
+          swap: 'innerHTML'
+        });
+      }
+    };
+  }
 </script>
