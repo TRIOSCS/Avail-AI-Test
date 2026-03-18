@@ -397,16 +397,20 @@ async def ai_search(query: str, db: Session) -> dict:
         logger.debug("AI search: Claude returned None, falling back to fast_search")
         return fast_search(query, db)
 
-    # Execute targeted queries per intent
+    # Execute targeted queries per intent, dedup by (type, id)
     groups = {k: [] for k in EMPTY_GROUPS}
-    all_results = []
+    seen: set[tuple[str, int]] = set()
 
     for search_op in intent["searches"]:
         group_key, results = _run_intent_query(search_op, db)
         if group_key and results:
-            groups[group_key].extend(results)
-            all_results.extend(results)
+            for r in results:
+                key = (r["type"], r["id"])
+                if key not in seen:
+                    seen.add(key)
+                    groups[group_key].append(r)
 
+    all_results = [r for g in groups.values() for r in g]
     best = all_results[0] if all_results else None
     result = {
         "best_match": best,

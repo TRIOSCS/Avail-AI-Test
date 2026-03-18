@@ -198,3 +198,27 @@ def test_ai_search_endpoint_returns_200(client, search_db):
 def test_full_results_endpoint_returns_200(client, search_db):
     resp = client.get("/v2/partials/search/results?q=LM358")
     assert resp.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_ai_search_deduplicates_overlapping_intents(search_db):
+    """When multiple intents target the same entity, results are deduplicated."""
+    from app.services.global_search_service import ai_search
+
+    # Two intents both searching parts for LM358N — should not produce duplicate results
+    mock_intent = {
+        "searches": [
+            {"entity_type": "part", "text_query": "LM358N"},
+            {"entity_type": "part", "text_query": "LM358"},
+        ]
+    }
+    with (
+        patch("app.services.global_search_service.claude_structured", new_callable=AsyncMock, return_value=mock_intent),
+        patch("app.services.global_search_service._get_ai_cache", return_value=None),
+        patch("app.services.global_search_service._set_ai_cache"),
+    ):
+        result = await ai_search("LM358N parts", search_db)
+
+    # Check no duplicate IDs in the parts group
+    part_ids = [r["id"] for r in result["groups"]["parts"]]
+    assert len(part_ids) == len(set(part_ids)), f"Duplicate part IDs found: {part_ids}"
