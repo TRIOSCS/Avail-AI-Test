@@ -1,0 +1,67 @@
+{# Filter macros for faceted search sidebar.
+   Called by: subfilters.html
+   Depends on: Alpine.js materialsFilter() component on parent
+#}
+
+{% macro checkbox_group(spec_key, display_name, values, counts, active_values) %}
+<div class="mb-4">
+  <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{{ display_name }}</h4>
+  <div class="space-y-1 max-h-48 overflow-y-auto">
+    {% for val in values %}
+    <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm">
+      <input type="checkbox" value="{{ val }}"
+             :checked="(subFilters['{{ spec_key }}'] || []).includes('{{ val }}')"
+             @change="toggleFilter('{{ spec_key }}', '{{ val }}')"
+             class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+      <span class="text-gray-700 truncate">{{ val }}</span>
+      {% if counts and val in counts %}
+      <span class="ml-auto text-xs text-gray-400">({{ counts[val] }})</span>
+      {% endif %}
+    </label>
+    {% endfor %}
+  </div>
+</div>
+{% endmacro %}
+
+{% macro range_input(spec_key, display_name, range_data, unit, active_min, active_max) %}
+<div class="mb-4">
+  <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
+    {{ display_name }}{% if unit %} <span class="text-gray-400 font-normal">({{ unit }})</span>{% endif %}
+  </h4>
+  {% if range_data and range_data.min is not none %}
+  <div class="flex items-center gap-2">
+    <input type="number" placeholder="Min"
+           :value="subFilters['{{ spec_key }}_min'] || ''"
+           @change="setRange('{{ spec_key }}', 'min', $event.target.value)"
+           class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
+           min="{{ range_data.min }}" max="{{ range_data.max }}" step="any">
+    <span class="text-gray-400 text-xs">–</span>
+    <input type="number" placeholder="Max"
+           :value="subFilters['{{ spec_key }}_max'] || ''"
+           @change="setRange('{{ spec_key }}', 'max', $event.target.value)"
+           class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
+           min="{{ range_data.min }}" max="{{ range_data.max }}" step="any">
+  </div>
+  {% else %}
+  <p class="text-xs text-gray-400 italic">No data available</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro boolean_toggle(spec_key, display_name, counts, active_value) %}
+<div class="mb-4">
+  <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">{{ display_name }}</h4>
+  <div class="flex gap-2">
+    <button @click="toggleFilter('{{ spec_key }}', 'true')"
+            :class="(subFilters['{{ spec_key }}'] || []).includes('true') ? 'bg-brand-100 text-brand-700 border-brand-300' : 'bg-white text-gray-600 border-gray-200'"
+            class="px-3 py-1 text-sm border rounded-full transition-colors">
+      Yes {% if counts and 'true' in counts %}<span class="text-xs opacity-60">({{ counts['true'] }})</span>{% endif %}
+    </button>
+    <button @click="toggleFilter('{{ spec_key }}', 'false')"
+            :class="(subFilters['{{ spec_key }}'] || []).includes('false') ? 'bg-brand-100 text-brand-700 border-brand-300' : 'bg-white text-gray-600 border-gray-200'"
+            class="px-3 py-1 text-sm border rounded-full transition-colors">
+      No {% if counts and 'false' in counts %}<span class="text-xs opacity-60">({{ counts['false'] }})</span>{% endif %}
+    </button>
+  </div>
+</div>
+{% endmacro %}

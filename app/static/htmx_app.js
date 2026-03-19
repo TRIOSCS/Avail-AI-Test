@@ -299,4 +299,144 @@ document.addEventListener('keydown', (e) => {
     }
 });
 
+/* Faceted materials search — Alpine.js component.
+ * Manages commodity, sub-filters, search query, pagination.
+ * URL is the canonical source of truth (back button, deep links work).
+ */
+function materialsFilter() {
+  return {
+    commodity: '',
+    commodityDisplayName: '',
+    subFilters: {},
+    q: '',
+    page: 0,
+    panelOpen: false,
+
+    get activeFilterCount() {
+      let count = 0;
+      for (const [key, val] of Object.entries(this.subFilters)) {
+        if (Array.isArray(val)) count += val.length;
+        else if (val !== '' && val !== null) count += 1;
+      }
+      return count;
+    },
+
+    init() {
+      this.syncFromURL();
+      window.addEventListener('popstate', () => this.syncFromURL());
+    },
+
+    syncFromURL() {
+      const params = new URLSearchParams(window.location.search);
+      this.commodity = params.get('commodity') || '';
+      this.q = params.get('q') || '';
+      this.page = parseInt(params.get('page') || '0', 10);
+      this.subFilters = {};
+      for (const [key, val] of params.entries()) {
+        if (key.startsWith('sf_')) {
+          const specKey = key.slice(3);
+          if (specKey.endsWith('_min') || specKey.endsWith('_max')) {
+            this.subFilters[specKey] = parseFloat(val);
+          } else {
+            this.subFilters[specKey] = val.split(',');
+          }
+        }
+      }
+    },
+
+    pushURL() {
+      const params = new URLSearchParams();
+      if (this.commodity) params.set('commodity', this.commodity);
+      if (this.q) params.set('q', this.q);
+      if (this.page > 0) params.set('page', this.page);
+      for (const [key, val] of Object.entries(this.subFilters)) {
+        if (Array.isArray(val) && val.length > 0) {
+          params.set('sf_' + key, val.join(','));
+        } else if (typeof val === 'number' && !isNaN(val)) {
+          params.set('sf_' + key, val);
+        }
+      }
+      const search = params.toString();
+      const url = window.location.pathname + (search ? '?' + search : '');
+      history.pushState({}, '', url);
+    },
+
+    selectCommodity(commodity) {
+      this.commodity = commodity || '';
+      this.commodityDisplayName = commodity ? commodity.replace(/(^|\s)\S/g, l => l.toUpperCase()) : '';
+      this.subFilters = {};
+      this.page = 0;
+      this.pushURL();
+      document.body.dispatchEvent(new CustomEvent('commodity-changed'));
+      this.applyFilters();
+    },
+
+    toggleFilter(specKey, value) {
+      if (!this.subFilters[specKey]) {
+        this.subFilters[specKey] = [value];
+      } else {
+        const idx = this.subFilters[specKey].indexOf(value);
+        if (idx >= 0) {
+          this.subFilters[specKey].splice(idx, 1);
+          if (this.subFilters[specKey].length === 0) {
+            delete this.subFilters[specKey];
+          }
+        } else {
+          this.subFilters[specKey].push(value);
+        }
+      }
+      this.page = 0;
+      // Desktop: instant apply
+      if (window.innerWidth >= 1024) {
+        this.pushURL();
+        this.applyFilters();
+      }
+    },
+
+    setRange(specKey, bound, value) {
+      const key = specKey + '_' + bound;
+      if (value === '' || value === null) {
+        delete this.subFilters[key];
+      } else {
+        this.subFilters[key] = parseFloat(value);
+      }
+      this.page = 0;
+      if (window.innerWidth >= 1024) {
+        this.pushURL();
+        this.applyFilters();
+      }
+    },
+
+    removeFilter(key, val) {
+      if (Array.isArray(this.subFilters[key])) {
+        this.subFilters[key] = this.subFilters[key].filter(v => v !== val);
+        if (this.subFilters[key].length === 0) delete this.subFilters[key];
+      } else {
+        delete this.subFilters[key];
+      }
+      this.page = 0;
+      this.pushURL();
+      this.applyFilters();
+    },
+
+    clearSubFilters() {
+      this.subFilters = {};
+      this.page = 0;
+      this.pushURL();
+      this.applyFilters();
+    },
+
+    applyFilters() {
+      this.pushURL();
+      document.body.dispatchEvent(new CustomEvent('filters-changed'));
+    },
+
+    goToPage(newPage) {
+      this.page = newPage;
+      this.pushURL();
+      this.applyFilters();
+    },
+  };
+}
+
 Alpine.start();

@@ -1,0 +1,29 @@
+{# Dynamic sub-filters for a specific commodity.
+   Called by: HTMX request when commodity is selected
+   Depends on: subfilter_options, facet_counts from route context
+#}
+{% from "htmx/partials/materials/filters/_macros.html" import checkbox_group, range_input, boolean_toggle %}
+
+{% if subfilter_options %}
+<div class="border-t border-gray-100 pt-3 mt-3">
+  <div class="flex items-center justify-between mb-3">
+    <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Filters</h3>
+    <button @click="clearSubFilters()" x-show="Object.keys(subFilters).length > 0"
+            class="text-xs text-brand-600 hover:text-brand-700">Clear all</button>
+  </div>
+
+  {% for opt in subfilter_options %}
+    {% if opt.data_type == 'enum' and opt.values %}
+      {{ checkbox_group(opt.spec_key, opt.display_name, opt.values, facet_counts.get(opt.spec_key, {}), []) }}
+    {% elif opt.data_type == 'numeric' %}
+      {{ range_input(opt.spec_key, opt.display_name, opt.range, opt.unit, None, None) }}
+    {% elif opt.data_type == 'boolean' %}
+      {{ boolean_toggle(opt.spec_key, opt.display_name, facet_counts.get(opt.spec_key, {}), None) }}
+    {% endif %}
+  {% endfor %}
+</div>
+{% else %}
+<div class="border-t border-gray-100 pt-3 mt-3">
+  <p class="text-xs text-gray-400 italic">Select a category to see filters</p>
+</div>
+{% endif %}
