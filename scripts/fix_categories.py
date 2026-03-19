@@ -5,6 +5,8 @@ Called by: manual one-time script
 Depends on: app.config.settings, app.models.intelligence.MaterialCard, anthropic
 """
 
+# Bootstrap app imports — works both locally and in Docker
+import os
 import sys
 import time
 
@@ -12,48 +14,69 @@ import anthropic
 from loguru import logger
 from sqlalchemy import func, or_
 
-# Bootstrap app imports
-sys.path.insert(0, "/root/availai")
+sys.path.insert(0, os.environ.get("APP_ROOT", "/app"))
 from app.config import settings
 from app.database import SessionLocal
 from app.models.intelligence import MaterialCard
 
-# Standardized commodity categories
+# Standardized commodity categories — granular enough for sourcing
 VALID_CATEGORIES = [
+    # Passives
     "capacitors",
     "resistors",
     "inductors",
-    "connectors",
-    "cables",
-    "relays",
-    "sensors",
-    "leds",
-    "motors",
-    "memory",
-    "flash",
-    "storage",
-    "processors",
-    "microcontrollers",
-    "fpga",
-    "gpu",
-    "analog_ic",
-    "power_ic",
-    "logic_ic",
-    "rf",
-    "networking",
-    "power_supplies",
-    "servers",
-    "displays",
-    "batteries",
     "transformers",
+    "fuses",
+    "oscillators",
+    "filters",
+    # Semiconductors — discrete
     "diodes",
     "transistors",
     "mosfets",
-    "optoelectronics",
-    "oscillators",
-    "fuses",
+    "thyristors",
+    # Semiconductors — ICs
+    "analog_ic",
+    "power_ic",
+    "logic_ic",
+    "microcontrollers",
+    "microprocessors",
+    "fpga",
+    "dsp",
+    "asic",
+    # Memory & storage
+    "dram",
+    "flash",
+    "ssd",
+    "hdd",
+    # Connectors & electromechanical
+    "connectors",
+    "cables",
+    "relays",
     "switches",
+    "sockets",
+    # Optoelectronics & display
+    "leds",
+    "optoelectronics",
+    "displays",
+    # Sensors & RF
+    "sensors",
+    "rf",
+    # Power
+    "power_supplies",
+    "batteries",
+    "voltage_regulators",
+    # IT / Server parts
+    "motherboards",
+    "cpu",
+    "gpu",
+    "network_cards",
+    "raid_controllers",
+    "server_chassis",
     "fans_cooling",
+    # Networking
+    "networking",
+    # Misc
+    "motors",
     "enclosures",
     "tools_accessories",
     "other",
@@ -116,8 +139,10 @@ def main():
     db = SessionLocal()
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
-    # Cards that need fixing: bad categories + uncategorized with descriptions
-    bad_category_ids = set(VALID_CATEGORIES) - {"other"}
+    # Coarse categories that need reclassification into granular ones
+    RECLASSIFY = {"servers", "storage", "memory", "processors", "Microprocessors"}
+
+    # Cards that need fixing: bad/coarse categories + uncategorized
     cards_to_fix = (
         db.query(MaterialCard.id, MaterialCard.normalized_mpn, MaterialCard.description, MaterialCard.manufacturer)
         .filter(
@@ -128,14 +153,14 @@ def main():
                 MaterialCard.category == "",
                 # "other" bucket
                 MaterialCard.category == "other",
+                # Coarse categories that need granular reclassification
+                MaterialCard.category.in_(RECLASSIFY),
                 # Long description used as category (junk)
                 func.length(MaterialCard.category) > 25,
             ),
-            # Must have some info to classify
-            or_(
-                MaterialCard.description.isnot(None),
-                MaterialCard.manufacturer.isnot(None),
-            ),
+            # Must have a description to classify meaningfully
+            MaterialCard.description.isnot(None),
+            MaterialCard.description != "",
         )
         .order_by(MaterialCard.search_count.desc().nullslast())
         .limit(BATCH_SIZE * MAX_BATCHES)
