@@ -4,11 +4,8 @@
 #}
 
 <div>
-  <div class="flex items-center justify-between mb-3">
-    <div>
-      <h3 class="text-lg font-semibold text-gray-900">{{ requirement.primary_mpn or 'Part' }}</h3>
-      <p class="text-xs text-gray-500">{{ requirement.requisition.name if requirement.requisition else '' }} · {{ offers|length }} offer{{ 's' if offers|length != 1 else '' }}</p>
-    </div>
+  <div class="flex items-center justify-between mb-2">
+    <p class="text-xs text-gray-500">{{ offers|length }} offer{{ 's' if offers|length != 1 else '' }}</p>
   </div>
 
   {% if offers %}

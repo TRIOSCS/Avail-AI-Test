@@ -4,10 +4,6 @@
 #}
 
 <div>
-  <div class="mb-4">
-    <h3 class="text-lg font-semibold text-gray-900">Communications — {{ requirement.primary_mpn or 'Part' }}</h3>
-  </div>
-
   {# ── Create task form ──────────────────────────────────── #}
   <div class="mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
     <form hx-post="/v2/partials/parts/{{ requirement.id }}/tasks"
