@@ -171,7 +171,7 @@ def fuzzy_match_vendor(query: str, candidates: list[str], threshold: int = 80) -
     Returns list of {"name": str, "score": int} sorted by score descending. Only returns
     matches at or above the threshold.
     """
-    from thefuzz import fuzz
+    from rapidfuzz import fuzz
 
     query_norm = normalize_vendor_name(query)
     if not query_norm:
@@ -195,7 +195,7 @@ def find_vendor_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> li
 
     Returns groups of vendors that may be duplicates, sorted by match score.
     """
-    from thefuzz import fuzz
+    from rapidfuzz import fuzz
 
     from .models import VendorCard
 

@@ -65,9 +65,9 @@ def _dedup_vendors(db: Session) -> int:
     from .vendor_merge_service import merge_vendor_cards
 
     try:
-        from thefuzz import fuzz
+        from rapidfuzz import fuzz
     except ImportError:
-        logger.warning("thefuzz not installed — skipping vendor auto-dedup")
+        logger.warning("rapidfuzz not installed — skipping vendor auto-dedup")
         return 0
 
     # Load vendor cards

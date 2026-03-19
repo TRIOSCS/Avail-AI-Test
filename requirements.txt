@@ -18,7 +18,7 @@ sentry-sdk[fastapi]==2.54.0
 # Rate limiting
 slowapi==0.1.9
 # Fuzzy matching
-thefuzz[speedup]==0.22.1
+rapidfuzz>=3.0.0
 # PDF generation
 weasyprint==68.1
 # Scheduling
@@ -27,6 +27,7 @@ apscheduler==3.11.2,<4.0
 alembic==1.18.4
 # Caching
 redis[hiredis]==7.3.0
+orjson>=3.9.0
 # CSRF protection
 starlette-csrf==3.0.0
 # NetComponents integration
