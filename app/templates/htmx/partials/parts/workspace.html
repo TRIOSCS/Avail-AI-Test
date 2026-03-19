@@ -4,9 +4,6 @@
    Depends on: parts/list.html, Alpine.js, HTMX
 #}
 
-{# OOB breadcrumb — hidden sink #}
-<div id="breadcrumb" hx-swap-oob="true"></div>
-
 <div class="h-[calc(100vh-90px)] flex"
      x-data="{
        splitRatio: parseFloat(localStorage.getItem('parts-split') || '0.45'),

@@ -5,13 +5,6 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
-<div id="breadcrumb" hx-swap-oob="true">
-  <a href="/v2/materials" hx-get="/v2/partials/materials" hx-target="#main-content" hx-push-url="/v2/materials"
-     class="text-brand-500 hover:text-brand-600">Materials</a>
-  <span class="mx-1.5 text-gray-400">/</span>
-  <span class="text-gray-700 font-medium">{{ card.display_mpn or card.normalized_mpn }}</span>
-</div>
-
 <div class="max-w-7xl mx-auto" x-data="{ editing: false }">
 
   {# Header card #}
