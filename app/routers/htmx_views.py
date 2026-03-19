@@ -47,6 +47,13 @@ from ..models.prospect_account import ProspectAccount
 from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorContact
 from ..scoring import classify_lead, explain_lead, score_unified
+from ..services.commodity_registry import COMMODITY_TREE, get_display_name
+from ..services.faceted_search_service import (
+    get_commodity_counts,
+    get_facet_counts,
+    get_subfilter_options,
+    search_materials_faceted,
+)
 from ..utils.search_builder import SearchBuilder
 
 router = APIRouter(tags=["htmx-views"])
@@ -5995,6 +6002,145 @@ async def materials_list_partial(
             "offset": offset,
             "interpreted_query": interpreted_query,
             "top_categories": top_categories,
+        }
+    )
+    return templates.TemplateResponse("htmx/partials/materials/list.html", ctx)
+
+
+@router.get("/v2/partials/materials/workspace", response_class=HTMLResponse)
+async def materials_workspace_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the faceted search workspace layout."""
+    from ..models.intelligence import MaterialCard
+
+    total_materials = db.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None)).count()
+    ctx = _base_ctx(request, user, "materials")
+    ctx["total_materials"] = total_materials
+    return templates.TemplateResponse("htmx/partials/materials/workspace.html", ctx)
+
+
+@router.get("/v2/partials/materials/filters/tree", response_class=HTMLResponse)
+async def materials_filters_tree_partial(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the commodity category tree for the faceted sidebar."""
+    commodity_counts = get_commodity_counts(db)
+    # Build display_names dict for template (.get() usage)
+    all_subs: list[str] = [sub for subs in COMMODITY_TREE.values() for sub in subs]
+    display_names = {sub: get_display_name(sub) for sub in all_subs}
+    ctx = _base_ctx(request, user, "materials")
+    ctx.update(
+        {
+            "commodity_tree": COMMODITY_TREE,
+            "commodity_counts": commodity_counts,
+            "display_names": display_names,
+        }
+    )
+    return templates.TemplateResponse("htmx/partials/materials/filters/tree.html", ctx)
+
+
+@router.get("/v2/partials/materials/filters/sub", response_class=HTMLResponse)
+async def materials_filters_sub_partial(
+    request: Request,
+    commodity: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render sub-filters for a selected commodity."""
+    if not commodity.strip():
+        return HTMLResponse("")
+    subfilter_options = get_subfilter_options(db, commodity)
+    facet_counts = get_facet_counts(db, commodity)
+    ctx = _base_ctx(request, user, "materials")
+    ctx.update(
+        {
+            "subfilter_options": subfilter_options,
+            "facet_counts": facet_counts,
+        }
+    )
+    return templates.TemplateResponse("htmx/partials/materials/filters/subfilters.html", ctx)
+
+
+@router.get("/v2/partials/materials/faceted", response_class=HTMLResponse)
+async def materials_faceted_partial(
+    request: Request,
+    commodity: str = "",
+    q: str = "",
+    sub_filters: str = "{}",
+    limit: int = Query(50, ge=1, le=200),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return faceted-search material list as HTML partial."""
+    from ..models.intelligence import MaterialVendorHistory
+
+    # Parse sub_filters JSON string → dict with correct types
+    try:
+        raw_filters: dict = json.loads(sub_filters) if sub_filters else {}
+    except (ValueError, TypeError):
+        raw_filters = {}
+
+    parsed_filters: dict = {}
+    for key, val in raw_filters.items():
+        if key.endswith("_min") or key.endswith("_max"):
+            try:
+                parsed_filters[key] = float(val)
+            except (ValueError, TypeError):
+                pass
+        elif isinstance(val, list):
+            parsed_filters[key] = val
+        else:
+            parsed_filters[key] = val
+
+    materials, total = search_materials_faceted(
+        db,
+        commodity=commodity or None,
+        q=q or None,
+        sub_filters=parsed_filters or None,
+        limit=limit,
+        offset=offset,
+    )
+
+    # Attach vendor stats (matching existing materials list pattern)
+    card_ids = [m.id for m in materials]
+    vendor_stats: dict = {}
+    if card_ids:
+        stats = (
+            db.query(
+                MaterialVendorHistory.material_card_id,
+                sqlfunc.count(MaterialVendorHistory.id),
+                sqlfunc.min(MaterialVendorHistory.last_price),
+            )
+            .filter(MaterialVendorHistory.material_card_id.in_(card_ids))
+            .group_by(MaterialVendorHistory.material_card_id)
+            .all()
+        )
+        vendor_stats = {s[0]: (s[1], s[2]) for s in stats}
+
+    for m in materials:
+        vc, bp = vendor_stats.get(m.id, (0, None))
+        m._vendor_count = vc
+        m._best_price = bp
+
+    ctx = _base_ctx(request, user, "materials")
+    ctx.update(
+        {
+            "materials": materials,
+            "q": q,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "commodity": commodity,
+            "category": commodity,
+            "top_categories": [],
+            "interpreted_query": "",
+            "faceted": True,
         }
     )
     return templates.TemplateResponse("htmx/partials/materials/list.html", ctx)

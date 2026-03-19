@@ -23,6 +23,7 @@ from loguru import logger
 sys.path.insert(0, os.environ.get("APP_ROOT", "/app"))
 from app.database import SessionLocal
 from app.models.intelligence import MaterialCard
+from app.services.spec_write_service import record_spec
 
 BATCH_SIZE = 50  # MPNs per request
 
@@ -402,6 +403,20 @@ async def apply_spec_results(meta_path: str, db, dry_run: bool = True) -> dict:
                     {"specs_summary": summary},
                     synchronize_session=False,
                 )
+                schema = COMMODITY_SPECS.get(category, {})
+                for spec in schema.get("specs", []):
+                    value = ai_part.get(spec["key"])
+                    conf = ai_part.get(f"{spec['key']}_confidence", 0.0)
+                    if value is not None and conf >= 0.70:
+                        record_spec(
+                            db,
+                            card_id,
+                            spec["key"],
+                            value,
+                            source="haiku_extraction",
+                            confidence=conf,
+                            unit=spec.get("unit", "").split("/")[0] if spec.get("unit") else None,
+                        )
 
             stats["updated"] += 1
 

@@ -1,24 +1,32 @@
 """Tests for scripts/enrich_specs_batch.py — Spec extraction logic.
 
-Tests prompt building, schema generation, and specs_summary formatting
-without hitting real APIs.
+Tests prompt building, schema generation, specs_summary formatting,
+and the record_spec integration path without hitting real APIs.
 
 Called by: pytest
-Depends on: scripts/enrich_specs_batch.py
+Depends on: scripts/enrich_specs_batch.py, app.services.spec_write_service
 """
 
+import json
 import os
 import sys
+from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
+
+import pytest
+from sqlalchemy.orm import Session
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
+from app.models import MaterialCard, MaterialSpecFacet
+from app.services.commodity_registry import seed_commodity_schemas
 from scripts.enrich_specs_batch import (
     COMMODITY_SPECS,
     _build_spec_prompt,
     _build_spec_schema,
     _specs_to_summary,
 )
-
+from tests.conftest import engine  # noqa: F401
 
 # ── COMMODITY_SPECS coverage ──────────────────────────────────────────
 
@@ -142,3 +150,62 @@ class TestSpecsToSummary:
         }
         summary = _specs_to_summary("capacitors", ai_part)
         assert " | " in summary
+
+
+# ── apply_spec_results + record_spec integration ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_apply_results_calls_record_spec(db_session: Session, tmp_path):
+    """Applying batch results should write to specs_structured via record_spec."""
+    seed_commodity_schemas(db_session)
+
+    card = MaterialCard(
+        normalized_mpn="mem-test",
+        display_mpn="MEM-TEST",
+        manufacturer="TestCo",
+        category="dram",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(card)
+    db_session.commit()
+
+    meta = {
+        "batch_id": "test-batch",
+        "category": "dram",
+        "request_map": {
+            "specs_dram_0": [{"id": card.id, "mpn": "MEM-TEST"}],
+        },
+    }
+    meta_path = str(tmp_path / "meta.json")
+    with open(meta_path, "w") as f:
+        json.dump(meta, f)
+
+    mock_results = {
+        "specs_dram_0": {
+            "parts": [
+                {
+                    "mpn": "MEM-TEST",
+                    "ddr_type": "DDR4",
+                    "ddr_type_confidence": 0.95,
+                    "capacity_gb": 16,
+                    "capacity_gb_confidence": 0.90,
+                }
+            ],
+        },
+    }
+
+    with patch("app.utils.claude_client.claude_batch_results", new_callable=AsyncMock, return_value=mock_results):
+        from scripts.enrich_specs_batch import apply_spec_results
+
+        stats = await apply_spec_results(meta_path, db_session, dry_run=False)
+
+    assert stats["updated"] > 0
+
+    db_session.refresh(card)
+    assert card.specs_structured is not None
+    assert card.specs_structured.get("ddr_type", {}).get("value") == "DDR4"
+
+    facet = db_session.query(MaterialSpecFacet).filter_by(material_card_id=card.id, spec_key="ddr_type").first()
+    assert facet is not None
+    assert facet.value_text == "DDR4"

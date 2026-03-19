@@ -13,8 +13,8 @@
   </div>
 
   {% for opt in subfilter_options %}
-    {% if opt.data_type == 'enum' and opt.values %}
-      {{ checkbox_group(opt.spec_key, opt.display_name, opt.values, facet_counts.get(opt.spec_key, {}), []) }}
+    {% if opt.data_type == 'enum' and opt['values'] %}
+      {{ checkbox_group(opt.spec_key, opt.display_name, opt['values'], facet_counts.get(opt.spec_key, {}), []) }}
     {% elif opt.data_type == 'numeric' %}
       {{ range_input(opt.spec_key, opt.display_name, opt.range, opt.unit, None, None) }}
     {% elif opt.data_type == 'boolean' %}
