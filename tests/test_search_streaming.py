@@ -4,6 +4,7 @@ Called by: pytest
 Depends on: app/search_service.py, app/connectors/sources.py
 """
 
+import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -224,3 +225,9 @@ async def test_stream_search_publishes_events(db_session):
     assert "results" in event_types
     assert "done" in event_types
     assert all(e["channel"] == "search:test-search-id" for e in published_events)
+
+    # Verify done event stats have correct keys
+    done_event = next(e for e in published_events if e["event"] == "done")
+    done_data = json.loads(done_event["data"])
+    assert "total_results" in done_data
+    assert "elapsed_seconds" in done_data

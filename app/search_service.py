@@ -1770,6 +1770,76 @@ def sighting_to_dict(s: Sighting) -> dict:
 # ── Streaming search ────────────────────────────────────────────────────
 
 
+def _score_raw_hit(r: dict, vendor_score_map: dict) -> dict:
+    """Normalize and score a single raw connector result for streaming search.
+
+    Mirrors the scoring in _fetch_fresh but without v2/median context (not
+    available incrementally). Produces fields needed by _incremental_dedup
+    and vendor card rendering.
+
+    Called by: stream_search_mpn
+    Depends on: scoring, evidence_tiers, normalization utilities
+    """
+    from .evidence_tiers import tier_for_sighting
+
+    raw_vendor = r.get("vendor_name", "Unknown")
+    clean_vendor = fix_encoding((raw_vendor or "").strip()) or raw_vendor
+    raw_mpn = r.get("mpn_matched")
+    clean_mpn_r = normalize_mpn(raw_mpn) or raw_mpn
+
+    clean_qty = normalize_quantity(r.get("qty_available"))
+    if clean_qty is None and isinstance(r.get("qty_available"), (int, float)) and r["qty_available"] > 0:
+        clean_qty = int(r["qty_available"])
+
+    clean_price = normalize_price(r.get("unit_price"))
+    if clean_price is None and isinstance(r.get("unit_price"), (int, float)) and r["unit_price"] > 0:
+        clean_price = float(r["unit_price"])
+
+    raw_currency = r.get("currency") or "USD"
+    clean_currency = detect_currency(raw_currency) if raw_currency else "USD"
+    raw_conf = r.get("confidence", 0) or 0
+    norm_conf = raw_conf / 5.0 if raw_conf > 1 else raw_conf
+    is_auth = r.get("is_authorized", False)
+    norm_name = normalize_vendor_name(clean_vendor)
+    base_score = score_sighting(vendor_score_map.get(norm_name), is_auth)
+    tier = tier_for_sighting(r.get("source_type"), is_auth)
+
+    return {
+        "vendor_name": clean_vendor,
+        "vendor_email": r.get("vendor_email"),
+        "vendor_phone": r.get("vendor_phone"),
+        "mpn_matched": clean_mpn_r,
+        "manufacturer": r.get("manufacturer"),
+        "qty_available": clean_qty,
+        "unit_price": clean_price,
+        "currency": clean_currency,
+        "source_type": r.get("source_type"),
+        "is_authorized": is_auth,
+        "confidence": norm_conf,
+        "score": base_score,
+        "evidence_tier": tier,
+        "octopart_url": r.get("octopart_url"),
+        "click_url": r.get("click_url"),
+        "vendor_url": r.get("vendor_url"),
+        "vendor_sku": r.get("vendor_sku"),
+        "condition": normalize_condition(r.get("condition")),
+        "moq": r.get("moq") if r.get("moq") and r.get("moq") > 0 else None,
+        "date_code": normalize_date_code(r.get("date_code")),
+        "packaging": normalize_packaging(r.get("packaging")),
+        "lead_time_days": normalize_lead_time(r.get("lead_time")),
+        "lead_time": r.get("lead_time"),
+        "country": r.get("country"),
+        "lead_quality": classify_lead(
+            score=base_score,
+            is_authorized=is_auth,
+            has_price=clean_price is not None,
+            has_qty=clean_qty is not None,
+            has_contact=bool(r.get("vendor_email") or r.get("vendor_phone")),
+            evidence_tier=tier,
+        ),
+    }
+
+
 async def stream_search_mpn(search_id: str, mpn: str, db: Session) -> None:
     """Stream search results via SSE as each connector completes.
 
@@ -1799,15 +1869,15 @@ async def stream_search_mpn(search_id: str, mpn: str, db: Session) -> None:
         await active_broker.publish(
             channel,
             "done",
-            json.dumps(
-                {
-                    "total": 0,
-                    "sources": 0,
-                    "elapsed_ms": 0,
-                }
-            ),
+            json.dumps({"total_results": 0, "sources": 0, "elapsed_seconds": 0}),
         )
         return
+
+    # Build vendor score lookup for scoring raw results
+    from .models import VendorCard
+
+    vendor_cards = db.query(VendorCard.normalized_name, VendorCard.vendor_score).all()
+    vendor_score_map = {vc.normalized_name: vc.vendor_score for vc in vendor_cards}
 
     # Create a task per connector, tagging with source_name
     task_map: dict[asyncio.Task, str] = {}
@@ -1836,12 +1906,14 @@ async def stream_search_mpn(search_id: str, mpn: str, db: Session) -> None:
                 hits, elapsed_ms = task.result()
                 hit_count = len(hits)
 
-                # Tag each hit with mpn_matched
+                # Score and normalize each hit
+                scored_hits = []
                 for r in hits:
                     r.setdefault("mpn_matched", mpn)
+                    scored_hits.append(_score_raw_hit(r, vendor_score_map))
 
                 # Incremental dedup against accumulated results
-                new_cards, updated_cards = _incremental_dedup(hits, accumulated)
+                new_cards, updated_cards = _incremental_dedup(scored_hits, accumulated)
 
                 # Publish source status
                 await active_broker.publish(
@@ -1906,15 +1978,15 @@ async def stream_search_mpn(search_id: str, mpn: str, db: Session) -> None:
                 )
 
     # All connectors done
-    elapsed_total = int((time.time() - t_start) * 1000)
+    elapsed_total = round(time.time() - t_start, 1)
     await active_broker.publish(
         channel,
         "done",
         json.dumps(
             {
-                "total": total_results,
+                "total_results": total_results,
                 "sources": sources_completed,
-                "elapsed_ms": elapsed_total,
+                "elapsed_seconds": elapsed_total,
             },
             default=str,
         ),
