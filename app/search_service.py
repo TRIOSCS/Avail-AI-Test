@@ -37,6 +37,7 @@ from .services.credential_service import get_credential, get_credentials_batch
 from .services.price_snapshot_service import record_price_snapshot
 from .services.sourcing_leads import sync_leads_for_sightings
 from .services.vendor_affinity_service import find_vendor_affinity
+from .utils.async_helpers import safe_background_task
 from .utils.normalization import (
     detect_currency,
     normalize_condition,
@@ -213,7 +214,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
             db.rollback()
 
     # 3b. Fire background enrichment for cards without manufacturer
-    _schedule_background_enrichment(card_ids, db)
+    await _schedule_background_enrichment(card_ids, db)
 
     # 4. Historical vendors from material cards
     fresh_vendors = {s.vendor_name.lower() for s in sightings}
@@ -1636,7 +1637,7 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
     return card
 
 
-def _schedule_background_enrichment(card_ids: set[int], db: Session) -> None:
+async def _schedule_background_enrichment(card_ids: set[int], db: Session) -> None:
     """Fire background connector enrichment for cards missing a manufacturer."""
     if not card_ids:
         return
@@ -1673,10 +1674,7 @@ def _schedule_background_enrichment(card_ids: set[int], db: Session) -> None:
         finally:
             session.close()
 
-    try:
-        asyncio.create_task(_enrich_cards())
-    except RuntimeError:
-        pass  # No event loop — skip silently (e.g., in tests)
+    await safe_background_task(_enrich_cards(), task_name="enrich_search_cards")
 
 
 def sighting_to_dict(s: Sighting) -> dict:
@@ -1976,6 +1974,15 @@ async def stream_search_mpn(search_id: str, mpn: str, db: Session) -> None:
                         default=str,
                     ),
                 )
+
+    # Cache results for filter endpoint (15-min TTL)
+    try:
+        rc = _get_search_redis()
+        if rc:
+            cache_key = f"search:{search_id}:results"
+            rc.setex(cache_key, 900, json.dumps(accumulated, default=str))
+    except Exception:
+        logger.warning("Failed to cache search results for filtering")
 
     # All connectors done
     elapsed_total = round(time.time() - t_start, 1)

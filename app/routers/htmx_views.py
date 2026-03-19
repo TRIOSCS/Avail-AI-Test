@@ -2220,6 +2220,69 @@ def _get_enabled_sources(db: Session) -> list[dict]:
     return [{"name": s.name, "status": s.status} for s in sources]
 
 
+def _get_cached_search_results(search_id: str) -> list[dict] | None:
+    """Read cached search results from Redis.
+
+    Called by: search_filter
+    Depends on: search_service._get_search_redis
+    """
+    try:
+        from ..search_service import _get_search_redis
+
+        rc = _get_search_redis()
+        if rc:
+            data = rc.get(f"search:{search_id}:results")
+            if data:
+                return json.loads(data)
+    except Exception:
+        pass
+    return None
+
+
+@router.get("/v2/partials/search/filter", response_class=HTMLResponse)
+async def search_filter(
+    request: Request,
+    search_id: str = Query(...),
+    confidence: str = Query("all"),
+    source: str = Query("all"),
+    sort: str = Query("best"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Re-render search results with filters applied, reading from Redis cache.
+
+    Called by: search filter bar (HTMX)
+    Depends on: _get_cached_search_results, vendor_card.html template
+    """
+    results = _get_cached_search_results(search_id)
+    if results is None:
+        return HTMLResponse('<div class="text-sm text-gray-500 p-4">Search results expired. Please search again.</div>')
+
+    # Apply filters
+    if confidence != "all":
+        color_map = {"high": "green", "medium": "amber", "low": "red"}
+        results = [r for r in results if r.get("confidence_color") == color_map.get(confidence)]
+
+    if source != "all":
+        results = [r for r in results if source in (r.get("sources_found") or [])]
+
+    # Apply sort
+    if sort == "cheapest":
+        results.sort(key=lambda r: r.get("unit_price") or float("inf"))
+    elif sort == "stock":
+        results.sort(key=lambda r: r.get("qty_available") or 0, reverse=True)
+    else:
+        results.sort(key=lambda r: (r.get("score", 0), r.get("confidence_pct", 0)), reverse=True)
+
+    # Re-render cards using vendor_card.html for each result
+    cards_html = ""
+    for i, card in enumerate(results):
+        cards_html += templates.get_template("htmx/partials/search/vendor_card.html").render(
+            card=card, card_index=i, search_id=search_id
+        )
+    return HTMLResponse(cards_html)
+
+
 @router.get("/v2/partials/search/lead-detail", response_class=HTMLResponse)
 async def search_lead_detail(
     request: Request,

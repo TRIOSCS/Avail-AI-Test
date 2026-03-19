@@ -378,6 +378,98 @@ def test_search_run_empty_mpn_returns_error(client):
     assert "Please enter a part number" in resp.text
 
 
+def test_search_filter_reads_from_cache(client, db_session):
+    """GET /v2/partials/search/filter returns re-rendered cards from cached results."""
+    cached_results = [
+        {
+            "vendor_name": "Arrow",
+            "mpn_matched": "LM317T",
+            "unit_price": 0.45,
+            "confidence_color": "green",
+            "confidence_pct": 85,
+            "lead_quality": "strong",
+            "source_type": "nexar",
+            "sub_offers": [],
+            "offer_count": 1,
+            "sources_found": ["nexar"],
+            "score": 80,
+            "is_authorized": True,
+        },
+    ]
+
+    with patch(
+        "app.routers.htmx_views._get_cached_search_results",
+        return_value=cached_results,
+    ):
+        resp = client.get(
+            "/v2/partials/search/filter?search_id=test-123&confidence=high",
+            headers={"HX-Request": "true"},
+        )
+    assert resp.status_code == 200
+    assert "Arrow" in resp.text
+
+
+def test_search_filter_expired_returns_message(client, db_session):
+    """GET /v2/partials/search/filter with no cached data returns expiry message."""
+    with patch(
+        "app.routers.htmx_views._get_cached_search_results",
+        return_value=None,
+    ):
+        resp = client.get(
+            "/v2/partials/search/filter?search_id=expired-123",
+            headers={"HX-Request": "true"},
+        )
+    assert resp.status_code == 200
+    assert "expired" in resp.text.lower() or "search again" in resp.text.lower()
+
+
+def test_search_filter_confidence_filters(client, db_session):
+    """GET /v2/partials/search/filter with confidence=high filters out non-green
+    results."""
+    cached_results = [
+        {
+            "vendor_name": "Arrow",
+            "mpn_matched": "LM317T",
+            "unit_price": 0.45,
+            "confidence_color": "green",
+            "confidence_pct": 85,
+            "lead_quality": "strong",
+            "source_type": "nexar",
+            "sub_offers": [],
+            "offer_count": 1,
+            "sources_found": ["nexar"],
+            "score": 80,
+            "is_authorized": True,
+        },
+        {
+            "vendor_name": "Shady Broker",
+            "mpn_matched": "LM317T",
+            "unit_price": 0.20,
+            "confidence_color": "red",
+            "confidence_pct": 20,
+            "lead_quality": "",
+            "source_type": "brokerbin",
+            "sub_offers": [],
+            "offer_count": 1,
+            "sources_found": ["brokerbin"],
+            "score": 30,
+            "is_authorized": False,
+        },
+    ]
+
+    with patch(
+        "app.routers.htmx_views._get_cached_search_results",
+        return_value=cached_results,
+    ):
+        resp = client.get(
+            "/v2/partials/search/filter?search_id=test-123&confidence=high",
+            headers={"HX-Request": "true"},
+        )
+    assert resp.status_code == 200
+    assert "Arrow" in resp.text
+    assert "Shady Broker" not in resp.text
+
+
 # ── Add to Requisition tests ────────────────────────────────────────────
 
 
