@@ -5713,23 +5713,51 @@ async def materials_list_partial(
     db: Session = Depends(get_db),
 ):
     """Return material cards list as HTML partial."""
-    from ..models.intelligence import MaterialCard
+    from ..services.material_search_service import classify_query, search_materials_local
 
-    query = db.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None))
+    interpreted_query = ""
     if q.strip():
-        safe = escape_like(q.strip())
-        query = query.filter(
-            MaterialCard.normalized_mpn.ilike(f"%{safe.lower()}%") | MaterialCard.display_mpn.ilike(f"%{safe}%")
+        query_type = classify_query(q.strip())
+        if query_type == "mpn":
+            materials, total = search_materials_local(db, q.strip(), lifecycle, limit, offset)
+        else:
+            # For now, fall back to local search for natural language too
+            # AI search will be wired when async route support is added
+            materials, total = search_materials_local(db, q.strip(), lifecycle, limit, offset)
+            interpreted_query = f"Searching: {q.strip()}"
+    else:
+        materials, total = search_materials_local(db, "", lifecycle, limit, offset)
+
+    # Compute vendor_count and best_price for each material
+    from sqlalchemy import func as sqlfunc
+
+    from ..models.intelligence import MaterialVendorHistory
+
+    card_ids = [m.id for m in materials]
+    if card_ids:
+        vendor_stats = (
+            db.query(
+                MaterialVendorHistory.material_card_id,
+                sqlfunc.count(MaterialVendorHistory.id).label("vendor_count"),
+                sqlfunc.min(MaterialVendorHistory.last_price).label("best_price"),
+            )
+            .filter(MaterialVendorHistory.material_card_id.in_(card_ids))
+            .group_by(MaterialVendorHistory.material_card_id)
+            .all()
         )
-    if lifecycle:
-        query = query.filter(MaterialCard.lifecycle_status == lifecycle)
-    total = query.count()
-    materials = (
-        query.order_by(MaterialCard.search_count.desc().nullslast(), MaterialCard.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+        stats_map = {
+            row.material_card_id: {"vendor_count": row.vendor_count, "best_price": row.best_price}
+            for row in vendor_stats
+        }
+    else:
+        stats_map = {}
+
+    # Attach stats to materials
+    for m in materials:
+        s = stats_map.get(m.id, {})
+        m._vendor_count = s.get("vendor_count", 0)
+        m._best_price = s.get("best_price")
+
     ctx = _base_ctx(request, user, "materials")
     ctx.update(
         {
@@ -5739,6 +5767,7 @@ async def materials_list_partial(
             "total": total,
             "limit": limit,
             "offset": offset,
+            "interpreted_query": interpreted_query,
         }
     )
     return templates.TemplateResponse("htmx/partials/materials/list.html", ctx)

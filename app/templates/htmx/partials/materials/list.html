@@ -1,7 +1,7 @@
 {#
-  materials/list.html — Material card list with search and lifecycle filter.
+  materials/list.html — Material card list with AI search and lifecycle filter.
   Receives: materials (list of MaterialCard), q (str), lifecycle (str),
-            total (int), limit (int), offset (int).
+            total (int), limit (int), offset (int), interpreted_query (str).
   Called by: htmx_views.py materials_list_partial endpoint.
   Depends on: HTMX, Tailwind CSS with brand palette.
 #}
@@ -19,19 +19,28 @@
     </div>
   </div>
 
-  {# Search + filter bar #}
+  {# Command-style search bar #}
   <div class="bg-white border border-brand-200 rounded-lg p-4 mb-4">
     <div class="flex flex-wrap gap-3 items-end">
       <div class="flex-1 min-w-[200px]">
-        <label class="block text-xs font-medium text-gray-500 mb-1">Search MPN</label>
-        <input type="text" name="q" value="{{ q }}" placeholder="Search by part number..."
-               class="w-full px-3 py-2 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+        <label class="block text-xs font-medium text-gray-500 mb-1">Search</label>
+        <input type="text" name="q" value="{{ q }}"
+               placeholder="MPN, manufacturer, or describe what you need..."
+               class="w-full px-3 py-2 border border-brand-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                hx-get="/v2/partials/materials"
                hx-trigger="keyup changed delay:300ms"
                hx-target="#main-content"
                hx-include="[name='q']">
       </div>
     </div>
+    {% if interpreted_query %}
+    <div class="mt-2 flex items-center gap-2">
+      <span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-brand-50 text-brand-700 rounded-full border border-brand-200">
+        <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
+        {{ interpreted_query }}
+      </span>
+    </div>
+    {% endif %}
   </div>
 
   {# Lifecycle filter pills #}
@@ -67,8 +76,9 @@
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Manufacturer</th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lifecycle</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Searches</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Enriched</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Vendors</th>
+            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Best Price</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Searched</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-200">
@@ -99,19 +109,15 @@
               <span class="text-xs text-gray-400">--</span>
               {% endif %}
             </td>
-            <td class="px-4 py-3 text-sm text-gray-600 text-right font-medium">{{ m.search_count or 0 }}</td>
-            <td class="px-4 py-3">
-              {% if m.enriched_at %}
-              <span class="inline-flex items-center gap-1 text-xs text-emerald-600">
-                <svg class="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
-                  <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
-                </svg>
-                {{ m.enriched_at.strftime('%b %d') }}
-              </span>
+            <td class="px-4 py-3 text-sm text-gray-600 text-right font-medium font-mono">{{ m._vendor_count or 0 }}</td>
+            <td class="px-4 py-3 text-sm text-right">
+              {% if m._best_price %}
+              <span class="text-emerald-700 font-medium font-mono">${{ "%.4f"|format(m._best_price) }}</span>
               {% else %}
-              <span class="text-xs text-gray-400">No</span>
+              <span class="text-gray-400 text-xs">--</span>
               {% endif %}
             </td>
+            <td class="px-4 py-3 text-sm text-gray-500">{{ m.last_searched_at.strftime('%b %d') if m.last_searched_at else "--" }}</td>
           </tr>
           {% endfor %}
         </tbody>
