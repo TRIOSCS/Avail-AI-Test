@@ -18,13 +18,13 @@
 
   {# -- Left sidebar -- #}
   <div :class="panelOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
-       class="fixed lg:static inset-y-0 left-0 z-40 w-72 bg-white border-r border-gray-100 overflow-y-auto transition-transform lg:transition-none flex-shrink-0"
+       class="fixed lg:static inset-y-0 left-0 z-40 w-72 bg-white border-r border-gray-100 overflow-y-auto transition-transform lg:transition-none flex-shrink-0 faceted-sidebar"
        style="top: 0; bottom: 0;">
 
     {# Mobile close button #}
     <div class="lg:hidden flex items-center justify-between p-3 border-b border-gray-100">
       <span class="font-semibold text-sm text-gray-700">Filters</span>
-      <button @click="panelOpen = false" class="text-gray-400 hover:text-gray-600">
+      <button @click="panelOpen = false" class="text-gray-400 hover:text-gray-600" aria-label="Dismiss">
         <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
         </svg>
@@ -88,17 +88,25 @@
       </div>
 
       {# Active filter chips #}
-      <template x-if="commodity">
+      <template x-if="commodity || q">
         <div class="flex flex-wrap gap-1.5 mt-2">
-          <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-brand-50 text-brand-700 rounded-full text-xs">
-            <span x-text="commodityDisplayName"></span>
-            <button @click="selectCommodity(null)" class="hover:text-brand-900">&times;</button>
-          </span>
+          <template x-if="q">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs">
+              Search: <span x-text="q"></span>
+              <button @click="q = ''; applyFilters()" class="hover:text-purple-900" aria-label="Remove filter">&times;</button>
+            </span>
+          </template>
+          <template x-if="commodity">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-brand-50 text-brand-700 rounded-full text-xs">
+              <span x-text="commodityDisplayName"></span>
+              <button @click="selectCommodity(null)" class="hover:text-brand-900" aria-label="Remove filter">&times;</button>
+            </span>
+          </template>
           <template x-for="[key, vals] in Object.entries(subFilters)" :key="key">
             <template x-for="val in (Array.isArray(vals) ? vals : [vals])" :key="key + val">
               <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
                 <span x-text="key.replace(/_/g, ' ') + ': ' + val"></span>
-                <button @click="removeFilter(key, val)" class="hover:text-gray-900">&times;</button>
+                <button @click="removeFilter(key, val)" class="hover:text-gray-900" aria-label="Remove filter">&times;</button>
               </span>
             </template>
           </template>

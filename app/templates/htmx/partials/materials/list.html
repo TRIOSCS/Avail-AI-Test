@@ -70,31 +70,30 @@
   <div class="bg-white rounded-lg border border-brand-200 overflow-hidden">
     {% if materials %}
     <div class="overflow-x-auto">
-      <table class="min-w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
+      <table class="compact-table">
+        <thead>
           <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MPN</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Manufacturer</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Category</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Lifecycle</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Vendors</th>
-            <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Best Price</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Last Searched</th>
+            <th class="text-left">MPN</th>
+            <th class="text-left">Manufacturer</th>
+            <th class="text-left">Category</th>
+            <th class="text-left">Lifecycle</th>
+            <th class="text-right">Vendors</th>
+            <th class="text-right">Best Price</th>
+            <th class="text-left">Last Searched</th>
           </tr>
         </thead>
-        <tbody class="divide-y divide-gray-200">
+        <tbody>
           {% for m in materials %}
-          <tr class="hover:bg-brand-50 cursor-pointer transition-colors"
-              hx-get="/v2/partials/materials/{{ m.id }}"
+          <tr hx-get="/v2/partials/materials/{{ m.id }}"
               hx-target="#main-content"
               hx-push-url="/v2/materials/{{ m.id }}"
               preload="mouseover">
-            <td class="px-4 py-3">
-              <span class="text-sm font-mono font-semibold text-brand-600">{{ m.display_mpn or m.normalized_mpn or "--" }}</span>
+            <td>
+              <span class="font-data font-semibold text-brand-600">{{ m.display_mpn or m.normalized_mpn or "--" }}</span>
             </td>
-            <td class="px-4 py-3 text-sm text-gray-600">{{ m.manufacturer or "--" }}</td>
-            <td class="px-4 py-3 text-sm text-gray-600">{{ m.category or "--" }}</td>
-            <td class="px-4 py-3">
+            <td class="td-label text-gray-600">{{ m.manufacturer or "--" }}</td>
+            <td class="td-label text-gray-600">{{ m.category or "--" }}</td>
+            <td>
               {% set lc_colors = {
                 'active': 'bg-emerald-50 text-emerald-700 border-emerald-200',
                 'eol': 'bg-amber-50 text-amber-700 border-amber-200',
@@ -110,15 +109,15 @@
               <span class="text-xs text-gray-400">--</span>
               {% endif %}
             </td>
-            <td class="px-4 py-3 text-sm text-gray-600 text-right font-medium font-mono">{{ m._vendor_count or 0 }}</td>
-            <td class="px-4 py-3 text-sm text-right">
+            <td class="text-right font-medium">{{ m._vendor_count or 0 }}</td>
+            <td class="text-right">
               {% if m._best_price %}
-              <span class="text-emerald-700 font-medium font-mono">${{ "%.4f"|format(m._best_price) }}</span>
+              <span class="text-emerald-700 font-medium">${{ "%.4f"|format(m._best_price) }}</span>
               {% else %}
               <span class="text-gray-400 text-xs">--</span>
               {% endif %}
             </td>
-            <td class="px-4 py-3 text-sm text-gray-500">{{ m.last_searched_at.strftime('%b %d') if m.last_searched_at else "--" }}</td>
+            <td class="td-label text-gray-500">{{ m.last_searched_at.strftime('%b %d') if m.last_searched_at else "--" }}</td>
           </tr>
           {% endfor %}
         </tbody>
