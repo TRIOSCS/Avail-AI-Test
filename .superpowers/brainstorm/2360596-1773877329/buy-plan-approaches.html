@@ -1,0 +1,252 @@
+<h2>Buy Plan Redesign — 3 Approaches</h2>
+<p class="subtitle">Which direction feels right for reducing noise and improving clarity?</p>
+
+<div class="cards">
+  <!-- Approach A -->
+  <div class="card" data-choice="a" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:20px;background:#f8fafc">
+      <div style="font-size:11px;color:#64748b;margin-bottom:12px;font-weight:600;letter-spacing:0.5px">APPROACH A: PROGRESSIVE DISCLOSURE</div>
+
+      <!-- Mockup -->
+      <div style="background:white;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;font-size:10px">
+        <!-- Header row -->
+        <div style="padding:10px 14px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e2e8f0">
+          <span style="font-weight:700;font-size:13px">Buy Plan #42</span>
+          <span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:99px;font-size:9px;font-weight:600">ACTIVE</span>
+          <span style="margin-left:auto;color:#6b7280;font-size:9px">Acme Corp &bull; Q-2024-156 &bull; SO-4821</span>
+        </div>
+
+        <!-- Workflow stepper -->
+        <div style="padding:10px 14px;background:#f8fafc;border-bottom:1px solid #e2e8f0;display:flex;align-items:center;gap:4px;font-size:9px">
+          <span style="background:#166534;color:white;padding:2px 8px;border-radius:99px">Draft</span>
+          <span style="color:#d1d5db">&rarr;</span>
+          <span style="background:#166534;color:white;padding:2px 8px;border-radius:99px">Submitted</span>
+          <span style="color:#d1d5db">&rarr;</span>
+          <span style="background:#166534;color:white;padding:2px 8px;border-radius:99px">Approved</span>
+          <span style="color:#d1d5db">&rarr;</span>
+          <span style="background:#fef3c7;color:#92400e;padding:2px 8px;border-radius:99px;font-weight:600">PO Execution</span>
+          <span style="color:#d1d5db">&rarr;</span>
+          <span style="color:#9ca3af;padding:2px 8px">Complete</span>
+        </div>
+
+        <!-- Compact stats row -->
+        <div style="padding:10px 14px;display:flex;gap:20px;border-bottom:1px solid #e2e8f0;font-size:9px;color:#6b7280">
+          <span><b style="color:#111">$4,280</b> cost</span>
+          <span><b style="color:#111">$6,150</b> revenue</span>
+          <span><b style="color:#166534">30.4%</b> margin</span>
+          <span><b style="color:#111">3</b> lines &bull; <b>2</b> vendors</span>
+          <span style="margin-left:auto"><span style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:99px">SO Verified</span></span>
+        </div>
+
+        <!-- Collapsible sections with role hints -->
+        <div style="padding:8px 14px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;cursor:pointer">
+          <span style="color:#3b82f6;font-size:9px;margin-right:6px">&#9660;</span>
+          <span style="font-weight:600;font-size:10px">Line Items</span>
+          <span style="margin-left:6px;background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:99px;font-size:8px">2 awaiting PO</span>
+        </div>
+        <div style="padding:6px 14px;font-size:9px;color:#6b7280;border-bottom:1px solid #f1f5f9">
+          <div style="display:flex;gap:12px;padding:3px 0;border-bottom:1px solid #f9fafb">
+            <span style="font-family:monospace;color:#111;width:100px">STM32F407VG</span>
+            <span style="width:70px">DigiKey</span>
+            <span style="width:40px;text-align:right">500</span>
+            <span style="width:60px;text-align:right">$2.14</span>
+            <span style="background:#fef3c7;color:#92400e;padding:0 6px;border-radius:99px;font-size:8px">Awaiting PO</span>
+          </div>
+          <div style="display:flex;gap:12px;padding:3px 0">
+            <span style="font-family:monospace;color:#111;width:100px">TPS65217C</span>
+            <span style="width:70px">Mouser</span>
+            <span style="width:40px;text-align:right">200</span>
+            <span style="width:60px;text-align:right">$3.85</span>
+            <span style="background:#dcfce7;color:#166534;padding:0 6px;border-radius:99px;font-size:8px">Verified</span>
+          </div>
+        </div>
+
+        <div style="padding:8px 14px;border-bottom:1px solid #f1f5f9;display:flex;align-items:center;cursor:pointer;color:#9ca3af">
+          <span style="font-size:9px;margin-right:6px">&#9654;</span>
+          <span style="font-weight:600;font-size:10px;color:#6b7280">AI Insights</span>
+          <span style="margin-left:6px;background:#fef2f2;color:#991b1b;padding:1px 6px;border-radius:99px;font-size:8px">1 warning</span>
+        </div>
+        <div style="padding:8px 14px;display:flex;align-items:center;cursor:pointer;color:#9ca3af">
+          <span style="font-size:9px;margin-right:6px">&#9654;</span>
+          <span style="font-weight:600;font-size:10px;color:#6b7280">Notes & History</span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>A: Progressive Disclosure</h3>
+      <p>Collapse sections by default. Show counts/badges on collapsed headers so users know what's inside without opening. Workflow stepper replaces status badges. Compact single-row stats instead of 6-card grid.</p>
+    </div>
+  </div>
+
+  <!-- Approach B -->
+  <div class="card" data-choice="b" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:20px;background:#f8fafc">
+      <div style="font-size:11px;color:#64748b;margin-bottom:12px;font-weight:600;letter-spacing:0.5px">APPROACH B: ROLE-FOCUSED PANELS</div>
+
+      <div style="background:white;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;font-size:10px">
+        <!-- Header -->
+        <div style="padding:10px 14px;display:flex;align-items:center;gap:8px;border-bottom:1px solid #e2e8f0">
+          <span style="font-weight:700;font-size:13px">Buy Plan #42</span>
+          <span style="background:#dcfce7;color:#166534;padding:2px 8px;border-radius:99px;font-size:9px;font-weight:600">ACTIVE</span>
+          <span style="margin-left:auto;color:#6b7280;font-size:9px">Acme Corp</span>
+        </div>
+
+        <!-- Role-specific action card -->
+        <div style="margin:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:8px;padding:10px 12px">
+          <div style="font-size:10px;font-weight:700;color:#1e40af;margin-bottom:6px">YOUR NEXT ACTIONS</div>
+          <div style="display:flex;gap:8px">
+            <div style="flex:1;background:white;border:1px solid #bfdbfe;border-radius:6px;padding:8px;text-align:center">
+              <div style="font-size:9px;color:#6b7280;margin-bottom:2px">Cut PO for</div>
+              <div style="font-family:monospace;font-size:10px;font-weight:600">STM32F407VG</div>
+              <div style="font-size:9px;color:#6b7280">DigiKey &bull; 500 pcs</div>
+              <div style="margin-top:6px;background:#3b82f6;color:white;padding:3px 10px;border-radius:4px;font-size:9px;font-weight:600;cursor:pointer">Enter PO</div>
+            </div>
+            <div style="flex:1;background:white;border:1px solid #bfdbfe;border-radius:6px;padding:8px;text-align:center">
+              <div style="font-size:9px;color:#6b7280;margin-bottom:2px">Cut PO for</div>
+              <div style="font-family:monospace;font-size:10px;font-weight:600">MAX232CPE</div>
+              <div style="font-size:9px;color:#6b7280">Nexar &bull; 100 pcs</div>
+              <div style="margin-top:6px;background:#3b82f6;color:white;padding:3px 10px;border-radius:4px;font-size:9px;font-weight:600;cursor:pointer">Enter PO</div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Compact deal summary -->
+        <div style="padding:8px 14px;display:flex;gap:16px;font-size:9px;color:#6b7280;border-top:1px solid #f1f5f9">
+          <span>SO: <b style="color:#111">SO-4821</b></span>
+          <span>Cost: <b style="color:#111">$4,280</b></span>
+          <span>Margin: <b style="color:#166534">30.4%</b></span>
+          <span>Lines: <b style="color:#111">3</b></span>
+        </div>
+
+        <!-- Line items (simplified) -->
+        <div style="padding:6px 14px;border-top:1px solid #e2e8f0;font-size:9px">
+          <div style="display:flex;gap:8px;padding:4px 0;color:#9ca3af;font-weight:600;text-transform:uppercase;letter-spacing:0.5px;font-size:8px">
+            <span style="width:110px">Part</span><span style="width:70px">Vendor</span><span style="width:40px;text-align:right">Qty</span><span style="width:50px;text-align:right">Cost</span><span style="width:70px;text-align:center">Status</span>
+          </div>
+          <div style="display:flex;gap:8px;padding:4px 0;border-top:1px solid #f9fafb;color:#374151">
+            <span style="width:110px;font-family:monospace;font-weight:500">STM32F407VG</span><span style="width:70px">DigiKey</span><span style="width:40px;text-align:right">500</span><span style="width:50px;text-align:right">$2.14</span><span style="width:70px;text-align:center"><span style="background:#fef3c7;color:#92400e;padding:0 5px;border-radius:99px;font-size:8px">Awaiting</span></span>
+          </div>
+          <div style="display:flex;gap:8px;padding:4px 0;border-top:1px solid #f9fafb;color:#374151">
+            <span style="width:110px;font-family:monospace;font-weight:500">TPS65217C</span><span style="width:70px">Mouser</span><span style="width:40px;text-align:right">200</span><span style="width:50px;text-align:right">$3.85</span><span style="width:70px;text-align:center"><span style="background:#dcfce7;color:#166534;padding:0 5px;border-radius:99px;font-size:8px">Verified</span></span>
+          </div>
+          <div style="display:flex;gap:8px;padding:4px 0;border-top:1px solid #f9fafb;color:#374151">
+            <span style="width:110px;font-family:monospace;font-weight:500">MAX232CPE</span><span style="width:70px">Nexar</span><span style="width:40px;text-align:right">100</span><span style="width:50px;text-align:right">$1.20</span><span style="width:70px;text-align:center"><span style="background:#fef3c7;color:#92400e;padding:0 5px;border-radius:99px;font-size:8px">Awaiting</span></span>
+          </div>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>B: Role-Focused Panels</h3>
+      <p>Lead with "Your Next Actions" card showing only what the current user needs to do. Line items table simplified to 5 columns. Deal stats compressed to single row. Less chrome, more action.</p>
+    </div>
+  </div>
+
+  <!-- Approach C -->
+  <div class="card" data-choice="c" onclick="toggleSelect(this)">
+    <div class="card-image" style="padding:20px;background:#f8fafc">
+      <div style="font-size:11px;color:#64748b;margin-bottom:12px;font-weight:600;letter-spacing:0.5px">APPROACH C: HYBRID (A + B COMBINED)</div>
+
+      <div style="background:white;border:1px solid #e2e8f0;border-radius:8px;overflow:hidden;font-size:10px">
+        <!-- Compact header + stepper combined -->
+        <div style="padding:10px 14px;border-bottom:1px solid #e2e8f0">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px">
+            <span style="font-weight:700;font-size:13px">Buy Plan #42</span>
+            <span style="color:#6b7280;font-size:9px">Acme Corp &bull; Q-2024-156 &bull; SO-4821</span>
+            <span style="margin-left:auto;font-size:9px"><b style="color:#111">$4,280</b> cost &bull; <b style="color:#166534">30.4%</b> margin &bull; 3 lines</span>
+          </div>
+          <!-- Mini stepper -->
+          <div style="display:flex;gap:0;font-size:8px">
+            <div style="flex:1;height:4px;background:#166534;border-radius:2px 0 0 2px"></div>
+            <div style="flex:1;height:4px;background:#166534;margin-left:2px"></div>
+            <div style="flex:1;height:4px;background:#166534;margin-left:2px"></div>
+            <div style="flex:1;height:4px;background:#fbbf24;margin-left:2px"></div>
+            <div style="flex:1;height:4px;background:#e5e7eb;margin-left:2px;border-radius:0 2px 2px 0"></div>
+          </div>
+          <div style="display:flex;font-size:7px;color:#9ca3af;margin-top:2px">
+            <span style="flex:1;color:#166534">Draft</span>
+            <span style="flex:1;color:#166534">Submit</span>
+            <span style="flex:1;color:#166534">Approve</span>
+            <span style="flex:1;color:#92400e;font-weight:600">PO Exec</span>
+            <span style="flex:1">Complete</span>
+          </div>
+        </div>
+
+        <!-- Role action card (only when there's something to do) -->
+        <div style="margin:10px 14px;background:#eff6ff;border:1px solid #bfdbfe;border-radius:6px;padding:8px 10px;display:flex;align-items:center;gap:10px">
+          <div style="background:#3b82f6;color:white;border-radius:50%;width:24px;height:24px;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex-shrink:0">2</div>
+          <div style="font-size:10px"><b style="color:#1e40af">2 POs need to be cut.</b> <span style="color:#6b7280">STM32F407VG (DigiKey) and MAX232CPE (Nexar)</span></div>
+        </div>
+
+        <!-- Clean line items -->
+        <div style="padding:0 14px 10px;font-size:9px">
+          <table style="width:100%;border-collapse:collapse">
+            <tr style="color:#9ca3af;font-size:8px;text-transform:uppercase;letter-spacing:0.5px">
+              <td style="padding:6px 0;border-bottom:1px solid #e2e8f0">Part</td>
+              <td style="padding:6px 0;border-bottom:1px solid #e2e8f0">Vendor</td>
+              <td style="padding:6px 0;border-bottom:1px solid #e2e8f0;text-align:right">Qty</td>
+              <td style="padding:6px 0;border-bottom:1px solid #e2e8f0;text-align:right">Unit</td>
+              <td style="padding:6px 0;border-bottom:1px solid #e2e8f0;text-align:center">Status</td>
+              <td style="padding:6px 0;border-bottom:1px solid #e2e8f0;text-align:right"></td>
+            </tr>
+            <tr style="color:#374151">
+              <td style="padding:6px 0;border-bottom:1px solid #f1f5f9;font-family:monospace;font-weight:500">STM32F407VG</td>
+              <td style="padding:6px 0;border-bottom:1px solid #f1f5f9">DigiKey</td>
+              <td style="padding:6px 0;border-bottom:1px solid #f1f5f9;text-align:right">500</td>
+              <td style="padding:6px 0;border-bottom:1px solid #f1f5f9;text-align:right">$2.14</td>
+              <td style="padding:6px 0;border-bottom:1px solid #f1f5f9;text-align:center"><span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:99px;font-size:8px">Awaiting PO</span></td>
+              <td style="padding:6px 0;border-bottom:1px solid #f1f5f9;text-align:right"><span style="color:#3b82f6;font-size:9px;font-weight:500;cursor:pointer">Enter PO &rarr;</span></td>
+            </tr>
+            <tr style="color:#374151">
+              <td style="padding:6px 0;border-bottom:1px solid #f1f5f9;font-family:monospace;font-weight:500">TPS65217C</td>
+              <td style="padding:6px 0;border-bottom:1px solid #f1f5f9">Mouser</td>
+              <td style="padding:6px 0;border-bottom:1px solid #f1f5f9;text-align:right">200</td>
+              <td style="padding:6px 0;border-bottom:1px solid #f1f5f9;text-align:right">$3.85</td>
+              <td style="padding:6px 0;border-bottom:1px solid #f1f5f9;text-align:center"><span style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:99px;font-size:8px">Verified</span></td>
+              <td style="padding:6px 0;border-bottom:1px solid #f1f5f9;text-align:right"><span style="color:#166534;font-size:9px">&#10003;</span></td>
+            </tr>
+            <tr style="color:#374151">
+              <td style="padding:6px 0;font-family:monospace;font-weight:500">MAX232CPE</td>
+              <td style="padding:6px 0">Nexar</td>
+              <td style="padding:6px 0;text-align:right">100</td>
+              <td style="padding:6px 0;text-align:right">$1.20</td>
+              <td style="padding:6px 0;text-align:center"><span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:99px;font-size:8px">Awaiting PO</span></td>
+              <td style="padding:6px 0;text-align:right"><span style="color:#3b82f6;font-size:9px;font-weight:500;cursor:pointer">Enter PO &rarr;</span></td>
+            </tr>
+          </table>
+        </div>
+
+        <!-- Collapsed secondary sections -->
+        <div style="border-top:1px solid #e2e8f0;padding:6px 14px;display:flex;gap:16px;font-size:9px;color:#6b7280">
+          <span style="cursor:pointer;display:flex;align-items:center;gap:3px"><span style="font-size:8px">&#9654;</span> AI Insights <span style="background:#fef3c7;color:#92400e;padding:0 4px;border-radius:99px;font-size:7px">1</span></span>
+          <span style="cursor:pointer;display:flex;align-items:center;gap:3px"><span style="font-size:8px">&#9654;</span> Notes</span>
+          <span style="cursor:pointer;display:flex;align-items:center;gap:3px"><span style="font-size:8px">&#9654;</span> SO Verification <span style="background:#dcfce7;color:#166534;padding:0 4px;border-radius:99px;font-size:7px">&#10003;</span></span>
+        </div>
+      </div>
+    </div>
+    <div class="card-body">
+      <h3>C: Hybrid (Recommended)</h3>
+      <p>Best of both: progress bar stepper + role-aware action banner + simplified line table + collapsed secondary sections with badge counts. Maximum signal, minimum noise. Everything on one screen, nothing hidden that matters.</p>
+    </div>
+  </div>
+</div>
+
+<div class="pros-cons" style="margin-top:24px">
+  <div class="pros">
+    <h4>Why C (Hybrid) Works Best</h4>
+    <ul>
+      <li>Progress bar instantly shows where the deal stands</li>
+      <li>Action banner tells each role exactly what to do next</li>
+      <li>Line items reduced from 10 to 6 columns with inline action links</li>
+      <li>AI flags, notes, SO verification collapsed but badge counts visible</li>
+      <li>Stats compressed to header row — no 6-card grid eating vertical space</li>
+    </ul>
+  </div>
+  <div class="cons">
+    <h4>Trade-offs</h4>
+    <ul>
+      <li>More complex template logic (role detection for action banner)</li>
+      <li>Collapsed sections require extra clicks to see details</li>
+      <li>Progress bar needs mapping for edge cases (halted, cancelled)</li>
+    </ul>
+  </div>
+</div>

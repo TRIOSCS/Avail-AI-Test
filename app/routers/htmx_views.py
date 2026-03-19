@@ -7132,6 +7132,95 @@ async def enrich_material(
     )
 
 
+@router.post("/v2/partials/materials/{material_id}/find-crosses", response_class=HTMLResponse)
+async def find_crosses(
+    request: Request,
+    material_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """On-demand AI search for crosses & substitutes for a single material card.
+
+    Called by: HTMX button on the material detail Crosses section.
+    Depends on: claude_json for AI lookup, MaterialCard model.
+    """
+    from ..models.intelligence import MaterialCard
+
+    mc = db.query(MaterialCard).filter(MaterialCard.id == material_id).first()
+    if not mc:
+        raise HTTPException(404, "Material not found")
+
+    mpn = mc.display_mpn or mc.normalized_mpn
+    mfg = mc.manufacturer or "unknown"
+    category = mc.category or "electronic component"
+
+    try:
+        from ..utils.claude_client import claude_json as ai_json
+
+        result = await ai_json(
+            f"List all known CROSSES and SUBSTITUTES for this electronic component:\n"
+            f"  MPN: {mpn}\n"
+            f"  Manufacturer: {mfg}\n"
+            f"  Category: {category}\n\n"
+            f"Include:\n"
+            f"1. Cross-manufacturer equivalents\n"
+            f"2. Pin-compatible alternatives / clones\n"
+            f"3. Same-family variants (different speed grades, temp ranges, packages)\n"
+            f"4. Second-source parts\n\n"
+            f"Only include REAL part numbers you are confident exist. Up to 10 results.",
+            schema={
+                "type": "object",
+                "properties": {
+                    "crosses": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "mpn": {"type": "string"},
+                                "manufacturer": {"type": "string"},
+                            },
+                            "required": ["mpn"],
+                        },
+                    }
+                },
+                "required": ["crosses"],
+            },
+            system=(
+                "You are an expert electronic component sourcing engineer. "
+                "List real, verified part numbers only — no guessing."
+            ),
+            model_tier="smart",
+            max_tokens=2048,
+        )
+
+        crosses = result.get("crosses", []) if result else []
+        # Deduplicate: exclude the card's own MPN
+        own_mpn = (mc.normalized_mpn or "").upper()
+        crosses = [
+            c for c in crosses
+            if isinstance(c, dict) and c.get("mpn") and c["mpn"].strip().upper() != own_mpn
+        ]
+
+        mc.cross_references = crosses
+        db.commit()
+
+    except Exception as exc:
+        logger.warning("Cross-reference search failed for material {}: {}", material_id, exc)
+        db.rollback()
+        # Return a user-friendly error in the crosses section
+        return HTMLResponse(
+            '<div class="text-sm text-red-600 py-2">'
+            "Cross-reference search failed. Please try again later."
+            "</div>"
+        )
+
+    # Return the updated crosses section
+    return templates.TemplateResponse(
+        "htmx/partials/materials/crosses_section.html",
+        {"request": request, "card": mc},
+    )
+
+
 @router.get("/v2/partials/materials/{material_id}/insights", response_class=HTMLResponse)
 async def material_insights(
     request: Request,

@@ -1,0 +1,33 @@
+<h2>Search Experience — Design Direction</h2>
+<p class="subtitle">What vibe should the search feel like for your buyers?</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>Command Center</h3>
+      <p>Dense, data-rich dashboard feel. Source status indicators, live connector feeds, split-panel results. Think Bloomberg terminal meets sourcing — maximum information density for power users who live in this tool all day.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>Clean & Focused</h3>
+      <p>Google-style simplicity — big search bar, clean result cards, progressive disclosure. Results stream in as connectors respond. Filters are tucked away until needed. Prioritizes scannability and speed over density.</p>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>Hybrid — Clean Entry, Rich Results</h3>
+      <p>Starts minimal (big search bar, recent searches). Once results arrive, transitions to a richer layout — source progress bar at top, sortable table with inline expansion, connector health sidebar. Progressive complexity that matches the user's journey.</p>
+    </div>
+  </div>
+</div>
+
+<div class="section" style="margin-top: 2rem;">
+  <h3>Context</h3>
+  <p class="subtitle">Your current search: single input → flat list of lead cards with confidence badges, source filters, and a detail drawer. 8 connectors return results in parallel but the UI waits for all of them before showing anything.</p>
+</div>

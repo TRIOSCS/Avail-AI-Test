@@ -11,6 +11,7 @@ import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Company, User, VendorCard
@@ -644,6 +645,7 @@ class TestAskClaudeMerge:
 # ══════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.slow
 class TestDedupVendorsCoverageGaps:
     def test_rapidfuzz_import_error(self, db_session):
         """Lines 54-56: when rapidfuzz is not installed, returns 0."""

@@ -1,0 +1,178 @@
+<h2>List View — Current vs Proposed</h2>
+<p class="subtitle">The list view currently has 10 columns. How much should we trim?</p>
+
+<div class="split">
+  <div class="mockup">
+    <div class="mockup-header">Current: 10 Columns</div>
+    <div class="mockup-body" style="padding:0;overflow-x:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:9px;min-width:700px">
+        <tr style="background:#f9fafb;color:#9ca3af;font-size:8px;text-transform:uppercase;letter-spacing:0.5px">
+          <td style="padding:6px 8px;border-bottom:2px solid #e5e7eb">Customer</td>
+          <td style="padding:6px 8px;border-bottom:2px solid #e5e7eb">Quote#</td>
+          <td style="padding:6px 8px;border-bottom:2px solid #e5e7eb">SO#</td>
+          <td style="padding:6px 8px;border-bottom:2px solid #e5e7eb;text-align:right">Lines</td>
+          <td style="padding:6px 8px;border-bottom:2px solid #e5e7eb;text-align:right">Cost</td>
+          <td style="padding:6px 8px;border-bottom:2px solid #e5e7eb;text-align:right">Margin%</td>
+          <td style="padding:6px 8px;border-bottom:2px solid #e5e7eb">Status</td>
+          <td style="padding:6px 8px;border-bottom:2px solid #e5e7eb">SO Verif</td>
+          <td style="padding:6px 8px;border-bottom:2px solid #e5e7eb">Submitted</td>
+          <td style="padding:6px 8px;border-bottom:2px solid #e5e7eb">Date</td>
+        </tr>
+        <tr style="color:#374151">
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-weight:500">Acme Corp</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-family:monospace;color:#3b82f6">Q-2024-156</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9">SO-4821</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:right">3</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:right">$4,280</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:right"><span style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:99px">30.4%</span></td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9"><span style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:99px">Active</span></td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9"><span style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:99px">Approved</span></td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;color:#6b7280">John S.</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;color:#9ca3af">Mar 15</td>
+        </tr>
+        <tr style="color:#374151">
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-weight:500">TechFlow Inc</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-family:monospace;color:#3b82f6">Q-2024-163</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9">-</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:right">5</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:right">$12,450</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:right"><span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:99px">18.2%</span></td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9"><span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:99px">Pending</span></td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9"><span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:99px">Pending</span></td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;color:#6b7280">Maria R.</td>
+          <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;color:#9ca3af">Mar 16</td>
+        </tr>
+      </table>
+      <div style="padding:8px;text-align:center;color:#dc2626;font-size:9px;font-weight:500">Problem: horizontal scroll needed on mobile/tablet, SO Verification column redundant with Status</div>
+    </div>
+  </div>
+
+  <div class="mockup">
+    <div class="mockup-header">Proposed: 7 Columns + Progress Indicator</div>
+    <div class="mockup-body" style="padding:0">
+      <table style="width:100%;border-collapse:collapse;font-size:9px">
+        <tr style="background:#f9fafb;color:#9ca3af;font-size:8px;text-transform:uppercase;letter-spacing:0.5px">
+          <td style="padding:6px 10px;border-bottom:2px solid #e5e7eb">Customer</td>
+          <td style="padding:6px 10px;border-bottom:2px solid #e5e7eb">SO# / Quote</td>
+          <td style="padding:6px 10px;border-bottom:2px solid #e5e7eb;text-align:right">Value</td>
+          <td style="padding:6px 10px;border-bottom:2px solid #e5e7eb;text-align:right">Margin</td>
+          <td style="padding:6px 10px;border-bottom:2px solid #e5e7eb">Progress</td>
+          <td style="padding:6px 10px;border-bottom:2px solid #e5e7eb">By</td>
+          <td style="padding:6px 10px;border-bottom:2px solid #e5e7eb">Date</td>
+        </tr>
+        <tr style="color:#374151;cursor:pointer" onmouseover="this.style.background='#f0f7ff'" onmouseout="this.style.background=''">
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9">
+            <div style="font-weight:600">Acme Corp</div>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9">
+            <div style="font-family:monospace;font-weight:500">SO-4821</div>
+            <div style="font-size:8px;color:#9ca3af">Q-2024-156</div>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:right">
+            <div style="font-weight:600">$4,280</div>
+            <div style="font-size:8px;color:#9ca3af">3 lines</div>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:right">
+            <span style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:99px;font-weight:500">30.4%</span>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9">
+            <div style="display:flex;gap:1px;margin-bottom:3px">
+              <div style="flex:1;height:3px;background:#166534;border-radius:2px 0 0 2px"></div>
+              <div style="flex:1;height:3px;background:#166534"></div>
+              <div style="flex:1;height:3px;background:#166534"></div>
+              <div style="flex:1;height:3px;background:#fbbf24"></div>
+              <div style="flex:1;height:3px;background:#e5e7eb;border-radius:0 2px 2px 0"></div>
+            </div>
+            <div style="font-size:8px;color:#92400e;font-weight:500">PO Execution</div>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;color:#6b7280">John S.</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;color:#9ca3af">Mar 15</td>
+        </tr>
+        <tr style="color:#374151;cursor:pointer" onmouseover="this.style.background='#f0f7ff'" onmouseout="this.style.background=''">
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9">
+            <div style="font-weight:600">TechFlow Inc</div>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9">
+            <div style="font-family:monospace;font-weight:500;color:#9ca3af">No SO#</div>
+            <div style="font-size:8px;color:#9ca3af">Q-2024-163</div>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:right">
+            <div style="font-weight:600">$12,450</div>
+            <div style="font-size:8px;color:#9ca3af">5 lines</div>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:right">
+            <span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:99px;font-weight:500">18.2%</span>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9">
+            <div style="display:flex;gap:1px;margin-bottom:3px">
+              <div style="flex:1;height:3px;background:#166534;border-radius:2px 0 0 2px"></div>
+              <div style="flex:1;height:3px;background:#166534"></div>
+              <div style="flex:1;height:3px;background:#fbbf24"></div>
+              <div style="flex:1;height:3px;background:#e5e7eb"></div>
+              <div style="flex:1;height:3px;background:#e5e7eb;border-radius:0 2px 2px 0"></div>
+            </div>
+            <div style="font-size:8px;color:#92400e;font-weight:500">Pending Approval</div>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;color:#6b7280">Maria R.</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;color:#9ca3af">Mar 16</td>
+        </tr>
+        <tr style="color:#374151;cursor:pointer" onmouseover="this.style.background='#f0f7ff'" onmouseout="this.style.background=''">
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9">
+            <div style="font-weight:600">NovaTech</div>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9">
+            <div style="font-family:monospace;font-weight:500">SO-4819</div>
+            <div style="font-size:8px;color:#9ca3af">Q-2024-148</div>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:right">
+            <div style="font-weight:600">$890</div>
+            <div style="font-size:8px;color:#9ca3af">1 line</div>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;text-align:right">
+            <span style="background:#dcfce7;color:#166534;padding:1px 6px;border-radius:99px;font-weight:500">42.1%</span>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9">
+            <div style="display:flex;gap:1px;margin-bottom:3px">
+              <div style="flex:1;height:3px;background:#166534;border-radius:2px 0 0 2px"></div>
+              <div style="flex:1;height:3px;background:#166534"></div>
+              <div style="flex:1;height:3px;background:#166534"></div>
+              <div style="flex:1;height:3px;background:#166534"></div>
+              <div style="flex:1;height:3px;background:#166534;border-radius:0 2px 2px 0"></div>
+            </div>
+            <div style="font-size:8px;color:#166534;font-weight:500">Complete</div>
+          </td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;color:#6b7280">John S.</td>
+          <td style="padding:8px 10px;border-bottom:1px solid #f1f5f9;color:#9ca3af">Mar 12</td>
+        </tr>
+      </table>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:24px;padding:16px;background:#f0fdf4;border:1px solid #bbf7d0;border-radius:8px">
+  <h3 style="margin:0 0 8px;font-size:14px;color:#166534">Key Changes in Proposed List View</h3>
+  <ul style="margin:0;padding-left:20px;font-size:12px;color:#374151;line-height:1.8">
+    <li><b>SO# and Quote# merged</b> into one stacked cell — SO# primary, quote secondary</li>
+    <li><b>Cost and Lines merged</b> — dollar amount primary, line count secondary</li>
+    <li><b>Status + SO Verification replaced</b> with a progress bar + label (one column instead of two)</li>
+    <li><b>10 columns → 7</b> — fits without horizontal scroll on most screens</li>
+    <li><b>Progress bar</b> gives instant visual read on deal stage without parsing text badges</li>
+  </ul>
+</div>
+
+<div class="options" style="margin-top:20px">
+  <div class="option" data-choice="approve-list" onclick="toggleSelect(this)">
+    <div class="letter">&#10003;</div>
+    <div class="content">
+      <h3>Looks good — proceed with this list + the hybrid detail view</h3>
+      <p>Write up the full design spec</p>
+    </div>
+  </div>
+  <div class="option" data-choice="tweak" onclick="toggleSelect(this)">
+    <div class="letter">?</div>
+    <div class="content">
+      <h3>Needs tweaks</h3>
+      <p>Tell me what to adjust in the terminal</p>
+    </div>
+  </div>
+</div>

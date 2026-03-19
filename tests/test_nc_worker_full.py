@@ -2531,6 +2531,7 @@ class TestNcSchedulerFull:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.slow
 class TestNcSearchEngineFull:
     def test_search_http_exception(self):
         """_search_http handles exceptions gracefully (lines 80-82)."""

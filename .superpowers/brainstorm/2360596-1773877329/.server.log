@@ -1,0 +1,5 @@
+{"type":"server-started","port":51234,"host":"0.0.0.0","url_host":"localhost","url":"http://localhost:51234","screen_dir":"/root/availai/.superpowers/brainstorm/2360596-1773877329"}
+{"type":"screen-added","file":"/root/availai/.superpowers/brainstorm/2360596-1773877329/buy-plan-approaches.html"}
+{"type":"screen-added","file":"/root/availai/.superpowers/brainstorm/2360596-1773877329/list-view-cleanup.html"}
+{"type":"screen-added","file":"/root/availai/.superpowers/brainstorm/2360596-1773877329/waiting.html"}
+{"type":"server-stopped","reason":"owner process exited"}

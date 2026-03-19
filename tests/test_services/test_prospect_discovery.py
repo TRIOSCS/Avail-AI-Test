@@ -210,6 +210,7 @@ class TestExploriumDiscovery:
         assert results == []
 
 
+@pytest.mark.slow
 class TestExploriumBatch:
     """Test batch orchestration with dedup."""
 

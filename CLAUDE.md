@@ -76,13 +76,31 @@ docker compose logs -f app          # Tail app logs
 uvicorn app.main:app --host 0.0.0.0 --port 8000
 ```
 
-### Tests
+### Tests — Tiered Strategy
+
+**During development: run only tests for changed files (fast feedback)**
 ```bash
-pytest tests/                           # All tests
-pytest tests/test_routers_rfq.py        # Single file
-pytest tests/test_routers_rfq.py -k "test_send" # Single test by name
-pytest -v                               # Verbose output
+TESTING=1 PYTHONPATH=/root/availai pytest tests/test_<changed_module>.py -v    # Targeted tests (~seconds)
+TESTING=1 PYTHONPATH=/root/availai pytest -m "not slow" -v                     # All fast tests (~2-3 min)
 ```
+
+**Before commit: full suite**
+```bash
+TESTING=1 PYTHONPATH=/root/availai pytest tests/ -v                            # Full suite with parallel (~3-4 min)
+```
+
+**Coverage check: only before PR creation**
+```bash
+TESTING=1 PYTHONPATH=/root/availai pytest tests/ --cov=app --cov-report=term-missing --tb=no -q
+```
+
+**Rules for Claude:**
+- When editing code, run ONLY the test file(s) related to the changed module
+- Run full suite only before committing
+- Run coverage only when explicitly asked or before PR
+- Never run `--cov` during iterative development — it adds significant overhead
+- Tests run in parallel via pytest-xdist (`-n auto` in pytest.ini)
+- Slow tests (marked `@pytest.mark.slow`) are included by default but can be skipped with `-m "not slow"`
 
 Tests use in-memory SQLite with auth overrides (no real DB or M365 tokens needed). PostgreSQL-only features (ARRAY columns, e.g. `buyer_profiles` table) are excluded from the SQLite test DB.
 

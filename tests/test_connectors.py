@@ -131,6 +131,7 @@ class TestBaseConnector:
         assert result == []
         _breakers.pop("SkipConnector", None)
 
+    @pytest.mark.slow
     @pytest.mark.asyncio
     async def test_search_retries_on_generic_error(self):
         from app.connectors.sources import BaseConnector, _breakers
@@ -1147,11 +1148,7 @@ class TestSourcengineConnector:
 
     def test_parse_authorized_true_when_set(self):
         c = self._make_connector()
-        data = {
-            "results": [
-                {"supplier": "Arrow", "mpn": "X", "quantity": 100, "authorized": True}
-            ]
-        }
+        data = {"results": [{"supplier": "Arrow", "mpn": "X", "quantity": 100, "authorized": True}]}
         results = c._parse(data, "X")
         assert results[0]["is_authorized"] is True
 

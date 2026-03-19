@@ -15,6 +15,8 @@ import asyncio
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
 from app.models import ActivityLog, Requisition
 from app.models.pipeline import SyncState
 
@@ -405,6 +407,7 @@ def test_401_not_retried():
     assert result["error"] == 401
 
 
+@pytest.mark.slow
 def test_429_returns_error_in_test_mode():
     """In TESTING mode (MAX_RETRIES=0), 429 returns after single attempt."""
     from app.utils.graph_client import GraphClient

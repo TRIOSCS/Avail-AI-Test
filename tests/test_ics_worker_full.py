@@ -3002,6 +3002,7 @@ class TestSearchEngineFull:
 # ═══════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.slow
 class TestSessionManagerFull:
     @pytest.mark.asyncio
     async def test_start_success(self):
