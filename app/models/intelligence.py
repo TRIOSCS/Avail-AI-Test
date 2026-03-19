@@ -125,8 +125,8 @@ class ProactiveMatch(Base):
     __tablename__ = "proactive_matches"
     id = Column(Integer, primary_key=True)
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False)
-    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
-    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True)
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"), nullable=True)
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id"), nullable=False)
     salesperson_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     mpn = Column(String(255), nullable=False)
