@@ -36,5 +36,4 @@ __pycache__/
 *.pyc
 *.pyo
 node_modules/
-scripts/
 *.bak
