@@ -41,7 +41,13 @@ COARSE_TO_GRANULAR = {**DETERMINISTIC_MAP, **AMBIGUOUS_MAP}
 
 def main(dry_run: bool = True):
     db = SessionLocal()
+    try:
+        _run(db, dry_run=dry_run)
+    finally:
+        db.close()
 
+
+def _run(db, dry_run: bool = True):
     total_updated = 0
 
     for old_cat, new_cat in COARSE_TO_GRANULAR.items():
@@ -89,7 +95,6 @@ def main(dry_run: bool = True):
 
     mode = "DRY RUN" if dry_run else "APPLIED"
     logger.info(f"[{mode}] Total reclassified: {total_updated}")
-    db.close()
 
 
 if __name__ == "__main__":

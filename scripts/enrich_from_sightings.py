@@ -13,7 +13,7 @@ import os
 import sys
 
 from loguru import logger
-from sqlalchemy import func, text
+from sqlalchemy import func
 
 sys.path.insert(0, os.environ.get("APP_ROOT", "/app"))
 from app.database import SessionLocal
@@ -151,7 +151,13 @@ def enrich_card_from_sightings(
 
 def main(dry_run: bool = True, limit: int = 0):
     db = SessionLocal()
+    try:
+        _run(db, dry_run=dry_run, limit=limit)
+    finally:
+        db.close()
 
+
+def _run(db, dry_run: bool = True, limit: int = 0):
     # Count cards with sightings
     total_cards_with_sightings = (
         db.query(func.count(func.distinct(Sighting.material_card_id)))
@@ -247,7 +253,6 @@ def main(dry_run: bool = True, limit: int = 0):
 
     mode = "DRY RUN" if dry_run else "APPLIED"
     logger.info(f"[{mode}] Final stats: {stats}")
-    db.close()
 
 
 if __name__ == "__main__":

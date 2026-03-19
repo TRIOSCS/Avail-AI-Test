@@ -25,23 +25,22 @@ from loguru import logger
 
 sys.path.insert(0, os.environ.get("APP_ROOT", "/app"))
 
+from sqlalchemy import func
+
 from app.database import SessionLocal
 from app.models.enrichment_run import EnrichmentRun
 from app.models.intelligence import MaterialCard
 from app.models.sourcing import Sighting
-from app.services.specialty_detector import COMMODITY_MAP
-
-from sqlalchemy import func
-
-# Import phase logic from individual scripts
-from scripts.enrich_from_sightings import enrich_card_from_sightings, SOURCE_PRIORITY
+from scripts.enrich_batch import (
+    BATCH_SIZE,
+    _build_batch_requests,
+)
 from scripts.enrich_batch import (
     VALID_CATEGORIES as BATCH_CATEGORIES,
-    _build_batch_requests,
-    _SYSTEM as BATCH_SYSTEM,
-    _SCHEMA as BATCH_SCHEMA,
-    BATCH_SIZE,
 )
+
+# Import phase logic from individual scripts
+from scripts.enrich_from_sightings import SOURCE_PRIORITY, enrich_card_from_sightings
 from scripts.enrich_specs_batch import (
     COMMODITY_SPECS,
     _build_spec_prompt,
@@ -235,7 +234,7 @@ async def phase_1_mine_sightings(db, dry_run: bool) -> dict:
 
 async def phase_2_batch_enrichment(db, dry_run: bool) -> dict:
     """Submit all cards to Sonnet Batch API for category + description + package."""
-    from app.utils.claude_client import claude_batch_submit, claude_batch_results
+    from app.utils.claude_client import claude_batch_submit
 
     logger.info("═══ Phase 2: AI batch enrichment (Sonnet) ═══")
 
@@ -331,7 +330,7 @@ async def _poll_and_apply_phase2(db, run: EnrichmentRun, dry_run: bool) -> dict:
 
             # Apply results
             for custom_id, result_data in results.items():
-                if result_data is None:
+                if result_data is None or not isinstance(result_data, dict):
                     stats["errors"] += 1
                     continue
 
@@ -394,7 +393,7 @@ async def _poll_and_apply_phase2(db, run: EnrichmentRun, dry_run: bool) -> dict:
 
 async def phase_3_spec_extraction(db, dry_run: bool) -> dict:
     """Extract structured specs per commodity via Sonnet Batch API."""
-    from app.utils.claude_client import claude_batch_submit, claude_batch_results
+    from app.utils.claude_client import claude_batch_submit
 
     logger.info("═══ Phase 3: Structured spec extraction ═══")
 
@@ -505,7 +504,7 @@ async def _poll_and_apply_specs(db, run: EnrichmentRun, category: str, dry_run: 
                 continue
 
             for custom_id, result_data in results.items():
-                if result_data is None:
+                if result_data is None or not isinstance(result_data, dict):
                     stats["errors"] += 1
                     continue
 
@@ -547,7 +546,7 @@ async def _poll_and_apply_specs(db, run: EnrichmentRun, category: str, dry_run: 
 
 async def phase_4_premium_descriptions(db, dry_run: bool) -> dict:
     """Generate rich technical descriptions for all cards with a category."""
-    from app.utils.claude_client import claude_batch_submit, claude_batch_results
+    from app.utils.claude_client import claude_batch_submit
 
     logger.info("═══ Phase 4: Premium descriptions (Sonnet) ═══")
 
@@ -695,7 +694,7 @@ async def _poll_and_apply_descriptions(db, run: EnrichmentRun, dry_run: bool) ->
                 continue
 
             for custom_id, result_data in results.items():
-                if result_data is None:
+                if result_data is None or not isinstance(result_data, dict):
                     stats["errors"] += 1
                     continue
 
@@ -820,35 +819,59 @@ async def run_pipeline(dry_run: bool = True, resume: bool = False):
         db.close()
 
 
+RETRY_DELAY_MINUTES = 5  # retry quickly after errors
+MAX_CONSECUTIVE_ERRORS = 10  # back off after repeated failures
+
+
 async def run_loop(interval_hours: float = 6.0):
     """Run the enrichment pipeline in a continuous loop.
 
-    After each full run, sleeps for interval_hours then runs again.
+    After a successful run, sleeps for interval_hours then runs again.
+    After a failure, retries in RETRY_DELAY_MINUTES (backs off after MAX_CONSECUTIVE_ERRORS).
     Always resumes from checkpoint so completed phases are skipped.
-    Catches and logs all errors — never exits unless killed.
     """
-    logger.info(f"Enrichment worker starting — loop interval: {interval_hours}h")
+    logger.info(f"Enrichment worker starting — loop interval: {interval_hours}h, retry delay: {RETRY_DELAY_MINUTES}m")
+    consecutive_errors = 0
 
     while True:
         try:
             await run_pipeline(dry_run=False, resume=True)
             logger.info(f"Pipeline run complete — sleeping {interval_hours}h until next run")
-        except Exception as e:
-            logger.error(f"Pipeline run failed: {e} — will retry in {interval_hours}h")
+            consecutive_errors = 0
+            sleep_seconds = interval_hours * 3600
 
-        await asyncio.sleep(interval_hours * 3600)
-
-        # Clear completed runs so the next loop does a fresh pass
-        try:
+            # Clear completed runs so the next loop does a fresh pass
             db = SessionLocal()
-            db.query(EnrichmentRun).filter(
-                EnrichmentRun.status == "completed"
-            ).delete(synchronize_session=False)
-            db.commit()
-            db.close()
-            logger.info("Cleared completed runs — next loop will re-enrich")
+            try:
+                db.query(EnrichmentRun).filter(EnrichmentRun.status == "completed").delete(
+                    synchronize_session=False
+                )
+                db.commit()
+                logger.info("Cleared completed runs — next loop will re-enrich")
+            except Exception as e:
+                logger.warning(f"Failed to clear completed runs: {e}")
+            finally:
+                db.close()
+
+        except (KeyboardInterrupt, SystemExit):
+            logger.info("Enrichment worker shutting down")
+            raise
         except Exception as e:
-            logger.warning(f"Failed to clear completed runs: {e}")
+            consecutive_errors += 1
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                sleep_seconds = interval_hours * 3600
+                logger.error(
+                    f"Pipeline failed ({consecutive_errors} consecutive errors): {e} "
+                    f"— backing off to {interval_hours}h"
+                )
+            else:
+                sleep_seconds = RETRY_DELAY_MINUTES * 60
+                logger.error(
+                    f"Pipeline failed (attempt {consecutive_errors}): {e} "
+                    f"— retrying in {RETRY_DELAY_MINUTES}m"
+                )
+
+        await asyncio.sleep(sleep_seconds)
 
 
 if __name__ == "__main__":

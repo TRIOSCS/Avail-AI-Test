@@ -395,22 +395,28 @@ if __name__ == "__main__":
         if args.all:
             async def submit_all():
                 db = SessionLocal()
-                for cat in COMMODITY_SPECS:
-                    result = await submit_spec_extraction(db, cat, limit=args.limit)
-                    logger.info(f"[{cat}] {result}")
-                db.close()
+                try:
+                    for cat in COMMODITY_SPECS:
+                        result = await submit_spec_extraction(db, cat, limit=args.limit)
+                        logger.info(f"[{cat}] {result}")
+                finally:
+                    db.close()
             asyncio.run(submit_all())
         else:
             async def submit_one():
                 db = SessionLocal()
-                result = await submit_spec_extraction(db, args.category, limit=args.limit)
-                logger.info(result)
-                db.close()
+                try:
+                    result = await submit_spec_extraction(db, args.category, limit=args.limit)
+                    logger.info(result)
+                finally:
+                    db.close()
             asyncio.run(submit_one())
     elif args.command == "apply":
         async def apply():
             db = SessionLocal()
-            result = await apply_spec_results(args.meta_path, db, dry_run=not args.apply)
-            logger.info(result)
-            db.close()
+            try:
+                result = await apply_spec_results(args.meta_path, db, dry_run=not args.apply)
+                logger.info(result)
+            finally:
+                db.close()
         asyncio.run(apply())
