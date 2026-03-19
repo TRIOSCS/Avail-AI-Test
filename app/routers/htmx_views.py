@@ -43,6 +43,7 @@ from ..models import (
 )
 from ..models.buy_plan import BuyPlanStatus
 from ..models.enrichment import ProspectContact
+from ..models.faceted_search import CommoditySpecSchema
 from ..models.prospect_account import ProspectAccount
 from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorContact
@@ -6140,10 +6141,22 @@ async def materials_faceted_partial(
         )
         vendor_stats = {s[0]: (s[1], s[2]) for s in stats}
 
+    # Attach primary spec chips for display
+    primary_keys = {}
+    if commodity:
+        primary_keys = {
+            s.spec_key: s.display_name
+            for s in db.query(CommoditySpecSchema).filter_by(commodity=commodity, is_primary=True).all()
+        }
+
     for m in materials:
         vc, bp = vendor_stats.get(m.id, (0, None))
         m._vendor_count = vc
         m._best_price = bp
+        specs = m.specs_structured or {}
+        m._primary_specs = [
+            {"label": primary_keys[k], "value": specs[k].get("value", "")} for k in primary_keys if k in specs
+        ]
 
     ctx = _base_ctx(request, user, "materials")
     ctx.update(

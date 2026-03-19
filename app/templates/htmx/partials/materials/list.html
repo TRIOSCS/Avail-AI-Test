@@ -90,6 +90,15 @@
               preload="mouseover">
             <td>
               <span class="font-data font-semibold text-brand-600">{{ m.display_mpn or m.normalized_mpn or "--" }}</span>
+              {% if m._primary_specs %}
+              <div class="flex flex-wrap gap-1 mt-0.5">
+                {% for spec in m._primary_specs[:3] %}
+                <span class="inline-block px-1.5 py-0.5 bg-gray-50 text-[10px] text-gray-500 rounded font-data">
+                  {{ spec.value }}
+                </span>
+                {% endfor %}
+              </div>
+              {% endif %}
             </td>
             <td class="td-label text-gray-600">{{ m.manufacturer or "--" }}</td>
             <td class="td-label text-gray-600">{{ m.category or "--" }}</td>
