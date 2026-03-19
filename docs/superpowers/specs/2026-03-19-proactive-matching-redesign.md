@@ -50,11 +50,26 @@ All backend changes are prerequisites for the new UI. They pay down real tech de
 - Sighting scan in `run_proactive_scan()` (lines 296-305 in proactive_matching.py)
 - The dual-scan in `POST /api/proactive/refresh` (router lines 42-63) — replace with single call to `run_proactive_scan()`
 - Module-level `_last_proactive_scan` global from proactive_service.py (line 36)
+- `proactive_archive_age_days` config setting from `app/config.py` (only used by deleted legacy engine)
 
 **Keep:**
 - `run_proactive_scan()` as the single batch scan entry point (offers only)
 - `find_matches_for_offer()` as the single-offer trigger
 - `_find_matches()` as the core matching logic
+
+### 1a-migration. Make `requirement_id` and `requisition_id` nullable on ProactiveMatch
+
+The current model (`app/models/intelligence.py`) has `offer_id`, `requirement_id`, and `requisition_id` as NOT NULL FKs. When matching Offers against CPH, many CPH rows will have no corresponding requisition/requirement for the customer+part combo. The current code silently skips these — losing valid matches.
+
+**Fix:** Alembic migration to make `requirement_id` and `requisition_id` nullable:
+
+```python
+# alembic migration
+op.alter_column('proactive_matches', 'requirement_id', nullable=True)
+op.alter_column('proactive_matches', 'requisition_id', nullable=True)
+```
+
+Update the model in `app/models/intelligence.py` to match. Remove the fallback requisition query from `_find_matches()` — matches without a historical requisition are now valid.
 
 ### 1b. Fix N+1 Queries in `_find_matches()`
 
@@ -74,26 +89,26 @@ for s in db.query(CustomerSite).filter(
 ).all():
     sites.setdefault(s.company_id, s)
 
-dno_set = set(
-    db.query(ProactiveDoNotOffer.company_id)
+dno_company_ids = {
+    row[0] for row in db.query(ProactiveDoNotOffer.company_id)
     .filter(ProactiveDoNotOffer.mpn == mpn_upper, ProactiveDoNotOffer.company_id.in_(company_ids))
     .all()
-)
+}
 
 site_ids = {s.id for s in sites.values()}
-throttled_sites = set(
-    db.query(ProactiveThrottle.customer_site_id)
+throttled_site_ids = {
+    row[0] for row in db.query(ProactiveThrottle.customer_site_id)
     .filter(ProactiveThrottle.mpn == mpn_upper, ProactiveThrottle.customer_site_id.in_(site_ids),
             ProactiveThrottle.last_offered_at > throttle_cutoff)
     .all()
-)
+}
 
-existing_matches = set(
-    db.query(ProactiveMatch.company_id)
+existing_match_company_ids = {
+    row[0] for row in db.query(ProactiveMatch.company_id)
     .filter(ProactiveMatch.material_card_id == material_card_id,
             ProactiveMatch.status.in_(["new", "sent"]))
     .all()
-)
+}
 
 req_by_site = {}
 for req_item, requisition in (
@@ -122,7 +137,7 @@ def _get_watermark(db: Session, key: str = "proactive_last_scan") -> datetime:
         return datetime.fromisoformat(row.value)
     return datetime.now(timezone.utc) - timedelta(hours=settings.proactive_scan_interval_hours)
 
-def _set_watermark(db: Session, key: str = "proactive_last_scan", ts: datetime):
+def _set_watermark(db: Session, ts: datetime, key: str = "proactive_last_scan"):
     row = db.query(SystemConfig).filter(SystemConfig.key == key).first()
     if row:
         row.value = ts.isoformat()
@@ -180,7 +195,7 @@ New: `material_card_id + company_id + status IN (new, sent)` only. Remove the `o
 
 **Enforce account owner visibility:**
 
-In `get_matches_for_user()`, filter by `Company.account_owner_id == user_id` instead of `ProactiveMatch.salesperson_id == user_id`. When creating matches, set `salesperson_id = company.account_owner_id`. If `account_owner_id` is null, skip the match.
+When creating matches in `_find_matches()`, set `salesperson_id = company.account_owner_id`. If `account_owner_id` is null, skip the match (no owner = no one to show it to). The existing filter in `get_matches_for_user()` on `ProactiveMatch.salesperson_id == user_id` continues to work correctly since `salesperson_id` is always set to the account owner. No join change needed.
 
 ### 1g. Fix Scorecard (if actively used)
 
@@ -224,7 +239,7 @@ return count
 
 Replace card grid (`_match_card.html`) with a compact table per customer group.
 
-**Columns (6):**
+**Columns (7):**
 
 | # | Column | Width | Content |
 |---|--------|-------|---------|
@@ -238,10 +253,13 @@ Replace card grid (`_match_card.html`) with a compact table per customer group.
 
 **Purchase history:** Small repeat-purchase icon with count (`3×`), full detail (last purchased date, avg price) in hover popover via `title` attribute or Alpine popover. Not a full column.
 
-**Vendor reliability tags:**
+**Vendor reliability tags** (requires join: `ProactiveMatch → Offer → VendorCard` via `offer.vendor_card_id`):
 - Ghost rate >30%: red "unreliable" text tag
 - Vendor score ≥70: green "trusted" text tag
+- No VendorCard linked (nullable FK): no tag shown
 - Otherwise: no tag
+
+**Margin when null:** Show gray "N/A" pill when `margin_pct` is null (unknown cost/price data).
 
 ### 2b. Customer Group Header
 
@@ -267,22 +285,24 @@ Desktop-first. Below `md` breakpoint, show horizontal scroll with frozen checkbo
 
 ### 2d. Alpine.js State (Per-Group)
 
-Each customer group manages its own selection state:
+Each customer group manages its own selection state. Note: Alpine.js does not deeply track `Set` mutations. Use a reactive object (plain object with ID keys) instead:
 
 ```javascript
 function proactiveGroup(groupData) {
   return {
-    selected: new Set(),
-    get selectedCount() { return this.selected.size },
+    selected: {},  // { matchId: true } — plain object for Alpine reactivity
+    get selectedCount() { return Object.keys(this.selected).length },
+    get selectedIds() { return Object.keys(this.selected).map(Number) },
     toggle(id) {
-      this.selected.has(id) ? this.selected.delete(id) : this.selected.add(id);
+      if (this.selected[id]) delete this.selected[id];
+      else this.selected[id] = true;
     },
     selectAll() {
-      groupData.matchIds.forEach(id => this.selected.add(id));
+      groupData.matchIds.forEach(id => this.selected[id] = true);
     },
-    deselectAll() { this.selected.clear() },
+    deselectAll() { this.selected = {} },
     toggleAll() {
-      this.selected.size === groupData.matchIds.length ? this.deselectAll() : this.selectAll();
+      this.selectedCount === groupData.matchIds.length ? this.deselectAll() : this.selectAll();
     },
   }
 }
@@ -290,7 +310,11 @@ function proactiveGroup(groupData) {
 
 No cross-group state. Each group is self-contained.
 
-### 2e. Empty States
+### 2e. Row Sort Order Within Groups
+
+Rows within each customer group sorted by `match_score` descending (highest opportunity first).
+
+### 2f. Empty States
 
 - **No matches at all:** Centered icon + "No new matches today. Matches appear when vendor offers align with customer purchase history."
 - **Sent tab empty:** "No offers sent yet. Select matches and prepare offers from the Matches tab."
@@ -303,7 +327,7 @@ No cross-group state. Each group is self-contained.
 
 1. Salesperson checks parts in a customer group
 2. "Prepare (N)" button becomes active, showing count
-3. Click navigates to: `GET /v2/proactive/prepare/{site_id}?match_ids=1,2,3`
+3. Click submits via `POST /v2/proactive/prepare/{site_id}` with match_ids in form body (avoids URL length limits for large selections)
 4. Full-page layout renders with selected parts and contacts
 
 ### 3b. Prepare Page Layout
@@ -378,7 +402,7 @@ No cross-group state. Each group is self-contained.
 
 **On failure:** Stay on prepare page. Show error banner: "Failed to send to jane@acme.com: [reason]. Other emails sent successfully." Match status unchanged for failed sends.
 
-**Partial failure:** Per-contact status tracking. Matches only marked "sent" when all emails succeed. If some fail, show which failed with retry option.
+**Partial failure:** Track send status per contact on the ProactiveOffer record (e.g., `send_status: dict[str, str]` mapping email → "sent"/"failed"/"pending"). Matches marked "sent" when at least one email succeeds. Failed contacts shown with retry option — retry only re-sends to failed contacts, not all. One `ProactiveOffer` record per send operation (not per contact), with `recipient_contact_ids` as the full list and `send_status` tracking individual results.
 
 ### 3f. Per-Group Dismiss
 
@@ -416,7 +440,7 @@ Show `total_sell` formatted as currency inline in the sent offers table.
 
 ### 4d. Relative Timestamps
 
-Server-side helper to convert ISO timestamps to relative format ("2h ago", "3d ago", "2w ago"). Use a Jinja filter, no JS library.
+Server-side helper to convert ISO timestamps to relative format ("2h ago", "3d ago", "2w ago"). Use a Jinja filter, no JS library. Note: timestamps won't update without page refresh — acceptable tradeoff for a B2B tool.
 
 ---
 
@@ -442,7 +466,7 @@ Salesperson views /v2/proactive (Matches tab)
     → Table with checkboxes per group
     ↓
 Salesperson selects parts → clicks "Prepare (N)"
-    → Full page: /v2/proactive/prepare/{site_id}?match_ids=...
+    → Full page: POST /v2/proactive/prepare/{site_id} (match_ids in form body)
     → Parts summary + contact picker + email compose
     → Optional: "Generate AI Draft" button
     ↓
@@ -469,7 +493,7 @@ Salesperson clicks "Send to N Contact(s)"
 - `app/templates/htmx/partials/proactive/_match_card.html` — Replace with `_match_row.html`
 - `app/templates/htmx/partials/proactive/draft_form.html` — Remove (replaced by prepare page)
 - `app/templates/htmx/partials/proactive/send_success.html` — Inline banner instead
-- `app/config.py` — No changes (throttle_days, scan_interval already exist)
+- `app/config.py` — Remove `proactive_archive_age_days` (only used by deleted legacy engine)
 
 ### New Files
 - `app/services/proactive_helpers.py` — Shared helpers (is_do_not_offer, is_throttled)
@@ -477,6 +501,11 @@ Salesperson clicks "Send to N Contact(s)"
 - `app/templates/htmx/partials/proactive/prepare.html` — Full prepare page
 - Tests for all new/modified code
 
+### Unchanged Files (kept as-is)
+- `app/templates/htmx/partials/proactive/scorecard.html` — Scorecard panel (no changes)
+- `app/templates/htmx/partials/proactive/convert_success.html` — Conversion confirmation (no changes)
+
 ### Deleted Files
-- `app/templates/htmx/partials/proactive/_match_card.html` — Replaced by row
+- `app/templates/htmx/partials/proactive/_match_card.html` — Replaced by `_match_row.html`
 - `app/templates/htmx/partials/proactive/draft_form.html` — Replaced by prepare page
+- `app/templates/htmx/partials/proactive/send_success.html` — Replaced by inline banner on matches list
