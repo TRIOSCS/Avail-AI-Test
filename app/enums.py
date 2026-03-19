@@ -82,3 +82,16 @@ class UserRole(str, enum.Enum):
     trader = "trader"
     manager = "manager"
     admin = "admin"
+
+
+class ProactiveMatchStatus(str, enum.Enum):
+    new = "new"
+    sent = "sent"
+    dismissed = "dismissed"
+    converted = "converted"
+    expired = "expired"
+
+
+class ProactiveOfferStatus(str, enum.Enum):
+    sent = "sent"
+    converted = "converted"
