@@ -24,6 +24,18 @@ def register_core_jobs(scheduler, settings):
         _job_inbox_scan, IntervalTrigger(minutes=settings.inbox_scan_interval_min), id="inbox_scan", name="Inbox scan"
     )
     scheduler.add_job(_job_batch_results, IntervalTrigger(minutes=5), id="batch_results", name="Process batch results")
+    scheduler.add_job(
+        _job_batch_enrich_materials,
+        IntervalTrigger(minutes=30),
+        id="batch_enrich_materials",
+        name="Batch enrich materials",
+    )
+    scheduler.add_job(
+        _job_poll_material_batch,
+        IntervalTrigger(minutes=5),
+        id="poll_material_batch",
+        name="Poll material batch results",
+    )
     if settings.activity_tracking_enabled:
         scheduler.add_job(
             _job_webhook_subscriptions, IntervalTrigger(minutes=5), id="webhook_subs", name="Webhook subscriptions"
@@ -202,6 +214,42 @@ async def _job_batch_results():
         db.rollback()
     except Exception as e:
         logger.error(f"Batch results processing error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_batch_enrich_materials():
+    """Submit unenriched material cards to Claude Batch API (runs every 30 min)."""
+    from ..database import SessionLocal
+    from ..services.material_enrichment_service import batch_enrich_materials
+
+    db = SessionLocal()
+    try:
+        batch_id = await batch_enrich_materials(db)
+        if batch_id:
+            logger.info(f"Material batch enrich submitted: {batch_id}")
+    except Exception as e:
+        logger.error(f"Material batch enrich error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_poll_material_batch():
+    """Poll and apply material batch enrichment results (runs every 5 min)."""
+    from ..database import SessionLocal
+    from ..services.material_enrichment_service import process_material_batch_results
+
+    db = SessionLocal()
+    try:
+        result = await process_material_batch_results(db)
+        if result:
+            logger.info(f"Material batch results: {result['applied']} applied, {result['errors']} errors")
+    except Exception as e:
+        logger.error(f"Material batch poll error: {e}")
         db.rollback()
     finally:
         db.close()
