@@ -33,6 +33,9 @@ from .enrichment import (  # noqa: F401
     ProspectContact,
 )
 
+# Enrichment Pipeline State
+from .enrichment_run import EnrichmentRun  # noqa: F401
+
 # Error Reports / Trouble Tickets
 from .error_report import ErrorReport  # noqa: F401
 
