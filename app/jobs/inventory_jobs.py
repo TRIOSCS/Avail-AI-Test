@@ -13,6 +13,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
 from ..scheduler import _traced_job
+from ..services.price_snapshot_service import record_price_snapshot
 
 
 def register_inventory_jobs(scheduler, settings):
@@ -287,6 +288,10 @@ async def _download_and_import_stock_list(
                 mvh.last_price = row["unit_price"]
             elif row.get("price"):
                 mvh.last_price = row["price"]
+            price = row.get("unit_price") or row.get("price")
+            record_price_snapshot(
+                db=db, material_card_id=card.id, vendor_name=norm_vendor, price=price, source="email_auto_import"
+            )
             if row.get("manufacturer"):
                 mvh.last_manufacturer = row["manufacturer"]
         else:
@@ -300,6 +305,13 @@ async def _download_and_import_stock_list(
                 last_manufacturer=row.get("manufacturer", ""),
             )
             db.add(mvh)
+            record_price_snapshot(
+                db=db,
+                material_card_id=card.id,
+                vendor_name=norm_vendor,
+                price=row.get("unit_price") or row.get("price"),
+                source="email_auto_import",
+            )
 
         imported += 1
         imported_for_matching.append(

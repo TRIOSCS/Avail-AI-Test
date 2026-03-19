@@ -39,6 +39,7 @@ from ..services.material_card_service import (
 from ..services.material_card_service import (
     serialize_material_card as material_card_to_dict,
 )
+from ..services.price_snapshot_service import record_price_snapshot
 from ..utils.normalization import normalize_mpn_key
 from ..utils.sql_helpers import escape_like
 from ..utils.vendor_helpers import _background_enrich_vendor
@@ -463,6 +464,13 @@ async def import_stock_list_standalone(
                 mvh.last_qty = parsed["qty"]
             if parsed.get("price") is not None:
                 mvh.last_price = parsed["price"]
+                record_price_snapshot(
+                    db=db,
+                    material_card_id=card.id,
+                    vendor_name=norm_vendor,
+                    price=parsed.get("price"),
+                    source="stock_list",
+                )
             if parsed.get("manufacturer"):
                 mvh.last_manufacturer = parsed["manufacturer"]
             mvh.source_type = "stock_list"
@@ -478,6 +486,9 @@ async def import_stock_list_standalone(
                 last_manufacturer=parsed.get("manufacturer") or "",
             )
             db.add(mvh)
+            record_price_snapshot(
+                db=db, material_card_id=card.id, vendor_name=norm_vendor, price=parsed.get("price"), source="stock_list"
+            )
 
         imported += 1
 
