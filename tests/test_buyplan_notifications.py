@@ -355,12 +355,12 @@ class TestRunV3NotifyBg:
 
         coro_factory = AsyncMock()
 
+        async def _run_coro(coro, **kwargs):
+            await coro
+
         with patch("app.database.SessionLocal", return_value=db_session):
-            with patch("asyncio.create_task") as mock_task:
-                run_notify_bg(coro_factory, plan.id, extra="arg")
-                # Extract the coroutine passed to create_task and await it
-                coro = mock_task.call_args[0][0]
-                await coro
+            with patch("app.services.buyplan_notifications.safe_background_task", side_effect=_run_coro):
+                await run_notify_bg(coro_factory, plan.id, extra="arg")
 
         coro_factory.assert_awaited_once()
 
@@ -370,11 +370,12 @@ class TestRunV3NotifyBg:
 
         coro_factory = AsyncMock()
 
+        async def _run_coro(coro, **kwargs):
+            await coro
+
         with patch("app.database.SessionLocal", return_value=db_session):
-            with patch("asyncio.create_task") as mock_task:
-                run_notify_bg(coro_factory, 99999)
-                coro = mock_task.call_args[0][0]
-                await coro
+            with patch("app.services.buyplan_notifications.safe_background_task", side_effect=_run_coro):
+                await run_notify_bg(coro_factory, 99999)
 
         coro_factory.assert_not_awaited()
 
@@ -387,11 +388,12 @@ class TestRunV3NotifyBg:
 
         coro_factory = AsyncMock(side_effect=Exception("boom"))
 
+        async def _run_coro(coro, **kwargs):
+            await coro
+
         with patch("app.database.SessionLocal", return_value=db_session):
-            with patch("asyncio.create_task") as mock_task:
-                run_notify_bg(coro_factory, plan.id)
-                coro = mock_task.call_args[0][0]
-                await coro  # should not raise
+            with patch("app.services.buyplan_notifications.safe_background_task", side_effect=_run_coro):
+                await run_notify_bg(coro_factory, plan.id)  # should not raise
 
 
 # ═══════════════════════════════════════════════════════════════════════

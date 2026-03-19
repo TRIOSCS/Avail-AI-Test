@@ -1213,15 +1213,11 @@ class TestSiteOwnershipGuard:
 
         captured_coro = None
 
-        def _capture_task(coro):
+        async def _capture_task(coro, **kwargs):
             nonlocal captured_coro
             captured_coro = coro
-            # Return a mock task so endpoint doesn't error
-            f = asyncio.get_event_loop().create_future()
-            f.set_result(None)
-            return f
 
-        with patch("app.routers.crm.sites.asyncio.create_task", side_effect=_capture_task):
+        with patch("app.routers.crm.sites.safe_background_task", side_effect=_capture_task):
             resp = client.post(
                 f"/api/companies/{test_company.id}/sites",
                 json={"site_name": "BG Enrich Site"},
@@ -3012,7 +3008,7 @@ class TestReqStatusTransitions:
         self, mock_cred, client, db_session, test_requisition, monkeypatch
     ):
         """Creating offer with new vendor + domain triggers background enrichment."""
-        monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close() if hasattr(coro, "close") else None)
+        monkeypatch.setattr("app.routers.crm.offers.safe_background_task", AsyncMock())
         req = test_requisition
         requirement = req.requirements[0]
         resp = client.post(
