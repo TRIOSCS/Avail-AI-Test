@@ -256,7 +256,9 @@ async def apply_spec_results(meta_path: str, db, dry_run: bool = True) -> dict:
                             value,
                             source="haiku_extraction",
                             confidence=conf,
-                            unit=spec.get("canonical_unit"),  # Use canonical_unit from registry
+                            # AI prompt already instructs extraction in canonical units,
+                            # so no conversion is needed—pass unit directly from registry.
+                            unit=spec.get("canonical_unit"),
                         )
 
             stats["updated"] += 1
