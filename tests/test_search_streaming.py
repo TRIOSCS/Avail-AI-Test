@@ -231,3 +231,31 @@ async def test_stream_search_publishes_events(db_session):
     done_data = json.loads(done_event["data"])
     assert "total_results" in done_data
     assert "elapsed_seconds" in done_data
+
+
+# ── Route tests ───────────────────────────────────────────────────────
+
+
+def test_search_run_returns_shell_html(client, db_session):
+    """POST /v2/partials/search/run should return results shell with SSE connection."""
+    with patch("app.search_service.stream_search_mpn", new_callable=AsyncMock):
+        resp = client.post(
+            "/v2/partials/search/run",
+            data={"mpn": "LM317T"},
+            headers={"HX-Request": "true"},
+        )
+    assert resp.status_code == 200
+    html = resp.text
+    assert "sse-connect" in html
+    assert "source-chip" in html or "source-progress" in html
+
+
+def test_search_run_empty_mpn_returns_error(client):
+    """POST /v2/partials/search/run with empty MPN returns error message."""
+    resp = client.post(
+        "/v2/partials/search/run",
+        data={"mpn": ""},
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 200
+    assert "Please enter a part number" in resp.text

@@ -1,0 +1,31 @@
+{# Results shell — returned by search_run POST, contains SSE connection for streaming.
+   Called by: htmx_views.search_run
+   Depends on: SSE stream at /v2/partials/search/stream
+#}
+<div id="search-results-wrapper" class="space-y-4">
+  <div id="source-progress" class="flex flex-wrap gap-2 items-center">
+    <span class="text-xs font-medium text-gray-500 mr-1">Sources:</span>
+    {% for source in enabled_sources %}
+    <span id="source-chip-{{ source.name }}"
+          class="source-chip source-chip--searching">
+      <span class="inline-block w-1.5 h-1.5 rounded-full bg-current animate-pulse mr-1"></span>
+      {{ source.name }}
+    </span>
+    {% endfor %}
+  </div>
+
+  <div hx-ext="sse"
+       sse-connect="/v2/partials/search/stream?search_id={{ search_id }}"
+       sse-close="done">
+    <div id="search-results-cards"
+         sse-swap="results"
+         hx-swap="beforeend settle:100ms"
+         class="space-y-3">
+    </div>
+    <div sse-swap="source-status" hx-swap="none"></div>
+    <div sse-swap="card-update" hx-swap="none"></div>
+    <div sse-swap="done" hx-swap="none"></div>
+  </div>
+
+  <div id="search-stats" class="hidden text-xs text-gray-500 pt-2"></div>
+</div>

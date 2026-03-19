@@ -2136,11 +2136,17 @@ async def search_run(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Run a part search and return results HTML.
+    """Launch a streaming part search and return the results shell HTML.
+
+    Generates a search_id, launches stream_search_mpn as a background task, and returns
+    the results_shell.html template with SSE connection details.
 
     If requirement_id is provided, searches for that requirement's MPN. Otherwise uses
     the mpn form field.
     """
+    import asyncio
+    from uuid import uuid4
+
     search_mpn = mpn.strip()
 
     # If searching from a requirement row, get the MPN from query params
@@ -2156,75 +2162,61 @@ async def search_run(
     if not search_mpn:
         return HTMLResponse('<div class="p-4 text-sm text-red-600">Please enter a part number.</div>')
 
-    start = time.time()
-    results = []
-    error = None
-    source_errors: list[str] = []
+    # Generate a unique search ID and launch streaming search in background
+    search_id = str(uuid4())
+    enabled_sources = _get_enabled_sources(db)
 
-    try:
-        # Use the search service to find parts across all connectors
-        from ..search_service import quick_search_mpn
+    from ..search_service import stream_search_mpn
 
-        raw_results = await quick_search_mpn(search_mpn, db)
-        results = raw_results.get("sightings", [])
-        # Extract actual errors from source_stats (source_errors key doesn't exist)
-        for stat in raw_results.get("source_stats", []):
-            if stat.get("status") == "error" and stat.get("error"):
-                source_errors.append(f"{stat.get('source', 'Unknown')}: {stat['error']}")
-    except Exception as exc:
-        logger.error("Search failed for {}: {}", search_mpn, exc)
-        error = f"Search error: {exc}"
-
-    elapsed = time.time() - start
-
-    # Enrich each result with confidence, lead quality, and reason summary
-    # using scoring functions that already exist in scoring.py.
-    for r in results:
-        unified = score_unified(
-            source_type=r.get("source_type", ""),
-            vendor_score=r.get("vendor_score"),
-            is_authorized=r.get("is_authorized", False),
-            unit_price=r.get("unit_price"),
-            qty_available=r.get("qty_available"),
-            age_hours=r.get("age_hours"),
-            has_price=bool(r.get("unit_price")),
-            has_qty=bool(r.get("qty_available")),
-            has_lead_time=bool(r.get("lead_time")),
-            has_condition=bool(r.get("condition")),
-        )
-        r["confidence_pct"] = unified["confidence_pct"]
-        r["confidence_color"] = unified["confidence_color"]
-        r["source_badge"] = unified["source_badge"]
-        r["lead_quality"] = classify_lead(
-            score=unified["score"],
-            is_authorized=r.get("is_authorized", False),
-            has_price=bool(r.get("unit_price")),
-            has_qty=bool(r.get("qty_available")),
-            has_contact=bool(r.get("vendor_email") or r.get("vendor_phone")),
-            evidence_tier=r.get("evidence_tier"),
-        )
-        r["reason"] = explain_lead(
-            vendor_name=r.get("vendor_name"),
-            is_authorized=r.get("is_authorized", False),
-            vendor_score=r.get("vendor_score"),
-            unit_price=r.get("unit_price"),
-            qty_available=r.get("qty_available"),
-            has_contact=bool(r.get("vendor_email") or r.get("vendor_phone")),
-            evidence_tier=r.get("evidence_tier"),
-            source_type=r.get("source_type"),
-        )
+    asyncio.create_task(stream_search_mpn(search_id, search_mpn, db))
 
     ctx = _base_ctx(request, user, "search")
     ctx.update(
         {
-            "results": results,
+            "search_id": search_id,
             "mpn": search_mpn,
-            "elapsed_seconds": elapsed,
-            "error": error,
-            "source_errors": source_errors,
+            "enabled_sources": enabled_sources,
         }
     )
-    return templates.TemplateResponse("htmx/partials/search/results.html", ctx)
+    return templates.TemplateResponse("htmx/partials/search/results_shell.html", ctx)
+
+
+@router.get("/v2/partials/search/stream")
+async def search_stream(
+    request: Request,
+    search_id: str = Query(...),
+    user: User = Depends(require_user),
+):
+    """SSE stream endpoint for search results.
+
+    Subscribes to the SSE broker channel for the given search_id and yields events until
+    the 'done' event is received or the client disconnects.
+    """
+    from sse_starlette.sse import EventSourceResponse
+
+    from ..services.sse_broker import broker
+
+    async def event_generator():
+        async for msg in broker.listen(f"search:{search_id}"):
+            if await request.is_disconnected():
+                break
+            yield {"event": msg["event"], "data": msg["data"]}
+            if msg["event"] == "done":
+                break
+
+    return EventSourceResponse(event_generator())
+
+
+def _get_enabled_sources(db: Session) -> list[dict]:
+    """Return list of enabled API sources for the source progress chips.
+
+    Called by: search_run
+    Depends on: ApiSource model
+    """
+    from ..models import ApiSource
+
+    sources = db.query(ApiSource).filter(ApiSource.status != "disabled").all()
+    return [{"name": s.name, "status": s.status} for s in sources]
 
 
 @router.get("/v2/partials/search/lead-detail", response_class=HTMLResponse)
