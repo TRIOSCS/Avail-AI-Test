@@ -39,6 +39,9 @@ from .enrichment_run import EnrichmentRun  # noqa: F401
 # Error Reports / Trouble Tickets
 from .error_report import ErrorReport  # noqa: F401
 
+# Excess Inventory & Bid Collection
+from .excess import Bid, BidSolicitation, ExcessLineItem, ExcessList  # noqa: F401
+
 # Faceted Search
 from .faceted_search import CommoditySpecSchema, MaterialSpecFacet  # noqa: F401
 
