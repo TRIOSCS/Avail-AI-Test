@@ -1765,3 +1765,157 @@ def sighting_to_dict(s: Sighting) -> dict:
         "lead_quality": quality,
         "lead_explanation": explanation,
     }
+
+
+# ── Streaming search ────────────────────────────────────────────────────
+
+
+async def stream_search_mpn(search_id: str, mpn: str, db: Session) -> None:
+    """Stream search results via SSE as each connector completes.
+
+    Instead of waiting for all connectors (like _fetch_fresh with asyncio.gather),
+    this fires all connectors as tasks and uses asyncio.wait(FIRST_COMPLETED) to
+    publish results incrementally via the SSE broker.
+
+    Called by: routers/htmx_views.py (search stream endpoint)
+    Depends on: _build_connectors, _incremental_dedup, services/sse_broker.broker
+    """
+    # Allow test mocks to override the broker via module-level patching
+    import app.search_service as _self_mod
+
+    from .services.sse_broker import broker as _broker
+
+    active_broker = getattr(_self_mod, "broker", _broker)
+
+    channel = f"search:{search_id}"
+    accumulated: list[dict] = []
+    total_results = 0
+    sources_completed = 0
+    t_start = time.time()
+
+    connectors, source_stats_map, _disabled = _build_connectors(db)
+
+    if not connectors:
+        await active_broker.publish(
+            channel,
+            "done",
+            json.dumps(
+                {
+                    "total": 0,
+                    "sources": 0,
+                    "elapsed_ms": 0,
+                }
+            ),
+        )
+        return
+
+    # Create a task per connector, tagging with source_name
+    task_map: dict[asyncio.Task, str] = {}
+    for conn in connectors:
+        source_name = getattr(conn, "source_name", _CONNECTOR_SOURCE_MAP.get(conn.__class__.__name__, "unknown"))
+
+        async def _run(c=conn, pn=mpn):
+            t0 = time.time()
+            hits = await c.search(pn)
+            elapsed = int((time.time() - t0) * 1000)
+            return hits, elapsed
+
+        task = asyncio.create_task(_run())
+        task_map[task] = source_name
+
+    pending = set(task_map.keys())
+
+    while pending:
+        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+
+        for task in done:
+            source_name = task_map[task]
+            sources_completed += 1
+
+            try:
+                hits, elapsed_ms = task.result()
+                hit_count = len(hits)
+
+                # Tag each hit with mpn_matched
+                for r in hits:
+                    r.setdefault("mpn_matched", mpn)
+
+                # Incremental dedup against accumulated results
+                new_cards, updated_cards = _incremental_dedup(hits, accumulated)
+
+                # Publish source status
+                await active_broker.publish(
+                    channel,
+                    "source-status",
+                    json.dumps(
+                        {
+                            "source": source_name,
+                            "status": "ok",
+                            "results": hit_count,
+                            "ms": elapsed_ms,
+                        },
+                        default=str,
+                    ),
+                )
+
+                # Publish new result cards
+                if new_cards:
+                    await active_broker.publish(
+                        channel,
+                        "results",
+                        json.dumps(
+                            {
+                                "cards": new_cards,
+                                "source": source_name,
+                            },
+                            default=str,
+                        ),
+                    )
+
+                # Publish updated cards
+                if updated_cards:
+                    await active_broker.publish(
+                        channel,
+                        "card-update",
+                        json.dumps(
+                            {
+                                "cards": updated_cards,
+                                "source": source_name,
+                            },
+                            default=str,
+                        ),
+                    )
+
+                total_results += hit_count
+
+            except Exception as e:
+                logger.warning(f"Streaming search connector {source_name} failed: {e}")
+                await active_broker.publish(
+                    channel,
+                    "source-status",
+                    json.dumps(
+                        {
+                            "source": source_name,
+                            "status": "error",
+                            "error": str(e)[:500],
+                            "results": 0,
+                            "ms": 0,
+                        },
+                        default=str,
+                    ),
+                )
+
+    # All connectors done
+    elapsed_total = int((time.time() - t_start) * 1000)
+    await active_broker.publish(
+        channel,
+        "done",
+        json.dumps(
+            {
+                "total": total_results,
+                "sources": sources_completed,
+                "elapsed_ms": elapsed_total,
+            },
+            default=str,
+        ),
+    )

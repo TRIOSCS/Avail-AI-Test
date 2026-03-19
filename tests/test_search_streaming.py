@@ -4,7 +4,9 @@ Called by: pytest
 Depends on: app/search_service.py, app/connectors/sources.py
 """
 
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
+
+import pytest
 
 from app.connectors.mouser import MouserConnector
 from app.connectors.sources import NexarConnector
@@ -174,3 +176,51 @@ def test_incremental_dedup_existing_vendor():
     assert len(new_cards) == 0
     assert len(updated_cards) == 1
     assert updated_cards[0]["offer_count"] == 2
+
+
+# ── Streaming search tests ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_stream_search_publishes_events(db_session):
+    """stream_search_mpn publishes source-status and results events to the SSE
+    broker."""
+    from app.search_service import stream_search_mpn
+
+    published_events = []
+
+    async def mock_publish(channel, event, data=""):
+        published_events.append({"channel": channel, "event": event, "data": data})
+
+    # Mock broker and connectors
+    with (
+        patch("app.search_service.broker", create=True) as mock_broker,
+        patch("app.search_service._build_connectors") as mock_build,
+    ):
+        mock_broker.publish = mock_publish
+
+        # One fake connector that returns one result
+        fake_connector = MagicMock()
+        fake_connector.source_name = "nexar"
+        fake_connector.search = AsyncMock(
+            return_value=[
+                {
+                    "vendor_name": "Arrow",
+                    "mpn_matched": "LM317T",
+                    "unit_price": 0.45,
+                    "qty_available": 1000,
+                    "source_type": "nexar",
+                    "is_authorized": True,
+                }
+            ]
+        )
+        mock_build.return_value = ([fake_connector], {}, set())
+
+        await stream_search_mpn("test-search-id", "LM317T", db_session)
+
+    # Should have published source-status + results + done events
+    event_types = [e["event"] for e in published_events]
+    assert "source-status" in event_types
+    assert "results" in event_types
+    assert "done" in event_types
+    assert all(e["channel"] == "search:test-search-id" for e in published_events)
