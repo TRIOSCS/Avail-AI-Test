@@ -397,3 +397,28 @@ def fuzzy_mpn_match(mpn_a: str | None, mpn_b: str | None) -> bool:
             return True
 
     return False
+
+
+MAX_SUBSTITUTES = 20
+
+
+def parse_substitute_mpns(raw: str, primary_mpn: str, *, limit: int = MAX_SUBSTITUTES) -> list[str]:
+    """Parse comma/newline-separated substitute MPNs, normalize, and deduplicate against
+    primary.
+
+    Called by: htmx_views.py (add/update/header-save endpoints)
+    Depends on: normalize_mpn, normalize_mpn_key
+    """
+    sub_list: list[str] = []
+    if not raw or not raw.strip():
+        return sub_list
+    seen_keys = {normalize_mpn_key(primary_mpn)}
+    for s in raw.replace("\n", ",").split(","):
+        ns = normalize_mpn(s.strip()) or s.strip()
+        if not ns:
+            continue
+        key = normalize_mpn_key(ns)
+        if key and key not in seen_keys:
+            seen_keys.add(key)
+            sub_list.append(ns)
+    return sub_list[:limit]

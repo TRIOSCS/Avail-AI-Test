@@ -29,6 +29,20 @@
           {{ requirement.brand or 'No brand' }}
         </span>
       </div>
+      {# Approved substitutes — inline editable #}
+      <div id="hdr-substitutes" class="flex flex-wrap items-center gap-1 mt-0.5"
+           hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/substitutes"
+           hx-target="#hdr-substitutes" hx-swap="outerHTML"
+           title="Click to edit approved substitutes">
+        {% if requirement.substitutes %}
+          <span class="text-[10px] text-gray-400 uppercase tracking-wide mr-0.5">Subs:</span>
+          {% for sub in requirement.substitutes %}
+            <span class="inline-flex px-1.5 py-0.5 text-[11px] font-mono font-medium rounded bg-amber-50 text-amber-700 border border-amber-200 cursor-pointer hover:bg-amber-100 transition-colors">{{ sub }}</span>
+          {% endfor %}
+        {% else %}
+          <span class="text-[10px] text-gray-400 cursor-pointer hover:text-brand-500 transition-colors">+ Add substitutes</span>
+        {% endif %}
+      </div>
       <p class="text-xs text-gray-400 truncate mt-0.5">
         {{ requirement.requisition.name if requirement.requisition else '—' }}
         {% if requirement.requisition and requirement.requisition.customer_name %}

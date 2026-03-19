@@ -10,6 +10,9 @@
   {# ── Display mode ────────────────────────────────────────── #}
   <td class="px-4 py-2.5 text-sm font-mono font-medium text-gray-900" x-show="!editing">
     {{ r.primary_mpn or "—" }}
+    {% if r.substitutes %}
+      <span class="ml-1 px-1.5 py-0.5 text-[10px] font-sans font-medium rounded-full bg-amber-50 text-amber-600 border border-amber-200" title="{{ r.substitutes|join(', ') }}">+{{ r.substitutes|length }} sub{{ 's' if r.substitutes|length != 1 }}</span>
+    {% endif %}
   </td>
   <td class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing">{{ r.brand or "—" }}</td>
   <td class="px-4 py-2.5 text-sm text-gray-500 text-right tabular-nums" x-show="!editing">
@@ -94,6 +97,9 @@
       <input type="number" name="target_price" value="{{ '{:.4f}'.format(r.target_price|float) if r.target_price else '' }}" step="0.0001" min="0"
              class="w-24 px-2 py-1.5 text-sm border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500"
              placeholder="Target $">
+      <input type="text" name="substitutes" value="{{ r.substitutes|join(', ') if r.substitutes else '' }}"
+             class="w-48 px-2 py-1.5 text-sm font-mono border border-brand-200 rounded-lg focus:ring-2 focus:ring-brand-500"
+             placeholder="Subs (comma-sep)" title="Approved substitute MPNs, comma-separated">
       <button type="submit" class="px-3 py-1.5 text-xs font-medium bg-brand-500 text-white rounded-lg hover:bg-brand-600">Save</button>
       <button type="button" @click="editing = false" class="px-3 py-1.5 text-xs font-medium text-gray-600 border border-gray-300 rounded-lg hover:bg-gray-100">Cancel</button>
     </form>

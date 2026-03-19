@@ -498,19 +498,25 @@ async def add_requirement(
     primary_mpn: str = Form(...),
     target_qty: int = Form(1),
     brand: str = Form(""),
+    substitutes: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Add a requirement to a requisition, return the new row HTML."""
+    from ..utils.normalization import parse_substitute_mpns
+
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
     if not req:
         raise HTTPException(404, "Requisition not found")
+
+    sub_list = parse_substitute_mpns(substitutes, primary_mpn)
 
     r = Requirement(
         requisition_id=req_id,
         primary_mpn=primary_mpn,
         target_qty=target_qty,
         brand=brand or None,
+        substitutes=sub_list,
         sourcing_status="open",
     )
     db.add(r)
@@ -2083,6 +2089,7 @@ async def update_requirement(
     target_qty: int = Form(1),
     brand: str = Form(""),
     target_price: float | None = Form(None),
+    substitutes: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -2090,6 +2097,8 @@ async def update_requirement(
 
     Returns the updated row HTML.
     """
+    from ..utils.normalization import parse_substitute_mpns
+
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
     if not req:
         raise HTTPException(404, "Requisition not found")
@@ -2101,6 +2110,7 @@ async def update_requirement(
     item.target_qty = target_qty
     item.brand = brand.strip() or None
     item.target_price = target_price
+    item.substitutes = parse_substitute_mpns(substitutes, primary_mpn)
     db.commit()
     db.refresh(item)
 
@@ -7639,6 +7649,7 @@ _PART_HEADER_EDITABLE = {
     "notes",
     "date_codes",
     "packaging",
+    "substitutes",
 }
 _CONDITION_CHOICES = ["New", "Used", "Refurbished", "Any"]
 
@@ -7691,6 +7702,22 @@ async def part_header_edit_cell(
             f"{options}</select>",
         )
 
+    if field == "substitutes":
+        from markupsafe import escape
+
+        subs_csv = escape(", ".join(req.substitutes)) if req.substitutes else ""
+        return HTMLResponse(
+            f'<div id="{cell_id}" class="flex items-center gap-2">'
+            f'<input type="text" name="value" value="{subs_csv}" '
+            f'hx-patch="{save_url}" hx-target="#part-header-wrap" hx-swap="innerHTML" '
+            f'hx-vals=\'{{"field": "{field}"}}\' '
+            f"hx-trigger=\"keyup[key=='Enter']\" "
+            f"@keydown.escape=\"htmx.ajax('GET', '{cancel_url}', {{target: '#part-header-wrap', swap: 'innerHTML'}})\" "
+            f'class="text-xs px-2 py-1 rounded border border-brand-300 focus:ring-1 focus:ring-brand-500 w-64 font-mono" '
+            f'placeholder="Comma-separated MPNs" autofocus />'
+            f"</div>",
+        )
+
     input_type = "number" if field in ("target_qty", "target_price") else "text"
     step = ' step="0.0001"' if field == "target_price" else ""
 
@@ -7739,6 +7766,10 @@ async def part_header_save(
             req.target_price = Decimal(value) if value else None
         except InvalidOperation:
             req.target_price = None
+    elif field == "substitutes":
+        from ..utils.normalization import parse_substitute_mpns
+
+        req.substitutes = parse_substitute_mpns(value, req.primary_mpn)
     else:
         setattr(req, field, value.strip() if value else None)
 
