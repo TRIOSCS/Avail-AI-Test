@@ -4,14 +4,6 @@
    Depends on: brand palette, partials/shared/enrich_button.html, partials/shared/empty_state.html.
 #}
 
-{# OOB breadcrumb update #}
-<div id="breadcrumb" class="hidden" aria-hidden="true" hx-swap-oob="true">
-  <a hx-get="/v2/partials/companies" hx-target="#main-content" hx-push-url="/v2/companies"
-     preload="mouseover"
-     class="text-brand-500 hover:text-brand-600 cursor-pointer">Companies</a>
-  <span class="text-gray-400 mx-1.5">/</span>
-  <span class="text-gray-900 font-medium">{{ company.name }}</span>
-</div>
 <title hx-swap-oob="true">{{ company.name }} — Companies — AvailAI</title>
 
 <div class="max-w-5xl mx-auto space-y-6">

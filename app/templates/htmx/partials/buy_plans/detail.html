@@ -5,14 +5,6 @@
   Called by: htmx_views.py buy_plan_detail_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
-{# OOB breadcrumb update #}
-<div id="breadcrumb" class="hidden" aria-hidden="true" hx-swap-oob="true">
-  <a hx-get="/v2/partials/buy-plans" hx-target="#main-content" hx-push-url="/v2/buy-plans"
-     preload="mouseover"
-     class="text-brand-400 hover:text-brand-300 cursor-pointer">Buy Plans</a>
-  <span class="text-gray-400 mx-1">/</span>
-  <span class="text-gray-900">Buy Plan #{{ bp.id }}</span>
-</div>
 <title hx-swap-oob="true">Buy Plan #{{ bp.id }} — AvailAI</title>
 
 <div class="max-w-7xl mx-auto" x-data="{ showModal: false, modalType: '' }">

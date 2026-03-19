@@ -5,19 +5,6 @@
    Context vars: requirement, leads, lead_sighting_data, total, page, total_pages, per_page,
                  f_confidence, f_safety, f_freshness, f_source, f_status, f_contactability, f_corroborated, f_sort #}
 
-{# OOB breadcrumb update #}
-<div id="breadcrumb" class="hidden" aria-hidden="true" hx-swap-oob="true">
-  <a href="/requisitions" hx-get="/v2/partials/requisitions" hx-target="#main-content" hx-push-url="true"
-     class="text-brand-500 hover:text-brand-600">Requisitions</a>
-  <span class="text-gray-400 mx-1">/</span>
-  <a href="/requisitions/{{ requirement.requisition_id }}"
-     hx-get="/v2/partials/requisitions/{{ requirement.requisition_id }}"
-     hx-target="#main-content" hx-push-url="true"
-     class="text-brand-500 hover:text-brand-600">{{ requirement.requisition.name if requirement.requisition else '' }}</a>
-  <span class="text-gray-400 mx-1">/</span>
-  <span class="text-gray-900">Sourcing: {{ requirement.primary_mpn }}</span>
-</div>
-
 <div class="space-y-6">
   {# Header #}
   <div class="flex items-center justify-between">

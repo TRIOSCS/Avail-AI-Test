@@ -1,11 +1,3 @@
-{# lead_panel.html — Condensed lead detail for workspace right panel.
-   Denser version of lead_detail.html: no breadcrumb, collapsible sections, smaller spacing.
-   Includes OOB swap of lead row in left panel after status changes.
-   Called by: htmx_views.lead_panel_partial
-   Depends on: partials/shared/source_badge.html, partials/shared/safety_review.html
-   Context vars: lead, evidence, evidence_by_category, category_labels,
-                 requirement, vendor_card, best_sighting #}
-
 {# OOB: update lead row highlight in left panel #}
 {% if lead %}
 <div id="lead-row-{{ lead.id }}" hx-swap-oob="true"

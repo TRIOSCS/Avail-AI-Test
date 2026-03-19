@@ -6,13 +6,6 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
-<div id="breadcrumb" class="hidden" aria-hidden="true" hx-swap-oob="true">
-  <a href="/v2/quotes" hx-get="/v2/partials/quotes" hx-target="#main-content" hx-push-url="/v2/quotes"
-     preload="mouseover"
-     class="text-brand-400 hover:text-brand-300">Quotes</a>
-  <span class="mx-1 text-gray-400">/</span>
-  {{ quote.quote_number }}
-</div>
 <title hx-swap-oob="true">{{ quote.quote_number }} — Quotes — AvailAI</title>
 
 <div class="max-w-7xl mx-auto" x-data="{ showMarkup: false, showHistory: false }">
