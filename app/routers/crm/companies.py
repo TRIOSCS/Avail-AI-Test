@@ -15,6 +15,7 @@ from ...dependencies import require_user
 from ...models import Company, CustomerSite, Quote, Requisition, User
 from ...schemas.crm import CompanyCreate, CompanyUpdate
 from ...services.credential_service import get_credential_cached
+from ...utils.async_helpers import safe_background_task
 from ...utils.sql_helpers import escape_like
 
 router = APIRouter()
@@ -530,7 +531,10 @@ async def create_company(
             except Exception:
                 logger.exception("Background enrichment failed for company %d", cid)
 
-        asyncio.create_task(_enrich_company_bg(result["id"], result["default_site_id"], domain, result["name"]))
+        await safe_background_task(
+            _enrich_company_bg(result["id"], result["default_site_id"], domain, result["name"]),
+            task_name="enrich_company_bg",
+        )
         result["enrich_triggered"] = True
 
     invalidate_prefix("company_list")

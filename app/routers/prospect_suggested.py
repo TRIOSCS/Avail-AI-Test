@@ -4,7 +4,6 @@ Phase 6: replaces the old Company-based pool with the unified prospect_accounts 
 Phase 7: enhanced claim with deep enrichment, AI briefing, manual submission.
 """
 
-import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -24,6 +23,7 @@ from ..services.prospect_claim import (
     trigger_deep_enrichment_bg,
 )
 from ..services.prospect_priority import build_priority_snapshot
+from ..utils.async_helpers import safe_background_task
 from ..utils.sql_helpers import escape_like
 
 router = APIRouter()
@@ -261,7 +261,7 @@ async def claim_suggested(
         raise HTTPException(409, str(e))
 
     # Trigger deep enrichment in background
-    asyncio.create_task(trigger_deep_enrichment_bg(prospect_id))
+    await safe_background_task(trigger_deep_enrichment_bg(prospect_id), task_name="deep_enrichment_prospect")
 
     return result
 
