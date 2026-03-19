@@ -786,6 +786,29 @@ async def run_pipeline(dry_run: bool = True, resume: bool = False):
         else:
             logger.info("Phase 4 already complete — skipping")
 
+        # Phase 5: Web search enrichment (lifecycle, RoHS, cross-refs)
+        if not dry_run:
+            if not resume or not db.query(EnrichmentRun).filter(
+                EnrichmentRun.phase == "phase_5_web", EnrichmentRun.status == "completed"
+            ).first():
+                from scripts.enrich_web_verified import run_web_enrichment
+                await run_web_enrichment(db, limit=5000, dry_run=False)
+            else:
+                logger.info("Phase 5 already complete — skipping")
+        else:
+            logger.info("Phase 5 skipped in dry-run (web search is real-time only)")
+
+        # Phase 6: Cross-verification
+        if not dry_run:
+            from scripts.verify_enrichment import run_verification
+            report = await run_verification(db, sample_size=1000)
+            if report.get("all_targets_met"):
+                logger.info("✓ All accuracy targets met!")
+            else:
+                logger.warning(f"Accuracy targets: {report.get('targets_met', {})}")
+        else:
+            logger.info("Phase 6 skipped in dry-run")
+
         logger.info(f"{'═' * 60}")
         logger.info("  PIPELINE COMPLETE")
         logger.info(f"{'═' * 60}")
