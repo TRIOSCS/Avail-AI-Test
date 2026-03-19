@@ -110,6 +110,21 @@ def _timesince_filter(dt):
 templates.env.filters["timesince"] = _timesince_filter
 
 
+def _fmtdate_filter(value, fmt: str = "%b %d, %H:%M", default: str = "—") -> str:
+    """Safe date formatter — handles None, strings, and datetime objects."""
+    if not value:
+        return default
+    if isinstance(value, str):
+        return value
+    try:
+        return value.strftime(fmt)
+    except (AttributeError, TypeError):
+        return default
+
+
+templates.env.filters["fmtdate"] = _fmtdate_filter
+
+
 def _is_htmx(request: Request) -> bool:
     """Check if this is an HTMX partial request (vs full page load)."""
     return request.headers.get("HX-Request") == "true"
@@ -7046,13 +7061,16 @@ async def proactive_list_partial(
     """Proactive matches list partial — shows matches and sent offers."""
     from ..services.proactive_service import get_matches_for_user, get_sent_offers
 
-    matches = get_matches_for_user(db, user.id, status="new")
+    result = get_matches_for_user(db, user.id, status="new")
+    groups = result.get("groups", []) if isinstance(result, dict) else result
+    match_count = result.get("stats", {}).get("total", 0) if isinstance(result, dict) else 0
     sent = get_sent_offers(db, user.id) if tab == "sent" else []
 
     ctx = _base_ctx(request, user, "proactive")
-    ctx["matches"] = matches
+    ctx["matches"] = groups
     ctx["sent"] = sent
     ctx["tab"] = tab
+    ctx["match_count"] = match_count
     return templates.TemplateResponse("htmx/partials/proactive/list.html", ctx)
 
 

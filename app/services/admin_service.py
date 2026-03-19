@@ -126,7 +126,7 @@ def get_all_config(db: Session) -> list[dict]:
             "value": r.value,
             "description": r.description,
             "updated_by": r.updated_by,
-            "updated_at": r.updated_at.isoformat() if r.updated_at else None,
+            "updated_at": r.updated_at,
         }
         for r in rows
     ]

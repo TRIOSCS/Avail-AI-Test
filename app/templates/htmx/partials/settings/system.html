@@ -106,7 +106,7 @@
 
           {# Last updated #}
           <td class="px-5 py-3 text-xs text-gray-400">
-            {{ item.updated_at.strftime('%b %d, %H:%M') if item.updated_at is defined and item.updated_at and item.updated_at is not string else (item.updated_at if item.updated_at else '—') }}
+            {{ item.updated_at | fmtdate }}
           </td>
         </tr>
         {% endfor %}

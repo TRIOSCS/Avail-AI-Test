@@ -2,7 +2,7 @@
    Called by: htmx_views.py materials_workspace route
    Depends on: Alpine.js materialsFilter() in htmx_app.js
 #}
-<div id="materials-workspace" x-data="materialsFilter()" x-init="init()" class="flex gap-0 h-full">
+<div id="materials-workspace" x-data="materialsFilter" class="flex gap-0 h-full">
 
   {# -- Mobile filter button -- #}
   <button @click="panelOpen = true" x-show="!panelOpen"
@@ -73,7 +73,7 @@
        class="lg:hidden fixed inset-0 bg-black/30 z-30" x-transition.opacity></div>
 
   {# -- Right results area -- #}
-  <div class="flex-1 min-w-0">
+  <div class="flex-1 min-w-0 relative">
     {# Search bar #}
     <div class="p-4 border-b border-gray-100">
       <div class="relative">

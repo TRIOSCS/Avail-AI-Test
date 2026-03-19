@@ -67,10 +67,9 @@ class MaterialSpecFacet(Base):
         Index("ix_msf_category_key_text", "category", "spec_key", "value_text"),
         Index(
             "ix_msf_key_numeric",
+            "category",
             "spec_key",
             "value_numeric",
             postgresql_where="value_numeric IS NOT NULL",
         ),
-        Index("ix_msf_key_text_card", "spec_key", "value_text", "material_card_id"),
-        Index("ix_msf_card", "material_card_id"),
     )
