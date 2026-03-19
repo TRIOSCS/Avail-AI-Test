@@ -32,9 +32,9 @@ def register_discovery_jobs(scheduler):
 
     scheduler.add_job(
         _job_family_expansion,
-        IntervalTrigger(days=7),
+        IntervalTrigger(days=3),
         id="part_discovery_family",
-        name="Family/series expansion (discover part variants)",
+        name="Cross/substitute discovery (find alternative parts for existing MPNs)",
         replace_existing=True,
     )
 
@@ -46,7 +46,7 @@ def register_discovery_jobs(scheduler):
         replace_existing=True,
     )
 
-    logger.info("Part discovery jobs registered: crossref (6h), family (7d), gap fill (30d)")
+    logger.info("Part discovery jobs registered: crossref (6h), cross/sub (3d), gap fill (30d)")
 
 
 @_traced_job

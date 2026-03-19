@@ -13,9 +13,6 @@ Depends on: app.models.intelligence.MaterialCard, app.utils.claude_client,
             app.search_service.resolve_material_card
 """
 
-import asyncio
-import json
-from datetime import datetime, timezone
 
 from loguru import logger
 from sqlalchemy import func
@@ -88,22 +85,23 @@ async def expand_cross_references(db: Session, limit: int = 500) -> dict:
 
 
 async def expand_families(db: Session, batch_size: int = 100) -> dict:
-    """Strategy B: Ask AI to list other parts in the same family/series.
+    """Strategy B: Ask AI for crosses, substitutes, and pin-compatible alternatives.
 
-    For popular MPNs, discover all siblings in the product family.
-    E.g., STM32F103C8T6 → STM32F103CBT6, STM32F103RBT6, etc.
+    For popular MPNs, discover direct replacements and cross-manufacturer equivalents.
+    E.g., Samsung M393A2K43DB3-CWE → Micron MTA18ASF2G72PDZ-3G2R (cross-manufacturer sub).
+    E.g., STM32F103C8T6 → GD32F103C8T6 (pin-compatible clone).
     """
     from app.search_service import resolve_material_card
     from app.utils.claude_client import claude_json
 
     stats = {"seed_cards": 0, "discovered": 0, "created": 0, "already_exists": 0, "errors": 0}
 
-    # Get popular MPNs as seeds
+    # Get popular MPNs as seeds — prioritize searched parts
     seeds = (
         db.query(MaterialCard.id, MaterialCard.display_mpn, MaterialCard.manufacturer, MaterialCard.category)
         .filter(
             MaterialCard.deleted_at.is_(None),
-            MaterialCard.search_count >= 3,
+            MaterialCard.search_count >= 1,
             MaterialCard.category.isnot(None),
             MaterialCard.category != "other",
         )
@@ -113,7 +111,7 @@ async def expand_families(db: Session, batch_size: int = 100) -> dict:
     )
 
     stats["seed_cards"] = len(seeds)
-    logger.info(f"Family expansion: {len(seeds)} seed MPNs")
+    logger.info(f"Cross/substitute discovery: {len(seeds)} seed MPNs")
 
     # Batch seeds into groups of 20 for efficiency
     for i in range(0, len(seeds), 20):
@@ -124,8 +122,14 @@ async def expand_families(db: Session, batch_size: int = 100) -> dict:
 
         try:
             result = await claude_json(
-                f"For each part below, list up to 5 other parts in the same product family/series "
-                f"by the same manufacturer. Only include REAL part numbers you are confident exist.\n\n"
+                f"For each electronic component below, list its CROSSES and SUBSTITUTES — parts from "
+                f"ANY manufacturer that are direct replacements, pin-compatible alternatives, or "
+                f"functional equivalents a buyer could use instead. Include:\n"
+                f"1. Cross-manufacturer equivalents (e.g., Samsung DRAM → Micron/SK Hynix equivalent)\n"
+                f"2. Pin-compatible clones (e.g., STM32 → GD32/APM32)\n"
+                f"3. Same-family variants with different specs (e.g., DDR4-3200 → DDR4-2933 version)\n"
+                f"4. Second-source parts from alternative manufacturers\n\n"
+                f"Only include REAL part numbers you are confident exist. Up to 8 per part.\n\n"
                 f"{mpn_list}",
                 schema={
                     "type": "object",
@@ -147,7 +151,12 @@ async def expand_families(db: Session, batch_size: int = 100) -> dict:
                     },
                     "required": ["families"],
                 },
-                system="You are an expert electronic component engineer. List real part numbers only.",
+                system=(
+                    "You are an expert electronic component sourcing engineer specializing in "
+                    "cross-references and substitute parts. Your job is to help buyers find "
+                    "alternative sources when their first-choice part is unavailable. "
+                    "List real, verified part numbers only — no guessing."
+                ),
                 model_tier="smart",
                 max_tokens=4096,
             )
@@ -176,18 +185,18 @@ async def expand_families(db: Session, batch_size: int = 100) -> dict:
                     try:
                         new_card = resolve_material_card(member_mpn.strip(), db)
                         if new_card:
-                            new_card.enrichment_source = "discovery_family"
+                            new_card.enrichment_source = "discovery_cross_sub"
                             db.commit()
                             stats["created"] += 1
-                    except Exception as e:
+                    except Exception:
                         db.rollback()
                         stats["errors"] += 1
 
         except Exception as e:
-            logger.warning(f"Family expansion batch failed: {e}")
+            logger.warning(f"Cross/substitute discovery batch failed: {e}")
             stats["errors"] += 1
 
-    logger.info(f"Family expansion: {stats}")
+    logger.info(f"Cross/substitute discovery: {stats}")
     return stats
 
 
@@ -280,7 +289,7 @@ async def fill_commodity_gaps(db: Session) -> dict:
                         new_card.category = category
                         db.commit()
                         stats["created"] += 1
-                except Exception as e:
+                except Exception:
                     db.rollback()
 
         except Exception as e:
