@@ -13,7 +13,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from app.models import EmailSignatureExtract, VendorResponse
+from app.models import EmailSignatureExtract
 from app.services.signature_parser import (
     batch_parse_signatures,
     process_signature_batch_results,
@@ -23,64 +23,66 @@ from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is use
 
 @pytest.fixture()
 def low_confidence_extracts(db_session):
-    """Create 3 EmailSignatureExtract records with regex method and low confidence, plus
-    matching VendorResponse records with body text."""
-    extracts = []
-    for i in range(3):
-        email = f"vendor{i}@example.com"
-        extract = EmailSignatureExtract(
-            sender_email=email,
-            sender_name=f"Vendor {i}",
-            full_name=f"Vendor {i}",
+    """Create 5 low-confidence regex-parsed signature extracts."""
+    records = []
+    for i in range(5):
+        record = EmailSignatureExtract(
+            sender_email=f"user{i}@example.com",
+            sender_name=f"User {i}",
+            full_name=f"User {i}" if i % 2 == 0 else None,
+            title="Manager" if i == 0 else None,
+            company_name=f"Company{i}" if i % 3 == 0 else None,
+            phone=f"555-000-{i:04d}" if i == 1 else None,
             extraction_method="regex",
-            confidence=0.4,
+            confidence=0.4 + (i * 0.05),  # 0.4, 0.45, 0.5, 0.55, 0.6
             created_at=datetime.now(timezone.utc),
         )
-        db_session.add(extract)
-
-        # Matching VendorResponse with body text
-        vr = VendorResponse(
-            vendor_email=email,
-            vendor_name=f"Vendor {i}",
-            body=f"Hi,\nPlease see attached quote.\n\nBest regards,\nVendor {i}\nSales Manager\nAcme Corp\nPhone: 555-000{i}",
-            received_at=datetime.now(timezone.utc),
-        )
-        db_session.add(vr)
-        extracts.append(extract)
-
+        db_session.add(record)
+        records.append(record)
     db_session.commit()
-    for e in extracts:
-        db_session.refresh(e)
-    return extracts
+    for r in records:
+        db_session.refresh(r)
+    return records
 
 
 @pytest.fixture()
 def high_confidence_extracts(db_session):
-    """Create 2 EmailSignatureExtract records with high confidence (should be
-    skipped)."""
-    extracts = []
-    for i in range(2):
-        email = f"good{i}@example.com"
-        extract = EmailSignatureExtract(
-            sender_email=email,
-            sender_name=f"Good {i}",
+    """Create 3 high-confidence extracts that should NOT be picked up."""
+    records = []
+    for i in range(3):
+        record = EmailSignatureExtract(
+            sender_email=f"good{i}@example.com",
+            sender_name=f"Good User {i}",
+            full_name=f"Good User {i}",
+            title="Director",
+            company_name=f"GoodCo{i}",
             extraction_method="regex",
-            confidence=0.85,
+            confidence=0.8,
             created_at=datetime.now(timezone.utc),
         )
-        db_session.add(extract)
-
-        vr = VendorResponse(
-            vendor_email=email,
-            vendor_name=f"Good {i}",
-            body=f"Some email body from Good {i}",
-            received_at=datetime.now(timezone.utc),
-        )
-        db_session.add(vr)
-        extracts.append(extract)
-
+        db_session.add(record)
+        records.append(record)
     db_session.commit()
-    return extracts
+    return records
+
+
+@pytest.fixture()
+def batch_api_extracts(db_session):
+    """Create 2 extracts already processed by batch_api (different method)."""
+    records = []
+    for i in range(2):
+        record = EmailSignatureExtract(
+            sender_email=f"batch{i}@example.com",
+            sender_name=f"Batch User {i}",
+            full_name=f"Batch User {i}",
+            extraction_method="batch_api",
+            confidence=0.5,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(record)
+        records.append(record)
+    db_session.commit()
+    return records
 
 
 @pytest.fixture()
@@ -153,7 +155,7 @@ def test_batch_parse_submits_batch(mock_submit, mock_redis, db_session, low_conf
 
     # Check the requests — one per low-confidence record
     requests = mock_submit.call_args[0][0]
-    assert len(requests) == 3
+    assert len(requests) == 5  # All 5 have confidence < 0.7
     for req in requests:
         assert "custom_id" in req
         assert req["custom_id"].startswith("sig_parse:")
@@ -180,8 +182,8 @@ def test_batch_parse_skips_high_confidence(
 
     assert result == "batch_sig_456"
     requests = mock_submit.call_args[0][0]
-    # Should have 3 requests (low confidence only), not 5
-    assert len(requests) == 3
+    # Should have 5 requests (low confidence only, all < 0.7), not 8
+    assert len(requests) == 5
 
 
 @patch("app.services.signature_parser._get_redis")
@@ -253,7 +255,7 @@ def test_process_results_applies_data(mock_results, mock_redis, db_session, low_
 
     result = asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
 
-    assert result["applied"] == 3
+    assert result["applied"] == 5
     assert result["errors"] == 0
 
     # Verify records were updated
