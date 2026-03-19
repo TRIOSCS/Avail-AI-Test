@@ -7145,8 +7145,10 @@ async def find_crosses(
     Depends on: claude_json for AI lookup, MaterialCard model.
     """
     from ..models.intelligence import MaterialCard
+    from ..utils.claude_client import claude_json as ai_json
+    from ..utils.normalization import normalize_mpn_key
 
-    mc = db.query(MaterialCard).filter(MaterialCard.id == material_id).first()
+    mc = db.get(MaterialCard, material_id)
     if not mc:
         raise HTTPException(404, "Material not found")
 
@@ -7155,50 +7157,36 @@ async def find_crosses(
     category = mc.category or "electronic component"
 
     try:
-        from ..utils.claude_client import claude_json as ai_json
+        import asyncio as _asyncio
 
-        result = await ai_json(
-            f"List all known CROSSES and SUBSTITUTES for this electronic component:\n"
-            f"  MPN: {mpn}\n"
-            f"  Manufacturer: {mfg}\n"
-            f"  Category: {category}\n\n"
-            f"Include:\n"
-            f"1. Cross-manufacturer equivalents\n"
-            f"2. Pin-compatible alternatives / clones\n"
-            f"3. Same-family variants (different speed grades, temp ranges, packages)\n"
-            f"4. Second-source parts\n\n"
-            f"Only include REAL part numbers you are confident exist. Up to 10 results.",
-            schema={
-                "type": "object",
-                "properties": {
-                    "crosses": {
-                        "type": "array",
-                        "items": {
-                            "type": "object",
-                            "properties": {
-                                "mpn": {"type": "string"},
-                                "manufacturer": {"type": "string"},
-                            },
-                            "required": ["mpn"],
-                        },
-                    }
-                },
-                "required": ["crosses"],
-            },
-            system=(
-                "You are an expert electronic component sourcing engineer. "
-                "List real, verified part numbers only — no guessing."
+        result = await _asyncio.wait_for(
+            ai_json(
+                f"List all known CROSSES and SUBSTITUTES for this electronic component:\n"
+                f"  MPN: {mpn}\n"
+                f"  Manufacturer: {mfg}\n"
+                f"  Category: {category}\n\n"
+                f"Include:\n"
+                f"1. Cross-manufacturer equivalents\n"
+                f"2. Pin-compatible alternatives / clones\n"
+                f"3. Same-family variants (different speed grades, temp ranges, packages)\n"
+                f"4. Second-source parts\n\n"
+                f"Only include REAL part numbers you are confident exist. Up to 10 results.\n\n"
+                f'Respond with JSON: {{"crosses": [{{"mpn": "...", "manufacturer": "..."}}]}}',
+                system=(
+                    "You are an expert electronic component sourcing engineer. "
+                    "List real, verified part numbers only — no guessing."
+                ),
+                model_tier="smart",
+                max_tokens=2048,
             ),
-            model_tier="smart",
-            max_tokens=2048,
+            timeout=30.0,
         )
 
-        crosses = result.get("crosses", []) if result else []
-        # Deduplicate: exclude the card's own MPN
-        own_mpn = (mc.normalized_mpn or "").upper()
+        crosses = result.get("crosses", []) if isinstance(result, dict) else []
+        # Deduplicate: exclude the card's own MPN (both display and normalized forms)
+        own_mpns = {normalize_mpn_key(mc.normalized_mpn or ""), normalize_mpn_key(mc.display_mpn or "")} - {""}
         crosses = [
-            c for c in crosses
-            if isinstance(c, dict) and c.get("mpn") and c["mpn"].strip().upper() != own_mpn
+            c for c in crosses if isinstance(c, dict) and c.get("mpn") and normalize_mpn_key(c["mpn"]) not in own_mpns
         ]
 
         mc.cross_references = crosses
@@ -7207,11 +7195,10 @@ async def find_crosses(
     except Exception as exc:
         logger.warning("Cross-reference search failed for material {}: {}", material_id, exc)
         db.rollback()
-        # Return a user-friendly error in the crosses section
-        return HTMLResponse(
-            '<div class="text-sm text-red-600 py-2">'
-            "Cross-reference search failed. Please try again later."
-            "</div>"
+        # Return error inside the same section ID so retry works
+        return templates.TemplateResponse(
+            "htmx/partials/materials/crosses_section.html",
+            {"request": request, "card": mc, "error": "Cross-reference search failed. Please try again."},
         )
 
     # Return the updated crosses section

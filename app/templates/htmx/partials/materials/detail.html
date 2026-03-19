@@ -193,8 +193,7 @@
               class="px-4 py-2.5 text-sm font-medium transition-colors -mb-px"
               hx-get="/v2/partials/materials/{{ card.id }}/tab/{{ tab_id }}"
               hx-target="#material-tab-content"
-              hx-trigger="click once"
-              {% if tab_id == 'vendors' %}hx-trigger="load, click once"{% endif %}>
+              hx-trigger="{{ 'load, click once' if tab_id == 'vendors' else 'click once' }}">
         {{ tab_label }}
       </button>
       {% endfor %}
