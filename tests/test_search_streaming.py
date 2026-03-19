@@ -659,3 +659,45 @@ def test_lead_detail_cache_vendor_not_matched(client, db_session):
         )
     assert resp.status_code == 200
     assert "not found" in resp.text.lower() or "search again" in resp.text.lower()
+
+
+# ── Integration smoke test ────────────────────────────────────────────
+
+
+def test_full_search_flow_smoke(client, db_session):
+    """Smoke test: search form → shell → filter → add-to-req."""
+    # 1. Submit search (returns shell with SSE connection)
+    with patch("app.search_service.stream_search_mpn", new_callable=AsyncMock):
+        resp = client.post(
+            "/v2/partials/search/run",
+            data={"mpn": "LM317T"},
+            headers={"HX-Request": "true"},
+        )
+    assert resp.status_code == 200
+    assert "sse-connect" in resp.text
+
+    # 2. Filter with cached results
+    cached = [
+        {
+            "vendor_name": "Arrow",
+            "mpn_matched": "LM317T",
+            "unit_price": 0.45,
+            "confidence_color": "green",
+            "confidence_pct": 85,
+            "lead_quality": "strong",
+            "source_type": "nexar",
+            "sub_offers": [],
+            "offer_count": 1,
+            "sources_found": ["nexar"],
+            "score": 80,
+            "is_authorized": True,
+            "qty_available": 1000,
+        },
+    ]
+    with patch("app.routers.htmx_views._get_cached_search_results", return_value=cached):
+        resp = client.get(
+            "/v2/partials/search/filter?search_id=test-123",
+            headers={"HX-Request": "true"},
+        )
+    assert resp.status_code == 200
+    assert "Arrow" in resp.text
