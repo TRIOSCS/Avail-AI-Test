@@ -858,37 +858,55 @@ async def run_pipeline(dry_run: bool = True, resume: bool = False):
         db.close()
 
 
+RETRY_DELAY_MINUTES = 5  # retry quickly after errors
+MAX_CONSECUTIVE_ERRORS = 10  # back off after repeated failures
+
+
 async def run_loop(interval_hours: float = 6.0):
     """Run the enrichment pipeline in a continuous loop.
 
-    After each full run, sleeps for interval_hours then runs again. Always resumes from
-    checkpoint so completed phases are skipped. Catches and logs all errors — never
-    exits unless killed.
+    After a successful run, sleeps for interval_hours then runs again. After a failure,
+    retries in RETRY_DELAY_MINUTES (backs off after MAX_CONSECUTIVE_ERRORS). Always
+    resumes from checkpoint so completed phases are skipped.
     """
-    logger.info(f"Enrichment worker starting — loop interval: {interval_hours}h")
+    logger.info(f"Enrichment worker starting — loop interval: {interval_hours}h, retry delay: {RETRY_DELAY_MINUTES}m")
+    consecutive_errors = 0
 
     while True:
         try:
             await run_pipeline(dry_run=False, resume=True)
             logger.info(f"Pipeline run complete — sleeping {interval_hours}h until next run")
+            consecutive_errors = 0
+            sleep_seconds = interval_hours * 3600
+
+            # Clear completed runs so the next loop does a fresh pass
+            db = SessionLocal()
+            try:
+                db.query(EnrichmentRun).filter(EnrichmentRun.status == "completed").delete(synchronize_session=False)
+                db.commit()
+                logger.info("Cleared completed runs — next loop will re-enrich")
+            except Exception as e:
+                logger.warning(f"Failed to clear completed runs: {e}")
+            finally:
+                db.close()
+
         except (KeyboardInterrupt, SystemExit):
             logger.info("Enrichment worker shutting down")
             raise
         except Exception as e:
-            logger.error(f"Pipeline run failed: {e} — will retry in {interval_hours}h")
+            consecutive_errors += 1
+            if consecutive_errors >= MAX_CONSECUTIVE_ERRORS:
+                sleep_seconds = interval_hours * 3600
+                logger.error(
+                    f"Pipeline failed ({consecutive_errors} consecutive errors): {e} — backing off to {interval_hours}h"
+                )
+            else:
+                sleep_seconds = RETRY_DELAY_MINUTES * 60
+                logger.error(
+                    f"Pipeline failed (attempt {consecutive_errors}): {e} — retrying in {RETRY_DELAY_MINUTES}m"
+                )
 
-        await asyncio.sleep(interval_hours * 3600)
-
-        # Clear completed runs so the next loop does a fresh pass
-        db = SessionLocal()
-        try:
-            db.query(EnrichmentRun).filter(EnrichmentRun.status == "completed").delete(synchronize_session=False)
-            db.commit()
-            logger.info("Cleared completed runs — next loop will re-enrich")
-        except Exception as e:
-            logger.warning(f"Failed to clear completed runs: {e}")
-        finally:
-            db.close()
+        await asyncio.sleep(sleep_seconds)
 
 
 if __name__ == "__main__":
