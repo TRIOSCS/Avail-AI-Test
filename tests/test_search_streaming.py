@@ -250,6 +250,112 @@ def test_search_run_returns_shell_html(client, db_session):
     assert "source-chip" in html or "source-progress" in html
 
 
+def test_vendor_card_template_renders():
+    """vendor_card.html renders without errors with sample data."""
+    from jinja2 import Environment, FileSystemLoader
+
+    env = Environment(loader=FileSystemLoader("app/templates"))
+    tpl = env.get_template("htmx/partials/search/vendor_card.html")
+    html = tpl.render(
+        card={
+            "vendor_name": "Arrow Electronics",
+            "mpn_matched": "LM317T",
+            "manufacturer": "Texas Instruments",
+            "unit_price": 0.45,
+            "qty_available": 12450,
+            "moq": 1,
+            "confidence_color": "green",
+            "confidence_pct": 85,
+            "lead_quality": "strong",
+            "source_badge": "Live Stock",
+            "is_authorized": True,
+            "source_type": "nexar",
+            "sub_offers": [],
+            "offer_count": 1,
+            "sources_found": ["nexar"],
+            "reason": "Authorized distributor with confirmed stock",
+        },
+        card_index=0,
+        search_id="test-123",
+    )
+    assert "Arrow Electronics" in html
+    assert "LM317T" in html
+    assert "0.4500" in html
+    assert "12,450" in html
+    assert "AUTH" in html
+    assert "85%" in html
+    assert "nexar" in html
+    assert "Texas Instruments" in html
+
+
+def test_vendor_card_template_renders_no_price():
+    """vendor_card.html renders gracefully when unit_price is None."""
+    from jinja2 import Environment, FileSystemLoader
+
+    env = Environment(loader=FileSystemLoader("app/templates"))
+    tpl = env.get_template("htmx/partials/search/vendor_card.html")
+    html = tpl.render(
+        card={
+            "vendor_name": "Unknown Vendor",
+            "mpn_matched": "ABC123",
+            "manufacturer": None,
+            "unit_price": None,
+            "qty_available": 0,
+            "moq": None,
+            "confidence_color": "red",
+            "confidence_pct": 20,
+            "lead_quality": "",
+            "is_authorized": False,
+            "source_type": "brokerbin",
+            "sub_offers": [],
+            "offer_count": 1,
+            "sources_found": ["brokerbin"],
+            "reason": "",
+        },
+        card_index=3,
+        search_id="test-456",
+    )
+    assert "Unknown Vendor" in html
+    assert "No price" in html
+    assert "AUTH" not in html
+
+
+def test_vendor_card_template_renders_sub_offers():
+    """vendor_card.html renders expandable sub-offers table."""
+    from jinja2 import Environment, FileSystemLoader
+
+    env = Environment(loader=FileSystemLoader("app/templates"))
+    tpl = env.get_template("htmx/partials/search/vendor_card.html")
+    html = tpl.render(
+        card={
+            "vendor_name": "Mouser",
+            "mpn_matched": "LM317T",
+            "manufacturer": "TI",
+            "unit_price": 0.50,
+            "qty_available": 3000,
+            "moq": 10,
+            "confidence_color": "amber",
+            "confidence_pct": 60,
+            "lead_quality": "fair",
+            "is_authorized": True,
+            "source_type": "mouser",
+            "sub_offers": [
+                {"source_type": "digikey", "unit_price": 0.55, "qty_available": 1000},
+                {"source_type": "nexar", "unit_price": 0.48, "qty_available": 2000},
+            ],
+            "offer_count": 3,
+            "sources_found": ["mouser", "digikey", "nexar"],
+            "reason": "Multiple sources",
+        },
+        card_index=1,
+        search_id="test-789",
+    )
+    assert "3 offers" in html
+    assert "digikey" in html
+    assert "0.5500" in html
+    assert "2,000" in html
+
+
 def test_search_run_empty_mpn_returns_error(client):
     """POST /v2/partials/search/run with empty MPN returns error message."""
     resp = client.post(

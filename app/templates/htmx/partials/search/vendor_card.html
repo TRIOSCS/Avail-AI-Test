@@ -1,0 +1,97 @@
+{# Single vendor card — rendered per SSE event in streaming search.
+   Called by: htmx_views.search_stream (via Jinja2 render)
+   Depends on: Alpine.js $store.shortlist, search detail drawer
+#}
+<div class="vendor-card bg-gray-800 border border-gray-700 rounded-lg p-4 hover:border-gray-500 transition-all"
+     style="--i: {{ card_index }}"
+     id="vendor-card-{{ card.vendor_name|lower|replace(' ', '-') }}"
+     x-data="{ expanded: false }">
+
+  <div class="flex items-start gap-3">
+    {# Shortlist checkbox #}
+    <input type="checkbox"
+           class="mt-1 accent-brand-500"
+           :checked="$store.shortlist.has('{{ card.vendor_name }}', '{{ card.mpn_matched }}')"
+           @change="$store.shortlist.toggle({vendor_name: '{{ card.vendor_name }}', mpn: '{{ card.mpn_matched }}', unit_price: {{ card.unit_price or 0 }}, qty_available: {{ card.qty_available or 0 }}, source_type: '{{ card.source_type }}'})">
+
+    <div class="flex-1 min-w-0">
+      {# Header row: vendor + badges #}
+      <div class="flex items-center gap-2 flex-wrap">
+        <span class="font-semibold text-white text-sm">{{ card.vendor_name }}</span>
+        {% if card.is_authorized %}
+        <span class="px-1.5 py-0.5 text-[10px] font-medium bg-emerald-900/50 text-emerald-400 rounded border border-emerald-800">AUTH</span>
+        {% endif %}
+        <span class="px-1.5 py-0.5 text-[10px] font-medium rounded border
+          {% if card.confidence_color == 'green' %}bg-emerald-900/50 text-emerald-400 border-emerald-800
+          {% elif card.confidence_color == 'amber' %}bg-amber-900/50 text-amber-400 border-amber-800
+          {% else %}bg-red-900/50 text-red-400 border-red-800{% endif %}">
+          {{ card.confidence_pct|default(0) }}%
+        </span>
+        {% for src in card.sources_found|default([]) %}
+        <span class="source-badge source-badge--{{ src }}">{{ src }}</span>
+        {% endfor %}
+      </div>
+
+      {# MPN + manufacturer #}
+      <div class="text-xs text-gray-400 mt-1 font-mono">
+        {{ card.mpn_matched }} {% if card.manufacturer %}· {{ card.manufacturer }}{% endif %}
+      </div>
+
+      {# Price / Qty / MOQ row #}
+      <div class="flex items-baseline gap-4 mt-2">
+        {% if card.unit_price %}
+        <span class="text-lg font-bold text-white font-mono">${{ "%.4f"|format(card.unit_price) }}</span>
+        {% else %}
+        <span class="text-sm text-gray-500">No price</span>
+        {% endif %}
+
+        {% if card.qty_available %}
+        <span class="text-sm text-gray-300 font-mono">{{ "{:,}".format(card.qty_available) }} avail</span>
+        {% endif %}
+
+        {% if card.moq %}
+        <span class="text-xs text-gray-500">MOQ {{ "{:,}".format(card.moq) }}</span>
+        {% endif %}
+      </div>
+
+      {# Lead quality + reason #}
+      <div class="text-xs text-gray-500 mt-1">{{ card.lead_quality|default('')|title }} · {{ card.reason|default('') }}</div>
+    </div>
+
+    {# Right side: actions #}
+    <div class="flex flex-col items-end gap-1 shrink-0">
+      {% if card.offer_count and card.offer_count > 1 %}
+      <button @click="expanded = !expanded" class="text-xs text-brand-400 hover:text-brand-300">
+        <span x-text="expanded ? 'Hide' : '{{ card.offer_count }} offers'"></span>
+      </button>
+      {% endif %}
+      <button hx-get="/v2/partials/search/lead-detail?search_id={{ search_id }}&vendor_key={{ card.vendor_name|lower|trim }}"
+              hx-target="#lead-drawer-content"
+              class="text-xs text-gray-400 hover:text-white transition-colors">
+        Details →
+      </button>
+    </div>
+  </div>
+
+  {# Sub-offers table (expandable) #}
+  {% if card.sub_offers %}
+  <div x-show="expanded" x-transition class="mt-3 border-t border-gray-700 pt-2">
+    <table class="w-full text-xs">
+      <thead><tr class="text-gray-500">
+        <th class="text-left py-1">Source</th>
+        <th class="text-right py-1">Price</th>
+        <th class="text-right py-1">Qty</th>
+      </tr></thead>
+      <tbody>
+      {% for offer in card.sub_offers %}
+        <tr class="text-gray-300 border-t border-gray-700/50">
+          <td class="py-1">{{ offer.source_type|default('') }}</td>
+          <td class="text-right font-mono">{% if offer.unit_price %}${{ "%.4f"|format(offer.unit_price) }}{% else %}-{% endif %}</td>
+          <td class="text-right font-mono">{{ "{:,}".format(offer.qty_available) if offer.qty_available else '-' }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</div>
