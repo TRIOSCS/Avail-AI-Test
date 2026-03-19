@@ -3,6 +3,7 @@
    Called by: partials/sourcing/results.html, htmx_views.lead_status_update (card swap)
    Depends on: partials/shared/source_badge.html
    Context vars: lead (SourcingLead), lead_sighting_data (dict keyed by lead.id) #}
+{% from "htmx/partials/shared/_macros.html" import status_badge, risk_badge %}
 
 {% set sighting = lead_sighting_data.get(lead.id, {}) %}
 {# Compact layout: left teal border for claimed leads, denser spacing #}
@@ -22,30 +23,18 @@
         <p class="text-xs text-gray-400 truncate max-w-[200px]">{{ lead.contact_url }}</p>
         {% endif %}
       </div>
-      {% set safety_badge = {
-        'low_risk': 'bg-emerald-50 text-emerald-700',
-        'medium_risk': 'bg-amber-50 text-amber-700',
-        'high_risk': 'bg-rose-50 text-rose-700',
-        'unknown': 'bg-gray-100 text-gray-600'
-      } %}
-      <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full
-                   {{ safety_badge.get(lead.vendor_safety_band, 'bg-gray-100 text-gray-600') }}">
-        {{ lead.vendor_safety_band|replace('_', ' ')|title if lead.vendor_safety_band else 'Unknown' }}
-      </span>
+      {{ risk_badge(lead.vendor_safety_band if lead.vendor_safety_band else 'unknown') }}
     </div>
 
     {# Buyer status badge (shown when status is not 'new') #}
-    {% set status_styles = {
+    {% set buyer_status_map = {
       'contacted': 'bg-amber-50 text-amber-700',
       'rfq_sent': 'bg-purple-50 text-purple-700',
       'has_stock': 'bg-emerald-50 text-emerald-700',
       'bad_lead': 'bg-gray-100 text-gray-500',
     } %}
     {% if lead.buyer_status and lead.buyer_status != 'new' %}
-    <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full
-                 {{ status_styles.get(lead.buyer_status, 'bg-gray-100 text-gray-600') }}">
-      {{ lead.buyer_status|replace('_', ' ')|title }}
-    </span>
+    {{ status_badge(lead.buyer_status, status_map=buyer_status_map) }}
     {% endif %}
 
     {# Row 2: Confidence score + progress bar #}

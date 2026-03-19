@@ -5,6 +5,7 @@
   Called by: htmx_views.py buy_plan_detail_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
 {# OOB breadcrumb update #}
 <div id="breadcrumb" hx-swap-oob="true">
   <a hx-get="/v2/partials/buy-plans" hx-target="#main-content" hx-push-url="/v2/buy-plans"
@@ -16,14 +17,6 @@
 <title hx-swap-oob="true">Buy Plan #{{ bp.id }} — AvailAI</title>
 
 {# ── Compute variables used throughout ── #}
-{% set status_colors = {
-  'draft': 'bg-brand-100 text-brand-600',
-  'pending': 'bg-amber-50 text-amber-700',
-  'active': 'bg-emerald-50 text-emerald-700',
-  'completed': 'bg-emerald-50 text-emerald-700',
-  'halted': 'bg-rose-50 text-rose-700',
-  'cancelled': 'bg-gray-100 text-gray-500'
-} %}
 {% set margin = bp.total_margin_pct|float if bp.total_margin_pct else 0 %}
 {% set total_cost = bp.total_cost|float if bp.total_cost else 0 %}
 {% set unique_vendors = lines|map(attribute='offer')|select('defined')|selectattr('vendor_name')|map(attribute='vendor_name')|unique|list %}
@@ -47,9 +40,7 @@
     <div class="flex flex-wrap items-center justify-between gap-3">
       <div class="flex items-center gap-3">
         <h1 class="text-2xl font-bold text-gray-900">Buy Plan #{{ bp.id }}</h1>
-        <span class="inline-flex px-2.5 py-1 text-xs font-semibold rounded-full {{ status_colors.get(bp.status, 'bg-gray-100 text-gray-700') }}">
-          {{ bp.status|upper }}
-        </span>
+        {{ status_badge(bp.status) }}
         {% if bp.is_stock_sale %}
         <span class="inline-flex px-2.5 py-1 text-xs font-semibold rounded-full bg-purple-100 text-purple-800">
           <svg class="w-3 h-3 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/></svg>
@@ -297,9 +288,7 @@
                 'issue': 'bg-rose-50 text-rose-700',
                 'cancelled': 'bg-gray-100 text-gray-500'
               } %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ line_colors.get(line.status, 'bg-gray-100 text-gray-600') }}">
-                {{ line.status|replace('_', ' ')|capitalize }}
-              </span>
+              {{ status_badge(line.status, status_map=line_colors) }}
               {% if line.po_number %}
               <div class="font-mono text-xs text-gray-500 mt-0.5">{{ line.po_number }}</div>
               {% endif %}
