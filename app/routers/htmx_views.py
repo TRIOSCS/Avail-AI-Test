@@ -6040,6 +6040,7 @@ async def materials_workspace_partial(
 @router.get("/v2/partials/materials/filters/tree", response_class=HTMLResponse)
 async def materials_filters_tree_partial(
     request: Request,
+    commodity: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -6054,6 +6055,7 @@ async def materials_filters_tree_partial(
             "commodity_tree": COMMODITY_TREE,
             "commodity_counts": commodity_counts,
             "display_names": display_names,
+            "active_commodity": commodity.lower().strip() if commodity else "",
         }
     )
     return templates.TemplateResponse("htmx/partials/materials/filters/tree.html", ctx)

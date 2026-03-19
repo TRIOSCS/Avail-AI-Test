@@ -32,13 +32,13 @@
   <div class="flex items-center gap-2">
     <input type="number" placeholder="Min"
            :value="subFilters['{{ spec_key }}_min'] || ''"
-           @change="setRange('{{ spec_key }}', 'min', $event.target.value)"
+           @input.debounce.600ms="setRange('{{ spec_key }}', 'min', $event.target.value)"
            class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
            min="{{ range_data.min }}" max="{{ range_data.max }}" step="any">
     <span class="text-gray-400 text-xs">–</span>
     <input type="number" placeholder="Max"
            :value="subFilters['{{ spec_key }}_max'] || ''"
-           @change="setRange('{{ spec_key }}', 'max', $event.target.value)"
+           @input.debounce.600ms="setRange('{{ spec_key }}', 'max', $event.target.value)"
            class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500"
            min="{{ range_data.min }}" max="{{ range_data.max }}" step="any">
   </div>

@@ -16,7 +16,8 @@
       </button>
 
       <div hx-get="/v2/partials/materials/filters/tree"
-           hx-trigger="load"
+           hx-trigger="load, commodity-changed from:body"
+           hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
            hx-swap="innerHTML">
         <div class="animate-pulse space-y-2 mt-2">
           {% for _ in range(5) %}
