@@ -69,7 +69,7 @@ def get_facet_counts(
         .filter(
             MaterialSpecFacet.category == commodity,
             MaterialSpecFacet.value_text.isnot(None),
-            MaterialSpecFacet.material_card_id.in_(db.query(card_ids_subq)),
+            MaterialSpecFacet.material_card_id.in_(db.query(card_ids_subq.c.material_card_id)),
         )
         .group_by(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_text)
         .all()
@@ -151,7 +151,7 @@ def search_materials_faceted(
                     )
                 )
 
-    total = query.count()
+    total = db.query(func.count()).select_from(query.subquery()).scalar()
     materials = (
         query.order_by(MaterialCard.search_count.desc(), MaterialCard.created_at.desc())
         .offset(offset)
