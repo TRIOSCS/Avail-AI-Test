@@ -309,7 +309,6 @@ Alpine.data('materialsFilter', () => ({
   subFilters: {},
   q: '',
   page: 0,
-  panelOpen: false,
   _onPopstate: null,
 
   get activeFilterCount() {
