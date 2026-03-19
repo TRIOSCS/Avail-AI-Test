@@ -372,6 +372,7 @@ async def process_material_batch_results(db: Session) -> dict | None:
     except Exception as e:
         logger.error("process_material_batch_results commit failed: %s", e)
         db.rollback()
+        return stats
 
     r.delete(_REDIS_KEY)
     logger.info(
