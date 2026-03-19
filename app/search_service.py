@@ -33,6 +33,8 @@ from .models import (
     Sighting,
 )
 from .scoring import classify_lead, explain_lead, is_weak_lead, score_sighting, score_sighting_v2, score_unified
+from .services.credential_service import get_credential, get_credentials_batch
+from .services.price_snapshot_service import record_price_snapshot
 from .services.sourcing_leads import sync_leads_for_sightings
 from .services.vendor_affinity_service import find_vendor_affinity
 from .utils.normalization import (
@@ -64,6 +66,19 @@ _CONNECTOR_SOURCE_MAP = {
 
 
 # ── Search result cache (Redis, 15-min TTL) ─────────────────────────────
+
+_JUNK_VENDORS = {
+    "",
+    "unknown",
+    "(no sellers listed)",
+    "no sellers listed",
+    "n/a",
+    "none",
+    "(none)",
+    "-",
+    "no vendor",
+    "no seller",
+}
 
 _SEARCH_CACHE_TTL = 900  # 15 minutes
 _SEARCH_CACHE_PREFIX = "search:"
@@ -565,97 +580,106 @@ def should_trigger_ai_search(
 # ── Private helpers ──────────────────────────────────────────────────────
 
 
+def _make_stat(source_name: str, status: str, error: str | None = None) -> dict:
+    """Build a source stat entry."""
+    return {"source": source_name, "results": 0, "ms": 0, "error": error, "status": status}
+
+
+def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
+    """Build enabled connectors with credentials, returning (connectors,
+    source_stats_map, disabled_sources).
+
+    Checks disabled sources in DB, loads credentials per-connector.
+
+    Called by: _fetch_fresh
+    Depends on: services/credential_service, connectors/*, models.ApiSource
+    """
+    disabled_sources = {src.name for src in db.query(ApiSource).filter_by(status="disabled").all()}
+
+    # Batch-load all credentials in a single DB query
+    creds = get_credentials_batch(
+        db,
+        [
+            ("nexar", "NEXAR_CLIENT_ID"),
+            ("nexar", "NEXAR_CLIENT_SECRET"),
+            ("nexar", "OCTOPART_API_KEY"),
+            ("brokerbin", "BROKERBIN_API_KEY"),
+            ("brokerbin", "BROKERBIN_API_SECRET"),
+            ("ebay", "EBAY_CLIENT_ID"),
+            ("ebay", "EBAY_CLIENT_SECRET"),
+            ("digikey", "DIGIKEY_CLIENT_ID"),
+            ("digikey", "DIGIKEY_CLIENT_SECRET"),
+            ("mouser", "MOUSER_API_KEY"),
+            ("oemsecrets", "OEMSECRETS_API_KEY"),
+            ("sourcengine", "SOURCENGINE_API_KEY"),
+            ("element14", "ELEMENT14_API_KEY"),
+        ],
+    )
+
+    def _c(source_name, var_name):
+        return creds.get((source_name, var_name))
+
+    connectors = []
+    source_stats_map: dict[str, dict] = {}
+
+    def _add_or_skip(source_name, has_creds, connector_factory):
+        if source_name in disabled_sources:
+            source_stats_map[source_name] = _make_stat(source_name, "disabled")
+        elif not has_creds:
+            source_stats_map[source_name] = _make_stat(source_name, "skipped", "No API key configured")
+        else:
+            connectors.append(connector_factory())
+
+    nexar_id = _c("nexar", "NEXAR_CLIENT_ID")
+    nexar_sec = _c("nexar", "NEXAR_CLIENT_SECRET")
+    octopart_key = _c("nexar", "OCTOPART_API_KEY")
+    _add_or_skip(
+        "nexar", nexar_id and nexar_sec or octopart_key, lambda: NexarConnector(nexar_id, nexar_sec, octopart_key)
+    )
+
+    bb_key = _c("brokerbin", "BROKERBIN_API_KEY")
+    bb_sec = _c("brokerbin", "BROKERBIN_API_SECRET")
+    _add_or_skip("brokerbin", bb_key, lambda: BrokerBinConnector(bb_key, bb_sec))
+
+    ebay_id = _c("ebay", "EBAY_CLIENT_ID")
+    ebay_sec = _c("ebay", "EBAY_CLIENT_SECRET")
+    _add_or_skip("ebay", ebay_id and ebay_sec, lambda: EbayConnector(ebay_id, ebay_sec))
+
+    dk_id = _c("digikey", "DIGIKEY_CLIENT_ID")
+    dk_sec = _c("digikey", "DIGIKEY_CLIENT_SECRET")
+    _add_or_skip("digikey", dk_id and dk_sec, lambda: DigiKeyConnector(dk_id, dk_sec))
+
+    mouser_key = _c("mouser", "MOUSER_API_KEY")
+    _add_or_skip("mouser", mouser_key, lambda: MouserConnector(mouser_key))
+
+    oem_key = _c("oemsecrets", "OEMSECRETS_API_KEY")
+    _add_or_skip("oemsecrets", oem_key, lambda: OEMSecretsConnector(oem_key))
+
+    src_key = _c("sourcengine", "SOURCENGINE_API_KEY")
+    _add_or_skip("sourcengine", src_key, lambda: SourcengineConnector(src_key))
+
+    e14_key = _c("element14", "ELEMENT14_API_KEY")
+    _add_or_skip("element14", e14_key, lambda: Element14Connector(e14_key))
+
+    return connectors, source_stats_map, disabled_sources
+
+
 async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[dict]]:
     """Returns (results, source_stats) where source_stats is a list of {"source": name,
     "results": count, "ms": elapsed, "error": str|None, "status":
 
     "ok"|"error"|"skipped"|"disabled"}.
     """
-    # Check which sources are disabled by the user
-    disabled_sources = set()
-    for src in db.query(ApiSource).filter_by(status="disabled").all():
-        disabled_sources.add(src.name)
-
-    connectors = []
-    source_stats_map: dict[str, dict] = {}  # track per-connector status
-
-    # Tier 1: Direct APIs (skip disabled). DB credentials first, env var fallback.
-    from .services.credential_service import get_credential
-
-    def _cred(source_name, var_name):
-        return get_credential(db, source_name, var_name)
-
-    def _add_or_skip(source_name, has_creds, connector_factory):
-        if source_name in disabled_sources:
-            source_stats_map[source_name] = {
-                "source": source_name,
-                "results": 0,
-                "ms": 0,
-                "error": None,
-                "status": "disabled",
-            }
-        elif not has_creds:
-            source_stats_map[source_name] = {
-                "source": source_name,
-                "results": 0,
-                "ms": 0,
-                "error": "No API key configured",
-                "status": "skipped",
-            }
-        else:
-            connectors.append(connector_factory())
-
-    nexar_id = _cred("nexar", "NEXAR_CLIENT_ID")
-    nexar_sec = _cred("nexar", "NEXAR_CLIENT_SECRET")
-    octopart_key = _cred("nexar", "OCTOPART_API_KEY")
-    _add_or_skip(
-        "nexar", nexar_id and nexar_sec or octopart_key, lambda: NexarConnector(nexar_id, nexar_sec, octopart_key)
-    )
-
-    bb_key = _cred("brokerbin", "BROKERBIN_API_KEY")
-    bb_sec = _cred("brokerbin", "BROKERBIN_API_SECRET")
-    _add_or_skip("brokerbin", bb_key, lambda: BrokerBinConnector(bb_key, bb_sec))
-
-    ebay_id = _cred("ebay", "EBAY_CLIENT_ID")
-    ebay_sec = _cred("ebay", "EBAY_CLIENT_SECRET")
-    _add_or_skip("ebay", ebay_id and ebay_sec, lambda: EbayConnector(ebay_id, ebay_sec))
-
-    dk_id = _cred("digikey", "DIGIKEY_CLIENT_ID")
-    dk_sec = _cred("digikey", "DIGIKEY_CLIENT_SECRET")
-    _add_or_skip("digikey", dk_id and dk_sec, lambda: DigiKeyConnector(dk_id, dk_sec))
-
-    mouser_key = _cred("mouser", "MOUSER_API_KEY")
-    _add_or_skip("mouser", mouser_key, lambda: MouserConnector(mouser_key))
-
-    oem_key = _cred("oemsecrets", "OEMSECRETS_API_KEY")
-    _add_or_skip("oemsecrets", oem_key, lambda: OEMSecretsConnector(oem_key))
-
-    src_key = _cred("sourcengine", "SOURCENGINE_API_KEY")
-    _add_or_skip("sourcengine", src_key, lambda: SourcengineConnector(src_key))
-
-    e14_key = _cred("element14", "ELEMENT14_API_KEY")
-    _add_or_skip("element14", e14_key, lambda: Element14Connector(e14_key))
+    connectors, source_stats_map, disabled_sources = _build_connectors(db)
 
     # AI live web search — held back for conditional trigger (smart AI trigger)
-    ai_key = _cred("anthropic_ai", "ANTHROPIC_API_KEY")
+    ai_key = get_credential(db, "anthropic_ai", "ANTHROPIC_API_KEY")
     has_ai_live = bool(ai_key) and not bool(os.environ.get("TESTING"))
     ai_connector = None
     if "ai_live_web" in disabled_sources:
-        source_stats_map["ai_live_web"] = {
-            "source": "ai_live_web",
-            "results": 0,
-            "ms": 0,
-            "error": None,
-            "status": "disabled",
-        }
+        source_stats_map["ai_live_web"] = _make_stat("ai_live_web", "disabled")
     elif not has_ai_live:
-        source_stats_map["ai_live_web"] = {
-            "source": "ai_live_web",
-            "results": 0,
-            "ms": 0,
-            "error": "No API key configured",
-            "status": "skipped",
-        }
+        source_stats_map["ai_live_web"] = _make_stat("ai_live_web", "skipped", "No API key configured")
     else:
         ai_connector = AIWebSearchConnector(ai_key)
 
@@ -761,19 +785,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
             out.append(r)
 
     # Filter out junk vendors — no sellers, blanks, placeholders
-    JUNK_VENDORS = {
-        "",
-        "unknown",
-        "(no sellers listed)",
-        "no sellers listed",
-        "n/a",
-        "none",
-        "(none)",
-        "-",
-        "no vendor",
-        "no seller",
-    }
-    out = [r for r in out if r.get("vendor_name", "").strip().lower() not in JUNK_VENDORS]
+    out = [r for r in out if r.get("vendor_name", "").strip().lower() not in _JUNK_VENDORS]
 
     # ── Smart AI trigger: conditionally fire AI connector ────────────
     if ai_connector is not None:
@@ -1414,6 +1426,15 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
                 vh.last_qty = s.qty_available
             if s.unit_price is not None:
                 vh.last_price = s.unit_price
+                record_price_snapshot(
+                    db=db,
+                    material_card_id=card.id,
+                    vendor_name=s.vendor_name,
+                    price=s.unit_price,
+                    currency=s.currency or "USD",
+                    quantity=s.qty_available,
+                    source="api_sighting",
+                )
             if s.currency:
                 vh.last_currency = s.currency
             if s.manufacturer:
@@ -1440,6 +1461,15 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
                 vendor_sku=raw.get("vendor_sku"),
             )
             db.add(new_vh)
+            record_price_snapshot(
+                db=db,
+                material_card_id=card.id,
+                vendor_name=s.vendor_name,
+                price=s.unit_price,
+                currency=s.currency or "USD",
+                quantity=s.qty_available,
+                source="api_sighting",
+            )
             existing_vh[vn_key] = new_vh  # Prevent dupe inserts within batch
 
     # Link sightings to material card + populate normalized_mpn

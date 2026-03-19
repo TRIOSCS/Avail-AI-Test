@@ -112,6 +112,34 @@ def credential_is_set(db: Session, source_name: str, env_var_name: str) -> bool:
     return bool(os.getenv(env_var_name))
 
 
+def get_credentials_batch(db: Session, requests: list[tuple[str, str]]) -> dict[tuple[str, str], str | None]:
+    """Batch-load credentials: DB first, then env var fallback.
+
+    Args:
+        requests: list of (source_name, env_var_name) tuples.
+
+    Returns:
+        dict mapping (source_name, env_var_name) -> decrypted value or None.
+    """
+    source_names = {r[0] for r in requests}
+    sources = {src.name: src for src in db.query(ApiSource).filter(ApiSource.name.in_(source_names)).all()}
+    result: dict[tuple[str, str], str | None] = {}
+    for source_name, env_var_name in requests:
+        src = sources.get(source_name)
+        val = None
+        if src and src.credentials:
+            encrypted = src.credentials.get(env_var_name)
+            if encrypted:
+                try:
+                    val = decrypt_value(encrypted)
+                except Exception:
+                    logger.debug("Credential decrypt fallback for %s", env_var_name, exc_info=True)
+        if not val:
+            val = os.getenv(env_var_name) or None
+        result[(source_name, env_var_name)] = val
+    return result
+
+
 # ── Cached credential access (no DB session required) ────────────────
 
 _cred_cache: dict[tuple[str, str], tuple[str | None, float]] = {}
