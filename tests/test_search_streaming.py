@@ -46,3 +46,131 @@ def test_build_connectors_instantiates_with_creds(db_session):
     assert "mouser" not in stats
     # Other sources should be skipped
     assert stats["nexar"]["status"] == "skipped"
+
+
+# ── Aggressive dedup tests ──────────────────────────────────────────────
+
+
+def test_aggressive_dedup_groups_by_vendor():
+    """Same vendor with different prices should merge into one entry with sub_offers."""
+    from app.search_service import _deduplicate_sightings_aggressive
+
+    sightings = [
+        {
+            "vendor_name": "Arrow",
+            "mpn_matched": "LM317T",
+            "unit_price": 0.45,
+            "qty_available": 1000,
+            "score": 80,
+            "confidence": 0.8,
+            "source_type": "nexar",
+            "is_authorized": True,
+            "moq": 1,
+        },
+        {
+            "vendor_name": "Arrow",
+            "mpn_matched": "LM317T",
+            "unit_price": 0.48,
+            "qty_available": 500,
+            "score": 70,
+            "confidence": 0.7,
+            "source_type": "digikey",
+            "is_authorized": True,
+            "moq": 10,
+        },
+        {
+            "vendor_name": "Mouser",
+            "mpn_matched": "LM317T",
+            "unit_price": 0.50,
+            "qty_available": 2000,
+            "score": 75,
+            "confidence": 0.75,
+            "source_type": "mouser",
+            "is_authorized": True,
+            "moq": 1,
+        },
+    ]
+    result = _deduplicate_sightings_aggressive(sightings)
+
+    # Should produce 2 entries: Arrow (merged) and Mouser
+    assert len(result) == 2
+    arrow = next(r for r in result if "arrow" in r["vendor_name"].lower())
+    assert arrow["unit_price"] == 0.45  # best offer (highest score)
+    assert arrow["qty_available"] == 1500  # summed
+    assert len(arrow["sub_offers"]) == 1  # the other Arrow offer
+    assert arrow["offer_count"] == 2
+    assert "nexar" in arrow["sources_found"]
+    assert "digikey" in arrow["sources_found"]
+
+
+def test_aggressive_dedup_filters_zero_qty():
+    """Sightings with qty_available=0 are excluded."""
+    from app.search_service import _deduplicate_sightings_aggressive
+
+    sightings = [
+        {
+            "vendor_name": "Arrow",
+            "mpn_matched": "LM317T",
+            "unit_price": 0.45,
+            "qty_available": 0,
+            "score": 80,
+            "confidence": 0.8,
+            "source_type": "nexar",
+            "is_authorized": True,
+        },
+    ]
+    result = _deduplicate_sightings_aggressive(sightings)
+    assert len(result) == 0
+
+
+def test_incremental_dedup_new_vendor():
+    """New vendor results in new_cards list."""
+    from app.search_service import _incremental_dedup
+
+    existing = []
+    incoming = [
+        {
+            "vendor_name": "Arrow",
+            "mpn_matched": "LM317T",
+            "unit_price": 0.45,
+            "qty_available": 1000,
+            "score": 80,
+            "source_type": "nexar",
+        },
+    ]
+    new_cards, updated_cards = _incremental_dedup(incoming, existing)
+    assert len(new_cards) == 1
+    assert len(updated_cards) == 0
+
+
+def test_incremental_dedup_existing_vendor():
+    """Existing vendor results in updated_cards list with merged sub_offers."""
+    from app.search_service import _incremental_dedup
+
+    existing = [
+        {
+            "vendor_name": "Arrow",
+            "mpn_matched": "LM317T",
+            "unit_price": 0.45,
+            "qty_available": 1000,
+            "score": 80,
+            "source_type": "nexar",
+            "sub_offers": [],
+            "offer_count": 1,
+            "sources_found": {"nexar"},
+        },
+    ]
+    incoming = [
+        {
+            "vendor_name": "Arrow",
+            "mpn_matched": "LM317T",
+            "unit_price": 0.48,
+            "qty_available": 500,
+            "score": 70,
+            "source_type": "digikey",
+        },
+    ]
+    new_cards, updated_cards = _incremental_dedup(incoming, existing)
+    assert len(new_cards) == 0
+    assert len(updated_cards) == 1
+    assert updated_cards[0]["offer_count"] == 2
