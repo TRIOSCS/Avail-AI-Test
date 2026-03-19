@@ -483,3 +483,225 @@ class TestHumanBehavior:
             assert page.keyboard.type.call_count == 2
 
         asyncio.get_event_loop().run_until_complete(_test())
+
+
+# ---------------------------------------------------------------------------
+# search_worker_base shared module tests (new parameterized versions)
+# ---------------------------------------------------------------------------
+
+
+class TestSharedMPNNormalizer:
+    """Test the shared mpn_normalizer moved into search_worker_base."""
+
+    def test_import_from_base(self):
+        from app.services.search_worker_base.mpn_normalizer import normalize_mpn as base_norm
+
+        assert base_norm("LM358/TR") == "LM358"
+
+    def test_matches_ics_version(self):
+        from app.services.ics_worker.mpn_normalizer import normalize_mpn as ics_norm
+        from app.services.search_worker_base.mpn_normalizer import normalize_mpn as base_norm
+
+        test_cases = [
+            "",
+            "abc123",
+            "  LM 358 /TR  ",
+            "ADP3338AKCZ-3.3-RL7",
+            "IRF540N#PBF",
+            "TPS54331-NOPB",
+            "STM32F103C8T6",
+        ]
+        for mpn in test_cases:
+            assert base_norm(mpn) == ics_norm(mpn), f"Mismatch for {mpn!r}"
+
+    def test_export_from_init(self):
+        from app.services.search_worker_base import normalize_mpn
+
+        assert normalize_mpn("LM358-CT") == "LM358"
+
+
+class TestSharedCircuitBreakerBase:
+    """Test CircuitBreakerBase from search_worker_base."""
+
+    def test_import_from_base(self):
+        from app.services.search_worker_base.circuit_breaker import CircuitBreakerBase
+
+        cb = CircuitBreakerBase()
+        assert not cb.is_open
+
+    def test_state_machine_matches_ics(self):
+        """Base class has same state machine as ICS version."""
+        from app.services.search_worker_base.circuit_breaker import CircuitBreakerBase
+
+        cb = CircuitBreakerBase()
+        cb._trip("test")
+        assert cb.is_open
+        assert cb.should_stop()
+        cb.reset()
+        assert not cb.is_open
+
+    def test_empty_results_streak_trips_at_10(self):
+        from app.services.search_worker_base.circuit_breaker import CircuitBreakerBase
+
+        cb = CircuitBreakerBase()
+        for _ in range(9):
+            cb.record_empty_results()
+        assert not cb.is_open
+        cb.record_empty_results()
+        assert cb.is_open
+
+    def test_get_trip_info(self):
+        from app.services.search_worker_base.circuit_breaker import CircuitBreakerBase
+
+        cb = CircuitBreakerBase()
+        cb._trip("reason")
+        info = cb.get_trip_info()
+        assert info["is_open"] is True
+        assert info["trip_reason"] == "reason"
+
+    def test_subclassable(self):
+        """Workers can subclass and add their own health check."""
+        from app.services.search_worker_base.circuit_breaker import CircuitBreakerBase
+
+        class TestBreaker(CircuitBreakerBase):
+            def check_health(self, status_code: int) -> str:
+                if status_code == 429:
+                    self._trip("rate limited")
+                    return "RATE_LIMITED"
+                self.consecutive_failures = 0
+                return "HEALTHY"
+
+        cb = TestBreaker()
+        assert cb.check_health(200) == "HEALTHY"
+        assert not cb.is_open
+        cb.check_health(429)
+        assert cb.is_open
+
+    def test_export_from_init(self):
+        from app.services.search_worker_base import CircuitBreakerBase
+
+        cb = CircuitBreakerBase()
+        assert hasattr(cb, "record_empty_results")
+
+
+class TestSharedQueueManager:
+    """Test parameterized QueueManager from search_worker_base."""
+
+    def test_import_from_base(self):
+        from app.services.search_worker_base.queue_manager import QueueManager
+
+        assert QueueManager is not None
+
+    def test_constructor_stores_params(self):
+        from app.services.search_worker_base.queue_manager import QueueManager
+
+        class FakeModel:
+            pass
+
+        qm = QueueManager(
+            queue_model=FakeModel,
+            source_type="test_source",
+            dedup_window_days=14,
+            log_prefix="TEST",
+        )
+        assert qm.queue_model is FakeModel
+        assert qm.source_type == "test_source"
+        assert qm.dedup_window_days == 14
+        assert qm.log_prefix == "TEST"
+
+    def test_custom_link_sighting_fn(self):
+        from app.services.search_worker_base.queue_manager import QueueManager
+
+        custom_called = []
+
+        def custom_linker(s, req_id, mat_id, source_type):
+            custom_called.append((req_id, mat_id, source_type))
+            return MagicMock()
+
+        qm = QueueManager(
+            queue_model=object,
+            source_type="test",
+            link_sighting_fn=custom_linker,
+        )
+        assert qm._link_sighting is custom_linker
+
+    def test_export_from_init(self):
+        from app.services.search_worker_base import QueueManager
+
+        assert QueueManager is not None
+
+
+class TestSharedAIGate:
+    """Test parameterized AIGate from search_worker_base."""
+
+    def test_import_from_base(self):
+        from app.services.search_worker_base.ai_gate import AIGate
+
+        assert AIGate is not None
+
+    def test_constructor_builds_prompt_and_schema(self):
+        from app.services.search_worker_base.ai_gate import AIGate
+
+        gate = AIGate(
+            queue_model=object,
+            marketplace_name="TestMarket",
+            search_field="search_test",
+            log_prefix="TM",
+        )
+        assert "TestMarket" in gate._system_prompt
+        assert "search_test" in gate._system_prompt
+        items = gate._schema["properties"]["classifications"]["items"]
+        assert "search_test" in items["properties"]
+        assert "search_test" in items["required"]
+
+    def test_clear_cache(self):
+        from app.services.search_worker_base.ai_gate import AIGate
+
+        gate = AIGate(queue_model=object, marketplace_name="X", search_field="search_x")
+        gate._classification_cache[("MPN1", "mfr")] = ("semi", "search", "reason")
+        assert len(gate._classification_cache) == 1
+        gate.clear_classification_cache()
+        assert len(gate._classification_cache) == 0
+
+    def test_ics_prompt_matches_original(self):
+        """ICS-configured gate prompt should match the original structure."""
+        from app.services.search_worker_base.ai_gate import AIGate
+
+        gate = AIGate(
+            queue_model=object,
+            marketplace_name="ICsource",
+            search_field="search_ics",
+        )
+        assert "ICsource" in gate._system_prompt
+        assert "search_ics=true" in gate._system_prompt
+        assert "search_ics=false" in gate._system_prompt
+
+    def test_nc_prompt_matches_original(self):
+        """NC-configured gate prompt should match the original structure."""
+        from app.services.search_worker_base.ai_gate import AIGate
+
+        gate = AIGate(
+            queue_model=object,
+            marketplace_name="NetComponents",
+            search_field="search_nc",
+        )
+        assert "NetComponents" in gate._system_prompt
+        assert "search_nc=true" in gate._system_prompt
+        assert "search_nc=false" in gate._system_prompt
+
+    def test_classify_empty_batch(self):
+        """classify_parts_batch with empty list should return []."""
+        from app.services.search_worker_base.ai_gate import AIGate
+
+        gate = AIGate(queue_model=object, marketplace_name="X", search_field="search_x")
+
+        async def _test():
+            result = await gate.classify_parts_batch([])
+            assert result == []
+
+        asyncio.get_event_loop().run_until_complete(_test())
+
+    def test_export_from_init(self):
+        from app.services.search_worker_base import AIGate
+
+        assert AIGate is not None
