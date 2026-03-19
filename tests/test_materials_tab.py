@@ -116,8 +116,8 @@ def test_material_detail_shows_cross_references(client, db_session):
     assert "Micron" in resp.text
 
 
-def test_material_detail_hides_cross_references_when_empty(client, db_session):
-    """Cross-references section hidden when no data."""
+def test_material_detail_shows_find_crosses_button_when_empty(client, db_session):
+    """Crosses section always visible; shows Find Crosses button when no data."""
     from app.models import MaterialCard
 
     card = MaterialCard(normalized_mpn="NOXREF-001", display_mpn="NOXREF-001")
@@ -126,7 +126,9 @@ def test_material_detail_hides_cross_references_when_empty(client, db_session):
 
     resp = client.get(f"/v2/partials/materials/{card.id}")
     assert resp.status_code == 200
-    assert "Crosses" not in resp.text
+    assert "Crosses" in resp.text
+    assert "Find Crosses" in resp.text
+    assert "find-crosses" in resp.text
 
 
 def test_material_tab_unknown_returns_404(client, db_session):

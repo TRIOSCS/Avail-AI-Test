@@ -179,37 +179,7 @@
   </div>
 
   {# ── Crosses & Substitutes ──────────────────────────────── #}
-  {% if card.cross_references %}
-  <div class="bg-white border border-brand-200 rounded-lg mb-6 px-6 py-4">
-    <h2 class="text-base font-semibold text-gray-900 mb-3">Crosses & Substitutes</h2>
-    <div class="flex flex-wrap gap-2">
-      {% for xref in card.cross_references %}
-      {% if xref is mapping and xref.mpn %}
-      <a href="/v2/materials?q={{ xref.mpn|urlencode }}"
-         hx-get="/v2/partials/materials?q={{ xref.mpn|urlencode }}"
-         hx-target="#main-content"
-         hx-push-url="/v2/materials?q={{ xref.mpn|urlencode }}"
-         class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium bg-brand-50 text-brand-700 border border-brand-200 rounded-lg hover:bg-brand-100 transition-colors"
-         style="font-family: 'JetBrains Mono', monospace;">
-        {{ xref.mpn }}
-        {% if xref.manufacturer %}
-        <span class="text-xs text-brand-400 font-normal">{{ xref.manufacturer }}</span>
-        {% endif %}
-      </a>
-      {% elif xref is string %}
-      <a href="/v2/materials?q={{ xref|urlencode }}"
-         hx-get="/v2/partials/materials?q={{ xref|urlencode }}"
-         hx-target="#main-content"
-         hx-push-url="/v2/materials?q={{ xref|urlencode }}"
-         class="inline-flex items-center px-3 py-1.5 text-sm font-medium bg-brand-50 text-brand-700 border border-brand-200 rounded-lg hover:bg-brand-100 transition-colors"
-         style="font-family: 'JetBrains Mono', monospace;">
-        {{ xref }}
-      </a>
-      {% endif %}
-      {% endfor %}
-    </div>
-  </div>
-  {% endif %}
+  {% include "htmx/partials/materials/crosses_section.html" %}
 
   {# Insights panel (lazy-loaded) #}
   <div id="insights-panel" class="mb-6"></div>
