@@ -164,6 +164,9 @@ def search_materials_faceted(
 def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
     """Get sub-filter options for a commodity from schema + actual data.
 
+    Uses 3 queries total (schema + text values + numeric ranges) instead of
+    1 + N queries per schema row, avoiding N+1.
+
     Returns list of dicts: {spec_key, display_name, data_type, values|range, unit, is_primary}
     """
     commodity = commodity.lower().strip()
@@ -174,6 +177,51 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
         .all()
     )
 
+    if not schemas:
+        return []
+
+    # Collect spec_keys by type so we can batch-query
+    enum_keys = [s.spec_key for s in schemas if s.data_type == "enum"]
+    numeric_keys = [s.spec_key for s in schemas if s.data_type == "numeric"]
+
+    # Single query for ALL text distinct values grouped by spec_key (covers enum types)
+    text_values_by_key: dict[str, list[str]] = {}
+    if enum_keys:
+        text_rows = (
+            db.query(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_text)
+            .filter(
+                MaterialSpecFacet.category == commodity,
+                MaterialSpecFacet.spec_key.in_(enum_keys),
+                MaterialSpecFacet.value_text.isnot(None),
+            )
+            .distinct()
+            .all()
+        )
+        for spec_key, value in text_rows:
+            text_values_by_key.setdefault(spec_key, []).append(value)
+
+    # Single query for ALL numeric min/max grouped by spec_key
+    numeric_ranges_by_key: dict[str, dict] = {}
+    if numeric_keys:
+        numeric_rows = (
+            db.query(
+                MaterialSpecFacet.spec_key,
+                func.min(MaterialSpecFacet.value_numeric),
+                func.max(MaterialSpecFacet.value_numeric),
+            )
+            .filter(
+                MaterialSpecFacet.category == commodity,
+                MaterialSpecFacet.spec_key.in_(numeric_keys),
+                MaterialSpecFacet.value_numeric.isnot(None),
+            )
+            .group_by(MaterialSpecFacet.spec_key)
+            .all()
+        )
+        for spec_key, min_val, max_val in numeric_rows:
+            if min_val is not None:
+                numeric_ranges_by_key[spec_key] = {"min": min_val, "max": max_val}
+
+    # Build result by matching pre-fetched data to schema rows
     result = []
     for schema in schemas:
         option = {
@@ -185,35 +233,9 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
         }
 
         if schema.data_type == "enum":
-            # Get actual values from data (not just enum_values from schema)
-            actual = (
-                db.query(MaterialSpecFacet.value_text)
-                .filter(
-                    MaterialSpecFacet.category == commodity,
-                    MaterialSpecFacet.spec_key == schema.spec_key,
-                    MaterialSpecFacet.value_text.isnot(None),
-                )
-                .distinct()
-                .all()
-            )
-            option["values"] = sorted([r[0] for r in actual])
-
+            option["values"] = sorted(text_values_by_key.get(schema.spec_key, []))
         elif schema.data_type == "numeric":
-            # Get min/max from actual data
-            agg = (
-                db.query(
-                    func.min(MaterialSpecFacet.value_numeric),
-                    func.max(MaterialSpecFacet.value_numeric),
-                )
-                .filter(
-                    MaterialSpecFacet.category == commodity,
-                    MaterialSpecFacet.spec_key == schema.spec_key,
-                    MaterialSpecFacet.value_numeric.isnot(None),
-                )
-                .first()
-            )
-            option["range"] = {"min": agg[0], "max": agg[1]} if agg and agg[0] is not None else None
-
+            option["range"] = numeric_ranges_by_key.get(schema.spec_key)
         elif schema.data_type == "boolean":
             option["values"] = ["true", "false"]
 
