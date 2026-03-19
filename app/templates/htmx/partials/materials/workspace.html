@@ -2,7 +2,7 @@
    Called by: htmx_views.py materials_workspace route
    Depends on: Alpine.js materialsFilter() in htmx_app.js
 #}
-<div x-data="materialsFilter()" x-init="init()" class="flex gap-0 h-full">
+<div id="materials-workspace" x-data="materialsFilter()" x-init="init()" class="flex gap-0 h-full">
 
   {# -- Mobile filter button -- #}
   <button @click="panelOpen = true" x-show="!panelOpen"
@@ -54,7 +54,7 @@
       <div id="subfilters-container"
            hx-get="/v2/partials/materials/filters/sub"
            hx-trigger="commodity-changed from:body"
-           hx-vals='js:{"commodity": Alpine.evaluate($el.closest("[x-data]"), "commodity")}'
+           hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity")}'
            hx-swap="innerHTML">
       </div>
     </div>
@@ -110,11 +110,11 @@
          hx-get="/v2/partials/materials/faceted"
          hx-trigger="load, filters-changed from:body"
          hx-vals='js:{
-           "commodity": Alpine.evaluate(document.querySelector("[x-data]"), "commodity") || "",
-           "q": Alpine.evaluate(document.querySelector("[x-data]"), "q") || "",
-           "sub_filters": JSON.stringify(Alpine.evaluate(document.querySelector("[x-data]"), "subFilters") || {}),
+           "commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || "",
+           "q": Alpine.evaluate(document.querySelector("#materials-workspace"), "q") || "",
+           "sub_filters": JSON.stringify(Alpine.evaluate(document.querySelector("#materials-workspace"), "subFilters") || {}),
            "limit": 50,
-           "offset": Alpine.evaluate(document.querySelector("[x-data]"), "page") * 50 || 0
+           "offset": Alpine.evaluate(document.querySelector("#materials-workspace"), "page") * 50 || 0
          }'
          hx-swap="innerHTML"
          hx-indicator="#results-loading">

@@ -427,6 +427,7 @@ function materialsFilter() {
     },
 
     applyFilters() {
+      this.page = 0;
       this.pushURL();
       document.body.dispatchEvent(new CustomEvent('filters-changed'));
     },
