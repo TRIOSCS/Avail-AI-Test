@@ -8,6 +8,7 @@ Depends on: routers/vendor_contacts.py, utils/vendor_helpers.py
 """
 
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock
 
 from app.models import Contact, Requisition, VendorCard, VendorContact, VendorResponse
 
@@ -754,7 +755,10 @@ def test_add_email_existing_contact(client, db_session, monkeypatch):
 def test_add_email_triggers_enrichment(client, db_session, monkeypatch):
     """add_email_to_card triggers background enrichment when credentials exist."""
     task_created = []
-    monkeypatch.setattr("asyncio.create_task", lambda coro: (task_created.append(True), coro.close()))
+    monkeypatch.setattr(
+        "app.routers.vendor_contacts.safe_background_task",
+        AsyncMock(side_effect=lambda *a, **kw: task_created.append(True)),
+    )
     monkeypatch.setattr("app.routers.vendor_contacts.get_credential_cached", lambda *a, **kw: "fake-key")
 
     resp = client.post(

@@ -1,4 +1,5 @@
-"""material_card_service.py — Material card serialization, manufacturer inference, and merge.
+"""material_card_service.py — Material card serialization, manufacturer inference, and
+merge.
 
 Extracted from routers/materials.py to keep routers thin (HTTP only).
 All functions take a db Session and return data — they do NOT commit.
@@ -18,6 +19,7 @@ from ..models import (
     Requirement,
     Sighting,
 )
+from ..services.price_snapshot_service import record_price_snapshot
 from ..vendor_utils import normalize_vendor_name
 
 MIN_MPN_PREFIX_LENGTH = 6  # Minimum prefix length for manufacturer inference
@@ -51,9 +53,7 @@ def backfill_missing_manufacturers(db: Session) -> int:
     Does NOT commit — caller must commit.
     """
     null_parts = (
-        db.query(MaterialCard)
-        .filter((MaterialCard.manufacturer.is_(None)) | (MaterialCard.manufacturer == ""))
-        .all()
+        db.query(MaterialCard).filter((MaterialCard.manufacturer.is_(None)) | (MaterialCard.manufacturer == "")).all()
     )
     updated = 0
     for part in null_parts:
@@ -116,13 +116,7 @@ def serialize_material_card(card: MaterialCard, db: Session) -> dict:
         for name, tt, conf, src in tag_rows
     ]
 
-    offers = (
-        db.query(Offer)
-        .filter(Offer.material_card_id == card.id)
-        .order_by(Offer.created_at.desc())
-        .limit(50)
-        .all()
-    )
+    offers = db.query(Offer).filter(Offer.material_card_id == card.id).order_by(Offer.created_at.desc()).limit(50).all()
     offers_list = [
         {
             "id": o.id,
@@ -237,6 +231,13 @@ def merge_material_cards(db: Session, source_id: int, target_id: int, user_email
                     tvh.last_qty = svh.last_qty
                 if svh.last_price is not None:
                     tvh.last_price = svh.last_price
+                    record_price_snapshot(
+                        db=db,
+                        material_card_id=target_id,
+                        vendor_name=tvh.vendor_name,
+                        price=svh.last_price,
+                        source="merge",
+                    )
                 if svh.last_currency:
                     tvh.last_currency = svh.last_currency
                 if svh.last_manufacturer:

@@ -1,4 +1,5 @@
-"""test_phase_integration_fixes.py — Tests for integration bug fixes and cross-feature links.
+"""test_phase_integration_fixes.py — Tests for integration bug fixes and cross-feature
+links.
 
 Verifies: Create Quote target fix, Add to Draft Quote route, Quotes tab clickable rows,
 Build Buy Plan button on won quotes, search→material link, vendor emails→req backlink,
@@ -16,7 +17,6 @@ from sqlalchemy.orm import Session
 
 from app.models import Offer, Quote, QuoteLine, Requirement, Requisition, User
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
@@ -32,9 +32,7 @@ def req_with_offers(db_session: Session, test_user: User):
     db_session.add(req)
     db_session.flush()
 
-    requirement = Requirement(
-        requisition_id=req.id, primary_mpn="LM317T", target_qty=100
-    )
+    requirement = Requirement(requisition_id=req.id, primary_mpn="LM317T", target_qty=100)
     db_session.add(requirement)
     db_session.flush()
 
@@ -66,7 +64,7 @@ def req_with_offers(db_session: Session, test_user: User):
 @pytest.fixture()
 def draft_quote(db_session: Session, test_user: User, req_with_offers):
     """A draft quote on the requisition."""
-    from app.models import CustomerSite, Company
+    from app.models import Company, CustomerSite
 
     req, offers = req_with_offers
 
@@ -95,9 +93,7 @@ def draft_quote(db_session: Session, test_user: User, req_with_offers):
 
 
 class TestCreateQuoteTarget:
-    def test_offers_tab_has_main_content_target(
-        self, client: TestClient, req_with_offers
-    ):
+    def test_offers_tab_has_main_content_target(self, client: TestClient, req_with_offers):
         """Create Quote button should target #main-content, not #tab-content."""
         req, _ = req_with_offers
         resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/offers")
@@ -110,9 +106,7 @@ class TestCreateQuoteTarget:
 
 
 class TestAddToDraftQuote:
-    def test_add_offers_to_draft_quote(
-        self, client: TestClient, db_session: Session, req_with_offers, draft_quote
-    ):
+    def test_add_offers_to_draft_quote(self, client: TestClient, db_session: Session, req_with_offers, draft_quote):
         """Adding offers to draft quote creates QuoteLines."""
         req, offers = req_with_offers
         resp = client.post(
@@ -123,17 +117,11 @@ class TestAddToDraftQuote:
         assert resp.status_code == 200
         assert "added" in resp.text.lower() or "Offers" in resp.text
 
-        lines = (
-            db_session.query(QuoteLine)
-            .filter(QuoteLine.quote_id == draft_quote.id)
-            .all()
-        )
+        lines = db_session.query(QuoteLine).filter(QuoteLine.quote_id == draft_quote.id).all()
         assert len(lines) == 1
         assert lines[0].mpn == "LM317T"
 
-    def test_add_to_non_draft_quote_fails(
-        self, client: TestClient, db_session: Session, req_with_offers, draft_quote
-    ):
+    def test_add_to_non_draft_quote_fails(self, client: TestClient, db_session: Session, req_with_offers, draft_quote):
         """Can't add offers to a sent/won quote."""
         req, offers = req_with_offers
         draft_quote.status = "sent"
@@ -151,9 +139,7 @@ class TestAddToDraftQuote:
 
 
 class TestQuotesTabClickable:
-    def test_quotes_tab_rows_have_hx_get(
-        self, client: TestClient, req_with_offers, draft_quote
-    ):
+    def test_quotes_tab_rows_have_hx_get(self, client: TestClient, req_with_offers, draft_quote):
         """Quote rows should have hx-get for navigation."""
         req, _ = req_with_offers
         resp = client.get(f"/v2/partials/requisitions/{req.id}/tab/quotes")
@@ -166,9 +152,7 @@ class TestQuotesTabClickable:
 
 
 class TestBuildBuyPlanButton:
-    def test_won_quote_shows_build_button(
-        self, client: TestClient, db_session: Session, draft_quote
-    ):
+    def test_won_quote_shows_build_button(self, client: TestClient, db_session: Session, draft_quote):
         """Won quotes should show 'Build Buy Plan' button."""
         draft_quote.status = "won"
         db_session.commit()
@@ -188,9 +172,7 @@ class TestBuildBuyPlanButton:
 
 
 class TestVendorEmailsBacklink:
-    def test_emails_tab_has_requisition_link(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_emails_tab_has_requisition_link(self, client: TestClient, db_session: Session, test_user: User):
         """Email contacts should link back to their requisition."""
         from app.models import VendorCard
         from app.models.offers import Contact as RfqContact
@@ -235,9 +217,7 @@ class TestVendorEmailsBacklink:
 
 
 class TestMaterialVendorLink:
-    def test_sightings_have_vendor_links(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_sightings_have_vendor_links(self, client: TestClient, db_session: Session, test_user: User):
         """Material card sightings should link vendor names to vendor search."""
         from app.models import Requirement, Sighting
         from app.models.intelligence import MaterialCard
@@ -260,9 +240,7 @@ class TestMaterialVendorLink:
         db_session.add(req)
         db_session.flush()
 
-        requirement = Requirement(
-            requisition_id=req.id, primary_mpn="LM317T", target_qty=100
-        )
+        requirement = Requirement(requisition_id=req.id, primary_mpn="LM317T", target_qty=100)
         db_session.add(requirement)
         db_session.flush()
 
@@ -279,23 +257,21 @@ class TestMaterialVendorLink:
         db_session.add(sighting)
         db_session.commit()
 
+        # Sightings are now in lazy-loaded tabs, not inline on detail page.
+        # Detail page should show tab structure.
         resp = client.get(f"/v2/partials/materials/{card.id}")
         assert resp.status_code == 200
-        assert "TestVendor" in resp.text
-        # Vendor name should be a link
-        assert "text-brand-500" in resp.text
-        assert "/v2/partials/vendors" in resp.text
+        assert "material-tab-content" in resp.text
+        assert "Vendors" in resp.text
 
 
 # ── Phase 5B: Company activity tab ──────────────────────────────────
 
 
 class TestCompanyActivityTab:
-    def test_company_activity_tab_with_rfq(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_company_activity_tab_with_rfq(self, client: TestClient, db_session: Session, test_user: User):
         """Company activity tab shows RFQ contacts for linked requisitions."""
-        from app.models import Company, CustomerSite
+        from app.models import Company
         from app.models.offers import Contact as RfqContact
 
         company = Company(name="Activity Co", account_type="customer")
@@ -332,9 +308,7 @@ class TestCompanyActivityTab:
         assert "RFQ History" in resp.text
         assert f"Req #{req.id}" in resp.text
 
-    def test_company_activity_tab_empty(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_company_activity_tab_empty(self, client: TestClient, db_session: Session, test_user: User):
         """Empty company activity tab shows placeholder."""
         from app.models import Company
 
@@ -351,9 +325,7 @@ class TestCompanyActivityTab:
 
 
 class TestInsightsPanels:
-    def test_requisition_insights_panel_empty(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_requisition_insights_panel_empty(self, client: TestClient, db_session: Session, test_user: User):
         """Requisition insights panel renders with no cached insights."""
         req = Requisition(
             name="Insights Req",
@@ -369,9 +341,7 @@ class TestInsightsPanels:
         assert "AI Insights" in resp.text
         assert "No insights yet" in resp.text
 
-    def test_vendor_insights_panel_empty(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_vendor_insights_panel_empty(self, client: TestClient, db_session: Session, test_user: User):
         """Vendor insights panel renders with no cached insights."""
         from app.models import VendorCard
 
@@ -386,9 +356,7 @@ class TestInsightsPanels:
         assert resp.status_code == 200
         assert "AI Insights" in resp.text
 
-    def test_company_insights_panel_empty(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_company_insights_panel_empty(self, client: TestClient, db_session: Session, test_user: User):
         """Company insights panel renders with no cached insights."""
         from app.models import Company
 
@@ -419,7 +387,8 @@ class TestDataOpsTab:
     def test_data_ops_tab_renders_for_admin(self, db_session: Session, admin_user):
         """Data ops tab renders for admin users."""
         from fastapi.testclient import TestClient as TC
-        from app.dependencies import require_user, get_db
+
+        from app.dependencies import get_db, require_user
         from app.main import app
 
         app.dependency_overrides[require_user] = lambda: admin_user
@@ -438,9 +407,7 @@ class TestDataOpsTab:
 
 
 class TestManualOfferCreation:
-    def test_add_offer_form_renders(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_add_offer_form_renders(self, client: TestClient, db_session: Session, test_user: User):
         """Add offer form renders with requirement options."""
         req = Requisition(
             name="Offer Form Test",
@@ -450,9 +417,7 @@ class TestManualOfferCreation:
         )
         db_session.add(req)
         db_session.flush()
-        requirement = Requirement(
-            requisition_id=req.id, primary_mpn="TEST123", target_qty=50
-        )
+        requirement = Requirement(requisition_id=req.id, primary_mpn="TEST123", target_qty=50)
         db_session.add(requirement)
         db_session.commit()
 
@@ -461,9 +426,7 @@ class TestManualOfferCreation:
         assert "Add Manual Offer" in resp.text
         assert "TEST123" in resp.text
 
-    def test_create_manual_offer(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_create_manual_offer(self, client: TestClient, db_session: Session, test_user: User):
         """Manual offer creation saves to DB."""
         req = Requisition(
             name="Manual Offer Test",
@@ -486,19 +449,13 @@ class TestManualOfferCreation:
         )
         assert resp.status_code == 200
 
-        offer = (
-            db_session.query(Offer)
-            .filter(Offer.requisition_id == req.id, Offer.mpn == "LM358N")
-            .first()
-        )
+        offer = db_session.query(Offer).filter(Offer.requisition_id == req.id, Offer.mpn == "LM358N").first()
         assert offer is not None
         assert offer.vendor_name == "Manual Vendor"
         assert offer.source == "manual"
         assert float(offer.unit_price) == 0.25
 
-    def test_create_offer_missing_fields(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_create_offer_missing_fields(self, client: TestClient, db_session: Session, test_user: User):
         """Manual offer creation fails without vendor/mpn."""
         req = Requisition(
             name="Missing Fields Test",
@@ -517,9 +474,7 @@ class TestManualOfferCreation:
 
 
 class TestReconfirmOffer:
-    def test_reconfirm_resets_ttl(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_reconfirm_resets_ttl(self, client: TestClient, db_session: Session, test_user: User):
         """Reconfirming an offer resets expiry and increments count."""
         req = Requisition(
             name="Reconfirm Test",
@@ -541,9 +496,7 @@ class TestReconfirmOffer:
         db_session.commit()
         db_session.refresh(offer)
 
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/offers/{offer.id}/reconfirm"
-        )
+        resp = client.post(f"/v2/partials/requisitions/{req.id}/offers/{offer.id}/reconfirm")
         assert resp.status_code == 200
 
         db_session.refresh(offer)

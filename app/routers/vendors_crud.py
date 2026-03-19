@@ -60,9 +60,13 @@ async def check_vendor_duplicate(
     # Fuzzy matches
     # TODO: Replace O(n) fuzzy match with pg_trgm trigram index for better performance
     try:
-        from thefuzz import fuzz
+        from rapidfuzz import fuzz
 
-        existing = db.query(VendorCard.id, VendorCard.normalized_name, VendorCard.display_name).limit(FUZZY_MATCH_POOL_SIZE).all()
+        existing = (
+            db.query(VendorCard.id, VendorCard.normalized_name, VendorCard.display_name)
+            .limit(FUZZY_MATCH_POOL_SIZE)
+            .all()
+        )
         for row in existing:
             score = fuzz.token_sort_ratio(norm, row.normalized_name)
             if score >= 80:

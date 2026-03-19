@@ -16,6 +16,7 @@ from app.database import get_db
 from app.dependencies import require_admin as require_user
 from app.models.intelligence import MaterialCard
 from app.models.tags import EntityTag, MaterialTag, Tag
+from app.utils.async_helpers import safe_background_task
 
 # Track enrichment progress (simple in-memory state)
 _enrichment_status: dict = {"running": False, "started_at": None, "result": None}
@@ -188,7 +189,7 @@ async def trigger_enrichment(db: Session = Depends(get_db), _user=Depends(requir
             session.close()
             _enrichment_status["running"] = False
 
-    asyncio.create_task(_run())
+    await safe_background_task(_run(), task_name="tag_enrich_batch")
     return {"ok": True, "message": f"Enrichment started for {len(mpns)} cards", "count": len(mpns)}
 
 
@@ -211,7 +212,7 @@ async def apply_batch_results(batch_id: str = "msgbatch_01M2nTyzQ141rLBb6SJte9fi
 
         return await apply_batch_results_chunked(batch_id)
 
-    asyncio.create_task(_run())
+    await safe_background_task(_run(), task_name="tag_apply_batch")
     return {"ok": True, "message": f"Applying batch {batch_id} results in background"}
 
 
@@ -233,7 +234,7 @@ async def trigger_ai_backfill(limit: int = 50000, db: Session = Depends(get_db),
         finally:
             session.close()
 
-    asyncio.create_task(_run())
+    await safe_background_task(_run(), task_name="tag_backfill")
     return {"ok": True, "message": f"AI backfill submitted for up to {limit} cards"}
 
 
@@ -259,7 +260,7 @@ async def trigger_cross_validation(
         finally:
             session.close()
 
-    asyncio.create_task(_run())
+    await safe_background_task(_run(), task_name="tag_cross_validate")
     return {"ok": True, "message": f"Cross-validation started (limit={limit})"}
 
 
@@ -350,7 +351,7 @@ async def trigger_nexar_validate(limit: int = 5000, _user=Depends(require_user))
         finally:
             session.close()
 
-    asyncio.create_task(_run())
+    await safe_background_task(_run(), task_name="tag_nexar_validate")
     return {"ok": True, "message": f"Nexar bulk validation started (limit={limit})"}
 
 
@@ -401,7 +402,7 @@ async def trigger_nexar_validate_all(batch_limit: int = 5000, _user=Depends(requ
             f"{total_confirmed} confirmed, {total_changed} changed"
         )
 
-    asyncio.create_task(_run())
+    await safe_background_task(_run(), task_name="tag_nexar_validate_all")
     return {"ok": True, "message": f"Nexar validate-all started (batch_limit={batch_limit})"}
 
 
@@ -424,7 +425,7 @@ async def trigger_nexar_backfill_untagged(limit: int = 5000, _user=Depends(requi
         finally:
             session.close()
 
-    asyncio.create_task(_run())
+    await safe_background_task(_run(), task_name="tag_nexar_backfill_untagged")
     return {"ok": True, "message": f"Nexar backfill for untagged cards started (limit={limit})"}
 
 
@@ -478,7 +479,7 @@ async def trigger_cross_validate_all(
             f"{total_confirmed} confirmed, {total_changed} changed"
         )
 
-    asyncio.create_task(_run())
+    await safe_background_task(_run(), task_name="tag_cross_validate_all")
     return {"ok": True, "message": f"Cross-validate-all started (batch_limit={batch_limit})"}
 
 
@@ -575,7 +576,7 @@ async def trigger_triage(limit: int = 50000, db: Session = Depends(get_db), _use
         finally:
             session.close()
 
-    asyncio.create_task(_run())
+    await safe_background_task(_run(), task_name="tag_triage_internal")
     return {"ok": True, "message": f"Internal part triage started (limit={limit})"}
 
 
@@ -589,5 +590,5 @@ async def apply_triage(batch_id: str, _user=Depends(require_user)):
         result = await apply_triage_results(batch_id)
         logger.info(f"Triage apply result: {result}")
 
-    asyncio.create_task(_run())
+    await safe_background_task(_run(), task_name="tag_apply_triage")
     return {"ok": True, "message": f"Applying triage results for batch {batch_id}"}

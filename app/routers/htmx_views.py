@@ -2136,11 +2136,18 @@ async def search_run(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Run a part search and return results HTML.
+    """Launch a streaming part search and return the results shell HTML.
+
+    Generates a search_id, launches stream_search_mpn as a background task, and returns
+    the results_shell.html template with SSE connection details.
 
     If requirement_id is provided, searches for that requirement's MPN. Otherwise uses
     the mpn form field.
     """
+    from uuid import uuid4
+
+    from ..utils.async_helpers import safe_background_task as _safe_bg
+
     search_mpn = mpn.strip()
 
     # If searching from a requirement row, get the MPN from query params
@@ -2156,75 +2163,124 @@ async def search_run(
     if not search_mpn:
         return HTMLResponse('<div class="p-4 text-sm text-red-600">Please enter a part number.</div>')
 
-    start = time.time()
-    results = []
-    error = None
-    source_errors: list[str] = []
+    # Generate a unique search ID and launch streaming search in background
+    search_id = str(uuid4())
+    enabled_sources = _get_enabled_sources(db)
 
-    try:
-        # Use the search service to find parts across all connectors
-        from ..search_service import quick_search_mpn
+    from ..search_service import stream_search_mpn
 
-        raw_results = await quick_search_mpn(search_mpn, db)
-        results = raw_results.get("sightings", [])
-        # Extract actual errors from source_stats (source_errors key doesn't exist)
-        for stat in raw_results.get("source_stats", []):
-            if stat.get("status") == "error" and stat.get("error"):
-                source_errors.append(f"{stat.get('source', 'Unknown')}: {stat['error']}")
-    except Exception as exc:
-        logger.error("Search failed for {}: {}", search_mpn, exc)
-        error = f"Search error: {exc}"
-
-    elapsed = time.time() - start
-
-    # Enrich each result with confidence, lead quality, and reason summary
-    # using scoring functions that already exist in scoring.py.
-    for r in results:
-        unified = score_unified(
-            source_type=r.get("source_type", ""),
-            vendor_score=r.get("vendor_score"),
-            is_authorized=r.get("is_authorized", False),
-            unit_price=r.get("unit_price"),
-            qty_available=r.get("qty_available"),
-            age_hours=r.get("age_hours"),
-            has_price=bool(r.get("unit_price")),
-            has_qty=bool(r.get("qty_available")),
-            has_lead_time=bool(r.get("lead_time")),
-            has_condition=bool(r.get("condition")),
-        )
-        r["confidence_pct"] = unified["confidence_pct"]
-        r["confidence_color"] = unified["confidence_color"]
-        r["source_badge"] = unified["source_badge"]
-        r["lead_quality"] = classify_lead(
-            score=unified["score"],
-            is_authorized=r.get("is_authorized", False),
-            has_price=bool(r.get("unit_price")),
-            has_qty=bool(r.get("qty_available")),
-            has_contact=bool(r.get("vendor_email") or r.get("vendor_phone")),
-            evidence_tier=r.get("evidence_tier"),
-        )
-        r["reason"] = explain_lead(
-            vendor_name=r.get("vendor_name"),
-            is_authorized=r.get("is_authorized", False),
-            vendor_score=r.get("vendor_score"),
-            unit_price=r.get("unit_price"),
-            qty_available=r.get("qty_available"),
-            has_contact=bool(r.get("vendor_email") or r.get("vendor_phone")),
-            evidence_tier=r.get("evidence_tier"),
-            source_type=r.get("source_type"),
-        )
+    await _safe_bg(stream_search_mpn(search_id, search_mpn, db), task_name="stream_search_mpn")
 
     ctx = _base_ctx(request, user, "search")
     ctx.update(
         {
-            "results": results,
+            "search_id": search_id,
             "mpn": search_mpn,
-            "elapsed_seconds": elapsed,
-            "error": error,
-            "source_errors": source_errors,
+            "enabled_sources": enabled_sources,
         }
     )
-    return templates.TemplateResponse("htmx/partials/search/results.html", ctx)
+    return templates.TemplateResponse("htmx/partials/search/results_shell.html", ctx)
+
+
+@router.get("/v2/partials/search/stream")
+async def search_stream(
+    request: Request,
+    search_id: str = Query(...),
+    user: User = Depends(require_user),
+):
+    """SSE stream endpoint for search results.
+
+    Subscribes to the SSE broker channel for the given search_id and yields events until
+    the 'done' event is received or the client disconnects.
+    """
+    from sse_starlette.sse import EventSourceResponse
+
+    from ..services.sse_broker import broker
+
+    async def event_generator():
+        async for msg in broker.listen(f"search:{search_id}"):
+            if await request.is_disconnected():
+                break
+            yield {"event": msg["event"], "data": msg["data"]}
+            if msg["event"] == "done":
+                break
+
+    return EventSourceResponse(event_generator())
+
+
+def _get_enabled_sources(db: Session) -> list[dict]:
+    """Return list of enabled API sources for the source progress chips.
+
+    Called by: search_run
+    Depends on: ApiSource model
+    """
+    from ..models import ApiSource
+
+    sources = db.query(ApiSource).filter(ApiSource.status != "disabled").all()
+    return [{"name": s.name, "status": s.status} for s in sources]
+
+
+def _get_cached_search_results(search_id: str) -> list[dict] | None:
+    """Read cached search results from Redis.
+
+    Called by: search_filter
+    Depends on: search_service._get_search_redis
+    """
+    try:
+        from ..search_service import _get_search_redis
+
+        rc = _get_search_redis()
+        if rc:
+            data = rc.get(f"search:{search_id}:results")
+            if data:
+                return json.loads(data)
+    except Exception:
+        pass
+    return None
+
+
+@router.get("/v2/partials/search/filter", response_class=HTMLResponse)
+async def search_filter(
+    request: Request,
+    search_id: str = Query(...),
+    confidence: str = Query("all"),
+    source: str = Query("all"),
+    sort: str = Query("best"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Re-render search results with filters applied, reading from Redis cache.
+
+    Called by: search filter bar (HTMX)
+    Depends on: _get_cached_search_results, vendor_card.html template
+    """
+    results = _get_cached_search_results(search_id)
+    if results is None:
+        return HTMLResponse('<div class="text-sm text-gray-500 p-4">Search results expired. Please search again.</div>')
+
+    # Apply filters
+    if confidence != "all":
+        color_map = {"high": "green", "medium": "amber", "low": "red"}
+        results = [r for r in results if r.get("confidence_color") == color_map.get(confidence)]
+
+    if source != "all":
+        results = [r for r in results if source in (r.get("sources_found") or [])]
+
+    # Apply sort
+    if sort == "cheapest":
+        results.sort(key=lambda r: r.get("unit_price") or float("inf"))
+    elif sort == "stock":
+        results.sort(key=lambda r: r.get("qty_available") or 0, reverse=True)
+    else:
+        results.sort(key=lambda r: (r.get("score", 0), r.get("confidence_pct", 0)), reverse=True)
+
+    # Re-render cards using vendor_card.html for each result
+    cards_html = ""
+    for i, card in enumerate(results):
+        cards_html += templates.get_template("htmx/partials/search/vendor_card.html").render(
+            card=card, card_index=i, search_id=search_id
+        )
+    return HTMLResponse(cards_html)
 
 
 @router.get("/v2/partials/search/lead-detail", response_class=HTMLResponse)
@@ -2232,14 +2288,36 @@ async def search_lead_detail(
     request: Request,
     idx: int = Query(0, ge=0),
     mpn: str = Query(""),
+    search_id: str = Query(""),
+    vendor_key: str = Query(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Return the lead detail drawer content for a single search result.
 
-    Re-runs the search (cached in search_service) and returns the enriched result at the
-    given index.
+    When search_id + vendor_key are provided, reads from Redis cache (new flow).
+    Otherwise falls back to re-running the search via quick_search_mpn (legacy).
+
+    Called by: lead detail drawer (HTMX)
+    Depends on: _get_cached_search_results, vendor_utils.normalize_vendor_name
     """
+    # ── New path: read from Redis cache by vendor_key ──
+    if search_id and vendor_key:
+        results = _get_cached_search_results(search_id)
+        if results:
+            from ..vendor_utils import normalize_vendor_name
+
+            lead = next(
+                (r for r in results if normalize_vendor_name(r.get("vendor_name", "")) == vendor_key),
+                None,
+            )
+            if lead:
+                ctx = _base_ctx(request, user, "search")
+                ctx.update({"lead": lead, "mpn": lead.get("mpn_matched", "")})
+                return templates.TemplateResponse("htmx/partials/search/lead_detail.html", ctx)
+        return HTMLResponse('<p class="p-4 text-sm text-gray-500">Lead not found in cache. Please search again.</p>')
+
+    # ── Legacy path: re-run search by MPN + index ──
     if not mpn.strip():
         return HTMLResponse('<p class="p-4 text-sm text-gray-500">No part number specified.</p>')
 
@@ -2340,6 +2418,128 @@ async def search_lead_detail(
         }
     )
     return templates.TemplateResponse("htmx/partials/search/lead_detail.html", ctx)
+
+
+@router.get("/v2/partials/search/requisition-picker", response_class=HTMLResponse)
+async def requisition_picker(
+    request: Request,
+    mpn: str = Query(""),
+    items: str = Query("[]"),
+    action: str = Query("add"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render requisition picker modal for adding shortlisted results.
+
+    Called by: shortlist_bar.html "Add to Requisition" button
+    Depends on: models.sourcing (Requisition)
+    """
+    recent_reqs = db.query(Requisition).order_by(Requisition.created_at.desc()).limit(20).all()
+
+    ctx = _base_ctx(request, user, "search")
+    ctx.update(
+        {
+            "requisitions": recent_reqs,
+            "mpn": mpn,
+            "items_json": items,
+            "action": action,
+        }
+    )
+    return templates.TemplateResponse("htmx/partials/search/requisition_picker_modal.html", ctx)
+
+
+@router.post("/v2/partials/search/add-to-requisition", response_class=HTMLResponse)
+async def add_to_requisition(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add shortlisted search results to a requisition as Sighting rows.
+
+    Creates a Requirement for the MPN if one doesn't exist on the requisition.
+    Persists each selected result as a Sighting row.
+
+    Called by: requisition_picker_modal.html action button
+    Depends on: models.sourcing (Requisition, Requirement, Sighting)
+    """
+    body = await request.json()
+    requisition_id = body.get("requisition_id")
+    mpn = body.get("mpn", "").strip()
+    items = body.get("items", [])
+
+    if not requisition_id or not mpn or not items:
+        return HTMLResponse(
+            '<div class="text-red-600 text-sm p-2">Missing required fields.</div>',
+            status_code=400,
+        )
+
+    req = db.get(Requisition, requisition_id)
+    if not req:
+        return HTMLResponse(
+            '<div class="text-red-600 text-sm p-2">Requisition not found.</div>',
+            status_code=404,
+        )
+
+    # Find or create Requirement for this MPN
+    requirement = (
+        db.query(Requirement)
+        .filter_by(
+            requisition_id=requisition_id,
+            primary_mpn=mpn,
+        )
+        .first()
+    )
+
+    if not requirement:
+        requirement = Requirement(
+            requisition_id=requisition_id,
+            primary_mpn=mpn,
+            normalized_mpn=mpn.strip().upper(),
+            target_qty=None,
+            sourcing_status="open",
+        )
+        db.add(requirement)
+        db.flush()
+
+    # Create Sighting rows
+    for item in items:
+        sighting = Sighting(
+            requirement_id=requirement.id,
+            vendor_name=item.get("vendor_name", "Unknown"),
+            mpn_matched=item.get("mpn_matched"),
+            manufacturer=item.get("manufacturer"),
+            qty_available=item.get("qty_available"),
+            unit_price=item.get("unit_price"),
+            currency=item.get("currency", "USD"),
+            source_type=item.get("source_type"),
+            is_authorized=item.get("is_authorized", False),
+            confidence=item.get("confidence", 0),
+            score=item.get("score", 0),
+            evidence_tier=item.get("evidence_tier"),
+            moq=item.get("moq"),
+            lead_time=item.get("lead_time"),
+            condition=item.get("condition"),
+            date_code=item.get("date_code"),
+            packaging=item.get("packaging"),
+            vendor_email=item.get("vendor_email"),
+            vendor_phone=item.get("vendor_phone"),
+            raw_data={
+                "vendor_url": item.get("vendor_url"),
+                "click_url": item.get("click_url"),
+                "octopart_url": item.get("octopart_url"),
+                "vendor_sku": item.get("vendor_sku"),
+            },
+        )
+        db.add(sighting)
+
+    db.commit()
+
+    count = len(items)
+    return HTMLResponse(
+        f'<div class="text-sm text-emerald-600 p-2">'
+        f"Added {count} result{'s' if count != 1 else ''} to requisition &ldquo;{req.name}&rdquo;"
+        f"</div>"
+    )
 
 
 # ── Vendor partials ─────────────────────────────────────────────────────
@@ -4733,9 +4933,9 @@ async def buy_plan_submit_partial(
         )
         db.commit()
         if plan.auto_approved:
-            run_notify_bg(notify_approved, plan.id)
+            await run_notify_bg(notify_approved, plan.id)
         else:
-            run_notify_bg(notify_submitted, plan.id)
+            await run_notify_bg(notify_submitted, plan.id)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -4767,9 +4967,9 @@ async def buy_plan_approve_partial(
         plan = approve_buy_plan(plan_id, action, user, db, notes=form.get("notes"))
         db.commit()
         if action == "approve":
-            run_notify_bg(notify_approved, plan.id)
+            await run_notify_bg(notify_approved, plan.id)
         else:
-            run_notify_bg(notify_rejected, plan.id)
+            await run_notify_bg(notify_rejected, plan.id)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
 
@@ -4804,9 +5004,9 @@ async def buy_plan_verify_so_partial(
         )
         db.commit()
         if action == "approve":
-            run_notify_bg(notify_so_verified, plan.id)
+            await run_notify_bg(notify_so_verified, plan.id)
         else:
-            run_notify_bg(notify_so_rejected, plan.id, action=action)
+            await run_notify_bg(notify_so_rejected, plan.id, action=action)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
 
@@ -4846,7 +5046,7 @@ async def buy_plan_confirm_po_partial(
     try:
         confirm_po(plan_id, line_id, po_number, ship_date, user, db)
         db.commit()
-        run_notify_bg(notify_po_confirmed, plan_id, line_id=line_id)
+        await run_notify_bg(notify_po_confirmed, plan_id, line_id=line_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -4874,7 +5074,7 @@ async def buy_plan_verify_po_partial(
         updated = check_completion(plan_id, db)
         if updated and updated.status == "completed":
             db.commit()
-            run_notify_bg(notify_completed, plan_id)
+            await run_notify_bg(notify_completed, plan_id)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
 
@@ -5707,38 +5907,86 @@ async def materials_list_partial(
     request: Request,
     q: str = "",
     lifecycle: str = "",
+    category: str = "",
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Return material cards list as HTML partial."""
-    from ..models.intelligence import MaterialCard
+    from sqlalchemy import func as sqlfunc
 
-    query = db.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None))
+    from ..models.intelligence import MaterialCard
+    from ..services.material_search_service import classify_query, search_materials_local
+
+    interpreted_query = ""
     if q.strip():
-        safe = escape_like(q.strip())
-        query = query.filter(
-            MaterialCard.normalized_mpn.ilike(f"%{safe.lower()}%") | MaterialCard.display_mpn.ilike(f"%{safe}%")
+        query_type = classify_query(q.strip())
+        if query_type == "mpn":
+            materials, total = search_materials_local(db, q.strip(), lifecycle, category, limit, offset)
+        else:
+            materials, total = search_materials_local(db, q.strip(), lifecycle, category, limit, offset)
+            interpreted_query = f"Searching: {q.strip()}"
+    else:
+        materials, total = search_materials_local(db, "", lifecycle, category, limit, offset)
+
+    # Top commodity categories for filter pills
+    top_categories = (
+        db.query(MaterialCard.category, sqlfunc.count(MaterialCard.id))
+        .filter(
+            MaterialCard.category.isnot(None),
+            MaterialCard.category != "",
+            MaterialCard.category != "other",
+            MaterialCard.deleted_at.is_(None),
         )
-    if lifecycle:
-        query = query.filter(MaterialCard.lifecycle_status == lifecycle)
-    total = query.count()
-    materials = (
-        query.order_by(MaterialCard.search_count.desc().nullslast(), MaterialCard.created_at.desc())
-        .offset(offset)
-        .limit(limit)
+        .group_by(MaterialCard.category)
+        .order_by(sqlfunc.count(MaterialCard.id).desc())
+        .limit(12)
         .all()
     )
+
+    # Compute vendor_count and best_price for each material
+    from sqlalchemy import func as sqlfunc
+
+    from ..models.intelligence import MaterialVendorHistory
+
+    card_ids = [m.id for m in materials]
+    if card_ids:
+        vendor_stats = (
+            db.query(
+                MaterialVendorHistory.material_card_id,
+                sqlfunc.count(MaterialVendorHistory.id).label("vendor_count"),
+                sqlfunc.min(MaterialVendorHistory.last_price).label("best_price"),
+            )
+            .filter(MaterialVendorHistory.material_card_id.in_(card_ids))
+            .group_by(MaterialVendorHistory.material_card_id)
+            .all()
+        )
+        stats_map = {
+            row.material_card_id: {"vendor_count": row.vendor_count, "best_price": row.best_price}
+            for row in vendor_stats
+        }
+    else:
+        stats_map = {}
+
+    # Attach stats to materials
+    for m in materials:
+        s = stats_map.get(m.id, {})
+        m._vendor_count = s.get("vendor_count", 0)
+        m._best_price = s.get("best_price")
+
     ctx = _base_ctx(request, user, "materials")
     ctx.update(
         {
             "materials": materials,
             "q": q,
             "lifecycle": lifecycle,
+            "category": category,
             "total": total,
             "limit": limit,
             "offset": offset,
+            "interpreted_query": interpreted_query,
+            "top_categories": top_categories,
         }
     )
     return templates.TemplateResponse("htmx/partials/materials/list.html", ctx)
@@ -5782,6 +6030,76 @@ async def material_detail_partial(
     ctx = _base_ctx(request, user, "materials")
     ctx.update({"card": card, "sightings": sightings, "offers": offers})
     return templates.TemplateResponse("htmx/partials/materials/detail.html", ctx)
+
+
+@router.get(
+    "/v2/partials/materials/{card_id}/tab/{tab_name}",
+    response_class=HTMLResponse,
+)
+async def material_tab_partial(
+    request: Request,
+    card_id: int,
+    tab_name: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return a material detail tab partial."""
+    from ..models.intelligence import MaterialCard, MaterialVendorHistory
+
+    card = db.get(MaterialCard, card_id)
+    if not card:
+        return HTMLResponse(
+            "<p class='text-gray-400 text-sm py-4 text-center'>Material not found</p>",
+            status_code=404,
+        )
+
+    ctx = _base_ctx(request, user, "materials")
+    ctx["card"] = card
+
+    if tab_name == "vendors":
+        ctx["vendors"] = (
+            db.query(MaterialVendorHistory)
+            .filter_by(material_card_id=card_id)
+            .order_by(MaterialVendorHistory.last_seen.desc().nullslast())
+            .all()
+        )
+        return templates.TemplateResponse("htmx/partials/materials/tabs/vendors.html", ctx)
+    elif tab_name == "customers":
+        from ..models.purchase_history import CustomerPartHistory
+
+        ctx["customers"] = (
+            db.query(CustomerPartHistory)
+            .filter_by(material_card_id=card_id)
+            .order_by(CustomerPartHistory.last_purchased_at.desc().nullslast())
+            .all()
+        )
+        return templates.TemplateResponse("htmx/partials/materials/tabs/customers.html", ctx)
+    elif tab_name == "sourcing":
+        from ..models.sourcing import Requirement
+
+        ctx["requirements"] = (
+            db.query(Requirement)
+            .filter(Requirement.material_card_id == card_id)
+            .order_by(Requirement.created_at.desc())
+            .all()
+        )
+        return templates.TemplateResponse("htmx/partials/materials/tabs/sourcing.html", ctx)
+    elif tab_name == "price_history":
+        from ..models.price_snapshot import MaterialPriceSnapshot
+
+        ctx["snapshots"] = (
+            db.query(MaterialPriceSnapshot)
+            .filter_by(material_card_id=card_id)
+            .order_by(MaterialPriceSnapshot.recorded_at.desc())
+            .limit(200)
+            .all()
+        )
+        return templates.TemplateResponse("htmx/partials/materials/tabs/price_history.html", ctx)
+    else:
+        return HTMLResponse(
+            "<p class='text-gray-400 text-sm py-4 text-center'>Unknown tab</p>",
+            status_code=404,
+        )
 
 
 @router.put("/v2/partials/materials/{card_id}", response_class=HTMLResponse)

@@ -27,11 +27,12 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import ActivityLog, User
 from ..models.buy_plan import BuyPlan
+from ..utils.async_helpers import safe_background_task
 
 # ── Background runner ────────────────────────────────────────────────
 
 
-def run_v3_notify_bg(coro_factory, plan_id: int, **kwargs):
+async def run_v3_notify_bg(coro_factory, plan_id: int, **kwargs):
     """Fire-and-forget a notification coroutine with its own DB session."""
 
     async def _run():
@@ -47,7 +48,7 @@ def run_v3_notify_bg(coro_factory, plan_id: int, **kwargs):
         finally:
             bg_db.close()
 
-    asyncio.create_task(_run())
+    await safe_background_task(_run(), task_name="buyplan_notification")
 
 
 # Backward-compatible alias

@@ -93,3 +93,53 @@ def test_part_header_null_fields(client, db_session, test_user):
     assert "UNKNOWN" in html
     assert "No brand" in html
     assert "Open" in html  # default when sourcing_status is None
+
+
+def test_edit_cell_returns_input(client, db_session, test_user):
+    """GET edit/{field} returns an input or select element."""
+    requisition = _make_requisition(db_session, test_user.id)
+    part = _make_requirement(db_session, requisition.id)
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/parts/{part.id}/header/edit/brand")
+    assert resp.status_code == 200
+    assert "input" in resp.text.lower() or "select" in resp.text.lower()
+
+
+def test_edit_cell_invalid_field(client, db_session, test_user):
+    """GET edit/bogus returns 400."""
+    requisition = _make_requisition(db_session, test_user.id)
+    part = _make_requirement(db_session, requisition.id)
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/parts/{part.id}/header/edit/bogus_field")
+    assert resp.status_code == 400
+
+
+def test_patch_header_updates_field(client, db_session, test_user):
+    """PATCH saves target_qty and returns updated header."""
+    requisition = _make_requisition(db_session, test_user.id)
+    part = _make_requirement(db_session, requisition.id)
+    db_session.commit()
+
+    resp = client.patch(
+        f"/v2/partials/parts/{part.id}/header",
+        data={"field": "target_qty", "value": "5000"},
+    )
+    assert resp.status_code == 200
+    db_session.refresh(part)
+    assert part.target_qty == 5000
+
+
+def test_patch_header_hx_trigger(client, db_session, test_user):
+    """PATCH response includes HX-Trigger for list sync."""
+    requisition = _make_requisition(db_session, test_user.id)
+    part = _make_requirement(db_session, requisition.id)
+    db_session.commit()
+
+    resp = client.patch(
+        f"/v2/partials/parts/{part.id}/header",
+        data={"field": "brand", "value": "TI"},
+    )
+    assert resp.status_code == 200
+    assert "part-updated" in resp.headers.get("hx-trigger", "")

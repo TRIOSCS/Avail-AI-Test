@@ -623,9 +623,9 @@ async def verify_so(
 
     db.commit()
     if body.action == "approve":
-        run_notify_bg(notify_so_verified, plan.id)
+        await run_notify_bg(notify_so_verified, plan.id)
     else:
-        run_notify_bg(notify_so_rejected, plan.id, action=body.action)
+        await run_notify_bg(notify_so_rejected, plan.id, action=body.action)
     return {"ok": True, "plan_id": plan.id, "so_status": plan.so_status, "status": plan.status}
 
 
@@ -654,7 +654,7 @@ async def confirm_po(
         raise HTTPException(400, str(e))
 
     db.commit()
-    run_notify_bg(notify_po_confirmed, plan_id, line_id=line.id)
+    await run_notify_bg(notify_po_confirmed, plan_id, line_id=line.id)
     return {"ok": True, "line_id": line.id, "status": line.status, "po_number": line.po_number}
 
 
@@ -689,7 +689,7 @@ async def verify_po(
     updated_plan = check_completion(plan_id, db)
     if updated_plan and updated_plan.status == BuyPlanStatus.completed.value:
         db.commit()
-        run_notify_bg(notify_completed, plan_id)
+        await run_notify_bg(notify_completed, plan_id)
     return {"ok": True, "line_id": line.id, "status": line.status}
 
 

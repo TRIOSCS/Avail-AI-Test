@@ -1559,6 +1559,16 @@ class TestPropagateVendorEmails:
 # ── _fetch_fresh ─────────────────────────────────────────────────────────
 
 
+def _fake_creds_batch(value="fake-key"):
+    """Return a mock for get_credentials_batch that returns value for every requested
+    key."""
+
+    def _batch(db, requests):
+        return {(src, var): value for src, var in requests}
+
+    return _batch
+
+
 class TestFetchFresh:
     """Test _fetch_fresh with all connectors mocked."""
 
@@ -1568,7 +1578,10 @@ class TestFetchFresh:
         for name in ["nexar", "brokerbin", "ebay", "digikey", "mouser", "oemsecrets", "sourcengine", "element14"]:
             _make_api_source(db_session, name, status="disabled")
 
-        with patch("app.services.credential_service.get_credential", return_value="fake-key"):
+        with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
+            patch("app.services.credential_service.get_credential", return_value="fake-key"),
+        ):
             results, stats = await _fetch_fresh(["LM317T"], db_session)
 
         assert results == []
@@ -1578,7 +1591,10 @@ class TestFetchFresh:
     @pytest.mark.asyncio
     async def test_no_credentials(self, db_session):
         """When no credentials are configured, all sources are skipped."""
-        with patch("app.services.credential_service.get_credential", return_value=None):
+        with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch(None)),
+            patch("app.services.credential_service.get_credential", return_value=None),
+        ):
             results, stats = await _fetch_fresh(["LM317T"], db_session)
 
         assert results == []
@@ -1591,6 +1607,7 @@ class TestFetchFresh:
         _make_api_source(db_session, "nexar")
 
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
@@ -1621,6 +1638,7 @@ class TestFetchFresh:
         _make_api_source(db_session, "brokerbin")
 
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
@@ -1659,6 +1677,7 @@ class TestFetchFresh:
     async def test_dedup_results(self, db_session):
         """Duplicate results (same vendor, mpn_key, vendor_sku) are deduped."""
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
@@ -1691,6 +1710,7 @@ class TestFetchFresh:
         """Dedup handles integer vendor_sku without crashing (OEMSecrets returns int
         SKUs)."""
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
@@ -1725,6 +1745,7 @@ class TestFetchFresh:
     async def test_junk_vendors_filtered(self, db_session):
         """Junk vendor names (empty, 'unknown', etc.) are filtered out."""
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
@@ -1764,6 +1785,7 @@ class TestFetchFresh:
         _make_api_source(db_session, "nexar")
 
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
@@ -1795,6 +1817,7 @@ class TestFetchFresh:
     async def test_db_stats_commit_failure(self, db_session):
         """DB stats commit failure doesn't break the search."""
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
@@ -1839,7 +1862,11 @@ class TestFetchFresh:
                 return "fake-key"
             return None
 
+        def selective_batch(db, requests):
+            return {(src, var): ("fake-key" if src == "brokerbin" else None) for src, var in requests}
+
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=selective_batch),
             patch("app.services.credential_service.get_credential", side_effect=selective_cred),
             patch("app.search_service.BrokerBinConnector") as MockBB,
         ):
@@ -1874,6 +1901,7 @@ class TestFetchFresh:
             return [{"vendor_name": "Arrow", "mpn_matched": pn, "vendor_sku": "A1"}]
 
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
@@ -1912,6 +1940,7 @@ class TestFetchFresh:
             raise Exception("Second call failed")
 
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
@@ -1941,7 +1970,10 @@ class TestFetchFresh:
         for name in ["nexar", "brokerbin", "ebay", "digikey", "mouser", "oemsecrets", "sourcengine", "element14"]:
             _make_api_source(db_session, name, status="disabled")
 
-        with patch("app.services.credential_service.get_credential", return_value="fake-key"):
+        with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
+            patch("app.services.credential_service.get_credential", return_value="fake-key"),
+        ):
             results, stats = await _fetch_fresh(["LM317T"], db_session)
 
         assert results == []
@@ -1954,6 +1986,7 @@ class TestFetchFresh:
         old_searches = src.total_searches
 
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
@@ -1987,6 +2020,7 @@ class TestFetchFresh:
         src = _make_api_source(db_session, "nexar")
 
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
@@ -2016,6 +2050,7 @@ class TestFetchFresh:
         db_session.commit()
 
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
@@ -2047,6 +2082,7 @@ class TestFetchFresh:
         db_session.commit()
 
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
@@ -2076,6 +2112,7 @@ class TestFetchFresh:
         """Connectors without matching ApiSource records skip stats update."""
         # Don't create any ApiSource records
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,
@@ -2396,6 +2433,7 @@ class TestSearchThrottling:
             return result
 
         with (
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
             patch("app.services.credential_service.get_credential", return_value="fake-key"),
             patch("app.search_service.NexarConnector") as MockNexar,
             patch("app.search_service.BrokerBinConnector") as MockBB,

@@ -4,7 +4,8 @@
    Depends on: requirements, offer_stats, visible_cols, filters, pagination context
 #}
 
-<div class="flex flex-col h-full" x-data="partsListSelection()">
+<div class="flex flex-col h-full" x-data="partsListSelection()"
+     @part-updated.window="htmx.ajax('GET', '/v2/partials/parts' + window.location.search, {target: '#parts-list', swap: 'innerHTML'})">
 
   {# ── Filter bar + top scrollbar ──────────────────────────── #}
   <div class="panel-header flex-wrap gap-y-1">

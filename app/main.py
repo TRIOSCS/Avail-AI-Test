@@ -149,9 +149,9 @@ async def lifespan(app):
             except Exception as e:
                 logger.warning(f"Cache warmup failed (non-fatal): {e}")
 
-        import asyncio
+        from .utils.async_helpers import safe_background_task as _safe_bg
 
-        asyncio.create_task(_warm_caches())
+        await _safe_bg(_warm_caches(), task_name="warm_caches")
 
     yield
 

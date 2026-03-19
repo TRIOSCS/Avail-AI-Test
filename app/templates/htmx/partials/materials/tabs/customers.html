@@ -1,0 +1,29 @@
+{#
+  materials/tabs/customers.html — Customer purchase history tab for material detail.
+  Receives: customers (list of CustomerPartHistory), card (MaterialCard).
+  Called by: htmx_views.py material_tab_partial endpoint.
+#}
+<table class="w-full text-xs" style="font-family: 'JetBrains Mono', monospace;">
+  <thead><tr class="text-left text-gray-500 border-b border-gray-200">
+    <th class="py-2 px-3 font-medium">Company</th>
+    <th class="py-2 px-3 text-right font-medium">Purchases</th>
+    <th class="py-2 px-3 text-right font-medium">Total Qty</th>
+    <th class="py-2 px-3 text-right font-medium">Avg Price</th>
+    <th class="py-2 px-3 font-medium">Last Purchased</th>
+    <th class="py-2 px-3 font-medium">Source</th>
+  </tr></thead>
+  <tbody>
+    {% for c in customers %}
+    <tr class="border-b border-gray-100 hover:bg-brand-50/50 transition-colors">
+      <td class="py-2 px-3 font-semibold text-gray-900">{{ c.company.name if c.company else '--' }}</td>
+      <td class="py-2 px-3 text-right">{{ c.purchase_count or 0 }}</td>
+      <td class="py-2 px-3 text-right">{{ "{:,}"|format(c.total_quantity) if c.total_quantity else '-' }}</td>
+      <td class="py-2 px-3 text-right">{% if c.avg_unit_price %}<span class="text-emerald-700 font-medium">${{ "%.4f"|format(c.avg_unit_price) }}</span>{% else %}<span class="text-gray-400">-</span>{% endif %}</td>
+      <td class="py-2 px-3">{{ c.last_purchased_at.strftime('%Y-%m-%d') if c.last_purchased_at else '-' }}</td>
+      <td class="py-2 px-3">{{ c.source or '-' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="py-8 text-center text-gray-400 text-sm">No customer purchase history</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

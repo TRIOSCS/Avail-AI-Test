@@ -1,4 +1,3 @@
-import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -25,6 +24,7 @@ from ...models import (
 from ...schemas.crm import OfferCreate, OfferUpdate, OneDriveAttach
 from ...schemas.responses import OfferListResponse
 from ...services.credential_service import get_credential_cached
+from ...utils.async_helpers import safe_background_task
 from ...utils.normalization import normalize_mpn_key
 from ...vendor_utils import normalize_vendor_name
 from ._helpers import _preload_last_quoted_prices, record_changes
@@ -441,7 +441,7 @@ async def create_offer(
     if _enrich_new_card:
         from ...utils.vendor_helpers import _background_enrich_vendor
 
-        asyncio.create_task(_background_enrich_vendor(*_enrich_new_card))
+        await safe_background_task(_background_enrich_vendor(*_enrich_new_card), task_name="enrich_vendor_from_offer")
 
     # Competitive quote alert: in-app notification if >20% below current best price
     try:

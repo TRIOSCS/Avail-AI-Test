@@ -7,7 +7,6 @@ Called by: main.py (router mount)
 Depends on: models, dependencies, vendor_helpers, cache, normalization, audit_service
 """
 
-import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -15,7 +14,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..cache.decorators import cached_endpoint
+from ..cache.decorators import cached_endpoint, invalidate_prefix
 from ..database import get_db
 from ..dependencies import require_admin, require_buyer, require_user
 from ..models import (
@@ -39,6 +38,8 @@ from ..services.material_card_service import (
 from ..services.material_card_service import (
     serialize_material_card as material_card_to_dict,
 )
+from ..services.price_snapshot_service import record_price_snapshot
+from ..utils.async_helpers import safe_background_task
 from ..utils.normalization import normalize_mpn_key
 from ..utils.sql_helpers import escape_like
 from ..utils.vendor_helpers import _background_enrich_vendor
@@ -158,6 +159,7 @@ async def get_material(card_id: int, user: User = Depends(require_user), db: Ses
             card.manufacturer = inferred
             db.add(card)
             db.commit()
+            invalidate_prefix("material_list")
     return material_card_to_dict(card, db)
 
 
@@ -199,6 +201,7 @@ async def get_material_by_mpn(mpn: str, user: User = Depends(require_user), db: 
             card.manufacturer = inferred
             db.add(card)
             db.commit()
+            invalidate_prefix("material_list")
     return material_card_to_dict(card, db)
 
 
@@ -235,6 +238,7 @@ async def update_material(
             if not card.enrichment_source:
                 card.enrichment_source = "manual"
     db.commit()
+    invalidate_prefix("material_list")
     return material_card_to_dict(card, db)
 
 
@@ -272,6 +276,7 @@ async def enrich_material(
         card.enrichment_source = body.get("source", "gradient_agent")
         card.enriched_at = datetime.now(timezone.utc)
     db.commit()
+    invalidate_prefix("material_list")
     return {"ok": True, "updated_fields": updated, "card_id": card_id}
 
 
@@ -297,6 +302,7 @@ async def delete_material(card_id: int, user: User = Depends(require_admin), db:
         created_by=user.email if hasattr(user, "email") else "admin",
     )
     db.commit()
+    invalidate_prefix("material_list")
     return {"ok": True, "deleted_at": card.deleted_at.isoformat()}
 
 
@@ -319,6 +325,7 @@ async def restore_material(card_id: int, user: User = Depends(require_admin), db
         created_by=user.email if hasattr(user, "email") else "admin",
     )
     db.commit()
+    invalidate_prefix("material_list")
     return {"ok": True}
 
 
@@ -344,6 +351,7 @@ async def merge_material_cards(
         raise HTTPException(400 if "itself" in str(e) else 404, str(e))
 
     db.commit()
+    invalidate_prefix("material_list")
     return result
 
 
@@ -356,6 +364,7 @@ async def backfill_manufacturers(user: User = Depends(require_admin), db: Sessio
     prefix-match."""
     count = backfill_missing_manufacturers(db)
     db.commit()
+    invalidate_prefix("material_list")
     return {"enriched_records": count}
 
 
@@ -463,6 +472,13 @@ async def import_stock_list_standalone(
                 mvh.last_qty = parsed["qty"]
             if parsed.get("price") is not None:
                 mvh.last_price = parsed["price"]
+                record_price_snapshot(
+                    db=db,
+                    material_card_id=card.id,
+                    vendor_name=norm_vendor,
+                    price=parsed.get("price"),
+                    source="stock_list",
+                )
             if parsed.get("manufacturer"):
                 mvh.last_manufacturer = parsed["manufacturer"]
             mvh.source_type = "stock_list"
@@ -478,11 +494,15 @@ async def import_stock_list_standalone(
                 last_manufacturer=parsed.get("manufacturer") or "",
             )
             db.add(mvh)
+            record_price_snapshot(
+                db=db, material_card_id=card.id, vendor_name=norm_vendor, price=parsed.get("price"), source="stock_list"
+            )
 
         imported += 1
 
     vendor_card.sighting_count = (vendor_card.sighting_count or 0) + imported
     db.commit()
+    invalidate_prefix("material_list")
 
     # Trigger enrichment for new vendor with domain
     enrich_triggered = False
@@ -490,7 +510,10 @@ async def import_stock_list_standalone(
         if get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") or get_credential_cached(
             "anthropic_ai", "ANTHROPIC_API_KEY"
         ):
-            asyncio.create_task(_background_enrich_vendor(vendor_card.id, vendor_card.domain, vendor_card.display_name))
+            await safe_background_task(
+                _background_enrich_vendor(vendor_card.id, vendor_card.domain, vendor_card.display_name),
+                task_name="enrich_vendor_bg",
+            )
             enrich_triggered = True
 
     return {

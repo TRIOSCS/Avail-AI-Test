@@ -4,28 +4,31 @@
    Depends on: partials/search/results.html (loaded into #search-results by form post) #}
 
 <div class="max-w-7xl mx-auto space-y-6">
+<div id="breadcrumb" hx-swap-oob="true">Part Search</div>
+
+<div class="max-w-7xl mx-auto space-y-3">
   {# Header #}
-  <h1 class="text-2xl font-bold text-gray-900">Part Search</h1>
+  <h1 class="text-xl font-bold text-gray-900 tracking-tight">Part Search</h1>
 
   {# Search form card #}
-  <div class="bg-white border border-brand-200 rounded-lg shadow-sm p-6">
+  <div class="bg-white border border-brand-200 rounded-lg shadow-sm p-3">
     <form hx-post="/v2/partials/search/run"
           hx-target="#search-results"
           hx-indicator="#search-spinner"
           x-data="{ mpn: '' }">
-      <div class="flex gap-3">
+      <div class="flex gap-2">
         <input type="text" name="mpn" x-model="mpn"
                placeholder="Enter part number (e.g. LM317T, STM32F407VG)"
-               class="flex-1 px-4 py-3 text-lg font-mono border border-brand-200 rounded-lg
+               class="flex-1 px-3 py-2 text-sm font-mono border border-brand-200 rounded-lg
                       focus:ring-2 focus:ring-brand-500 focus:border-brand-500
-                      placeholder:text-gray-400"
+                      placeholder:text-gray-400 tracking-tight"
                required>
         <button type="submit" :disabled="!mpn.trim()"
-                class="px-6 py-3 bg-brand-500 text-white font-semibold rounded-lg
+                class="px-4 py-2 bg-brand-500 text-white font-semibold rounded-lg
                        hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed
-                       transition-colors flex items-center gap-2 whitespace-nowrap">
+                       transition-colors flex items-center gap-2 whitespace-nowrap text-sm">
           <span id="search-spinner" class="htmx-indicator">
-            <svg class="inline h-5 w-5 animate-spin" viewBox="0 0 24 24" fill="none">
+            <svg class="inline h-4 w-4 animate-spin" viewBox="0 0 24 24" fill="none">
               <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
               <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
             </svg>
@@ -33,7 +36,7 @@
           Search All Sources
         </button>
       </div>
-      <p class="mt-2 text-xs text-gray-400">Searches Nexar, BrokerBin, DigiKey, Mouser, eBay, OEMSecrets, and more in parallel.</p>
+      <p class="mt-1 text-xs text-gray-400">Searches Nexar, BrokerBin, DigiKey, Mouser, eBay, OEMSecrets, and more in parallel.</p>
     </form>
   </div>
 

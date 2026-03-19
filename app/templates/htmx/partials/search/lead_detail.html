@@ -136,6 +136,63 @@
     </dl>
   </div>
 
+  {# ── Section 3b: Sub-offers table (when vendor has multiple source offers) ── #}
+  {% if s.sub_offers and s.sub_offers|length > 0 %}
+  <div class="bg-gray-800 rounded-lg border border-gray-700 p-4">
+    <h3 class="text-xs font-semibold text-gray-400 uppercase tracking-wider mb-3">
+      All Offers ({{ s.sub_offers|length }})
+    </h3>
+    <div class="overflow-x-auto">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-xs text-gray-400 border-b border-gray-700">
+            <th class="text-left pb-2 pr-3">Source</th>
+            <th class="text-right pb-2 pr-3">Price</th>
+            <th class="text-right pb-2">Qty</th>
+          </tr>
+        </thead>
+        <tbody class="text-white">
+          {% for offer in s.sub_offers %}
+          <tr class="border-b border-gray-700/50 last:border-0">
+            <td class="py-1.5 pr-3 text-xs">{{ offer.source_type or "—" }}</td>
+            <td class="py-1.5 pr-3 text-right font-mono text-xs" style="font-family: 'JetBrains Mono', monospace;">
+              {% if offer.unit_price %}${{ "%.4f"|format(offer.unit_price) if offer.unit_price < 1 else "%.2f"|format(offer.unit_price) }}{% else %}RFQ{% endif %}
+            </td>
+            <td class="py-1.5 text-right font-mono text-xs" style="font-family: 'JetBrains Mono', monospace;">
+              {% if offer.qty_available %}{{ "{:,}".format(offer.qty_available) }}{% else %}—{% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+  {% endif %}
+
+  {# ── Section 3c: Sources found ── #}
+  {% if s.sources_found and s.sources_found|length > 0 %}
+  <div class="flex items-center gap-2 flex-wrap">
+    <span class="text-xs text-gray-500">Found in:</span>
+    {% for src_name in s.sources_found %}
+    <span class="px-2 py-0.5 text-xs font-medium rounded bg-gray-100 text-gray-600">{{ src_name }}</span>
+    {% endfor %}
+  </div>
+  {% endif %}
+
+  {# ── Shortlist action ── #}
+  <div x-data class="flex gap-2">
+    <button @click="$store.shortlist && $store.shortlist.toggle({
+        vendor_name: '{{ s.vendor_name|replace("'", "\\'") }}',
+        mpn_matched: '{{ (s.mpn_matched or s.mpn or "")|replace("'", "\\'") }}',
+        unit_price: {{ s.unit_price or 'null' }},
+        qty_available: {{ s.qty_available or 'null' }},
+        vendor_key: '{{ s.vendor_key|default("")|replace("'", "\\'") }}'
+      })"
+      class="flex-1 px-4 py-2 text-sm font-medium rounded-lg bg-brand-600 text-white hover:bg-brand-700 transition-colors text-center">
+      Add to Shortlist
+    </button>
+  </div>
+
   {# ── Section 4: Source Attribution ── #}
   <div class="bg-white rounded-lg border border-gray-200 p-4">
     <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Source Attribution</h3>

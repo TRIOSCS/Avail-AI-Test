@@ -1,0 +1,105 @@
+# tests/test_materials_tab.py
+"""Integration tests for Materials tab routes."""
+
+
+def test_materials_list_returns_html(client, db_session):
+    """GET /v2/partials/materials returns HTML with material table."""
+    from app.models import MaterialCard
+
+    card = MaterialCard(normalized_mpn="INT-TEST-001", display_mpn="INT-TEST-001", manufacturer="TestMfg")
+    db_session.add(card)
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials")
+    assert resp.status_code == 200
+    assert "INT-TEST-001" in resp.text
+
+
+def test_materials_list_search_mpn(client, db_session):
+    """Search by MPN uses local search."""
+    from app.models import MaterialCard
+
+    card = MaterialCard(normalized_mpn="LM358DR", display_mpn="LM358DR")
+    db_session.add(card)
+    db_session.commit()
+
+    resp = client.get("/v2/partials/materials?q=LM358")
+    assert resp.status_code == 200
+    assert "LM358DR" in resp.text
+
+
+def test_material_detail_returns_html(client, db_session):
+    """GET /v2/partials/materials/{id} returns detail page."""
+    from app.models import MaterialCard
+
+    card = MaterialCard(normalized_mpn="DETAIL-001", display_mpn="DETAIL-001")
+    db_session.add(card)
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/materials/{card.id}")
+    assert resp.status_code == 200
+    assert "DETAIL-001" in resp.text
+
+
+def test_material_tab_vendors(client, db_session):
+    """GET /v2/partials/materials/{id}/tab/vendors returns vendor table."""
+    from app.models import MaterialCard
+
+    card = MaterialCard(normalized_mpn="TAB-001", display_mpn="TAB-001")
+    db_session.add(card)
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/materials/{card.id}/tab/vendors")
+    assert resp.status_code == 200
+    assert "No vendor history" in resp.text
+
+
+def test_material_tab_customers(client, db_session):
+    """Customers tab returns HTML."""
+    from app.models import MaterialCard
+
+    card = MaterialCard(normalized_mpn="CUST-001", display_mpn="CUST-001")
+    db_session.add(card)
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/materials/{card.id}/tab/customers")
+    assert resp.status_code == 200
+    assert "No customer purchase history" in resp.text
+
+
+def test_material_tab_sourcing(client, db_session):
+    """Sourcing tab returns HTML."""
+    from app.models import MaterialCard
+
+    card = MaterialCard(normalized_mpn="SRC-001", display_mpn="SRC-001")
+    db_session.add(card)
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/materials/{card.id}/tab/sourcing")
+    assert resp.status_code == 200
+    assert "No sourcing activity" in resp.text
+
+
+def test_material_tab_price_history_empty(client, db_session):
+    """Price history tab shows empty state."""
+    from app.models import MaterialCard
+
+    card = MaterialCard(normalized_mpn="PRICE-001", display_mpn="PRICE-001")
+    db_session.add(card)
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/materials/{card.id}/tab/price_history")
+    assert resp.status_code == 200
+    assert "Price tracking active" in resp.text
+
+
+def test_material_tab_unknown_returns_404(client, db_session):
+    """Unknown tab name returns 404."""
+    from app.models import MaterialCard
+
+    card = MaterialCard(normalized_mpn="UNK-001", display_mpn="UNK-001")
+    db_session.add(card)
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/materials/{card.id}/tab/nonexistent")
+    assert resp.status_code == 404

@@ -13,6 +13,7 @@ from ...dependencies import require_user
 from ...models import Company, CustomerSite, Requisition, SiteContact, User
 from ...schemas.crm import SiteContactCreate, SiteContactUpdate, SiteCreate, SiteUpdate
 from ...schemas.v13_features import SiteContactNoteLog
+from ...utils.async_helpers import safe_background_task
 from ...utils.phone_utils import format_phone_e164
 
 router = APIRouter()
@@ -54,7 +55,7 @@ async def add_site(
             finally:
                 s.close()
 
-        asyncio.create_task(_bg_enrich(company_id))
+        await safe_background_task(_bg_enrich(company_id), task_name="enrich_site_bg")
 
     return {"id": site.id, "site_name": site.site_name}
 

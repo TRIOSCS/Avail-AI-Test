@@ -13,8 +13,8 @@ def find_company_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> l
       3. Tie → is_strategic wins
       4. Tie → lower id (older record) wins
     """
+    from rapidfuzz import fuzz
     from sqlalchemy import func
-    from thefuzz import fuzz
 
     from .models import Company, CustomerSite
 

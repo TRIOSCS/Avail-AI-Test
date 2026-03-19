@@ -33,8 +33,11 @@ from .models import (
     Sighting,
 )
 from .scoring import classify_lead, explain_lead, is_weak_lead, score_sighting, score_sighting_v2, score_unified
+from .services.credential_service import get_credential, get_credentials_batch
+from .services.price_snapshot_service import record_price_snapshot
 from .services.sourcing_leads import sync_leads_for_sightings
 from .services.vendor_affinity_service import find_vendor_affinity
+from .utils.async_helpers import safe_background_task
 from .utils.normalization import (
     detect_currency,
     normalize_condition,
@@ -64,6 +67,19 @@ _CONNECTOR_SOURCE_MAP = {
 
 
 # ── Search result cache (Redis, 15-min TTL) ─────────────────────────────
+
+_JUNK_VENDORS = {
+    "",
+    "unknown",
+    "(no sellers listed)",
+    "no sellers listed",
+    "n/a",
+    "none",
+    "(none)",
+    "-",
+    "no vendor",
+    "no seller",
+}
 
 _SEARCH_CACHE_TTL = 900  # 15 minutes
 _SEARCH_CACHE_PREFIX = "search:"
@@ -198,7 +214,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
             db.rollback()
 
     # 3b. Fire background enrichment for cards without manufacturer
-    _schedule_background_enrichment(card_ids, db)
+    await _schedule_background_enrichment(card_ids, db)
 
     # 4. Historical vendors from material cards
     fresh_vendors = {s.vendor_name.lower() for s in sightings}
@@ -533,6 +549,121 @@ def _deduplicate_sightings(sighting_dicts: list[dict]) -> list[dict]:
     return kept
 
 
+def _deduplicate_sightings_aggressive(sighting_dicts: list[dict]) -> list[dict]:
+    """Aggressive dedup: one entry per vendor+MPN. All price variants become sub_offers.
+
+    Used by the search tab (not requisition search which uses _deduplicate_sightings).
+
+    Called by: stream_search_mpn, search_run (search tab only)
+    Depends on: vendor_utils.normalize_vendor_name
+    """
+    groups: dict[tuple, list[dict]] = {}
+
+    for d in sighting_dicts:
+        qty = d.get("qty_available")
+        if qty is not None and qty == 0:
+            continue
+
+        vendor = normalize_vendor_name((d.get("vendor_name") or "").strip())
+        mpn = (d.get("mpn_matched") or "").strip().lower()
+        key = (vendor, mpn)
+        groups.setdefault(key, []).append(d)
+
+    results = []
+    for group in groups.values():
+        group.sort(key=lambda x: (x.get("score", 0), x.get("confidence", 0)), reverse=True)
+        best = dict(group[0])
+
+        # Sum quantities
+        known_qtys = [g["qty_available"] for g in group if g.get("qty_available") is not None]
+        best["qty_available"] = sum(known_qtys) if known_qtys else None
+
+        # Best confidence
+        best["confidence"] = max((g.get("confidence") or 0) for g in group)
+
+        # Lowest MOQ
+        moqs = [g["moq"] for g in group if g.get("moq")]
+        if moqs:
+            best["moq"] = min(moqs)
+
+        # Collect sources
+        best["sources_found"] = {g.get("source_type", "") for g in group}
+        best["sources_found"].discard("")
+
+        # Sub-offers (everything except the best)
+        best["sub_offers"] = group[1:] if len(group) > 1 else []
+        best["offer_count"] = len(group)
+
+        results.append(best)
+
+    results.sort(key=lambda x: (x.get("score", 0), x.get("confidence", 0)), reverse=True)
+    return results
+
+
+def _incremental_dedup(incoming: list[dict], existing: list[dict]) -> tuple[list[dict], list[dict]]:
+    """Dedup incoming results against already-sent cards.
+
+    Returns (new_cards, updated_cards) where:
+    - new_cards: vendors not yet seen — append to DOM
+    - updated_cards: vendors already sent — OOB swap to update card
+
+    Mutates existing list in-place (adds new entries, updates existing ones).
+
+    Called by: _run_streaming_search
+    Depends on: vendor_utils.normalize_vendor_name
+    """
+    existing_map: dict[tuple, dict] = {}
+    for card in existing:
+        vendor = normalize_vendor_name((card.get("vendor_name") or "").strip())
+        mpn = (card.get("mpn_matched") or "").strip().lower()
+        existing_map[(vendor, mpn)] = card
+
+    new_cards = []
+    updated_cards = []
+
+    for item in incoming:
+        qty = item.get("qty_available")
+        if qty is not None and qty == 0:
+            continue
+
+        vendor = normalize_vendor_name((item.get("vendor_name") or "").strip())
+        mpn = (item.get("mpn_matched") or "").strip().lower()
+        key = (vendor, mpn)
+
+        if key in existing_map:
+            card = existing_map[key]
+            card.setdefault("sub_offers", []).append(item)
+            card["offer_count"] = card.get("offer_count", 1) + 1
+            card.setdefault("sources_found", set()).add(item.get("source_type", ""))
+
+            # Update best offer if incoming is better
+            if item.get("score", 0) > card.get("score", 0):
+                old_best = {k: v for k, v in card.items() if k not in ("sub_offers", "offer_count", "sources_found")}
+                card["sub_offers"].append(old_best)
+                card["sub_offers"].remove(item)
+                for k, v in item.items():
+                    if k not in ("sub_offers", "offer_count", "sources_found"):
+                        card[k] = v
+
+            # Re-sum quantities
+            all_offers = [card] + card.get("sub_offers", [])
+            known_qtys = [o["qty_available"] for o in all_offers if o.get("qty_available") is not None]
+            card["qty_available"] = sum(known_qtys) if known_qtys else None
+
+            updated_cards.append(card)
+        else:
+            new_card = dict(item)
+            new_card["sub_offers"] = []
+            new_card["offer_count"] = 1
+            new_card["sources_found"] = {item.get("source_type", "")}
+            new_card["sources_found"].discard("")
+            existing.append(new_card)
+            existing_map[key] = new_card
+            new_cards.append(new_card)
+
+    return new_cards, updated_cards
+
+
 # ── Smart AI trigger ─────────────────────────────────────────────────────
 
 
@@ -565,97 +696,106 @@ def should_trigger_ai_search(
 # ── Private helpers ──────────────────────────────────────────────────────
 
 
+def _make_stat(source_name: str, status: str, error: str | None = None) -> dict:
+    """Build a source stat entry."""
+    return {"source": source_name, "results": 0, "ms": 0, "error": error, "status": status}
+
+
+def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
+    """Build enabled connectors with credentials, returning (connectors,
+    source_stats_map, disabled_sources).
+
+    Checks disabled sources in DB, loads credentials per-connector.
+
+    Called by: _fetch_fresh
+    Depends on: services/credential_service, connectors/*, models.ApiSource
+    """
+    disabled_sources = {src.name for src in db.query(ApiSource).filter_by(status="disabled").all()}
+
+    # Batch-load all credentials in a single DB query
+    creds = get_credentials_batch(
+        db,
+        [
+            ("nexar", "NEXAR_CLIENT_ID"),
+            ("nexar", "NEXAR_CLIENT_SECRET"),
+            ("nexar", "OCTOPART_API_KEY"),
+            ("brokerbin", "BROKERBIN_API_KEY"),
+            ("brokerbin", "BROKERBIN_API_SECRET"),
+            ("ebay", "EBAY_CLIENT_ID"),
+            ("ebay", "EBAY_CLIENT_SECRET"),
+            ("digikey", "DIGIKEY_CLIENT_ID"),
+            ("digikey", "DIGIKEY_CLIENT_SECRET"),
+            ("mouser", "MOUSER_API_KEY"),
+            ("oemsecrets", "OEMSECRETS_API_KEY"),
+            ("sourcengine", "SOURCENGINE_API_KEY"),
+            ("element14", "ELEMENT14_API_KEY"),
+        ],
+    )
+
+    def _c(source_name, var_name):
+        return creds.get((source_name, var_name))
+
+    connectors = []
+    source_stats_map: dict[str, dict] = {}
+
+    def _add_or_skip(source_name, has_creds, connector_factory):
+        if source_name in disabled_sources:
+            source_stats_map[source_name] = _make_stat(source_name, "disabled")
+        elif not has_creds:
+            source_stats_map[source_name] = _make_stat(source_name, "skipped", "No API key configured")
+        else:
+            connectors.append(connector_factory())
+
+    nexar_id = _c("nexar", "NEXAR_CLIENT_ID")
+    nexar_sec = _c("nexar", "NEXAR_CLIENT_SECRET")
+    octopart_key = _c("nexar", "OCTOPART_API_KEY")
+    _add_or_skip(
+        "nexar", nexar_id and nexar_sec or octopart_key, lambda: NexarConnector(nexar_id, nexar_sec, octopart_key)
+    )
+
+    bb_key = _c("brokerbin", "BROKERBIN_API_KEY")
+    bb_sec = _c("brokerbin", "BROKERBIN_API_SECRET")
+    _add_or_skip("brokerbin", bb_key, lambda: BrokerBinConnector(bb_key, bb_sec))
+
+    ebay_id = _c("ebay", "EBAY_CLIENT_ID")
+    ebay_sec = _c("ebay", "EBAY_CLIENT_SECRET")
+    _add_or_skip("ebay", ebay_id and ebay_sec, lambda: EbayConnector(ebay_id, ebay_sec))
+
+    dk_id = _c("digikey", "DIGIKEY_CLIENT_ID")
+    dk_sec = _c("digikey", "DIGIKEY_CLIENT_SECRET")
+    _add_or_skip("digikey", dk_id and dk_sec, lambda: DigiKeyConnector(dk_id, dk_sec))
+
+    mouser_key = _c("mouser", "MOUSER_API_KEY")
+    _add_or_skip("mouser", mouser_key, lambda: MouserConnector(mouser_key))
+
+    oem_key = _c("oemsecrets", "OEMSECRETS_API_KEY")
+    _add_or_skip("oemsecrets", oem_key, lambda: OEMSecretsConnector(oem_key))
+
+    src_key = _c("sourcengine", "SOURCENGINE_API_KEY")
+    _add_or_skip("sourcengine", src_key, lambda: SourcengineConnector(src_key))
+
+    e14_key = _c("element14", "ELEMENT14_API_KEY")
+    _add_or_skip("element14", e14_key, lambda: Element14Connector(e14_key))
+
+    return connectors, source_stats_map, disabled_sources
+
+
 async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[dict]]:
     """Returns (results, source_stats) where source_stats is a list of {"source": name,
     "results": count, "ms": elapsed, "error": str|None, "status":
 
     "ok"|"error"|"skipped"|"disabled"}.
     """
-    # Check which sources are disabled by the user
-    disabled_sources = set()
-    for src in db.query(ApiSource).filter_by(status="disabled").all():
-        disabled_sources.add(src.name)
-
-    connectors = []
-    source_stats_map: dict[str, dict] = {}  # track per-connector status
-
-    # Tier 1: Direct APIs (skip disabled). DB credentials first, env var fallback.
-    from .services.credential_service import get_credential
-
-    def _cred(source_name, var_name):
-        return get_credential(db, source_name, var_name)
-
-    def _add_or_skip(source_name, has_creds, connector_factory):
-        if source_name in disabled_sources:
-            source_stats_map[source_name] = {
-                "source": source_name,
-                "results": 0,
-                "ms": 0,
-                "error": None,
-                "status": "disabled",
-            }
-        elif not has_creds:
-            source_stats_map[source_name] = {
-                "source": source_name,
-                "results": 0,
-                "ms": 0,
-                "error": "No API key configured",
-                "status": "skipped",
-            }
-        else:
-            connectors.append(connector_factory())
-
-    nexar_id = _cred("nexar", "NEXAR_CLIENT_ID")
-    nexar_sec = _cred("nexar", "NEXAR_CLIENT_SECRET")
-    octopart_key = _cred("nexar", "OCTOPART_API_KEY")
-    _add_or_skip(
-        "nexar", nexar_id and nexar_sec or octopart_key, lambda: NexarConnector(nexar_id, nexar_sec, octopart_key)
-    )
-
-    bb_key = _cred("brokerbin", "BROKERBIN_API_KEY")
-    bb_sec = _cred("brokerbin", "BROKERBIN_API_SECRET")
-    _add_or_skip("brokerbin", bb_key, lambda: BrokerBinConnector(bb_key, bb_sec))
-
-    ebay_id = _cred("ebay", "EBAY_CLIENT_ID")
-    ebay_sec = _cred("ebay", "EBAY_CLIENT_SECRET")
-    _add_or_skip("ebay", ebay_id and ebay_sec, lambda: EbayConnector(ebay_id, ebay_sec))
-
-    dk_id = _cred("digikey", "DIGIKEY_CLIENT_ID")
-    dk_sec = _cred("digikey", "DIGIKEY_CLIENT_SECRET")
-    _add_or_skip("digikey", dk_id and dk_sec, lambda: DigiKeyConnector(dk_id, dk_sec))
-
-    mouser_key = _cred("mouser", "MOUSER_API_KEY")
-    _add_or_skip("mouser", mouser_key, lambda: MouserConnector(mouser_key))
-
-    oem_key = _cred("oemsecrets", "OEMSECRETS_API_KEY")
-    _add_or_skip("oemsecrets", oem_key, lambda: OEMSecretsConnector(oem_key))
-
-    src_key = _cred("sourcengine", "SOURCENGINE_API_KEY")
-    _add_or_skip("sourcengine", src_key, lambda: SourcengineConnector(src_key))
-
-    e14_key = _cred("element14", "ELEMENT14_API_KEY")
-    _add_or_skip("element14", e14_key, lambda: Element14Connector(e14_key))
+    connectors, source_stats_map, disabled_sources = _build_connectors(db)
 
     # AI live web search — held back for conditional trigger (smart AI trigger)
-    ai_key = _cred("anthropic_ai", "ANTHROPIC_API_KEY")
+    ai_key = get_credential(db, "anthropic_ai", "ANTHROPIC_API_KEY")
     has_ai_live = bool(ai_key) and not bool(os.environ.get("TESTING"))
     ai_connector = None
     if "ai_live_web" in disabled_sources:
-        source_stats_map["ai_live_web"] = {
-            "source": "ai_live_web",
-            "results": 0,
-            "ms": 0,
-            "error": None,
-            "status": "disabled",
-        }
+        source_stats_map["ai_live_web"] = _make_stat("ai_live_web", "disabled")
     elif not has_ai_live:
-        source_stats_map["ai_live_web"] = {
-            "source": "ai_live_web",
-            "results": 0,
-            "ms": 0,
-            "error": "No API key configured",
-            "status": "skipped",
-        }
+        source_stats_map["ai_live_web"] = _make_stat("ai_live_web", "skipped", "No API key configured")
     else:
         ai_connector = AIWebSearchConnector(ai_key)
 
@@ -761,19 +901,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
             out.append(r)
 
     # Filter out junk vendors — no sellers, blanks, placeholders
-    JUNK_VENDORS = {
-        "",
-        "unknown",
-        "(no sellers listed)",
-        "no sellers listed",
-        "n/a",
-        "none",
-        "(none)",
-        "-",
-        "no vendor",
-        "no seller",
-    }
-    out = [r for r in out if r.get("vendor_name", "").strip().lower() not in JUNK_VENDORS]
+    out = [r for r in out if r.get("vendor_name", "").strip().lower() not in _JUNK_VENDORS]
 
     # ── Smart AI trigger: conditionally fire AI connector ────────────
     if ai_connector is not None:
@@ -1414,6 +1542,15 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
                 vh.last_qty = s.qty_available
             if s.unit_price is not None:
                 vh.last_price = s.unit_price
+                record_price_snapshot(
+                    db=db,
+                    material_card_id=card.id,
+                    vendor_name=s.vendor_name,
+                    price=s.unit_price,
+                    currency=s.currency or "USD",
+                    quantity=s.qty_available,
+                    source="api_sighting",
+                )
             if s.currency:
                 vh.last_currency = s.currency
             if s.manufacturer:
@@ -1440,6 +1577,15 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
                 vendor_sku=raw.get("vendor_sku"),
             )
             db.add(new_vh)
+            record_price_snapshot(
+                db=db,
+                material_card_id=card.id,
+                vendor_name=s.vendor_name,
+                price=s.unit_price,
+                currency=s.currency or "USD",
+                quantity=s.qty_available,
+                source="api_sighting",
+            )
             existing_vh[vn_key] = new_vh  # Prevent dupe inserts within batch
 
     # Link sightings to material card + populate normalized_mpn
@@ -1491,7 +1637,7 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
     return card
 
 
-def _schedule_background_enrichment(card_ids: set[int], db: Session) -> None:
+async def _schedule_background_enrichment(card_ids: set[int], db: Session) -> None:
     """Fire background connector enrichment for cards missing a manufacturer."""
     if not card_ids:
         return
@@ -1528,10 +1674,7 @@ def _schedule_background_enrichment(card_ids: set[int], db: Session) -> None:
         finally:
             session.close()
 
-    try:
-        asyncio.create_task(_enrich_cards())
-    except RuntimeError:
-        pass  # No event loop — skip silently (e.g., in tests)
+    await safe_background_task(_enrich_cards(), task_name="enrich_search_cards")
 
 
 def sighting_to_dict(s: Sighting) -> dict:
@@ -1620,3 +1763,238 @@ def sighting_to_dict(s: Sighting) -> dict:
         "lead_quality": quality,
         "lead_explanation": explanation,
     }
+
+
+# ── Streaming search ────────────────────────────────────────────────────
+
+
+def _score_raw_hit(r: dict, vendor_score_map: dict) -> dict:
+    """Normalize and score a single raw connector result for streaming search.
+
+    Mirrors the scoring in _fetch_fresh but without v2/median context (not
+    available incrementally). Produces fields needed by _incremental_dedup
+    and vendor card rendering.
+
+    Called by: stream_search_mpn
+    Depends on: scoring, evidence_tiers, normalization utilities
+    """
+    from .evidence_tiers import tier_for_sighting
+
+    raw_vendor = r.get("vendor_name", "Unknown")
+    clean_vendor = fix_encoding((raw_vendor or "").strip()) or raw_vendor
+    raw_mpn = r.get("mpn_matched")
+    clean_mpn_r = normalize_mpn(raw_mpn) or raw_mpn
+
+    clean_qty = normalize_quantity(r.get("qty_available"))
+    if clean_qty is None and isinstance(r.get("qty_available"), (int, float)) and r["qty_available"] > 0:
+        clean_qty = int(r["qty_available"])
+
+    clean_price = normalize_price(r.get("unit_price"))
+    if clean_price is None and isinstance(r.get("unit_price"), (int, float)) and r["unit_price"] > 0:
+        clean_price = float(r["unit_price"])
+
+    raw_currency = r.get("currency") or "USD"
+    clean_currency = detect_currency(raw_currency) if raw_currency else "USD"
+    raw_conf = r.get("confidence", 0) or 0
+    norm_conf = raw_conf / 5.0 if raw_conf > 1 else raw_conf
+    is_auth = r.get("is_authorized", False)
+    norm_name = normalize_vendor_name(clean_vendor)
+    base_score = score_sighting(vendor_score_map.get(norm_name), is_auth)
+    tier = tier_for_sighting(r.get("source_type"), is_auth)
+
+    return {
+        "vendor_name": clean_vendor,
+        "vendor_email": r.get("vendor_email"),
+        "vendor_phone": r.get("vendor_phone"),
+        "mpn_matched": clean_mpn_r,
+        "manufacturer": r.get("manufacturer"),
+        "qty_available": clean_qty,
+        "unit_price": clean_price,
+        "currency": clean_currency,
+        "source_type": r.get("source_type"),
+        "is_authorized": is_auth,
+        "confidence": norm_conf,
+        "score": base_score,
+        "evidence_tier": tier,
+        "octopart_url": r.get("octopart_url"),
+        "click_url": r.get("click_url"),
+        "vendor_url": r.get("vendor_url"),
+        "vendor_sku": r.get("vendor_sku"),
+        "condition": normalize_condition(r.get("condition")),
+        "moq": r.get("moq") if r.get("moq") and r.get("moq") > 0 else None,
+        "date_code": normalize_date_code(r.get("date_code")),
+        "packaging": normalize_packaging(r.get("packaging")),
+        "lead_time_days": normalize_lead_time(r.get("lead_time")),
+        "lead_time": r.get("lead_time"),
+        "country": r.get("country"),
+        "lead_quality": classify_lead(
+            score=base_score,
+            is_authorized=is_auth,
+            has_price=clean_price is not None,
+            has_qty=clean_qty is not None,
+            has_contact=bool(r.get("vendor_email") or r.get("vendor_phone")),
+            evidence_tier=tier,
+        ),
+    }
+
+
+async def stream_search_mpn(search_id: str, mpn: str, db: Session) -> None:
+    """Stream search results via SSE as each connector completes.
+
+    Instead of waiting for all connectors (like _fetch_fresh with asyncio.gather),
+    this fires all connectors as tasks and uses asyncio.wait(FIRST_COMPLETED) to
+    publish results incrementally via the SSE broker.
+
+    Called by: routers/htmx_views.py (search stream endpoint)
+    Depends on: _build_connectors, _incremental_dedup, services/sse_broker.broker
+    """
+    # Allow test mocks to override the broker via module-level patching
+    import app.search_service as _self_mod
+
+    from .services.sse_broker import broker as _broker
+
+    active_broker = getattr(_self_mod, "broker", _broker)
+
+    channel = f"search:{search_id}"
+    accumulated: list[dict] = []
+    total_results = 0
+    sources_completed = 0
+    t_start = time.time()
+
+    connectors, source_stats_map, _disabled = _build_connectors(db)
+
+    if not connectors:
+        await active_broker.publish(
+            channel,
+            "done",
+            json.dumps({"total_results": 0, "sources": 0, "elapsed_seconds": 0}),
+        )
+        return
+
+    # Build vendor score lookup for scoring raw results
+    from .models import VendorCard
+
+    vendor_cards = db.query(VendorCard.normalized_name, VendorCard.vendor_score).all()
+    vendor_score_map = {vc.normalized_name: vc.vendor_score for vc in vendor_cards}
+
+    # Create a task per connector, tagging with source_name
+    task_map: dict[asyncio.Task, str] = {}
+    for conn in connectors:
+        source_name = getattr(conn, "source_name", _CONNECTOR_SOURCE_MAP.get(conn.__class__.__name__, "unknown"))
+
+        async def _run(c=conn, pn=mpn):
+            t0 = time.time()
+            hits = await c.search(pn)
+            elapsed = int((time.time() - t0) * 1000)
+            return hits, elapsed
+
+        task = asyncio.create_task(_run())
+        task_map[task] = source_name
+
+    pending = set(task_map.keys())
+
+    while pending:
+        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+
+        for task in done:
+            source_name = task_map[task]
+            sources_completed += 1
+
+            try:
+                hits, elapsed_ms = task.result()
+                hit_count = len(hits)
+
+                # Score and normalize each hit
+                scored_hits = []
+                for r in hits:
+                    r.setdefault("mpn_matched", mpn)
+                    scored_hits.append(_score_raw_hit(r, vendor_score_map))
+
+                # Incremental dedup against accumulated results
+                new_cards, updated_cards = _incremental_dedup(scored_hits, accumulated)
+
+                # Publish source status
+                await active_broker.publish(
+                    channel,
+                    "source-status",
+                    json.dumps(
+                        {
+                            "source": source_name,
+                            "status": "ok",
+                            "results": hit_count,
+                            "ms": elapsed_ms,
+                        },
+                        default=str,
+                    ),
+                )
+
+                # Publish new result cards
+                if new_cards:
+                    await active_broker.publish(
+                        channel,
+                        "results",
+                        json.dumps(
+                            {
+                                "cards": new_cards,
+                                "source": source_name,
+                            },
+                            default=str,
+                        ),
+                    )
+
+                # Publish updated cards
+                if updated_cards:
+                    await active_broker.publish(
+                        channel,
+                        "card-update",
+                        json.dumps(
+                            {
+                                "cards": updated_cards,
+                                "source": source_name,
+                            },
+                            default=str,
+                        ),
+                    )
+
+                total_results += hit_count
+
+            except Exception as e:
+                logger.warning(f"Streaming search connector {source_name} failed: {e}")
+                await active_broker.publish(
+                    channel,
+                    "source-status",
+                    json.dumps(
+                        {
+                            "source": source_name,
+                            "status": "error",
+                            "error": str(e)[:500],
+                            "results": 0,
+                            "ms": 0,
+                        },
+                        default=str,
+                    ),
+                )
+
+    # Cache results for filter endpoint (15-min TTL)
+    try:
+        rc = _get_search_redis()
+        if rc:
+            cache_key = f"search:{search_id}:results"
+            rc.setex(cache_key, 900, json.dumps(accumulated, default=str))
+    except Exception:
+        logger.warning("Failed to cache search results for filtering")
+
+    # All connectors done
+    elapsed_total = round(time.time() - t_start, 1)
+    await active_broker.publish(
+        channel,
+        "done",
+        json.dumps(
+            {
+                "total_results": total_results,
+                "sources": sources_completed,
+                "elapsed_seconds": elapsed_total,
+            },
+            default=str,
+        ),
+    )

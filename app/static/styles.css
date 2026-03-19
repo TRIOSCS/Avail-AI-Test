@@ -510,3 +510,41 @@ hr { border-color: #c8d5e2; }
 .col-picker label:hover {
   background: #f0f4f8;
 }
+
+/* Source progress chips */
+.source-chip {
+  @apply px-2.5 py-1 text-xs font-medium rounded-full border transition-all duration-300;
+}
+.source-chip--searching { @apply bg-gray-100 text-gray-500 border-gray-200 animate-pulse; }
+.source-chip--done { @apply border-transparent text-white; }
+.source-chip--nexar { @apply bg-violet-600; }
+.source-chip--brokerbin { @apply bg-sky-600; }
+.source-chip--digikey { @apply bg-orange-600; }
+.source-chip--mouser { @apply bg-teal-600; }
+.source-chip--ebay { @apply bg-yellow-600; }
+.source-chip--oemsecrets { @apply bg-fuchsia-600; }
+.source-chip--element14 { @apply bg-lime-600; }
+.source-chip--sourcengine { @apply bg-emerald-600; }
+.source-chip--empty { @apply bg-gray-200 text-gray-400 border-gray-200; }
+.source-chip--error { @apply bg-rose-100 text-rose-600 border-rose-200; }
+.source-chip--disabled { @apply bg-gray-100 text-gray-400 border-gray-200 opacity-50; }
+.source-chip--skipped { @apply bg-gray-100 text-gray-400 border-gray-200 opacity-50; }
+
+/* Source badges (inline in vendor cards) */
+.source-badge { @apply px-1.5 py-0.5 text-[10px] font-medium rounded border; }
+.source-badge--nexar { @apply bg-violet-900/50 text-violet-400 border-violet-800; }
+.source-badge--brokerbin { @apply bg-sky-900/50 text-sky-400 border-sky-800; }
+.source-badge--digikey { @apply bg-orange-900/50 text-orange-400 border-orange-800; }
+.source-badge--mouser { @apply bg-teal-900/50 text-teal-400 border-teal-800; }
+.source-badge--oemsecrets { @apply bg-fuchsia-900/50 text-fuchsia-400 border-fuchsia-800; }
+.source-badge--element14 { @apply bg-lime-900/50 text-lime-400 border-lime-800; }
+
+/* Vendor card animation */
+@keyframes slideUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+.vendor-card {
+    animation: slideUp 0.3s ease-out both;
+    animation-delay: calc(var(--i, 0) * 50ms);
+}

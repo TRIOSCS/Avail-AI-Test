@@ -10,7 +10,7 @@ Depends on: routers/materials.py
 import io
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastapi.testclient import TestClient
@@ -624,7 +624,9 @@ def test_import_stock_enrichment_triggered(client, db_session, monkeypatch):
     """POST /api/materials/import-stock triggers enrichment for new vendor with
     domain."""
     task_created = []
-    monkeypatch.setattr("asyncio.create_task", lambda coro: (task_created.append(True), coro.close()))
+    monkeypatch.setattr(
+        "app.routers.materials.safe_background_task", AsyncMock(side_effect=lambda *a, **kw: task_created.append(True))
+    )
     monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: "fake-key")
 
     csv_content = b"mpn,qty,price\nENRICH-001,100,0.50"

@@ -8,7 +8,6 @@ Called by: main.py (router mount)
 Depends on: models, dependencies, vendor_helpers, cache, credential_service
 """
 
-import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -23,6 +22,7 @@ from ..models import Contact, User, VendorCard, VendorContact, VendorResponse
 from ..schemas.responses import VendorEmailMetricsResponse
 from ..schemas.vendors import VendorContactCreate, VendorContactLookup, VendorContactUpdate, VendorEmailAdd
 from ..services.credential_service import get_credential_cached
+from ..utils.async_helpers import safe_background_task
 from ..utils.phone_utils import format_phone_e164
 from ..utils.vendor_helpers import (
     _background_enrich_vendor,
@@ -604,7 +604,10 @@ async def add_email_to_card(
         if get_credential_cached("explorium_enrichment", "EXPLORIUM_API_KEY") or get_credential_cached(
             "anthropic_ai", "ANTHROPIC_API_KEY"
         ):
-            asyncio.create_task(_background_enrich_vendor(card.id, domain_extracted, card.display_name))
+            await safe_background_task(
+                _background_enrich_vendor(card.id, domain_extracted, card.display_name),
+                task_name="enrich_vendor_from_contact",
+            )
             enrich_triggered = True
 
     return {

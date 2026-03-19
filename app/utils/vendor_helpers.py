@@ -111,7 +111,7 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
             )
             return card
 
-    # Fuzzy match: use pg_trgm on PostgreSQL, fall back to thefuzz
+    # Fuzzy match: use pg_trgm on PostgreSQL, fall back to rapidfuzz
     if not os.environ.get("TESTING"):  # pragma: no cover
         try:
             trgm_rows = db.execute(
@@ -138,10 +138,10 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
                     )
                     return card
         except (ProgrammingError, OperationalError):
-            pass  # pg_trgm not available -- fall through to thefuzz
+            pass  # pg_trgm not available -- fall through to rapidfuzz
 
     try:
-        from thefuzz import fuzz
+        from rapidfuzz import fuzz
 
         existing = db.query(VendorCard.id, VendorCard.normalized_name, VendorCard.display_name).limit(500).all()
         best_score, best_card_id = 0, None
@@ -166,7 +166,7 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
                 )
                 return card
     except ImportError:
-        pass  # thefuzz not installed -- skip fuzzy matching
+        pass  # rapidfuzz not installed -- skip fuzzy matching
 
     card = VendorCard(normalized_name=norm, display_name=vendor_name, emails=[], phones=[])
     db.add(card)
