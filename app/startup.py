@@ -59,6 +59,7 @@ def run_startup_migrations() -> None:
     _backfill_proactive_offer_qty()
     _backfill_ticket_defaults()
     _seed_vinod_user()
+    _seed_commodity_schemas()
     logger.info("Startup migrations complete")
 
 
@@ -626,6 +627,24 @@ def _backfill_proactive_offer_qty() -> None:
         except Exception as e:
             logger.warning("Backfill proactive offer qty failed: %s", e)
             conn.rollback()
+
+
+def _seed_commodity_schemas() -> None:
+    """Seed commodity_spec_schemas table at startup. Idempotent.
+
+    Called by: run_startup_migrations
+    Depends on: commodity_registry, SessionLocal
+    """
+    from .services.commodity_registry import seed_commodity_schemas
+
+    db = SessionLocal()
+    try:
+        seed_commodity_schemas(db)
+    except Exception:
+        logger.exception("Failed seeding commodity schemas")
+        db.rollback()
+    finally:
+        db.close()
 
 
 def _backfill_ticket_defaults() -> None:
