@@ -15,6 +15,7 @@ import pytest
 
 from app.models import EmailSignatureExtract
 from app.services.signature_parser import (
+    _build_signature_prompt,
     batch_parse_signatures,
     process_signature_batch_results,
 )
@@ -99,6 +100,27 @@ def no_body_extracts(db_session):
     db_session.commit()
     db_session.refresh(extract)
     return [extract]
+
+
+# ── _build_signature_prompt tests ────────────────────────────────────
+
+
+def test_build_prompt_with_all_fields(low_confidence_extracts):
+    """Prompt includes all known fields."""
+    record = low_confidence_extracts[0]  # has full_name, title, company_name
+    prompt = _build_signature_prompt(record)
+    assert "User 0" in prompt
+    assert "user0@example.com" in prompt
+    assert "Manager" in prompt
+    assert "Company0" in prompt
+
+
+def test_build_prompt_with_missing_fields(low_confidence_extracts):
+    """Prompt uses 'unknown' for missing fields."""
+    record = low_confidence_extracts[1]  # has phone but no full_name, title, company
+    prompt = _build_signature_prompt(record)
+    assert "user1@example.com" in prompt
+    assert "555-000-0001" in prompt
 
 
 # ── batch_parse_signatures tests ─────────────────────────────────────
@@ -188,6 +210,22 @@ def test_batch_parse_skips_high_confidence(
 
 @patch("app.services.signature_parser._get_redis")
 @patch("app.services.signature_parser.claude_batch_submit")
+def test_batch_parse_skips_non_regex(mock_submit, mock_redis, db_session, low_confidence_extracts, batch_api_extracts):
+    """Only picks up records with extraction_method = 'regex'."""
+    mock_submit.return_value = "batch_sig_003"
+    mock_r = MagicMock()
+    mock_r.get.return_value = None
+    mock_redis.return_value = mock_r
+
+    result = asyncio.get_event_loop().run_until_complete(batch_parse_signatures(db_session))
+
+    assert result == "batch_sig_003"
+    requests = mock_submit.call_args[0][0]
+    assert len(requests) == 5  # batch_api_extracts excluded
+
+
+@patch("app.services.signature_parser._get_redis")
+@patch("app.services.signature_parser.claude_batch_submit")
 def test_batch_parse_submit_fails(mock_submit, mock_redis, db_session, low_confidence_extracts):
     """Returns None when claude_batch_submit fails."""
     mock_submit.return_value = None
@@ -202,6 +240,15 @@ def test_batch_parse_submit_fails(mock_submit, mock_redis, db_session, low_confi
 
 
 # ── process_signature_batch_results tests ────────────────────────────
+
+
+@patch("app.services.signature_parser._get_redis")
+def test_process_results_no_redis(mock_redis, db_session):
+    """Returns None when Redis is unavailable."""
+    mock_redis.return_value = None
+
+    result = asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+    assert result is None
 
 
 @patch("app.services.signature_parser._get_redis")
@@ -362,3 +409,138 @@ def test_process_results_partial_fields(mock_results, mock_redis, db_session, lo
     # Confidence based on 3 non-null fields (full_name, company_name, phone)
     # plus any that were already set
     assert extract.confidence >= 0.5
+
+
+@patch("app.services.signature_parser._get_redis")
+@patch("app.services.signature_parser.claude_batch_results")
+def test_process_results_only_updates_nonnull(mock_results, mock_redis, db_session, low_confidence_extracts):
+    """Only updates fields where AI returned non-null values."""
+    mock_r = MagicMock()
+    mock_r.get.return_value = b"batch_sig_001"
+    mock_redis.return_value = mock_r
+
+    record = low_confidence_extracts[0]
+    original_name = record.full_name  # "User 0"
+
+    results_dict = {
+        f"sig_parse:{record.id}": {
+            "full_name": None,  # Should NOT overwrite
+            "title": "New Title",
+            "company_name": None,
+            "phone": None,
+            "mobile": None,
+            "website": None,
+            "address": None,
+            "linkedin_url": None,
+        }
+    }
+    mock_results.return_value = results_dict
+
+    result = asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+
+    assert result["applied"] == 1
+    db_session.refresh(record)
+    assert record.full_name == original_name  # Preserved
+    assert record.title == "New Title"  # Updated
+    assert record.extraction_method == "batch_api"
+
+
+@patch("app.services.signature_parser._get_redis")
+@patch("app.services.signature_parser.claude_batch_results")
+def test_process_results_bad_custom_id(mock_results, mock_redis, db_session):
+    """Handles malformed custom_id gracefully."""
+    mock_r = MagicMock()
+    mock_r.get.return_value = b"batch_sig_001"
+    mock_redis.return_value = mock_r
+
+    results_dict = {
+        "bad_format": {"full_name": "Test"},  # Missing prefix:id format
+        "sig_parse:not_a_number": {"full_name": "Test"},  # Non-integer ID
+        "sig_parse:99999": {"full_name": "Test"},  # Non-existent record
+    }
+    mock_results.return_value = results_dict
+
+    result = asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+
+    assert result["applied"] == 0
+    assert result["errors"] == 3
+
+
+@patch("app.services.signature_parser._get_redis")
+@patch("app.services.signature_parser.claude_batch_results")
+def test_process_results_confidence_all_fields(mock_results, mock_redis, db_session, low_confidence_extracts):
+    """Confidence caps at 0.95 when all 8 fields are filled."""
+    mock_r = MagicMock()
+    mock_r.get.return_value = b"batch_sig_001"
+    mock_redis.return_value = mock_r
+
+    record = low_confidence_extracts[0]
+    results_dict = {
+        f"sig_parse:{record.id}": {
+            "full_name": "John Doe",
+            "title": "VP Sales",
+            "company_name": "Acme",
+            "phone": "555-111-2222",
+            "mobile": "555-333-4444",
+            "website": "acme.com",
+            "address": "123 Main St",
+            "linkedin_url": "https://linkedin.com/in/jdoe",
+        }
+    }
+    mock_results.return_value = results_dict
+
+    asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+
+    db_session.refresh(record)
+    # 8 fields * 0.08 + 0.5 = 1.14 -> capped at 0.95
+    assert record.confidence == 0.95
+
+
+@patch("app.services.signature_parser._get_redis")
+@patch("app.services.signature_parser.claude_batch_results")
+def test_process_results_confidence_partial(mock_results, mock_redis, db_session, low_confidence_extracts):
+    """Confidence calculation with partial fields."""
+    mock_r = MagicMock()
+    mock_r.get.return_value = b"batch_sig_001"
+    mock_redis.return_value = mock_r
+
+    record = low_confidence_extracts[1]  # has phone but no full_name, title, company
+    # Return only title — so after update: phone + title = 2 fields
+    results_dict = {
+        f"sig_parse:{record.id}": {
+            "full_name": None,
+            "title": "Engineer",
+            "company_name": None,
+            "phone": None,
+            "mobile": None,
+            "website": None,
+            "address": None,
+            "linkedin_url": None,
+        }
+    }
+    mock_results.return_value = results_dict
+
+    asyncio.get_event_loop().run_until_complete(process_signature_batch_results(db_session))
+
+    db_session.refresh(record)
+    # phone + title = 2 fields => 0.5 + 2*0.08 = 0.66
+    assert record.confidence == pytest.approx(0.66, abs=0.01)
+
+
+# ── core_jobs registration tests ─────────────────────────────────────
+
+
+def test_signature_batch_jobs_registered():
+    """Both signature batch jobs are registered in core_jobs."""
+    from app.jobs.core_jobs import register_core_jobs
+
+    scheduler = MagicMock()
+    settings = MagicMock()
+    settings.inbox_scan_interval_min = 30
+    settings.activity_tracking_enabled = False
+
+    register_core_jobs(scheduler, settings)
+
+    job_ids = [call.kwargs["id"] for call in scheduler.add_job.call_args_list]
+    assert "batch_parse_signatures" in job_ids
+    assert "poll_signature_batch" in job_ids
