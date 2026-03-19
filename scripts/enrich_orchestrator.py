@@ -826,4 +826,9 @@ if __name__ == "__main__":
     parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
     args = parser.parse_args()
 
+    # Log to file so output is visible when running detached (-d)
+    LOG_FILE = "/tmp/enrichment_pipeline.log"
+    logger.add(LOG_FILE, rotation="50 MB", retention="3 days", level="INFO")
+    logger.info(f"Logging to {LOG_FILE}")
+
     asyncio.run(run_pipeline(dry_run=not args.apply, resume=args.resume))

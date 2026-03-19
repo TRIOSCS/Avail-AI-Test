@@ -31,8 +31,9 @@ RUN pip install --no-cache-dir -r requirements.txt \
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 RUN python -m patchright install chromium
 
-# Copy app code and Alembic (for migrations at runtime)
+# Copy app code, scripts, and Alembic (for migrations at runtime)
 COPY app/ app/
+COPY scripts/ scripts/
 COPY alembic.ini .
 COPY alembic/ alembic/
 
