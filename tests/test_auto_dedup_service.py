@@ -131,9 +131,16 @@ class TestDedupVendors:
         """Near-identical names (score >= 98) should auto-merge."""
         from app.services.auto_dedup_service import _dedup_vendors
 
-        # "arrow electronics corp" vs "arrow electronics cor" = score 98
-        _make_vendor(db_session, "Arrow Electronics Corp", normalized_name="arrow electronics corp", sighting_count=20)
-        _make_vendor(db_session, "Arrow Electronics Cor", normalized_name="arrow electronics cor", sighting_count=5)
+        # "arrow electronics corporation" vs "arrow electronics corporatio" = score ~98.2 (rapidfuzz)
+        _make_vendor(
+            db_session,
+            "Arrow Electronics Corporation",
+            normalized_name="arrow electronics corporation",
+            sighting_count=20,
+        )
+        _make_vendor(
+            db_session, "Arrow Electronics Corporatio", normalized_name="arrow electronics corporatio", sighting_count=5
+        )
         db_session.commit()
 
         merged = _dedup_vendors(db_session)
@@ -638,15 +645,15 @@ class TestAskClaudeMerge:
 
 
 class TestDedupVendorsCoverageGaps:
-    def test_thefuzz_import_error(self, db_session):
-        """Lines 54-56: when thefuzz is not installed, returns 0."""
+    def test_rapidfuzz_import_error(self, db_session):
+        """Lines 54-56: when rapidfuzz is not installed, returns 0."""
         import builtins
 
         original_import = builtins.__import__
 
         def mock_import(name, *args, **kwargs):
-            if name == "thefuzz":
-                raise ImportError("No module named 'thefuzz'")
+            if name == "rapidfuzz":
+                raise ImportError("No module named 'rapidfuzz'")
             return original_import(name, *args, **kwargs)
 
         from app.services.auto_dedup_service import _dedup_vendors
@@ -705,14 +712,14 @@ class TestDedupVendorsCoverageGaps:
         for i in range(55):
             _make_vendor(
                 db_session,
-                f"Corp{i:03d} Electronics Inc",
-                normalized_name=f"corp{i:03d} electronics inc",
+                f"Corp{i:03d} Electronics Incorporated",
+                normalized_name=f"corp{i:03d} electronics incorporated",
                 sighting_count=100,
             )
             _make_vendor(
                 db_session,
-                f"Corp{i:03d} Electronics In",
-                normalized_name=f"corp{i:03d} electronics in",
+                f"Corp{i:03d} Electronics Incorporate",
+                normalized_name=f"corp{i:03d} electronics incorporate",
                 sighting_count=50,
             )
         db_session.commit()

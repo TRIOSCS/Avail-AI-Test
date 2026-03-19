@@ -135,7 +135,7 @@ class TestSetCached:
         mock_redis.setex.assert_called_once_with(
             "intel:company:acme",
             7 * 86400,
-            json.dumps({"intel": "data"}),
+            '{"intel":"data"}',
         )
 
     @patch("app.cache.intel_cache.SessionLocal")

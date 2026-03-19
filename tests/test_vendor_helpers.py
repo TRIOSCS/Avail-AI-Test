@@ -247,10 +247,10 @@ class TestGetOrCreateCard:
 
         # The function does: from thefuzz import fuzz
         # So we mock the thefuzz module's fuzz attribute
-        mock_thefuzz_module = MagicMock()
-        mock_thefuzz_module.fuzz = mock_fuzz
+        mock_rapidfuzz_module = MagicMock()
+        mock_rapidfuzz_module.fuzz = mock_fuzz
 
-        with patch.dict("sys.modules", {"thefuzz": mock_thefuzz_module, "thefuzz.fuzz": mock_fuzz}):
+        with patch.dict("sys.modules", {"rapidfuzz": mock_rapidfuzz_module, "rapidfuzz.fuzz": mock_fuzz}):
             result = get_or_create_card("Arrow Elecctronics", db_session)
 
         assert result.id == card.id
@@ -271,10 +271,10 @@ class TestGetOrCreateCard:
 
         mock_fuzz = MagicMock()
         mock_fuzz.token_sort_ratio.return_value = 95
-        mock_thefuzz_module = MagicMock()
-        mock_thefuzz_module.fuzz = mock_fuzz
+        mock_rapidfuzz_module = MagicMock()
+        mock_rapidfuzz_module.fuzz = mock_fuzz
 
-        with patch.dict("sys.modules", {"thefuzz": mock_thefuzz_module, "thefuzz.fuzz": mock_fuzz}):
+        with patch.dict("sys.modules", {"rapidfuzz": mock_rapidfuzz_module, "rapidfuzz.fuzz": mock_fuzz}):
             result = get_or_create_card("Arrow Electronics", db_session)
 
         assert result.id == card.id
@@ -294,10 +294,10 @@ class TestGetOrCreateCard:
 
         mock_fuzz = MagicMock()
         mock_fuzz.token_sort_ratio.return_value = 95
-        mock_thefuzz_module = MagicMock()
-        mock_thefuzz_module.fuzz = mock_fuzz
+        mock_rapidfuzz_module = MagicMock()
+        mock_rapidfuzz_module.fuzz = mock_fuzz
 
-        with patch.dict("sys.modules", {"thefuzz": mock_thefuzz_module, "thefuzz.fuzz": mock_fuzz}):
+        with patch.dict("sys.modules", {"rapidfuzz": mock_rapidfuzz_module, "rapidfuzz.fuzz": mock_fuzz}):
             result = get_or_create_card("Arrow Elecctronics", db_session)
 
         assert result.id == card.id
@@ -316,17 +316,17 @@ class TestGetOrCreateCard:
 
         mock_fuzz = MagicMock()
         mock_fuzz.token_sort_ratio.return_value = 50
-        mock_thefuzz_module = MagicMock()
-        mock_thefuzz_module.fuzz = mock_fuzz
+        mock_rapidfuzz_module = MagicMock()
+        mock_rapidfuzz_module.fuzz = mock_fuzz
 
-        with patch.dict("sys.modules", {"thefuzz": mock_thefuzz_module, "thefuzz.fuzz": mock_fuzz}):
+        with patch.dict("sys.modules", {"rapidfuzz": mock_rapidfuzz_module, "rapidfuzz.fuzz": mock_fuzz}):
             result = get_or_create_card("Completely Different Vendor", db_session)
 
         assert result.id != card.id
         assert result.display_name == "Completely Different Vendor"
 
-    def test_thefuzz_import_error_creates_new(self, db_session):
-        """If thefuzz not installed, skip fuzzy and create new card."""
+    def test_rapidfuzz_import_error_creates_new(self, db_session):
+        """If rapidfuzz not installed, skip fuzzy and create new card."""
         card = VendorCard(
             normalized_name="arrow electronics",
             display_name="Arrow Electronics",
@@ -341,8 +341,8 @@ class TestGetOrCreateCard:
         original_import = builtins.__import__
 
         def mock_import(name, *args, **kwargs):
-            if name == "thefuzz":
-                raise ImportError("thefuzz not installed")
+            if name == "rapidfuzz":
+                raise ImportError("rapidfuzz not installed")
             return original_import(name, *args, **kwargs)
 
         with patch("builtins.__import__", side_effect=mock_import):
@@ -364,8 +364,8 @@ class TestGetOrCreateCard:
 
         mock_fuzz = MagicMock()
         mock_fuzz.token_sort_ratio.return_value = 95
-        mock_thefuzz_module = MagicMock()
-        mock_thefuzz_module.fuzz = mock_fuzz
+        mock_rapidfuzz_module = MagicMock()
+        mock_rapidfuzz_module.fuzz = mock_fuzz
 
         # Patch db.get to return None for the fuzzy match lookup
         original_get = db_session.get
@@ -375,7 +375,7 @@ class TestGetOrCreateCard:
                 return None
             return original_get(model, id_val)
 
-        with patch.dict("sys.modules", {"thefuzz": mock_thefuzz_module, "thefuzz.fuzz": mock_fuzz}):
+        with patch.dict("sys.modules", {"rapidfuzz": mock_rapidfuzz_module, "rapidfuzz.fuzz": mock_fuzz}):
             with patch.object(db_session, "get", side_effect=patched_get):
                 result = get_or_create_card("Arrow Elecctronics", db_session)
 
