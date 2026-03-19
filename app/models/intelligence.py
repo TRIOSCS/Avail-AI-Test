@@ -41,6 +41,9 @@ class MaterialCard(Base):
     datasheet_url = Column(String(1000))
     cross_references = Column(JSONB, default=list)  # [{mpn, manufacturer}]
     specs_summary = Column(Text)  # Key electrical specs in plain text
+    specs_structured = Column(
+        JSONB
+    )  # Structured specs: {"ddr_type": {"value": "DDR4", "source": "...", "confidence": 0.99, "updated_at": "..."}}
     enrichment_source = Column(String(50))  # "gradient_agent", "manual", etc.
     enriched_at = Column(DateTime)
 
@@ -57,6 +60,11 @@ class MaterialCard(Base):
 
     vendor_history = relationship(
         "MaterialVendorHistory",
+        back_populates="material_card",
+        cascade="all, delete-orphan",
+    )
+    spec_facets = relationship(
+        "MaterialSpecFacet",
         back_populates="material_card",
         cascade="all, delete-orphan",
     )
