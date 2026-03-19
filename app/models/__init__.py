@@ -41,8 +41,6 @@ from .ics_classification_cache import IcsClassificationCache  # noqa: F401
 from .ics_search_log import IcsSearchLog  # noqa: F401
 from .ics_search_queue import IcsSearchQueue  # noqa: F401
 from .ics_worker_status import IcsWorkerStatus  # noqa: F401
-
-# Intelligence: Materials, Proactive, Activity
 from .intelligence import (  # noqa: F401
     ActivityLog,
     ChangeLog,
@@ -83,6 +81,9 @@ from .performance import (  # noqa: F401
 
 # Email Pipeline
 from .pipeline import ColumnMappingCache, PendingBatch, ProcessedMessage, SyncState  # noqa: F401
+
+# Intelligence: Materials, Proactive, Activity, Price Snapshots
+from .price_snapshot import MaterialPriceSnapshot  # noqa: F401
 from .prospect_account import ProspectAccount  # noqa: F401
 
 # Purchase History (Proactive matching backbone)
