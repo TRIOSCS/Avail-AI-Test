@@ -169,7 +169,7 @@ class TestHTMXCancel:
             data={"reason": "No longer needed"},
         )
         assert r.status_code == 200
-        assert "CANCELLED" in r.text
+        assert "Cancelled" in r.text
 
 
 class TestHTMXReset:
@@ -182,7 +182,7 @@ class TestHTMXReset:
         c = _make_client(db_session, test_user)
         r = c.post(f"/v2/partials/buy-plans/{plan.id}/reset")
         assert r.status_code == 200
-        assert "DRAFT" in r.text
+        assert "Draft" in r.text
 
 
 class TestFullPageLoad:
