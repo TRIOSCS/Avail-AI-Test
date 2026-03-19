@@ -665,12 +665,14 @@ async def claim_requisition_endpoint(
         raise HTTPException(404, "Requisition not found")
 
     from ...services.requirement_status import claim_requisition
+    from . import invalidate_prefix
 
     try:
         changed = claim_requisition(req, user, db)
     except ValueError as e:
         raise HTTPException(409, str(e))
     db.commit()
+    invalidate_prefix("req_list")
     return {"ok": True, "claimed": changed, "claimed_by_id": req.claimed_by_id}
 
 
@@ -691,7 +693,9 @@ async def unclaim_requisition_endpoint(
         raise HTTPException(403, "Only the claiming buyer or admin can unclaim")
 
     from ...services.requirement_status import unclaim_requisition
+    from . import invalidate_prefix
 
     changed = unclaim_requisition(req, db, actor=user)
     db.commit()
+    invalidate_prefix("req_list")
     return {"ok": True, "unclaimed": changed}
