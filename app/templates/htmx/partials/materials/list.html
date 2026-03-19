@@ -19,6 +19,7 @@
     </div>
   </div>
 
+  {% if not faceted %}
   {# Command-style search bar #}
   <div class="bg-white border border-brand-200 rounded-lg p-4 mb-4">
     <div class="flex flex-wrap gap-3 items-end">
@@ -62,6 +63,7 @@
     </button>
     {% endfor %}
   </div>
+  {% endif %}
   {% endif %}
 
   {# Table #}
@@ -137,16 +139,28 @@
   {% if total > limit %}
   <div class="mt-4 flex justify-center">
     <nav class="flex gap-1 items-center">
-      {% if offset > 0 %}
-      <a hx-get="/v2/partials/materials?offset={{ offset - limit }}&q={{ q }}&category={{ category }}"
-         hx-target="#main-content"
-         class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Prev</a>
-      {% endif %}
-      <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
-      {% if offset + limit < total %}
-      <a hx-get="/v2/partials/materials?offset={{ offset + limit }}&q={{ q }}&category={{ category }}"
-         hx-target="#main-content"
-         class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Next</a>
+      {% if faceted %}
+        {% if offset > 0 %}
+        <button @click="goToPage({{ (offset - limit) // limit }})"
+           class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Prev</button>
+        {% endif %}
+        <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
+        {% if offset + limit < total %}
+        <button @click="goToPage({{ (offset + limit) // limit }})"
+           class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Next</button>
+        {% endif %}
+      {% else %}
+        {% if offset > 0 %}
+        <a hx-get="/v2/partials/materials?offset={{ offset - limit }}&q={{ q }}&category={{ category }}"
+           hx-target="#main-content"
+           class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Prev</a>
+        {% endif %}
+        <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
+        {% if offset + limit < total %}
+        <a hx-get="/v2/partials/materials?offset={{ offset + limit }}&q={{ q }}&category={{ category }}"
+           hx-target="#main-content"
+           class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Next</a>
+        {% endif %}
       {% endif %}
     </nav>
   </div>

@@ -548,3 +548,12 @@ hr { border-color: #c8d5e2; }
     animation: slideUp 0.3s ease-out both;
     animation-delay: calc(var(--i, 0) * 50ms);
 }
+
+/* Faceted search sidebar */
+@media (min-width: 1024px) {
+  .faceted-sidebar {
+    height: calc(100vh - 120px);
+    position: sticky;
+    top: 60px;
+  }
+}
