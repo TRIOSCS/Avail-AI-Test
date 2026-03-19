@@ -2288,14 +2288,36 @@ async def search_lead_detail(
     request: Request,
     idx: int = Query(0, ge=0),
     mpn: str = Query(""),
+    search_id: str = Query(""),
+    vendor_key: str = Query(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Return the lead detail drawer content for a single search result.
 
-    Re-runs the search (cached in search_service) and returns the enriched result at the
-    given index.
+    When search_id + vendor_key are provided, reads from Redis cache (new flow).
+    Otherwise falls back to re-running the search via quick_search_mpn (legacy).
+
+    Called by: lead detail drawer (HTMX)
+    Depends on: _get_cached_search_results, vendor_utils.normalize_vendor_name
     """
+    # ── New path: read from Redis cache by vendor_key ──
+    if search_id and vendor_key:
+        results = _get_cached_search_results(search_id)
+        if results:
+            from ..vendor_utils import normalize_vendor_name
+
+            lead = next(
+                (r for r in results if normalize_vendor_name(r.get("vendor_name", "")) == vendor_key),
+                None,
+            )
+            if lead:
+                ctx = _base_ctx(request, user, "search")
+                ctx.update({"lead": lead, "mpn": lead.get("mpn_matched", "")})
+                return templates.TemplateResponse("htmx/partials/search/lead_detail.html", ctx)
+        return HTMLResponse('<p class="p-4 text-sm text-gray-500">Lead not found in cache. Please search again.</p>')
+
+    # ── Legacy path: re-run search by MPN + index ──
     if not mpn.strip():
         return HTMLResponse('<p class="p-4 text-sm text-gray-500">No part number specified.</p>')
 

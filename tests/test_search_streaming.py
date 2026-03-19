@@ -593,3 +593,69 @@ def test_requisition_picker_renders(client, db_session):
     assert resp.status_code == 200
     assert "Pick Me" in resp.text
     assert "Add to Requisition" in resp.text
+
+
+def test_lead_detail_reads_from_cache(client, db_session):
+    """Lead detail route reads vendor data from Redis cache."""
+    cached_results = [
+        {
+            "vendor_name": "Arrow",
+            "mpn_matched": "LM317T",
+            "unit_price": 0.45,
+            "confidence_color": "green",
+            "confidence_pct": 85,
+            "lead_quality": "strong",
+            "source_type": "nexar",
+            "reason": "Authorized distributor",
+            "sub_offers": [
+                {"unit_price": 0.48, "source_type": "digikey", "qty_available": 500},
+            ],
+            "offer_count": 2,
+            "sources_found": ["nexar", "digikey"],
+            "is_authorized": True,
+            "qty_available": 1000,
+        },
+    ]
+
+    with patch(
+        "app.routers.htmx_views._get_cached_search_results",
+        return_value=cached_results,
+    ):
+        resp = client.get(
+            "/v2/partials/search/lead-detail?search_id=test-123&vendor_key=arrow",
+            headers={"HX-Request": "true"},
+        )
+    assert resp.status_code == 200
+    assert "Arrow" in resp.text
+
+
+def test_lead_detail_cache_miss_returns_not_found(client, db_session):
+    """Lead detail route returns friendly message when cache is empty."""
+    with patch(
+        "app.routers.htmx_views._get_cached_search_results",
+        return_value=None,
+    ):
+        resp = client.get(
+            "/v2/partials/search/lead-detail?search_id=test-123&vendor_key=arrow",
+            headers={"HX-Request": "true"},
+        )
+    assert resp.status_code == 200
+    assert "not found" in resp.text.lower() or "search again" in resp.text.lower()
+
+
+def test_lead_detail_cache_vendor_not_matched(client, db_session):
+    """Lead detail returns not-found when vendor_key doesn't match any cached result."""
+    cached_results = [
+        {"vendor_name": "Mouser", "mpn_matched": "LM317T", "unit_price": 0.50},
+    ]
+
+    with patch(
+        "app.routers.htmx_views._get_cached_search_results",
+        return_value=cached_results,
+    ):
+        resp = client.get(
+            "/v2/partials/search/lead-detail?search_id=test-123&vendor_key=nonexistent",
+            headers={"HX-Request": "true"},
+        )
+    assert resp.status_code == 200
+    assert "not found" in resp.text.lower() or "search again" in resp.text.lower()
