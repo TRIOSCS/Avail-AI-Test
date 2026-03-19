@@ -7,7 +7,6 @@ Redis is preferred for speed. Falls back to PostgreSQL if Redis is
 unavailable (e.g., during development without Docker).
 """
 
-import json
 import os
 from datetime import datetime, timedelta, timezone
 
@@ -15,6 +14,7 @@ from loguru import logger
 from sqlalchemy import text
 
 from app.database import SessionLocal
+from app.utils import json_helpers as json
 
 # Lazy-initialized Redis client
 _redis_client = None

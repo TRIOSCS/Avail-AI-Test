@@ -11,9 +11,10 @@ Usage:
 
 import functools
 import hashlib
-import json
 
 from loguru import logger
+
+from app.utils import json_helpers as json
 
 from .intel_cache import get_cached, set_cached
 
