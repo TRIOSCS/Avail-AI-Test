@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
+  <!-- TRIO honeycomb favicon - three interlocking hexagons -->
+  <polygon points="35,5 52,15 52,35 35,45 18,35 18,15" fill="none" stroke="#0082CA" stroke-width="5" stroke-linejoin="round"/>
+  <polygon points="65,5 82,15 82,35 65,45 48,35 48,15" fill="none" stroke="#A7A9AC" stroke-width="5" stroke-linejoin="round"/>
+  <polygon points="35,45 52,55 52,75 35,85 18,75 18,55" fill="none" stroke="#231F20" stroke-width="5" stroke-linejoin="round"/>
+</svg>
