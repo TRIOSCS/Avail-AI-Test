@@ -282,9 +282,12 @@ async def _job_batch_parse_signatures():
 
     db = SessionLocal()
     try:
-        batch_id = await batch_parse_signatures(db)
+        batch_id = await asyncio.wait_for(batch_parse_signatures(db), timeout=120)
         if batch_id:
             logger.info(f"Signature batch parse submitted: {batch_id}")
+    except asyncio.TimeoutError:
+        logger.error("Signature batch parse timed out (120s)")
+        db.rollback()
     except Exception as e:
         logger.error(f"Signature batch parse error: {e}")
         db.rollback()
@@ -300,9 +303,12 @@ async def _job_poll_signature_batch():
 
     db = SessionLocal()
     try:
-        result = await process_signature_batch_results(db)
-        if result:
+        result = await asyncio.wait_for(process_signature_batch_results(db), timeout=120)
+        if result is not None:
             logger.info(f"Signature batch results: {result['applied']} applied, {result['errors']} errors")
+    except asyncio.TimeoutError:
+        logger.error("Signature batch poll timed out (120s)")
+        db.rollback()
     except Exception as e:
         logger.error(f"Signature batch poll error: {e}")
         db.rollback()

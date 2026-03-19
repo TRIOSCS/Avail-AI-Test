@@ -418,7 +418,7 @@ from ..services.batch_queue import BatchQueue  # noqa: E402
 from ..utils.claude_client import claude_batch_results, claude_batch_submit  # noqa: E402
 
 _REDIS_KEY = "batch:signature_parse:current"
-_BATCH_LIMIT = 100
+_BATCH_LIMIT = 200
 
 _SIGNATURE_SCHEMA = {
     "type": "object",
