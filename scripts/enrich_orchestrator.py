@@ -335,7 +335,7 @@ async def _poll_and_apply_phase2(db, run: EnrichmentRun, dry_run: bool) -> dict:
 
             # Apply results
             for custom_id, result_data in results.items():
-                if result_data is None:
+                if result_data is None or not isinstance(result_data, dict):
                     stats["errors"] += 1
                     continue
 
@@ -515,7 +515,7 @@ async def _poll_and_apply_specs(db, run: EnrichmentRun, category: str, dry_run: 
                 continue
 
             for custom_id, result_data in results.items():
-                if result_data is None:
+                if result_data is None or not isinstance(result_data, dict):
                     stats["errors"] += 1
                     continue
 
@@ -711,7 +711,7 @@ async def _poll_and_apply_descriptions(db, run: EnrichmentRun, dry_run: bool) ->
                 continue
 
             for custom_id, result_data in results.items():
-                if result_data is None:
+                if result_data is None or not isinstance(result_data, dict):
                     stats["errors"] += 1
                     continue
 
