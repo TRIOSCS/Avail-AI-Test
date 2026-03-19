@@ -20,7 +20,7 @@ export default defineConfig({
     },
   },
   webServer: {
-    command: `TESTING=1 DATABASE_URL=sqlite:// REDIS_URL="" CACHE_BACKEND=none python -m uvicorn app.main:app --host 127.0.0.1 --port ${port}`,
+    command: `TESTING=1 DATABASE_URL=sqlite:// REDIS_URL="" CACHE_BACKEND=none PYTHONPATH=/root/availai python3 -m uvicorn app.main:app --host 127.0.0.1 --port ${port}`,
     port,
     timeout: 15000,
     reuseExistingServer: false,
@@ -30,5 +30,7 @@ export default defineConfig({
     { name: 'auth', testMatch: /auth\.spec\.ts$/ },
     { name: 'smoke', testMatch: /smoke\.spec\.ts$/ },
     { name: 'data-validation', testMatch: /data-validation\.spec\.ts$/ },
+    { name: 'accessibility', testMatch: /accessibility\.spec\.ts$/ },
+    { name: 'visual', testMatch: /visual\.spec\.ts$/ },
   ],
 });

@@ -26,7 +26,7 @@ test.describe('App Health', () => {
     });
     const html = await res.text();
     expect(html).toContain('viewport');
-    expect(html).toContain('Electronic Component Sourcing');
+    expect(html).toContain('AvailAI');
   });
 });
 
