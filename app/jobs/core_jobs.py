@@ -36,6 +36,18 @@ def register_core_jobs(scheduler, settings):
         id="poll_material_batch",
         name="Poll material batch results",
     )
+    scheduler.add_job(
+        _job_batch_parse_signatures,
+        IntervalTrigger(minutes=10),
+        id="batch_parse_signatures",
+        name="Batch parse signatures",
+    )
+    scheduler.add_job(
+        _job_poll_signature_batch,
+        IntervalTrigger(minutes=5),
+        id="poll_signature_batch",
+        name="Poll signature batch results",
+    )
     if settings.activity_tracking_enabled:
         scheduler.add_job(
             _job_webhook_subscriptions, IntervalTrigger(minutes=5), id="webhook_subs", name="Webhook subscriptions"
@@ -227,9 +239,12 @@ async def _job_batch_enrich_materials():
 
     db = SessionLocal()
     try:
-        batch_id = await batch_enrich_materials(db)
+        batch_id = await asyncio.wait_for(batch_enrich_materials(db), timeout=120)
         if batch_id:
             logger.info(f"Material batch enrich submitted: {batch_id}")
+    except asyncio.TimeoutError:
+        logger.error("Material batch enrich timed out (120s)")
+        db.rollback()
     except Exception as e:
         logger.error(f"Material batch enrich error: {e}")
         db.rollback()
@@ -245,11 +260,51 @@ async def _job_poll_material_batch():
 
     db = SessionLocal()
     try:
-        result = await process_material_batch_results(db)
-        if result:
+        result = await asyncio.wait_for(process_material_batch_results(db), timeout=120)
+        if result is not None:
             logger.info(f"Material batch results: {result['applied']} applied, {result['errors']} errors")
+    except asyncio.TimeoutError:
+        logger.error("Material batch poll timed out (120s)")
+        db.rollback()
     except Exception as e:
         logger.error(f"Material batch poll error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_batch_parse_signatures():
+    """Submit low-confidence regex-parsed signatures to Claude Batch API (runs every 10
+    min)."""
+    from ..database import SessionLocal
+    from ..services.signature_parser import batch_parse_signatures
+
+    db = SessionLocal()
+    try:
+        batch_id = await batch_parse_signatures(db)
+        if batch_id:
+            logger.info(f"Signature batch parse submitted: {batch_id}")
+    except Exception as e:
+        logger.error(f"Signature batch parse error: {e}")
+        db.rollback()
+    finally:
+        db.close()
+
+
+@_traced_job
+async def _job_poll_signature_batch():
+    """Poll and apply signature batch parsing results (runs every 5 min)."""
+    from ..database import SessionLocal
+    from ..services.signature_parser import process_signature_batch_results
+
+    db = SessionLocal()
+    try:
+        result = await process_signature_batch_results(db)
+        if result:
+            logger.info(f"Signature batch results: {result['applied']} applied, {result['errors']} errors")
+    except Exception as e:
+        logger.error(f"Signature batch poll error: {e}")
         db.rollback()
     finally:
         db.close()

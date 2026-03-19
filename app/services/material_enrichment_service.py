@@ -249,6 +249,11 @@ async def batch_enrich_materials(db: Session) -> str | None:
 
     Returns the batch_id or None if no materials to enrich or submit failed.
     """
+    r = _get_redis()
+    if r and r.get(_REDIS_KEY):
+        logger.info("batch_enrich_materials: batch already pending, skipping submit")
+        return None
+
     cards = (
         db.query(MaterialCard)
         .filter(
@@ -288,7 +293,6 @@ async def batch_enrich_materials(db: Session) -> str | None:
         logger.warning("batch_enrich_materials: claude_batch_submit returned None")
         return None
 
-    r = _get_redis()
     if r:
         r.set(_REDIS_KEY, batch_id)
 

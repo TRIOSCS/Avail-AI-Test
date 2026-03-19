@@ -73,6 +73,7 @@ def test_batch_enrich_submits_batch(mock_submit, mock_redis, db_session, unenric
     """Submits a batch and stores batch_id in Redis."""
     mock_submit.return_value = "batch_abc123"
     mock_r = MagicMock()
+    mock_r.get.return_value = None  # No in-flight batch
     mock_redis.return_value = mock_r
 
     result = asyncio.get_event_loop().run_until_complete(batch_enrich_materials(db_session))
@@ -99,6 +100,7 @@ def test_batch_enrich_skips_enriched(mock_submit, mock_redis, db_session, unenri
     """Only picks up cards with enriched_at IS NULL."""
     mock_submit.return_value = "batch_xyz"
     mock_r = MagicMock()
+    mock_r.get.return_value = None  # No in-flight batch
     mock_redis.return_value = mock_r
 
     result = asyncio.get_event_loop().run_until_complete(batch_enrich_materials(db_session))
@@ -121,12 +123,27 @@ def test_batch_enrich_submit_fails(mock_submit, mock_redis, db_session, unenrich
     """Returns None when claude_batch_submit fails."""
     mock_submit.return_value = None
     mock_r = MagicMock()
+    mock_r.get.return_value = None  # No in-flight batch
     mock_redis.return_value = mock_r
 
     result = asyncio.get_event_loop().run_until_complete(batch_enrich_materials(db_session))
 
     assert result is None
     mock_r.set.assert_not_called()
+
+
+@patch("app.services.material_enrichment_service._get_redis")
+@patch("app.services.material_enrichment_service.claude_batch_submit")
+def test_batch_enrich_skips_if_inflight(mock_submit, mock_redis, db_session, unenriched_cards):
+    """Returns None immediately when a batch is already in-flight in Redis."""
+    mock_r = MagicMock()
+    mock_r.get.return_value = b"batch_already_running"  # Simulate in-flight batch
+    mock_redis.return_value = mock_r
+
+    result = asyncio.get_event_loop().run_until_complete(batch_enrich_materials(db_session))
+
+    assert result is None
+    mock_submit.assert_not_called()
 
 
 # ── process_material_batch_results tests ──────────────────────────────
