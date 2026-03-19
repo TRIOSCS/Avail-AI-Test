@@ -5,12 +5,10 @@ Called by: htmx_views materials_list_partial route.
 Depends on: Anthropic API (Haiku), MaterialCard model.
 """
 
-import anthropic
 from loguru import logger
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
-from app.config import settings
 from app.models.intelligence import MaterialCard
 
 
@@ -62,6 +60,10 @@ async def interpret_with_haiku(query: str) -> dict:
     Returns dict with keys: keywords, category, description_terms.
     """
     try:
+        import anthropic
+
+        from app.config import settings
+
         client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
         response = client.messages.create(
             model="claude-haiku-4-5-20251001",
