@@ -1,14 +1,13 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
-  <!-- TRIO honeycomb favicon - three connected pointy-top hexagons, scaled to fill viewBox -->
-  <!-- r=24 pointy-top hex. sin60=0.866, r*sin60=20.8 -->
-  <!-- Centered in viewBox: group spans ~62.4w x ~84h, offset to center -->
+  <!-- TRIO honeycomb favicon - three connected pointy-top hexagons, max size -->
+  <!-- r=27, rsin60=23.4, height=3.5r=94.5, width=2*r*sqrt3=93.6 -->
 
-  <!-- Top-left hexagon (blue) center (30, 26) -->
-  <polygon points="30,2 50.8,14 50.8,38 30,50 9.2,38 9.2,14" fill="none" stroke="#0082CA" stroke-width="4.5" stroke-linejoin="round"/>
+  <!-- Top-left hexagon (blue) center (26.6, 29.8) -->
+  <polygon points="26.6,2.8 50,16.3 50,43.3 26.6,56.8 3.2,43.3 3.2,16.3" fill="none" stroke="#0082CA" stroke-width="5" stroke-linejoin="round"/>
 
-  <!-- Top-right hexagon (gray) center (66, 26) — shares edge with top-left -->
-  <polygon points="66,2 86.8,14 86.8,38 66,50 45.2,38 45.2,14" fill="none" stroke="#A7A9AC" stroke-width="4.5" stroke-linejoin="round"/>
+  <!-- Top-right hexagon (gray) center (73.4, 29.8) -->
+  <polygon points="73.4,2.8 96.8,16.3 96.8,43.3 73.4,56.8 50,43.3 50,16.3" fill="none" stroke="#A7A9AC" stroke-width="5" stroke-linejoin="round"/>
 
-  <!-- Bottom-center hexagon (dark) center (48, 62) — shares edges with both -->
-  <polygon points="48,38 68.8,50 68.8,74 48,86 27.2,74 27.2,50" fill="none" stroke="#231F20" stroke-width="4.5" stroke-linejoin="round"/>
+  <!-- Bottom-center hexagon (dark) center (50, 70.3) -->
+  <polygon points="50,43.3 73.4,56.8 73.4,83.8 50,97.3 26.6,83.8 26.6,56.8" fill="none" stroke="#231F20" stroke-width="5" stroke-linejoin="round"/>
 </svg>
