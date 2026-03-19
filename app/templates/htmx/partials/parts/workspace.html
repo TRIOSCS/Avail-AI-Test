@@ -32,7 +32,7 @@
        },
        selectPart(id) {
          this.selectedPartId = id;
-         this.activeTab = 'offers';
+         if (!this.activeTab) this.activeTab = 'offers';
        },
        syncScroll(source, target) {
          const el = document.getElementById(target);
@@ -71,16 +71,25 @@
 
     {# Tab bar — compact industrial tabs #}
     <template x-if="selectedPartId">
-      <div class="border-b-2 border-brand-200 bg-gray-50/80 px-2 flex-shrink-0">
-        <nav class="flex -mb-[2px]">
-          {% for tab_key, tab_label in [('offers', 'Offers'), ('sourcing', 'Sourcing'), ('activity', 'Activity'), ('comms', 'Comms')] %}
-          <button @click="activeTab = '{{ tab_key }}'; htmx.ajax('GET', '/v2/partials/parts/' + selectedPartId + '/tab/{{ tab_key }}', {target: '#part-detail'})"
-                  :class="activeTab === '{{ tab_key }}' ? 'ws-tab-active' : ''"
-                  class="ws-tab">
-            {{ tab_label }}
-          </button>
-          {% endfor %}
-        </nav>
+      <div>
+        {# Part header — persistent context strip #}
+        <div id="part-header-wrap"
+             hx-get :hx-vals="JSON.stringify({})"
+             x-init="htmx.ajax('GET', '/v2/partials/parts/' + selectedPartId + '/header', {target: '#part-header-wrap', swap: 'innerHTML'})"
+             x-effect="if (selectedPartId) htmx.ajax('GET', '/v2/partials/parts/' + selectedPartId + '/header', {target: '#part-header-wrap', swap: 'innerHTML'})">
+        </div>
+        {# Tab bar #}
+        <div class="border-b-2 border-brand-200 bg-gray-50/80 px-2 flex-shrink-0">
+          <nav class="flex -mb-[2px]">
+            {% for tab_key, tab_label in [('offers', 'Offers'), ('sourcing', 'Sourcing'), ('activity', 'Activity'), ('comms', 'Comms')] %}
+            <button @click="activeTab = '{{ tab_key }}'; htmx.ajax('GET', '/v2/partials/parts/' + selectedPartId + '/tab/{{ tab_key }}', {target: '#part-detail'})"
+                    :class="activeTab === '{{ tab_key }}' ? 'ws-tab-active' : ''"
+                    class="ws-tab">
+              {{ tab_label }}
+            </button>
+            {% endfor %}
+          </nav>
+        </div>
       </div>
     </template>
 
