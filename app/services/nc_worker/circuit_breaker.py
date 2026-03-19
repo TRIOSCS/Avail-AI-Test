@@ -1,31 +1,19 @@
 """Circuit breaker — stops searches on signs of blocking or errors.
 
-Monitors HTTP responses for captchas, redirects, rate limiting, and
-other signs that NC has detected automated access. Trips immediately
-on high-severity signals, accumulates for lower-severity ones.
+Thin subclass of CircuitBreakerBase that adds the NC-specific
+check_response_health() method for HTTP response inspection.
 
 Called by: worker loop (after each search)
-Depends on: nothing (HTTP response analysis)
+Depends on: search_worker_base.circuit_breaker.CircuitBreakerBase
 """
 
 from loguru import logger
 
+from ..search_worker_base.circuit_breaker import CircuitBreakerBase
 
-class CircuitBreaker:
-    """Monitors for signs of blocking and stops all searches if triggered."""
 
-    def __init__(self):
-        self.consecutive_failures = 0
-        self.captcha_count = 0
-        self.empty_results_streak = 0
-        self.is_open = False
-        self.trip_reason = ""
-
-    def _trip(self, reason: str):
-        """Trip the circuit breaker — all searches stop."""
-        self.is_open = True
-        self.trip_reason = reason
-        logger.critical("CIRCUIT BREAKER TRIPPED: {}", reason)
+class CircuitBreaker(CircuitBreakerBase):
+    """NC-specific circuit breaker with HTTP response health checking."""
 
     def check_response_health(self, status_code: int, html: str, url: str) -> str:
         """Check HTTP response for red flags indicating detection.
@@ -77,37 +65,3 @@ class CircuitBreaker:
         # All clear — reset failure counters
         self.consecutive_failures = 0
         return "HEALTHY"
-
-    def record_empty_results(self):
-        """Track consecutive empty results — many in a row may indicate shadow-
-        blocking."""
-        self.empty_results_streak += 1
-        if self.empty_results_streak >= 10:
-            self._trip("10 consecutive empty results — possible shadow-block")
-
-    def record_results(self):
-        """Reset empty results streak on successful result."""
-        self.empty_results_streak = 0
-
-    def should_stop(self) -> bool:
-        """Return True if the circuit breaker is open (all searches should stop)."""
-        return self.is_open
-
-    def get_trip_info(self) -> dict:
-        """Return circuit breaker state for monitoring."""
-        return {
-            "is_open": self.is_open,
-            "trip_reason": self.trip_reason,
-            "captcha_count": self.captcha_count,
-            "consecutive_failures": self.consecutive_failures,
-            "empty_results_streak": self.empty_results_streak,
-        }
-
-    def reset(self):
-        """Manually reset the circuit breaker (admin action)."""
-        self.is_open = False
-        self.trip_reason = ""
-        self.captcha_count = 0
-        self.consecutive_failures = 0
-        self.empty_results_streak = 0
-        logger.info("Circuit breaker manually reset")
