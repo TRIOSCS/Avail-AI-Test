@@ -81,8 +81,25 @@ def record_spec(
     # Normalize unit for numeric types
     canonical_value = value
     canonical_unit = schema.canonical_unit
-    if schema.data_type == "numeric" and unit and canonical_unit:
-        canonical_value = normalize_value(value, unit, canonical_unit)
+    if schema.data_type == "numeric":
+        # If value is a string like "0.1µF", try to extract the numeric part
+        if isinstance(value, str):
+            import re
+
+            m = re.match(r"^\s*([+-]?\d+(?:[.,]\d+)?(?:[eE][+-]?\d+)?)\s*([a-zA-Zµμ%Ω°/]+.*)?\s*$", value)
+            if m:
+                try:
+                    canonical_value = float(m.group(1).replace(",", "."))
+                    if not unit and m.group(2):
+                        unit = m.group(2).strip()
+                except ValueError:
+                    logger.debug("record_spec: cannot parse numeric value '{}' for {}.{}", value, category, spec_key)
+                    return
+            else:
+                logger.debug("record_spec: non-numeric string '{}' for numeric spec {}.{}", value, category, spec_key)
+                return
+        if unit and canonical_unit:
+            canonical_value = normalize_value(canonical_value, unit, canonical_unit)
 
     # Build the spec entry
     now_iso = datetime.now(timezone.utc).isoformat()
