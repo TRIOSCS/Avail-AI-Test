@@ -19,7 +19,7 @@ from app.models.offers import Offer
 from app.models.sourcing import Requirement, Requisition
 from app.models.vendors import VendorCard, VendorContact
 from app.utils.claude_client import claude_structured
-from app.utils.sql_helpers import escape_like
+from app.utils.search_builder import SearchBuilder
 
 RESULT_LIMIT = 5
 
@@ -101,8 +101,8 @@ def fast_search(query: str, db: Session) -> dict:
     if not query or len(query.strip()) < 2:
         return _empty_result()
 
-    safe = escape_like(query.strip())
-    pattern = f"%{safe}%"
+    sb = SearchBuilder(query.strip())
+    pattern = f"%{sb.safe}%"
     use_pg = _is_postgres(db)
 
     groups = {}
@@ -342,8 +342,8 @@ def _run_intent_query(search_op: dict, db: Session) -> tuple[str, list[dict]]:
         return ("", [])
 
     model, search_fields, display_fields, group_key = config
-    safe = escape_like(text_query.strip()) if text_query.strip() else ""
-    pattern = f"%{safe}%" if safe else None
+    sb_intent = SearchBuilder(text_query.strip()) if text_query.strip() else None
+    pattern = f"%{sb_intent.safe}%" if sb_intent and sb_intent.safe else None
 
     # Build ILIKE conditions on search fields
     conditions = []
@@ -377,12 +377,14 @@ def _run_intent_query(search_op: dict, db: Session) -> tuple[str, list[dict]]:
 
         if filter_name == "email_domain":
             # Domain filter: ILIKE %@domain
-            q = q.filter(col.ilike(f"%@{escape_like(str(filter_value))}%"))
+            sb_filter = SearchBuilder(str(filter_value))
+            q = q.filter(col.ilike(f"%@{sb_filter.safe}%"))
         elif filter_name == "is_blacklisted":
             q = q.filter(col == filter_value)
         else:
             # Exact-ish match via ILIKE for text filters
-            q = q.filter(col.ilike(f"%{escape_like(str(filter_value))}%"))
+            sb_filter = SearchBuilder(str(filter_value))
+            q = q.filter(col.ilike(f"%{sb_filter.safe}%"))
 
     # Dedup parts by normalized_mpn, offers by (mpn, vendor_name)
     if entity_type == "part":

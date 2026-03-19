@@ -16,7 +16,7 @@ from ...models import Company, CustomerSite, Quote, Requisition, User
 from ...schemas.crm import CompanyCreate, CompanyUpdate
 from ...services.credential_service import get_credential_cached
 from ...utils.async_helpers import safe_background_task
-from ...utils.sql_helpers import escape_like
+from ...utils.search_builder import SearchBuilder
 
 router = APIRouter()
 
@@ -68,8 +68,8 @@ async def list_companies(
             .options(joinedload(Company.account_owner))
         )
         if search.strip():
-            safe = escape_like(search.strip())
-            query = query.filter(Company.name.ilike(f"%{safe}%"))
+            sb = SearchBuilder(search.strip())
+            query = query.filter(sb.ilike_filter(Company.name))
         if tag.strip():
             safe_tag = tag.strip().lower()
             query = query.filter(

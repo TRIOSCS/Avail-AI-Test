@@ -41,7 +41,7 @@ from ..services.material_card_service import (
 from ..services.price_snapshot_service import record_price_snapshot
 from ..utils.async_helpers import safe_background_task
 from ..utils.normalization import normalize_mpn_key
-from ..utils.sql_helpers import escape_like
+from ..utils.search_builder import SearchBuilder
 from ..utils.vendor_helpers import _background_enrich_vendor
 from ..vendor_utils import normalize_vendor_name
 
@@ -66,8 +66,8 @@ async def list_materials(request: Request, user: User = Depends(require_user), d
         )
         if q:
             # TODO: Add minimum length validation (e.g., 2 chars) to prevent broad queries
-            safe_q = escape_like(q)
-            query = query.filter(MaterialCard.normalized_mpn.ilike(f"{safe_q}%"))
+            sb = SearchBuilder(q)
+            query = query.filter(sb.ilike_filter(MaterialCard.normalized_mpn, prefix=True))
         total = query.count()
         cards = query.limit(limit).offset(offset).all()
         if not cards:

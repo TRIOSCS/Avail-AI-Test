@@ -47,7 +47,7 @@ from ..models.prospect_account import ProspectAccount
 from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorContact
 from ..scoring import classify_lead, explain_lead, score_unified
-from ..utils.sql_helpers import escape_like
+from ..utils.search_builder import SearchBuilder
 
 router = APIRouter(tags=["htmx-views"])
 _DASH = "\u2014"  # em-dash for template fallbacks
@@ -311,8 +311,8 @@ async def requisitions_list_partial(
     )
 
     if q.strip():
-        safe = escape_like(q.strip())
-        query = query.filter(Requisition.name.ilike(f"%{safe}%") | Requisition.customer_name.ilike(f"%{safe}%"))
+        sb = SearchBuilder(q.strip())
+        query = query.filter(sb.ilike_filter(Requisition.name, Requisition.customer_name))
     if status:
         query = query.filter(Requisition.status == status)
     if owner:
@@ -2576,8 +2576,8 @@ async def vendors_list_partial(
         query = query.filter(VendorCard.is_blacklisted.is_(False))
 
     if q.strip():
-        safe = escape_like(q.strip())
-        query = query.filter(VendorCard.display_name.ilike(f"%{safe}%") | VendorCard.domain.ilike(f"%{safe}%"))
+        sb = SearchBuilder(q.strip())
+        query = query.filter(sb.ilike_filter(VendorCard.display_name, VendorCard.domain))
 
     total = query.count()
 
@@ -3305,8 +3305,8 @@ async def companies_list_partial(
     query = db.query(Company).filter(Company.is_active.is_(True)).options(joinedload(Company.account_owner))
 
     if search.strip():
-        safe = escape_like(search.strip())
-        query = query.filter(Company.name.ilike(f"%{safe}%"))
+        sb = SearchBuilder(search.strip())
+        query = query.filter(sb.ilike_filter(Company.name))
 
     total = query.count()
     companies = query.order_by(Company.name).offset(offset).limit(limit).all()
@@ -3388,10 +3388,10 @@ async def company_typeahead(
     if not q.strip() or len(q.strip()) < 2:
         return HTMLResponse("")
 
-    safe = escape_like(q.strip())
+    sb = SearchBuilder(q.strip())
     companies = (
         db.query(Company)
-        .filter(Company.is_active.is_(True), Company.name.ilike(f"%{safe}%"))
+        .filter(Company.is_active.is_(True), sb.ilike_filter(Company.name))
         .order_by(Company.name)
         .limit(10)
         .all()
@@ -4814,10 +4814,8 @@ async def buy_plans_list_partial(
     if mine:
         query = query.filter(BuyPlan.submitted_by_id == user.id)
     if q.strip():
-        safe = escape_like(q.strip())
-        query = query.filter(
-            BuyPlan.sales_order_number.ilike(f"%{safe}%") | BuyPlan.customer_po_number.ilike(f"%{safe}%")
-        )
+        sb = SearchBuilder(q.strip())
+        query = query.filter(sb.ilike_filter(BuyPlan.sales_order_number, BuyPlan.customer_po_number))
 
     # Sales users only see their own
     if user.role == "sales":
@@ -6168,8 +6166,8 @@ async def quotes_list_partial(
         joinedload(Quote.created_by),
     )
     if q.strip():
-        safe = escape_like(q.strip())
-        query = query.filter(Quote.quote_number.ilike(f"%{safe}%"))
+        sb = SearchBuilder(q.strip())
+        query = query.filter(sb.ilike_filter(Quote.quote_number))
     if status:
         query = query.filter(Quote.status == status)
     total = query.count()
@@ -6548,8 +6546,8 @@ async def prospecting_list_partial(
     else:
         query = query.filter(ProspectAccount.status.in_(["suggested", "claimed", "dismissed"]))
     if q.strip():
-        safe = escape_like(q.strip())
-        query = query.filter(ProspectAccount.name.ilike(f"%{safe}%") | ProspectAccount.domain.ilike(f"%{safe}%"))
+        sb = SearchBuilder(q.strip())
+        query = query.filter(sb.ilike_filter(ProspectAccount.name, ProspectAccount.domain))
     total = query.count()
     if sort == "fit_desc":
         query = query.order_by(ProspectAccount.fit_score.desc())
@@ -7169,8 +7167,8 @@ async def knowledge_list(
 
     query = db.query(KnowledgeEntry)
     if q.strip():
-        safe = escape_like(q.strip())
-        query = query.filter(KnowledgeEntry.content.ilike(f"%{safe}%"))
+        sb = SearchBuilder(q.strip())
+        query = query.filter(sb.ilike_filter(KnowledgeEntry.content))
     entries = query.order_by(KnowledgeEntry.created_at.desc()).limit(50).all()
 
     return templates.TemplateResponse(
@@ -7448,19 +7446,16 @@ async def parts_list_partial(
 
     # Filters
     if q:
-        pattern = f"%{escape_like(q)}%"
+        sb_q = SearchBuilder(q)
         query = query.filter(
-            (Requirement.primary_mpn.ilike(pattern))
-            | (Requirement.brand.ilike(pattern))
-            | (Requisition.name.ilike(pattern))
-            | (Requisition.customer_name.ilike(pattern))
+            sb_q.ilike_filter(Requirement.primary_mpn, Requirement.brand, Requisition.name, Requisition.customer_name)
         )
     if requisition_name:
-        query = query.filter(Requisition.name.ilike(f"%{escape_like(requisition_name)}%"))
+        query = query.filter(SearchBuilder(requisition_name).ilike_filter(Requisition.name))
     if customer:
-        query = query.filter(Requisition.customer_name.ilike(f"%{escape_like(customer)}%"))
+        query = query.filter(SearchBuilder(customer).ilike_filter(Requisition.customer_name))
     if brand:
-        query = query.filter(Requirement.brand.ilike(f"%{escape_like(brand)}%"))
+        query = query.filter(SearchBuilder(brand).ilike_filter(Requirement.brand))
     if status and status != "archived":
         query = query.filter(Requirement.sourcing_status == status)
     if owner:

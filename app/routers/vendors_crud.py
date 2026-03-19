@@ -21,7 +21,7 @@ from ..models.strategic import StrategicVendor
 from ..models.vendors import VendorContact
 from ..schemas.responses import VendorDetailResponse, VendorListResponse
 from ..schemas.vendors import VendorBlacklistToggle, VendorCardUpdate, VendorReviewCreate
-from ..utils.sql_helpers import escape_like
+from ..utils.search_builder import SearchBuilder
 from ..utils.vendor_helpers import card_to_dict
 from ..vendor_utils import normalize_vendor_name
 
@@ -147,14 +147,14 @@ async def list_vendors(
             from sqlalchemy import String as SAString
             from sqlalchemy import or_
 
-            safe_q = escape_like(q)
+            sb = SearchBuilder(q)
             # Tag match — vendors whose brand/commodity tags contain the query
             tag_filter = or_(
                 sqlfunc.lower(sqlfunc.cast(VendorCard.brand_tags, SAString)).contains(q),
                 sqlfunc.lower(sqlfunc.cast(VendorCard.commodity_tags, SAString)).contains(q),
-                VendorCard.industry.ilike(f"%{safe_q}%"),
+                sb.ilike_filter(VendorCard.industry),
             )
-            name_filter = VendorCard.normalized_name.ilike(f"%{safe_q}%")
+            name_filter = sb.ilike_filter(VendorCard.normalized_name)
 
             if len(q) >= 3:
                 # Full-text search for longer queries (faster + ranked)
@@ -337,14 +337,14 @@ async def autocomplete_names(
     if len(q) < 2:
         return []
     limit = min(int(request.query_params.get("limit", "8")), 20)
-    safe_q = escape_like(q)
+    sb = SearchBuilder(q)
 
     from sqlalchemy import String, cast
 
     # Primary: match on normalized_name
     vendors_by_name = (
         db.query(VendorCard)
-        .filter(VendorCard.normalized_name.ilike(f"%{safe_q}%"))
+        .filter(VendorCard.normalized_name.ilike(f"%{sb.safe}%"))
         .order_by(VendorCard.sighting_count.desc().nullslast(), VendorCard.display_name)
         .limit(limit)
         .all()
@@ -355,7 +355,7 @@ async def autocomplete_names(
     vendors_by_alt = (
         db.query(VendorCard)
         .filter(
-            cast(VendorCard.alternate_names, String).ilike(f"%{safe_q}%"),
+            cast(VendorCard.alternate_names, String).ilike(f"%{sb.safe}%"),
             VendorCard.id.notin_(seen_ids) if seen_ids else True,
         )
         .order_by(VendorCard.sighting_count.desc().nullslast(), VendorCard.display_name)
@@ -365,7 +365,7 @@ async def autocomplete_names(
 
     companies = (
         db.query(Company.id, Company.name)
-        .filter(Company.is_active, Company.name.ilike(f"%{safe_q}%"))
+        .filter(Company.is_active, Company.name.ilike(f"%{sb.safe}%"))
         .order_by(Company.name)
         .limit(limit)
         .all()
