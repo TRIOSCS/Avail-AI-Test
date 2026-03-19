@@ -166,3 +166,73 @@ def test_get_subfilter_options(db_session: Session):
     ddr_opt = next(o for o in options if o["spec_key"] == "ddr_type")
     assert "DDR4" in ddr_opt["values"]
     assert "DDR5" in ddr_opt["values"]
+
+
+# --- Facet counts with active_filters ---
+
+
+def test_get_facet_counts_with_active_filters(db_session: Session):
+    """When active_filters narrow the card set, counts for other specs reflect filtered
+    subset."""
+    _seed_dram_schema(db_session)
+    _make_dram_card(db_session, "MEM-001", "DDR4", 16, ecc=True)
+    _make_dram_card(db_session, "MEM-002", "DDR4", 32, ecc=False)
+    _make_dram_card(db_session, "MEM-003", "DDR5", 16, ecc=True)
+
+    # Filter to DDR4 only — should see 2 cards, ecc counts should reflect DDR4 subset
+    counts = get_facet_counts(db_session, "dram", active_filters={"ddr_type": ["DDR4"]})
+    # Only DDR4 cards: MEM-001 (ecc=true) and MEM-002 (ecc=false)
+    assert counts["ecc"]["true"] == 1
+    assert counts["ecc"]["false"] == 1
+    # DDR5 should still appear in ddr_type counts (facet counts show options within filtered set)
+    assert counts["ddr_type"]["DDR4"] == 2
+    assert "DDR5" not in counts.get("ddr_type", {})
+
+
+# --- Text search with q parameter ---
+
+
+def test_search_materials_faceted_text_search_by_mpn(db_session: Session):
+    """Search by partial MPN returns matching cards."""
+    _seed_dram_schema(db_session)
+    _make_dram_card(db_session, "MEM-001", "DDR4", 16)
+    _make_dram_card(db_session, "XYZ-999", "DDR5", 32)
+
+    results, total = search_materials_faceted(db_session, q="MEM")
+    assert total == 1
+    assert results[0].display_mpn == "MEM-001"
+
+
+def test_search_materials_faceted_text_search_by_manufacturer(db_session: Session):
+    """Search by manufacturer returns matching cards."""
+    _seed_dram_schema(db_session)
+    _make_dram_card(db_session, "MEM-001", "DDR4", 16)
+
+    # All test cards have manufacturer "TestCo"
+    results, total = search_materials_faceted(db_session, q="TestCo")
+    assert total == 1
+    assert results[0].manufacturer == "TestCo"
+
+
+# --- Pagination with offset ---
+
+
+def test_search_materials_faceted_pagination_offset(db_session: Session):
+    """Offset skips the correct number of results."""
+    _seed_dram_schema(db_session)
+    for i in range(5):
+        _make_dram_card(db_session, f"MEM-{i:03d}", "DDR4", 16)
+
+    # Get all to confirm total
+    all_results, total = search_materials_faceted(db_session, commodity="dram", limit=50)
+    assert total == 5
+
+    # Offset 3 should return 2 results
+    page_results, page_total = search_materials_faceted(
+        db_session,
+        commodity="dram",
+        limit=50,
+        offset=3,
+    )
+    assert page_total == 5  # Total count unchanged
+    assert len(page_results) == 2  # Only 2 remaining after offset
