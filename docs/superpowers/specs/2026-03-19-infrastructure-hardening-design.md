@@ -15,7 +15,7 @@ An audit of the AvailAI codebase identified 8 areas where existing infrastructur
 ## 1. Critical Safety — `safe_background_task()` Wrap
 
 ### Problem
-11 raw `asyncio.create_task()` calls across the app with zero error isolation. If any background enrichment, tagging, or notification task throws an unhandled exception, it can crash the event loop or surface as an unhandled promise rejection.
+~19 raw `asyncio.create_task()` calls across 10 files with zero error isolation. If any background enrichment, tagging, or notification task throws an unhandled exception, it can crash the event loop or surface as an unhandled promise rejection.
 
 ### Solution
 Replace every `asyncio.create_task(coro)` with `safe_background_task(coro, "task_name")`. The function already exists in `app/utils/async_helpers.py`, is tested, but is never called in production.
@@ -43,11 +43,12 @@ Near zero. `safe_background_task` is a strict superset of `asyncio.create_task` 
 
 **Problem:** `thefuzz[speedup]` is 10-100x slower than `rapidfuzz` for fuzzy string matching.
 
-**Solution:** Replace `thefuzz[speedup]==0.22.1` with `rapidfuzz` in `requirements.txt`. Update 4 import sites:
+**Solution:** Replace `thefuzz[speedup]==0.22.1` with `rapidfuzz` in `requirements.txt`. Update 5 import sites:
 - `app/utils/vendor_helpers.py` — conditional import with fallback
 - `app/routers/vendors_crud.py` — `from thefuzz import fuzz`
 - `app/company_utils.py` — `from thefuzz import fuzz`
 - `app/services/auto_dedup_service.py` — conditional import
+- `app/vendor_utils.py` — 2 occurrences of `from thefuzz import fuzz`
 
 `rapidfuzz` provides API-compatible `fuzz.ratio()`, `fuzz.partial_ratio()`, `fuzz.token_sort_ratio()` on the same 0-100 scale. Existing thresholds (82% in vendor dedup) work unchanged.
 
@@ -109,7 +110,7 @@ Near zero. Worst case is a few extra Redis SCAN + DELETE operations. Upside is i
 ## 4. SearchBuilder Utility
 
 ### Problem
-18 files, 45 invocations of the same `escape_like()` + `ILIKE` pattern. One file (vendors_crud.py) has the FTS-with-fallback cascade. Every new searchable entity requires copy-pasting ~20 lines.
+13 files, ~45 invocations of the same `escape_like()` + `ILIKE` pattern. One file (vendors_crud.py) has the FTS-with-fallback cascade. Every new searchable entity requires copy-pasting ~20 lines.
 
 ### Solution
 New file `app/utils/search_builder.py`:
@@ -212,7 +213,7 @@ Low. Macros generate identical HTML. Visual regression caught by loading the pag
 ## 6. Batch API Expansion
 
 ### Problem
-Claude Batch API gives 50% cost savings but is only used in 2 places (email parsing, tag classification). 25+ real-time Claude calls exist for tasks that don't need instant results.
+Claude Batch API gives 50% cost savings but is only used in 2 places (email parsing, tag classification). Of the 25+ real-time Claude calls, 4 high-volume non-interactive services are strong candidates for batch conversion.
 
 ### Candidates for Batch Conversion
 
@@ -266,10 +267,11 @@ Wire the broker into background operations. One SSE connection per session on th
 - Publish: `broker.publish(f"user:{user_id}", "enrichment_complete", {"entity_type": "vendor", "entity_id": 123})`
 - Frontend: HTMX SSE listener refreshes enrichment section on detail page
 
-#### Batch API results ready
+#### Batch API results ready (depends on Section 6)
 - Trigger: Batch poll job finds completed results
 - Publish: `broker.publish(f"user:{user_id}", "batch_complete", {"batch_type": "materials", "count": 42})`
 - Frontend: Toast notification — "42 materials enriched"
+- **Note:** This event requires Section 6 (Batch API Expansion) to be implemented first. Implement enrichment_complete, quote_updated, and rfq_response events independently; add batch_complete after Section 6 lands.
 
 #### Quote/offer status changes
 - Trigger: Offer created or quote status changes
@@ -299,6 +301,11 @@ Low-medium. SSE is additive — if connection drops, pages still work via normal
 
 ### Problem
 ICS and NC workers have nearly identical implementations. Both duplicate config, monitoring, circuit breaker, session management, and result parsing. Changes to one require mirroring in the other.
+
+### Current File Locations
+- `app/services/ics_worker/` — 12 modules: `worker.py`, `config.py`, `monitoring.py`, `session_manager.py`, `circuit_breaker.py`, `queue_manager.py`, `scheduler.py`, `search_engine.py`, `result_parser.py`, `mpn_normalizer.py`, `human_behavior.py`, `ai_gate.py`, `sighting_writer.py`
+- `app/services/nc_worker/` — 12 modules: identical file structure to ICS
+- `app/services/search_worker_base/` — 4 modules: `config.py`, `monitoring.py`, `human_behavior.py`, `scheduler.py` (partial extraction already started)
 
 ### Solution
 Collapse shared logic into `search_worker_base/`. Reduce ICS and NC to thin configuration + parsing overrides.
@@ -355,4 +362,4 @@ Medium. Workers are critical sourcing path. Full test coverage on base class bef
 7. SSE delivers at least enrichment-complete and batch-complete events to frontend
 8. ICS and NC workers share a single base with no duplicated logic
 9. 100% test coverage maintained — no regression
-10. All existing tests pass without modification (except import path updates)
+10. All existing tests pass — test updates limited to import paths and search pattern changes from SearchBuilder migration
