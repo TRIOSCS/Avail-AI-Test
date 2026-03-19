@@ -55,7 +55,8 @@
            hx-get="/v2/partials/materials/filters/sub"
            hx-trigger="commodity-changed from:body"
            hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity")}'
-           hx-swap="innerHTML">
+           hx-swap="innerHTML"
+           hx-sync="this:replace">
       </div>
     </div>
 
@@ -105,12 +106,7 @@
       </template>
     </div>
 
-    {# Loading indicator for results #}
-    <div id="results-loading" class="htmx-indicator absolute top-2 right-2 z-10">
-      <svg class="h-5 w-5 text-brand-500 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
-    </div>
-
-    {# Results container — loaded via HTMX #}
+    {# Results container — loaded via HTMX (CSS opacity handles loading state) #}
     <div id="materials-results"
          hx-get="/v2/partials/materials/faceted"
          hx-trigger="load, filters-changed from:body"
@@ -122,7 +118,7 @@
            "offset": Alpine.evaluate(document.querySelector("#materials-workspace"), "page") * 50 || 0
          }'
          hx-swap="innerHTML"
-         hx-indicator="#results-loading">
+         hx-sync="this:replace">
       {# Skeleton loading #}
       <div class="p-4 space-y-3">
         {% for _ in range(8) %}

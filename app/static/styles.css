@@ -549,6 +549,12 @@ hr { border-color: #c8d5e2; }
     animation-delay: calc(var(--i, 0) * 50ms);
 }
 
+/* Faceted search — loading state */
+#materials-results.htmx-request {
+  opacity: 0.5;
+  transition: opacity 0.2s ease;
+}
+
 /* Faceted search sidebar */
 @media (min-width: 1024px) {
   .faceted-sidebar {
