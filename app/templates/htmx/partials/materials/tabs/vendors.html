@@ -1,0 +1,35 @@
+{#
+  materials/tabs/vendors.html — Vendor history tab for material detail.
+  Receives: vendors (list of MaterialVendorHistory), card (MaterialCard).
+  Called by: htmx_views.py material_tab_partial endpoint.
+#}
+<table class="w-full text-xs" style="font-family: 'JetBrains Mono', monospace;">
+  <thead><tr class="text-left text-gray-500 border-b border-gray-200">
+    <th class="py-2 px-3 font-medium">Vendor</th>
+    <th class="py-2 px-3 font-medium">Auth</th>
+    <th class="py-2 px-3 text-right font-medium">Last Price</th>
+    <th class="py-2 px-3 text-right font-medium">Last Qty</th>
+    <th class="py-2 px-3 font-medium">Currency</th>
+    <th class="py-2 px-3 font-medium">First Seen</th>
+    <th class="py-2 px-3 font-medium">Last Seen</th>
+    <th class="py-2 px-3 text-right font-medium">Times</th>
+    <th class="py-2 px-3 font-medium">SKU</th>
+  </tr></thead>
+  <tbody>
+    {% for v in vendors %}
+    <tr class="border-b border-gray-100 hover:bg-brand-50/50 transition-colors">
+      <td class="py-2 px-3 font-semibold text-gray-900">{{ v.vendor_name }}</td>
+      <td class="py-2 px-3">{% if v.is_authorized %}<span class="text-emerald-600 font-medium">Yes</span>{% else %}<span class="text-gray-400">-</span>{% endif %}</td>
+      <td class="py-2 px-3 text-right">{% if v.last_price %}<span class="text-emerald-700 font-medium">${{ "%.4f"|format(v.last_price) }}</span>{% else %}<span class="text-gray-400">-</span>{% endif %}</td>
+      <td class="py-2 px-3 text-right">{{ "{:,}"|format(v.last_qty) if v.last_qty else '-' }}</td>
+      <td class="py-2 px-3">{{ v.last_currency or 'USD' }}</td>
+      <td class="py-2 px-3">{{ v.first_seen.strftime('%Y-%m-%d') if v.first_seen else '-' }}</td>
+      <td class="py-2 px-3">{{ v.last_seen.strftime('%Y-%m-%d') if v.last_seen else '-' }}</td>
+      <td class="py-2 px-3 text-right">{{ v.times_seen or 0 }}</td>
+      <td class="py-2 px-3">{{ v.vendor_sku or '-' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="9" class="py-8 text-center text-gray-400 text-sm">No vendor history</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

@@ -1,0 +1,29 @@
+{#
+  materials/tabs/price_history.html — Price observation history tab for material detail.
+  Receives: snapshots (list of MaterialPriceSnapshot), card (MaterialCard).
+  Called by: htmx_views.py material_tab_partial endpoint.
+#}
+<table class="w-full text-xs" style="font-family: 'JetBrains Mono', monospace;">
+  <thead><tr class="text-left text-gray-500 border-b border-gray-200">
+    <th class="py-2 px-3 font-medium">Date</th>
+    <th class="py-2 px-3 font-medium">Vendor</th>
+    <th class="py-2 px-3 text-right font-medium">Price</th>
+    <th class="py-2 px-3 text-right font-medium">Qty</th>
+    <th class="py-2 px-3 font-medium">Currency</th>
+    <th class="py-2 px-3 font-medium">Source</th>
+  </tr></thead>
+  <tbody>
+    {% for s in snapshots %}
+    <tr class="border-b border-gray-100 hover:bg-brand-50/50 transition-colors">
+      <td class="py-2 px-3">{{ s.recorded_at.strftime('%Y-%m-%d %H:%M') if s.recorded_at else '-' }}</td>
+      <td class="py-2 px-3 font-semibold text-gray-900">{{ s.vendor_name }}</td>
+      <td class="py-2 px-3 text-right"><span class="text-emerald-700 font-medium">${{ "%.4f"|format(s.price) }}</span></td>
+      <td class="py-2 px-3 text-right">{{ "{:,}"|format(s.quantity) if s.quantity else '-' }}</td>
+      <td class="py-2 px-3">{{ s.currency or 'USD' }}</td>
+      <td class="py-2 px-3">{{ s.source or '-' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="py-8 text-center text-gray-400 text-sm">Price tracking active. Data will appear as new vendor sightings are recorded.</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

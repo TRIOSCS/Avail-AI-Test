@@ -1,0 +1,44 @@
+{#
+  materials/tabs/sourcing.html — Sourcing / requisition activity tab for material detail.
+  Receives: requirements (list of Requirement), card (MaterialCard).
+  Called by: htmx_views.py material_tab_partial endpoint.
+#}
+<table class="w-full text-xs" style="font-family: 'JetBrains Mono', monospace;">
+  <thead><tr class="text-left text-gray-500 border-b border-gray-200">
+    <th class="py-2 px-3 font-medium">Req #</th>
+    <th class="py-2 px-3 font-medium">MPN</th>
+    <th class="py-2 px-3 font-medium">Status</th>
+    <th class="py-2 px-3 text-right font-medium">Target Qty</th>
+    <th class="py-2 px-3 text-right font-medium">Target Price</th>
+    <th class="py-2 px-3 font-medium">Date</th>
+  </tr></thead>
+  <tbody>
+    {% for r in requirements %}
+    {% set st_colors = {
+      'open': 'bg-blue-50 text-blue-700 border-blue-200',
+      'sourcing': 'bg-amber-50 text-amber-700 border-amber-200',
+      'offered': 'bg-purple-50 text-purple-700 border-purple-200',
+      'quoted': 'bg-brand-50 text-brand-700 border-brand-200',
+      'won': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      'lost': 'bg-rose-50 text-rose-700 border-rose-200',
+    } %}
+    <tr class="border-b border-gray-100 hover:bg-brand-50/50 transition-colors cursor-pointer"
+        hx-get="/v2/partials/parts/workspace?req_id={{ r.requisition_id }}"
+        hx-target="#main-content"
+        hx-push-url="/v2/requisitions/{{ r.requisition_id }}">
+      <td class="py-2 px-3 font-semibold text-brand-600">#{{ r.requisition_id }}</td>
+      <td class="py-2 px-3">{{ r.primary_mpn or '-' }}</td>
+      <td class="py-2 px-3">
+        <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border {{ st_colors.get(r.sourcing_status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
+          {{ (r.sourcing_status or 'open')|capitalize }}
+        </span>
+      </td>
+      <td class="py-2 px-3 text-right">{{ "{:,}"|format(r.target_qty) if r.target_qty else '-' }}</td>
+      <td class="py-2 px-3 text-right">{% if r.target_price %}<span class="text-emerald-700">${{ "%.4f"|format(r.target_price) }}</span>{% else %}<span class="text-gray-400">-</span>{% endif %}</td>
+      <td class="py-2 px-3">{{ r.created_at.strftime('%Y-%m-%d') if r.created_at else '-' }}</td>
+    </tr>
+    {% else %}
+    <tr><td colspan="6" class="py-8 text-center text-gray-400 text-sm">No sourcing activity for this part</td></tr>
+    {% endfor %}
+  </tbody>
+</table>

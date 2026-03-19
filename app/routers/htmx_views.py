@@ -5813,6 +5813,76 @@ async def material_detail_partial(
     return templates.TemplateResponse("htmx/partials/materials/detail.html", ctx)
 
 
+@router.get(
+    "/v2/partials/materials/{card_id}/tab/{tab_name}",
+    response_class=HTMLResponse,
+)
+async def material_tab_partial(
+    request: Request,
+    card_id: int,
+    tab_name: str,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return a material detail tab partial."""
+    from ..models.intelligence import MaterialCard, MaterialVendorHistory
+
+    card = db.get(MaterialCard, card_id)
+    if not card:
+        return HTMLResponse(
+            "<p class='text-gray-400 text-sm py-4 text-center'>Material not found</p>",
+            status_code=404,
+        )
+
+    ctx = _base_ctx(request, user, "materials")
+    ctx["card"] = card
+
+    if tab_name == "vendors":
+        ctx["vendors"] = (
+            db.query(MaterialVendorHistory)
+            .filter_by(material_card_id=card_id)
+            .order_by(MaterialVendorHistory.last_seen.desc().nullslast())
+            .all()
+        )
+        return templates.TemplateResponse("htmx/partials/materials/tabs/vendors.html", ctx)
+    elif tab_name == "customers":
+        from ..models.purchase_history import CustomerPartHistory
+
+        ctx["customers"] = (
+            db.query(CustomerPartHistory)
+            .filter_by(material_card_id=card_id)
+            .order_by(CustomerPartHistory.last_purchased_at.desc().nullslast())
+            .all()
+        )
+        return templates.TemplateResponse("htmx/partials/materials/tabs/customers.html", ctx)
+    elif tab_name == "sourcing":
+        from ..models.sourcing import Requirement
+
+        ctx["requirements"] = (
+            db.query(Requirement)
+            .filter(Requirement.material_card_id == card_id)
+            .order_by(Requirement.created_at.desc())
+            .all()
+        )
+        return templates.TemplateResponse("htmx/partials/materials/tabs/sourcing.html", ctx)
+    elif tab_name == "price_history":
+        from ..models.price_snapshot import MaterialPriceSnapshot
+
+        ctx["snapshots"] = (
+            db.query(MaterialPriceSnapshot)
+            .filter_by(material_card_id=card_id)
+            .order_by(MaterialPriceSnapshot.recorded_at.desc())
+            .limit(200)
+            .all()
+        )
+        return templates.TemplateResponse("htmx/partials/materials/tabs/price_history.html", ctx)
+    else:
+        return HTMLResponse(
+            "<p class='text-gray-400 text-sm py-4 text-center'>Unknown tab</p>",
+            status_code=404,
+        )
+
+
 @router.put("/v2/partials/materials/{card_id}", response_class=HTMLResponse)
 async def update_material_card(
     request: Request,
