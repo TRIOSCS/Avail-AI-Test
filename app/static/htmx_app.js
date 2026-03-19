@@ -100,6 +100,25 @@ Alpine.store('preferences', Alpine.$persist({
     compactTables: false,
 }).as('avail_preferences'));
 
+Alpine.store('shortlist', {
+    items: [],
+    toggle(item) {
+        const key = item.vendor_name + ':' + item.mpn;
+        const idx = this.items.findIndex(i => (i.vendor_name + ':' + i.mpn) === key);
+        if (idx >= 0) {
+            this.items.splice(idx, 1);
+        } else {
+            this.items.push(item);
+        }
+    },
+    has(vendorName, mpn) {
+        const key = vendorName + ':' + mpn;
+        return this.items.some(i => (i.vendor_name + ':' + i.mpn) === key);
+    },
+    clear() { this.items = []; },
+    get count() { return this.items.length; },
+});
+
 // ── HTMX config ─────────────────────────────────────────────
 htmx.config.defaultSwapStyle = 'innerHTML';
 htmx.config.historyCacheSize = 10;
