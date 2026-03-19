@@ -13,7 +13,7 @@ import os
 import sys
 
 from loguru import logger
-from sqlalchemy import func, text
+from sqlalchemy import func
 
 sys.path.insert(0, os.environ.get("APP_ROOT", "/app"))
 from app.database import SessionLocal
@@ -64,7 +64,10 @@ def _extract_description(raw_data: dict, source_type: str) -> str | None:
 
 
 def _extract_datasheet_url(raw_data: dict) -> str | None:
-    """Pull datasheet URL from raw_data. OEMSecrets is the primary source."""
+    """Pull datasheet URL from raw_data.
+
+    OEMSecrets is the primary source.
+    """
     if not raw_data or not isinstance(raw_data, dict):
         return None
 
@@ -151,7 +154,13 @@ def enrich_card_from_sightings(
 
 def main(dry_run: bool = True, limit: int = 0):
     db = SessionLocal()
+    try:
+        _run(db, dry_run=dry_run, limit=limit)
+    finally:
+        db.close()
 
+
+def _run(db, dry_run: bool = True, limit: int = 0):
     # Count cards with sightings
     total_cards_with_sightings = (
         db.query(func.count(func.distinct(Sighting.material_card_id)))
@@ -180,11 +189,7 @@ def main(dry_run: bool = True, limit: int = 0):
             break
 
         # Load the cards
-        cards = (
-            db.query(MaterialCard)
-            .filter(MaterialCard.id.in_(card_ids), MaterialCard.deleted_at.is_(None))
-            .all()
-        )
+        cards = db.query(MaterialCard).filter(MaterialCard.id.in_(card_ids), MaterialCard.deleted_at.is_(None)).all()
         card_map = {c.id: c for c in cards}
 
         # Load all sightings for these cards, ordered by source priority
@@ -210,9 +215,7 @@ def main(dry_run: bool = True, limit: int = 0):
 
         # Sort each card's sightings by source priority (highest first)
         for cid in card_sightings:
-            card_sightings[cid].sort(
-                key=lambda x: SOURCE_PRIORITY.get(x[0] or "", 0), reverse=True
-            )
+            card_sightings[cid].sort(key=lambda x: SOURCE_PRIORITY.get(x[0] or "", 0), reverse=True)
 
         # Enrich each card
         for cid, sight_list in card_sightings.items():
@@ -247,7 +250,6 @@ def main(dry_run: bool = True, limit: int = 0):
 
     mode = "DRY RUN" if dry_run else "APPLIED"
     logger.info(f"[{mode}] Final stats: {stats}")
-    db.close()
 
 
 if __name__ == "__main__":

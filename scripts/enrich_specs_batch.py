@@ -32,11 +32,21 @@ BATCH_SIZE = 50  # MPNs per request
 COMMODITY_SPECS = {
     "dram": {
         "specs": [
-            {"key": "ddr_type", "label": "DDR Type", "type": "enum", "values": "DDR3, DDR4, DDR5, DDR5X, LPDDR4, LPDDR5"},
+            {
+                "key": "ddr_type",
+                "label": "DDR Type",
+                "type": "enum",
+                "values": "DDR3, DDR4, DDR5, DDR5X, LPDDR4, LPDDR5",
+            },
             {"key": "capacity_gb", "label": "Capacity (GB)", "type": "numeric"},
             {"key": "speed_mhz", "label": "Speed (MHz)", "type": "numeric"},
             {"key": "ecc", "label": "ECC", "type": "boolean"},
-            {"key": "form_factor", "label": "Form Factor", "type": "enum", "values": "DIMM, SO-DIMM, UDIMM, RDIMM, LRDIMM"},
+            {
+                "key": "form_factor",
+                "label": "Form Factor",
+                "type": "enum",
+                "values": "DIMM, SO-DIMM, UDIMM, RDIMM, LRDIMM",
+            },
         ],
     },
     "capacitors": {
@@ -45,7 +55,12 @@ COMMODITY_SPECS = {
             {"key": "voltage_rating", "label": "Voltage Rating (V)", "type": "numeric"},
             {"key": "dielectric", "label": "Dielectric", "type": "enum", "values": "X7R, X5R, C0G, Y5V, NP0"},
             {"key": "tolerance", "label": "Tolerance", "type": "enum", "values": "±1%, ±5%, ±10%, ±20%"},
-            {"key": "package", "label": "Package", "type": "enum", "values": "0402, 0603, 0805, 1206, 1210, through-hole"},
+            {
+                "key": "package",
+                "label": "Package",
+                "type": "enum",
+                "values": "0402, 0603, 0805, 1206, 1210, through-hole",
+            },
         ],
     },
     "resistors": {
@@ -60,14 +75,14 @@ COMMODITY_SPECS = {
         "specs": [
             {"key": "capacity_gb", "label": "Capacity (GB)", "type": "numeric"},
             {"key": "rpm", "label": "RPM", "type": "enum", "values": "5400, 7200, 10000, 15000"},
-            {"key": "form_factor", "label": "Form Factor", "type": "enum", "values": "2.5\", 3.5\""},
+            {"key": "form_factor", "label": "Form Factor", "type": "enum", "values": '2.5", 3.5"'},
             {"key": "interface", "label": "Interface", "type": "enum", "values": "SATA, SAS, NVMe"},
         ],
     },
     "ssd": {
         "specs": [
             {"key": "capacity_gb", "label": "Capacity (GB)", "type": "numeric"},
-            {"key": "form_factor", "label": "Form Factor", "type": "enum", "values": "2.5\", M.2, U.2, mSATA"},
+            {"key": "form_factor", "label": "Form Factor", "type": "enum", "values": '2.5", M.2, U.2, mSATA'},
             {"key": "interface", "label": "Interface", "type": "enum", "values": "SATA, NVMe, SAS"},
             {"key": "read_speed_mbps", "label": "Read Speed (MB/s)", "type": "numeric"},
         ],
@@ -82,7 +97,12 @@ COMMODITY_SPECS = {
     },
     "motherboards": {
         "specs": [
-            {"key": "socket", "label": "CPU Socket", "type": "enum", "values": "LGA1700, AM5, LGA4677, LGA1151, LGA2066, SP3"},
+            {
+                "key": "socket",
+                "label": "CPU Socket",
+                "type": "enum",
+                "values": "LGA1700, AM5, LGA4677, LGA1151, LGA2066, SP3",
+            },
             {"key": "form_factor", "label": "Form Factor", "type": "enum", "values": "ATX, mATX, EATX, Mini-ITX"},
             {"key": "chipset", "label": "Chipset", "type": "text"},
             {"key": "ram_slots", "label": "RAM Slots", "type": "numeric"},
@@ -101,13 +121,23 @@ COMMODITY_SPECS = {
         "specs": [
             {"key": "wattage", "label": "Wattage (W)", "type": "numeric"},
             {"key": "form_factor", "label": "Form Factor", "type": "enum", "values": "ATX, SFX, 1U, 2U, redundant"},
-            {"key": "efficiency", "label": "Efficiency", "type": "enum", "values": "80+ Bronze, 80+ Silver, 80+ Gold, 80+ Platinum, 80+ Titanium"},
+            {
+                "key": "efficiency",
+                "label": "Efficiency",
+                "type": "enum",
+                "values": "80+ Bronze, 80+ Silver, 80+ Gold, 80+ Platinum, 80+ Titanium",
+            },
         ],
     },
     "gpu": {
         "specs": [
             {"key": "memory_gb", "label": "Memory (GB)", "type": "numeric"},
-            {"key": "memory_type", "label": "Memory Type", "type": "enum", "values": "GDDR5, GDDR6, GDDR6X, HBM2, HBM3"},
+            {
+                "key": "memory_type",
+                "label": "Memory Type",
+                "type": "enum",
+                "values": "GDDR5, GDDR6, GDDR6X, HBM2, HBM3",
+            },
             {"key": "interface", "label": "Interface", "type": "enum", "values": "PCIe 3.0, PCIe 4.0, PCIe 5.0"},
         ],
     },
@@ -137,7 +167,12 @@ COMMODITY_SPECS = {
     },
     "microcontrollers": {
         "specs": [
-            {"key": "core", "label": "Core", "type": "enum", "values": "ARM Cortex-M0, Cortex-M3, Cortex-M4, Cortex-M7, RISC-V, AVR, PIC"},
+            {
+                "key": "core",
+                "label": "Core",
+                "type": "enum",
+                "values": "ARM Cortex-M0, Cortex-M3, Cortex-M4, Cortex-M7, RISC-V, AVR, PIC",
+            },
             {"key": "flash_kb", "label": "Flash (KB)", "type": "numeric"},
             {"key": "ram_kb", "label": "RAM (KB)", "type": "numeric"},
             {"key": "clock_mhz", "label": "Clock (MHz)", "type": "numeric"},
@@ -297,14 +332,16 @@ async def submit_spec_extraction(db, category: str, limit: int = 0) -> dict:
         custom_id = f"specs_{category}_{i}"
         prompt = _build_spec_prompt(category, chunk)
 
-        requests.append({
-            "custom_id": custom_id,
-            "prompt": prompt,
-            "schema": schema,
-            "system": system,
-            "model_tier": "smart",
-            "max_tokens": 8192,
-        })
+        requests.append(
+            {
+                "custom_id": custom_id,
+                "prompt": prompt,
+                "schema": schema,
+                "system": system,
+                "model_tier": "smart",
+                "max_tokens": 8192,
+            }
+        )
         meta_map[custom_id] = [{"id": c["id"], "mpn": c["display_mpn"]} for c in chunk]
 
     logger.info(f"[{category}] Built {len(requests)} batch requests")
@@ -393,24 +430,36 @@ if __name__ == "__main__":
 
     if args.command == "submit":
         if args.all:
+
             async def submit_all():
                 db = SessionLocal()
-                for cat in COMMODITY_SPECS:
-                    result = await submit_spec_extraction(db, cat, limit=args.limit)
-                    logger.info(f"[{cat}] {result}")
-                db.close()
+                try:
+                    for cat in COMMODITY_SPECS:
+                        result = await submit_spec_extraction(db, cat, limit=args.limit)
+                        logger.info(f"[{cat}] {result}")
+                finally:
+                    db.close()
+
             asyncio.run(submit_all())
         else:
+
             async def submit_one():
                 db = SessionLocal()
-                result = await submit_spec_extraction(db, args.category, limit=args.limit)
-                logger.info(result)
-                db.close()
+                try:
+                    result = await submit_spec_extraction(db, args.category, limit=args.limit)
+                    logger.info(result)
+                finally:
+                    db.close()
+
             asyncio.run(submit_one())
     elif args.command == "apply":
+
         async def apply():
             db = SessionLocal()
-            result = await apply_spec_results(args.meta_path, db, dry_run=not args.apply)
-            logger.info(result)
-            db.close()
+            try:
+                result = await apply_spec_results(args.meta_path, db, dry_run=not args.apply)
+                logger.info(result)
+            finally:
+                db.close()
+
         asyncio.run(apply())
