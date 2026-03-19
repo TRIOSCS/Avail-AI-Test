@@ -2335,6 +2335,128 @@ async def search_lead_detail(
     return templates.TemplateResponse("htmx/partials/search/lead_detail.html", ctx)
 
 
+@router.get("/v2/partials/search/requisition-picker", response_class=HTMLResponse)
+async def requisition_picker(
+    request: Request,
+    mpn: str = Query(""),
+    items: str = Query("[]"),
+    action: str = Query("add"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render requisition picker modal for adding shortlisted results.
+
+    Called by: shortlist_bar.html "Add to Requisition" button
+    Depends on: models.sourcing (Requisition)
+    """
+    recent_reqs = db.query(Requisition).order_by(Requisition.created_at.desc()).limit(20).all()
+
+    ctx = _base_ctx(request, user, "search")
+    ctx.update(
+        {
+            "requisitions": recent_reqs,
+            "mpn": mpn,
+            "items_json": items,
+            "action": action,
+        }
+    )
+    return templates.TemplateResponse("htmx/partials/search/requisition_picker_modal.html", ctx)
+
+
+@router.post("/v2/partials/search/add-to-requisition", response_class=HTMLResponse)
+async def add_to_requisition(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add shortlisted search results to a requisition as Sighting rows.
+
+    Creates a Requirement for the MPN if one doesn't exist on the requisition.
+    Persists each selected result as a Sighting row.
+
+    Called by: requisition_picker_modal.html action button
+    Depends on: models.sourcing (Requisition, Requirement, Sighting)
+    """
+    body = await request.json()
+    requisition_id = body.get("requisition_id")
+    mpn = body.get("mpn", "").strip()
+    items = body.get("items", [])
+
+    if not requisition_id or not mpn or not items:
+        return HTMLResponse(
+            '<div class="text-red-600 text-sm p-2">Missing required fields.</div>',
+            status_code=400,
+        )
+
+    req = db.get(Requisition, requisition_id)
+    if not req:
+        return HTMLResponse(
+            '<div class="text-red-600 text-sm p-2">Requisition not found.</div>',
+            status_code=404,
+        )
+
+    # Find or create Requirement for this MPN
+    requirement = (
+        db.query(Requirement)
+        .filter_by(
+            requisition_id=requisition_id,
+            primary_mpn=mpn,
+        )
+        .first()
+    )
+
+    if not requirement:
+        requirement = Requirement(
+            requisition_id=requisition_id,
+            primary_mpn=mpn,
+            normalized_mpn=mpn.strip().upper(),
+            target_qty=None,
+            sourcing_status="open",
+        )
+        db.add(requirement)
+        db.flush()
+
+    # Create Sighting rows
+    for item in items:
+        sighting = Sighting(
+            requirement_id=requirement.id,
+            vendor_name=item.get("vendor_name", "Unknown"),
+            mpn_matched=item.get("mpn_matched"),
+            manufacturer=item.get("manufacturer"),
+            qty_available=item.get("qty_available"),
+            unit_price=item.get("unit_price"),
+            currency=item.get("currency", "USD"),
+            source_type=item.get("source_type"),
+            is_authorized=item.get("is_authorized", False),
+            confidence=item.get("confidence", 0),
+            score=item.get("score", 0),
+            evidence_tier=item.get("evidence_tier"),
+            moq=item.get("moq"),
+            lead_time=item.get("lead_time"),
+            condition=item.get("condition"),
+            date_code=item.get("date_code"),
+            packaging=item.get("packaging"),
+            vendor_email=item.get("vendor_email"),
+            vendor_phone=item.get("vendor_phone"),
+            raw_data={
+                "vendor_url": item.get("vendor_url"),
+                "click_url": item.get("click_url"),
+                "octopart_url": item.get("octopart_url"),
+                "vendor_sku": item.get("vendor_sku"),
+            },
+        )
+        db.add(sighting)
+
+    db.commit()
+
+    count = len(items)
+    return HTMLResponse(
+        f'<div class="text-sm text-emerald-600 p-2">'
+        f"Added {count} result{'s' if count != 1 else ''} to requisition &ldquo;{req.name}&rdquo;"
+        f"</div>"
+    )
+
+
 # ── Vendor partials ─────────────────────────────────────────────────────
 
 

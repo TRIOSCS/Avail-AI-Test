@@ -356,6 +356,17 @@ def test_vendor_card_template_renders_sub_offers():
     assert "2,000" in html
 
 
+def test_shortlist_bar_template_renders():
+    """shortlist_bar.html renders with Alpine.js directives."""
+    from jinja2 import Environment, FileSystemLoader
+
+    env = Environment(loader=FileSystemLoader("app/templates"))
+    tpl = env.get_template("htmx/partials/search/shortlist_bar.html")
+    html = tpl.render()
+    assert "$store.shortlist" in html
+    assert "Add to Requisition" in html
+
+
 def test_search_run_empty_mpn_returns_error(client):
     """POST /v2/partials/search/run with empty MPN returns error message."""
     resp = client.post(
@@ -365,3 +376,128 @@ def test_search_run_empty_mpn_returns_error(client):
     )
     assert resp.status_code == 200
     assert "Please enter a part number" in resp.text
+
+
+# ── Add to Requisition tests ────────────────────────────────────────────
+
+
+def test_add_to_requisition_creates_sightings(client, db_session):
+    """POST /v2/partials/search/add-to-requisition creates Requirement + Sighting
+    rows."""
+    from app.models.sourcing import Requirement, Requisition, Sighting
+
+    req = Requisition(name="Test Req", customer_name="Test Co")
+    db_session.add(req)
+    db_session.commit()
+    db_session.refresh(req)
+
+    resp = client.post(
+        "/v2/partials/search/add-to-requisition",
+        headers={"HX-Request": "true", "Content-Type": "application/json"},
+        json={
+            "requisition_id": req.id,
+            "mpn": "LM317T",
+            "items": [
+                {
+                    "vendor_name": "Arrow",
+                    "mpn_matched": "LM317T",
+                    "unit_price": 0.45,
+                    "qty_available": 1000,
+                    "source_type": "nexar",
+                    "is_authorized": True,
+                    "confidence": 0.8,
+                    "score": 80,
+                }
+            ],
+        },
+    )
+    assert resp.status_code == 200
+    assert "Added 1 result" in resp.text
+
+    requirement = db_session.query(Requirement).filter_by(requisition_id=req.id, primary_mpn="LM317T").first()
+    assert requirement is not None
+    assert requirement.normalized_mpn == "LM317T"
+
+    sighting = db_session.query(Sighting).filter_by(requirement_id=requirement.id).first()
+    assert sighting is not None
+    assert sighting.vendor_name == "Arrow"
+    assert sighting.unit_price == 0.45
+
+
+def test_add_to_requisition_reuses_existing_requirement(client, db_session):
+    """Adding to a requisition with an existing Requirement reuses it."""
+    from app.models.sourcing import Requirement, Requisition, Sighting
+
+    req = Requisition(name="Existing Req", customer_name="Acme")
+    db_session.add(req)
+    db_session.commit()
+    db_session.refresh(req)
+
+    # Pre-create a Requirement
+    requirement = Requirement(
+        requisition_id=req.id,
+        primary_mpn="LM317T",
+        normalized_mpn="LM317T",
+        sourcing_status="open",
+    )
+    db_session.add(requirement)
+    db_session.commit()
+    db_session.refresh(requirement)
+
+    resp = client.post(
+        "/v2/partials/search/add-to-requisition",
+        headers={"HX-Request": "true", "Content-Type": "application/json"},
+        json={
+            "requisition_id": req.id,
+            "mpn": "LM317T",
+            "items": [{"vendor_name": "Mouser", "source_type": "mouser", "score": 70}],
+        },
+    )
+    assert resp.status_code == 200
+
+    # Should still be exactly one Requirement
+    count = db_session.query(Requirement).filter_by(requisition_id=req.id, primary_mpn="LM317T").count()
+    assert count == 1
+
+    sighting = db_session.query(Sighting).filter_by(requirement_id=requirement.id).first()
+    assert sighting is not None
+    assert sighting.vendor_name == "Mouser"
+
+
+def test_add_to_requisition_missing_fields(client):
+    """POST with missing fields returns 400."""
+    resp = client.post(
+        "/v2/partials/search/add-to-requisition",
+        headers={"HX-Request": "true", "Content-Type": "application/json"},
+        json={"requisition_id": None, "mpn": "", "items": []},
+    )
+    assert resp.status_code == 400
+    assert "Missing required fields" in resp.text
+
+
+def test_add_to_requisition_not_found(client):
+    """POST with nonexistent requisition returns 404."""
+    resp = client.post(
+        "/v2/partials/search/add-to-requisition",
+        headers={"HX-Request": "true", "Content-Type": "application/json"},
+        json={"requisition_id": 999999, "mpn": "LM317T", "items": [{"vendor_name": "X"}]},
+    )
+    assert resp.status_code == 404
+    assert "Requisition not found" in resp.text
+
+
+def test_requisition_picker_renders(client, db_session):
+    """GET /v2/partials/search/requisition-picker returns the modal HTML."""
+    from app.models.sourcing import Requisition
+
+    req = Requisition(name="Pick Me", customer_name="TestCo")
+    db_session.add(req)
+    db_session.commit()
+
+    resp = client.get(
+        "/v2/partials/search/requisition-picker?mpn=LM317T&items=[]",
+        headers={"HX-Request": "true"},
+    )
+    assert resp.status_code == 200
+    assert "Pick Me" in resp.text
+    assert "Add to Requisition" in resp.text
