@@ -67,12 +67,12 @@ class TestDetectCommoditiesFromText:
 
     def test_single_commodity(self):
         result = detect_commodities_from_text("DDR4 SDRAM module 16GB")
-        assert "memory" in result
+        assert "dram" in result
 
     def test_multiple_commodities(self):
-        result = detect_commodities_from_text("SSD storage and DDR SDRAM module")
-        assert "memory" in result
-        assert "storage" in result
+        result = detect_commodities_from_text("SSD and DDR SDRAM module")
+        assert "dram" in result
+        assert "ssd" in result
 
     def test_sorted_output(self):
         result = detect_commodities_from_text("resistor and capacitor and inductor")
@@ -81,7 +81,7 @@ class TestDetectCommoditiesFromText:
     def test_no_duplicates(self):
         """Multiple keywords mapping to same category should not duplicate."""
         result = detect_commodities_from_text("ddr sdram dimm rdimm")
-        assert result.count("memory") == 1
+        assert result.count("dram") == 1
 
     def test_no_match(self):
         result = detect_commodities_from_text("hello world foo bar")
@@ -174,7 +174,7 @@ class TestAnalyzeVendorSpecialties:
 
         result = analyze_vendor_specialties(card.id, db_session)
         assert "Texas Instruments" in result["brand_tags"]
-        assert "memory" in result["commodity_tags"]
+        assert "dram" in result["commodity_tags"]
         assert result["confidence"] > 0.0
 
     def test_vendor_with_offers(self, db_session):

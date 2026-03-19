@@ -18,69 +18,10 @@ sys.path.insert(0, os.environ.get("APP_ROOT", "/app"))
 from app.config import settings
 from app.database import SessionLocal
 from app.models.intelligence import MaterialCard
+from app.services.specialty_detector import COMMODITY_MAP
 
-# Standardized commodity categories — granular enough for sourcing
-VALID_CATEGORIES = [
-    # Passives
-    "capacitors",
-    "resistors",
-    "inductors",
-    "transformers",
-    "fuses",
-    "oscillators",
-    "filters",
-    # Semiconductors — discrete
-    "diodes",
-    "transistors",
-    "mosfets",
-    "thyristors",
-    # Semiconductors — ICs
-    "analog_ic",
-    "power_ic",
-    "logic_ic",
-    "microcontrollers",
-    "microprocessors",
-    "fpga",
-    "dsp",
-    "asic",
-    # Memory & storage
-    "dram",
-    "flash",
-    "ssd",
-    "hdd",
-    # Connectors & electromechanical
-    "connectors",
-    "cables",
-    "relays",
-    "switches",
-    "sockets",
-    # Optoelectronics & display
-    "leds",
-    "optoelectronics",
-    "displays",
-    # Sensors & RF
-    "sensors",
-    "rf",
-    # Power
-    "power_supplies",
-    "batteries",
-    "voltage_regulators",
-    # IT / Server parts
-    "motherboards",
-    "cpu",
-    "gpu",
-    "network_cards",
-    "raid_controllers",
-    "server_chassis",
-    "fans_cooling",
-    # Networking
-    "networking",
-    # Misc
-    "motors",
-    "enclosures",
-    "tools_accessories",
-    "other",
-]
+# Use the canonical 45-category taxonomy from specialty_detector (single source of truth).
+VALID_CATEGORIES = sorted(COMMODITY_MAP.keys())
 
 BATCH_SIZE = 50
 MAX_BATCHES = 2000  # Safety cap

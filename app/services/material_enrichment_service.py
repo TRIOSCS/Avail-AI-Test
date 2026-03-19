@@ -8,7 +8,9 @@ from sqlalchemy.orm import Session
 from ..models import MaterialCard
 from ..services.specialty_detector import COMMODITY_MAP
 
-VALID_CATEGORIES = sorted(COMMODITY_MAP.keys()) + ["other"]
+# 45 granular categories from COMMODITY_MAP + "other" fallback.
+# COMMODITY_MAP already includes "other" as a key, so no need to append.
+VALID_CATEGORIES = sorted(COMMODITY_MAP.keys())
 
 _SYSTEM_PROMPT = (
     "You are an expert electronic component engineer. "

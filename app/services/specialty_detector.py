@@ -132,66 +132,130 @@ for brand in BRAND_LIST:
 # ── Commodity category mapping ───────────────────────────────────────
 
 COMMODITY_MAP = {
-    # Memory & Storage
-    "memory": ["ddr", "sdram", "dimm", "rdimm", "lrdimm", "sodimm", "ecc", "ram", "memory module"],
-    "storage": ["ssd", "hdd", "nvme", "sata", "sas", "hard drive", "solid state", "flash storage"],
-    "flash": ["nand", "nor flash", "eeprom", "flash memory", "emmc"],
-    # Processors
-    "processors": ["cpu", "processor", "xeon", "epyc", "core i", "ryzen", "arm", "mips", "risc-v"],
-    "gpu": ["gpu", "graphics", "geforce", "radeon", "quadro", "tesla"],
-    "fpga": ["fpga", "cpld", "programmable logic", "spartan", "virtex", "cyclone", "stratix"],
-    # Integrated circuits
-    "microcontrollers": ["mcu", "microcontroller", "stm32", "pic", "avr", "esp32", "arduino"],
-    "analog_ic": ["op-amp", "opamp", "adc", "dac", "comparator", "amplifier", "voltage reference"],
-    "power_ic": ["voltage regulator", "mosfet", "igbt", "power supply", "dc-dc", "ldo", "pmic"],
-    "logic_ic": ["gate", "flip-flop", "multiplexer", "decoder", "buffer", "transceiver"],
-    # Passive components
+    # ── Passives ──────────────────────────────────────────────────────
     "capacitors": ["capacitor", "mlcc", "electrolytic", "tantalum", "ceramic cap", "supercap"],
     "resistors": ["resistor", "potentiometer", "thermistor", "varistor", "ntc", "ptc"],
-    "inductors": ["inductor", "choke", "ferrite", "transformer", "coil"],
-    # Connectors
-    "connectors": ["connector", "header", "socket", "plug", "jack", "terminal", "backplane"],
+    "inductors": ["inductor", "choke", "ferrite", "coil"],
+    "transformers": ["transformer", "current transformer", "isolation transformer"],
+    "fuses": ["fuse", "ptc fuse", "circuit breaker", "fusible"],
+    "oscillators": ["oscillator", "crystal", "resonator", "clock generator", "tcxo", "vcxo"],
+    "filters": ["emi filter", "common mode", "ferrite bead", "lc filter", "band pass"],
+    # ── Semiconductors — Discrete ─────────────────────────────────────
+    "diodes": ["diode", "rectifier", "zener", "schottky", "tvs", "led diode"],
+    "transistors": ["transistor", "bjt", "jfet", "darlington"],
+    "mosfets": ["mosfet", "igbt", "fet", "power mosfet"],
+    "thyristors": ["thyristor", "scr", "triac", "diac"],
+    # ── Semiconductors — ICs ──────────────────────────────────────────
+    "analog_ic": ["op-amp", "opamp", "adc", "dac", "comparator", "amplifier", "voltage reference"],
+    "logic_ic": ["gate", "flip-flop", "multiplexer", "decoder", "buffer", "logic ic"],
+    "power_ic": ["voltage regulator", "dc-dc", "ldo", "pmic", "power management"],
+    # ── Processors & Programmable ─────────────────────────────────────
+    "microcontrollers": ["mcu", "microcontroller", "stm32", "pic", "avr", "esp32", "arduino"],
+    "microprocessors": ["microprocessor", "mpu", "application processor"],
+    "cpu": ["cpu", "processor", "xeon", "epyc", "core i", "ryzen", "threadripper"],
+    "dsp": ["dsp", "digital signal processor", "codec"],
+    "fpga": ["fpga", "cpld", "programmable logic", "spartan", "virtex", "cyclone", "stratix"],
+    "asic": ["asic", "custom ic", "gate array"],
+    "gpu": ["gpu", "graphics", "geforce", "radeon", "quadro", "tesla"],
+    # ── Memory & Storage ──────────────────────────────────────────────
+    "dram": ["ddr", "sdram", "dimm", "rdimm", "lrdimm", "sodimm", "ecc", "ram", "memory module", "dram"],
+    "flash": ["nand", "nor flash", "eeprom", "flash memory", "emmc"],
+    "ssd": ["ssd", "solid state drive", "nvme drive", "m.2 drive"],
+    "hdd": ["hdd", "hard drive", "hard disk", "sata drive", "sas drive"],
+    # ── Connectors & Electromechanical ────────────────────────────────
+    "connectors": ["connector", "header", "plug", "jack", "terminal", "backplane"],
     "cables": ["cable", "wire", "harness", "ribbon", "coaxial", "fiber optic"],
-    # RF & Wireless
-    "rf": ["rf", "antenna", "filter", "mixer", "amplifier", "transceiver", "wireless module"],
-    # Optoelectronics
-    "leds": ["led", "oled", "display", "backlight", "indicator"],
+    "relays": ["relay", "contactor"],
+    "switches": ["switch", "toggle", "pushbutton", "dip switch", "rocker"],
+    "sockets": ["socket", "ic socket", "cpu socket", "zif socket"],
+    # ── Optoelectronics & Display ─────────────────────────────────────
+    "leds": ["led", "oled", "backlight", "indicator"],
+    "displays": ["display", "lcd", "tft", "oled display", "7-segment"],
+    "optoelectronics": ["optocoupler", "photodiode", "phototransistor", "laser diode", "fiber transceiver"],
+    # ── Sensors & RF ──────────────────────────────────────────────────
     "sensors": ["sensor", "accelerometer", "gyroscope", "temperature sensor", "pressure sensor"],
-    # Electromechanical
-    "relays": ["relay", "contactor", "switch"],
-    "motors": ["motor", "stepper", "servo", "actuator", "fan", "blower"],
-    # Server/Systems
-    "servers": ["server", "blade", "rack", "chassis", "motherboard", "mainboard"],
-    "networking": ["switch", "router", "firewall", "nic", "sfp", "transceiver module", "ethernet"],
-    # Power supplies
+    "rf": ["rf", "antenna", "rf filter", "rf mixer", "rf amplifier", "wireless module"],
+    # ── Power & Energy ────────────────────────────────────────────────
     "power_supplies": ["power supply", "psu", "ups", "inverter", "converter", "charger"],
+    "voltage_regulators": ["voltage regulator", "linear regulator", "switching regulator"],
+    "batteries": ["battery", "lithium", "nimh", "battery charger", "battery pack"],
+    # ── IT / Server Hardware ──────────────────────────────────────────
+    "motherboards": ["motherboard", "mainboard", "system board", "server board"],
+    "network_cards": ["nic", "network card", "ethernet adapter", "hba", "fiber channel"],
+    "raid_controllers": ["raid", "raid controller", "storage controller"],
+    "server_chassis": ["server", "blade", "rack", "chassis", "server chassis"],
+    "fans_cooling": ["fan", "heatsink", "cooling", "blower", "thermal pad"],
+    # ── Networking ────────────────────────────────────────────────────
+    "networking": ["switch", "router", "firewall", "sfp", "transceiver module", "ethernet"],
+    # ── Misc ──────────────────────────────────────────────────────────
+    "motors": ["motor", "stepper", "servo", "actuator"],
+    "enclosures": ["enclosure", "housing", "case", "rackmount"],
+    "tools_accessories": ["tool", "accessory", "test probe", "solder"],
+    "other": [],
 }
 
 # Slug → display name mapping for commodity tags stored on VendorCard/Company
 COMMODITY_DISPLAY_NAMES: dict[str, str] = {
-    "memory": "Memory",
-    "storage": "Storage",
-    "flash": "Flash",
-    "processors": "Processors",
-    "gpu": "GPUs",
-    "fpga": "FPGAs & PLDs",
-    "microcontrollers": "Microcontrollers",
-    "analog_ic": "Analog ICs",
-    "power_ic": "Power Management ICs",
-    "logic_ic": "Logic ICs",
+    # Passives
     "capacitors": "Capacitors",
     "resistors": "Resistors",
     "inductors": "Inductors",
+    "transformers": "Transformers",
+    "fuses": "Fuses",
+    "oscillators": "Oscillators & Crystals",
+    "filters": "Filters",
+    # Semiconductors — Discrete
+    "diodes": "Diodes",
+    "transistors": "Transistors",
+    "mosfets": "MOSFETs & IGBTs",
+    "thyristors": "Thyristors",
+    # Semiconductors — ICs
+    "analog_ic": "Analog ICs",
+    "logic_ic": "Logic ICs",
+    "power_ic": "Power Management ICs",
+    # Processors & Programmable
+    "microcontrollers": "Microcontrollers",
+    "microprocessors": "Microprocessors",
+    "cpu": "CPUs & Processors",
+    "dsp": "DSPs",
+    "fpga": "FPGAs & PLDs",
+    "asic": "ASICs",
+    "gpu": "GPUs",
+    # Memory & Storage
+    "dram": "DRAM & Memory Modules",
+    "flash": "Flash Memory",
+    "ssd": "SSDs",
+    "hdd": "Hard Drives",
+    # Connectors & Electromechanical
     "connectors": "Connectors",
     "cables": "Cables & Wire",
-    "rf": "RF & Wireless",
-    "leds": "LEDs & Optoelectronics",
-    "sensors": "Sensors",
     "relays": "Relays",
-    "motors": "Motors & Actuators",
-    "servers": "Servers & Systems",
-    "networking": "Networking",
+    "switches": "Switches",
+    "sockets": "Sockets",
+    # Optoelectronics & Display
+    "leds": "LEDs",
+    "displays": "Displays",
+    "optoelectronics": "Optoelectronics",
+    # Sensors & RF
+    "sensors": "Sensors",
+    "rf": "RF & Wireless",
+    # Power & Energy
     "power_supplies": "Power Supplies",
+    "voltage_regulators": "Voltage Regulators",
+    "batteries": "Batteries",
+    # IT / Server Hardware
+    "motherboards": "Motherboards",
+    "network_cards": "Network Cards",
+    "raid_controllers": "RAID Controllers",
+    "server_chassis": "Server Chassis",
+    "fans_cooling": "Fans & Cooling",
+    # Networking
+    "networking": "Networking",
+    # Misc
+    "motors": "Motors & Actuators",
+    "enclosures": "Enclosures",
+    "tools_accessories": "Tools & Accessories",
+    "other": "Other",
 }
 
 

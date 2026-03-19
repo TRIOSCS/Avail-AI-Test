@@ -1,237 +1,334 @@
 # Material Card Enrichment — Populating Commodity Tags, Sub-Filters & AI Descriptions
 
 **Date:** 2026-03-19
-**Goal:** Enrich 743K+ MaterialCards with accurate commodity categories, structured specs (sub-filter data), and AI-generated descriptions at ≥95% confidence
+**Goal:** Enrich 743K+ MaterialCards with accurate commodity categories, structured specs (sub-filter data), AI descriptions, lifecycle/RoHS/cross-refs, and ongoing part discovery at ≥95% confidence
 **Branch:** `claude/material-tab-project-0Z2XD`
+**Status:** v3 — see `/root/.claude/plans/warm-mixing-badger.md` for latest approved plan
 
 ---
 
-## Current State
+## Audit Findings (v1 → v2 Changes)
 
-- **MaterialCard columns available:** `category`, `description`, `specs_summary`, `manufacturer`, `package_type`, `lifecycle_status`, `rohs_status`, `pin_count`, `datasheet_url`, `cross_references`
-- **New columns needed:** `specs_structured` (JSONB) — from Sub-Project 1 design spec
-- **Category coverage:** ~40% populated, mix of coarse ("servers", "memory") and granular ("capacitors", "dram")
-- **Description coverage:** ~80% populated (Gradient AI enrichment), but many are generic 1-liners
-- **Structured specs:** 0% — `specs_structured` column doesn't exist yet
-- **Existing enrichment:** `material_enrichment_service.py` does MPN → description + category via Gradient/Anthropic
-- **Existing batch infra:** `tagging_ai_batch.py` (607 lines) handles Anthropic Batch API lifecycle, `BatchQueue` helper available
+### Issues Found in v1
 
----
+1. **Phase 1 overstated raw_data richness.** Sighting `raw_data` is the flat connector result dict (not a separate blob). It contains `description` and `manufacturer` but **zero structured specs** (no RoHS, lifecycle, package, pin count, or electrical parameters). The v1 claim of "specs from product pages" in Tier 1 was wrong — connectors don't extract specs.
 
-## Data Sources (Priority Order)
+2. **Connectors are throwing away data.** DigiKey, Mouser, and OEMSecrets API responses contain RoHS status, lifecycle, lead time, full pricing tiers, specs/attributes — but parsers only extract ~12 fields and drop the rest. This is the biggest missed opportunity.
 
-### Tier 1 — Authoritative APIs (confidence: 0.95-0.99)
-| Source | What It Gives Us | How to Access |
-|--------|-----------------|---------------|
-| **Nexar/Octopart** | description, category, shortDescription, manufacturer, specs from product pages | GraphQL `part.shortDescription`, `part.category.name`, REST v4 detailed specs |
-| **DigiKey** | DetailedDescription, manufacturer, package, specs tables | Already stored in `sighting.raw_data`, also live API v4 |
-| **Mouser** | Description, manufacturer, specs | Already stored in `sighting.raw_data`, also live API |
-| **Element14** | displayName, manufacturer, stock | Already stored in `sighting.raw_data` |
+3. **Nexar GraphQL doesn't query specs.** `FULL_QUERY` and `AGGREGATE_QUERY` omit `part.specs`, `part.parameters`, `part.descriptions`, `part.datasheets`, `part.rohs`, `part.lifecycle`. These fields exist in the Nexar schema but are never requested.
 
-### Tier 2 — Aggregators (confidence: 0.85-0.95)
-| Source | What It Gives Us | How to Access |
-|--------|-----------------|---------------|
-| **OEMSecrets** | datasheet_url, manufacturer, descriptions from 140+ distributors | Already stored in `sighting.raw_data` |
-| **Sourcengine** | manufacturer, basic descriptions | Already stored in `sighting.raw_data` |
+4. **Category taxonomy is misaligned.** `specialty_detector.py` uses coarse categories ("memory", "processors", "servers") while `fix_categories.py` uses granular ones ("dram", "cpu", "motherboards"). The `material_enrichment_service.py` imports from `specialty_detector` so it writes the WRONG categories. Must unify before enrichment.
 
-### Tier 3 — AI Extraction (confidence: 0.80-0.95)
-| Source | What It Gives Us | How to Access |
-|--------|-----------------|---------------|
-| **Claude Haiku** (batch) | category, description, structured specs from MPN + manufacturer + existing description | Anthropic Batch API (50% cheaper) |
-| **Claude Sonnet** (verification) | High-confidence validation pass on Haiku results, rich descriptions | Direct API or Batch API |
+5. **Batch metadata persistence is fragile.** Current `tagging_ai_batch.py` writes batch tracking to `/tmp/` which doesn't survive container restarts. Need DB-backed tracking for production reliability.
 
-### Tier 4 — Supplemental (confidence: 0.60-0.80)
-| Source | What It Gives Us | How to Access |
-|--------|-----------------|---------------|
-| **BrokerBin** | description (short), condition | Already stored in `sighting.raw_data` |
-| **eBay** | ebay_title (often has specs embedded) | Already stored in `sighting.raw_data` |
+6. **No incremental enrichment.** Plan was all one-time scripts. New cards created after enrichment runs would remain unenriched. Need to wire into the search flow for ongoing enrichment.
+
+7. **`specs_structured` column doesn't exist yet.** Phase 3 depends on Sub-Project 1 (migration + tables). We can still extract specs into `specs_summary` (Text, already exists) as an interim step.
 
 ---
 
-## Enrichment Pipeline — 5 Phases
+## Current State (Verified)
+
+| Field | Column Exists | Coverage | Source |
+|-------|--------------|----------|--------|
+| `description` | Yes (String 1000) | ~80% | Gradient AI from MPN only |
+| `category` | Yes (String 255) | ~40% | Mixed coarse + granular |
+| `manufacturer` | Yes (String 255) | ~60% | Connectors + AI |
+| `specs_summary` | Yes (Text) | ~0% | Never populated |
+| `package_type` | Yes (String 100) | ~0% | Never populated |
+| `lifecycle_status` | Yes (String 50) | ~0% | Never populated |
+| `rohs_status` | Yes (String 50) | ~0% | Never populated |
+| `pin_count` | Yes (Integer) | ~0% | Never populated |
+| `datasheet_url` | Yes (String 1000) | ~0% | Never populated |
+| `cross_references` | Yes (JSONB) | ~0% | Never populated |
+| `specs_structured` | **No — needs migration** | 0% | Sub-Project 1 |
+
+---
+
+## Data Sources (Verified — What's Actually Available)
+
+### Tier 1 — Existing Sighting Data (FREE, already fetched)
+| Source | What's Actually in raw_data | What's NOT in raw_data |
+|--------|---------------------------|----------------------|
+| **DigiKey** | `description` (DetailedDescription), manufacturer, vendor_sku, click_url | RoHS, lifecycle, specs, package, lead time, full pricing — **dropped by parser** |
+| **Mouser** | `description`, manufacturer, vendor_sku, click_url | RoHS, MSL, specs, lead time, full pricing — **dropped by parser** |
+| **Nexar** | `description` + `category` (aggregate only), manufacturer | specs, parameters, datasheets, rohs, lifecycle — **never queried** |
+| **Element14** | `description` (displayName), manufacturer | specs, lifecycle — **dropped by parser** |
+| **OEMSecrets** | manufacturer, `datasheet_url`, `moq` | description (not mapped!), specs, lifecycle — **dropped** |
+| **BrokerBin** | `description`, `condition`, `country`, `age_in_days` | No structured specs available |
+| **eBay** | `ebay_title`, `ebay_condition`, `ebay_image` | No structured specs |
+| **NetComponents** | `description`, `region`, `country`, `price_breaks` | No structured specs |
+| **ICSource** | `description`, `in_stock` | No structured specs |
+
+### Tier 2 — Connector Upgrades (Requires code changes, then future searches yield richer data)
+| Source | Fields We Should Add to Parser |
+|--------|-------------------------------|
+| **Nexar GraphQL** | `part.specs`, `part.descriptions`, `part.datasheets`, `part.rohs`, `part.lifecycle` |
+| **DigiKey v4** | RoHS, lifecycle, specs/attributes, full PriceBreaks, MOQ, packaging |
+| **Mouser** | RoHS, MSL, lead time, full PriceBreaks |
+
+### Tier 3 — AI Extraction (API cost, high accuracy)
+| Source | Best For |
+|--------|---------|
+| **Claude Haiku** (batch) | Category classification, basic spec extraction from MPN/description |
+| **Claude Sonnet** (batch) | Rich descriptions, complex spec inference, cross-reference identification |
+
+---
+
+## Revised Pipeline — 6 Phases
+
+### Phase 0: Fix Category Taxonomy Alignment (Pre-requisite)
+**File:** `app/services/specialty_detector.py` + `app/services/material_enrichment_service.py`
+
+The system has TWO conflicting category lists:
+- `specialty_detector.py` COMMODITY_MAP: coarse ("memory", "processors", "servers") — 23 categories
+- `fix_categories.py` VALID_CATEGORIES: granular ("dram", "cpu", "motherboards") — 45 categories
+- `material_enrichment_service.py` imports from specialty_detector → **writes wrong categories**
+
+**Fix:**
+1. Update `COMMODITY_MAP` in specialty_detector.py to use the 45-category granular taxonomy
+2. Update `COMMODITY_DISPLAY_NAMES` to match
+3. Update `material_enrichment_service.py` VALID_CATEGORIES to use the 45-category list directly
+4. Add migration script to reclassify existing coarse categories → granular equivalents
+5. Tests
+
+**No API cost. ~1 hour dev.**
+
+---
 
 ### Phase 1: Mine Existing Sighting Data (Free — Zero API Cost)
 **Script:** `scripts/enrich_from_sightings.py`
 
-We have 743K+ MaterialCards with linked Sightings that already contain raw_data from DigiKey, Mouser, Nexar, OEMSecrets, etc. This data was fetched but never extracted back onto the card.
+Extract descriptions, manufacturers, and datasheet URLs from existing sighting raw_data. These are real API responses from DigiKey, Mouser, etc. that were never pulled back onto the MaterialCard.
+
+**What we CAN extract (verified):**
+- `description` — available from DigiKey, Mouser, Nexar (aggregate), Element14, BrokerBin, NetComponents, ICSource
+- `manufacturer` — available from all authorized sources
+- `datasheet_url` — available from OEMSecrets sightings only
+- `category` — available from Nexar aggregate sightings only (limited)
+
+**What we CANNOT extract (no data exists):**
+- Structured specs (voltage, capacitance, etc.) — connectors don't capture these
+- Package type, lifecycle, RoHS — connectors drop these fields
+- Pin count, cross-references — never fetched
 
 **Steps:**
-1. Query all MaterialCards joined to their Sightings
-2. For each card, collect all sighting.raw_data blobs grouped by source_type
-3. Extract and merge (highest-confidence source wins):
-   - `description` — prefer DigiKey DetailedDescription > Mouser Description > Nexar shortDescription > OEMSecrets > BrokerBin
-   - `manufacturer` — prefer authorized sources (DigiKey, Mouser) > aggregators
-   - `category` — map from Nexar `category.name` or infer from DigiKey/Mouser category fields
-   - `datasheet_url` — from OEMSecrets (they provide it directly)
-   - `package_type` — parse from description or raw_data fields
-4. Only overwrite if incoming confidence > existing confidence
-5. Track provenance: set `enrichment_source = "{source_type}_sighting"`
+1. Query MaterialCards LEFT JOIN Sightings, grouped by material_card_id
+2. For each card, rank sighting descriptions by source priority:
+   DigiKey > Mouser > Element14 > Nexar > NetComponents > BrokerBin > ICSource > eBay title
+3. Pick best description (longest from highest-priority authorized source)
+4. Pick manufacturer from highest-priority authorized source
+5. Pick datasheet_url from any OEMSecrets sighting
+6. Only overwrite NULL or empty fields (don't clobber existing enrichment)
+7. Set `enrichment_source = 'sighting_extraction'`
 
-**Expected yield:** 200-400K cards enriched (every card that's been searched at least once has sightings)
-**Confidence:** 0.90-0.99 (this is real API data, just never extracted)
+**Expected yield:** Description improvements on ~100-200K cards (those with sightings from authorized sources). Manufacturer fill on ~50-100K cards. Datasheet URLs on a smaller subset.
+**Confidence:** 0.95-0.99 (this is verbatim distributor data)
 
 ---
 
-### Phase 2: AI Category Classification (Haiku Batch — Low Cost)
-**Script:** `scripts/enrich_categories_batch.py`
-**Builds on:** existing `fix_categories.py` pattern + `tagging_ai_batch.py` Batch API infra
+### Phase 2: AI Category + Description Enrichment (Haiku Batch)
+**Script:** `scripts/enrich_batch.py`
+**Combined Phase** — do category AND description in one pass (saves tokens vs two separate passes)
 
-Classify ALL cards into the 45-category taxonomy from the faceted search design spec.
+Classify cards into 45-category taxonomy AND generate descriptions in a single Batch API call per batch of 50 MPNs.
 
 **Steps:**
-1. Query all cards where `category IS NULL` OR `category = 'other'` OR category is coarse/legacy
-2. Group into batches of 100 MPNs (Batch API format)
-3. Submit to Anthropic Batch API (Haiku, 50% cost savings)
-4. Prompt includes: MPN, manufacturer, existing description (if any)
-5. Response: `{mpn, category, confidence}` — only apply if confidence ≥ 0.90
-6. Cards with confidence 0.80-0.90 → flag for Phase 4 Sonnet verification
-7. Cards with confidence < 0.80 → leave as "other", flag for manual review
+1. Query cards needing work:
+   - `category IS NULL` OR `category = 'other'` OR category is coarse/legacy
+   - OR `description IS NULL` OR `LENGTH(description) < 30`
+2. Assemble context per card: MPN + manufacturer + best sighting description (from Phase 1)
+3. Submit to Anthropic Batch API (Haiku) in batches of 50 MPNs per request
+4. Prompt returns per-MPN:
+   ```json
+   {
+     "mpn": "M393A2K43DB3-CWE",
+     "category": "dram",
+     "category_confidence": 0.97,
+     "description": "16GB DDR4-3200 ECC Registered DIMM...",
+     "description_confidence": 0.93,
+     "manufacturer": "Samsung",
+     "package_type": "RDIMM"
+   }
+   ```
+5. Apply with confidence gates:
+   - Category: apply if ≥ 0.90, flag for review if 0.80-0.90
+   - Description: apply if ≥ 0.90 AND longer than existing description
+   - Manufacturer: apply only if card has no manufacturer AND confidence ≥ 0.95
+   - Package type: apply if ≥ 0.90
+6. Track in DB (not /tmp/) — create `EnrichmentBatch` model or reuse `DiscoveryBatch`
 
-**Validation:** Category must be in the 45-item `VALID_CATEGORIES` list from the design spec
-**Expected yield:** 300-500K cards categorized
-**Cost:** ~$15-25 via Batch API (743K cards × ~80 tokens each × $0.25/MTok input)
+**Validation:** Category must be in 45-item VALID_CATEGORIES. Package must be reasonable length.
+**Expected yield:** 400-600K cards with category + description
+**Cost:** ~$25-40 via Batch API (combined pass is more efficient than separate)
 
 ---
 
-### Phase 3: AI Structured Spec Extraction (Haiku Batch)
+### Phase 3: Structured Spec Extraction (Haiku Batch)
 **Script:** `scripts/enrich_specs_batch.py`
-**Depends on:** Sub-Project 1 tables (`commodity_spec_schemas`, `material_spec_facets`) existing in DB
 
-Extract commodity-specific structured specs for each card based on its category.
+Two paths depending on whether Sub-Project 1 tables exist:
+
+**Path A — Sub-Project 1 tables exist:**
+Write to `specs_structured` JSONB + `material_spec_facets` via `spec_write_service.record_spec()`
+
+**Path B — Interim (Sub-Project 1 not built yet):**
+Write to `specs_summary` (Text, already exists) as structured text. Example:
+> "DDR Type: DDR4 | Capacity: 16GB | Speed: 3200MHz | ECC: Yes | Form Factor: RDIMM"
+
+This is parseable later when `specs_structured` column is added.
 
 **Steps:**
-1. Query `commodity_spec_schemas` to get the spec schema for each commodity
-2. For each commodity group, batch cards with that category
-3. Prompt includes: MPN, manufacturer, description, and the exact spec fields to extract
-4. Haiku extracts: `{mpn, specs: {ddr_type: "DDR4", capacity_gb: 16, ...}, confidence_per_field: {...}}`
-5. Write via `spec_write_service.record_spec()` (normalize units, validate enums, upsert facets)
-6. Fields with confidence < 0.85 → skip (don't write bad data)
+1. Group cards by category (from Phase 2)
+2. For each commodity, load spec schema (from design spec, hardcoded until DB table exists)
+3. Batch 50 cards of the SAME commodity per request (commodity-specific prompt)
+4. Haiku extracts specs with per-field confidence
+5. Only write fields with confidence ≥ 0.85
+6. Normalize units (uF→pF, kΩ→Ω, GB→GB) using existing `normalization.py` patterns
 
-**Example prompt for DRAM cards:**
-```
-For each DRAM module, extract these specs from the MPN and description:
-- ddr_type: one of DDR3, DDR4, DDR5, DDR5X, LPDDR4, LPDDR5
-- capacity_gb: number (e.g., 8, 16, 32, 64)
-- speed_mhz: number (e.g., 2400, 3200, 4800, 5600)
-- ecc: true/false
-- form_factor: one of DIMM, SO-DIMM, UDIMM, RDIMM, LRDIMM
-```
+**Priority commodities (top 15 by card count):**
+dram, capacitors, resistors, connectors, ssd, hdd, inductors, microcontrollers, power_supplies, diodes, mosfets, flash, cpu, gpu, network_cards
 
-**Expected yield:** 100-300K cards with structured specs (cards with meaningful category)
-**Cost:** ~$20-40 via Batch API (larger prompts due to schema context)
+**Expected yield:** 100-300K cards with structured specs
+**Cost:** ~$30-50 via Batch API
 
 ---
 
-### Phase 4: AI Description Generation (Sonnet — High Quality)
-**Script:** `scripts/enrich_descriptions_batch.py`
+### Phase 4: Sonnet Description Upgrade (High-Value Cards Only)
+**Script:** `scripts/enrich_descriptions_sonnet.py`
 
-Generate rich, professional descriptions for cards that have poor or missing descriptions.
+Sonnet-quality descriptions for high-visibility cards only (not all 743K).
+
+**Target cards (prioritized):**
+1. Cards linked to active requirements (buyer is looking at them)
+2. Cards with search_count ≥ 5 (frequently searched)
+3. Cards with category in top 15 commodities AND description < 80 chars
 
 **Steps:**
-1. Query cards where:
-   - `description IS NULL` or `description = ''`
-   - `description` is < 30 chars (too short to be useful)
-   - `enrichment_source = 'gradient_ai'` AND description is generic (optional upgrade pass)
-2. For each card, assemble all available context:
-   - MPN, manufacturer, category (from Phase 2)
-   - Structured specs (from Phase 3)
-   - Best sighting descriptions (from Phase 1)
-   - Cross-references
-3. Submit to Sonnet (higher quality than Haiku for prose):
-   - Batch API for bulk, direct API for priority cards
-   - Prompt: "Write a professional 2-3 sentence technical description..."
-4. Output includes:
-   - `description` (2-3 sentences, technical, no hallucinated specs)
-   - `specs_summary` (key electrical specs, concise)
-   - `confidence` (self-rated 0-1)
-5. Only apply if confidence ≥ 0.90
+1. Query ~20-50K high-priority cards
+2. Assemble full context: MPN, manufacturer, category, specs (Phase 3), sighting descriptions
+3. Submit to Sonnet Batch API
+4. Generate:
+   - Rich 2-3 sentence technical description
+   - `specs_summary` (key specs, concise)
+5. Apply if confidence ≥ 0.90
 
-**Example output:**
-> "Samsung M393A2K43DB3-CWE is a 16GB DDR4-3200 ECC Registered DIMM designed for enterprise server and workstation applications. Features 2Rx8 memory organization, 1.2V operating voltage, and CAS latency of CL22. Compatible with Intel Purley/Whitley and AMD Rome/Milan platforms."
-
-**Expected yield:** 200-400K cards with rich descriptions
-**Cost:** ~$50-80 via Batch API (Sonnet, longer outputs)
+**Expected yield:** 20-50K cards with professional descriptions
+**Cost:** ~$30-50 via Batch API (smaller volume, higher quality)
 
 ---
 
-### Phase 5: Cross-Verification & Confidence Scoring (Sonnet Spot-Check)
+### Phase 5: Connector Enrichment Upgrade (Ongoing — Future Data)
+**Files:** `app/connectors/sources.py`, `digikey.py`, `mouser.py`
+
+Upgrade connectors so ALL FUTURE searches capture richer data. This doesn't help existing cards but prevents the "data thrown away" problem going forward.
+
+**Changes:**
+1. **Nexar GraphQL** — Add to FULL_QUERY and AGGREGATE_QUERY:
+   ```graphql
+   part {
+     specs { attribute { name } displayValue }
+     descriptions { text creditString }
+     bestDatasheet { url }
+     category { name parentId }
+   }
+   ```
+2. **DigiKey** — Capture into raw_data: `RoHSStatus`, `LifecycleStatus`, `PackagingType`, `MinimumOrderQuantity`, full `StandardPricing` array, `Parameters` array
+3. **Mouser** — Capture into raw_data: `ROHSStatus`, `LeadTime`, full `PriceBreaks` array
+
+4. **Search service** — After sighting creation, auto-populate MaterialCard fields from the enriched connector data (lifecycle_status, rohs_status, package_type, datasheet_url)
+
+**No API cost (same API calls, just extract more fields). ~3 hours dev.**
+
+---
+
+### Phase 6: Cross-Verification (Sonnet Spot-Check)
 **Script:** `scripts/verify_enrichment.py`
 
-Random-sample verification to validate the pipeline hit ≥95% accuracy.
+Same as v1 Phase 5 — stratified sampling + Sonnet web search verification.
+
+**Additional improvement:** Verify BEFORE making enrichment visible to users. Run verification on a staging flag, only flip to "verified" after accuracy targets met.
 
 **Steps:**
-1. Sample 500 cards stratified by category (proportional to category size)
-2. For each sampled card, send to Sonnet with web_search enabled:
-   - "Verify these attributes for MPN {mpn}: category={cat}, description={desc}, specs={specs}"
-   - Sonnet searches live web to cross-reference
-3. Score each field: correct / incorrect / uncertain
-4. Compute per-field accuracy:
-   - category accuracy target: ≥ 95%
-   - description accuracy target: ≥ 95% (no hallucinated specs)
-   - structured spec accuracy target: ≥ 90% per field
-5. If any field < target, identify failure patterns and re-run targeted correction
+1. Sample 500 cards stratified by category
+2. Sonnet + web_search cross-references each card's category, description, specs
+3. Score: correct / incorrect / uncertain per field
+4. Targets: category ≥ 95%, description ≥ 95%, specs ≥ 90%
+5. If below target, identify failure patterns → re-run targeted correction on that category
 
-**Cost:** ~$10-15 (500 cards × Sonnet + web_search)
-**Output:** Verification report with accuracy metrics per category and field
+**Cost:** ~$12-15
 
 ---
 
-## Implementation Order
+## Revised Implementation Order
 
 ```
-Phase 1: Mine sightings (free)          → ~3 hours dev, 0 API cost
-Phase 2: Category classification        → ~2 hours dev, ~$20 API cost
-    ↓ (requires Sub-Project 1 tables)
-Phase 3: Structured spec extraction     → ~3 hours dev, ~$30 API cost
-Phase 4: AI descriptions (Sonnet)       → ~2 hours dev, ~$65 API cost
-Phase 5: Cross-verification             → ~1 hour dev, ~$12 API cost
+Phase 0: Fix taxonomy alignment         → ~1 hour dev, $0
+Phase 1: Mine sighting data             → ~2 hours dev, $0
+Phase 2: Category + description (Haiku) → ~3 hours dev, ~$35
+Phase 3: Structured specs (Haiku)       → ~3 hours dev, ~$40
+Phase 4: Sonnet descriptions (top cards)→ ~2 hours dev, ~$40
+Phase 5: Connector upgrades (ongoing)   → ~3 hours dev, $0
+Phase 6: Cross-verification             → ~1 hour dev, ~$15
 ```
 
-**Total estimated API cost: ~$125**
-**Total dev time: ~11 hours across sessions**
+**Total estimated API cost: ~$130**
+**Total dev time: ~15 hours across sessions**
 
 ---
 
 ## Task Checklist
 
+### Phase 0: Fix Category Taxonomy
+- [ ] Unify `specialty_detector.py` COMMODITY_MAP → 45-category granular taxonomy
+- [ ] Update `COMMODITY_DISPLAY_NAMES` to match
+- [ ] Update `material_enrichment_service.py` to use unified categories
+- [ ] Create `scripts/reclassify_coarse_categories.py` to fix existing coarse → granular
+- [ ] Tests for category mapping
+
 ### Phase 1: Mine Existing Sighting Data
 - [ ] Create `scripts/enrich_from_sightings.py`
-- [ ] Build source-specific extractors for each connector's raw_data shape
-- [ ] Implement merge logic (highest confidence source wins)
-- [ ] Add dry-run mode (log what would change without writing)
-- [ ] Add progress logging (every 1000 cards)
-- [ ] Test with 100-card sample, validate extractions
-- [ ] Run full extraction
+- [ ] Build source-priority ranking for descriptions
+- [ ] Extract: description, manufacturer, datasheet_url from raw_data
+- [ ] Only fill NULL/empty fields (don't clobber)
+- [ ] Add `--dry-run` flag (default on)
+- [ ] Progress logging every 1000 cards
+- [ ] Test with 100-card sample
 - [ ] Write tests for extraction logic
 
-### Phase 2: Category Classification
-- [ ] Create `scripts/enrich_categories_batch.py` using Batch API
-- [ ] Use 45-category taxonomy from faceted search design spec
-- [ ] Implement confidence-gated application (≥0.90 only)
-- [ ] Handle Batch API lifecycle (submit → poll → apply)
-- [ ] Add fallback to real-time Haiku for small batches
-- [ ] Run on all uncategorized/coarse cards
+### Phase 2: AI Category + Description (Combined)
+- [ ] Create `scripts/enrich_batch.py` using Batch API
+- [ ] Combined category + description extraction in single pass
+- [ ] Use 45-category taxonomy
+- [ ] Confidence-gated application (≥0.90 category, ≥0.90 description)
+- [ ] DB-backed batch tracking (not /tmp/)
+- [ ] Handle Batch API lifecycle (submit → poll → apply) using chunked processing pattern
 - [ ] Write tests
 
-### Phase 3: Structured Spec Extraction (after Sub-Project 1 tables exist)
+### Phase 3: Structured Spec Extraction
 - [ ] Create `scripts/enrich_specs_batch.py`
-- [ ] Build per-commodity prompt templates from `commodity_spec_schemas`
-- [ ] Integrate with `spec_write_service.record_spec()`
-- [ ] Unit normalization (uF→pF, kΩ→Ω, etc.)
-- [ ] Enum validation against schema
-- [ ] Run per-commodity extraction batches
+- [ ] Per-commodity prompt templates (top 15 commodities)
+- [ ] Path A: write to specs_structured JSONB (if column exists)
+- [ ] Path B: write to specs_summary Text (interim)
+- [ ] Unit normalization
+- [ ] Enum validation
 - [ ] Write tests
 
-### Phase 4: AI Description Generation
-- [ ] Create `scripts/enrich_descriptions_batch.py`
-- [ ] Assemble full context per card (specs, sightings, cross-refs)
-- [ ] Use Sonnet Batch API for quality prose
-- [ ] Confidence-gated application
-- [ ] Generate `specs_summary` alongside description
-- [ ] Run on all cards with missing/weak descriptions
+### Phase 4: Sonnet Description Upgrade
+- [ ] Create `scripts/enrich_descriptions_sonnet.py`
+- [ ] Target high-priority cards only (active requirements, high search_count)
+- [ ] Full context assembly (specs + sightings + cross-refs)
+- [ ] Sonnet Batch API submission
 - [ ] Write tests
 
-### Phase 5: Cross-Verification
+### Phase 5: Connector Upgrades
+- [ ] Add specs/rohs/lifecycle/datasheets to Nexar GraphQL queries
+- [ ] Capture dropped fields in DigiKey parser → raw_data
+- [ ] Capture dropped fields in Mouser parser → raw_data
+- [ ] Auto-populate MaterialCard from enriched connector data in search_service
+- [ ] Write tests
+
+### Phase 6: Cross-Verification
 - [ ] Create `scripts/verify_enrichment.py`
 - [ ] Stratified sampling by category
 - [ ] Sonnet + web_search verification
@@ -243,24 +340,25 @@ Phase 5: Cross-verification             → ~1 hour dev, ~$12 API cost
 
 ## Architecture Decisions
 
-1. **Scripts, not services** — These are one-time/periodic enrichment runs, not real-time features. Scripts in `scripts/` keep the service layer clean.
+1. **Phase 0 is non-negotiable.** Two conflicting taxonomies means every enrichment pass would write inconsistent categories. Fix once, then all downstream phases use the same 45 categories.
 
-2. **Batch API first** — 50% cost reduction, no rate limits, same quality. Use `tagging_ai_batch.py` patterns for lifecycle management.
+2. **Combined category + description pass (Phase 2)** saves ~30% tokens vs separate passes. The model already has the MPN context loaded — asking for both outputs in one call is more efficient.
 
-3. **Confidence gates everywhere** — Never write data below threshold. Bad data is worse than no data for the faceted search UI.
+3. **Batch API with DB tracking.** The existing `/tmp/` persistence in `tagging_ai_batch.py` doesn't survive container restarts. Use `DiscoveryBatch` model or create `EnrichmentBatch` for reliability.
 
-4. **Phase 1 is free and first** — Mining existing sighting data costs nothing and provides the highest-confidence data (it came from authoritative APIs). This also gives Haiku better context in Phases 2-3.
+4. **Phase 4 is Sonnet but limited scope.** Sonnet costs 5x Haiku. Running it on all 743K cards would be ~$300+. Limiting to 20-50K high-visibility cards keeps cost at ~$40 while covering the cards users actually see.
 
-5. **Sonnet for descriptions, Haiku for classification** — Classification is a constrained task (pick from 45 options). Descriptions need nuance and accuracy. Match model capability to task complexity.
+5. **Phase 5 (connector upgrades) prevents future debt.** Without this, every new search still throws away rich data. One-time code change, zero ongoing cost.
 
-6. **Incremental, not all-at-once** — Each phase can run independently. If budget runs out, Phase 1+2 alone dramatically improve the materials tab.
+6. **Interim specs_summary (Phase 3 Path B)** lets us extract and store specs NOW without waiting for Sub-Project 1 migration. Text format is parseable when we add the JSONB column later.
 
 ---
 
 ## Safety & Rollback
 
 - All scripts have `--dry-run` flag (default on)
-- All writes are batched with `db.commit()` per batch (not one giant transaction)
-- `enrichment_source` field tracks which script wrote the data
-- Rollback: `UPDATE material_cards SET category = NULL, description = NULL WHERE enrichment_source = 'script_name'`
-- Phase 5 verification catches systematic errors before they're visible to users
+- All writes batched with `db.commit()` per 100 cards (not one giant transaction)
+- `enrichment_source` tracks provenance per script
+- Rollback per phase: `UPDATE material_cards SET field = NULL WHERE enrichment_source = 'phase_X_source'`
+- Phase 6 verification runs BEFORE enrichment is visible to users
+- Connector upgrades (Phase 5) are additive — existing fields unchanged, new fields added to raw_data
