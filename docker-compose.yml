@@ -105,6 +105,35 @@ services:
         max-size: "100m"
         max-file: "10"
 
+  # --- Enrichment Worker (runs continuously, auto-restarts) ---
+  enrichment-worker:
+    build: .
+    restart: always
+    entrypoint: ["tini", "--", "./enrichment-entrypoint.sh"]
+    command: []
+    env_file: .env
+    environment:
+      - ENRICHMENT_INTERVAL_HOURS=${ENRICHMENT_INTERVAL_HOURS:-6}
+    depends_on:
+      db:
+        condition: service_healthy
+      app:
+        condition: service_healthy
+    volumes:
+      - ./scripts:/app/scripts:ro
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: '1'
+        reservations:
+          memory: 256M
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "5"
+
   # --- HTTPS (auto-generates SSL certificate for your domain) ---
   caddy:
     image: caddy:2-alpine

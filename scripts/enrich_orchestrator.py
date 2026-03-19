@@ -820,15 +820,51 @@ async def run_pipeline(dry_run: bool = True, resume: bool = False):
         db.close()
 
 
+async def run_loop(interval_hours: float = 6.0):
+    """Run the enrichment pipeline in a continuous loop.
+
+    After each full run, sleeps for interval_hours then runs again.
+    Always resumes from checkpoint so completed phases are skipped.
+    Catches and logs all errors — never exits unless killed.
+    """
+    logger.info(f"Enrichment worker starting — loop interval: {interval_hours}h")
+
+    while True:
+        try:
+            await run_pipeline(dry_run=False, resume=True)
+            logger.info(f"Pipeline run complete — sleeping {interval_hours}h until next run")
+        except Exception as e:
+            logger.error(f"Pipeline run failed: {e} — will retry in {interval_hours}h")
+
+        await asyncio.sleep(interval_hours * 3600)
+
+        # Clear completed runs so the next loop does a fresh pass
+        try:
+            db = SessionLocal()
+            db.query(EnrichmentRun).filter(
+                EnrichmentRun.status == "completed"
+            ).delete(synchronize_session=False)
+            db.commit()
+            db.close()
+            logger.info("Cleared completed runs — next loop will re-enrich")
+        except Exception as e:
+            logger.warning(f"Failed to clear completed runs: {e}")
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Autonomous enrichment pipeline")
     parser.add_argument("--apply", action="store_true", help="Actually write changes (default: dry run)")
     parser.add_argument("--resume", action="store_true", help="Resume from last checkpoint")
+    parser.add_argument("--loop", action="store_true", help="Run continuously (apply + resume + repeat)")
+    parser.add_argument("--interval", type=float, default=6.0, help="Hours between loop runs (default: 6)")
     args = parser.parse_args()
 
-    # Log to file so output is visible when running detached (-d)
+    # Log to file so output is visible via docker compose logs or tail
     LOG_FILE = "/tmp/enrichment_pipeline.log"
-    logger.add(LOG_FILE, rotation="50 MB", retention="3 days", level="INFO")
+    logger.add(LOG_FILE, rotation="50 MB", retention="7 days", level="INFO")
     logger.info(f"Logging to {LOG_FILE}")
 
-    asyncio.run(run_pipeline(dry_run=not args.apply, resume=args.resume))
+    if args.loop:
+        asyncio.run(run_loop(interval_hours=args.interval))
+    else:
+        asyncio.run(run_pipeline(dry_run=not args.apply, resume=args.resume))

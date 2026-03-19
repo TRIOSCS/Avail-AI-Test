@@ -40,9 +40,10 @@ COPY alembic/ alembic/
 # Overlay Vite build output from stage 1
 COPY --from=builder /build/app/static/dist/ app/static/dist/
 
-# Copy entrypoint
+# Copy entrypoints
 COPY docker-entrypoint.sh .
-RUN chmod +x docker-entrypoint.sh
+COPY enrichment-entrypoint.sh .
+RUN chmod +x docker-entrypoint.sh enrichment-entrypoint.sh
 
 # Create non-root user for running the app process
 RUN useradd -r -u 1000 -m appuser \
