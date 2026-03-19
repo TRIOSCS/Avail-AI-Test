@@ -1,16 +1,13 @@
 """Faceted search data models.
 
-What: CommoditySpecSchema, MaterialSpecFacet, MaterialSpecConflict tables.
+What: CommoditySpecSchema, MaterialSpecFacet tables.
 Called by: spec_write_service, faceted search queries (SP3).
 Depends on: Base from app.models.base, MaterialCard FK.
 """
 
-from datetime import datetime, timezone
-
 from sqlalchemy import (
     Boolean,
     Column,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -77,28 +74,3 @@ class MaterialSpecFacet(Base):
         Index("ix_msf_key_text_card", "spec_key", "value_text", "material_card_id"),
         Index("ix_msf_card", "material_card_id"),
     )
-
-
-class MaterialSpecConflict(Base):
-    """Audit log for when sources disagree on a spec value."""
-
-    __tablename__ = "material_spec_conflicts"
-
-    id = Column(Integer, primary_key=True)
-    material_card_id = Column(
-        Integer,
-        ForeignKey("material_cards.id", ondelete="CASCADE"),
-        nullable=False,
-    )
-    spec_key = Column(String(100), nullable=False)
-    existing_value = Column(String(255))
-    existing_source = Column(String(50))
-    existing_confidence = Column(Float)
-    incoming_value = Column(String(255))
-    incoming_source = Column(String(50))
-    incoming_confidence = Column(Float)
-    resolution = Column(String(20), nullable=False)  # kept_existing, overwrote, flagged
-    resolved_by = Column(String(50), default="auto")
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-
-    material_card = relationship("MaterialCard")

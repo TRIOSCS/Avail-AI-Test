@@ -40,7 +40,7 @@ from .enrichment_run import EnrichmentRun  # noqa: F401
 from .error_report import ErrorReport  # noqa: F401
 
 # Faceted Search
-from .faceted_search import CommoditySpecSchema, MaterialSpecConflict, MaterialSpecFacet  # noqa: F401
+from .faceted_search import CommoditySpecSchema, MaterialSpecFacet  # noqa: F401
 
 # ICsource Search
 from .ics_classification_cache import IcsClassificationCache  # noqa: F401

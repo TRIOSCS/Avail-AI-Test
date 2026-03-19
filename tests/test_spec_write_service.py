@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecConflict, MaterialSpecFacet
+from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
 from app.services.spec_write_service import record_spec
 from tests.conftest import engine  # noqa: F401
 
@@ -131,10 +131,25 @@ def test_record_spec_no_schema_skips(db_session: Session):
     assert count == 0
 
 
-# --- Conflict: higher priority overwrites ---
+# --- Conflict: non-vendor-API overwrites non-vendor-API (latest wins) ---
 
 
-def test_conflict_higher_priority_overwrites(db_session: Session):
+def test_conflict_non_api_overwrites_non_api(db_session: Session):
+    card = _make_card(db_session)
+    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
+
+    record_spec(db_session, card.id, "ddr_type", "DDR3", source="haiku_extraction", confidence=0.85)
+    record_spec(db_session, card.id, "ddr_type", "DDR4", source="octopart_scrape", confidence=0.90)
+
+    db_session.refresh(card)
+    assert card.specs_structured["ddr_type"]["value"] == "DDR4"
+    assert card.specs_structured["ddr_type"]["source"] == "octopart_scrape"
+
+
+# --- Conflict: vendor API overwrites non-vendor-API ---
+
+
+def test_conflict_vendor_api_overwrites_non_api(db_session: Session):
     card = _make_card(db_session)
     _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
 
@@ -145,56 +160,35 @@ def test_conflict_higher_priority_overwrites(db_session: Session):
     assert card.specs_structured["ddr_type"]["value"] == "DDR4"
     assert card.specs_structured["ddr_type"]["source"] == "digikey_api"
 
-    conflict = db_session.query(MaterialSpecConflict).filter_by(material_card_id=card.id, spec_key="ddr_type").first()
-    assert conflict is not None
-    assert conflict.resolution == "overwrote"
+
+# --- Conflict: non-vendor-API cannot overwrite vendor API ---
 
 
-# --- Conflict: lower priority keeps existing ---
-
-
-def test_conflict_lower_priority_keeps_existing(db_session: Session):
+def test_conflict_non_api_cannot_overwrite_vendor_api(db_session: Session):
     card = _make_card(db_session)
     _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
 
     record_spec(db_session, card.id, "ddr_type", "DDR4", source="digikey_api", confidence=0.95)
-    record_spec(db_session, card.id, "ddr_type", "DDR3", source="haiku_extraction", confidence=0.90)
+    record_spec(db_session, card.id, "ddr_type", "DDR3", source="haiku_extraction", confidence=0.99)
 
     db_session.refresh(card)
     assert card.specs_structured["ddr_type"]["value"] == "DDR4"
-
-    conflict = db_session.query(MaterialSpecConflict).filter_by(material_card_id=card.id, spec_key="ddr_type").first()
-    assert conflict is not None
-    assert conflict.resolution == "kept_existing"
+    assert card.specs_structured["ddr_type"]["source"] == "digikey_api"
 
 
-# --- Conflict: high confidence override ---
+# --- Conflict: vendor API overwrites vendor API (latest wins) ---
 
 
-def test_conflict_high_confidence_overrides_regardless(db_session: Session):
-    card = _make_card(db_session)
-    _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
-
-    record_spec(db_session, card.id, "ddr_type", "DDR3", source="digikey_api", confidence=0.70)
-    record_spec(db_session, card.id, "ddr_type", "DDR4", source="haiku_extraction", confidence=0.96)
-
-    db_session.refresh(card)
-    assert card.specs_structured["ddr_type"]["value"] == "DDR4"
-
-
-# --- Conflict: close confidence flags for review ---
-
-
-def test_conflict_close_confidence_flags(db_session: Session):
+def test_conflict_vendor_api_overwrites_vendor_api(db_session: Session):
     card = _make_card(db_session)
     _make_schema(db_session, enum_values=["DDR3", "DDR4", "DDR5"])
 
     record_spec(db_session, card.id, "ddr_type", "DDR3", source="digikey_api", confidence=0.90)
     record_spec(db_session, card.id, "ddr_type", "DDR4", source="nexar_api", confidence=0.88)
 
-    conflict = db_session.query(MaterialSpecConflict).filter_by(material_card_id=card.id, spec_key="ddr_type").first()
-    assert conflict is not None
-    assert conflict.resolution == "flagged"
+    db_session.refresh(card)
+    assert card.specs_structured["ddr_type"]["value"] == "DDR4"
+    assert card.specs_structured["ddr_type"]["source"] == "nexar_api"
 
 
 # --- Upsert: same source updates in place ---
@@ -209,11 +203,6 @@ def test_same_source_updates_in_place(db_session: Session):
 
     db_session.refresh(card)
     assert card.specs_structured["ddr_type"]["value"] == "DDR4"
-
-    conflict_count = (
-        db_session.query(MaterialSpecConflict).filter_by(material_card_id=card.id, spec_key="ddr_type").count()
-    )
-    assert conflict_count == 0
 
 
 # --- Boolean type ---

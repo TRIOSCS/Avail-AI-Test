@@ -3,8 +3,7 @@
 What: Normalizes, validates, conflict-resolves, and writes spec data to
       both the JSONB column (source of truth) and the facet table (indexed projection).
 Called by: Data population jobs (SP2), vendor API enrichment, AI extraction.
-Depends on: CommoditySpecSchema, MaterialSpecFacet, MaterialSpecConflict,
-            MaterialCard, unit_normalizer.
+Depends on: CommoditySpecSchema, MaterialSpecFacet, MaterialCard, unit_normalizer.
 """
 
 from datetime import datetime, timezone
@@ -12,25 +11,11 @@ from datetime import datetime, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecConflict, MaterialSpecFacet
+from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
 from app.services.unit_normalizer import normalize_value
 
-# Source priority: lower number = higher priority
-_SOURCE_PRIORITY: dict[str, int] = {
-    "digikey_api": 1,
-    "nexar_api": 1,
-    "mouser_api": 1,
-    "newegg_scrape": 2,
-    "octopart_scrape": 2,
-    "haiku_extraction": 3,
-    "vendor_freetext": 4,
-}
-
-_DEFAULT_PRIORITY = 5
-
-
-def _get_priority(source: str) -> int:
-    return _SOURCE_PRIORITY.get(source, _DEFAULT_PRIORITY)
+# Vendor API sources are authoritative — their values are never overwritten.
+_VENDOR_API_SOURCES: set[str] = {"digikey_api", "nexar_api", "mouser_api"}
 
 
 def record_spec(
@@ -100,47 +85,41 @@ def record_spec(
         new_entry["original_value"] = value
         new_entry["original_unit"] = unit
 
-    # Conflict resolution
+    # Conflict resolution: 2-tier — vendor API sources are authoritative, otherwise latest wins
     specs = dict(card.specs_structured or {})
     existing = specs.get(spec_key)
 
     if existing and existing.get("source") != source:
-        # Different source — check priority
-        existing_priority = _get_priority(existing["source"])
-        incoming_priority = _get_priority(source)
-        existing_conf = existing.get("confidence", 0)
-        incoming_conf = confidence
+        existing_source = existing.get("source", "")
 
-        # Determine resolution
-        if incoming_conf >= 0.95 and existing_conf < 0.80:
-            resolution = "overwrote"  # High confidence override
-        elif abs(existing_conf - incoming_conf) <= 0.1 and existing_priority == incoming_priority:
-            resolution = "flagged"  # Close confidence, same priority
-        elif incoming_priority < existing_priority:
-            resolution = "overwrote"  # Higher priority source
-        elif incoming_priority == existing_priority and incoming_conf > existing_conf:
-            resolution = "overwrote"  # Equal priority, higher confidence
-        else:
-            resolution = "kept_existing"
-
-        # Log the conflict
-        conflict = MaterialSpecConflict(
-            material_card_id=card_id,
-            spec_key=spec_key,
-            existing_value=str(existing.get("value", "")),
-            existing_source=existing.get("source", ""),
-            existing_confidence=existing_conf,
-            incoming_value=str(value),
-            incoming_source=source,
-            incoming_confidence=confidence,
-            resolution=resolution,
-            resolved_by="auto",
-        )
-        db.add(conflict)
-
-        if resolution == "kept_existing" or resolution == "flagged":
-            db.flush()
+        if existing_source in _VENDOR_API_SOURCES and source not in _VENDOR_API_SOURCES:
+            # Existing value from vendor API — keep it
+            logger.info(
+                "spec conflict: card={} key={} kept existing (vendor_api) "
+                "existing={}({}, conf={}) incoming={}({}, conf={})",
+                card_id,
+                spec_key,
+                existing.get("value", ""),
+                existing_source,
+                existing.get("confidence", 0),
+                value,
+                source,
+                confidence,
+            )
             return
+
+        # Latest write wins — overwrite
+        logger.info(
+            "spec conflict: card={} key={} overwriting existing={}({}, conf={}) with incoming={}({}, conf={})",
+            card_id,
+            spec_key,
+            existing.get("value", ""),
+            existing_source,
+            existing.get("confidence", 0),
+            value,
+            source,
+            confidence,
+        )
 
     # Write to JSONB (source of truth)
     if schema.data_type == "boolean":
