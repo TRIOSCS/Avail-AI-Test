@@ -333,20 +333,39 @@ Alpine.data('materialsFilter', () => ({
   },
 
   syncFromURL() {
-    const params = new URLSearchParams(window.location.search);
-    this.commodity = params.get('commodity') || '';
-    this.q = params.get('q') || '';
-    this.page = parseInt(params.get('page') || '0', 10);
-    this.subFilters = {};
-    for (const [key, val] of params.entries()) {
-      if (key.startsWith('sf_')) {
-        const specKey = key.slice(3);
-        if (specKey.endsWith('_min') || specKey.endsWith('_max')) {
-          this.subFilters[specKey] = parseFloat(val);
-        } else {
-          this.subFilters[specKey] = val.split(',');
+    try {
+      const params = new URLSearchParams(window.location.search);
+      this.commodity = params.get('commodity') || '';
+      this.q = params.get('q') || '';
+      const pageVal = parseInt(params.get('page') || '0', 10);
+      this.page = isNaN(pageVal) ? 0 : pageVal;
+      this.subFilters = {};
+      for (const [key, val] of params.entries()) {
+        if (key.startsWith('sf_')) {
+          const specKey = key.slice(3);
+          try {
+            if (specKey.endsWith('_min') || specKey.endsWith('_max')) {
+              const num = parseFloat(val);
+              if (!isNaN(num)) {
+                this.subFilters[specKey] = num;
+              }
+            } else {
+              const items = val.split(',').filter(s => s !== '');
+              if (items.length > 0) {
+                this.subFilters[specKey] = items;
+              }
+            }
+          } catch (e) {
+            // Ignore unparseable sf_ param
+          }
         }
       }
+    } catch (e) {
+      // Broken URL — reset to defaults
+      this.commodity = '';
+      this.q = '';
+      this.page = 0;
+      this.subFilters = {};
     }
   },
 
