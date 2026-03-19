@@ -93,6 +93,42 @@ def test_material_tab_price_history_empty(client, db_session):
     assert "Price tracking active" in resp.text
 
 
+def test_material_detail_shows_cross_references(client, db_session):
+    """Cross-references section appears on material detail when data exists."""
+    from app.models import MaterialCard
+
+    card = MaterialCard(
+        normalized_mpn="XREF-001",
+        display_mpn="XREF-001",
+        cross_references=[
+            {"mpn": "ALT-100", "manufacturer": "Micron"},
+            {"mpn": "ALT-200", "manufacturer": "SK Hynix"},
+        ],
+    )
+    db_session.add(card)
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/materials/{card.id}")
+    assert resp.status_code == 200
+    assert "Crosses" in resp.text
+    assert "ALT-100" in resp.text
+    assert "ALT-200" in resp.text
+    assert "Micron" in resp.text
+
+
+def test_material_detail_hides_cross_references_when_empty(client, db_session):
+    """Cross-references section hidden when no data."""
+    from app.models import MaterialCard
+
+    card = MaterialCard(normalized_mpn="NOXREF-001", display_mpn="NOXREF-001")
+    db_session.add(card)
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/materials/{card.id}")
+    assert resp.status_code == 200
+    assert "Crosses" not in resp.text
+
+
 def test_material_tab_unknown_returns_404(client, db_session):
     """Unknown tab name returns 404."""
     from app.models import MaterialCard
