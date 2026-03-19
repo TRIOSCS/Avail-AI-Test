@@ -1,6 +1,23 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" width="32" height="32">
-  <!-- TRIO honeycomb favicon - three interlocking hexagons -->
-  <polygon points="35,5 52,15 52,35 35,45 18,35 18,15" fill="none" stroke="#0082CA" stroke-width="5" stroke-linejoin="round"/>
-  <polygon points="65,5 82,15 82,35 65,45 48,35 48,15" fill="none" stroke="#A7A9AC" stroke-width="5" stroke-linejoin="round"/>
-  <polygon points="35,45 52,55 52,75 35,85 18,75 18,55" fill="none" stroke="#231F20" stroke-width="5" stroke-linejoin="round"/>
+  <!-- TRIO honeycomb favicon - three connected pointy-top hexagons -->
+  <!-- Pointy-top hex: w=2r, h=r*sqrt(3). r=20, so h~34.6 per hex -->
+  <!-- Pointy-top adjacency: horizontal neighbors share an edge offset by 1.5r horiz, 0.5h vert -->
+
+  <!-- Using pointy-top hexagons like the actual logo -->
+  <!-- Top-left (blue) center: (30, 25) -->
+  <!-- Top-right (gray) center: (60, 25) — shares vertical edge at x=45 -->
+  <!-- Bottom-left (dark) center: (30, 59.6) — shares horizontal edge below top-left -->
+
+  <!-- r=18 pointy-top hex points from center (cx,cy): -->
+  <!-- (cx, cy-r), (cx+r*sin60, cy-r/2), (cx+r*sin60, cy+r/2), (cx, cy+r), (cx-r*sin60, cy+r/2), (cx-r*sin60, cy-r/2) -->
+  <!-- sin60 = 0.866, so r*sin60 = 15.6 -->
+
+  <!-- Top-left hexagon (blue) center (32, 23) -->
+  <polygon points="32,5 47.6,14 47.6,32 32,41 16.4,32 16.4,14" fill="none" stroke="#0082CA" stroke-width="4" stroke-linejoin="round"/>
+
+  <!-- Top-right hexagon (gray) center (63.2, 23) — offset 1.5r=27 right, shares edge -->
+  <polygon points="63.2,5 78.8,14 78.8,32 63.2,41 47.6,32 47.6,14" fill="none" stroke="#A7A9AC" stroke-width="4" stroke-linejoin="round"/>
+
+  <!-- Bottom-left hexagon (dark) center (47.6, 50) — offset 0.5*31.2=15.6 right and r*1.5=27 down from top-left -->
+  <polygon points="47.6,32 63.2,41 63.2,59 47.6,68 32,59 32,41" fill="none" stroke="#231F20" stroke-width="4" stroke-linejoin="round"/>
 </svg>
