@@ -19,9 +19,10 @@ from loguru import logger
 
 sys.path.insert(0, os.environ.get("APP_ROOT", "/app"))
 
+from sqlalchemy import func
+
 from app.database import SessionLocal
 from app.models.intelligence import MaterialCard
-from sqlalchemy import func
 
 SAMPLE_SIZE = 1000
 MAX_CONCURRENT = 5
@@ -50,18 +51,11 @@ async def _verify_card(card: dict, semaphore: asyncio.Semaphore) -> dict:
             )
 
             result = await claude_json(
-                prompt,
-                schema={
-                    "type": "object",
-                    "properties": {
-                        "category_verdict": {"type": "string", "enum": ["correct", "incorrect", "uncertain"]},
-                        "description_verdict": {"type": "string", "enum": ["correct", "incorrect", "uncertain"]},
-                        "manufacturer_verdict": {"type": "string", "enum": ["correct", "incorrect", "uncertain"]},
-                        "specs_verdict": {"type": "string", "enum": ["correct", "incorrect", "uncertain", "not_applicable"]},
-                        "notes": {"type": "string"},
-                    },
-                    "required": ["category_verdict", "description_verdict"],
-                },
+                prompt + '\n\nRespond with JSON: {"category_verdict": "correct|incorrect|uncertain", '
+                '"description_verdict": "correct|incorrect|uncertain", '
+                '"manufacturer_verdict": "correct|incorrect|uncertain", '
+                '"specs_verdict": "correct|incorrect|uncertain|not_applicable", '
+                '"notes": "string"}',
                 system=_SYSTEM,
                 model_tier="smart",
                 max_tokens=1024,
@@ -105,9 +99,12 @@ async def run_verification(db, sample_size: int = SAMPLE_SIZE) -> dict:
         n = max(5, int(sample_size * count / total))
         cards = (
             db.query(
-                MaterialCard.id, MaterialCard.display_mpn,
-                MaterialCard.manufacturer, MaterialCard.category,
-                MaterialCard.description, MaterialCard.specs_summary,
+                MaterialCard.id,
+                MaterialCard.display_mpn,
+                MaterialCard.manufacturer,
+                MaterialCard.category,
+                MaterialCard.description,
+                MaterialCard.specs_summary,
             )
             .filter(
                 MaterialCard.deleted_at.is_(None),
@@ -119,14 +116,16 @@ async def run_verification(db, sample_size: int = SAMPLE_SIZE) -> dict:
             .all()
         )
         for c in cards:
-            sample_cards.append({
-                "id": c.id,
-                "display_mpn": c.display_mpn,
-                "manufacturer": c.manufacturer,
-                "category": c.category,
-                "description": c.description,
-                "specs_summary": c.specs_summary,
-            })
+            sample_cards.append(
+                {
+                    "id": c.id,
+                    "display_mpn": c.display_mpn,
+                    "manufacturer": c.manufacturer,
+                    "category": c.category,
+                    "description": c.description,
+                    "specs_summary": c.specs_summary,
+                }
+            )
 
     logger.info(f"  Sampled {len(sample_cards)} cards across {len(cat_counts)} categories")
 
@@ -189,7 +188,9 @@ async def run_verification(db, sample_size: int = SAMPLE_SIZE) -> dict:
 
     # Save report
     os.makedirs("docs/superpowers/reports", exist_ok=True)
-    report_path = f"docs/superpowers/reports/enrichment_verification_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.json"
+    report_path = (
+        f"docs/superpowers/reports/enrichment_verification_{datetime.now(timezone.utc).strftime('%Y%m%d_%H%M')}.json"
+    )
     with open(report_path, "w") as f:
         json.dump(report, f, indent=2)
 
@@ -207,7 +208,9 @@ if __name__ == "__main__":
 
     async def main():
         db = SessionLocal()
-        report = await run_verification(db, sample_size=args.sample_size)
-        db.close()
+        try:
+            report = await run_verification(db, sample_size=args.sample_size)
+        finally:
+            db.close()
 
     asyncio.run(main())

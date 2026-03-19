@@ -25,23 +25,22 @@ from loguru import logger
 
 sys.path.insert(0, os.environ.get("APP_ROOT", "/app"))
 
+from sqlalchemy import func
+
 from app.database import SessionLocal
 from app.models.enrichment_run import EnrichmentRun
 from app.models.intelligence import MaterialCard
 from app.models.sourcing import Sighting
-from app.services.specialty_detector import COMMODITY_MAP
-
-from sqlalchemy import func
-
-# Import phase logic from individual scripts
-from scripts.enrich_from_sightings import enrich_card_from_sightings, SOURCE_PRIORITY
+from scripts.enrich_batch import (
+    BATCH_SIZE,
+    _build_batch_requests,
+)
 from scripts.enrich_batch import (
     VALID_CATEGORIES as BATCH_CATEGORIES,
-    _build_batch_requests,
-    _SYSTEM as BATCH_SYSTEM,
-    _SCHEMA as BATCH_SCHEMA,
-    BATCH_SIZE,
 )
+
+# Import phase logic from individual scripts
+from scripts.enrich_from_sightings import SOURCE_PRIORITY, enrich_card_from_sightings
 from scripts.enrich_specs_batch import (
     COMMODITY_SPECS,
     _build_spec_prompt,
@@ -51,6 +50,9 @@ from scripts.enrich_specs_batch import (
 
 POLL_INTERVAL = 60  # seconds between batch status checks
 MAX_POLL_TIME = 86400  # 24 hours max wait per batch
+CATEGORY_CONFIDENCE_MIN = 0.90  # minimum confidence to accept AI-assigned category
+DESCRIPTION_CONFIDENCE_MIN = 0.90  # minimum confidence to accept AI-generated description
+SPEC_CONFIDENCE_MIN = 0.85  # minimum confidence for spec extraction
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -106,35 +108,39 @@ async def phase_0_reclassify(db, dry_run: bool) -> dict:
     stats = {"total_reclassified": 0}
 
     for old_cat, new_cat in COARSE_TO_GRANULAR.items():
-        count = (
-            db.query(func.count(MaterialCard.id))
-            .filter(MaterialCard.deleted_at.is_(None), MaterialCard.category == old_cat)
-            .scalar()
-        )
-        if count == 0:
-            continue
-
-        logger.info(f"  {old_cat} → {new_cat}: {count} cards")
-        if not dry_run:
-            db.query(MaterialCard).filter(
-                MaterialCard.deleted_at.is_(None), MaterialCard.category == old_cat
-            ).update({"category": new_cat}, synchronize_session=False)
+        if dry_run:
+            count = (
+                db.query(func.count(MaterialCard.id))
+                .filter(MaterialCard.deleted_at.is_(None), MaterialCard.category == old_cat)
+                .scalar()
+            )
+        else:
+            count = (
+                db.query(MaterialCard)
+                .filter(MaterialCard.deleted_at.is_(None), MaterialCard.category == old_cat)
+                .update({"category": new_cat}, synchronize_session=False)
+            )
             db.commit()
-        stats["total_reclassified"] += count
+        if count:
+            logger.info(f"  {old_cat} → {new_cat}: {count} cards")
+            stats["total_reclassified"] += count
 
     # Fix junk categories
-    junk = (
-        db.query(func.count(MaterialCard.id))
-        .filter(MaterialCard.deleted_at.is_(None), func.length(MaterialCard.category) > 25)
-        .scalar()
-    )
+    if dry_run:
+        junk = (
+            db.query(func.count(MaterialCard.id))
+            .filter(MaterialCard.deleted_at.is_(None), func.length(MaterialCard.category) > 25)
+            .scalar()
+        )
+    else:
+        junk = (
+            db.query(MaterialCard)
+            .filter(MaterialCard.deleted_at.is_(None), func.length(MaterialCard.category) > 25)
+            .update({"category": "other"}, synchronize_session=False)
+        )
+        db.commit()
     if junk:
         logger.info(f"  junk (len>25) → other: {junk} cards")
-        if not dry_run:
-            db.query(MaterialCard).filter(
-                MaterialCard.deleted_at.is_(None), func.length(MaterialCard.category) > 25
-            ).update({"category": "other"}, synchronize_session=False)
-            db.commit()
         stats["total_reclassified"] += junk
 
     _complete_run(db, run, stats)
@@ -168,11 +174,7 @@ async def phase_1_mine_sightings(db, dry_run: bool) -> dict:
         if not card_ids:
             break
 
-        cards = (
-            db.query(MaterialCard)
-            .filter(MaterialCard.id.in_(card_ids), MaterialCard.deleted_at.is_(None))
-            .all()
-        )
+        cards = db.query(MaterialCard).filter(MaterialCard.id.in_(card_ids), MaterialCard.deleted_at.is_(None)).all()
         card_map = {c.id: c for c in cards}
 
         sightings = (
@@ -235,7 +237,7 @@ async def phase_1_mine_sightings(db, dry_run: bool) -> dict:
 
 async def phase_2_batch_enrichment(db, dry_run: bool) -> dict:
     """Submit all cards to Sonnet Batch API for category + description + package."""
-    from app.utils.claude_client import claude_batch_submit, claude_batch_results
+    from app.utils.claude_client import claude_batch_submit
 
     logger.info("═══ Phase 2: AI batch enrichment (Sonnet) ═══")
 
@@ -255,8 +257,10 @@ async def phase_2_batch_enrichment(db, dry_run: bool) -> dict:
     # Query all cards
     rows = (
         db.query(
-            MaterialCard.id, MaterialCard.display_mpn,
-            MaterialCard.manufacturer, MaterialCard.description,
+            MaterialCard.id,
+            MaterialCard.display_mpn,
+            MaterialCard.manufacturer,
+            MaterialCard.description,
         )
         .filter(MaterialCard.deleted_at.is_(None))
         .order_by(MaterialCard.search_count.desc().nullslast())
@@ -277,7 +281,7 @@ async def phase_2_batch_enrichment(db, dry_run: bool) -> dict:
     request_map = {}
     idx = 0
     for req in requests:
-        chunk = all_cards[idx: idx + BATCH_SIZE]
+        chunk = all_cards[idx : idx + BATCH_SIZE]
         request_map[req["custom_id"]] = [{"id": c["id"], "mpn": c["display_mpn"]} for c in chunk]
         idx += BATCH_SIZE
 
@@ -290,7 +294,7 @@ async def phase_2_batch_enrichment(db, dry_run: bool) -> dict:
     # Submit batches (Anthropic limit: 10K requests per batch)
     batch_ids = []
     for chunk_start in range(0, len(requests), 10000):
-        chunk = requests[chunk_start: chunk_start + 10000]
+        chunk = requests[chunk_start : chunk_start + 10000]
         batch_id = await claude_batch_submit(chunk)
         if batch_id:
             batch_ids.append(batch_id)
@@ -351,9 +355,9 @@ async def _poll_and_apply_phase2(db, run: EnrichmentRun, dry_run: bool) -> dict:
                         cat = "other"
 
                     updates = {}
-                    if cat_conf >= 0.90 and cat != "other":
+                    if cat_conf >= CATEGORY_CONFIDENCE_MIN and cat != "other":
                         updates["category"] = cat
-                    if desc and desc_conf >= 0.90:
+                    if desc and desc_conf >= DESCRIPTION_CONFIDENCE_MIN:
                         updates["description"] = desc[:1000]
                     if mfg and isinstance(mfg, str) and mfg.strip():
                         updates["manufacturer"] = mfg.strip()[:255]
@@ -366,7 +370,11 @@ async def _poll_and_apply_phase2(db, run: EnrichmentRun, dry_run: bool) -> dict:
 
                     if not dry_run:
                         db.query(MaterialCard).filter(MaterialCard.id == card_info["id"]).update(
-                            {**updates, "enrichment_source": "sonnet_batch_v2", "enriched_at": datetime.now(timezone.utc)},
+                            {
+                                **updates,
+                                "enrichment_source": "sonnet_batch_v2",
+                                "enriched_at": datetime.now(timezone.utc),
+                            },
                             synchronize_session=False,
                         )
                     stats["updated"] += 1
@@ -394,7 +402,7 @@ async def _poll_and_apply_phase2(db, run: EnrichmentRun, dry_run: bool) -> dict:
 
 async def phase_3_spec_extraction(db, dry_run: bool) -> dict:
     """Extract structured specs per commodity via Sonnet Batch API."""
-    from app.utils.claude_client import claude_batch_submit, claude_batch_results
+    from app.utils.claude_client import claude_batch_submit
 
     logger.info("═══ Phase 3: Structured spec extraction ═══")
 
@@ -458,17 +466,19 @@ async def phase_3_spec_extraction(db, dry_run: bool) -> dict:
         request_map = {}
 
         for i in range(0, len(all_cards), BATCH_SIZE):
-            chunk = all_cards[i: i + BATCH_SIZE]
+            chunk = all_cards[i : i + BATCH_SIZE]
             custom_id = f"specs_{category}_{i}"
             prompt = _build_spec_prompt(category, chunk)
-            requests.append({
-                "custom_id": custom_id,
-                "prompt": prompt,
-                "schema": schema,
-                "system": system,
-                "model_tier": "smart",
-                "max_tokens": 8192,
-            })
+            requests.append(
+                {
+                    "custom_id": custom_id,
+                    "prompt": prompt,
+                    "schema": schema,
+                    "system": system,
+                    "model_tier": "smart",
+                    "max_tokens": 8192,
+                }
+            )
             request_map[custom_id] = [{"id": c["id"], "mpn": c["display_mpn"]} for c in chunk]
 
         batch_id = await claude_batch_submit(requests)
@@ -521,7 +531,8 @@ async def _poll_and_apply_specs(db, run: EnrichmentRun, category: str, dry_run: 
 
                     if not dry_run:
                         db.query(MaterialCard).filter(MaterialCard.id == card_info["id"]).update(
-                            {"specs_summary": summary}, synchronize_session=False,
+                            {"specs_summary": summary},
+                            synchronize_session=False,
                         )
                     stats["updated"] += 1
 
@@ -547,7 +558,7 @@ async def _poll_and_apply_specs(db, run: EnrichmentRun, category: str, dry_run: 
 
 async def phase_4_premium_descriptions(db, dry_run: bool) -> dict:
     """Generate rich technical descriptions for all cards with a category."""
-    from app.utils.claude_client import claude_batch_submit, claude_batch_results
+    from app.utils.claude_client import claude_batch_submit
 
     logger.info("═══ Phase 4: Premium descriptions (Sonnet) ═══")
 
@@ -565,9 +576,12 @@ async def phase_4_premium_descriptions(db, dry_run: bool) -> dict:
 
     rows = (
         db.query(
-            MaterialCard.id, MaterialCard.display_mpn,
-            MaterialCard.manufacturer, MaterialCard.category,
-            MaterialCard.description, MaterialCard.specs_summary,
+            MaterialCard.id,
+            MaterialCard.display_mpn,
+            MaterialCard.manufacturer,
+            MaterialCard.category,
+            MaterialCard.description,
+            MaterialCard.specs_summary,
         )
         .filter(
             MaterialCard.deleted_at.is_(None),
@@ -618,7 +632,7 @@ async def phase_4_premium_descriptions(db, dry_run: bool) -> dict:
     request_map = {}
 
     for i in range(0, len(rows), BATCH_SIZE):
-        chunk = rows[i: i + BATCH_SIZE]
+        chunk = rows[i : i + BATCH_SIZE]
         custom_id = f"desc_{i}"
 
         lines = []
@@ -642,14 +656,16 @@ async def phase_4_premium_descriptions(db, dry_run: bool) -> dict:
             + "\n\nReturn a JSON object with a 'parts' array, one entry per MPN above, in order."
         )
 
-        requests.append({
-            "custom_id": custom_id,
-            "prompt": prompt,
-            "schema": schema,
-            "system": system,
-            "model_tier": "smart",
-            "max_tokens": 8192,
-        })
+        requests.append(
+            {
+                "custom_id": custom_id,
+                "prompt": prompt,
+                "schema": schema,
+                "system": system,
+                "model_tier": "smart",
+                "max_tokens": 8192,
+            }
+        )
         request_map[custom_id] = card_meta
 
     if dry_run:
@@ -660,7 +676,7 @@ async def phase_4_premium_descriptions(db, dry_run: bool) -> dict:
 
     batch_ids = []
     for chunk_start in range(0, len(requests), 10000):
-        chunk = requests[chunk_start: chunk_start + 10000]
+        chunk = requests[chunk_start : chunk_start + 10000]
         batch_id = await claude_batch_submit(chunk)
         if batch_id:
             batch_ids.append(batch_id)
@@ -708,17 +724,22 @@ async def _poll_and_apply_descriptions(db, run: EnrichmentRun, dry_run: bool) ->
                     specs = ai_part.get("specs_summary")
                     conf = ai_part.get("confidence", 0.0)
 
-                    if not desc or conf < 0.90:
+                    if not desc or conf < DESCRIPTION_CONFIDENCE_MIN:
                         stats["skipped"] += 1
                         continue
 
-                    updates = {"description": desc[:1000], "enrichment_source": "sonnet_premium_v4", "enriched_at": datetime.now(timezone.utc)}
+                    updates = {
+                        "description": desc[:1000],
+                        "enrichment_source": "sonnet_premium_v4",
+                        "enriched_at": datetime.now(timezone.utc),
+                    }
                     if specs:
                         updates["specs_summary"] = specs
 
                     if not dry_run:
                         db.query(MaterialCard).filter(MaterialCard.id == card_info["id"]).update(
-                            updates, synchronize_session=False,
+                            updates,
+                            synchronize_session=False,
                         )
                     stats["updated"] += 1
 
@@ -752,25 +773,34 @@ async def run_pipeline(dry_run: bool = True, resume: bool = False):
         logger.info(f"{'═' * 60}")
 
         # Phase 0: Reclassify coarse categories
-        if not resume or not db.query(EnrichmentRun).filter(
-            EnrichmentRun.phase == "phase_0_reclassify", EnrichmentRun.status == "completed"
-        ).first():
+        if (
+            not resume
+            or not db.query(EnrichmentRun)
+            .filter(EnrichmentRun.phase == "phase_0_reclassify", EnrichmentRun.status == "completed")
+            .first()
+        ):
             await phase_0_reclassify(db, dry_run)
         else:
             logger.info("Phase 0 already complete — skipping")
 
         # Phase 1: Mine sighting data
-        if not resume or not db.query(EnrichmentRun).filter(
-            EnrichmentRun.phase == "phase_1_sightings", EnrichmentRun.status == "completed"
-        ).first():
+        if (
+            not resume
+            or not db.query(EnrichmentRun)
+            .filter(EnrichmentRun.phase == "phase_1_sightings", EnrichmentRun.status == "completed")
+            .first()
+        ):
             await phase_1_mine_sightings(db, dry_run)
         else:
             logger.info("Phase 1 already complete — skipping")
 
         # Phase 2: AI batch enrichment (Sonnet)
-        if not resume or not db.query(EnrichmentRun).filter(
-            EnrichmentRun.phase == "phase_2_batch", EnrichmentRun.status == "completed"
-        ).first():
+        if (
+            not resume
+            or not db.query(EnrichmentRun)
+            .filter(EnrichmentRun.phase == "phase_2_batch", EnrichmentRun.status == "completed")
+            .first()
+        ):
             await phase_2_batch_enrichment(db, dry_run)
         else:
             logger.info("Phase 2 already complete — skipping")
@@ -779,19 +809,26 @@ async def run_pipeline(dry_run: bool = True, resume: bool = False):
         await phase_3_spec_extraction(db, dry_run)
 
         # Phase 4: Premium descriptions
-        if not resume or not db.query(EnrichmentRun).filter(
-            EnrichmentRun.phase == "phase_4_descriptions", EnrichmentRun.status == "completed"
-        ).first():
+        if (
+            not resume
+            or not db.query(EnrichmentRun)
+            .filter(EnrichmentRun.phase == "phase_4_descriptions", EnrichmentRun.status == "completed")
+            .first()
+        ):
             await phase_4_premium_descriptions(db, dry_run)
         else:
             logger.info("Phase 4 already complete — skipping")
 
         # Phase 5: Web search enrichment (lifecycle, RoHS, cross-refs)
         if not dry_run:
-            if not resume or not db.query(EnrichmentRun).filter(
-                EnrichmentRun.phase == "phase_5_web", EnrichmentRun.status == "completed"
-            ).first():
+            if (
+                not resume
+                or not db.query(EnrichmentRun)
+                .filter(EnrichmentRun.phase == "phase_5_web", EnrichmentRun.status == "completed")
+                .first()
+            ):
                 from scripts.enrich_web_verified import run_web_enrichment
+
                 await run_web_enrichment(db, limit=5000, dry_run=False)
             else:
                 logger.info("Phase 5 already complete — skipping")
@@ -801,6 +838,7 @@ async def run_pipeline(dry_run: bool = True, resume: bool = False):
         # Phase 6: Cross-verification
         if not dry_run:
             from scripts.verify_enrichment import run_verification
+
             report = await run_verification(db, sample_size=1000)
             if report.get("all_targets_met"):
                 logger.info("✓ All accuracy targets met!")
@@ -823,9 +861,9 @@ async def run_pipeline(dry_run: bool = True, resume: bool = False):
 async def run_loop(interval_hours: float = 6.0):
     """Run the enrichment pipeline in a continuous loop.
 
-    After each full run, sleeps for interval_hours then runs again.
-    Always resumes from checkpoint so completed phases are skipped.
-    Catches and logs all errors — never exits unless killed.
+    After each full run, sleeps for interval_hours then runs again. Always resumes from
+    checkpoint so completed phases are skipped. Catches and logs all errors — never
+    exits unless killed.
     """
     logger.info(f"Enrichment worker starting — loop interval: {interval_hours}h")
 
@@ -833,22 +871,24 @@ async def run_loop(interval_hours: float = 6.0):
         try:
             await run_pipeline(dry_run=False, resume=True)
             logger.info(f"Pipeline run complete — sleeping {interval_hours}h until next run")
+        except (KeyboardInterrupt, SystemExit):
+            logger.info("Enrichment worker shutting down")
+            raise
         except Exception as e:
             logger.error(f"Pipeline run failed: {e} — will retry in {interval_hours}h")
 
         await asyncio.sleep(interval_hours * 3600)
 
         # Clear completed runs so the next loop does a fresh pass
+        db = SessionLocal()
         try:
-            db = SessionLocal()
-            db.query(EnrichmentRun).filter(
-                EnrichmentRun.status == "completed"
-            ).delete(synchronize_session=False)
+            db.query(EnrichmentRun).filter(EnrichmentRun.status == "completed").delete(synchronize_session=False)
             db.commit()
-            db.close()
             logger.info("Cleared completed runs — next loop will re-enrich")
         except Exception as e:
             logger.warning(f"Failed to clear completed runs: {e}")
+        finally:
+            db.close()
 
 
 if __name__ == "__main__":

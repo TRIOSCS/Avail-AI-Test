@@ -13,16 +13,13 @@ Depends on: app.models.intelligence.MaterialCard, app.utils.claude_client,
             app.search_service.resolve_material_card
 """
 
-import asyncio
-import json
-from datetime import datetime, timezone
-
 from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models.intelligence import MaterialCard
 from app.services.specialty_detector import COMMODITY_MAP
+from app.utils.normalization import normalize_mpn_key
 
 
 async def expand_cross_references(db: Session, limit: int = 500) -> dict:
@@ -45,6 +42,27 @@ async def expand_cross_references(db: Session, limit: int = 500) -> dict:
         .all()
     )
 
+    # Collect all candidate MPNs first for batch existence check
+    candidate_mpns = []
+    for card in cards:
+        refs = card.cross_references
+        if not isinstance(refs, list):
+            continue
+        for ref in refs:
+            if isinstance(ref, dict) and ref.get("mpn"):
+                candidate_mpns.append(normalize_mpn_key(ref["mpn"]))
+
+    # Batch existence check — single query instead of N+1
+    existing_mpns = set()
+    for i in range(0, len(candidate_mpns), 500):
+        chunk = candidate_mpns[i : i + 500]
+        rows = (
+            db.query(MaterialCard.normalized_mpn)
+            .filter(MaterialCard.normalized_mpn.in_(chunk), MaterialCard.deleted_at.is_(None))
+            .all()
+        )
+        existing_mpns.update(r.normalized_mpn for r in rows)
+
     for card in cards:
         refs = card.cross_references
         if not isinstance(refs, list):
@@ -55,16 +73,9 @@ async def expand_cross_references(db: Session, limit: int = 500) -> dict:
                 continue
 
             stats["checked"] += 1
-            mpn = ref["mpn"].strip().upper()
+            mpn = normalize_mpn_key(ref["mpn"])
 
-            # Check if already exists
-            existing = (
-                db.query(MaterialCard.id)
-                .filter(MaterialCard.normalized_mpn == mpn, MaterialCard.deleted_at.is_(None))
-                .first()
-            )
-
-            if existing:
+            if mpn in existing_mpns:
                 stats["already_exists"] += 1
                 continue
 
@@ -117,36 +128,15 @@ async def expand_families(db: Session, batch_size: int = 100) -> dict:
 
     # Batch seeds into groups of 20 for efficiency
     for i in range(0, len(seeds), 20):
-        chunk = seeds[i: i + 20]
-        mpn_list = "\n".join(
-            f"- {s.display_mpn} ({s.manufacturer or 'unknown'}, {s.category})" for s in chunk
-        )
+        chunk = seeds[i : i + 20]
+        mpn_list = "\n".join(f"- {s.display_mpn} ({s.manufacturer or 'unknown'}, {s.category})" for s in chunk)
 
         try:
             result = await claude_json(
                 f"For each part below, list up to 5 other parts in the same product family/series "
                 f"by the same manufacturer. Only include REAL part numbers you are confident exist.\n\n"
-                f"{mpn_list}",
-                schema={
-                    "type": "object",
-                    "properties": {
-                        "families": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "seed_mpn": {"type": "string"},
-                                    "family_members": {
-                                        "type": "array",
-                                        "items": {"type": "string"},
-                                    },
-                                },
-                                "required": ["seed_mpn", "family_members"],
-                            },
-                        }
-                    },
-                    "required": ["families"],
-                },
+                f"{mpn_list}\n\n"
+                f'Respond with JSON: {{"families": [{{"seed_mpn": "...", "family_members": ["..."]}}]}}',
                 system="You are an expert electronic component engineer. List real part numbers only.",
                 model_tier="smart",
                 max_tokens=4096,
@@ -155,21 +145,30 @@ async def expand_families(db: Session, batch_size: int = 100) -> dict:
             if not result or "families" not in result:
                 continue
 
+            # Batch existence check for all discovered MPNs in this chunk
+            all_discovered = []
+            for family in result["families"]:
+                for m in family.get("family_members", []):
+                    if m and isinstance(m, str):
+                        all_discovered.append(normalize_mpn_key(m))
+            existing_set = set()
+            if all_discovered:
+                rows = (
+                    db.query(MaterialCard.normalized_mpn)
+                    .filter(MaterialCard.normalized_mpn.in_(all_discovered), MaterialCard.deleted_at.is_(None))
+                    .all()
+                )
+                existing_set = {r.normalized_mpn for r in rows}
+
             for family in result["families"]:
                 for member_mpn in family.get("family_members", []):
                     if not member_mpn or not isinstance(member_mpn, str):
                         continue
 
                     stats["discovered"] += 1
-                    mpn_norm = member_mpn.strip().upper()
+                    mpn_norm = normalize_mpn_key(member_mpn)
 
-                    existing = (
-                        db.query(MaterialCard.id)
-                        .filter(MaterialCard.normalized_mpn == mpn_norm, MaterialCard.deleted_at.is_(None))
-                        .first()
-                    )
-
-                    if existing:
+                    if mpn_norm in existing_set:
                         stats["already_exists"] += 1
                         continue
 
@@ -180,6 +179,7 @@ async def expand_families(db: Session, batch_size: int = 100) -> dict:
                             db.commit()
                             stats["created"] += 1
                     except Exception as e:
+                        logger.warning(f"Failed to create card for family member {member_mpn}: {e}")
                         db.rollback()
                         stats["errors"] += 1
 
@@ -211,10 +211,7 @@ async def fill_commodity_gaps(db: Session) -> dict:
     count_map = {cat: cnt for cat, cnt in category_counts}
 
     # Target categories under 1000 cards
-    small_categories = [
-        cat for cat in COMMODITY_MAP
-        if cat != "other" and count_map.get(cat, 0) < 1000
-    ]
+    small_categories = [cat for cat in COMMODITY_MAP if cat != "other" and count_map.get(cat, 0) < 1000]
 
     if not small_categories:
         return stats
@@ -227,24 +224,8 @@ async def fill_commodity_gaps(db: Session) -> dict:
         try:
             result = await claude_json(
                 f"List the 30 most commonly sourced '{category}' electronic component MPNs "
-                f"that a global distributor would stock. Include manufacturer for each.",
-                schema={
-                    "type": "object",
-                    "properties": {
-                        "parts": {
-                            "type": "array",
-                            "items": {
-                                "type": "object",
-                                "properties": {
-                                    "mpn": {"type": "string"},
-                                    "manufacturer": {"type": "string"},
-                                },
-                                "required": ["mpn"],
-                            },
-                        }
-                    },
-                    "required": ["parts"],
-                },
+                f"that a global distributor would stock. Include manufacturer for each.\n\n"
+                f'Respond with JSON: {{"parts": [{{"mpn": "...", "manufacturer": "..."}}]}}',
                 system="You are an expert in electronic component supply chains. List real, common MPNs only.",
                 model_tier="smart",
                 max_tokens=4096,
@@ -253,21 +234,26 @@ async def fill_commodity_gaps(db: Session) -> dict:
             if not result or "parts" not in result:
                 continue
 
+            # Batch existence check for all MPNs in this AI response
+            candidate_norms = [normalize_mpn_key(p["mpn"]) for p in result["parts"] if p.get("mpn", "").strip()]
+            existing_set = set()
+            if candidate_norms:
+                rows = (
+                    db.query(MaterialCard.normalized_mpn)
+                    .filter(MaterialCard.normalized_mpn.in_(candidate_norms), MaterialCard.deleted_at.is_(None))
+                    .all()
+                )
+                existing_set = {r.normalized_mpn for r in rows}
+
             for part in result["parts"]:
                 mpn = part.get("mpn", "").strip()
                 if not mpn:
                     continue
 
                 stats["discovered"] += 1
-                mpn_norm = mpn.upper()
+                mpn_norm = normalize_mpn_key(mpn)
 
-                existing = (
-                    db.query(MaterialCard.id)
-                    .filter(MaterialCard.normalized_mpn == mpn_norm, MaterialCard.deleted_at.is_(None))
-                    .first()
-                )
-
-                if existing:
+                if mpn_norm in existing_set:
                     stats["already_exists"] += 1
                     continue
 
@@ -281,6 +267,7 @@ async def fill_commodity_gaps(db: Session) -> dict:
                         db.commit()
                         stats["created"] += 1
                 except Exception as e:
+                    logger.warning(f"Failed to create card for gap fill {mpn}: {e}")
                     db.rollback()
 
         except Exception as e:
