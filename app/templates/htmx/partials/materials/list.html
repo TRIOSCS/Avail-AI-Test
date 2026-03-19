@@ -43,27 +43,26 @@
     {% endif %}
   </div>
 
-  {# Lifecycle filter pills #}
+  {# Commodity filter pills #}
+  {% if top_categories %}
   <div class="flex flex-wrap gap-2 mb-4">
-    {% for val, label, icon_color in [
-      ('', 'All', 'text-gray-500'),
-      ('active', 'Active', 'text-emerald-500'),
-      ('eol', 'EOL', 'text-amber-500'),
-      ('obsolete', 'Obsolete', 'text-rose-500'),
-      ('nrfnd', 'NRFND', 'text-gray-400'),
-      ('ltb', 'LTB', 'text-amber-400')
-    ] %}
     <button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors
-                   {% if lifecycle == val %}bg-brand-500 text-white shadow-sm{% else %}bg-white text-gray-600 border border-brand-200 hover:bg-brand-50{% endif %}"
-            hx-get="/v2/partials/materials?lifecycle={{ val }}&q={{ q }}"
+                   {% if not category %}bg-brand-500 text-white shadow-sm{% else %}bg-white text-gray-600 border border-brand-200 hover:bg-brand-50{% endif %}"
+            hx-get="/v2/partials/materials?q={{ q }}"
             hx-target="#main-content">
-      {% if val %}
-      <span class="w-2 h-2 rounded-full {% if lifecycle == val %}bg-white{% else %}{{ icon_color }} bg-current{% endif %}"></span>
-      {% endif %}
-      {{ label }}
+      All
+    </button>
+    {% for cat_name, cat_count in top_categories %}
+    <button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors
+                   {% if category == cat_name %}bg-brand-500 text-white shadow-sm{% else %}bg-white text-gray-600 border border-brand-200 hover:bg-brand-50{% endif %}"
+            hx-get="/v2/partials/materials?category={{ cat_name }}&q={{ q }}"
+            hx-target="#main-content">
+      {{ cat_name|replace('_', ' ')|title }}
+      <span class="text-xs {% if category == cat_name %}text-brand-200{% else %}text-gray-400{% endif %}">{{ cat_count }}</span>
     </button>
     {% endfor %}
   </div>
+  {% endif %}
 
   {# Table #}
   <div class="bg-white rounded-lg border border-brand-200 overflow-hidden">
@@ -139,13 +138,13 @@
   <div class="mt-4 flex justify-center">
     <nav class="flex gap-1 items-center">
       {% if offset > 0 %}
-      <a hx-get="/v2/partials/materials?offset={{ offset - limit }}&q={{ q }}&lifecycle={{ lifecycle }}"
+      <a hx-get="/v2/partials/materials?offset={{ offset - limit }}&q={{ q }}&category={{ category }}"
          hx-target="#main-content"
          class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Prev</a>
       {% endif %}
       <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
       {% if offset + limit < total %}
-      <a hx-get="/v2/partials/materials?offset={{ offset + limit }}&q={{ q }}&lifecycle={{ lifecycle }}"
+      <a hx-get="/v2/partials/materials?offset={{ offset + limit }}&q={{ q }}&category={{ category }}"
          hx-target="#main-content"
          class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Next</a>
       {% endif %}

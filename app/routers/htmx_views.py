@@ -2144,8 +2144,9 @@ async def search_run(
     If requirement_id is provided, searches for that requirement's MPN. Otherwise uses
     the mpn form field.
     """
-    import asyncio
     from uuid import uuid4
+
+    from ..utils.async_helpers import safe_background_task as _safe_bg
 
     search_mpn = mpn.strip()
 
@@ -2168,7 +2169,7 @@ async def search_run(
 
     from ..search_service import stream_search_mpn
 
-    asyncio.create_task(stream_search_mpn(search_id, search_mpn, db))
+    await _safe_bg(stream_search_mpn(search_id, search_mpn, db), task_name="stream_search_mpn")
 
     ctx = _base_ctx(request, user, "search")
     ctx.update(
@@ -4725,9 +4726,9 @@ async def buy_plan_submit_partial(
         )
         db.commit()
         if plan.auto_approved:
-            run_notify_bg(notify_approved, plan.id)
+            await run_notify_bg(notify_approved, plan.id)
         else:
-            run_notify_bg(notify_submitted, plan.id)
+            await run_notify_bg(notify_submitted, plan.id)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -4759,9 +4760,9 @@ async def buy_plan_approve_partial(
         plan = approve_buy_plan(plan_id, action, user, db, notes=form.get("notes"))
         db.commit()
         if action == "approve":
-            run_notify_bg(notify_approved, plan.id)
+            await run_notify_bg(notify_approved, plan.id)
         else:
-            run_notify_bg(notify_rejected, plan.id)
+            await run_notify_bg(notify_rejected, plan.id)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
 
@@ -4796,9 +4797,9 @@ async def buy_plan_verify_so_partial(
         )
         db.commit()
         if action == "approve":
-            run_notify_bg(notify_so_verified, plan.id)
+            await run_notify_bg(notify_so_verified, plan.id)
         else:
-            run_notify_bg(notify_so_rejected, plan.id, action=action)
+            await run_notify_bg(notify_so_rejected, plan.id, action=action)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
 
@@ -4838,7 +4839,7 @@ async def buy_plan_confirm_po_partial(
     try:
         confirm_po(plan_id, line_id, po_number, ship_date, user, db)
         db.commit()
-        run_notify_bg(notify_po_confirmed, plan_id, line_id=line_id)
+        await run_notify_bg(notify_po_confirmed, plan_id, line_id=line_id)
     except ValueError as e:
         raise HTTPException(400, str(e))
 
@@ -4866,7 +4867,7 @@ async def buy_plan_verify_po_partial(
         updated = check_completion(plan_id, db)
         if updated and updated.status == "completed":
             db.commit()
-            run_notify_bg(notify_completed, plan_id)
+            await run_notify_bg(notify_completed, plan_id)
     except (ValueError, PermissionError) as e:
         raise HTTPException(400, str(e))
 
@@ -5699,26 +5700,43 @@ async def materials_list_partial(
     request: Request,
     q: str = "",
     lifecycle: str = "",
+    category: str = "",
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Return material cards list as HTML partial."""
+    from sqlalchemy import func as sqlfunc
+
+    from ..models.intelligence import MaterialCard
     from ..services.material_search_service import classify_query, search_materials_local
 
     interpreted_query = ""
     if q.strip():
         query_type = classify_query(q.strip())
         if query_type == "mpn":
-            materials, total = search_materials_local(db, q.strip(), lifecycle, limit, offset)
+            materials, total = search_materials_local(db, q.strip(), lifecycle, category, limit, offset)
         else:
-            # For now, fall back to local search for natural language too
-            # AI search will be wired when async route support is added
-            materials, total = search_materials_local(db, q.strip(), lifecycle, limit, offset)
+            materials, total = search_materials_local(db, q.strip(), lifecycle, category, limit, offset)
             interpreted_query = f"Searching: {q.strip()}"
     else:
-        materials, total = search_materials_local(db, "", lifecycle, limit, offset)
+        materials, total = search_materials_local(db, "", lifecycle, category, limit, offset)
+
+    # Top commodity categories for filter pills
+    top_categories = (
+        db.query(MaterialCard.category, sqlfunc.count(MaterialCard.id))
+        .filter(
+            MaterialCard.category.isnot(None),
+            MaterialCard.category != "",
+            MaterialCard.category != "other",
+            MaterialCard.deleted_at.is_(None),
+        )
+        .group_by(MaterialCard.category)
+        .order_by(sqlfunc.count(MaterialCard.id).desc())
+        .limit(12)
+        .all()
+    )
 
     # Compute vendor_count and best_price for each material
     from sqlalchemy import func as sqlfunc
@@ -5756,10 +5774,12 @@ async def materials_list_partial(
             "materials": materials,
             "q": q,
             "lifecycle": lifecycle,
+            "category": category,
             "total": total,
             "limit": limit,
             "offset": offset,
             "interpreted_query": interpreted_query,
+            "top_categories": top_categories,
         }
     )
     return templates.TemplateResponse("htmx/partials/materials/list.html", ctx)

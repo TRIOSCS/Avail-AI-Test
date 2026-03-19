@@ -27,6 +27,7 @@ def search_materials_local(
     db: Session,
     query: str,
     lifecycle: str = "",
+    category: str = "",
     limit: int = 50,
     offset: int = 0,
 ):
@@ -46,6 +47,9 @@ def search_materials_local(
 
     if lifecycle:
         q = q.filter(MaterialCard.lifecycle_status == lifecycle)
+
+    if category:
+        q = q.filter(MaterialCard.category == category)
 
     total = q.count()
     materials = (
