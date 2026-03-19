@@ -105,6 +105,11 @@
       </template>
     </div>
 
+    {# Loading indicator for results #}
+    <div id="results-loading" class="htmx-indicator absolute top-2 right-2 z-10">
+      <svg class="h-5 w-5 text-brand-500 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+    </div>
+
     {# Results container — loaded via HTMX #}
     <div id="materials-results"
          hx-get="/v2/partials/materials/faceted"

@@ -303,7 +303,7 @@ document.addEventListener('keydown', (e) => {
  * Manages commodity, sub-filters, search query, pagination.
  * URL is the canonical source of truth (back button, deep links work).
  */
-function materialsFilter() {
+window.materialsFilter = function materialsFilter() {
   return {
     commodity: '',
     commodityDisplayName: '',
