@@ -174,5 +174,40 @@
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
     </svg>
   </template>
+
+  {# SSE event listener for real-time notifications #}
+  {% if user_name %}
+  <div id="sse-listener"
+       hx-ext="sse"
+       sse-connect="/api/events/stream"
+       sse-swap="none"
+       style="display:none">
+  </div>
+
+  <script>
+    document.addEventListener('DOMContentLoaded', function() {
+      var el = document.getElementById('sse-listener');
+      if (!el) return;
+
+      el.addEventListener('sse:enrichment_complete', function(e) {
+        Alpine.store('toast').message = 'Enrichment complete';
+        Alpine.store('toast').type = 'success';
+        Alpine.store('toast').show = true;
+      });
+
+      el.addEventListener('sse:quote_updated', function(e) {
+        Alpine.store('toast').message = 'Quote updated';
+        Alpine.store('toast').type = 'info';
+        Alpine.store('toast').show = true;
+      });
+
+      el.addEventListener('sse:rfq_response', function(e) {
+        Alpine.store('toast').message = 'New RFQ response received';
+        Alpine.store('toast').type = 'info';
+        Alpine.store('toast').show = true;
+      });
+    });
+  </script>
+  {% endif %}
 </body>
 </html>

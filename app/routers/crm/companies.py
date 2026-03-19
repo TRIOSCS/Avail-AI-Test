@@ -497,8 +497,9 @@ async def create_company(
     ):
         from ...enrichment_service import apply_enrichment_to_company, enrich_entity
 
-        async def _enrich_company_bg(cid, sid, d, n):
+        async def _enrich_company_bg(cid, sid, d, n, uid):
             from ...database import SessionLocal
+            from ...services.sse_broker import broker
 
             try:
                 enrichment = await enrich_entity(d, n)
@@ -528,11 +529,18 @@ async def create_company(
                             s.rollback()
                 finally:
                     s.close()
+
+                # Notify user via SSE that enrichment is done
+                await broker.publish(
+                    f"user:{uid}",
+                    "enrichment_complete",
+                    '{"entity_type": "company", "company_id": ' + str(cid) + "}",
+                )
             except Exception:
                 logger.exception("Background enrichment failed for company %d", cid)
 
         await safe_background_task(
-            _enrich_company_bg(result["id"], result["default_site_id"], domain, result["name"]),
+            _enrich_company_bg(result["id"], result["default_site_id"], domain, result["name"], user.id),
             task_name="enrich_company_bg",
         )
         result["enrich_triggered"] = True

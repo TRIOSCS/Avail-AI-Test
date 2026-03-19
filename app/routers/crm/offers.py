@@ -490,6 +490,19 @@ async def create_offer(
     except Exception:
         logger.debug("Activity event creation failed", exc_info=True)
 
+    # Notify requisition creator via SSE that a new offer/quote was added
+    notify_user_id = req.created_by if req.created_by and req.created_by != user.id else user.id
+    try:
+        from ...services.sse_broker import broker
+
+        await broker.publish(
+            f"user:{notify_user_id}",
+            "quote_updated",
+            '{"offer_id": ' + str(offer.id) + ', "requisition_id": ' + str(req_id) + "}",
+        )
+    except Exception:
+        logger.debug("SSE quote_updated notification failed", exc_info=True)
+
     return {
         "id": offer.id,
         "vendor_name": offer.vendor_name,
