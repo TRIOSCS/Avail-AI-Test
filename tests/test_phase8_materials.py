@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from app.models import User
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
@@ -151,22 +150,19 @@ class TestMaterialDetail:
         assert "TI" in resp.text
         assert "Voltage Regulator" in resp.text
 
-    def test_detail_shows_lifecycle_badge(
-        self, client: TestClient, material_cards
-    ):
+    def test_detail_shows_lifecycle_badge(self, client: TestClient, material_cards):
         card = material_cards[2]  # STM32F103 - EOL
         resp = client.get(f"/v2/partials/materials/{card.id}")
         assert resp.status_code == 200
         assert "EOL" in resp.text
 
-    def test_detail_shows_sightings(
-        self, client: TestClient, card_with_sightings
-    ):
+    def test_detail_has_tab_structure(self, client: TestClient, card_with_sightings):
+        """Detail page should show tab bar (sightings moved to lazy-loaded tabs)."""
         resp = client.get(f"/v2/partials/materials/{card_with_sightings.id}")
         assert resp.status_code == 200
-        assert "Arrow" in resp.text
-        assert "Mouser" in resp.text
-        assert "Recent Sightings" in resp.text
+        assert "material-tab-content" in resp.text
+        assert "Vendors" in resp.text
+        assert "Price History" in resp.text
 
     def test_detail_404(self, client: TestClient):
         resp = client.get("/v2/partials/materials/99999")
@@ -186,9 +182,7 @@ class TestMaterialDetail:
 class TestMaterialUpdate:
     """Tests for updating material card fields."""
 
-    def test_update_manufacturer(
-        self, client: TestClient, db_session: Session, material_cards
-    ):
+    def test_update_manufacturer(self, client: TestClient, db_session: Session, material_cards):
         card = material_cards[0]  # LM317T
         resp = client.put(
             f"/v2/partials/materials/{card.id}",
@@ -201,9 +195,7 @@ class TestMaterialUpdate:
         assert card.manufacturer == "Texas Instruments"
         assert card.category == "Linear Regulator"
 
-    def test_update_lifecycle(
-        self, client: TestClient, db_session: Session, material_cards
-    ):
+    def test_update_lifecycle(self, client: TestClient, db_session: Session, material_cards):
         card = material_cards[0]
         resp = client.put(
             f"/v2/partials/materials/{card.id}",
