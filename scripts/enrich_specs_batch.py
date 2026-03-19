@@ -39,7 +39,7 @@ def _build_spec_prompt(category: str, cards: list[dict]) -> str:
     for spec in schema["specs"]:
         line = f"- {spec['key']}: {spec['label']}"
         if spec["type"] == "enum":
-            line += f" (one of: {spec['values']})"
+            line += f" (one of: {spec.get('values', 'see common values')})"
         elif spec["type"] == "numeric":
             unit = spec.get("unit", "")
             line += f" (number{', unit: ' + unit if unit else ''})"
