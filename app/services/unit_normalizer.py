@@ -12,13 +12,24 @@ from loguru import logger
 _CONVERSIONS: dict[tuple[str, str], float] = {
     # Capacitance -> pF
     ("uf", "pf"): 1_000_000,
+    ("µf", "pf"): 1_000_000,
     ("nf", "pf"): 1_000,
     ("mf", "pf"): 1_000_000_000,
     # Resistance -> ohms
     ("kohm", "ohms"): 1_000,
-    ("mohm", "ohms"): 1_000_000,
+    ("kohms", "ohms"): 1_000,
+    ("kω", "ohms"): 1_000,  # kΩ lowercased
+    ("megohm", "ohms"): 1_000_000,
+    ("megaohm", "ohms"): 1_000_000,
+    ("mω", "ohms"): 1_000_000,  # MΩ lowercased (mega-ohms)
+    ("ω", "ohms"): 1,  # Ω lowercased
+    ("ohm", "ohms"): 1,
+    # milli-ohms (MOSFET rds_on: canonical_unit is "mOhm")
+    ("milliohm", "mohm"): 1,
+    ("milliohms", "mohm"): 1,
     # Inductance -> nH
     ("uh", "nh"): 1_000,
+    ("µh", "nh"): 1_000,
     ("mh", "nh"): 1_000_000,
     ("h", "nh"): 1_000_000_000,
     # Frequency -> MHz
@@ -31,6 +42,7 @@ _CONVERSIONS: dict[tuple[str, str], float] = {
     # Current -> A
     ("ma", "a"): 0.001,
     ("ua", "a"): 0.000001,
+    ("µa", "a"): 0.000001,
 }
 
 

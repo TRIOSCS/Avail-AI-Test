@@ -81,7 +81,7 @@ def main():
     client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
     # Coarse categories that need reclassification into granular ones
-    RECLASSIFY = {"servers", "storage", "memory", "processors", "Microprocessors"}
+    RECLASSIFY = {"servers", "storage", "memory", "processors", "microprocessors"}
 
     # Cards that need fixing: bad/coarse categories + uncategorized
     cards_to_fix = (
@@ -156,6 +156,7 @@ def main():
             except Exception as e:
                 logger.error(f"Retry failed: {e}")
                 errors += len(batch)
+                db.rollback()
 
         except Exception as e:
             logger.error(f"Batch {batch_num} failed: {e}")

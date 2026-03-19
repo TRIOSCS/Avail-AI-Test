@@ -10,6 +10,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
+from app.utils.search_builder import SearchBuilder
 
 
 def get_commodity_counts(db: Session) -> dict[str, int]:
@@ -45,9 +46,29 @@ def get_facet_counts(
     # Apply active filters to narrow the base set
     if active_filters:
         for key, values in active_filters.items():
-            if key.endswith("_min") or key.endswith("_max"):
-                continue  # Range filters handled separately
-            if isinstance(values, list) and values:
+            if key.endswith("_min"):
+                spec_key = key[:-4]
+                base_q = base_q.filter(
+                    MaterialSpecFacet.material_card_id.in_(
+                        db.query(MaterialSpecFacet.material_card_id).filter(
+                            MaterialSpecFacet.category == commodity,
+                            MaterialSpecFacet.spec_key == spec_key,
+                            MaterialSpecFacet.value_numeric >= values,
+                        )
+                    )
+                )
+            elif key.endswith("_max"):
+                spec_key = key[:-4]
+                base_q = base_q.filter(
+                    MaterialSpecFacet.material_card_id.in_(
+                        db.query(MaterialSpecFacet.material_card_id).filter(
+                            MaterialSpecFacet.category == commodity,
+                            MaterialSpecFacet.spec_key == spec_key,
+                            MaterialSpecFacet.value_numeric <= values,
+                        )
+                    )
+                )
+            elif isinstance(values, list) and values:
                 base_q = base_q.filter(
                     MaterialSpecFacet.material_card_id.in_(
                         db.query(MaterialSpecFacet.material_card_id).filter(
@@ -107,12 +128,14 @@ def search_materials_faceted(
         query = query.filter(func.lower(func.trim(MaterialCard.category)) == commodity.lower().strip())
 
     if q:
-        pattern = f"%{q}%"
+        sb = SearchBuilder(q)
         query = query.filter(
-            (MaterialCard.normalized_mpn.ilike(pattern))
-            | (MaterialCard.display_mpn.ilike(pattern))
-            | (MaterialCard.manufacturer.ilike(pattern))
-            | (MaterialCard.description.ilike(pattern))
+            sb.ilike_filter(
+                MaterialCard.normalized_mpn,
+                MaterialCard.display_mpn,
+                MaterialCard.manufacturer,
+                MaterialCard.description,
+            )
         )
 
     if sub_filters and commodity:
@@ -176,52 +199,43 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
         .order_by(CommoditySpecSchema.sort_order)
         .all()
     )
-
     if not schemas:
         return []
 
-    # Collect spec_keys by type so we can batch-query
-    enum_keys = [s.spec_key for s in schemas if s.data_type == "enum"]
-    numeric_keys = [s.spec_key for s in schemas if s.data_type == "numeric"]
-
-    # Single query for ALL text distinct values grouped by spec_key (covers enum types)
-    text_values_by_key: dict[str, list[str]] = {}
-    if enum_keys:
-        text_rows = (
-            db.query(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_text)
-            .filter(
-                MaterialSpecFacet.category == commodity,
-                MaterialSpecFacet.spec_key.in_(enum_keys),
-                MaterialSpecFacet.value_text.isnot(None),
-            )
-            .distinct()
-            .all()
+    # Batch query: all distinct text values grouped by spec_key
+    text_rows = (
+        db.query(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_text)
+        .filter(
+            MaterialSpecFacet.category == commodity,
+            MaterialSpecFacet.value_text.isnot(None),
         )
-        for spec_key, value in text_rows:
-            text_values_by_key.setdefault(spec_key, []).append(value)
+        .distinct()
+        .all()
+    )
+    text_map: dict[str, list[str]] = {}
+    for sk, vt in text_rows:
+        text_map.setdefault(sk, []).append(vt)
+    for k in text_map:
+        text_map[k].sort()
 
-    # Single query for ALL numeric min/max grouped by spec_key
-    numeric_ranges_by_key: dict[str, dict] = {}
-    if numeric_keys:
-        numeric_rows = (
-            db.query(
-                MaterialSpecFacet.spec_key,
-                func.min(MaterialSpecFacet.value_numeric),
-                func.max(MaterialSpecFacet.value_numeric),
-            )
-            .filter(
-                MaterialSpecFacet.category == commodity,
-                MaterialSpecFacet.spec_key.in_(numeric_keys),
-                MaterialSpecFacet.value_numeric.isnot(None),
-            )
-            .group_by(MaterialSpecFacet.spec_key)
-            .all()
+    # Batch query: min/max for numeric specs
+    numeric_rows = (
+        db.query(
+            MaterialSpecFacet.spec_key,
+            func.min(MaterialSpecFacet.value_numeric),
+            func.max(MaterialSpecFacet.value_numeric),
         )
-        for spec_key, min_val, max_val in numeric_rows:
-            if min_val is not None:
-                numeric_ranges_by_key[spec_key] = {"min": min_val, "max": max_val}
+        .filter(
+            MaterialSpecFacet.category == commodity,
+            MaterialSpecFacet.value_numeric.isnot(None),
+        )
+        .group_by(MaterialSpecFacet.spec_key)
+        .all()
+    )
+    numeric_map: dict[str, dict] = {}
+    for sk, mn, mx in numeric_rows:
+        numeric_map[sk] = {"min": mn, "max": mx}
 
-    # Build result by matching pre-fetched data to schema rows
     result = []
     for schema in schemas:
         option = {
@@ -231,13 +245,11 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
             "unit": schema.unit,
             "is_primary": schema.is_primary,
         }
-
         if schema.data_type == "enum":
-            option["values"] = sorted(text_values_by_key.get(schema.spec_key, []))
+            option["values"] = text_map.get(schema.spec_key, [])
         elif schema.data_type == "numeric":
-            option["range"] = numeric_ranges_by_key.get(schema.spec_key)
+            option["range"] = numeric_map.get(schema.spec_key)
         elif schema.data_type == "boolean":
             option["values"] = ["true", "false"]
-
         result.append(option)
     return result

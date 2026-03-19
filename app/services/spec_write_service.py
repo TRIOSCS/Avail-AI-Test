@@ -18,6 +18,15 @@ from app.services.unit_normalizer import normalize_value
 _VENDOR_API_SOURCES: set[str] = {"digikey_api", "nexar_api", "mouser_api"}
 
 
+def load_schema_cache(db: Session, commodity: str) -> dict:
+    """Pre-load all schemas for a commodity into a cache dict.
+
+    Returns: {(commodity, spec_key): CommoditySpecSchema, ...}
+    """
+    schemas = db.query(CommoditySpecSchema).filter_by(commodity=commodity).all()
+    return {(s.commodity, s.spec_key): s for s in schemas}
+
+
 def record_spec(
     db: Session,
     card_id: int,
@@ -27,6 +36,7 @@ def record_spec(
     source: str,
     confidence: float,
     unit: str | None = None,
+    schema_cache: dict | None = None,
 ) -> None:
     """Record a structured spec value for a material card.
 
@@ -43,8 +53,11 @@ def record_spec(
         logger.debug("record_spec: card {} has no category, skipping", card_id)
         return
 
-    # Look up schema
-    schema = db.query(CommoditySpecSchema).filter_by(commodity=category, spec_key=spec_key).first()
+    # Look up schema — use cache if provided
+    if schema_cache is not None:
+        schema = schema_cache.get((category, spec_key))
+    else:
+        schema = db.query(CommoditySpecSchema).filter_by(commodity=category, spec_key=spec_key).first()
     if schema is None:
         logger.debug(
             "record_spec: no schema for commodity={} spec_key={}, skipping",
@@ -89,14 +102,29 @@ def record_spec(
     specs = dict(card.specs_structured or {})
     existing = specs.get(spec_key)
 
-    if existing and existing.get("source") != source:
+    if existing:
         existing_source = existing.get("source", "")
 
-        if existing_source in _VENDOR_API_SOURCES and source not in _VENDOR_API_SOURCES:
-            # Existing value from vendor API — keep it
+        if existing_source != source:
+            # Different source — check vendor API priority
+            if existing_source in _VENDOR_API_SOURCES and source not in _VENDOR_API_SOURCES:
+                logger.info(
+                    "spec conflict: card={} key={} kept existing (vendor_api) "
+                    "existing={}({}, conf={}) incoming={}({}, conf={})",
+                    card_id,
+                    spec_key,
+                    existing.get("value", ""),
+                    existing_source,
+                    existing.get("confidence", 0),
+                    value,
+                    source,
+                    confidence,
+                )
+                return
+
+            # Latest write wins for different non-vendor sources
             logger.info(
-                "spec conflict: card={} key={} kept existing (vendor_api) "
-                "existing={}({}, conf={}) incoming={}({}, conf={})",
+                "spec conflict: card={} key={} overwriting existing={}({}, conf={}) with incoming={}({}, conf={})",
                 card_id,
                 spec_key,
                 existing.get("value", ""),
@@ -106,20 +134,19 @@ def record_spec(
                 source,
                 confidence,
             )
-            return
-
-        # Latest write wins — overwrite
-        logger.info(
-            "spec conflict: card={} key={} overwriting existing={}({}, conf={}) with incoming={}({}, conf={})",
-            card_id,
-            spec_key,
-            existing.get("value", ""),
-            existing_source,
-            existing.get("confidence", 0),
-            value,
-            source,
-            confidence,
-        )
+        else:
+            # Same source — only overwrite if confidence is higher or equal
+            existing_conf = existing.get("confidence", 0)
+            if confidence < existing_conf:
+                logger.debug(
+                    "spec skip: card={} key={} same source={} existing_conf={} > incoming_conf={}",
+                    card_id,
+                    spec_key,
+                    source,
+                    existing_conf,
+                    confidence,
+                )
+                return
 
     # Write to JSONB (source of truth)
     if schema.data_type == "boolean":

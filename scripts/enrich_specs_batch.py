@@ -23,180 +23,13 @@ from loguru import logger
 sys.path.insert(0, os.environ.get("APP_ROOT", "/app"))
 from app.database import SessionLocal
 from app.models.intelligence import MaterialCard
+from app.services.commodity_registry import get_batch_spec_schema
 from app.services.spec_write_service import record_spec
 
 BATCH_SIZE = 50  # MPNs per request
 
-# ── Commodity spec schemas (what sub-filters to extract per category) ──
-# Each entry defines the specs to extract for that commodity.
-# These match the commodity_spec_schemas from the faceted search design spec.
-COMMODITY_SPECS = {
-    "dram": {
-        "specs": [
-            {
-                "key": "ddr_type",
-                "label": "DDR Type",
-                "type": "enum",
-                "values": "DDR3, DDR4, DDR5, DDR5X, LPDDR4, LPDDR5",
-            },
-            {"key": "capacity_gb", "label": "Capacity (GB)", "type": "numeric"},
-            {"key": "speed_mhz", "label": "Speed (MHz)", "type": "numeric"},
-            {"key": "ecc", "label": "ECC", "type": "boolean"},
-            {
-                "key": "form_factor",
-                "label": "Form Factor",
-                "type": "enum",
-                "values": "DIMM, SO-DIMM, UDIMM, RDIMM, LRDIMM",
-            },
-        ],
-    },
-    "capacitors": {
-        "specs": [
-            {"key": "capacitance", "label": "Capacitance", "type": "numeric", "unit": "pF/nF/uF"},
-            {"key": "voltage_rating", "label": "Voltage Rating (V)", "type": "numeric"},
-            {"key": "dielectric", "label": "Dielectric", "type": "enum", "values": "X7R, X5R, C0G, Y5V, NP0"},
-            {"key": "tolerance", "label": "Tolerance", "type": "enum", "values": "±1%, ±5%, ±10%, ±20%"},
-            {
-                "key": "package",
-                "label": "Package",
-                "type": "enum",
-                "values": "0402, 0603, 0805, 1206, 1210, through-hole",
-            },
-        ],
-    },
-    "resistors": {
-        "specs": [
-            {"key": "resistance", "label": "Resistance", "type": "numeric", "unit": "Ω/kΩ/MΩ"},
-            {"key": "power_rating", "label": "Power Rating (W)", "type": "numeric"},
-            {"key": "tolerance", "label": "Tolerance", "type": "enum", "values": "0.1%, 1%, 5%"},
-            {"key": "package", "label": "Package", "type": "enum", "values": "0402, 0603, 0805, 1206, through-hole"},
-        ],
-    },
-    "hdd": {
-        "specs": [
-            {"key": "capacity_gb", "label": "Capacity (GB)", "type": "numeric"},
-            {"key": "rpm", "label": "RPM", "type": "enum", "values": "5400, 7200, 10000, 15000"},
-            {"key": "form_factor", "label": "Form Factor", "type": "enum", "values": '2.5", 3.5"'},
-            {"key": "interface", "label": "Interface", "type": "enum", "values": "SATA, SAS, NVMe"},
-        ],
-    },
-    "ssd": {
-        "specs": [
-            {"key": "capacity_gb", "label": "Capacity (GB)", "type": "numeric"},
-            {"key": "form_factor", "label": "Form Factor", "type": "enum", "values": '2.5", M.2, U.2, mSATA'},
-            {"key": "interface", "label": "Interface", "type": "enum", "values": "SATA, NVMe, SAS"},
-            {"key": "read_speed_mbps", "label": "Read Speed (MB/s)", "type": "numeric"},
-        ],
-    },
-    "connectors": {
-        "specs": [
-            {"key": "pin_count", "label": "Pin Count", "type": "numeric"},
-            {"key": "pitch_mm", "label": "Pitch (mm)", "type": "numeric"},
-            {"key": "mounting", "label": "Mounting", "type": "enum", "values": "through-hole, SMD, press-fit"},
-            {"key": "gender", "label": "Gender", "type": "enum", "values": "male, female, genderless"},
-        ],
-    },
-    "motherboards": {
-        "specs": [
-            {
-                "key": "socket",
-                "label": "CPU Socket",
-                "type": "enum",
-                "values": "LGA1700, AM5, LGA4677, LGA1151, LGA2066, SP3",
-            },
-            {"key": "form_factor", "label": "Form Factor", "type": "enum", "values": "ATX, mATX, EATX, Mini-ITX"},
-            {"key": "chipset", "label": "Chipset", "type": "text"},
-            {"key": "ram_slots", "label": "RAM Slots", "type": "numeric"},
-        ],
-    },
-    "cpu": {
-        "specs": [
-            {"key": "socket", "label": "Socket", "type": "text"},
-            {"key": "core_count", "label": "Core Count", "type": "numeric"},
-            {"key": "clock_speed_ghz", "label": "Clock Speed (GHz)", "type": "numeric"},
-            {"key": "tdp_watts", "label": "TDP (W)", "type": "numeric"},
-            {"key": "architecture", "label": "Architecture", "type": "text"},
-        ],
-    },
-    "power_supplies": {
-        "specs": [
-            {"key": "wattage", "label": "Wattage (W)", "type": "numeric"},
-            {"key": "form_factor", "label": "Form Factor", "type": "enum", "values": "ATX, SFX, 1U, 2U, redundant"},
-            {
-                "key": "efficiency",
-                "label": "Efficiency",
-                "type": "enum",
-                "values": "80+ Bronze, 80+ Silver, 80+ Gold, 80+ Platinum, 80+ Titanium",
-            },
-        ],
-    },
-    "gpu": {
-        "specs": [
-            {"key": "memory_gb", "label": "Memory (GB)", "type": "numeric"},
-            {
-                "key": "memory_type",
-                "label": "Memory Type",
-                "type": "enum",
-                "values": "GDDR5, GDDR6, GDDR6X, HBM2, HBM3",
-            },
-            {"key": "interface", "label": "Interface", "type": "enum", "values": "PCIe 3.0, PCIe 4.0, PCIe 5.0"},
-        ],
-    },
-    "inductors": {
-        "specs": [
-            {"key": "inductance", "label": "Inductance", "type": "numeric", "unit": "nH/uH/mH"},
-            {"key": "current_rating", "label": "Current Rating (A)", "type": "numeric"},
-            {"key": "package", "label": "Package", "type": "text"},
-        ],
-    },
-    "diodes": {
-        "specs": [
-            {"key": "type", "label": "Type", "type": "enum", "values": "rectifier, zener, Schottky, TVS"},
-            {"key": "voltage", "label": "Voltage (V)", "type": "numeric"},
-            {"key": "current", "label": "Current (A)", "type": "numeric"},
-            {"key": "package", "label": "Package", "type": "text"},
-        ],
-    },
-    "mosfets": {
-        "specs": [
-            {"key": "channel_type", "label": "Channel", "type": "enum", "values": "N-channel, P-channel"},
-            {"key": "vds", "label": "Vds (V)", "type": "numeric"},
-            {"key": "rds_on", "label": "Rds(on) (mΩ)", "type": "numeric"},
-            {"key": "id_max", "label": "Id max (A)", "type": "numeric"},
-            {"key": "package", "label": "Package", "type": "text"},
-        ],
-    },
-    "microcontrollers": {
-        "specs": [
-            {
-                "key": "core",
-                "label": "Core",
-                "type": "enum",
-                "values": "ARM Cortex-M0, Cortex-M3, Cortex-M4, Cortex-M7, RISC-V, AVR, PIC",
-            },
-            {"key": "flash_kb", "label": "Flash (KB)", "type": "numeric"},
-            {"key": "ram_kb", "label": "RAM (KB)", "type": "numeric"},
-            {"key": "clock_mhz", "label": "Clock (MHz)", "type": "numeric"},
-            {"key": "package", "label": "Package", "type": "text"},
-        ],
-    },
-    "network_cards": {
-        "specs": [
-            {"key": "speed", "label": "Speed", "type": "enum", "values": "1GbE, 10GbE, 25GbE, 40GbE, 100GbE"},
-            {"key": "ports", "label": "Ports", "type": "numeric"},
-            {"key": "interface", "label": "Interface", "type": "enum", "values": "PCIe, OCP, LOM"},
-            {"key": "controller", "label": "Controller", "type": "enum", "values": "Intel, Broadcom, Mellanox"},
-        ],
-    },
-    "flash": {
-        "specs": [
-            {"key": "type", "label": "Type", "type": "enum", "values": "NAND, NOR, EEPROM, eMMC"},
-            {"key": "capacity", "label": "Capacity", "type": "text"},
-            {"key": "interface", "label": "Interface", "type": "enum", "values": "SPI, parallel, I2C, eMMC"},
-            {"key": "package", "label": "Package", "type": "text"},
-        ],
-    },
-}
+# ── Commodity spec schemas — single source of truth from commodity_registry ──
+COMMODITY_SPECS = get_batch_spec_schema()
 
 
 def _build_spec_prompt(category: str, cards: list[dict]) -> str:
@@ -307,7 +140,7 @@ async def submit_spec_extraction(db, category: str, limit: int = 0) -> dict:
     if limit:
         query = query.limit(limit)
 
-    rows = query.all()
+    rows = query.yield_per(5000).all()
     logger.info(f"[{category}] Cards with description: {len(rows)}")
 
     if not rows:
@@ -389,6 +222,14 @@ async def apply_spec_results(meta_path: str, db, dry_run: bool = True) -> dict:
         card_meta_list = meta["request_map"].get(custom_id, [])
         parts = result_data.get("parts", [])
 
+        if len(parts) != len(card_meta_list):
+            logger.warning(
+                "AI returned %d parts but expected %d for %s",
+                len(parts),
+                len(card_meta_list),
+                custom_id,
+            )
+
         for card_info, ai_part in zip(card_meta_list, parts):
             card_id = card_info["id"]
             stats["processed"] += 1
@@ -415,7 +256,7 @@ async def apply_spec_results(meta_path: str, db, dry_run: bool = True) -> dict:
                             value,
                             source="haiku_extraction",
                             confidence=conf,
-                            unit=spec.get("unit", "").split("/")[0] if spec.get("unit") else None,
+                            unit=spec.get("canonical_unit"),  # Use canonical_unit from registry
                         )
 
             stats["updated"] += 1
