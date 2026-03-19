@@ -409,3 +409,197 @@ def cache_signature_extract(db, sender_email: str, extract: dict) -> None:
     except Exception as e:
         logger.debug("Signature cache flush error: %s", e)
         db.rollback()
+
+
+# ── Batch API signature re-parsing ───────────────────────────────────
+
+from ..cache.intel_cache import _get_redis  # noqa: E402
+from ..services.batch_queue import BatchQueue  # noqa: E402
+from ..utils.claude_client import claude_batch_results, claude_batch_submit  # noqa: E402
+
+_REDIS_KEY = "batch:signature_parse:current"
+_BATCH_LIMIT = 100
+
+_SIGNATURE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "full_name": {"type": ["string", "null"]},
+        "title": {"type": ["string", "null"]},
+        "company_name": {"type": ["string", "null"]},
+        "phone": {"type": ["string", "null"]},
+        "mobile": {"type": ["string", "null"]},
+        "website": {"type": ["string", "null"]},
+        "address": {"type": ["string", "null"]},
+        "linkedin_url": {"type": ["string", "null"]},
+    },
+    "required": ["full_name", "title", "company_name", "phone", "mobile", "website", "address", "linkedin_url"],
+}
+
+_BATCH_SYSTEM_PROMPT = "You extract contact information from email signatures. Return ONLY valid JSON."
+
+
+def _build_signature_prompt(record) -> str:
+    """Build a validation/improvement prompt from existing extracted fields.
+
+    Since EmailSignatureExtract does not store the raw email body, we ask Claude to
+    validate and improve the partial fields already extracted by regex.
+    """
+    return (
+        f"Given this partial contact information extracted from an email signature:\n"
+        f"Name: {record.full_name or 'unknown'}\n"
+        f"Email: {record.sender_email}\n"
+        f"Title: {record.title or 'unknown'}\n"
+        f"Company: {record.company_name or 'unknown'}\n"
+        f"Phone: {record.phone or 'unknown'}\n\n"
+        f"Please validate these fields and provide your best assessment. "
+        f"Return a JSON object with the corrected/validated fields."
+    )
+
+
+async def batch_parse_signatures(db) -> str | None:
+    """Submit low-confidence regex-parsed signatures to Claude Batch API.
+
+    Queries EmailSignatureExtract records where extraction_method = 'regex' AND
+    confidence < 0.7. Uses existing extracted fields as context for AI validation (raw
+    email body is not stored on the extract). Submits up to 100 records.
+
+    Returns the batch_id or None if no records to process or submit failed.
+    """
+    from ..models import EmailSignatureExtract  # noqa: F811
+
+    # ── Inflight guard ──────────────────────────────────────────────
+    r = _get_redis()
+    if r and r.get(_REDIS_KEY):
+        logger.info("batch_parse_signatures: batch already pending, skipping submit")
+        return None
+
+    records = (
+        db.query(EmailSignatureExtract)
+        .filter(
+            EmailSignatureExtract.extraction_method == "regex",
+            EmailSignatureExtract.confidence < 0.7,
+        )
+        .limit(_BATCH_LIMIT)
+        .all()
+    )
+
+    if not records:
+        logger.debug("batch_parse_signatures: no low-confidence records found")
+        return None
+
+    bq = BatchQueue(prefix="sig_parse")
+    for extract in records:
+        prompt = _build_signature_prompt(extract)
+        bq.enqueue(
+            str(extract.id),
+            {
+                "prompt": prompt,
+                "schema": _SIGNATURE_SCHEMA,
+                "system": _BATCH_SYSTEM_PROMPT,
+                "model_tier": "fast",
+                "max_tokens": 512,
+            },
+        )
+
+    requests = bq.build_batch()
+    if not requests:
+        return None
+
+    batch_id = await claude_batch_submit(requests)
+    if not batch_id:
+        logger.warning("batch_parse_signatures: claude_batch_submit returned None")
+        return None
+
+    if r:
+        r.set(_REDIS_KEY, batch_id)
+
+    logger.info("batch_parse_signatures: submitted %d records, batch_id=%s", len(records), batch_id)
+    return batch_id
+
+
+async def process_signature_batch_results(db) -> dict | None:
+    """Poll and apply batch signature parsing results.
+
+    Loads the batch_id from Redis, checks for results via claude_batch_results(). If
+    results are available, applies parsed data to EmailSignatureExtract records, sets
+    extraction_method = 'batch_api' and recalculates confidence.
+
+    Returns {"applied": int, "errors": int} when complete, or None if no batch pending /
+    still processing / Redis unavailable.
+
+    On commit failure, returns stats WITHOUT clearing the Redis key so the batch can be
+    retried.
+    """
+    from ..models import EmailSignatureExtract  # noqa: F811
+
+    r = _get_redis()
+    if not r:
+        return None
+
+    raw = r.get(_REDIS_KEY)
+    if not raw:
+        return None
+
+    batch_id = raw.decode() if isinstance(raw, bytes) else raw
+
+    results = await claude_batch_results(batch_id)
+    if results is None:
+        logger.debug("process_signature_batch_results: batch %s still processing", batch_id)
+        return None
+
+    stats = {"applied": 0, "errors": 0}
+    _FIELDS = ("full_name", "title", "company_name", "phone", "mobile", "website", "address", "linkedin_url")
+
+    for custom_id, parsed in results.items():
+        if parsed is None:
+            logger.debug("Batch signature result error for %s — skipping", custom_id)
+            stats["errors"] += 1
+            continue
+
+        # custom_id format: "sig_parse:<record_id>"
+        id_parts = custom_id.split(":")
+        if len(id_parts) < 2:
+            stats["errors"] += 1
+            continue
+        try:
+            record_id = int(id_parts[1])
+        except (ValueError, IndexError):
+            stats["errors"] += 1
+            continue
+
+        record = db.get(EmailSignatureExtract, record_id)
+        if not record:
+            stats["errors"] += 1
+            continue
+
+        try:
+            for field in _FIELDS:
+                val = parsed.get(field)
+                if val:
+                    setattr(record, field, val)
+
+            # Calculate confidence — same formula as parse_signature_ai
+            fields_found = sum(1 for f in _FIELDS if getattr(record, f, None))
+            record.confidence = min(0.5 + (fields_found * 0.08), 0.95)
+            record.extraction_method = "batch_api"
+            record.updated_at = datetime.now(timezone.utc)
+            stats["applied"] += 1
+        except Exception as e:
+            logger.warning("Failed to apply batch signature for record %d: %s", record_id, e)
+            stats["errors"] += 1
+
+    try:
+        db.commit()
+    except Exception as e:
+        logger.error("process_signature_batch_results commit failed: %s", e)
+        db.rollback()
+        return stats
+
+    r.delete(_REDIS_KEY)
+    logger.info(
+        "process_signature_batch_results: %d applied, %d errors from batch %s",
+        stats["applied"],
+        stats["errors"],
+        batch_id,
+    )
+    return stats
