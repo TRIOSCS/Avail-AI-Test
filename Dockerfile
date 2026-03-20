@@ -22,6 +22,14 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libgbm1 libasound2 fonts-unifont \
     && rm -rf /var/lib/apt/lists/*
 
+# Install GitHub CLI for trouble report filing
+RUN curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg \
+      -o /usr/share/keyrings/githubcli-archive-keyring.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" \
+       > /etc/apt/sources.list.d/github-cli.list \
+    && apt-get update && apt-get install -y --no-install-recommends gh \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Python deps early — only re-runs when requirements.txt changes
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt \

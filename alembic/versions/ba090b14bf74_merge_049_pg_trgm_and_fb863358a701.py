@@ -1,7 +1,7 @@
-"""Merge all orphan migration heads.
+"""Merge three orphan migration heads into one.
 
 Revision ID: ba090b14bf74
-Revises: 049_pg_trgm, fb863358a701, d1a2b3c4e5f6, 009_prospect_accounts_discovery_batches, 050, 064
+Revises: 049_pg_trgm, fb863358a701, d1a2b3c4e5f6 (merged)
 Create Date: 2026-03-20 20:31:19.730652
 """
 
@@ -13,10 +13,6 @@ down_revision: Union[str, None] = (
     "049_pg_trgm",
     "fb863358a701",
     "d1a2b3c4e5f6",
-    "009_prospect_accounts_discovery_batches",
-    "050",
-    "064",
-    "0db55f6cfb21",
 )
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None

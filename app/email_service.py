@@ -19,6 +19,8 @@ from .models import (
     VendorResponse,
 )
 from .services.credential_service import get_credential_cached
+from .shared_constants import JUNK_DOMAINS as NOISE_DOMAINS
+from .shared_constants import JUNK_EMAIL_PREFIXES as NOISE_PREFIXES
 from .vendor_utils import normalize_vendor_name
 
 
@@ -28,6 +30,44 @@ def _build_html_body(plain_text: str) -> str:
     return f"""<html><body style="font-family: Calibri, Arial, sans-serif; font-size: 14px; color: #333;">
 {html_body}
 </body></html>"""
+
+
+def _create_contact(
+    db: Session,
+    requisition_id: int,
+    user_id: int,
+    vendor_name: str,
+    vendor_email: str,
+    parts: list,
+    subject: str,
+    body: str,
+    status: str,
+    error_message: str | None = None,
+) -> Contact:
+    """Create and flush a Contact record with common fields.
+
+    Called by: send_batch_rfq (for success, exception-error, and API-error cases).
+    Depends on: normalize_vendor_name.
+    """
+    now = datetime.now(timezone.utc)
+    contact = Contact(
+        requisition_id=requisition_id,
+        user_id=user_id,
+        contact_type="email",
+        vendor_name=vendor_name,
+        vendor_name_normalized=normalize_vendor_name(vendor_name or ""),
+        vendor_contact=vendor_email,
+        parts_included=parts,
+        subject=subject,
+        details=body,
+        status=status,
+        error_message=error_message,
+        status_updated_at=now,
+        created_at=now,
+    )
+    db.add(contact)
+    db.flush()
+    return contact
 
 
 async def send_batch_rfq(
@@ -103,23 +143,19 @@ async def send_batch_rfq(
 
         if isinstance(send_result, Exception):
             logger.error(f"Send error to {email}: {send_result}")
-            failed_contact = Contact(
-                requisition_id=requisition_id,
-                user_id=user_id,
-                contact_type="email",
-                vendor_name=group["vendor_name"],
-                vendor_name_normalized=normalize_vendor_name(group["vendor_name"] or ""),
-                vendor_contact=email,
-                parts_included=group.get("parts", []),
-                subject=tagged_subject,
-                details=group["body"],
-                status="failed",
-                error_message=str(send_result)[:500],
-                status_updated_at=datetime.now(timezone.utc),
-                created_at=datetime.now(timezone.utc),
+            err_msg = str(send_result)[:500]
+            failed_contact = _create_contact(
+                db,
+                requisition_id,
+                user_id,
+                group["vendor_name"],
+                email,
+                group.get("parts", []),
+                tagged_subject,
+                group["body"],
+                "failed",
+                err_msg,
             )
-            db.add(failed_contact)
-            db.flush()
             results.append(
                 {
                     "id": failed_contact.id,
@@ -133,23 +169,19 @@ async def send_batch_rfq(
 
         if "error" in send_result:
             logger.error(f"Send failed to {email}: {send_result}")
-            failed_contact = Contact(
-                requisition_id=requisition_id,
-                user_id=user_id,
-                contact_type="email",
-                vendor_name=group["vendor_name"],
-                vendor_name_normalized=normalize_vendor_name(group["vendor_name"] or ""),
-                vendor_contact=email,
-                parts_included=group.get("parts", []),
-                subject=tagged_subject,
-                details=group["body"],
-                status="failed",
-                error_message=str(send_result.get("detail", ""))[:500],
-                status_updated_at=datetime.now(timezone.utc),
-                created_at=datetime.now(timezone.utc),
+            err_msg = str(send_result.get("detail", ""))[:500]
+            failed_contact = _create_contact(
+                db,
+                requisition_id,
+                user_id,
+                group["vendor_name"],
+                email,
+                group.get("parts", []),
+                tagged_subject,
+                group["body"],
+                "failed",
+                err_msg,
             )
-            db.add(failed_contact)
-            db.flush()
             results.append(
                 {
                     "id": failed_contact.id,
@@ -161,22 +193,17 @@ async def send_batch_rfq(
             )
             continue
 
-        contact = Contact(
-            requisition_id=requisition_id,
-            user_id=user_id,
-            contact_type="email",
-            vendor_name=group["vendor_name"],
-            vendor_name_normalized=normalize_vendor_name(group["vendor_name"] or ""),
-            vendor_contact=email,
-            parts_included=group.get("parts", []),
-            subject=tagged_subject,
-            details=group["body"],
-            status="sent",
-            status_updated_at=datetime.now(timezone.utc),
-            created_at=datetime.now(timezone.utc),
+        contact = _create_contact(
+            db,
+            requisition_id,
+            user_id,
+            group["vendor_name"],
+            email,
+            group.get("parts", []),
+            tagged_subject,
+            group["body"],
+            "sent",
         )
-        db.add(contact)
-        db.flush()
         contacts_to_lookup.append((contact, tagged_subject))
         results.append(
             {
@@ -597,7 +624,7 @@ def _classify_response(parsed: dict, body: str, subject: str) -> dict:
         return {
             "type": "ooo_bounce",
             "needs_action": False,
-            "action_hint": "Auto-reply detected — will need follow-up later",
+            "action_hint": "Auto-reply detected \u2014 will need follow-up later",
         }
 
     parts = parsed.get("parts", [])
@@ -608,7 +635,7 @@ def _classify_response(parsed: dict, body: str, subject: str) -> dict:
         return {
             "type": "quote_provided",
             "needs_action": True,
-            "action_hint": f"Quote received for {len(parts)} part(s) — review pricing",
+            "action_hint": f"Quote received for {len(parts)} part(s) \u2014 review pricing",
         }
 
     # Partial availability — some parts but not all, or limited qty
@@ -617,7 +644,7 @@ def _classify_response(parsed: dict, body: str, subject: str) -> dict:
             return {
                 "type": "partial_availability",
                 "needs_action": True,
-                "action_hint": "Partial stock available — review quantities",
+                "action_hint": "Partial stock available \u2014 review quantities",
             }
 
     # No stock
@@ -655,7 +682,7 @@ def _classify_response(parsed: dict, body: str, subject: str) -> dict:
         return {
             "type": "counter_offer",
             "needs_action": True,
-            "action_hint": "Vendor proposed an alternative — review offer",
+            "action_hint": "Vendor proposed an alternative \u2014 review offer",
         }
 
     # Clarification needed
@@ -673,14 +700,14 @@ def _classify_response(parsed: dict, body: str, subject: str) -> dict:
         return {
             "type": "clarification_needed",
             "needs_action": True,
-            "action_hint": "Vendor asked a question — reply needed",
+            "action_hint": "Vendor asked a question \u2014 reply needed",
         }
 
     # Default: follow_up_pending (got a reply but unclear what it means)
     return {
         "type": "follow_up_pending",
         "needs_action": True,
-        "action_hint": "Response received — review and determine next steps",
+        "action_hint": "Response received \u2014 review and determine next steps",
     }
 
 
@@ -714,59 +741,8 @@ def _progress_contact_status(contact: Contact, vr: VendorResponse, db: Session):
     contact.status_updated_at = now
 
 
-# Noise filter — common non-vendor senders
-NOISE_DOMAINS = {
-    "microsoft.com",
-    "microsoftonline.com",
-    "office365.com",
-    "office.com",
-    "google.com",
-    "googleapis.com",
-    "googlemail.com",
-    "linkedin.com",
-    "facebook.com",
-    "twitter.com",
-    "instagram.com",
-    "youtube.com",
-    "github.com",
-    "slack.com",
-    "zoom.us",
-    "teams.microsoft.com",
-    "mailchimp.com",
-    "constantcontact.com",
-    "sendgrid.net",
-    "amazonses.com",
-    "hubspot.com",
-    "salesforce.com",
-    "marketo.com",
-    "fedex.com",
-    "ups.com",
-    "usps.com",
-    "dhl.com",
-    "intuit.com",
-    "quickbooks.com",
-    "paypal.com",
-    "stripe.com",
-    "docusign.com",
-    "dropbox.com",
-    "box.com",
-}
-
-NOISE_PREFIXES = {
-    "noreply",
-    "no-reply",
-    "donotreply",
-    "do-not-reply",
-    "mailer-daemon",
-    "postmaster",
-    "notifications",
-    "alerts",
-    "newsletter",
-    "marketing",
-    "support",
-    "info",
-    "billing",
-}
+# NOISE_DOMAINS and NOISE_PREFIXES are imported from shared_constants
+# (as JUNK_DOMAINS / JUNK_EMAIL_PREFIXES) at the top of this file.
 
 
 def _is_noise_email(email: str) -> bool:
@@ -872,7 +848,15 @@ async def _parse_sequential_fallback(
 
 
 def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -> None:
-    """Apply AI-parsed data to a VendorResponse record."""
+    """Apply AI-parsed data to a VendorResponse record.
+
+    Pure field assignment \u2014 classifies the response and sets fields on vr.
+    When db is provided, also runs _auto_create_offers_from_parse for
+    backward compatibility with existing callers.
+
+    Called by: _parse_sequential_fallback, process_batch_results, tests.
+    Depends on: _classify_response, _auto_create_offers_from_parse.
+    """
     vr.parsed_data = parsed
     vr.confidence = parsed.get("confidence", 0)
     vr.status = "parsed"
@@ -881,156 +865,175 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
     vr.needs_action = classification["needs_action"]
     vr.action_hint = classification["action_hint"]
 
-    # Auto-create Offer records from parsed emails.
-    # High confidence (>=0.8) → T5, auto-active.
-    # Medium confidence (0.5-0.8) → T4, pending_review (review queue).
-    if db and vr.confidence and vr.confidence >= 0.5 and vr.requisition_id:
-        try:
-            from .services.response_parser import extract_draft_offers
+    # Delegate business-logic side effects when db is provided
+    if db is not None:
+        _auto_create_offers_from_parse(vr, parsed, db)
 
-            draft_offers = extract_draft_offers(parsed, vr.vendor_name or "Unknown")
-            req = db.get(Requisition, vr.requisition_id)
-            owner_id = vr.scanned_by_user_id
-            if req and req.created_by:
-                owner_id = req.created_by
 
-            # Build maps for linking: MPN → requirement_id, MPN → material_card_id
-            from .search_service import resolve_material_card
-            from .utils.normalization import normalize_mpn_key
+def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session) -> None:
+    """Auto-create Offer records and side effects from parsed email data.
 
-            req_obj = db.get(Requisition, vr.requisition_id)
-            mpn_to_req_id: dict[str, int] = {}
-            mpn_to_card_id: dict[str, int] = {}
-            if req_obj:
-                for r in db.query(Requirement).filter(Requirement.requisition_id == vr.requisition_id).all():
-                    if r.primary_mpn:
-                        key = normalize_mpn_key(r.primary_mpn) or r.primary_mpn.upper().strip()
-                        mpn_to_req_id[key] = r.id
-                        if r.material_card_id:
-                            mpn_to_card_id[key] = r.material_card_id
+    Business logic extracted from _apply_parsed_result:
+    - Creates Offer records (high confidence >= 0.8 active, 0.5-0.8 pending_review)
+    - Generates tasks for email-parsed offers
+    - Captures offer facts into Knowledge Ledger
+    - Propagates tags from material cards to vendor cards
+    - Resets strategic vendor 39-day clock
+    - Creates/updates deduplicated ActivityLog notifications
 
-            for draft in draft_offers:
-                raw_mpn = draft.get("mpn") or ""
-                mpn_key = normalize_mpn_key(raw_mpn) or raw_mpn.upper().strip()
-                # Dedup: check if offer already exists from this vendor response
-                existing = (
-                    db.query(Offer.id)
+    Called by: _apply_parsed_result (when db provided).
+    Depends on: extract_draft_offers, resolve_material_card, normalize_mpn_key,
+                tier_for_parsed_offer, task_service, knowledge_service, tagging.
+    """
+    if not (vr.confidence and vr.confidence >= 0.5 and vr.requisition_id):
+        return
+
+    try:
+        from .services.response_parser import extract_draft_offers
+
+        draft_offers = extract_draft_offers(parsed, vr.vendor_name or "Unknown")
+        req = db.get(Requisition, vr.requisition_id)
+        owner_id = vr.scanned_by_user_id
+        if req and req.created_by:
+            owner_id = req.created_by
+
+        # Build maps for linking: MPN -> requirement_id, MPN -> material_card_id
+        from .search_service import resolve_material_card
+        from .utils.normalization import normalize_mpn_key
+
+        req_obj = db.get(Requisition, vr.requisition_id)
+        mpn_to_req_id: dict[str, int] = {}
+        mpn_to_card_id: dict[str, int] = {}
+        if req_obj:
+            for r in db.query(Requirement).filter(Requirement.requisition_id == vr.requisition_id).all():
+                if r.primary_mpn:
+                    key = normalize_mpn_key(r.primary_mpn) or r.primary_mpn.upper().strip()
+                    mpn_to_req_id[key] = r.id
+                    if r.material_card_id:
+                        mpn_to_card_id[key] = r.material_card_id
+
+        for draft in draft_offers:
+            raw_mpn = draft.get("mpn") or ""
+            mpn_key = normalize_mpn_key(raw_mpn) or raw_mpn.upper().strip()
+            # Dedup: check if offer already exists from this vendor response
+            existing = (
+                db.query(Offer.id)
+                .filter(
+                    Offer.vendor_response_id == vr.id,
+                    Offer.mpn == draft.get("mpn", ""),
+                )
+                .first()
+            )
+            if existing:
+                continue
+
+            # Resolve material card -- use requirement's card or find/create
+            card_id = mpn_to_card_id.get(mpn_key)
+            if not card_id and raw_mpn.strip():
+                card = resolve_material_card(raw_mpn, db)
+                if card:
+                    card_id = card.id
+
+            from .evidence_tiers import tier_for_parsed_offer
+
+            offer = Offer(
+                requisition_id=vr.requisition_id,
+                requirement_id=mpn_to_req_id.get(mpn_key),
+                material_card_id=card_id,
+                vendor_name=draft.get("vendor_name", ""),
+                vendor_name_normalized=normalize_vendor_name(draft.get("vendor_name", "")),
+                mpn=draft.get("mpn", ""),
+                manufacturer=draft.get("manufacturer"),
+                qty_available=draft.get("qty_available"),
+                unit_price=draft.get("unit_price"),
+                currency=draft.get("currency", "USD"),
+                lead_time=draft.get("lead_time"),
+                date_code=draft.get("date_code"),
+                condition=draft.get("condition"),
+                packaging=draft.get("packaging"),
+                moq=draft.get("moq"),
+                notes=draft.get("notes"),
+                source="email_parse",
+                status="active" if vr.confidence >= 0.8 else "pending_review",
+                vendor_response_id=vr.id,
+                evidence_tier=tier_for_parsed_offer(vr.confidence),
+                parse_confidence=vr.confidence,
+            )
+            db.add(offer)
+            db.flush()
+
+            # Auto-generate task for email-parsed offer
+            try:
+                from app.services.task_service import on_email_offer_parsed
+
+                on_email_offer_parsed(
+                    db,
+                    offer.requisition_id,
+                    offer.vendor_name or "Unknown",
+                    offer.mpn or "?",
+                    offer.id,
+                )
+            except Exception:
+                logger.debug("Task auto-gen for email offer failed", exc_info=True)
+
+            # Auto-capture offer facts into Knowledge Ledger
+            try:
+                from app.services.knowledge_service import capture_offer_fact
+
+                capture_offer_fact(db, offer=offer)
+            except Exception as e:
+                logger.warning("Knowledge auto-capture (email offer) failed: {}", e)
+
+            # Tag propagation: propagate material card tags to vendor
+            try:
+                if offer.material_card_id and offer.vendor_name_normalized:
+                    from .services.tagging import propagate_tags_to_entity
+
+                    vc = db.query(VendorCard).filter_by(normalized_name=offer.vendor_name_normalized).first()
+                    if vc:  # pragma: no cover
+                        propagate_tags_to_entity("vendor_card", vc.id, offer.material_card_id, 1.0, db)
+            except Exception:
+                logger.debug("Tag propagation failed for offer %s", offer.id, exc_info=True)
+
+            # Reset strategic vendor 39-day clock
+            if offer.vendor_card_id:
+                try:
+                    from app.services.strategic_vendor_service import record_offer as sv_record
+
+                    sv_record(db, offer.vendor_card_id)
+                except Exception:
+                    logger.warning("Strategic vendor clock reset failed for offer %s", offer.id, exc_info=True)
+
+            # Deduplicated notification -- update existing if unread, else create new
+            if owner_id:
+                existing_notif = (
+                    db.query(ActivityLog)
                     .filter(
-                        Offer.vendor_response_id == vr.id,
-                        Offer.mpn == draft.get("mpn", ""),
+                        ActivityLog.user_id == owner_id,
+                        ActivityLog.activity_type == "offer_pending_review",
+                        ActivityLog.requisition_id == vr.requisition_id,
+                        ActivityLog.dismissed_at.is_(None),
                     )
                     .first()
                 )
-                if existing:
-                    continue
-
-                # Resolve material card — use requirement's card or find/create
-                card_id = mpn_to_card_id.get(mpn_key)
-                if not card_id and raw_mpn.strip():
-                    card = resolve_material_card(raw_mpn, db)
-                    if card:
-                        card_id = card.id
-
-                from .evidence_tiers import tier_for_parsed_offer
-
-                offer = Offer(
-                    requisition_id=vr.requisition_id,
-                    requirement_id=mpn_to_req_id.get(mpn_key),
-                    material_card_id=card_id,
-                    vendor_name=draft.get("vendor_name", ""),
-                    vendor_name_normalized=normalize_vendor_name(draft.get("vendor_name", "")),
-                    mpn=draft.get("mpn", ""),
-                    manufacturer=draft.get("manufacturer"),
-                    qty_available=draft.get("qty_available"),
-                    unit_price=draft.get("unit_price"),
-                    currency=draft.get("currency", "USD"),
-                    lead_time=draft.get("lead_time"),
-                    date_code=draft.get("date_code"),
-                    condition=draft.get("condition"),
-                    packaging=draft.get("packaging"),
-                    moq=draft.get("moq"),
-                    notes=draft.get("notes"),
-                    source="email_parse",
-                    status="active" if vr.confidence >= 0.8 else "pending_review",
-                    vendor_response_id=vr.id,
-                    evidence_tier=tier_for_parsed_offer(vr.confidence),
-                    parse_confidence=vr.confidence,
-                )
-                db.add(offer)
-                db.flush()
-
-                # Auto-generate task for email-parsed offer
-                try:
-                    from app.services.task_service import on_email_offer_parsed
-
-                    on_email_offer_parsed(
-                        db,
-                        offer.requisition_id,
-                        offer.vendor_name or "Unknown",
-                        offer.mpn or "?",
-                        offer.id,
+                if existing_notif:
+                    existing_notif.subject = (
+                        f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} \u2014 {draft.get('mpn', '?')}"
                     )
-                except Exception:
-                    logger.debug("Task auto-gen for email offer failed", exc_info=True)
-
-                # Auto-capture offer facts into Knowledge Ledger
-                try:
-                    from app.services.knowledge_service import capture_offer_fact
-
-                    capture_offer_fact(db, offer=offer)
-                except Exception as e:
-                    logger.warning("Knowledge auto-capture (email offer) failed: {}", e)
-
-                # Tag propagation: propagate material card tags to vendor
-                try:
-                    if offer.material_card_id and offer.vendor_name_normalized:
-                        from .services.tagging import propagate_tags_to_entity
-
-                        vc = db.query(VendorCard).filter_by(normalized_name=offer.vendor_name_normalized).first()
-                        if vc:  # pragma: no cover
-                            propagate_tags_to_entity("vendor_card", vc.id, offer.material_card_id, 1.0, db)
-                except Exception:
-                    logger.debug("Tag propagation failed for offer %s", offer.id, exc_info=True)
-
-                # Reset strategic vendor 39-day clock
-                if offer.vendor_card_id:
-                    try:
-                        from app.services.strategic_vendor_service import record_offer as sv_record
-
-                        sv_record(db, offer.vendor_card_id)
-                    except Exception:
-                        logger.warning("Strategic vendor clock reset failed for offer %s", offer.id, exc_info=True)
-
-                # Deduplicated notification — update existing if unread, else create new
-                if owner_id:
-                    existing_notif = (
-                        db.query(ActivityLog)
-                        .filter(
-                            ActivityLog.user_id == owner_id,
-                            ActivityLog.activity_type == "offer_pending_review",
-                            ActivityLog.requisition_id == vr.requisition_id,
-                            ActivityLog.dismissed_at.is_(None),
+                    existing_notif.created_at = datetime.now(timezone.utc)
+                else:
+                    db.add(
+                        ActivityLog(
+                            user_id=owner_id,
+                            activity_type="offer_pending_review",
+                            channel="system",
+                            requisition_id=vr.requisition_id,
+                            contact_name=vr.vendor_name,
+                            subject=f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} \u2014 {draft.get('mpn', '?')}",
                         )
-                        .first()
                     )
-                    if existing_notif:
-                        existing_notif.subject = (
-                            f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} — {draft.get('mpn', '?')}"
-                        )
-                        existing_notif.created_at = datetime.now(timezone.utc)
-                    else:
-                        db.add(
-                            ActivityLog(
-                                user_id=owner_id,
-                                activity_type="offer_pending_review",
-                                channel="system",
-                                requisition_id=vr.requisition_id,
-                                contact_name=vr.vendor_name,
-                                subject=f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} — {draft.get('mpn', '?')}",
-                            )
-                        )
-        except Exception as e:
-            logger.warning(f"Failed to auto-create draft offers: {e}")
+    except Exception as e:
+        logger.warning(f"Failed to auto-create draft offers: {e}")
 
 
 async def process_batch_results(db: Session) -> int:
@@ -1063,7 +1066,7 @@ async def process_batch_results(db: Session) -> int:
             continue
 
         if results is None:
-            # Still processing — check for timeout
+            # Still processing -- check for timeout
             if pb.submitted_at:
                 sa = pb.submitted_at if pb.submitted_at.tzinfo else pb.submitted_at.replace(tzinfo=timezone.utc)
                 if datetime.now(timezone.utc) - sa > timedelta(hours=24):
@@ -1072,7 +1075,7 @@ async def process_batch_results(db: Session) -> int:
                     db.commit()
             continue
 
-        # Batch complete — apply results
+        # Batch complete -- apply results
         request_map = pb.request_map or {}
         applied = 0
 
