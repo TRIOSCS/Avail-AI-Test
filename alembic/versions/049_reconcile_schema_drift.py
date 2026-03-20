@@ -80,7 +80,7 @@ def upgrade() -> None:
     op.drop_index("ix_bp_approved_by", table_name="buy_plans", if_exists=True)
     op.drop_index("ix_bp_cancelled_by", table_name="buy_plans", if_exists=True)
     op.drop_index("ix_bp_completed_by", table_name="buy_plans", if_exists=True)
-    op.create_index("ix_buyplans_token", "buy_plans", ["approval_token"], unique=False)
+    op.create_index("ix_buyplans_token", "buy_plans", ["approval_token"], unique=False, if_not_exists=True)
 
     # ── BUCKET 1: Index reconciliation — companies ──
     op.drop_index("ix_companies_owner", table_name="companies", if_exists=True)
@@ -95,7 +95,7 @@ def upgrade() -> None:
     op.create_index("ix_contact_type_vendor", "contacts", ["contact_type", "vendor_name"], unique=False)
 
     # ── BUCKET 1: Index reconciliation — email_signature_extracts ──
-    op.create_index("ix_ese_email", "email_signature_extracts", ["sender_email"], unique=True)
+    op.create_index("ix_ese_email", "email_signature_extracts", ["sender_email"], unique=True, if_not_exists=True)
 
     # ── BUCKET 1: Index reconciliation — enrichment_jobs, enrichment_queue ──
     op.drop_index("ix_ej_started_by", table_name="enrichment_jobs", if_exists=True)
@@ -154,7 +154,7 @@ def upgrade() -> None:
     op.create_index("ix_requisitions_created_at", "requisitions", ["created_at"], unique=False)
     op.create_index("ix_requisitions_created_by", "requisitions", ["created_by"], unique=False)
     op.create_index("ix_requisitions_customer_name", "requisitions", ["customer_name"], unique=False)
-    op.create_index("ix_requisitions_name", "requisitions", ["name"], unique=False)
+    op.create_index("ix_requisitions_name", "requisitions", ["name"], unique=False, if_not_exists=True)
     op.create_index("ix_requisitions_site", "requisitions", ["customer_site_id"], unique=False)
     op.create_index("ix_requisitions_status", "requisitions", ["status"], unique=False)
 
@@ -187,10 +187,10 @@ def upgrade() -> None:
     # ── BUCKET 1: Index reconciliation — vendor_responses ──
     op.drop_index("ix_vendor_responses_vendor_name", table_name="vendor_responses", if_exists=True)
     op.create_index("ix_vr_classification", "vendor_responses", ["classification"], unique=False)
-    op.create_index("ix_vr_contact", "vendor_responses", ["contact_id"], unique=False)
+    op.create_index("ix_vr_contact", "vendor_responses", ["contact_id"], unique=False, if_not_exists=True)
     op.create_index("ix_vr_received_email", "vendor_responses", ["received_at", "vendor_email"], unique=False)
     op.create_index("ix_vr_req_email", "vendor_responses", ["requisition_id", "vendor_email"], unique=False)
-    op.create_index("ix_vr_scanned_by", "vendor_responses", ["scanned_by_user_id"], unique=False)
+    op.create_index("ix_vr_scanned_by", "vendor_responses", ["scanned_by_user_id"], unique=False, if_not_exists=True)
     op.create_index("ix_vr_vendor_name", "vendor_responses", ["vendor_name"], unique=False)
 
     # ── BUCKET 1: Index reconciliation — vendor_reviews ──
