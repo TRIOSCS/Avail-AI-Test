@@ -14,11 +14,13 @@ from sqlalchemy.orm import Session
 from app.models import Company, User
 from app.models.excess import ExcessLineItem, ExcessList
 from app.services.excess_service import (
+    confirm_import,
     create_excess_list,
     delete_excess_list,
     get_excess_list,
     import_line_items,
     list_excess_lists,
+    preview_import,
     update_excess_list,
 )
 from tests.conftest import engine
@@ -55,6 +57,16 @@ def _make_user(db: Session, email: str = "trader@test.com") -> User:
 
 def _make_excess_list(db: Session, company: Company, user: User, title: str = "Test Excess") -> ExcessList:
     return create_excess_list(db, title=title, company_id=company.id, owner_id=user.id)
+
+
+@pytest.fixture()
+def company(db_session: Session) -> Company:
+    return _make_company(db_session)
+
+
+@pytest.fixture()
+def trader(db_session: Session) -> User:
+    return _make_user(db_session)
 
 
 # ---------------------------------------------------------------------------
@@ -335,3 +347,71 @@ class TestImportLineItems:
         with pytest.raises(HTTPException) as exc_info:
             import_line_items(db_session, 99999, [{"part_number": "X", "quantity": "1"}])
         assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# TestPreviewImport
+# ---------------------------------------------------------------------------
+
+
+class TestPreviewImport:
+    def test_parses_valid_rows(self, db_session, company, trader):
+        el = create_excess_list(db_session, title="Preview", company_id=company.id, owner_id=trader.id)
+        rows = [
+            {"part_number": "LM358N", "quantity": "500", "asking_price": "0.45"},
+            {"mpn": "NE555P", "qty": "1000", "manufacturer": "TI"},
+        ]
+        result = preview_import(rows)
+        assert result["valid_count"] == 2
+        assert result["error_count"] == 0
+        assert len(result["preview_rows"]) == 2
+        assert result["preview_rows"][0]["part_number"] == "LM358N"
+
+    def test_flags_invalid_rows(self):
+        rows = [
+            {"part_number": "", "quantity": "500"},
+            {"part_number": "LM358N", "quantity": "abc"},
+            {"part_number": "NE555P", "quantity": "100"},
+        ]
+        result = preview_import(rows)
+        assert result["valid_count"] == 1
+        assert result["error_count"] == 2
+        assert len(result["errors"]) == 2
+        assert "Row 1" in result["errors"][0]
+
+    def test_detects_column_mapping(self):
+        rows = [{"mpn": "LM358N", "qty": "100", "cost": "0.50"}]
+        result = preview_import(rows)
+        mapping = result["column_mapping"]
+        assert mapping["mpn"] == "part_number"
+        assert mapping["qty"] == "quantity"
+        assert mapping["cost"] == "asking_price"
+
+    def test_limits_preview_to_10_rows(self):
+        rows = [{"part_number": f"PART{i}", "quantity": "1"} for i in range(25)]
+        result = preview_import(rows)
+        assert len(result["preview_rows"]) == 10
+        assert result["valid_count"] == 25
+
+
+# ---------------------------------------------------------------------------
+# TestConfirmImport
+# ---------------------------------------------------------------------------
+
+
+class TestConfirmImport:
+    def test_imports_validated_rows(self, db_session, company, trader):
+        el = create_excess_list(db_session, title="Confirm", company_id=company.id, owner_id=trader.id)
+        validated_rows = [
+            {"part_number": "LM358N", "quantity": 500, "asking_price": 0.45},
+            {"part_number": "NE555P", "quantity": 1000, "manufacturer": "TI"},
+        ]
+        result = confirm_import(db_session, el.id, validated_rows)
+        assert result["imported"] == 2
+        db_session.refresh(el)
+        assert el.total_line_items == 2
+
+    def test_rejects_empty_rows(self, db_session, company, trader):
+        el = create_excess_list(db_session, title="Empty", company_id=company.id, owner_id=trader.id)
+        result = confirm_import(db_session, el.id, [])
+        assert result["imported"] == 0

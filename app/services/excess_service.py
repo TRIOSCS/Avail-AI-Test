@@ -255,3 +255,81 @@ def import_line_items(db: Session, list_id: int, rows: list[dict]) -> dict:
         skipped,
     )
     return {"imported": imported, "skipped": skipped, "errors": errors}
+
+
+def preview_import(rows: list[dict]) -> dict:
+    """Parse rows and return a preview with validation results.
+
+    No DB access.
+    """
+    valid_rows = []
+    errors = []
+    column_mapping = {}
+
+    for i, raw_row in enumerate(rows, start=1):
+        for key in raw_row:
+            canonical = _HEADER_MAP.get(key.strip().lower().replace(" ", "_"))
+            if canonical and key not in column_mapping:
+                column_mapping[key] = canonical
+
+        row = _normalize_row(raw_row)
+        part_number = (row.get("part_number") or "").strip()
+        if not part_number:
+            errors.append(f"Row {i}: blank part_number — will be skipped")
+            continue
+
+        quantity = _parse_quantity(row.get("quantity"))
+        if quantity is None:
+            errors.append(f"Row {i}: invalid quantity — will be skipped")
+            continue
+
+        asking_price = _parse_price(row.get("asking_price"))
+        manufacturer = (row.get("manufacturer") or "").strip() or None
+        date_code = (row.get("date_code") or "").strip() or None
+        condition = (row.get("condition") or "").strip() or "New"
+
+        valid_rows.append(
+            {
+                "part_number": part_number,
+                "manufacturer": manufacturer,
+                "quantity": quantity,
+                "date_code": date_code,
+                "condition": condition,
+                "asking_price": float(asking_price) if asking_price is not None else None,
+            }
+        )
+
+    return {
+        "valid_count": len(valid_rows),
+        "error_count": len(errors),
+        "errors": errors,
+        "preview_rows": valid_rows[:10],
+        "all_valid_rows": valid_rows,
+        "column_mapping": column_mapping,
+    }
+
+
+def confirm_import(db: Session, list_id: int, validated_rows: list[dict]) -> dict:
+    """Import pre-validated rows into an excess list.
+
+    Returns {imported: int}.
+    """
+    excess_list = get_excess_list(db, list_id)
+    imported = 0
+    for row in validated_rows:
+        item = ExcessLineItem(
+            excess_list_id=list_id,
+            part_number=row["part_number"],
+            manufacturer=row.get("manufacturer"),
+            quantity=row["quantity"],
+            date_code=row.get("date_code"),
+            condition=row.get("condition", "New"),
+            asking_price=row.get("asking_price"),
+        )
+        db.add(item)
+        imported += 1
+    if imported > 0:
+        excess_list.total_line_items = (excess_list.total_line_items or 0) + imported
+        _safe_commit(db, entity="excess line items")
+    logger.info("Confirmed import of {} items into ExcessList id={}", imported, list_id)
+    return {"imported": imported}
