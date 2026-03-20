@@ -33,15 +33,12 @@ TRIGRAM_SIMILARITY_THRESHOLD = 0.3  # pg_trgm similarity threshold (0.3 ≈ 80+ 
 
 
 def _fuzzy_match_pg_trgm(db: Session, norm: str) -> list[dict]:
-    """Use PostgreSQL pg_trgm similarity() for O(1) index-backed fuzzy matching."""
+    """Use PostgreSQL pg_trgm similarity() for index-backed fuzzy matching."""
+    sim = sqlfunc.similarity(VendorCard.normalized_name, norm).label("score")
     rows = (
-        db.query(
-            VendorCard.id,
-            VendorCard.display_name,
-            sqlfunc.similarity(VendorCard.normalized_name, norm).label("score"),
-        )
-        .filter(sqlfunc.similarity(VendorCard.normalized_name, norm) >= TRIGRAM_SIMILARITY_THRESHOLD)
-        .order_by(sqlfunc.similarity(VendorCard.normalized_name, norm).desc())
+        db.query(VendorCard.id, VendorCard.display_name, sim)
+        .filter(sim >= TRIGRAM_SIMILARITY_THRESHOLD)
+        .order_by(sim.desc())
         .limit(5)
         .all()
     )
@@ -76,7 +73,7 @@ def _fuzzy_match_python(db: Session, norm: str) -> list[dict]:
                     "id": row.id,
                     "name": row.display_name,
                     "match": "fuzzy",
-                    "score": score,
+                    "score": round(score),
                 }
             )
     matches.sort(key=lambda m: m["score"], reverse=True)
@@ -117,6 +114,7 @@ async def check_vendor_duplicate(
         try:
             matches = _fuzzy_match_pg_trgm(db, norm)
         except (OperationalError, ProgrammingError):
+            db.rollback()
             logger.warning("pg_trgm not available, falling back to Python fuzzy match")
             matches = _fuzzy_match_python(db, norm)
     else:
