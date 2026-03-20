@@ -16,6 +16,11 @@ from sqlalchemy.orm import Session
 
 from ..models import Company
 from ..models.excess import ExcessLineItem, ExcessList
+from ..models.offers import Offer
+from ..models.sourcing import Requirement, Requisition
+from ..utils.normalization import normalize_mpn_key
+
+_ACTIVE_REQ_STATUSES = {"active", "open", "sourcing"}
 
 # ---------------------------------------------------------------------------
 # Header aliases for flexible CSV/Excel import
@@ -333,3 +338,92 @@ def confirm_import(db: Session, list_id: int, validated_rows: list[dict]) -> dic
         _safe_commit(db, entity="excess line items")
     logger.info("Confirmed import of {} items into ExcessList id={}", imported, list_id)
     return {"imported": imported}
+
+
+# ---------------------------------------------------------------------------
+# Demand matching
+# ---------------------------------------------------------------------------
+
+
+def match_excess_demand(db: Session, list_id: int, *, user_id: int) -> dict:
+    """Match excess line items against active requirements and create Offers.
+
+    For each excess line item, finds requirements with matching normalized_mpn on active
+    requisitions. Creates one Offer per match. Avoids duplicates.
+
+    Returns {matches_created: int, items_matched: int}.
+    """
+    excess_list = get_excess_list(db, list_id)
+    line_items = db.query(ExcessLineItem).filter_by(excess_list_id=list_id).all()
+
+    matches_created = 0
+    items_matched = 0
+
+    for item in line_items:
+        norm_key = normalize_mpn_key(item.part_number)
+        if not norm_key:
+            continue
+
+        requirements = (
+            db.query(Requirement)
+            .join(Requisition, Requirement.requisition_id == Requisition.id)
+            .filter(
+                Requirement.normalized_mpn == norm_key,
+                Requisition.status.in_(_ACTIVE_REQ_STATUSES),
+            )
+            .all()
+        )
+
+        if not requirements:
+            continue
+
+        vendor_name = excess_list.company.name if excess_list.company else "Unknown"
+        item_matches = 0
+        for req in requirements:
+            # Avoid duplicates
+            existing = (
+                db.query(Offer)
+                .filter(
+                    Offer.source == "excess",
+                    Offer.requisition_id == req.requisition_id,
+                    Offer.normalized_mpn == norm_key,
+                    Offer.vendor_name == vendor_name,
+                )
+                .first()
+            )
+            if existing:
+                continue
+
+            offer = Offer(
+                requisition_id=req.requisition_id,
+                requirement_id=req.id,
+                vendor_name=vendor_name,
+                mpn=item.part_number,
+                normalized_mpn=norm_key,
+                manufacturer=item.manufacturer,
+                qty_available=item.quantity,
+                unit_price=item.asking_price,
+                source="excess",
+                condition=item.condition,
+                date_code=item.date_code,
+                entered_by_id=user_id,
+                notes=f"Auto-matched from excess list: {excess_list.title}",
+            )
+            db.add(offer)
+            item_matches += 1
+            matches_created += 1
+
+        if item_matches > 0:
+            item.demand_match_count = (item.demand_match_count or 0) + item_matches
+            items_matched += 1
+
+    if matches_created > 0:
+        _safe_commit(db, entity="excess demand matches")
+
+    logger.info(
+        "Demand matching for ExcessList id={}: {} matches across {} items",
+        list_id,
+        matches_created,
+        items_matched,
+    )
+    return {"matches_created": matches_created, "items_matched": items_matched}

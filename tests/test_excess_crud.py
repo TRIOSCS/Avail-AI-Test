@@ -415,3 +415,83 @@ class TestConfirmImport:
         el = create_excess_list(db_session, title="Empty", company_id=company.id, owner_id=trader.id)
         result = confirm_import(db_session, el.id, [])
         assert result["imported"] == 0
+
+
+# ---------------------------------------------------------------------------
+# TestMatchExcessDemand
+# ---------------------------------------------------------------------------
+
+
+class TestMatchExcessDemand:
+    @pytest.fixture()
+    def active_req(self, db_session, company, trader):
+        """Create an active requisition with a requirement for LM358N."""
+        from app.models.sourcing import Requirement, Requisition
+        from app.utils.normalization import normalize_mpn_key
+
+        req = Requisition(name="Test RFQ", status="active", created_by=trader.id, company_id=company.id)
+        db_session.add(req)
+        db_session.flush()
+        requirement = Requirement(
+            requisition_id=req.id,
+            primary_mpn="LM358N",
+            normalized_mpn=normalize_mpn_key("LM358N"),
+            target_qty=100,
+        )
+        db_session.add(requirement)
+        db_session.commit()
+        return req, requirement
+
+    def test_creates_offer_on_match(self, db_session, company, trader, active_req):
+        from app.models.offers import Offer
+        from app.services.excess_service import match_excess_demand
+
+        req, requirement = active_req
+        el = create_excess_list(db_session, title="Match Test", company_id=company.id, owner_id=trader.id)
+        confirm_import(db_session, el.id, [{"part_number": "LM358N", "quantity": 500, "asking_price": 0.45}])
+        result = match_excess_demand(db_session, el.id, user_id=trader.id)
+        assert result["matches_created"] >= 1
+        offer = db_session.query(Offer).filter(Offer.source == "excess", Offer.requisition_id == req.id).first()
+        assert offer is not None
+        assert offer.mpn == "LM358N"
+        assert float(offer.unit_price) == 0.45
+        assert offer.vendor_name == company.name
+
+    def test_updates_demand_match_count(self, db_session, company, trader, active_req):
+        from app.services.excess_service import match_excess_demand
+
+        el = create_excess_list(db_session, title="Count Test", company_id=company.id, owner_id=trader.id)
+        confirm_import(db_session, el.id, [{"part_number": "LM358N", "quantity": 500}])
+        match_excess_demand(db_session, el.id, user_id=trader.id)
+        item = db_session.query(ExcessLineItem).filter_by(excess_list_id=el.id).first()
+        assert item.demand_match_count >= 1
+
+    def test_no_match_for_unrelated_part(self, db_session, company, trader, active_req):
+        from app.services.excess_service import match_excess_demand
+
+        el = create_excess_list(db_session, title="No Match", company_id=company.id, owner_id=trader.id)
+        confirm_import(db_session, el.id, [{"part_number": "XXXXXX", "quantity": 100}])
+        result = match_excess_demand(db_session, el.id, user_id=trader.id)
+        assert result["matches_created"] == 0
+
+    def test_skips_archived_requisitions(self, db_session, company, trader):
+        from app.models.sourcing import Requirement, Requisition
+        from app.services.excess_service import match_excess_demand
+        from app.utils.normalization import normalize_mpn_key
+
+        req = Requisition(name="Old RFQ", status="archived", created_by=trader.id, company_id=company.id)
+        db_session.add(req)
+        db_session.flush()
+        requirement = Requirement(
+            requisition_id=req.id,
+            primary_mpn="LM358N",
+            normalized_mpn=normalize_mpn_key("LM358N"),
+            target_qty=100,
+        )
+        db_session.add(requirement)
+        db_session.commit()
+
+        el = create_excess_list(db_session, title="Archived", company_id=company.id, owner_id=trader.id)
+        confirm_import(db_session, el.id, [{"part_number": "LM358N", "quantity": 500}])
+        result = match_excess_demand(db_session, el.id, user_id=trader.id)
+        assert result["matches_created"] == 0
