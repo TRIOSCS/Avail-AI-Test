@@ -25,11 +25,12 @@ VALID_CATEGORIES = sorted(COMMODITY_MAP.keys())
 _SYSTEM_PROMPT = (
     "You are an expert electronic component engineer. "
     "Given a manufacturer part number (MPN) and optional manufacturer name, "
-    "generate a concise technical description and classify the component into "
-    "the correct commodity category.\n\n"
+    "generate a concise technical description, classify the component into "
+    "the correct commodity category, and assess its lifecycle status.\n\n"
     "Rules:\n"
     "- description: 1-2 sentences describing what the part is, key specs if inferable from the MPN.\n"
     "- category: choose from the provided list. Use 'other' only if no category fits.\n"
+    "- lifecycle_status: one of 'active', 'eol', 'obsolete', 'nrfnd', 'ltb'. Use 'active' if unknown.\n"
     "- If you cannot identify the part at all, set description to null and category to 'other'.\n"
     "- Do NOT hallucinate specs — only include what you can confidently infer from the MPN."
 )
@@ -45,13 +46,39 @@ _PART_SCHEMA = {
                     "mpn": {"type": "string"},
                     "description": {"type": ["string", "null"]},
                     "category": {"type": "string", "enum": VALID_CATEGORIES},
+                    "lifecycle_status": {
+                        "type": "string",
+                        "enum": ["active", "eol", "obsolete", "nrfnd", "ltb"],
+                    },
                 },
-                "required": ["mpn", "description", "category"],
+                "required": ["mpn", "description", "category", "lifecycle_status"],
             },
         }
     },
     "required": ["parts"],
 }
+
+
+VALID_LIFECYCLE = {"active", "eol", "obsolete", "nrfnd", "ltb"}
+
+
+def _apply_enrichment_result(card: MaterialCard, ai: dict) -> None:
+    """Apply AI enrichment result to a MaterialCard."""
+    desc = ai.get("description")
+    cat = ai.get("category", "other")
+    lifecycle = ai.get("lifecycle_status", "active")
+
+    if cat not in VALID_CATEGORIES:
+        cat = "other"
+    if lifecycle not in VALID_LIFECYCLE:
+        lifecycle = "active"
+
+    if desc:
+        card.description = desc
+    card.category = cat
+    card.lifecycle_status = lifecycle
+    card.enrichment_source = "claude_haiku"
+    card.enriched_at = datetime.now(timezone.utc)
 
 
 async def enrich_material_cards(card_ids: list[int], db: Session, *, batch_size: int = 30) -> dict:
@@ -120,21 +147,10 @@ async def _enrich_batch(cards: list[MaterialCard], db: Session, stats: dict) -> 
         return
 
     ai_parts = result["parts"]
-    now = datetime.now(timezone.utc)
 
     for card, ai in zip(cards, ai_parts):
         try:
-            desc = ai.get("description")
-            cat = ai.get("category", "other")
-
-            if cat not in VALID_CATEGORIES:
-                cat = "other"
-
-            if desc:
-                card.description = desc
-            card.category = cat
-            card.enrichment_source = "claude_haiku"
-            card.enriched_at = now
+            _apply_enrichment_result(card, ai)
             stats["enriched"] += 1
         except Exception as e:
             logger.warning("Failed to apply enrichment for card %d: %s", card.id, e)
@@ -309,7 +325,6 @@ async def process_material_batch_results(db: Session) -> dict | None:
         logger.debug("process_material_batch_results: batch %s still processing", batch_id)
         return None
 
-    now = datetime.now(timezone.utc)
     stats = {"applied": 0, "errors": 0}
 
     for custom_id, parsed in results.items():
@@ -341,15 +356,8 @@ async def process_material_batch_results(db: Session) -> dict | None:
 
         ai = ai_parts[0]
         try:
-            desc = ai.get("description")
-            cat = ai.get("category", "other")
-            if cat not in VALID_CATEGORIES:
-                cat = "other"
-            if desc:
-                card.description = desc
-            card.category = cat
-            card.enrichment_source = "batch_api"
-            card.enriched_at = now
+            _apply_enrichment_result(card, ai)
+            card.enrichment_source = "batch_api"  # Override source for batch
             stats["applied"] += 1
         except Exception as e:
             logger.warning("Failed to apply batch enrichment for card %d: %s", card_id, e)
