@@ -32,5 +32,7 @@ export default defineConfig({
     { name: 'data-validation', testMatch: /data-validation\.spec\.ts$/ },
     { name: 'accessibility', testMatch: /accessibility\.spec\.ts$/ },
     { name: 'visual', testMatch: /visual\.spec\.ts$/ },
+    { name: 'dead-ends', testMatch: /dead-ends\.spec\.ts$/ },
+    { name: 'workflows', testMatch: /workflows\.spec\.ts$/ },
   ],
 });
