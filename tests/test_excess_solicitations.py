@@ -267,6 +267,92 @@ class TestPolishEmail:
         assert resp.status_code == 422
 
 
+class TestRoundTrip:
+    """Full round-trip: send solicitation via API, then parse an email reply."""
+
+    @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
+    @patch("app.utils.graph_client.GraphClient")
+    def test_send_then_parse_creates_bid(
+        self,
+        mock_graph_cls,
+        mock_claude,
+        client,
+        db_session,
+        test_user,
+        test_company,
+        excess_list_with_items,
+    ):
+        import asyncio
+
+        from app.models import ActivityLog
+        from app.models.excess import Bid, BidSolicitation
+
+        el, items = excess_list_with_items
+        item = items[0]  # LM358N
+
+        # Configure GraphClient mock
+        mock_gc = AsyncMock()
+        mock_gc.post_json = AsyncMock(return_value=None)
+        mock_graph_cls.return_value = mock_gc
+
+        # Step 1: Send the solicitation via the API
+        with patch(
+            "app.services.excess_service._find_sent_message",
+            new_callable=AsyncMock,
+            return_value={"id": "graph-msg-rt-001", "conversationId": "conv-rt-1"},
+        ):
+            resp = client.post(
+                f"/api/excess-lists/{el.id}/solicitations",
+                json={
+                    "line_item_ids": [item.id],
+                    "recipient_email": "buyer@example.com",
+                    "recipient_name": "Round Trip Buyer",
+                    "contact_id": 42,
+                    "bundled": True,
+                },
+            )
+
+        assert resp.status_code == 201
+        data = resp.json()
+        assert data["total"] == 1
+        sol_id = data["items"][0]["id"]
+
+        # Step 2: Mock Claude to return a valid bid
+        mock_claude.return_value = {
+            "unit_price": 0.40,
+            "quantity_wanted": 800,
+            "lead_time_days": 5,
+            "notes": "In stock, ready to ship",
+        }
+
+        # Step 3: Call _handle_excess_bid_reply directly with a mock message
+        msg = {"body": {"content": "We can offer 800 pcs at $0.40 each, 5 day lead time."}}
+
+        from app.email_service import _handle_excess_bid_reply
+
+        asyncio.run(_handle_excess_bid_reply(msg, sol_id, db_session))
+        db_session.commit()  # Persist ActivityLog added after parse_bid_response commit
+
+        # Step 4: Verify bid created with source="email_parsed" and unit_price=0.40
+        sol = db_session.get(BidSolicitation, sol_id)
+        db_session.refresh(sol)
+        assert sol.parsed_bid_id is not None
+
+        bid = db_session.get(Bid, sol.parsed_bid_id)
+        assert bid is not None
+        assert bid.source == "email_parsed"
+        assert float(bid.unit_price) == 0.40
+
+        # Step 5: Verify solicitation status="responded" and parsed_bid_id set
+        assert sol.status == "responded"
+        assert sol.parsed_bid_id == bid.id
+
+        # Step 6: Verify ActivityLog with activity_type="bid_received" contains part number
+        logs = db_session.query(ActivityLog).filter(ActivityLog.activity_type == "bid_received").all()
+        assert len(logs) >= 1
+        assert any(item.part_number in log.subject for log in logs)
+
+
 class TestInboxParse:
     """Inbox parsing of excess bid solicitation replies."""
 
