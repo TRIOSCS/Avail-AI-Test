@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 
 from loguru import logger
+from sqlalchemy import case, func
 from sqlalchemy.orm import Session, joinedload
 
 from ..models import (
@@ -557,42 +558,68 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
 # ── Scorecard ──────────────────────────────────────────────────────────────
 
 
-def _cap_outlier(value: float, cap: float = 500_000) -> float:
-    """Cap unrealistic financial values to prevent test-data pollution.
-
-    Electronic component deals rarely exceed $10M per offer. Values above the cap are
-    replaced with 0 (treated as bad data).
-    """
-    if value > cap:
-        return 0.0
-    return value
-
-
 def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
-    """Get proactive offer scorecard metrics."""
-    query = db.query(ProactiveOffer)
-    if salesperson_id:
-        query = query.filter(ProactiveOffer.salesperson_id == salesperson_id)
+    """Get proactive offer scorecard metrics using SQL aggregation."""
+    CAP = 500_000
 
-    all_offers = query.all()
-    sent = len(all_offers)
-    converted = sum(1 for o in all_offers if o.status == "converted")
-    converted_revenue = sum(_cap_outlier(float(o.total_sell or 0)) for o in all_offers if o.status == "converted")
-    converted_cost = sum(_cap_outlier(float(o.total_cost or 0)) for o in all_offers if o.status == "converted")
-    gross_profit = converted_revenue - converted_cost
-    pending_revenue = sum(_cap_outlier(float(o.total_sell or 0)) for o in all_offers if o.status == "sent")
-    quoted = sum(1 for o in all_offers if o.converted_quote_id is not None)
-    converted_quote_ids = [o.converted_quote_id for o in all_offers if o.converted_quote_id]
-    po_count = 0
-    if converted_quote_ids:
-        po_count = (
-            db.query(BuyPlan)
-            .filter(
-                BuyPlan.quote_id.in_(converted_quote_ids),
-                BuyPlan.status.in_(["approved", "po_entered"]),
-            )
-            .count()
+    # Capped value expression: values > cap become 0 (treated as bad data)
+    def _capped(col):
+        return case((col > CAP, 0), else_=col)
+
+    # Base filter
+    base_filter = []
+    if salesperson_id:
+        base_filter.append(ProactiveOffer.salesperson_id == salesperson_id)
+
+    # Main aggregation query
+    row = (
+        db.query(
+            func.count(ProactiveOffer.id).label("sent"),
+            func.count(case((ProactiveOffer.status == "converted", 1))).label("converted"),
+            func.coalesce(
+                func.sum(
+                    case((ProactiveOffer.status == "converted", _capped(func.coalesce(ProactiveOffer.total_sell, 0))))
+                ),
+                0,
+            ).label("converted_revenue"),
+            func.coalesce(
+                func.sum(
+                    case((ProactiveOffer.status == "converted", _capped(func.coalesce(ProactiveOffer.total_cost, 0))))
+                ),
+                0,
+            ).label("converted_cost"),
+            func.coalesce(
+                func.sum(case((ProactiveOffer.status == "sent", _capped(func.coalesce(ProactiveOffer.total_sell, 0))))),
+                0,
+            ).label("pending_revenue"),
+            func.count(ProactiveOffer.converted_quote_id).label("quoted"),
         )
+        .filter(*base_filter)
+        .one()
+    )
+
+    sent = row.sent or 0
+    converted = row.converted or 0
+    converted_revenue = float(row.converted_revenue)
+    converted_cost = float(row.converted_cost)
+    gross_profit = converted_revenue - converted_cost
+    pending_revenue = float(row.pending_revenue)
+    quoted = row.quoted or 0
+
+    # PO count — separate query joining BuyPlan via converted_quote_id
+    po_subq = (
+        db.query(ProactiveOffer.converted_quote_id)
+        .filter(ProactiveOffer.converted_quote_id.isnot(None), *base_filter)
+        .subquery()
+    )
+    po_count = (
+        db.query(func.count(BuyPlan.id))
+        .filter(
+            BuyPlan.quote_id.in_(db.query(po_subq.c.converted_quote_id)),
+            BuyPlan.status.in_(["approved", "po_entered"]),
+        )
+        .scalar()
+    ) or 0
 
     result = {
         "total_sent": sent,
@@ -605,31 +632,74 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
         "gross_profit": round(gross_profit, 2),
     }
 
-    # Per-salesperson breakdown (for admin view)
+    # Per-salesperson breakdown (admin view) — only when not filtered
     if not salesperson_id:
-        sales_ids = {o.salesperson_id for o in all_offers}
-        salespeople = db.query(User).filter(User.id.in_(sales_ids)).all() if sales_ids else []
+        breakdown_rows = (
+            db.query(
+                ProactiveOffer.salesperson_id,
+                func.count(ProactiveOffer.id).label("sent"),
+                func.count(case((ProactiveOffer.status == "converted", 1))).label("converted"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (ProactiveOffer.status == "converted", _capped(func.coalesce(ProactiveOffer.total_sell, 0)))
+                        )
+                    ),
+                    0,
+                ).label("rev"),
+                func.coalesce(
+                    func.sum(
+                        case(
+                            (ProactiveOffer.status == "converted", _capped(func.coalesce(ProactiveOffer.total_cost, 0)))
+                        )
+                    ),
+                    0,
+                ).label("cost"),
+                func.coalesce(
+                    func.sum(
+                        case((ProactiveOffer.status == "sent", _capped(func.coalesce(ProactiveOffer.total_sell, 0))))
+                    ),
+                    0,
+                ).label("pending"),
+                func.count(ProactiveOffer.converted_quote_id).label("quoted"),
+            )
+            .group_by(ProactiveOffer.salesperson_id)
+            .all()
+        )
+
+        # Fetch user names
+        sp_ids = [r.salesperson_id for r in breakdown_rows]
+        salespeople = db.query(User).filter(User.id.in_(sp_ids)).all() if sp_ids else []
         sales_map = {u.id: u.name or u.email.split("@")[0] for u in salespeople}
+
         breakdown = []
-        for sid in sales_ids:
-            user_offers = [o for o in all_offers if o.salesperson_id == sid]
-            u_sent = len(user_offers)
-            u_conv = sum(1 for o in user_offers if o.status == "converted")
-            u_rev = sum(_cap_outlier(float(o.total_sell or 0)) for o in user_offers if o.status == "converted")
-            u_cost = sum(_cap_outlier(float(o.total_cost or 0)) for o in user_offers if o.status == "converted")
-            u_pending = sum(_cap_outlier(float(o.total_sell or 0)) for o in user_offers if o.status == "sent")
-            u_quoted = sum(1 for o in user_offers if o.converted_quote_id is not None)
-            u_quote_ids = [o.converted_quote_id for o in user_offers if o.converted_quote_id]
-            u_po = 0
-            if u_quote_ids:
-                u_po = (
-                    db.query(BuyPlan)
-                    .filter(
-                        BuyPlan.quote_id.in_(u_quote_ids),
-                        BuyPlan.status.in_(["approved", "po_entered"]),
-                    )
-                    .count()
+        for r in breakdown_rows:
+            sid = r.salesperson_id
+            u_sent = r.sent or 0
+            u_conv = r.converted or 0
+            u_rev = float(r.rev)
+            u_cost = float(r.cost)
+            u_pending = float(r.pending)
+            u_quoted = r.quoted or 0
+
+            # PO count per salesperson
+            u_quote_ids_q = (
+                db.query(ProactiveOffer.converted_quote_id)
+                .filter(
+                    ProactiveOffer.salesperson_id == sid,
+                    ProactiveOffer.converted_quote_id.isnot(None),
                 )
+                .subquery()
+            )
+            u_po = (
+                db.query(func.count(BuyPlan.id))
+                .filter(
+                    BuyPlan.quote_id.in_(db.query(u_quote_ids_q.c.converted_quote_id)),
+                    BuyPlan.status.in_(["approved", "po_entered"]),
+                )
+                .scalar()
+            ) or 0
+
             breakdown.append(
                 {
                     "salesperson_id": sid,
