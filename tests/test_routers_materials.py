@@ -692,3 +692,32 @@ class TestMaterialCardMerge:
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True
+
+
+# ── Minimum query length validation tests ────────────────────────────────
+
+
+def test_list_materials_search_single_char_rejected(client):
+    """GET /api/materials?q=x returns 400 for single-character query."""
+    resp = client.get("/api/materials", params={"q": "x"})
+    assert resp.status_code == 400
+    data = resp.json()
+    assert data["error"] == "Search query must be at least 2 characters"
+    assert data["status_code"] == 400
+    assert "request_id" in data
+
+
+def test_list_materials_search_two_chars_accepted(client, db_session):
+    """GET /api/materials?q=lm returns 200 for two-character query."""
+    resp = client.get("/api/materials", params={"q": "lm"})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "materials" in data
+
+
+def test_list_materials_search_empty_string_ok(client, db_session):
+    """GET /api/materials?q= (empty) returns 200, treated as no filter."""
+    resp = client.get("/api/materials", params={"q": ""})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "materials" in data

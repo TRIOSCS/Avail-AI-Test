@@ -10,6 +10,7 @@ Depends on: models, dependencies, vendor_helpers, cache, normalization, audit_se
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -57,6 +58,17 @@ async def list_materials(request: Request, user: User = Depends(require_user), d
     limit = min(int(request.query_params.get("limit", "200")), 1000)
     offset = max(int(request.query_params.get("offset", "0")), 0)
 
+    if q and len(q) < 2:
+        req_id = getattr(request.state, "request_id", "unknown")
+        return JSONResponse(
+            status_code=400,
+            content={
+                "error": "Search query must be at least 2 characters",
+                "status_code": 400,
+                "request_id": req_id,
+            },
+        )
+
     @cached_endpoint(prefix="material_list", ttl_hours=2, key_params=["q", "limit", "offset"])
     def _fetch(q, limit, offset, user, db):
         query = (
@@ -65,7 +77,6 @@ async def list_materials(request: Request, user: User = Depends(require_user), d
             .order_by(MaterialCard.last_searched_at.desc())
         )
         if q:
-            # TODO: Add minimum length validation (e.g., 2 chars) to prevent broad queries
             sb = SearchBuilder(q)
             query = query.filter(sb.ilike_filter(MaterialCard.normalized_mpn, prefix=True))
         total = query.count()
