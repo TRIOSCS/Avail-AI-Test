@@ -282,6 +282,15 @@ table {
 .border-gray-100 { border-color: #dce4ed !important; }
 hr { border-color: #c8d5e2; }
 
+/* ── Faceted sidebar ───────────────────────────────────────────── */
+.faceted-sidebar {
+  scrollbar-width: thin;
+  scrollbar-color: #b7c7d8 transparent;
+}
+.faceted-sidebar::-webkit-scrollbar { width: 4px; }
+.faceted-sidebar::-webkit-scrollbar-track { background: transparent; }
+.faceted-sidebar::-webkit-scrollbar-thumb { background: #b7c7d8; border-radius: 2px; }
+
 /* ── Scrollbar at top of overflow containers ───────────────────── */
 /* Chrome/Safari: make all scrollbars brand-colored */
 ::-webkit-scrollbar {

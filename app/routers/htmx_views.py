@@ -132,6 +132,29 @@ def _is_htmx(request: Request) -> bool:
     return request.headers.get("HX-Request") == "true"
 
 
+def _parse_filter_json(raw: str, *, coerce_numeric: bool = False) -> dict:
+    """Parse a JSON filter string into a dict, returning {} on failure.
+
+    When coerce_numeric=True, keys ending in _min/_max are cast to float.
+    """
+    try:
+        parsed: dict = json.loads(raw) if raw else {}
+    except (ValueError, TypeError):
+        return {}
+    if not coerce_numeric:
+        return parsed
+    result: dict = {}
+    for key, val in parsed.items():
+        if key.endswith("_min") or key.endswith("_max"):
+            try:
+                result[key] = float(val)
+            except (ValueError, TypeError):
+                pass
+        else:
+            result[key] = val
+    return result
+
+
 def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
     """Shared template context for all views."""
     assets = _vite_assets()
@@ -159,8 +182,8 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/companies/{company_id:int}", response_class=HTMLResponse)
 @router.get("/v2/buy-plans", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
-@router.get("/v2/excess", response_class=HTMLResponse)
-@router.get("/v2/excess/{list_id:int}", response_class=HTMLResponse)
+@router.get("/v2/resell", response_class=HTMLResponse)
+@router.get("/v2/resell/{list_id:int}", response_class=HTMLResponse)
 @router.get("/v2/quotes", response_class=HTMLResponse)
 @router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
 @router.get("/v2/settings", response_class=HTMLResponse)
@@ -180,8 +203,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         return templates.TemplateResponse("htmx/login.html", {"request": request, **_vite_assets()})
     if "/buy-plans" in path:
         current_view = "buy-plans"
-    elif "/excess" in path:
-        current_view = "excess"
+    elif "/resell" in path:
+        current_view = "resell"
     elif "/quotes" in path:
         current_view = "quotes"
     elif "/prospecting" in path:
@@ -230,10 +253,10 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         parts = path.split("/buy-plans/")
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/buy-plans/{parts[1]}"
-    elif current_view == "excess" and "/excess/" in path:
-        parts = path.split("/excess/")
+    elif current_view == "resell" and "/resell/" in path:
+        parts = path.split("/resell/")
         if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/excess/{parts[1]}"
+            partial_url = f"/v2/partials/resell/{parts[1]}"
     elif current_view == "quotes" and "/quotes/" in path:
         parts = path.split("/quotes/")
         if len(parts) > 1 and parts[1].isdigit():
@@ -5945,91 +5968,12 @@ async def lead_panel_partial(
 @router.get("/v2/partials/materials", response_class=HTMLResponse)
 async def materials_list_partial(
     request: Request,
-    q: str = "",
-    lifecycle: str = "",
-    category: str = "",
-    limit: int = Query(50, ge=1, le=200),
-    offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Return material cards list as HTML partial."""
-    from sqlalchemy import func as sqlfunc
-
-    from ..models.intelligence import MaterialCard
-    from ..services.material_search_service import classify_query, search_materials_local
-
-    interpreted_query = ""
-    if q.strip():
-        query_type = classify_query(q.strip())
-        if query_type == "mpn":
-            materials, total = search_materials_local(db, q.strip(), lifecycle, category, limit, offset)
-        else:
-            materials, total = search_materials_local(db, q.strip(), lifecycle, category, limit, offset)
-            interpreted_query = f"Searching: {q.strip()}"
-    else:
-        materials, total = search_materials_local(db, "", lifecycle, category, limit, offset)
-
-    # Top commodity categories for filter pills
-    top_categories = (
-        db.query(MaterialCard.category, sqlfunc.count(MaterialCard.id))
-        .filter(
-            MaterialCard.category.isnot(None),
-            MaterialCard.category != "",
-            MaterialCard.category != "other",
-            MaterialCard.deleted_at.is_(None),
-        )
-        .group_by(MaterialCard.category)
-        .order_by(sqlfunc.count(MaterialCard.id).desc())
-        .limit(12)
-        .all()
-    )
-
-    # Compute vendor_count and best_price for each material
-    from sqlalchemy import func as sqlfunc
-
-    from ..models.intelligence import MaterialVendorHistory
-
-    card_ids = [m.id for m in materials]
-    if card_ids:
-        vendor_stats = (
-            db.query(
-                MaterialVendorHistory.material_card_id,
-                sqlfunc.count(MaterialVendorHistory.id).label("vendor_count"),
-                sqlfunc.min(MaterialVendorHistory.last_price).label("best_price"),
-            )
-            .filter(MaterialVendorHistory.material_card_id.in_(card_ids))
-            .group_by(MaterialVendorHistory.material_card_id)
-            .all()
-        )
-        stats_map = {
-            row.material_card_id: {"vendor_count": row.vendor_count, "best_price": row.best_price}
-            for row in vendor_stats
-        }
-    else:
-        stats_map = {}
-
-    # Attach stats to materials
-    for m in materials:
-        s = stats_map.get(m.id, {})
-        m._vendor_count = s.get("vendor_count", 0)
-        m._best_price = s.get("best_price")
-
-    ctx = _base_ctx(request, user, "materials")
-    ctx.update(
-        {
-            "materials": materials,
-            "q": q,
-            "lifecycle": lifecycle,
-            "category": category,
-            "total": total,
-            "limit": limit,
-            "offset": offset,
-            "interpreted_query": interpreted_query,
-            "top_categories": top_categories,
-        }
-    )
-    return templates.TemplateResponse("htmx/partials/materials/list.html", ctx)
+    """Redirect to faceted workspace — all materials browsing uses the sidebar
+    layout."""
+    return await materials_workspace_partial(request, user, db)
 
 
 @router.get("/v2/partials/materials/workspace", response_class=HTMLResponse)
@@ -6075,19 +6019,25 @@ async def materials_filters_tree_partial(
 async def materials_filters_sub_partial(
     request: Request,
     commodity: str = "",
+    sub_filters: str = "{}",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Render sub-filters for a selected commodity."""
+    """Render sub-filters for a selected commodity with live facet counts."""
     if not commodity.strip():
         return HTMLResponse("")
+
+    # Parse active filters so facet counts reflect current selection
+    parsed_filters = _parse_filter_json(sub_filters)
+
     subfilter_options = get_subfilter_options(db, commodity)
-    facet_counts = get_facet_counts(db, commodity)
+    facet_counts = get_facet_counts(db, commodity, active_filters=parsed_filters or None)
     ctx = _base_ctx(request, user, "materials")
     ctx.update(
         {
             "subfilter_options": subfilter_options,
             "facet_counts": facet_counts,
+            "commodity_selected": True,
         }
     )
     return templates.TemplateResponse("htmx/partials/materials/filters/subfilters.html", ctx)
@@ -6107,23 +6057,7 @@ async def materials_faceted_partial(
     """Return faceted-search material list as HTML partial."""
     from ..models.intelligence import MaterialVendorHistory
 
-    # Parse sub_filters JSON string → dict with correct types
-    try:
-        raw_filters: dict = json.loads(sub_filters) if sub_filters else {}
-    except (ValueError, TypeError):
-        raw_filters = {}
-
-    parsed_filters: dict = {}
-    for key, val in raw_filters.items():
-        if key.endswith("_min") or key.endswith("_max"):
-            try:
-                parsed_filters[key] = float(val)
-            except (ValueError, TypeError):
-                pass
-        elif isinstance(val, list):
-            parsed_filters[key] = val
-        else:
-            parsed_filters[key] = val
+    parsed_filters = _parse_filter_json(sub_filters, coerce_numeric=True)
 
     materials, total = search_materials_faceted(
         db,

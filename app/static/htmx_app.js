@@ -317,11 +317,15 @@ document.addEventListener('keydown', (e) => {
  */
 Alpine.data('materialsFilter', () => ({
   commodity: '',
-  commodityDisplayName: '',
   subFilters: {},
   q: '',
   page: 0,
+  drawerOpen: false,
   _onPopstate: null,
+
+  get commodityDisplayName() {
+    return this.commodity ? this.commodity.replace(/_/g, ' ').replace(/(^|\s)\S/g, l => l.toUpperCase()) : '';
+  },
 
   get activeFilterCount() {
     let count = 0;
@@ -400,7 +404,6 @@ Alpine.data('materialsFilter', () => ({
 
   selectCommodity(commodity) {
     this.commodity = commodity || '';
-    this.commodityDisplayName = commodity ? commodity.replace(/(^|\s)\S/g, l => l.toUpperCase()) : '';
     this.subFilters = {};
     document.body.dispatchEvent(new CustomEvent('commodity-changed'));
     this.applyFilters();

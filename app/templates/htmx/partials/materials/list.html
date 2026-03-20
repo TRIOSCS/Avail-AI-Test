@@ -1,186 +1,105 @@
 {#
-  materials/list.html — Material card list with AI search and lifecycle filter.
-  Receives: materials (list of MaterialCard), q (str), lifecycle (str),
-            total (int), limit (int), offset (int), interpreted_query (str).
-  Called by: htmx_views.py materials_list_partial endpoint.
-  Depends on: HTMX, Tailwind CSS with brand palette.
+  materials/list.html — Material card results table (rendered inside workspace).
+  Receives: materials (list of MaterialCard), q (str), commodity (str),
+            total (int), limit (int), offset (int).
+  Called by: htmx_views.py materials_faceted_partial endpoint.
+  Depends on: HTMX, Tailwind CSS with brand palette, Alpine.js materialsFilter().
 #}
 
 <div id="breadcrumb" hx-swap-oob="true">
   <span class="text-brand-600 font-medium">Materials</span>
 </div>
 
-<div class="max-w-7xl mx-auto">
-  {# Header #}
-  <div class="flex items-center justify-between mb-4">
-    <div>
-      <h1 class="text-2xl font-bold text-gray-900">Material Cards</h1>
-      <p class="text-sm text-gray-500 mt-1">{{ total }} material{{ "s" if total != 1 }}</p>
-    </div>
-  </div>
-
-  {% if not faceted %}
-  {# Command-style search bar #}
-  <div class="bg-white border border-brand-200 rounded-lg p-4 mb-4">
-    <div class="flex flex-wrap gap-3 items-end">
-      <div class="flex-1 min-w-[200px]">
-        <label class="block text-xs font-medium text-gray-500 mb-1">Search</label>
-        <input type="text" name="q" value="{{ q }}"
-               placeholder="MPN, manufacturer, or describe what you need..."
-               class="w-full px-3 py-2 border border-brand-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
-               hx-get="/v2/partials/materials"
-               hx-trigger="keyup changed delay:300ms"
-               hx-target="#main-content"
-               hx-include="[name='q']">
-      </div>
-    </div>
-    {% if interpreted_query %}
-    <div class="mt-2 flex items-center gap-2">
-      <span class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium bg-brand-50 text-brand-700 rounded-full border border-brand-200">
-        <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/></svg>
-        {{ interpreted_query }}
-      </span>
-    </div>
-    {% endif %}
-  </div>
-
-  {# Commodity filter pills #}
-  {% if top_categories %}
-  <div class="flex flex-wrap gap-2 mb-4">
-    <button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors
-                   {% if not category %}bg-brand-500 text-white shadow-sm{% else %}bg-white text-gray-600 border border-brand-200 hover:bg-brand-50{% endif %}"
-            hx-get="/v2/partials/materials?q={{ q }}"
-            hx-target="#main-content">
-      All
-    </button>
-    {% for cat_name, cat_count in top_categories %}
-    <button class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium rounded-lg transition-colors
-                   {% if category == cat_name %}bg-brand-500 text-white shadow-sm{% else %}bg-white text-gray-600 border border-brand-200 hover:bg-brand-50{% endif %}"
-            hx-get="/v2/partials/materials?category={{ cat_name }}&q={{ q }}"
-            hx-target="#main-content">
-      {{ cat_name|replace('_', ' ')|title }}
-      <span class="text-xs {% if category == cat_name %}text-brand-200{% else %}text-gray-400{% endif %}">{{ cat_count }}</span>
-    </button>
-    {% endfor %}
-  </div>
-  {% endif %}
-  {% endif %}
-
-  {# Table #}
-  <div class="bg-white rounded-lg border border-brand-200 overflow-hidden">
-    {% if materials %}
-    <div class="overflow-x-auto">
-      <table class="compact-table">
-        <thead>
-          <tr>
-            <th class="text-left">MPN</th>
-            <th class="text-left">Manufacturer</th>
-            <th class="text-left">Category</th>
-            <th class="text-left">Lifecycle</th>
-            <th class="text-right">Vendors</th>
-            <th class="text-right">Best Price</th>
-            <th class="text-left">Last Searched</th>
-          </tr>
-        </thead>
-        <tbody>
-          {% for m in materials %}
-          <tr hx-get="/v2/partials/materials/{{ m.id }}"
-              hx-target="#main-content"
-              hx-push-url="/v2/materials/{{ m.id }}"
-              preload="mouseover">
-            <td>
-              <span class="font-data font-semibold text-brand-600">{{ m.display_mpn or m.normalized_mpn or "--" }}</span>
-              {% if m._primary_specs %}
-              <div class="flex flex-wrap gap-1 mt-0.5">
-                {% for spec in m._primary_specs[:3] %}
-                <span class="inline-block px-1.5 py-0.5 bg-gray-50 text-[10px] text-gray-500 rounded font-data">
-                  {{ spec.value }}
-                </span>
-                {% endfor %}
-              </div>
-              {% endif %}
-            </td>
-            <td class="td-label text-gray-600">{{ m.manufacturer or "--" }}</td>
-            <td class="td-label text-gray-600">{{ m.category or "--" }}</td>
-            <td>
-              {% set lc_colors = {
-                'active': 'bg-emerald-50 text-emerald-700 border-emerald-200',
-                'eol': 'bg-amber-50 text-amber-700 border-amber-200',
-                'obsolete': 'bg-rose-50 text-rose-700 border-rose-200',
-                'nrfnd': 'bg-gray-100 text-gray-600 border-gray-200',
-                'ltb': 'bg-amber-50 text-amber-600 border-amber-200',
-              } %}
-              {% if m.lifecycle_status %}
-              <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border {{ lc_colors.get(m.lifecycle_status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
-                {{ m.lifecycle_status|upper }}
+{# Table #}
+<div class="bg-white rounded-lg border border-brand-200 overflow-hidden">
+  {% set lc_colors = {
+    'active': 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    'eol': 'bg-amber-50 text-amber-700 border-amber-200',
+    'obsolete': 'bg-rose-50 text-rose-700 border-rose-200',
+    'nrfnd': 'bg-gray-100 text-gray-600 border-gray-200',
+    'ltb': 'bg-amber-50 text-amber-600 border-amber-200',
+  } %}
+  {% if materials %}
+  <div class="overflow-x-auto">
+    <table class="compact-table">
+      <thead>
+        <tr>
+          <th class="text-left">MPN</th>
+          <th class="text-left">Manufacturer</th>
+          <th class="text-left">Category</th>
+          <th class="text-left">Lifecycle</th>
+          <th class="text-right">Vendors</th>
+          <th class="text-right">Best Price</th>
+          <th class="text-left">Last Searched</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in materials %}
+        <tr hx-get="/v2/partials/materials/{{ m.id }}"
+            hx-target="#main-content"
+            hx-push-url="/v2/materials/{{ m.id }}"
+            preload="mouseover">
+          <td>
+            <span class="font-data font-semibold text-brand-600">{{ m.display_mpn or m.normalized_mpn or "--" }}</span>
+            {% if m._primary_specs %}
+            <div class="flex flex-wrap gap-1 mt-0.5">
+              {% for spec in m._primary_specs[:3] %}
+              <span class="inline-block px-1.5 py-0.5 bg-gray-50 text-[10px] text-gray-500 rounded font-data">
+                {{ spec.value }}
               </span>
-              {% else %}
-              <span class="text-xs text-gray-400">--</span>
-              {% endif %}
-            </td>
-            <td class="text-right font-medium">{{ m._vendor_count or 0 }}</td>
-            <td class="text-right">
-              {% if m._best_price %}
-              <span class="text-emerald-700 font-medium">${{ "%.4f"|format(m._best_price) }}</span>
-              {% else %}
-              <span class="text-gray-400 text-xs">--</span>
-              {% endif %}
-            </td>
-            <td class="td-label text-gray-500">{{ m.last_searched_at.strftime('%b %d') if m.last_searched_at else "--" }}</td>
-          </tr>
-          {% endfor %}
-        </tbody>
-      </table>
-    </div>
-    {% else %}
-    {% if faceted %}
-    <div class="text-center py-12 text-gray-400">
-      <svg class="mx-auto h-10 w-10 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
-      </svg>
-      <p class="text-sm font-medium text-gray-500">No results match your filters</p>
-      <p class="text-xs text-gray-400 mt-1">Try removing a filter or broadening your search</p>
-    </div>
-    {% else %}
-    <div class="p-12 text-center">
-      <svg class="mx-auto h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-        <path stroke-linecap="round" stroke-linejoin="round" d="M19.428 15.428a2 2 0 00-1.022-.547l-2.387-.477a6 6 0 00-3.86.517l-.318.158a6 6 0 01-3.86.517L6.05 15.21a2 2 0 00-1.806.547M8 4h8l-1 1v5.172a2 2 0 00.586 1.414l5 5c1.26 1.26.367 3.414-1.415 3.414H4.828c-1.782 0-2.674-2.154-1.414-3.414l5-5A2 2 0 009 10.172V5L8 4z"/>
-      </svg>
-      <p class="mt-3 text-sm font-medium text-gray-600">No material cards found</p>
-      {% if q %}<p class="text-xs text-gray-400 mt-1">Try a different search term</p>{% endif %}
-    </div>
-    {% endif %}
-    {% endif %}
+              {% endfor %}
+            </div>
+            {% endif %}
+          </td>
+          <td class="td-label text-gray-600">{{ m.manufacturer or "--" }}</td>
+          <td class="td-label text-gray-600">{{ m.category or "--" }}</td>
+          <td>
+            {% if m.lifecycle_status %}
+            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border {{ lc_colors.get(m.lifecycle_status, 'bg-gray-100 text-gray-600 border-gray-200') }}">
+              {{ m.lifecycle_status|upper }}
+            </span>
+            {% else %}
+            <span class="text-xs text-gray-400">--</span>
+            {% endif %}
+          </td>
+          <td class="text-right font-medium">{{ m._vendor_count or 0 }}</td>
+          <td class="text-right">
+            {% if m._best_price %}
+            <span class="text-emerald-700 font-medium">${{ "%.4f"|format(m._best_price) }}</span>
+            {% else %}
+            <span class="text-gray-400 text-xs">--</span>
+            {% endif %}
+          </td>
+          <td class="td-label text-gray-500">{{ m.last_searched_at.strftime('%b %d') if m.last_searched_at else "--" }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
   </div>
-
-  {# Pagination #}
-  {% if total > limit %}
-  <div class="mt-4 flex justify-center">
-    <nav class="flex gap-1 items-center">
-      {% if faceted %}
-        {% if offset > 0 %}
-        <button @click="goToPage({{ (offset - limit) // limit }})"
-           class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Prev</button>
-        {% endif %}
-        <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
-        {% if offset + limit < total %}
-        <button @click="goToPage({{ (offset + limit) // limit }})"
-           class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Next</button>
-        {% endif %}
-      {% else %}
-        {% if offset > 0 %}
-        <a hx-get="/v2/partials/materials?offset={{ offset - limit }}&q={{ q }}&category={{ category }}"
-           hx-target="#main-content"
-           class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Prev</a>
-        {% endif %}
-        <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
-        {% if offset + limit < total %}
-        <a hx-get="/v2/partials/materials?offset={{ offset + limit }}&q={{ q }}&category={{ category }}"
-           hx-target="#main-content"
-           class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Next</a>
-        {% endif %}
-      {% endif %}
-    </nav>
+  {% else %}
+  <div class="text-center py-12 text-gray-400">
+    <svg class="mx-auto h-10 w-10 mb-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
+    </svg>
+    <p class="text-sm font-medium text-gray-500">No results match your filters</p>
+    <p class="text-xs text-gray-400 mt-1">Try removing a filter or broadening your search</p>
   </div>
   {% endif %}
 </div>
+
+{# Pagination #}
+{% if total > limit %}
+<div class="mt-4 flex justify-center">
+  <nav class="flex gap-1 items-center">
+    {% if offset > 0 %}
+    <button @click="goToPage({{ (offset - limit) // limit }})"
+       class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Prev</button>
+    {% endif %}
+    <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
+    {% if offset + limit < total %}
+    <button @click="goToPage({{ (offset + limit) // limit }})"
+       class="px-3 py-1.5 text-sm bg-white border border-brand-200 rounded-lg hover:bg-brand-50 cursor-pointer transition-colors">Next</button>
+    {% endif %}
+  </nav>
+</div>
+{% endif %}

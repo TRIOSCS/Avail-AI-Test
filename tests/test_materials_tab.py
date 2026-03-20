@@ -2,28 +2,36 @@
 """Integration tests for Materials tab routes."""
 
 
-def test_materials_list_returns_html(client, db_session):
-    """GET /v2/partials/materials returns HTML with material table."""
+def test_materials_list_returns_workspace(client, db_session):
+    """GET /v2/partials/materials returns faceted workspace shell."""
+    resp = client.get("/v2/partials/materials")
+    assert resp.status_code == 200
+    assert "materials-workspace" in resp.text
+    assert "materialsFilter" in resp.text
+
+
+def test_materials_faceted_returns_results(client, db_session):
+    """GET /v2/partials/materials/faceted returns material rows."""
     from app.models import MaterialCard
 
     card = MaterialCard(normalized_mpn="INT-TEST-001", display_mpn="INT-TEST-001", manufacturer="TestMfg")
     db_session.add(card)
     db_session.commit()
 
-    resp = client.get("/v2/partials/materials")
+    resp = client.get("/v2/partials/materials/faceted")
     assert resp.status_code == 200
     assert "INT-TEST-001" in resp.text
 
 
-def test_materials_list_search_mpn(client, db_session):
-    """Search by MPN uses local search."""
+def test_materials_faceted_search_mpn(client, db_session):
+    """Faceted search by MPN returns matching material."""
     from app.models import MaterialCard
 
     card = MaterialCard(normalized_mpn="LM358DR", display_mpn="LM358DR")
     db_session.add(card)
     db_session.commit()
 
-    resp = client.get("/v2/partials/materials?q=LM358")
+    resp = client.get("/v2/partials/materials/faceted?q=LM358")
     assert resp.status_code == 200
     assert "LM358DR" in resp.text
 

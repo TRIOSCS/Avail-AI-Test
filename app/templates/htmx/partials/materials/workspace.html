@@ -1,20 +1,43 @@
-{# Materials faceted search workspace — two-column layout.
+{# Materials faceted search workspace — two-column layout with mobile drawer.
    Called by: htmx_views.py materials_workspace route
    Depends on: Alpine.js materialsFilter() in htmx_app.js
 #}
 <div id="materials-workspace" x-data="materialsFilter" class="flex gap-0 h-full">
 
-  {# -- Left sidebar (desktop only) -- #}
-  <div class="hidden lg:block w-72 bg-white border-r border-gray-100 overflow-y-auto flex-shrink-0 faceted-sidebar">
+  {# -- Mobile drawer backdrop -- #}
+  <div x-show="drawerOpen" x-transition:enter="transition-opacity ease-out duration-200"
+       x-transition:enter-start="opacity-0" x-transition:enter-end="opacity-100"
+       x-transition:leave="transition-opacity ease-in duration-150"
+       x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
+       @click="drawerOpen = false"
+       class="fixed inset-0 bg-gray-900/40 z-40 lg:hidden" style="display:none"></div>
+
+  {# -- Sidebar (desktop: static, mobile: slide-over drawer) -- #}
+  <div :class="drawerOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
+       class="fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-200 overflow-y-auto flex-shrink-0
+              transition-transform duration-200 ease-out
+              lg:static lg:z-auto lg:border-r lg:border-gray-100 faceted-sidebar"
+       style="top: 52px; bottom: 48px;">
+
     <div class="p-3">
-      {# Commodity tree — loaded once #}
-      <h3 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Categories</h3>
+      {# Sidebar header (mobile: includes close button) #}
+      <div class="flex items-center justify-between mb-2">
+        <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Categories</h3>
+        <button @click="drawerOpen = false" class="lg:hidden p-1 text-gray-400 hover:text-gray-600 rounded">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+          </svg>
+        </button>
+      </div>
+
+      {# "All Materials" button #}
       <button @click="selectCommodity(null)"
-              :class="!commodity ? 'bg-brand-50 text-brand-700 font-medium' : 'text-gray-600 hover:bg-gray-50'"
-              class="w-full text-left px-3 py-1.5 text-sm rounded transition-colors mb-1">
+              :class="!commodity ? 'bg-brand-50 text-brand-700 font-medium border-l-2 border-brand-500' : 'text-gray-600 hover:bg-gray-50 border-l-2 border-transparent'"
+              class="w-full text-left px-3 py-1.5 text-sm rounded-r transition-colors mb-1">
         All Materials <span class="text-xs text-gray-400">({{ total_materials }})</span>
       </button>
 
+      {# Commodity tree — loaded once #}
       <div hx-get="/v2/partials/materials/filters/tree"
            hx-trigger="load, commodity-changed from:body"
            hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
@@ -26,34 +49,62 @@
         </div>
       </div>
 
-      {# Dynamic sub-filters — loaded when commodity changes #}
+      {# Dynamic sub-filters — reloads on commodity change AND filter change #}
       <div id="subfilters-container"
            hx-get="/v2/partials/materials/filters/sub"
-           hx-trigger="commodity-changed from:body"
-           hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity")}'
+           hx-trigger="commodity-changed from:body, filters-changed from:body"
+           hx-vals='js:{
+             "commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || "",
+             "sub_filters": JSON.stringify(Alpine.evaluate(document.querySelector("#materials-workspace"), "subFilters") || {})
+           }'
            hx-swap="innerHTML"
            hx-sync="this:replace">
       </div>
-    </div>
 
+      {# Mobile: "Show Results" button (batch-apply) #}
+      <div class="lg:hidden sticky bottom-0 bg-white pt-2 pb-3 border-t border-gray-100 mt-3">
+        <button @click="applyFilters(); drawerOpen = false"
+                class="btn-primary w-full text-center">
+          Show Results
+          <template x-if="activeFilterCount > 0">
+            <span class="ml-1 bg-white/20 px-1.5 py-0.5 rounded-full text-xs" x-text="'(' + activeFilterCount + ')'"></span>
+          </template>
+        </button>
+      </div>
+    </div>
   </div>
 
   {# -- Right results area -- #}
   <div class="flex-1 min-w-0 relative">
-    {# Search bar #}
+    {# Search bar + mobile filter button #}
     <div class="p-4 border-b border-gray-100">
-      <div class="relative">
-        <input type="text" x-model="q"
-               @input.debounce.400ms="applyFilters()"
-               placeholder="Search by MPN, manufacturer, or description..."
-               class="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
-        <svg class="absolute left-3 top-2.5 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-        </svg>
+      <div class="flex gap-2">
+        {# Mobile filter toggle #}
+        <button @click="drawerOpen = true"
+                class="lg:hidden flex items-center gap-1.5 px-3 py-2 border border-gray-200 rounded-lg text-sm text-gray-600 hover:bg-gray-50 flex-shrink-0">
+          <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 4a1 1 0 011-1h16a1 1 0 011 1v2.586a1 1 0 01-.293.707l-6.414 6.414a1 1 0 00-.293.707V17l-4 4v-6.586a1 1 0 00-.293-.707L3.293 7.293A1 1 0 013 6.586V4z"/>
+          </svg>
+          Filters
+          <template x-if="activeFilterCount > 0">
+            <span class="bg-brand-500 text-white text-[10px] font-bold rounded-full px-1.5 py-0.5 leading-none" x-text="activeFilterCount"></span>
+          </template>
+        </button>
+
+        {# Search input #}
+        <div class="relative flex-1">
+          <input type="text" x-model="q"
+                 @input.debounce.400ms="applyFilters()"
+                 placeholder="Search by MPN, manufacturer, or description..."
+                 class="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
+          <svg class="absolute left-3 top-2.5 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+          </svg>
+        </div>
       </div>
 
       {# Active filter chips #}
-      <template x-if="commodity || q">
+      <template x-if="commodity || q || Object.keys(subFilters).length > 0">
         <div class="flex flex-wrap gap-1.5 mt-2">
           <template x-if="q">
             <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs">
@@ -79,7 +130,7 @@
       </template>
     </div>
 
-    {# Results container — loaded via HTMX (CSS opacity handles loading state) #}
+    {# Results container #}
     <div id="materials-results"
          hx-get="/v2/partials/materials/faceted"
          hx-trigger="load, filters-changed from:body"
