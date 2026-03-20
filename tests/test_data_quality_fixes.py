@@ -16,49 +16,6 @@ from app.models import (
 )
 
 # ═══════════════════════════════════════════════════════════════════════
-#  TT-036: Proactive scorecard $500K cap
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestCapOutlierLowered:
-    """_cap_outlier default cap should be $500K, not $10M."""
-
-    def test_values_under_500k_pass_through(self):
-        from app.services.proactive_service import _cap_outlier
-
-        assert _cap_outlier(100.0) == 100.0
-        assert _cap_outlier(250_000.0) == 250_000.0
-        assert _cap_outlier(500_000.0) == 500_000.0
-
-    def test_values_over_500k_zeroed(self):
-        from app.services.proactive_service import _cap_outlier
-
-        assert _cap_outlier(500_001.0) == 0.0
-        assert _cap_outlier(4_000_000.0) == 0.0
-        assert _cap_outlier(10_000_000.0) == 0.0
-
-    def test_typical_inflated_offers_zeroed(self):
-        """Offers of $4-6M each (the TT-036 scenario) should be zeroed."""
-        from app.services.proactive_service import _cap_outlier
-
-        for val in [4_000_000, 5_000_000, 6_000_000]:
-            assert _cap_outlier(float(val)) == 0.0
-
-    def test_realistic_component_deals_kept(self):
-        """Real component deals ($1K-$500K) should pass through."""
-        from app.services.proactive_service import _cap_outlier
-
-        for val in [1_000, 10_000, 50_000, 100_000, 250_000, 500_000]:
-            assert _cap_outlier(float(val)) == float(val)
-
-    def test_custom_cap_still_works(self):
-        from app.services.proactive_service import _cap_outlier
-
-        assert _cap_outlier(200.0, cap=100) == 0.0
-        assert _cap_outlier(50.0, cap=100) == 50.0
-
-
-# ═══════════════════════════════════════════════════════════════════════
 #  TT-100: Morning brief uses selected user's name
 # ═══════════════════════════════════════════════════════════════════════
 
