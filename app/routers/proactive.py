@@ -44,23 +44,11 @@ async def refresh_proactive_matches(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Trigger a proactive matching scan (both legacy + CPH)."""
-    from ..services.proactive_service import scan_new_offers_for_matches
+    """Trigger a proactive matching scan."""
+    from ..services.proactive_matching import run_proactive_scan
 
-    legacy = scan_new_offers_for_matches(db)
-
-    try:
-        from ..services.proactive_matching import run_proactive_scan
-
-        cph = run_proactive_scan(db)
-    except Exception:
-        cph = {"scanned_offers": 0, "matches_created": 0}
-
-    return {
-        "legacy_matches": legacy.get("matches_created", 0),
-        "cph_matches": cph.get("matches_created", 0),
-        "total_new": legacy.get("matches_created", 0) + cph.get("matches_created", 0),
-    }
+    result = run_proactive_scan(db)
+    return result
 
 
 @router.get("/api/proactive/count")

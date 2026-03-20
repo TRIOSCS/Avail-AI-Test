@@ -1,0 +1,197 @@
+"""routers/excess.py — REST API for Excess Inventory lists and line items.
+
+Thin routing layer that delegates to the excess_service for business logic.
+Supports CRUD on ExcessList, single line-item add, and CSV/Excel bulk import.
+
+Called by: main.py (router mount)
+Depends on: services/excess_service, schemas/excess, file_utils, dependencies
+"""
+
+from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from sqlalchemy.orm import Session
+
+from ..database import get_db
+from ..dependencies import require_user
+from ..file_utils import parse_tabular_file
+from ..models import User
+from ..models.excess import ExcessLineItem
+from ..schemas.excess import (
+    ExcessLineItemCreate,
+    ExcessLineItemResponse,
+    ExcessListCreate,
+    ExcessListResponse,
+    ExcessListUpdate,
+)
+from ..services.excess_service import (
+    create_excess_list,
+    delete_excess_list,
+    get_excess_list,
+    import_line_items,
+    list_excess_lists,
+    update_excess_list,
+)
+
+router = APIRouter(tags=["excess"])
+
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
+ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xlsx", ".xls"}
+
+
+# ── List / Create ─────────────────────────────────────────────────────
+
+
+@router.get("/api/excess-lists")
+async def api_list_excess_lists(
+    q: str = Query("", description="Search title"),
+    status: str = Query("", description="Filter by status"),
+    limit: int = Query(50, ge=1, le=500),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List excess lists with optional search, status filter, and pagination."""
+    result = list_excess_lists(db, q=q, status=status or None, limit=limit, offset=offset)
+    result["items"] = [ExcessListResponse.model_validate(el) for el in result["items"]]
+    return result
+
+
+@router.post("/api/excess-lists", status_code=201)
+async def api_create_excess_list(
+    payload: ExcessListCreate,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create a new excess inventory list (owner set from current user)."""
+    el = create_excess_list(
+        db,
+        title=payload.title,
+        company_id=payload.company_id,
+        owner_id=user.id,
+        customer_site_id=payload.customer_site_id,
+        notes=payload.notes,
+    )
+    return ExcessListResponse.model_validate(el)
+
+
+# ── Detail / Update / Delete ──────────────────────────────────────────
+
+
+@router.get("/api/excess-lists/{list_id}")
+async def api_get_excess_list(
+    list_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get a single excess list by ID."""
+    el = get_excess_list(db, list_id)
+    return ExcessListResponse.model_validate(el)
+
+
+@router.patch("/api/excess-lists/{list_id}")
+async def api_update_excess_list(
+    list_id: int,
+    payload: ExcessListUpdate,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Partial update of an excess list."""
+    updates = payload.model_dump(exclude_unset=True)
+    el = update_excess_list(db, list_id, **updates)
+    return ExcessListResponse.model_validate(el)
+
+
+@router.delete("/api/excess-lists/{list_id}")
+async def api_delete_excess_list(
+    list_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Hard-delete an excess list and its line items."""
+    delete_excess_list(db, list_id)
+    return {"ok": True}
+
+
+# ── File Import ───────────────────────────────────────────────────────
+
+
+@router.post("/api/excess-lists/{list_id}/import")
+async def api_import_file(
+    list_id: int,
+    file: UploadFile,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Upload a CSV/TSV/Excel file to bulk-import line items."""
+    filename = file.filename or ""
+    ext = ""
+    if "." in filename:
+        ext = "." + filename.rsplit(".", 1)[-1].lower()
+
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported file type '{ext}'. Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}")
+
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(400, f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)")
+
+    rows = parse_tabular_file(content, filename)
+    if not rows:
+        raise HTTPException(400, "No data rows found in file")
+
+    result = import_line_items(db, list_id, rows)
+    return result
+
+
+# ── Line Items ────────────────────────────────────────────────────────
+
+
+@router.post("/api/excess-lists/{list_id}/line-items", status_code=201)
+async def api_add_line_item(
+    list_id: int,
+    payload: ExcessLineItemCreate,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add a single line item to an excess list."""
+    # Verify list exists
+    excess_list = get_excess_list(db, list_id)
+
+    item = ExcessLineItem(
+        excess_list_id=list_id,
+        part_number=payload.part_number,
+        manufacturer=payload.manufacturer,
+        quantity=payload.quantity,
+        date_code=payload.date_code,
+        condition=payload.condition or "New",
+        asking_price=payload.asking_price,
+        notes=payload.notes,
+    )
+    db.add(item)
+    excess_list.total_line_items = (excess_list.total_line_items or 0) + 1
+    db.commit()
+    db.refresh(item)
+    return ExcessLineItemResponse.model_validate(item)
+
+
+@router.get("/api/excess-lists/{list_id}/line-items")
+async def api_list_line_items(
+    list_id: int,
+    limit: int = Query(100, ge=1, le=1000),
+    offset: int = Query(0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List line items for a given excess list."""
+    # Verify list exists
+    get_excess_list(db, list_id)
+
+    query = db.query(ExcessLineItem).filter(ExcessLineItem.excess_list_id == list_id)
+    total = query.count()
+    items = query.order_by(ExcessLineItem.id).offset(offset).limit(limit).all()
+
+    return {
+        "items": [ExcessLineItemResponse.model_validate(li) for li in items],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
+    }

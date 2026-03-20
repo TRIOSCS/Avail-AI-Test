@@ -158,6 +158,8 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/companies/{company_id:int}", response_class=HTMLResponse)
 @router.get("/v2/buy-plans", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
+@router.get("/v2/excess", response_class=HTMLResponse)
+@router.get("/v2/excess/{list_id:int}", response_class=HTMLResponse)
 @router.get("/v2/quotes", response_class=HTMLResponse)
 @router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
 @router.get("/v2/settings", response_class=HTMLResponse)
@@ -177,6 +179,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         return templates.TemplateResponse("htmx/login.html", {"request": request, **_vite_assets()})
     if "/buy-plans" in path:
         current_view = "buy-plans"
+    elif "/excess" in path:
+        current_view = "excess"
     elif "/quotes" in path:
         current_view = "quotes"
     elif "/prospecting" in path:
@@ -225,6 +229,10 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         parts = path.split("/buy-plans/")
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/buy-plans/{parts[1]}"
+    elif current_view == "excess" and "/excess/" in path:
+        parts = path.split("/excess/")
+        if len(parts) > 1 and parts[1].isdigit():
+            partial_url = f"/v2/partials/excess/{parts[1]}"
     elif current_view == "quotes" and "/quotes/" in path:
         parts = path.split("/quotes/")
         if len(parts) > 1 and parts[1].isdigit():
