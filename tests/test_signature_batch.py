@@ -158,7 +158,7 @@ def test_batch_parse_no_body_still_submits(mock_submit, mock_redis, db_session, 
     assert result == "batch_sig_nobody"
     requests = mock_submit.call_args[0][0]
     assert len(requests) == 1
-    assert requests[0]["custom_id"].startswith("sig_parse:")
+    assert requests[0]["custom_id"].startswith("sig_parse-")
 
 
 @patch("app.services.signature_parser._get_redis")
@@ -180,7 +180,7 @@ def test_batch_parse_submits_batch(mock_submit, mock_redis, db_session, low_conf
     assert len(requests) == 5  # All 5 have confidence < 0.7
     for req in requests:
         assert "custom_id" in req
-        assert req["custom_id"].startswith("sig_parse:")
+        assert req["custom_id"].startswith("sig_parse-")
         assert "prompt" in req
         assert "schema" in req
         assert "system" in req
@@ -286,7 +286,7 @@ def test_process_results_applies_data(mock_results, mock_redis, db_session, low_
 
     results_dict = {}
     for extract in low_confidence_extracts:
-        custom_id = f"sig_parse:{extract.id}"
+        custom_id = f"sig_parse-{extract.id}"
         results_dict[custom_id] = {
             "full_name": f"AI Parsed {extract.sender_name}",
             "title": "Sales Manager",
@@ -327,7 +327,7 @@ def test_process_results_handles_none_entry(mock_results, mock_redis, db_session
 
     extract = low_confidence_extracts[0]
     results_dict = {
-        f"sig_parse:{extract.id}": None,  # Error entry
+        f"sig_parse-{extract.id}": None,  # Error entry
     }
     mock_results.return_value = results_dict
 
@@ -352,7 +352,7 @@ def test_process_results_commit_failure_keeps_redis_key(mock_results, mock_redis
 
     extract = low_confidence_extracts[0]
     results_dict = {
-        f"sig_parse:{extract.id}": {
+        f"sig_parse-{extract.id}": {
             "full_name": "Test Person",
             "title": "Engineer",
             "company_name": "TestCo",
@@ -385,7 +385,7 @@ def test_process_results_partial_fields(mock_results, mock_redis, db_session, lo
 
     extract = low_confidence_extracts[0]
     results_dict = {
-        f"sig_parse:{extract.id}": {
+        f"sig_parse-{extract.id}": {
             "full_name": "John Doe",
             "title": None,
             "company_name": "SomeCorp",
@@ -423,7 +423,7 @@ def test_process_results_only_updates_nonnull(mock_results, mock_redis, db_sessi
     original_name = record.full_name  # "User 0"
 
     results_dict = {
-        f"sig_parse:{record.id}": {
+        f"sig_parse-{record.id}": {
             "full_name": None,  # Should NOT overwrite
             "title": "New Title",
             "company_name": None,
@@ -455,8 +455,8 @@ def test_process_results_bad_custom_id(mock_results, mock_redis, db_session):
 
     results_dict = {
         "bad_format": {"full_name": "Test"},  # Missing prefix:id format
-        "sig_parse:not_a_number": {"full_name": "Test"},  # Non-integer ID
-        "sig_parse:99999": {"full_name": "Test"},  # Non-existent record
+        "sig_parse-not_a_number": {"full_name": "Test"},  # Non-integer ID
+        "sig_parse-99999": {"full_name": "Test"},  # Non-existent record
     }
     mock_results.return_value = results_dict
 
@@ -476,7 +476,7 @@ def test_process_results_confidence_all_fields(mock_results, mock_redis, db_sess
 
     record = low_confidence_extracts[0]
     results_dict = {
-        f"sig_parse:{record.id}": {
+        f"sig_parse-{record.id}": {
             "full_name": "John Doe",
             "title": "VP Sales",
             "company_name": "Acme",
@@ -507,7 +507,7 @@ def test_process_results_confidence_partial(mock_results, mock_redis, db_session
     record = low_confidence_extracts[1]  # has phone but no full_name, title, company
     # Return only title — so after update: phone + title = 2 fields
     results_dict = {
-        f"sig_parse:{record.id}": {
+        f"sig_parse-{record.id}": {
             "full_name": None,
             "title": "Engineer",
             "company_name": None,

@@ -45,7 +45,7 @@ class BatchQueue:
         for item_id, req in self._pending.items():
             requests.append(
                 {
-                    "custom_id": f"{self.prefix}:{item_id}",
+                    "custom_id": f"{self.prefix}-{item_id}",
                     "prompt": req["prompt"],
                     "schema": req["schema"],
                     "system": req.get("system", ""),

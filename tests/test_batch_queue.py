@@ -14,7 +14,7 @@ def test_build_batch_returns_requests():
     bq.enqueue("item_1", {"prompt": "test prompt", "schema": {"type": "object"}})
     requests = bq.build_batch()
     assert len(requests) == 1
-    assert requests[0]["custom_id"] == "test:item_1"
+    assert requests[0]["custom_id"] == "test-item_1"
     assert requests[0]["prompt"] == "test prompt"
     assert requests[0]["schema"] == {"type": "object"}
     assert requests[0]["model_tier"] == "fast"
@@ -40,13 +40,13 @@ def test_multiple_items():
     requests = bq.build_batch()
     assert len(requests) == 2
     ids = {r["custom_id"] for r in requests}
-    assert "enrich:mat_1" in ids
-    assert "enrich:mat_2" in ids
+    assert "enrich-mat_1" in ids
+    assert "enrich-mat_2" in ids
     # Check custom params passed through
-    smart_req = next(r for r in requests if r["custom_id"] == "enrich:mat_1")
+    smart_req = next(r for r in requests if r["custom_id"] == "enrich-mat_1")
     assert smart_req["model_tier"] == "smart"
     assert smart_req["max_tokens"] == 2048
-    sys_req = next(r for r in requests if r["custom_id"] == "enrich:mat_2")
+    sys_req = next(r for r in requests if r["custom_id"] == "enrich-mat_2")
     assert sys_req["system"] == "You are an expert."
 
 

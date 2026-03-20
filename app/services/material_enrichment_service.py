@@ -334,8 +334,8 @@ async def process_material_batch_results(db: Session) -> dict | None:
             stats["errors"] += 1
             continue
 
-        # custom_id format: "mat_enrich:<card_id>"
-        id_parts = custom_id.split(":")
+        # custom_id format: "mat_enrich-<card_id>"
+        id_parts = custom_id.split("-", 1)
         if len(id_parts) < 2:
             stats["errors"] += 1
             continue

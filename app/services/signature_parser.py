@@ -556,8 +556,8 @@ async def process_signature_batch_results(db) -> dict | None:
             stats["errors"] += 1
             continue
 
-        # custom_id format: "sig_parse:<record_id>"
-        id_parts = custom_id.split(":")
+        # custom_id format: "sig_parse-<record_id>"
+        id_parts = custom_id.split("-", 1)
         if len(id_parts) < 2:
             stats["errors"] += 1
             continue

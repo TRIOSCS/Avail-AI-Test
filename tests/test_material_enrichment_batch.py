@@ -187,7 +187,7 @@ def test_process_results_applies_enrichment(mock_results, mock_redis, db_session
     results_dict = {}
     for i in range(5):
         card = unenriched_cards[i]
-        custom_id = f"mat_enrich:{card.id}"
+        custom_id = f"mat_enrich-{card.id}"
         results_dict[custom_id] = {
             "parts": [
                 {
@@ -227,7 +227,7 @@ def test_process_results_handles_none_entry(mock_results, mock_redis, db_session
 
     card = unenriched_cards[0]
     results_dict = {
-        f"mat_enrich:{card.id}": None,  # Error entry
+        f"mat_enrich-{card.id}": None,  # Error entry
     }
     mock_results.return_value = results_dict
 
@@ -253,7 +253,7 @@ def test_process_results_invalid_category_falls_back(mock_results, mock_redis, d
 
     card = unenriched_cards[0]
     results_dict = {
-        f"mat_enrich:{card.id}": {
+        f"mat_enrich-{card.id}": {
             "parts": [
                 {
                     "mpn": card.display_mpn,
