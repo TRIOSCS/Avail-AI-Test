@@ -14,9 +14,7 @@ import asyncio
 import json
 import os
 import sys
-import time
 from datetime import datetime, timezone
-from pathlib import Path
 
 from loguru import logger
 
@@ -40,7 +38,14 @@ _SYSTEM = (
     "- description: 2-3 sentences. Include key specs inferable from the MPN. "
     "Do NOT hallucinate specs you aren't confident about.\n"
     "- manufacturer: the component manufacturer (not the distributor).\n"
-    "- package_type: physical package if inferable (e.g., LQFP-100, BGA-256, 0603, DIMM, 2.5\").\n"
+    '- package_type: physical package if inferable (e.g., LQFP-100, BGA-256, 0603, DIMM, 2.5").\n'
+    "- lifecycle_status: one of 'active', 'nrfnd', 'eol', 'obsolete', 'ltb'. "
+    "Infer from MPN suffixes (-ND, -NRFND, -OBSOLETE) or known manufacturer EOL patterns. "
+    "Set null if unknown.\n"
+    "- rohs_status: one of 'compliant', 'non-compliant', 'exempt'. "
+    "Infer from suffixes like -PBF (lead-free), /NOPB, -E3 (RoHS). Set null if unknown.\n"
+    "- pin_count: integer number of pins/terminals if inferable from package or MPN "
+    "(e.g., LQFP-100 = 100, SO-8 = 8). Set null if unknown.\n"
     "- confidence: your confidence (0.0-1.0) that the classification and description are correct.\n"
     "- If you cannot identify the part at all, set category to 'other' and confidence to 0.0."
 )
@@ -60,6 +65,12 @@ _SCHEMA = {
                     "description_confidence": {"type": "number"},
                     "manufacturer": {"type": ["string", "null"]},
                     "package_type": {"type": ["string", "null"]},
+                    "lifecycle_status": {
+                        "type": ["string", "null"],
+                        "enum": ["active", "nrfnd", "eol", "obsolete", "ltb", None],
+                    },
+                    "rohs_status": {"type": ["string", "null"], "enum": ["compliant", "non-compliant", "exempt", None]},
+                    "pin_count": {"type": ["integer", "null"]},
                 },
                 "required": ["mpn", "category", "category_confidence", "description", "description_confidence"],
             },
@@ -99,14 +110,16 @@ def _build_batch_requests(all_cards: list[dict]) -> list[dict]:
         custom_id = f"enrich_{i}_{i + len(chunk)}"
         prompt = _build_prompt(chunk)
 
-        requests.append({
-            "custom_id": custom_id,
-            "prompt": prompt,
-            "schema": _SCHEMA,
-            "system": _SYSTEM,
-            "model_tier": "smart",  # Sonnet for quality
-            "max_tokens": 8192,
-        })
+        requests.append(
+            {
+                "custom_id": custom_id,
+                "prompt": prompt,
+                "schema": _SCHEMA,
+                "system": _SYSTEM,
+                "model_tier": "smart",  # Sonnet for quality
+                "max_tokens": 8192,
+            }
+        )
 
     return requests
 
@@ -146,12 +159,14 @@ async def submit_enrichment_batch(db, limit: int = 0) -> dict:
     card_meta = {}  # custom_id → [(card_id, mpn), ...]
 
     for r in rows:
-        all_cards.append({
-            "id": r.id,
-            "display_mpn": r.display_mpn,
-            "manufacturer": r.manufacturer,
-            "description": r.description,
-        })
+        all_cards.append(
+            {
+                "id": r.id,
+                "display_mpn": r.display_mpn,
+                "manufacturer": r.manufacturer,
+                "description": r.description,
+            }
+        )
 
     # Build batch requests (50 MPNs per request)
     requests = _build_batch_requests(all_cards)

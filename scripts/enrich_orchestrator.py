@@ -48,6 +48,18 @@ from scripts.enrich_specs_batch import (
     _specs_to_summary,
 )
 
+
+def _parse_parts(result_data: dict) -> list | None:
+    """Extract and parse 'parts' from batch result, handling JSON string edge case."""
+    parts = result_data.get("parts", [])
+    if isinstance(parts, str):
+        try:
+            parts = json.loads(parts)
+        except (json.JSONDecodeError, TypeError):
+            return None
+    return parts if isinstance(parts, list) else None
+
+
 POLL_INTERVAL = 60  # seconds between batch status checks
 MAX_POLL_TIME = 86400  # 24 hours max wait per batch
 CATEGORY_CONFIDENCE_MIN = 0.90  # minimum confidence to accept AI-assigned category
@@ -340,7 +352,10 @@ async def _poll_and_apply_phase2(db, run: EnrichmentRun, dry_run: bool) -> dict:
                     continue
 
                 card_meta_list = run.request_map.get(custom_id, [])
-                parts = result_data.get("parts", [])
+                parts = _parse_parts(result_data)
+                if parts is None:
+                    stats["errors"] += 1
+                    continue
 
                 for card_info, ai_part in zip(card_meta_list, parts):
                     stats["processed"] += 1
@@ -350,6 +365,9 @@ async def _poll_and_apply_phase2(db, run: EnrichmentRun, dry_run: bool) -> dict:
                     desc_conf = ai_part.get("description_confidence", 0.0)
                     mfg = ai_part.get("manufacturer")
                     pkg = ai_part.get("package_type")
+                    lifecycle = ai_part.get("lifecycle_status")
+                    rohs = ai_part.get("rohs_status")
+                    pins = ai_part.get("pin_count")
 
                     if cat not in BATCH_CATEGORIES:
                         cat = "other"
@@ -363,6 +381,12 @@ async def _poll_and_apply_phase2(db, run: EnrichmentRun, dry_run: bool) -> dict:
                         updates["manufacturer"] = mfg.strip()[:255]
                     if pkg and isinstance(pkg, str) and pkg.strip():
                         updates["package_type"] = pkg.strip()[:100]
+                    if lifecycle and lifecycle in ("active", "nrfnd", "eol", "obsolete", "ltb"):
+                        updates["lifecycle_status"] = lifecycle
+                    if rohs and rohs in ("compliant", "non-compliant", "exempt"):
+                        updates["rohs_status"] = rohs
+                    if isinstance(pins, int) and 0 < pins <= 10000:
+                        updates["pin_count"] = pins
 
                     if not updates:
                         stats["skipped"] += 1
@@ -520,7 +544,10 @@ async def _poll_and_apply_specs(db, run: EnrichmentRun, category: str, dry_run: 
                     continue
 
                 card_meta_list = run.request_map.get(custom_id, [])
-                parts = result_data.get("parts", [])
+                parts = _parse_parts(result_data)
+                if parts is None:
+                    stats["errors"] += 1
+                    continue
 
                 for card_info, ai_part in zip(card_meta_list, parts):
                     stats["processed"] += 1
@@ -716,7 +743,10 @@ async def _poll_and_apply_descriptions(db, run: EnrichmentRun, dry_run: bool) ->
                     continue
 
                 card_meta = run.request_map.get(custom_id, [])
-                parts = result_data.get("parts", [])
+                parts = _parse_parts(result_data)
+                if parts is None:
+                    stats["errors"] += 1
+                    continue
 
                 for card_info, ai_part in zip(card_meta, parts):
                     stats["processed"] += 1
