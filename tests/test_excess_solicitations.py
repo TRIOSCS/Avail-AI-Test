@@ -7,6 +7,7 @@ Called by: pytest
 Depends on: app/services/excess_service.py, app/models/excess.py, tests/conftest.py
 """
 
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -264,3 +265,151 @@ class TestPolishEmail:
     def test_polish_empty_text_returns_422(self, client):
         resp = client.post("/api/excess-lists/polish-email", json={"text": ""})
         assert resp.status_code == 422
+
+
+class TestInboxParse:
+    """Inbox parsing of excess bid solicitation replies."""
+
+    def _make_solicitation(self, db_session, excess_list_with_items, status="sent"):
+        """Create a BidSolicitation record linked to the first line item."""
+        from app.models.excess import BidSolicitation
+
+        _, items = excess_list_with_items
+        item = items[0]
+        # Get the owner from the excess list
+        el = db_session.get(ExcessList, item.excess_list_id)
+        sol = BidSolicitation(
+            excess_line_item_id=item.id,
+            contact_id=99,
+            sent_by=el.owner_id,
+            recipient_email="buyer@example.com",
+            recipient_name="Joe Buyer",
+            subject="[EXCESS-BID-0] RE: Excess parts",
+            status=status,
+            sent_at=datetime.now(timezone.utc),
+        )
+        db_session.add(sol)
+        db_session.commit()
+        db_session.refresh(sol)
+        return sol
+
+    def test_excess_bid_tag_creates_pending_bid(self, db_session, excess_list_with_items):
+        """Mock claude_structured to return bid data.
+
+        Assert Bid created with correct fields.
+        """
+        import asyncio
+
+        from app.models.excess import Bid
+
+        sol = self._make_solicitation(db_session, excess_list_with_items)
+        msg = {
+            "body": {"content": "We can do 5000 pcs at $0.38 each, ship next week."},
+        }
+        mock_result = {
+            "unit_price": 0.38,
+            "quantity_wanted": 5000,
+            "lead_time_days": 7,
+            "notes": "Can ship next week",
+        }
+
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
+            from app.email_service import _handle_excess_bid_reply
+
+            asyncio.run(_handle_excess_bid_reply(msg, sol.id, db_session))
+
+        db_session.refresh(sol)
+        assert sol.status == "responded"
+        assert sol.parsed_bid_id is not None
+
+        bid = db_session.get(Bid, sol.parsed_bid_id)
+        assert bid is not None
+        assert bid.status == "pending"
+        assert bid.source == "email_parsed"
+        assert float(bid.unit_price) == 0.38
+        assert bid.quantity_wanted == 5000
+
+    def test_declined_response_no_bid_created(self, db_session, excess_list_with_items):
+        """When claude returns declined=True, no Bid is created but status updated."""
+        import asyncio
+
+        from app.models.excess import Bid
+
+        sol = self._make_solicitation(db_session, excess_list_with_items)
+        msg = {"body": {"content": "Sorry, not interested at this time."}}
+        mock_result = {"declined": True}
+
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=mock_result):
+            from app.email_service import _handle_excess_bid_reply
+
+            asyncio.run(_handle_excess_bid_reply(msg, sol.id, db_session))
+
+        db_session.refresh(sol)
+        assert sol.status == "responded"
+
+        # No bid should have been created
+        bids = db_session.query(Bid).filter(Bid.excess_line_item_id == sol.excess_line_item_id).all()
+        assert len(bids) == 0
+
+    def test_already_responded_skipped(self, db_session, excess_list_with_items):
+        """Solicitation already responded should be skipped without error."""
+        import asyncio
+
+        sol = self._make_solicitation(db_session, excess_list_with_items, status="responded")
+        msg = {"body": {"content": "Follow up email"}}
+
+        from app.email_service import _handle_excess_bid_reply
+
+        # Should return without error, no mocking needed since it returns early
+        asyncio.run(_handle_excess_bid_reply(msg, sol.id, db_session))
+
+        db_session.refresh(sol)
+        assert sol.status == "responded"
+
+    def test_solicitation_not_found_skipped(self, db_session, excess_list_with_items):
+        """Non-existent solicitation ID should not raise."""
+        import asyncio
+
+        msg = {"body": {"content": "Some email body"}}
+
+        from app.email_service import _handle_excess_bid_reply
+
+        # Should not raise
+        asyncio.run(_handle_excess_bid_reply(msg, 99999, db_session))
+
+    def test_lookback_window_skips_old_solicitations(self, db_session, excess_list_with_items):
+        """Solicitation sent >lookback_days ago should be skipped."""
+        import asyncio
+
+        sol = self._make_solicitation(db_session, excess_list_with_items)
+        # Set sent_at to 30 days ago (beyond default 14-day lookback)
+        sol.sent_at = datetime.now(timezone.utc) - timedelta(days=30)
+        db_session.commit()
+
+        msg = {"body": {"content": "Late reply"}}
+
+        from app.email_service import _handle_excess_bid_reply
+
+        asyncio.run(_handle_excess_bid_reply(msg, sol.id, db_session))
+
+        db_session.refresh(sol)
+        assert sol.status == "sent"  # unchanged
+
+    def test_parse_failure_leaves_solicitation_sent(self, db_session, excess_list_with_items):
+        """When claude_structured raises, solicitation stays in sent status."""
+        import asyncio
+
+        sol = self._make_solicitation(db_session, excess_list_with_items)
+        msg = {"body": {"content": "We are interested."}}
+
+        with patch(
+            "app.utils.claude_client.claude_structured",
+            new_callable=AsyncMock,
+            side_effect=Exception("API timeout"),
+        ):
+            from app.email_service import _handle_excess_bid_reply
+
+            asyncio.run(_handle_excess_bid_reply(msg, sol.id, db_session))
+
+        db_session.refresh(sol)
+        assert sol.status == "sent"  # unchanged
