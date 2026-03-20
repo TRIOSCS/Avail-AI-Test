@@ -89,6 +89,27 @@ async def partial_excess_create_form(
     )
 
 
+@router.get("/v2/partials/excess/{list_id}", response_class=HTMLResponse)
+async def partial_excess_detail(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render excess list detail partial for HTMX."""
+    el = get_excess_list(db, list_id)
+    items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
+    return templates.TemplateResponse(
+        "htmx/partials/excess/detail.html",
+        {
+            "request": request,
+            "user": user,
+            "list": el,
+            "line_items": items,
+        },
+    )
+
+
 # ── List / Create ─────────────────────────────────────────────────────
 
 
