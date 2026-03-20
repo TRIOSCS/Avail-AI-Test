@@ -89,6 +89,21 @@ async def partial_excess_create_form(
     )
 
 
+@router.get("/v2/partials/excess/{list_id}/add-line-item-form", response_class=HTMLResponse)
+async def partial_add_line_item_form(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the add-line-item modal form."""
+    get_excess_list(db, list_id)
+    return templates.TemplateResponse(
+        "htmx/partials/excess/add_line_item_modal.html",
+        {"request": request, "list_id": list_id},
+    )
+
+
 @router.get("/v2/partials/excess/{list_id}", response_class=HTMLResponse)
 async def partial_excess_detail(
     request: Request,
@@ -244,6 +259,24 @@ async def api_add_line_item(
     db.commit()
     db.refresh(item)
     return ExcessLineItemResponse.model_validate(item)
+
+
+@router.delete("/api/excess-lists/{list_id}/line-items/{item_id}")
+async def api_delete_line_item(
+    list_id: int,
+    item_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Delete a single line item from an excess list."""
+    excess_list = get_excess_list(db, list_id)
+    item = db.get(ExcessLineItem, item_id)
+    if not item or item.excess_list_id != list_id:
+        raise HTTPException(404, f"Line item {item_id} not found in list {list_id}")
+    db.delete(item)
+    excess_list.total_line_items = max((excess_list.total_line_items or 1) - 1, 0)
+    db.commit()
+    return {"ok": True}
 
 
 @router.get("/api/excess-lists/{list_id}/line-items")
