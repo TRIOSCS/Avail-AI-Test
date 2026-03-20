@@ -76,7 +76,7 @@ Additions per commodity (on top of existing specs). All new specs are `is_filter
 **MOSFETs** (existing: channel_type, vds, rds_on, id_max, package)
 | Spec Key | Display Name | Data Type | Values/Range | Unit |
 |----------|-------------|-----------|--------------|------|
-| mounting | Mounting | enum | SMD, THT | — |
+| mounting | Mounting | enum | SMD, through-hole, press-fit | — |
 
 ### Processors & Programmable
 

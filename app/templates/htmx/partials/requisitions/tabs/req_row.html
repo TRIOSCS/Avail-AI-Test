@@ -8,24 +8,40 @@
     @dblclick="editing = true">
 
   {# ── Display mode ────────────────────────────────────────── #}
-  <td class="px-4 py-2.5 text-sm font-mono font-medium text-gray-900" x-show="!editing">
+  <td data-col-key="mpn" class="px-4 py-2.5 text-sm font-mono font-medium text-gray-900" x-show="!editing">
     {{ r.primary_mpn or "—" }}
-    {% if r.substitutes %}
-      <span class="ml-1 px-1.5 py-0.5 text-[10px] font-sans font-medium rounded-full bg-amber-50 text-amber-600 border border-amber-200" title="{{ r.substitutes|join(', ') }}">+{{ r.substitutes|length }} sub{{ 's' if r.substitutes|length != 1 }}</span>
-    {% endif %}
   </td>
-  <td class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing">{{ r.brand or "—" }}</td>
-  <td class="px-4 py-2.5 text-sm text-gray-500 text-right tabular-nums" x-show="!editing">
+  <td data-col-key="brand" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing">{{ r.brand or "—" }}</td>
+  <td data-col-key="qty" class="px-4 py-2.5 text-sm text-gray-500 text-right tabular-nums" x-show="!editing">
     {{ "{:,}".format(r.target_qty) if r.target_qty else "—" }}
   </td>
-  <td class="px-4 py-2.5 text-sm text-right tabular-nums" x-show="!editing">
+  <td data-col-key="target_price" class="px-4 py-2.5 text-sm text-right tabular-nums" x-show="!editing">
     {% if r.target_price %}
       <span class="text-emerald-700 font-medium">${{ "{:,.4f}".format(r.target_price) }}</span>
     {% else %}
       <span class="text-gray-500">—</span>
     {% endif %}
   </td>
-  <td class="px-4 py-2.5" x-show="!editing">
+  <td data-col-key="customer_pn" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing">{{ r.customer_pn or "—" }}</td>
+  <td data-col-key="need_by_date" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing">
+    {{ r.need_by_date.strftime('%b %d, %Y') if r.need_by_date else "—" }}
+  </td>
+  <td data-col-key="condition" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing">
+    {{ (r.condition or "—")|replace('_', ' ')|capitalize }}
+  </td>
+  <td data-col-key="date_codes" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing">{{ r.date_codes or "—" }}</td>
+  <td data-col-key="firmware" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing">{{ r.firmware or "—" }}</td>
+  <td data-col-key="hardware_codes" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing">{{ r.hardware_codes or "—" }}</td>
+  <td data-col-key="packaging" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing">{{ r.packaging or "—" }}</td>
+  <td data-col-key="notes" class="px-4 py-2.5 text-sm text-gray-500 max-w-[200px] truncate" x-show="!editing" title="{{ r.notes or '' }}">{{ r.notes or "—" }}</td>
+  <td data-col-key="substitutes" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing">
+    {% if r.substitutes %}
+      <span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-50 text-amber-600 border border-amber-200" title="{{ r.substitutes|join(', ') }}">+{{ r.substitutes|length }} sub{{ 's' if r.substitutes|length != 1 }}</span>
+    {% else %}
+      —
+    {% endif %}
+  </td>
+  <td data-col-key="status" class="px-4 py-2.5" x-show="!editing">
     {% set st_colors = {
       "open": "bg-brand-100 text-brand-600",
       "sourcing": "bg-brand-100 text-brand-600",
@@ -37,7 +53,7 @@
       {{ (r.sourcing_status or 'open')|capitalize }}
     </span>
   </td>
-  <td class="px-4 py-2.5 text-sm text-right tabular-nums" x-show="!editing">
+  <td data-col-key="sightings" class="px-4 py-2.5 text-sm text-right tabular-nums" x-show="!editing">
     {% if r.sighting_count > 0 %}
       <span class="inline-flex items-center gap-1 text-brand-600 font-medium">
         {{ r.sighting_count }}
@@ -81,7 +97,7 @@
   </td>
 
   {# ── Edit mode (double-click) ───────────────────────────── #}
-  <td colspan="7" x-show="editing" x-cloak>
+  <td colspan="16" x-show="editing" x-cloak>
     <form hx-put="/v2/partials/requisitions/{{ req.id }}/requirements/{{ r.id }}"
           hx-target="#req-row-{{ r.id }}" hx-swap="outerHTML"
           class="flex items-center gap-2 py-1">
