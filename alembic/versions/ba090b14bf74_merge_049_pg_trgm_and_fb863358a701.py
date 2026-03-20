@@ -16,6 +16,7 @@ down_revision: Union[str, None] = (
     "009_prospect_accounts_discovery_batches",
     "050",
     "064",
+    "0db55f6cfb21",
 )
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
