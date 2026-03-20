@@ -6243,11 +6243,17 @@ async def materials_faceted_partial(
 
     parsed_filters = _parse_filter_json(sub_filters, coerce_numeric=True)
 
+    manufacturers = None
+    if parsed_filters and "manufacturers" in parsed_filters:
+        mfr_val = parsed_filters.pop("manufacturers")
+        manufacturers = mfr_val if isinstance(mfr_val, list) else [mfr_val]
+
     materials, total = search_materials_faceted(
         db,
         commodity=commodity or None,
         q=q or None,
         sub_filters=parsed_filters or None,
+        manufacturers=manufacturers,
         limit=limit,
         offset=offset,
     )

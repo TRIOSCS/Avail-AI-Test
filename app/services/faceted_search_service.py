@@ -102,12 +102,42 @@ def get_facet_counts(
     return result
 
 
+def get_manufacturer_options(
+    db: Session,
+    commodity: str | None = None,
+    limit: int = 20,
+) -> list[dict]:
+    """Return distinct manufacturers sorted by card count (descending).
+
+    Args:
+        commodity: If set, scope to this commodity only.
+        limit: Max results to return (default 20 per spec).
+
+    Returns: [{"name": str, "count": int}, ...]
+    """
+    query = db.query(
+        MaterialCard.manufacturer,
+        func.count(MaterialCard.id).label("cnt"),
+    ).filter(
+        MaterialCard.deleted_at.is_(None),
+        MaterialCard.manufacturer.isnot(None),
+        MaterialCard.manufacturer != "",
+    )
+
+    if commodity:
+        query = query.filter(func.lower(func.trim(MaterialCard.category)) == commodity.lower().strip())
+
+    rows = query.group_by(MaterialCard.manufacturer).order_by(func.count(MaterialCard.id).desc()).limit(limit).all()
+    return [{"name": name, "count": count} for name, count in rows]
+
+
 def search_materials_faceted(
     db: Session,
     *,
     commodity: str | None = None,
     q: str | None = None,
     sub_filters: dict | None = None,
+    manufacturers: list[str] | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[MaterialCard], int]:
@@ -137,6 +167,9 @@ def search_materials_faceted(
                 MaterialCard.description,
             )
         )
+
+    if manufacturers:
+        query = query.filter(MaterialCard.manufacturer.in_(manufacturers))
 
     if sub_filters and commodity:
         commodity_lower = commodity.lower().strip()

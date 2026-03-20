@@ -1,7 +1,7 @@
 """test_proactive_service.py — Tests for app/services/proactive_service.py.
 
-Covers: scan_new_offers_for_matches, send_proactive_offer,
-        convert_proactive_to_win, get_scorecard, get_sent_offers.
+Covers: send_proactive_offer, convert_proactive_to_win,
+        get_scorecard, get_sent_offers, get_matches_for_user, get_match_count.
 
 Business rules tested:
 - Scanning new offers against archived requirements produces ProactiveMatch rows

@@ -12,6 +12,7 @@ from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
 from app.services.faceted_search_service import (
     get_commodity_counts,
     get_facet_counts,
+    get_manufacturer_options,
     get_subfilter_options,
     search_materials_faceted,
 )
@@ -236,3 +237,49 @@ def test_search_materials_faceted_pagination_offset(db_session: Session):
     )
     assert page_total == 5  # Total count unchanged
     assert len(page_results) == 2  # Only 2 remaining after offset
+
+
+# --- Manufacturer options ---
+
+
+def test_get_manufacturer_options_returns_sorted_list(db_session: Session):
+    """get_manufacturer_options returns distinct manufacturers sorted by count."""
+    db_session.add(
+        MaterialCard(normalized_mpn="a", display_mpn="A", manufacturer="Texas Instruments", category="resistors")
+    )
+    db_session.add(
+        MaterialCard(normalized_mpn="b", display_mpn="B", manufacturer="Texas Instruments", category="resistors")
+    )
+    db_session.add(MaterialCard(normalized_mpn="c", display_mpn="C", manufacturer="Murata", category="capacitors"))
+    db_session.flush()
+
+    result = get_manufacturer_options(db_session)
+    assert len(result) == 2
+    assert result[0]["name"] == "Texas Instruments"
+    assert result[0]["count"] == 2
+    assert result[1]["name"] == "Murata"
+
+
+def test_get_manufacturer_options_scoped_to_commodity(db_session: Session):
+    """When commodity is given, only return manufacturers in that commodity."""
+    db_session.add(MaterialCard(normalized_mpn="a", display_mpn="A", manufacturer="TI", category="resistors"))
+    db_session.add(MaterialCard(normalized_mpn="b", display_mpn="B", manufacturer="Murata", category="capacitors"))
+    db_session.flush()
+
+    result = get_manufacturer_options(db_session, commodity="resistors")
+    assert len(result) == 1
+    assert result[0]["name"] == "TI"
+
+
+# --- Manufacturer filter in search ---
+
+
+def test_search_faceted_filters_by_manufacturer(db_session: Session):
+    """search_materials_faceted respects manufacturer filter."""
+    db_session.add(MaterialCard(normalized_mpn="a", display_mpn="A", manufacturer="TI", category="resistors"))
+    db_session.add(MaterialCard(normalized_mpn="b", display_mpn="B", manufacturer="Murata", category="resistors"))
+    db_session.flush()
+
+    results, total = search_materials_faceted(db_session, commodity="resistors", manufacturers=["TI"])
+    assert total == 1
+    assert results[0].manufacturer == "TI"
