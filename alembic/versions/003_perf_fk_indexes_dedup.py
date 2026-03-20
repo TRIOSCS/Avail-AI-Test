@@ -14,6 +14,8 @@ Addresses performance audit findings:
 
 from typing import Sequence, Union
 
+from sqlalchemy import text
+
 from alembic import op
 
 revision: str = "003_perf_fk_indexes"
@@ -22,25 +24,36 @@ branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
+def _drop_index_if_exists(index_name: str, table_name: str) -> None:
+    """Drop an index only if it exists (idempotent for fresh DBs)."""
+    conn = op.get_bind()
+    result = conn.execute(
+        text("SELECT 1 FROM pg_indexes WHERE indexname = :name"),
+        {"name": index_name},
+    )
+    if result.fetchone():
+        op.drop_index(index_name, table_name=table_name)
+
+
 def upgrade() -> None:
     # ── Phase 1: Drop duplicate indexes ─────────────────────────────────
-    # Each pair: (dropped, kept)
+    # Each pair: (dropped, kept) — use _drop_index_if_exists for fresh DBs
     # ix_buyplans_token ↔ buy_plans_approval_token_key (UNIQUE)
-    op.drop_index("ix_buyplans_token", table_name="buy_plans")
+    _drop_index_if_exists("ix_buyplans_token", table_name="buy_plans")
     # ix_contacts_vendor_name (WHERE) ↔ ix_contact_vendor_name (full)
-    op.drop_index("ix_contacts_vendor_name", table_name="contacts")
+    _drop_index_if_exists("ix_contacts_vendor_name", table_name="contacts")
     # ix_ese_email ↔ email_signature_extracts_sender_email_key (UNIQUE)
-    op.drop_index("ix_ese_email", table_name="email_signature_extracts")
+    _drop_index_if_exists("ix_ese_email", table_name="email_signature_extracts")
     # ix_offers_vendor_card (WHERE) ↔ ix_offers_vendor (full)
-    op.drop_index("ix_offers_vendor_card", table_name="offers")
+    _drop_index_if_exists("ix_offers_vendor_card", table_name="offers")
     # ix_sysconfig_key ↔ system_config_key_key (UNIQUE)
-    op.drop_index("ix_sysconfig_key", table_name="system_config")
+    _drop_index_if_exists("ix_sysconfig_key", table_name="system_config")
     # ix_vc_domain ↔ ix_vendor_cards_domain (same definition)
-    op.drop_index("ix_vc_domain", table_name="vendor_cards")
+    _drop_index_if_exists("ix_vc_domain", table_name="vendor_cards")
     # ix_vendor_responses_vendor_name (WHERE) ↔ ix_vr_vendor_name (full)
-    op.drop_index("ix_vendor_responses_vendor_name", table_name="vendor_responses")
+    _drop_index_if_exists("ix_vendor_responses_vendor_name", table_name="vendor_responses")
     # ix_vr_message_id ↔ ix_vendor_responses_message_id (both UNIQUE)
-    op.drop_index("ix_vr_message_id", table_name="vendor_responses")
+    _drop_index_if_exists("ix_vr_message_id", table_name="vendor_responses")
 
     # ── Phase 2: Add missing FK indexes ─────────────────────────────────
     # vendor_responses (high seq scan table — 199K scans, 206M tuples)
