@@ -500,7 +500,7 @@ async def partial_solicit_form(
     db: Session = Depends(get_db),
 ):
     """Render bid solicitation modal form."""
-    get_excess_list(db, list_id)
+    excess_list = get_excess_list(db, list_id)
     ids = [int(i) for i in item_ids.split(",") if i.strip().isdigit()]
     items = (
         db.query(ExcessLineItem).filter(ExcessLineItem.id.in_(ids), ExcessLineItem.excess_list_id == list_id).all()
@@ -509,7 +509,7 @@ async def partial_solicit_form(
     )
     return templates.TemplateResponse(
         "htmx/partials/excess/solicit_modal.html",
-        {"request": request, "list_id": list_id, "items": items},
+        {"request": request, "list_id": list_id, "items": items, "list": excess_list},
     )
 
 
