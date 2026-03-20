@@ -73,6 +73,7 @@ class ExcessLineItem(Base):
     asking_price = Column(Numeric(12, 4), nullable=True)
     market_price = Column(Numeric(12, 4), nullable=True)
     demand_score = Column(Integer, nullable=True)  # 0–100
+    demand_match_count = Column(Integer, default=0)
     status = Column(String(20), default="available")  # available, bidding, awarded, withdrawn
     notes = Column(Text, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
