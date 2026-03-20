@@ -150,9 +150,20 @@ def get_matches_for_user(
             }
         )
 
-    total = sum(len(g["matches"]) for g in groups.values())
+    # Sort matches within each group by match_score descending
+    for g in groups.values():
+        g["matches"].sort(key=lambda m: m.get("match_score", 0), reverse=True)
+
+    # Sort groups by total opportunity (sum of margins) descending
+    groups_list = sorted(
+        groups.values(),
+        key=lambda g: sum(m.get("margin_pct") or 0 for m in g["matches"]),
+        reverse=True,
+    )
+
+    total = sum(len(g["matches"]) for g in groups_list)
     return {
-        "groups": list(groups.values()),
+        "groups": groups_list,
         "stats": {
             "total": total,
             "avg_score": round(sum(all_scores) / total, 1) if total else 0,
@@ -643,16 +654,31 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
 
 
 def get_sent_offers(db: Session, user_id: int) -> list[dict]:
-    """Get sent proactive offers for a salesperson."""
+    """Get sent proactive offers for a salesperson, grouped by customer."""
     offers = (
         db.query(ProactiveOffer)
         .filter(
             ProactiveOffer.salesperson_id == user_id,
         )
+        .options(joinedload(ProactiveOffer.customer_site).joinedload(CustomerSite.company))
         .order_by(ProactiveOffer.sent_at.desc())
         .all()
     )
-    return [_proactive_offer_to_dict(o) for o in offers]
+    # Group by company
+    groups: dict[int, dict] = {}
+    for o in offers:
+        site = o.customer_site
+        company_name = site.company.name if site and site.company else "Unknown"
+        company_id = site.company_id if site else 0
+        if company_id not in groups:
+            groups[company_id] = {
+                "company_name": company_name,
+                "site_name": site.site_name if site else "",
+                "company_id": company_id,
+                "offers": [],
+            }
+        groups[company_id]["offers"].append(_proactive_offer_to_dict(o))
+    return list(groups.values())
 
 
 def _proactive_offer_to_dict(po: ProactiveOffer) -> dict:

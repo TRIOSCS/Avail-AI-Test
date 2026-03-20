@@ -1,0 +1,204 @@
+{#
+  proactive/prepare.html — Full-page prepare/send workflow for proactive offers.
+  Receives: site_id, company_name, site_name, matches (list of dicts),
+            match_ids_json (JSON string), contacts (list of dicts), error_msg.
+  Called by: htmx_views.py proactive_prepare_page endpoint.
+  Depends on: HTMX, Alpine.js, Tailwind CSS.
+#}
+
+<div id="breadcrumb" hx-swap-oob="true">
+  <a hx-get="/v2/partials/proactive?tab=matches" hx-target="#main-content" class="text-brand-600 hover:underline">Proactive</a>
+  <span class="text-gray-400 mx-1">/</span>
+  <span class="text-brand-600 font-medium">Prepare Offer</span>
+</div>
+
+<div class="max-w-4xl mx-auto"
+     x-data="{
+       selectedContacts: {
+         {% for c in contacts %}{% if c.is_primary and c.has_email %}{{ c.id }}: true,{% endif %}{% endfor %}
+       },
+       get contactCount() { return Object.keys(this.selectedContacts).length },
+       get contactIds() { return Object.keys(this.selectedContacts).map(Number) },
+       toggleContact(id) {
+         if (this.selectedContacts[id]) { delete this.selectedContacts[id]; }
+         else { this.selectedContacts[id] = true; }
+         this.selectedContacts = {...this.selectedContacts};
+       },
+     }">
+
+  {# Back link #}
+  <a hx-get="/v2/partials/proactive?tab=matches" hx-target="#main-content"
+     class="inline-flex items-center gap-1 text-sm text-brand-600 hover:text-brand-700 mb-4">
+    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+    </svg>
+    Back to Matches
+  </a>
+
+  {# Header #}
+  <h1 class="text-xl font-bold text-gray-900 mb-1">Prepare Offer — {{ company_name }}</h1>
+  {% if site_name %}
+  <p class="text-sm text-gray-500 mb-6">{{ site_name }}</p>
+  {% endif %}
+
+  {# Error banner #}
+  {% if error_msg %}
+  <div class="mb-4 p-3 bg-rose-50 border border-rose-200 rounded-lg text-sm text-rose-700">
+    {{ error_msg }}
+  </div>
+  {% endif %}
+
+  {# Selected Parts #}
+  <div class="bg-white rounded-lg border border-gray-200 mb-6 overflow-hidden">
+    <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+      <h2 class="text-sm font-semibold text-gray-900">Selected Parts ({{ matches|length }})</h2>
+    </div>
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50/50">
+          <tr>
+            <th class="px-4 py-2 text-left text-[10px] font-medium text-gray-500 uppercase">MPN</th>
+            <th class="px-4 py-2 text-left text-[10px] font-medium text-gray-500 uppercase">Vendor</th>
+            <th class="px-4 py-2 text-right text-[10px] font-medium text-gray-500 uppercase">Qty</th>
+            <th class="px-4 py-2 text-right text-[10px] font-medium text-gray-500 uppercase">Price</th>
+            <th class="px-4 py-2 text-left text-[10px] font-medium text-gray-500 uppercase">Margin</th>
+          </tr>
+        </thead>
+        <tbody class="divide-y divide-gray-100">
+          {% for m in matches %}
+          <tr class="hover:bg-gray-50">
+            <td class="px-4 py-2.5">
+              <span class="text-sm font-medium text-gray-900 font-mono">{{ m.mpn }}</span>
+              {% if m.manufacturer %}
+              <span class="text-xs text-gray-400 ml-1">{{ m.manufacturer }}</span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-2.5 text-sm text-gray-700">{{ m.vendor_name }}</td>
+            <td class="px-4 py-2.5 text-sm text-gray-700 text-right tabular-nums">
+              {{ "{:,}".format(m.qty_available|int) if m.qty_available else '--' }}
+            </td>
+            <td class="px-4 py-2.5 text-sm text-gray-700 text-right tabular-nums">
+              {% if m.unit_price %}${{ "%.4f"|format(m.unit_price) }}{% else %}--{% endif %}
+            </td>
+            <td class="px-4 py-2.5">
+              {% if m.margin_pct is not none %}
+              <span class="inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded
+                {{ 'bg-emerald-50 text-emerald-700' if m.margin_pct >= 20 else
+                   'bg-amber-50 text-amber-700' if m.margin_pct >= 10 else
+                   'bg-rose-50 text-rose-700' }}">
+                {{ "%.0f"|format(m.margin_pct) }}%
+              </span>
+              {% else %}
+              <span class="text-[10px] text-gray-400">N/A</span>
+              {% endif %}
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {# Send To — Contact Picker #}
+  <div class="bg-white rounded-lg border border-gray-200 mb-6">
+    <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+      <h2 class="text-sm font-semibold text-gray-900">Send To</h2>
+    </div>
+    <div class="p-4 space-y-2">
+      {% if contacts %}
+        {% for c in contacts %}
+        <label class="flex items-center gap-3 p-2 rounded-lg hover:bg-gray-50 cursor-pointer {{ 'opacity-50' if not c.has_email }}"
+               {% if not c.has_email %}title="No email address"{% endif %}>
+          <input type="checkbox"
+                 {% if not c.has_email %}disabled{% endif %}
+                 :checked="selectedContacts[{{ c.id }}]"
+                 @change="toggleContact({{ c.id }})"
+                 class="rounded border-gray-300 text-brand-500 focus:ring-brand-500 disabled:opacity-40">
+          <div class="flex-1 min-w-0">
+            <p class="text-sm font-medium text-gray-900">{{ c.full_name or '(unnamed)' }}</p>
+            <p class="text-xs text-gray-500">
+              {{ c.email or '(no email)' }}
+              {% if c.title %} &middot; {{ c.title }}{% endif %}
+              {% if c.is_primary %}
+              <span class="ml-1 px-1.5 py-0.5 text-[9px] font-semibold bg-brand-50 text-brand-600 rounded">Primary</span>
+              {% endif %}
+            </p>
+          </div>
+        </label>
+        {% endfor %}
+      {% else %}
+        <div class="text-center py-6">
+          <p class="text-sm text-gray-500">No contacts on file.</p>
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  {# Email Compose #}
+  <form method="POST" action="/v2/proactive/send"
+        hx-post="/v2/proactive/send"
+        hx-target="#main-content"
+        class="bg-white rounded-lg border border-gray-200 mb-6">
+    <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
+      <h2 class="text-sm font-semibold text-gray-900">Email</h2>
+    </div>
+    <div class="p-4 space-y-4">
+      {# Hidden match_ids #}
+      {% for m in matches %}
+      <input type="hidden" name="match_ids" value="{{ m.id }}">
+      {% endfor %}
+      {# Hidden contact_ids (populated by Alpine) #}
+      <template x-for="id in contactIds" :key="id">
+        <input type="hidden" name="contact_ids" :value="id">
+      </template>
+
+      {# Subject #}
+      <div>
+        <label for="subject-input" class="block text-xs font-medium text-gray-600 mb-1">Subject</label>
+        <input type="text" name="subject" id="subject-input"
+               value="Parts Available — {{ company_name }}"
+               class="w-full rounded-lg border-gray-300 text-sm focus:border-brand-500 focus:ring-brand-500">
+      </div>
+
+      {# Body #}
+      <div>
+        <label for="body-input" class="block text-xs font-medium text-gray-600 mb-1">Body</label>
+        <textarea name="body" id="body-input" rows="6"
+                  placeholder="Type your message or use AI draft..."
+                  class="w-full rounded-lg border-gray-300 text-sm focus:border-brand-500 focus:ring-brand-500"></textarea>
+      </div>
+
+      {# AI Draft button #}
+      <div id="draft-status" class="flex items-center gap-2">
+        <button type="button"
+                hx-post="/v2/partials/proactive/draft"
+                hx-target="#draft-status"
+                hx-include="[name='match_ids'],[name='contact_ids']"
+                hx-indicator="#draft-spinner"
+                class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 transition-colors">
+          <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+          </svg>
+          Generate AI Draft
+          <svg id="draft-spinner" class="htmx-indicator animate-spin h-3.5 w-3.5 text-brand-400" fill="none" viewBox="0 0 24 24">
+            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+          </svg>
+        </button>
+      </div>
+    </div>
+
+    {# Footer actions #}
+    <div class="flex items-center justify-end gap-3 px-4 py-3 bg-gray-50 border-t border-gray-200">
+      <a hx-get="/v2/partials/proactive?tab=matches" hx-target="#main-content"
+         class="px-4 py-2 text-sm font-medium text-gray-600 hover:text-gray-800 transition-colors cursor-pointer">
+        Cancel
+      </a>
+      <button type="submit"
+              :disabled="contactCount === 0"
+              class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
+        Send to <span x-text="contactCount">0</span> Contact<span x-show="contactCount !== 1">s</span>
+      </button>
+    </div>
+  </form>
+</div>
