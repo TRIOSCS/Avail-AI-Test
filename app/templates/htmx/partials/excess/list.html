@@ -1,0 +1,140 @@
+{# Excess Inventory list partial — searchable, filterable table with create modal.
+   Receives: lists, total, limit, offset, companies, q, status_filter, user, request.
+   Called by: partial_excess_list route.
+   Depends on: excess/row.html, brand palette, Alpine.js modal system.
+#}
+
+{# OOB breadcrumb update #}
+<div id="breadcrumb" hx-swap-oob="true">Excess Inventory</div>
+
+<div class="max-w-7xl mx-auto">
+
+  {# Header #}
+  <div class="flex items-center justify-between mb-4">
+    <div>
+      <h1 class="text-2xl font-bold text-gray-900">Excess Inventory</h1>
+      <p class="text-sm text-gray-500 mt-1">{{ total }} list{{ "s" if total != 1 else "" }}</p>
+    </div>
+    <button @click="$dispatch('open-modal')"
+            hx-get="/v2/partials/excess/create-form"
+            hx-target="#modal-content"
+            data-loading-disable
+            class="inline-flex items-center px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors">
+      <svg data-loading class="h-4 w-4 mr-1.5 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+      <svg data-loading-remove class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+      New List
+    </button>
+  </div>
+
+  {# Filter bar: search + status pills #}
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
+    <div class="flex flex-wrap gap-3 items-center">
+      {# Search input #}
+      <div class="relative flex-1 min-w-[200px]">
+        <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+        </svg>
+        <input type="text" name="q" value="{{ q }}" placeholder="Search lists..."
+               hx-get="/v2/partials/excess" hx-target="#main-content" hx-push-url="true"
+               hx-swap="morph"
+               hx-trigger="keyup changed delay:300ms"
+               hx-include="[name='status']"
+               class="w-full pl-10 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+      </div>
+
+      {# Status pills #}
+      <input type="hidden" name="status" value="{{ status_filter }}">
+      {% set statuses = ["draft", "active", "bidding", "closed"] %}
+      {% set pill_colors = {
+        "draft": "bg-gray-100 text-gray-700 hover:bg-gray-200",
+        "active": "bg-emerald-50 text-emerald-700 hover:bg-emerald-100",
+        "bidding": "bg-amber-50 text-amber-700 hover:bg-amber-100",
+        "closed": "bg-slate-100 text-slate-700 hover:bg-slate-200",
+      } %}
+      {% set pill_active = {
+        "draft": "ring-2 ring-gray-400",
+        "active": "ring-2 ring-emerald-400",
+        "bidding": "ring-2 ring-amber-400",
+        "closed": "ring-2 ring-slate-400",
+      } %}
+      {% for s in statuses %}
+      <a hx-get="/v2/partials/excess?status={{ '' if status_filter == s else s }}&q={{ q }}"
+         hx-target="#main-content" hx-push-url="true" hx-swap="morph"
+         class="inline-flex px-3 py-1 text-xs font-medium rounded-full cursor-pointer transition-all {{ pill_colors[s] }} {{ pill_active[s] if status_filter == s else '' }}">
+        {{ s|capitalize }}
+      </a>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# Table #}
+  {% if lists %}
+  <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
+    <div class="overflow-x-auto">
+      <table class="min-w-full divide-y divide-gray-200">
+        <thead class="bg-gray-50">
+          <tr>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Line Items</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+            <th class="px-4 py-3 w-10"></th>
+          </tr>
+        </thead>
+        <tbody id="excess-table-body" class="divide-y divide-gray-200">
+          {% for list in lists %}
+          {% include "htmx/partials/excess/row.html" %}
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  {# Pagination #}
+  {% if total > limit %}
+  <div class="mt-4 flex justify-center">
+    <nav class="flex gap-1 items-center">
+      {% if offset > 0 %}
+      <a hx-get="/v2/partials/excess?offset={{ offset - limit }}&q={{ q }}&status={{ status_filter }}"
+         hx-target="#main-content" hx-swap="morph"
+         class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
+      {% endif %}
+      <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
+      {% if offset + limit < total %}
+      <a hx-get="/v2/partials/excess?offset={{ offset + limit }}&q={{ q }}&status={{ status_filter }}"
+         hx-target="#main-content" hx-swap="morph"
+         class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
+      {% endif %}
+    </nav>
+  </div>
+  {% endif %}
+
+  {% else %}
+  {# Empty state #}
+  <div class="bg-white rounded-lg shadow border border-gray-200 p-12 text-center">
+    <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
+    </svg>
+    <h3 class="mt-3 text-sm font-medium text-gray-900">No excess lists</h3>
+    <p class="mt-1 text-sm text-gray-500">
+      {% if q or status_filter %}
+        No lists match your filters. <a hx-get="/v2/partials/excess" hx-target="#main-content" hx-push-url="true" class="text-brand-500 hover:text-brand-600 cursor-pointer">Clear filters</a>
+      {% else %}
+        Get started by creating your first excess inventory list.
+      {% endif %}
+    </p>
+    {% if not q and not status_filter %}
+    <div class="mt-4">
+      <button @click="$dispatch('open-modal')"
+              hx-get="/v2/partials/excess/create-form"
+              hx-target="#modal-content"
+              class="inline-flex items-center px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors">
+        <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+        New List
+      </button>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>

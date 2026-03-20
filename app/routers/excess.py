@@ -7,13 +7,15 @@ Called by: main.py (router mount)
 Depends on: services/excess_service, schemas/excess, file_utils, dependencies
 """
 
-from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import require_user
 from ..file_utils import parse_tabular_file
-from ..models import User
+from ..models import Company, User
 from ..models.excess import ExcessLineItem
 from ..schemas.excess import (
     ExcessLineItemCreate,
@@ -32,9 +34,59 @@ from ..services.excess_service import (
 )
 
 router = APIRouter(tags=["excess"])
+templates = Jinja2Templates(directory="app/templates")
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xlsx", ".xls"}
+
+
+# ── HTMX Partials ────────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/excess", response_class=HTMLResponse)
+async def partial_excess_list(
+    request: Request,
+    q: str = "",
+    status: str = "",
+    limit: int = 50,
+    offset: int = 0,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render excess inventory list partial for HTMX."""
+    result = list_excess_lists(db, q=q, status=status or None, limit=limit, offset=offset)
+    companies = db.query(Company).order_by(Company.name).all()
+    return templates.TemplateResponse(
+        "htmx/partials/excess/list.html",
+        {
+            "request": request,
+            "user": user,
+            "lists": result["items"],
+            "total": result["total"],
+            "limit": limit,
+            "offset": offset,
+            "companies": companies,
+            "q": q,
+            "status_filter": status or "",
+        },
+    )
+
+
+@router.get("/v2/partials/excess/create-form", response_class=HTMLResponse)
+async def partial_excess_create_form(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the create-excess-list modal form."""
+    companies = db.query(Company).order_by(Company.name).all()
+    return templates.TemplateResponse(
+        "htmx/partials/excess/create_modal.html",
+        {
+            "request": request,
+            "companies": companies,
+        },
+    )
 
 
 # ── List / Create ─────────────────────────────────────────────────────
