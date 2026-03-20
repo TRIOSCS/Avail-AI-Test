@@ -472,7 +472,14 @@ async def claude_batch_results(
                     # Extract tool_use input (same as claude_structured)
                     for block in message.get("content", []):
                         if block.get("type") == "tool_use" and block.get("name") == "structured_output":
-                            parsed[cid] = block.get("input")
+                            raw_input = block.get("input")
+                            # API occasionally returns tool input as JSON string
+                            if isinstance(raw_input, str):
+                                try:
+                                    raw_input = json.loads(raw_input)
+                                except (json.JSONDecodeError, TypeError):
+                                    raw_input = None
+                            parsed[cid] = raw_input
                             break
                     else:
                         parsed[cid] = None

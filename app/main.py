@@ -606,6 +606,7 @@ from .routers.documents import router as documents_router
 from .routers.emails import router as emails_router
 from .routers.error_reports import router as error_reports_router
 from .routers.events import router as events_router
+from .routers.excess import router as excess_router
 from .routers.htmx_views import router as htmx_views_router
 from .routers.ics_admin import router as ics_admin_router
 from .routers.knowledge import insights_router as knowledge_insights_router
@@ -641,6 +642,7 @@ app.include_router(crm_router)
 app.include_router(documents_router)
 app.include_router(emails_router)
 app.include_router(events_router)
+app.include_router(excess_router)
 app.include_router(error_reports_router)
 app.include_router(ics_admin_router)
 app.include_router(knowledge_router)
