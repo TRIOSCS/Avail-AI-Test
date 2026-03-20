@@ -666,6 +666,7 @@ async def api_send_solicitations(
         token=token,
         subject=payload.subject,
         message=payload.message,
+        bundled=payload.bundled,
     )
     return {
         "items": [BidSolicitationResponse.model_validate(s) for s in solicitations],

@@ -756,6 +756,76 @@ def _build_solicitation_html(item: ExcessLineItem, body_text: str, recipient_nam
     """
 
 
+def _build_bundled_solicitation_html(
+    items: list[ExcessLineItem],
+    body_text: str,
+    recipient_name: str | None,
+) -> str:
+    """Build inline HTML email body for a bundled bid solicitation with multi-row parts
+    table."""
+    greeting = f"Hi {recipient_name}," if recipient_name else "Hello,"
+    rows = ""
+    for item in items:
+        rows += (
+            "<tr>"
+            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{item.part_number or "\u2014"}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{item.manufacturer or "\u2014"}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">{item.quantity or "\u2014"}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{getattr(item, "condition", None) or "\u2014"}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{getattr(item, "date_code", None) or "\u2014"}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">'
+            f"{'$' + str(item.asking_price) if getattr(item, 'asking_price', None) else '\u2014'}</td>"
+            "</tr>"
+        )
+    return (
+        '<div style="font-family: Arial, sans-serif; max-width: 600px;">'
+        f"<p>{greeting}</p>"
+        f"<p>{body_text}</p>"
+        '<table style="border-collapse: collapse; width: 100%; margin: 16px 0;">'
+        '<thead><tr style="background: #f3f4f6;">'
+        '<th style="border: 1px solid #d1d5db; padding: 8px; text-align: left;">MPN</th>'
+        '<th style="border: 1px solid #d1d5db; padding: 8px; text-align: left;">Manufacturer</th>'
+        '<th style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">Qty</th>'
+        '<th style="border: 1px solid #d1d5db; padding: 8px; text-align: left;">Condition</th>'
+        '<th style="border: 1px solid #d1d5db; padding: 8px; text-align: left;">Date Code</th>'
+        '<th style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">Asking Price</th>'
+        "</tr></thead>"
+        f"<tbody>{rows}</tbody>"
+        "</table>"
+        '<p style="color: #6b7280; font-size: 12px;">'
+        "This email was sent via AvailAI. Please reply with your best bid."
+        "</p></div>"
+    )
+
+
+async def _find_sent_message(gc, subject: str) -> dict | None:
+    """Find the just-sent message in Sent Items to get its ID and conversationId.
+
+    Retries with backoff (1s, 2s) to handle Graph API propagation delays.
+    """
+    import asyncio
+
+    delays = [1, 2]
+    for delay in delays:
+        try:
+            await asyncio.sleep(delay)
+            data = await gc.get_json(
+                "/me/mailFolders/sentItems/messages",
+                params={
+                    "$top": "5",
+                    "$orderby": "sentDateTime desc",
+                    "$select": "id,conversationId,subject",
+                },
+            )
+            msgs = data.get("value", []) if data else []
+            for m in msgs:
+                if m.get("subject", "").strip() == subject.strip():
+                    return m
+        except Exception as e:
+            logger.debug(f"Sent message lookup attempt failed: {e}")
+    return None
+
+
 async def send_bid_solicitation(
     db: Session,
     *,
@@ -768,11 +838,12 @@ async def send_bid_solicitation(
     token: str,
     subject: str | None = None,
     message: str | None = None,
+    bundled: bool = True,
 ) -> list[BidSolicitation]:
     """Create bid solicitation records and send emails via Microsoft Graph API.
 
-    Creates a BidSolicitation per line item, sends each as a separate email tagged with
-    [EXCESS-BID-{id}] for inbox parsing, and stores the graph_message_id.
+    If bundled=True, sends ONE email containing all items in a multi-row table. If
+    bundled=False, sends a separate email per item (split mode).
 
     Returns list of created BidSolicitation records.
     """
@@ -780,44 +851,51 @@ async def send_bid_solicitation(
 
     excess_list = get_excess_list(db, list_id)
     gc = GraphClient(token)
-    solicitations = []
+    solicitations: list[BidSolicitation] = []
 
+    # Validate all line items exist first
+    validated_items: list[ExcessLineItem] = []
     for item_id in line_item_ids:
         item = db.get(ExcessLineItem, item_id)
         if not item or item.excess_list_id != list_id:
             raise HTTPException(404, f"Line item {item_id} not found in list {list_id}")
+        validated_items.append(item)
 
-        # Build default body text
+    if bundled:
+        # ── Bundled mode: one email with all items ──
         body_text = message or (
-            f"We have {item.quantity} pcs of {item.part_number}"
-            f"{' (' + item.manufacturer + ')' if item.manufacturer else ''}"
-            f" available. Please send your best bid."
+            f"We have {len(validated_items)} excess parts available. Please review and send your best bid."
         )
 
-        # Create solicitation record first (status=pending) so we get an ID for tagging
-        solicitation = BidSolicitation(
-            excess_line_item_id=item_id,
-            contact_id=contact_id,
-            sent_by=user_id,
-            recipient_email=recipient_email,
-            recipient_name=recipient_name,
-            body_preview=body_text[:500],
-            status="pending",
-        )
-        db.add(solicitation)
-        db.flush()  # get solicitation.id
+        # Create all solicitation records (status=pending)
+        for item in validated_items:
+            solicitation = BidSolicitation(
+                excess_line_item_id=item.id,
+                contact_id=contact_id,
+                sent_by=user_id,
+                recipient_email=recipient_email,
+                recipient_name=recipient_name,
+                body_preview=body_text[:500],
+                status="pending",
+            )
+            db.add(solicitation)
+            solicitations.append(solicitation)
 
-        # Tag subject with solicitation ID for inbox parsing
-        base_subject = subject or (f"Bid Request: {item.part_number} x {item.quantity} — {excess_list.title}")
-        email_subject = f"{base_subject} [EXCESS-BID-{solicitation.id}]"
-        solicitation.subject = email_subject
+        db.flush()  # get all solicitation IDs
 
-        # Build HTML email
-        html_body = _build_solicitation_html(item, body_text, recipient_name)
+        # Tag subject with first solicitation's ID
+        first_id = solicitations[0].id
+        base_subject = subject or f"Bid Request: {len(validated_items)} parts \u2014 {excess_list.title}"
+        email_subject = f"{base_subject} [EXCESS-BID-{first_id}]"
+        for s in solicitations:
+            s.subject = email_subject
 
-        # Send via Graph API
+        # Build bundled HTML email with all items
+        html_body = _build_bundled_solicitation_html(validated_items, body_text, recipient_name)
+
+        # Send ONE email via Graph API
         try:
-            result = await gc.post_json(
+            await gc.post_json(
                 "/me/sendMail",
                 {
                     "message": {
@@ -828,19 +906,75 @@ async def send_bid_solicitation(
                     "saveToSentItems": "true",
                 },
             )
-            solicitation.graph_message_id = result.get("id") if result else None
-            solicitation.status = "sent"
-            solicitation.sent_at = datetime.now(timezone.utc)
+            # Look up sent message for graph_message_id
+            sent_msg = await _find_sent_message(gc, email_subject)
+            graph_msg_id = sent_msg.get("id") if sent_msg else None
+            now = datetime.now(timezone.utc)
+            for s in solicitations:
+                s.graph_message_id = graph_msg_id
+                s.status = "sent"
+                s.sent_at = now
         except Exception as exc:
-            solicitation.status = "failed"
+            for s in solicitations:
+                s.status = "failed"
             logger.error(
-                "Failed to send bid solicitation {} to {}: {}",
-                solicitation.id,
+                "Failed to send bundled bid solicitation to {}: {}",
                 recipient_email,
                 exc,
             )
+    else:
+        # ── Split mode: one email per item ──
+        for item in validated_items:
+            body_text = message or (
+                f"We have {item.quantity} pcs of {item.part_number}"
+                f"{' (' + item.manufacturer + ')' if item.manufacturer else ''}"
+                f" available. Please send your best bid."
+            )
 
-        solicitations.append(solicitation)
+            solicitation = BidSolicitation(
+                excess_line_item_id=item.id,
+                contact_id=contact_id,
+                sent_by=user_id,
+                recipient_email=recipient_email,
+                recipient_name=recipient_name,
+                body_preview=body_text[:500],
+                status="pending",
+            )
+            db.add(solicitation)
+            db.flush()  # get solicitation.id
+
+            base_subject = subject or (f"Bid Request: {item.part_number} x {item.quantity} \u2014 {excess_list.title}")
+            email_subject = f"{base_subject} [EXCESS-BID-{solicitation.id}]"
+            solicitation.subject = email_subject
+
+            html_body = _build_solicitation_html(item, body_text, recipient_name)
+
+            try:
+                await gc.post_json(
+                    "/me/sendMail",
+                    {
+                        "message": {
+                            "subject": email_subject,
+                            "body": {"contentType": "HTML", "content": html_body},
+                            "toRecipients": [{"emailAddress": {"address": recipient_email}}],
+                        },
+                        "saveToSentItems": "true",
+                    },
+                )
+                sent_msg = await _find_sent_message(gc, email_subject)
+                solicitation.graph_message_id = sent_msg.get("id") if sent_msg else None
+                solicitation.status = "sent"
+                solicitation.sent_at = datetime.now(timezone.utc)
+            except Exception as exc:
+                solicitation.status = "failed"
+                logger.error(
+                    "Failed to send bid solicitation {} to {}: {}",
+                    solicitation.id,
+                    recipient_email,
+                    exc,
+                )
+
+            solicitations.append(solicitation)
 
     if solicitations:
         _safe_commit(db, entity="bid solicitations")
@@ -848,10 +982,11 @@ async def send_bid_solicitation(
             db.refresh(s)
 
     logger.info(
-        "Created {} bid solicitations for ExcessList id={} to {}",
+        "Created {} bid solicitations for ExcessList id={} to {} (bundled={})",
         len(solicitations),
         list_id,
         recipient_email,
+        bundled,
     )
     return solicitations
 
