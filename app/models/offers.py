@@ -29,6 +29,7 @@ class Offer(Base):
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"))
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
+    excess_line_item_id = Column(Integer, ForeignKey("excess_line_items.id", ondelete="SET NULL"), nullable=True)
 
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"))
     vendor_name = Column(String(255), nullable=False)
@@ -112,6 +113,7 @@ class Offer(Base):
         Index("ix_offers_vendor_name", "vendor_name"),
         Index("ix_offers_vendor_norm", "vendor_name_normalized"),
         Index("ix_offers_material_card", "material_card_id"),
+        Index("ix_offers_excess_line_item", "excess_line_item_id"),
     )
 
 

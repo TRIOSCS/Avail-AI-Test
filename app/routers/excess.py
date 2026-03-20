@@ -1,7 +1,8 @@
 """routers/excess.py — REST API for Excess Inventory lists and line items.
 
 Thin routing layer that delegates to the excess_service for business logic.
-Supports CRUD on ExcessList, single line-item add, and CSV/Excel bulk import.
+Supports CRUD on ExcessList, single line-item add, CSV/Excel bulk import,
+stats, email solicitations, and proactive matching.
 
 Called by: main.py (router mount)
 Depends on: services/excess_service, schemas/excess, file_utils, dependencies
@@ -22,27 +23,38 @@ from ..models.excess import Bid, ExcessLineItem
 from ..schemas.excess import (
     BidCreateRequest,
     BidResponse,
+    BidSolicitationResponse,
     BidUpdate,
+    ConfirmImportRequest,
     ExcessLineItemCreate,
     ExcessLineItemResponse,
     ExcessListCreate,
     ExcessListResponse,
     ExcessListUpdate,
+    ExcessStatsResponse,
+    ParseBidResponseRequest,
+    SendBidSolicitationRequest,
 )
 from ..services.excess_service import (
     accept_bid,
     confirm_import,
     create_bid,
     create_excess_list,
+    create_proactive_matches_for_excess,
     delete_excess_list,
     get_excess_list,
+    get_excess_stats,
     import_line_items,
     list_bids,
     list_excess_lists,
+    list_solicitations,
     match_excess_demand,
+    parse_bid_response,
     preview_import,
+    send_bid_solicitation,
     update_excess_list,
 )
+from ..utils.normalization import normalize_mpn_key
 
 router = APIRouter(tags=["excess"])
 templates = Jinja2Templates(directory="app/templates")
@@ -67,6 +79,7 @@ async def partial_excess_list(
     """Render excess inventory list partial for HTMX."""
     result = list_excess_lists(db, q=q, status=status or None, limit=limit, offset=offset)
     companies = db.query(Company).order_by(Company.name).all()
+    stats = get_excess_stats(db)
     return templates.TemplateResponse(
         "htmx/partials/excess/list.html",
         {
@@ -79,6 +92,7 @@ async def partial_excess_list(
             "companies": companies,
             "q": q,
             "status_filter": status or "",
+            "stats": stats,
         },
     )
 
@@ -302,14 +316,12 @@ async def api_preview_import(
 @router.post("/api/excess-lists/{list_id}/confirm-import")
 async def api_confirm_import(
     list_id: int,
-    payload: dict,
+    payload: ConfirmImportRequest,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Confirm import of pre-validated rows, then run demand matching."""
-    rows = payload.get("rows", [])
-    if not rows:
-        raise HTTPException(400, "No rows to import")
+    rows = [r.model_dump() for r in payload.rows]
     result = confirm_import(db, list_id, rows)
     match_result = match_excess_demand(db, list_id, user_id=user.id)
     return {
@@ -335,6 +347,7 @@ async def api_add_line_item(
     item = ExcessLineItem(
         excess_list_id=list_id,
         part_number=payload.part_number,
+        normalized_part_number=normalize_mpn_key(payload.part_number) or None,
         manufacturer=payload.manufacturer,
         quantity=payload.quantity,
         date_code=payload.date_code,
@@ -527,3 +540,92 @@ async def partial_bid_list(
             "companies": companies,
         },
     )
+
+
+# ── Phase 4: Stats ────────────────────────────────────────────────────
+
+
+@router.get("/api/excess-stats")
+async def api_excess_stats(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get aggregate stats for the excess module."""
+    stats = get_excess_stats(db)
+    return ExcessStatsResponse(**stats)
+
+
+# ── Phase 4: Email Solicitations ──────────────────────────────────────
+
+
+@router.post("/api/excess-lists/{list_id}/solicitations", status_code=201)
+async def api_send_solicitations(
+    list_id: int,
+    payload: SendBidSolicitationRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Send bid solicitation emails for selected line items."""
+    solicitations = send_bid_solicitation(
+        db,
+        list_id=list_id,
+        line_item_ids=payload.line_item_ids,
+        recipient_email=payload.recipient_email,
+        recipient_name=payload.recipient_name,
+        contact_id=payload.contact_id,
+        user_id=user.id,
+        subject=payload.subject,
+        message=payload.message,
+    )
+    return {
+        "items": [BidSolicitationResponse.model_validate(s) for s in solicitations],
+        "total": len(solicitations),
+    }
+
+
+@router.get("/api/excess-lists/{list_id}/solicitations")
+async def api_list_solicitations(
+    list_id: int,
+    item_id: int | None = Query(None),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List solicitations for an excess list."""
+    solicitations = list_solicitations(db, list_id, item_id)
+    return {
+        "items": [BidSolicitationResponse.model_validate(s) for s in solicitations],
+        "total": len(solicitations),
+    }
+
+
+@router.post("/api/excess-solicitations/{solicitation_id}/parse-response")
+async def api_parse_bid_response(
+    solicitation_id: int,
+    payload: ParseBidResponseRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Parse a bid response from an email solicitation and create a Bid."""
+    bid = parse_bid_response(
+        db,
+        solicitation_id=solicitation_id,
+        unit_price=payload.unit_price,
+        quantity_wanted=payload.quantity_wanted,
+        lead_time_days=payload.lead_time_days,
+        notes=payload.notes,
+    )
+    return BidResponse.model_validate(bid)
+
+
+# ── Phase 4: Proactive Matching on Archive ────────────────────────────
+
+
+@router.post("/api/excess-lists/{list_id}/create-proactive-matches")
+async def api_create_proactive_matches(
+    list_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create proactive matches when an excess list is archived."""
+    result = create_proactive_matches_for_excess(db, list_id, user_id=user.id)
+    return result

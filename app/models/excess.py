@@ -66,6 +66,7 @@ class ExcessLineItem(Base):
     id = Column(Integer, primary_key=True)
     excess_list_id = Column(Integer, ForeignKey("excess_lists.id", ondelete="CASCADE"), nullable=False)
     part_number = Column(String(100), nullable=False, index=True)
+    normalized_part_number = Column(String(100), nullable=True, index=True)
     manufacturer = Column(String(255), nullable=True)
     quantity = Column(Integer, nullable=False)
     date_code = Column(String(50), nullable=True)
@@ -98,16 +99,27 @@ class BidSolicitation(Base):
     contact_id = Column(Integer, nullable=False)  # generic FK — no EmailTrack model exists
     sent_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
     email_track_id = Column(Integer, nullable=True)  # reserved for future email tracking FK
-    status = Column(String(20), default="pending")  # pending, sent, responded, expired
+    recipient_email = Column(String(255), nullable=True)
+    recipient_name = Column(String(255), nullable=True)
+    graph_message_id = Column(String(500), nullable=True)  # Graph API message ID for tracking
+    subject = Column(String(500), nullable=True)
+    body_preview = Column(Text, nullable=True)  # first ~200 chars of email body
+    response_received_at = Column(DateTime, nullable=True)
+    parsed_bid_id = Column(
+        Integer, ForeignKey("bids.id", ondelete="SET NULL", use_alter=True), nullable=True
+    )  # auto-created bid
+    status = Column(String(20), default="pending")  # pending, sent, responded, expired, failed
     sent_at = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     excess_line_item = relationship("ExcessLineItem", back_populates="solicitations")
     sent_by_user = relationship("User", foreign_keys=[sent_by])
+    parsed_bid = relationship("Bid", foreign_keys=[parsed_bid_id])
 
     __table_args__ = (
         Index("ix_bid_solicitations_line_item", "excess_line_item_id"),
         Index("ix_bid_solicitations_contact", "contact_id"),
+        Index("ix_bid_solicitations_graph_msg", "graph_message_id"),
     )
 
 
