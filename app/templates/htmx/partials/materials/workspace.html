@@ -100,18 +100,29 @@
           </template>
         </button>
 
-        {# Search input #}
+        {# Search input — triggers AI interpret when 3+ words #}
         <div class="relative flex-1">
           <input type="text" x-model="q"
                  @input.debounce.400ms="applyFilters()"
-                 placeholder="Search by MPN, manufacturer, or description..."
-                 aria-label="Search materials by MPN, manufacturer, or description"
+                 hx-get="/v2/partials/materials/ai-interpret"
+                 hx-trigger="keyup changed delay:800ms[this.value.trim().split(/\s+/).length >= 3]"
+                 hx-include="this"
+                 hx-vals='js:{"q": document.querySelector("[x-model=q]")?.value || ""}'
+                 hx-swap="none"
+                 name="q"
+                 placeholder="Search by MPN, manufacturer, or try: 'DDR5 32GB ECC server memory'..."
+                 aria-label="Search materials by MPN, manufacturer, or natural language"
                  class="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
           <svg class="absolute left-3 top-2.5 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
           </svg>
         </div>
       </div>
+
+      {# AI interpretation chip (populated via OOB swap from ai_interpret.html) #}
+      <div id="ai-chip-container"></div>
+      {# AI script injection target (populated via OOB swap) #}
+      <div id="ai-script-container"></div>
 
       {# Active filter chips #}
       <template x-if="commodity || q || Object.keys(subFilters).length > 0">
