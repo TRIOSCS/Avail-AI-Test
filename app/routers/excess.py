@@ -16,7 +16,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from ..database import get_db
-from ..dependencies import require_user
+from ..dependencies import require_fresh_token, require_user
 from ..file_utils import parse_tabular_file
 from ..models import Company, User
 from ..models.excess import Bid, ExcessLineItem
@@ -564,9 +564,10 @@ async def api_send_solicitations(
     payload: SendBidSolicitationRequest,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
+    token: str = Depends(require_fresh_token),
 ):
     """Send bid solicitation emails for selected line items."""
-    solicitations = send_bid_solicitation(
+    solicitations = await send_bid_solicitation(
         db,
         list_id=list_id,
         line_item_ids=payload.line_item_ids,
@@ -574,6 +575,7 @@ async def api_send_solicitations(
         recipient_name=payload.recipient_name,
         contact_id=payload.contact_id,
         user_id=user.id,
+        token=token,
         subject=payload.subject,
         message=payload.message,
     )

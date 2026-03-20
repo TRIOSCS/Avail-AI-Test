@@ -719,7 +719,44 @@ def create_proactive_matches_for_excess(
 # ---------------------------------------------------------------------------
 
 
-def send_bid_solicitation(
+def _build_solicitation_html(item: ExcessLineItem, body_text: str, recipient_name: str | None) -> str:
+    """Build inline HTML email body for a bid solicitation — parts table with
+    details."""
+    greeting = f"Hi {recipient_name}," if recipient_name else "Hello,"
+    return f"""
+    <div style="font-family: Arial, sans-serif; max-width: 600px;">
+        <p>{greeting}</p>
+        <p>{body_text}</p>
+        <table style="border-collapse: collapse; width: 100%; margin: 16px 0;">
+            <thead>
+                <tr style="background: #f3f4f6;">
+                    <th style="border: 1px solid #d1d5db; padding: 8px; text-align: left;">MPN</th>
+                    <th style="border: 1px solid #d1d5db; padding: 8px; text-align: left;">Manufacturer</th>
+                    <th style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">Qty</th>
+                    <th style="border: 1px solid #d1d5db; padding: 8px; text-align: left;">Condition</th>
+                    <th style="border: 1px solid #d1d5db; padding: 8px; text-align: left;">Date Code</th>
+                    <th style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">Asking Price</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td style="border: 1px solid #d1d5db; padding: 8px;">{item.part_number or "—"}</td>
+                    <td style="border: 1px solid #d1d5db; padding: 8px;">{item.manufacturer or "—"}</td>
+                    <td style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">{item.quantity or "—"}</td>
+                    <td style="border: 1px solid #d1d5db; padding: 8px;">{getattr(item, "condition", None) or "—"}</td>
+                    <td style="border: 1px solid #d1d5db; padding: 8px;">{getattr(item, "date_code", None) or "—"}</td>
+                    <td style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">{("$" + str(item.asking_price)) if getattr(item, "asking_price", None) else "—"}</td>
+                </tr>
+            </tbody>
+        </table>
+        <p style="color: #6b7280; font-size: 12px;">
+            This email was sent via AvailAI. Please reply with your best bid.
+        </p>
+    </div>
+    """
+
+
+async def send_bid_solicitation(
     db: Session,
     *,
     list_id: int,
@@ -728,17 +765,21 @@ def send_bid_solicitation(
     recipient_name: str | None,
     contact_id: int,
     user_id: int,
+    token: str,
     subject: str | None = None,
     message: str | None = None,
 ) -> list[BidSolicitation]:
-    """Create bid solicitation records for the given line items.
+    """Create bid solicitation records and send emails via Microsoft Graph API.
 
-    In production, this would also send an email via Microsoft Graph API. For now,
-    creates the solicitation records and marks them as 'sent'.
+    Creates a BidSolicitation per line item, sends each as a separate email tagged with
+    [EXCESS-BID-{id}] for inbox parsing, and stores the graph_message_id.
 
     Returns list of created BidSolicitation records.
     """
+    from ..utils.graph_client import GraphClient
+
     excess_list = get_excess_list(db, list_id)
+    gc = GraphClient(token)
     solicitations = []
 
     for item_id in line_item_ids:
@@ -746,28 +787,59 @@ def send_bid_solicitation(
         if not item or item.excess_list_id != list_id:
             raise HTTPException(404, f"Line item {item_id} not found in list {list_id}")
 
-        # Build email subject if not provided
-        email_subject = subject or (f"Bid Request: {item.part_number} x {item.quantity} — {excess_list.title}")
-
-        # Build email body preview
-        body_preview = message or (
+        # Build default body text
+        body_text = message or (
             f"We have {item.quantity} pcs of {item.part_number}"
             f"{' (' + item.manufacturer + ')' if item.manufacturer else ''}"
             f" available. Please send your best bid."
         )
 
+        # Create solicitation record first (status=pending) so we get an ID for tagging
         solicitation = BidSolicitation(
             excess_line_item_id=item_id,
             contact_id=contact_id,
             sent_by=user_id,
             recipient_email=recipient_email,
             recipient_name=recipient_name,
-            subject=email_subject,
-            body_preview=body_preview[:500],
-            status="sent",
-            sent_at=datetime.now(timezone.utc),
+            body_preview=body_text[:500],
+            status="pending",
         )
         db.add(solicitation)
+        db.flush()  # get solicitation.id
+
+        # Tag subject with solicitation ID for inbox parsing
+        base_subject = subject or (f"Bid Request: {item.part_number} x {item.quantity} — {excess_list.title}")
+        email_subject = f"{base_subject} [EXCESS-BID-{solicitation.id}]"
+        solicitation.subject = email_subject
+
+        # Build HTML email
+        html_body = _build_solicitation_html(item, body_text, recipient_name)
+
+        # Send via Graph API
+        try:
+            result = await gc.post_json(
+                "/me/sendMail",
+                {
+                    "message": {
+                        "subject": email_subject,
+                        "body": {"contentType": "HTML", "content": html_body},
+                        "toRecipients": [{"emailAddress": {"address": recipient_email}}],
+                    },
+                    "saveToSentItems": "true",
+                },
+            )
+            solicitation.graph_message_id = result.get("id") if result else None
+            solicitation.status = "sent"
+            solicitation.sent_at = datetime.now(timezone.utc)
+        except Exception as exc:
+            solicitation.status = "failed"
+            logger.error(
+                "Failed to send bid solicitation {} to {}: {}",
+                solicitation.id,
+                recipient_email,
+                exc,
+            )
+
         solicitations.append(solicitation)
 
     if solicitations:

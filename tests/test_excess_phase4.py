@@ -12,6 +12,8 @@ Called by: pytest
 Depends on: app.services.excess_service, app.models.excess, conftest fixtures
 """
 
+from unittest.mock import AsyncMock, patch
+
 import pytest
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
@@ -243,12 +245,15 @@ class TestOfferExcessLineItemFK:
 
 
 class TestBidSolicitations:
-    def test_send_solicitation_creates_records(self, db_session: Session, company, trader):
+    @pytest.mark.asyncio
+    @patch("app.utils.graph_client.GraphClient")
+    async def test_send_solicitation_creates_records(self, mock_gc_cls, db_session: Session, company, trader):
+        mock_gc_cls.return_value.post_json = AsyncMock(return_value={})
         el = _make_excess_list(db_session, company, trader)
         item1 = _make_line_item(db_session, el, "PART-A")
         item2 = _make_line_item(db_session, el, "PART-B")
 
-        solicitations = send_bid_solicitation(
+        solicitations = await send_bid_solicitation(
             db_session,
             list_id=el.id,
             line_item_ids=[item1.id, item2.id],
@@ -256,6 +261,7 @@ class TestBidSolicitations:
             recipient_name="John Buyer",
             contact_id=1,
             user_id=trader.id,
+            token="fake",
         )
 
         assert len(solicitations) == 2
@@ -264,11 +270,14 @@ class TestBidSolicitations:
         assert solicitations[0].status == "sent"
         assert solicitations[0].sent_at is not None
 
-    def test_send_solicitation_with_custom_subject(self, db_session: Session, company, trader):
+    @pytest.mark.asyncio
+    @patch("app.utils.graph_client.GraphClient")
+    async def test_send_solicitation_with_custom_subject(self, mock_gc_cls, db_session: Session, company, trader):
+        mock_gc_cls.return_value.post_json = AsyncMock(return_value={})
         el = _make_excess_list(db_session, company, trader)
         item = _make_line_item(db_session, el)
 
-        solicitations = send_bid_solicitation(
+        solicitations = await send_bid_solicitation(
             db_session,
             list_id=el.id,
             line_item_ids=[item.id],
@@ -276,18 +285,21 @@ class TestBidSolicitations:
             recipient_name=None,
             contact_id=1,
             user_id=trader.id,
+            token="fake",
             subject="Custom Subject",
             message="Custom message body",
         )
 
-        assert solicitations[0].subject == "Custom Subject"
+        assert "Custom Subject" in solicitations[0].subject
         assert solicitations[0].body_preview == "Custom message body"
 
-    def test_send_solicitation_invalid_item(self, db_session: Session, company, trader):
+    @pytest.mark.asyncio
+    @patch("app.utils.graph_client.GraphClient")
+    async def test_send_solicitation_invalid_item(self, mock_gc_cls, db_session: Session, company, trader):
         el = _make_excess_list(db_session, company, trader)
 
         with pytest.raises(HTTPException) as exc_info:
-            send_bid_solicitation(
+            await send_bid_solicitation(
                 db_session,
                 list_id=el.id,
                 line_item_ids=[99999],
@@ -295,14 +307,18 @@ class TestBidSolicitations:
                 recipient_name=None,
                 contact_id=1,
                 user_id=trader.id,
+                token="fake",
             )
         assert exc_info.value.status_code == 404
 
-    def test_parse_bid_response_creates_bid(self, db_session: Session, company, trader):
+    @pytest.mark.asyncio
+    @patch("app.utils.graph_client.GraphClient")
+    async def test_parse_bid_response_creates_bid(self, mock_gc_cls, db_session: Session, company, trader):
+        mock_gc_cls.return_value.post_json = AsyncMock(return_value={})
         el = _make_excess_list(db_session, company, trader)
         item = _make_line_item(db_session, el)
 
-        solicitations = send_bid_solicitation(
+        solicitations = await send_bid_solicitation(
             db_session,
             list_id=el.id,
             line_item_ids=[item.id],
@@ -310,6 +326,7 @@ class TestBidSolicitations:
             recipient_name=None,
             contact_id=1,
             user_id=trader.id,
+            token="fake",
         )
 
         bid = parse_bid_response(
@@ -336,12 +353,15 @@ class TestBidSolicitations:
             parse_bid_response(db_session, solicitation_id=99999, unit_price=1.0, quantity_wanted=10)
         assert exc_info.value.status_code == 404
 
-    def test_list_solicitations(self, db_session: Session, company, trader):
+    @pytest.mark.asyncio
+    @patch("app.utils.graph_client.GraphClient")
+    async def test_list_solicitations(self, mock_gc_cls, db_session: Session, company, trader):
+        mock_gc_cls.return_value.post_json = AsyncMock(return_value={})
         el = _make_excess_list(db_session, company, trader)
         item1 = _make_line_item(db_session, el, "A")
         item2 = _make_line_item(db_session, el, "B")
 
-        send_bid_solicitation(
+        await send_bid_solicitation(
             db_session,
             list_id=el.id,
             line_item_ids=[item1.id],
@@ -349,8 +369,9 @@ class TestBidSolicitations:
             recipient_name=None,
             contact_id=1,
             user_id=trader.id,
+            token="fake",
         )
-        send_bid_solicitation(
+        await send_bid_solicitation(
             db_session,
             list_id=el.id,
             line_item_ids=[item2.id],
@@ -358,6 +379,7 @@ class TestBidSolicitations:
             recipient_name=None,
             contact_id=2,
             user_id=trader.id,
+            token="fake",
         )
 
         # All solicitations for the list
@@ -494,7 +516,9 @@ class TestStatsEndpoint:
 
 
 class TestSolicitationEndpoints:
-    def test_send_solicitation_endpoint(self, client, db_session: Session, test_user):
+    @patch("app.utils.graph_client.GraphClient")
+    def test_send_solicitation_endpoint(self, mock_gc_cls, client, db_session: Session, test_user):
+        mock_gc_cls.return_value.post_json = AsyncMock(return_value={})
         company = _make_company(db_session, "Endpoint Test Co")
         el = create_excess_list(db_session, title="Endpoint Test", company_id=company.id, owner_id=test_user.id)
         item = _make_line_item(db_session, el)
@@ -513,20 +537,22 @@ class TestSolicitationEndpoints:
         assert data["total"] == 1
         assert data["items"][0]["recipient_email"] == "buyer@test.com"
 
-    def test_list_solicitations_endpoint(self, client, db_session: Session, test_user):
+    @patch("app.utils.graph_client.GraphClient")
+    def test_list_solicitations_endpoint(self, mock_gc_cls, client, db_session: Session, test_user):
+        mock_gc_cls.return_value.post_json = AsyncMock(return_value={})
         company = _make_company(db_session, "List Solicit Co")
         el = create_excess_list(db_session, title="List Test", company_id=company.id, owner_id=test_user.id)
         item = _make_line_item(db_session, el)
 
-        # Create a solicitation first
-        send_bid_solicitation(
-            db_session,
-            list_id=el.id,
-            line_item_ids=[item.id],
-            recipient_email="x@test.com",
-            recipient_name=None,
-            contact_id=1,
-            user_id=test_user.id,
+        # Create a solicitation via the endpoint (which handles async)
+        client.post(
+            f"/api/excess-lists/{el.id}/solicitations",
+            json={
+                "line_item_ids": [item.id],
+                "recipient_email": "x@test.com",
+                "recipient_name": None,
+                "contact_id": 1,
+            },
         )
 
         response = client.get(f"/api/excess-lists/{el.id}/solicitations")
