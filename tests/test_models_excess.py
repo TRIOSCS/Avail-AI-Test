@@ -283,5 +283,5 @@ class TestBidSchemas:
 
 class TestBidSolicitationSchemas:
     def test_create_valid(self):
-        schema = BidSolicitationCreate(excess_line_item_id=1, contact_id=42)
+        schema = BidSolicitationCreate(excess_line_item_id=1, contact_id=42, recipient_email="test@example.com")
         assert schema.contact_id == 42

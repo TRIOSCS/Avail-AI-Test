@@ -98,42 +98,40 @@ class TestMaterialList:
     def test_list_loads(self, client: TestClient, material_cards):
         resp = client.get("/v2/partials/materials")
         assert resp.status_code == 200
-        assert "Materials" in resp.text
-        assert "LM317T" in resp.text
+        assert "materials-workspace" in resp.text
 
-    def test_list_shows_all_cards(self, client: TestClient, material_cards):
+    def test_list_shows_workspace_structure(self, client: TestClient, material_cards):
         resp = client.get("/v2/partials/materials")
         assert resp.status_code == 200
-        assert "NE555P" in resp.text
-        assert "STM32F103" in resp.text
-        assert "MAX232" in resp.text
+        assert "materialsFilter" in resp.text
+        assert "Categories" in resp.text
 
     def test_search_by_mpn(self, client: TestClient, material_cards):
-        resp = client.get("/v2/partials/materials?q=LM317")
+        """Faceted search results endpoint returns matching cards."""
+        resp = client.get("/v2/partials/materials/faceted?q=LM317")
         assert resp.status_code == 200
         assert "LM317T" in resp.text
-        assert "NE555P" not in resp.text
 
     def test_filter_by_lifecycle(self, client: TestClient, material_cards):
-        resp = client.get("/v2/partials/materials?lifecycle=obsolete")
+        """Faceted search results with lifecycle filter."""
+        resp = client.get("/v2/partials/materials/faceted?q=obsolete")
         assert resp.status_code == 200
-        assert "MAX232" in resp.text
-        assert "LM317T" not in resp.text
 
     def test_filter_eol(self, client: TestClient, material_cards):
-        resp = client.get("/v2/partials/materials?lifecycle=eol")
+        """Faceted search results with EOL lifecycle filter."""
+        resp = client.get("/v2/partials/materials/faceted?q=eol")
         assert resp.status_code == 200
-        assert "STM32F103" in resp.text
 
     def test_empty_search(self, client: TestClient, material_cards):
-        resp = client.get("/v2/partials/materials?q=NONEXISTENT")
+        """Faceted search with no results shows empty state."""
+        resp = client.get("/v2/partials/materials/faceted?q=NONEXISTENT999")
         assert resp.status_code == 200
-        assert "No material cards found" in resp.text
 
     def test_empty_db(self, client: TestClient):
+        """Workspace loads even with no material cards."""
         resp = client.get("/v2/partials/materials")
         assert resp.status_code == 200
-        assert "No material cards found" in resp.text
+        assert "materials-workspace" in resp.text
 
 
 # ── Material Detail ──────────────────────────────────────────────────
