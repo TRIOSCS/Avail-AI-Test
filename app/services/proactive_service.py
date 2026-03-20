@@ -672,6 +672,23 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
         salespeople = db.query(User).filter(User.id.in_(sp_ids)).all() if sp_ids else []
         sales_map = {u.id: u.name or u.email.split("@")[0] for u in salespeople}
 
+        # Batch quoted counts per salesperson (avoids N+1)
+        quoted_by_sp = dict(
+            db.query(ProactiveOffer.salesperson_id, func.count(ProactiveOffer.id))
+            .filter(ProactiveOffer.converted_quote_id.isnot(None))
+            .group_by(ProactiveOffer.salesperson_id)
+            .all()
+        )
+
+        # Batch PO counts per salesperson (avoids N+1)
+        po_by_sp = dict(
+            db.query(ProactiveOffer.salesperson_id, func.count(BuyPlan.id))
+            .join(BuyPlan, BuyPlan.quote_id == ProactiveOffer.converted_quote_id)
+            .filter(BuyPlan.status.in_(["approved", "po_entered"]))
+            .group_by(ProactiveOffer.salesperson_id)
+            .all()
+        )
+
         breakdown = []
         for r in breakdown_rows:
             sid = r.salesperson_id
@@ -680,25 +697,8 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
             u_rev = float(r.rev)
             u_cost = float(r.cost)
             u_pending = float(r.pending)
-            u_quoted = r.quoted or 0
-
-            # PO count per salesperson
-            u_quote_ids_q = (
-                db.query(ProactiveOffer.converted_quote_id)
-                .filter(
-                    ProactiveOffer.salesperson_id == sid,
-                    ProactiveOffer.converted_quote_id.isnot(None),
-                )
-                .subquery()
-            )
-            u_po = (
-                db.query(func.count(BuyPlan.id))
-                .filter(
-                    BuyPlan.quote_id.in_(db.query(u_quote_ids_q.c.converted_quote_id)),
-                    BuyPlan.status.in_(["approved", "po_entered"]),
-                )
-                .scalar()
-            ) or 0
+            u_quoted = quoted_by_sp.get(sid, 0)
+            u_po = po_by_sp.get(sid, 0)
 
             breakdown.append(
                 {
