@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
@@ -22,6 +23,8 @@ from .services.credential_service import get_credential_cached
 from .shared_constants import JUNK_DOMAINS as NOISE_DOMAINS
 from .shared_constants import JUNK_EMAIL_PREFIXES as NOISE_PREFIXES
 from .vendor_utils import normalize_vendor_name
+
+_EXCESS_BID_RE = re.compile(r"\[EXCESS-BID-(\d+)\]")
 
 
 def _build_html_body(plain_text: str) -> str:
@@ -469,6 +472,13 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
         if _is_noise_email(email_addr):
             continue
 
+        # ── Excess bid reply detection (before RFQ matching) ──
+        excess_bid_match = _EXCESS_BID_RE.search(subj)
+        if excess_bid_match:
+            sol_id = int(excess_bid_match.group(1))
+            await _handle_excess_bid_reply(msg, sol_id, db)
+            continue
+
         # ── 4-tier reply matching ──
         matched_contact = None
         matched_req_id = requisition_id
@@ -869,6 +879,116 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
     # Delegate business-logic side effects when db is provided
     if db is not None:
         _auto_create_offers_from_parse(vr, parsed, db)
+
+
+async def _handle_excess_bid_reply(msg: dict, solicitation_id: int, db: Session) -> None:
+    """Parse an inbox reply to an excess bid solicitation and create a pending Bid.
+
+    Called by: poll_inbox() when [EXCESS-BID-{id}] tag detected in subject.
+    Depends on: claude_structured, parse_bid_response (excess_service).
+    """
+    from .models.excess import BidSolicitation
+    from .services.excess_service import parse_bid_response
+
+    solicitation = db.get(BidSolicitation, solicitation_id)
+    if not solicitation:
+        logger.warning("Excess bid solicitation {} not found, skipping", solicitation_id)
+        return
+
+    if solicitation.status in ("responded", "expired"):
+        logger.debug("Solicitation {} already {}, skipping", solicitation_id, solicitation.status)
+        return
+
+    # Lookback window
+    from .config import settings
+
+    if solicitation.sent_at:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=settings.excess_bid_parse_lookback_days)
+        sent_at = solicitation.sent_at
+        if sent_at.tzinfo is None:
+            sent_at = sent_at.replace(tzinfo=timezone.utc)
+        if sent_at < cutoff:
+            logger.debug("Solicitation {} before lookback cutoff, skipping", solicitation_id)
+            return
+
+    body = msg.get("body", {}).get("content", msg.get("bodyPreview", ""))
+    if not body.strip():
+        logger.debug("Empty body for solicitation {} reply, skipping", solicitation_id)
+        return
+
+    # Parse with Claude
+    try:
+        from .utils.claude_client import claude_structured
+
+        item = solicitation.excess_line_item
+        prompt = (
+            f"Extract bid info from this email reply to a parts solicitation.\n"
+            f"Original request: {item.part_number} x {item.quantity}, "
+            f"asking ${item.asking_price or '?'}.\n\n"
+            f"Email body:\n{body[:2000]}\n\n"
+            f'Return JSON: {{"unit_price": float|null, "quantity_wanted": int|null, '
+            f'"lead_time_days": int|null, "notes": str|null}}\n'
+            f'If the email declines to bid, return {{"declined": true}}.'
+        )
+
+        result = await claude_structured(
+            prompt=prompt,
+            schema={
+                "type": "object",
+                "properties": {
+                    "unit_price": {"type": ["number", "null"]},
+                    "quantity_wanted": {"type": ["integer", "null"]},
+                    "lead_time_days": {"type": ["integer", "null"]},
+                    "notes": {"type": ["string", "null"]},
+                    "declined": {"type": "boolean"},
+                },
+            },
+            max_tokens=512,
+        )
+    except Exception as e:
+        logger.warning("Failed to parse excess bid reply for solicitation {}: {}", solicitation_id, e)
+        return
+
+    if not result:
+        logger.warning("Empty parse result for solicitation {}", solicitation_id)
+        return
+
+    if result.get("declined"):
+        solicitation.status = "responded"
+        solicitation.response_received_at = datetime.now(timezone.utc)
+        db.flush()
+        logger.info("Solicitation {} declined by recipient", solicitation_id)
+        return
+
+    unit_price = result.get("unit_price")
+    qty = result.get("quantity_wanted")
+    if not unit_price or not qty:
+        logger.warning("Incomplete parse for solicitation {}: {}", solicitation_id, result)
+        return
+
+    bid = parse_bid_response(
+        db,
+        solicitation_id=solicitation_id,
+        unit_price=unit_price,
+        quantity_wanted=qty,
+        lead_time_days=result.get("lead_time_days"),
+        notes=result.get("notes"),
+    )
+
+    # ActivityLog notification
+    db.add(
+        ActivityLog(
+            user_id=solicitation.sent_by,
+            activity_type="bid_received",
+            channel="system",
+            subject=(
+                f"New bid received (pending review): "
+                f"{solicitation.recipient_name or solicitation.recipient_email} — {item.part_number}"
+            ),
+        )
+    )
+
+    logger.info("Auto-created bid {} from solicitation {} reply", bid.id, solicitation_id)
 
 
 def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session) -> None:
