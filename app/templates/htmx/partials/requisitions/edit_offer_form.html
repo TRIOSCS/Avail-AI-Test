@@ -15,10 +15,16 @@
         hx-target="#tab-content"
         class="space-y-3">
 
+    {# Row 1: Vendor, MPN, Qty, Price #}
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div>
         <label class="block text-xs text-gray-500 mb-1">Vendor Name *</label>
         <input type="text" name="vendor_name" required value="{{ offer.vendor_name or '' }}"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">MPN *</label>
+        <input type="text" name="mpn" required value="{{ offer.mpn or '' }}"
                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
       </div>
       <div>
@@ -31,14 +37,20 @@
         <input type="number" name="unit_price" step="0.0001" min="0" value="{{ offer.unit_price or '' }}"
                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
       </div>
+    </div>
+
+    {# Row 2: Manufacturer, Lead Time, Date Code, Condition #}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Manufacturer</label>
+        <input type="text" name="manufacturer" value="{{ offer.manufacturer or '' }}"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+      </div>
       <div>
         <label class="block text-xs text-gray-500 mb-1">Lead Time</label>
         <input type="text" name="lead_time" value="{{ offer.lead_time or '' }}"
                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
       </div>
-    </div>
-
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div>
         <label class="block text-xs text-gray-500 mb-1">Date Code</label>
         <input type="text" name="date_code" value="{{ offer.date_code or '' }}"
@@ -49,17 +61,68 @@
         <select name="condition" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
           <option value="">—</option>
           <option value="new" {{ 'selected' if offer.condition == 'new' }}>New</option>
+          <option value="new_surplus" {{ 'selected' if offer.condition == 'new_surplus' }}>New Surplus</option>
+          <option value="etn" {{ 'selected' if offer.condition == 'etn' }}>ETN</option>
           <option value="refurbished" {{ 'selected' if offer.condition == 'refurbished' }}>Refurbished</option>
           <option value="used" {{ 'selected' if offer.condition == 'used' }}>Used</option>
+          <option value="pulls" {{ 'selected' if offer.condition == 'pulls' }}>Pulls</option>
+          <option value="as_is" {{ 'selected' if offer.condition == 'as_is' }}>As-Is</option>
         </select>
       </div>
+    </div>
+
+    {# Row 3: MOQ, SPQ, Packaging, Firmware #}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div>
         <label class="block text-xs text-gray-500 mb-1">MOQ</label>
         <input type="number" name="moq" min="1" value="{{ offer.moq or '' }}"
                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
       </div>
-      {% if requirements %}
       <div>
+        <label class="block text-xs text-gray-500 mb-1">SPQ</label>
+        <input type="number" name="spq" min="1" value="{{ offer.spq or '' }}"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Packaging</label>
+        <input type="text" name="packaging" value="{{ offer.packaging or '' }}"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Firmware</label>
+        <input type="text" name="firmware" value="{{ offer.firmware or '' }}"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+      </div>
+    </div>
+
+    {# Row 4: Hardware Code, Warranty, Country of Origin, Valid Until #}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Hardware Code</label>
+        <input type="text" name="hardware_code" value="{{ offer.hardware_code or '' }}"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Warranty</label>
+        <input type="text" name="warranty" value="{{ offer.warranty or '' }}"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Country of Origin</label>
+        <input type="text" name="country_of_origin" value="{{ offer.country_of_origin or '' }}"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Valid Until</label>
+        <input type="date" name="valid_until" value="{{ offer.valid_until or '' }}"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+      </div>
+    </div>
+
+    {# Linked Requirement #}
+    {% if requirements %}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="col-span-2">
         <label class="block text-xs text-gray-500 mb-1">Linked Requirement</label>
         <select name="requirement_id" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
           <option value="">— None —</option>
@@ -68,9 +131,10 @@
           {% endfor %}
         </select>
       </div>
-      {% endif %}
     </div>
+    {% endif %}
 
+    {# Full-width: Notes #}
     <div>
       <label class="block text-xs text-gray-500 mb-1">Notes</label>
       <textarea name="notes" rows="2"

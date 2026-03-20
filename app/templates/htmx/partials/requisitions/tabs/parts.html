@@ -10,33 +10,98 @@
           hx-target="#parts-tbody"
           hx-swap="afterbegin"
           @htmx:after-request.camel="if(event.detail.successful) { $el.reset(); Alpine.store('toast').message='Requirement added'; Alpine.store('toast').type='success'; Alpine.store('toast').show=true; }"
-          class="flex flex-wrap items-end gap-3">
-      <div>
-        <label class="block text-xs font-medium text-gray-500 mb-1">MPN</label>
-        <input type="text" name="primary_mpn" required placeholder="Part number"
-               class="px-3 py-1.5 border border-brand-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500 w-48">
+          class="space-y-3">
+
+      {# Row 1: MPN, Qty, Brand, Target Price #}
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">MPN *</label>
+          <input type="text" name="primary_mpn" required placeholder="Part number"
+                 class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Qty</label>
+          <input type="number" name="target_qty" min="1" value="1" placeholder="Qty"
+                 class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Brand</label>
+          <input type="text" name="brand" placeholder="Manufacturer"
+                 class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Target Price</label>
+          <input type="number" name="target_price" step="0.0001" min="0" placeholder="$0.0000"
+                 class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+        </div>
       </div>
-      <div>
-        <label class="block text-xs font-medium text-gray-500 mb-1">Qty</label>
-        <input type="number" name="target_qty" min="1" value="1" placeholder="Qty"
-               class="px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 w-24">
+
+      {# Row 2: Customer PN, Need-by Date, Condition, Packaging #}
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Customer PN</label>
+          <input type="text" name="customer_pn" placeholder="Customer part #"
+                 class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Need-by Date</label>
+          <input type="date" name="need_by_date"
+                 class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Condition</label>
+          <select name="condition" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+            <option value="">—</option>
+            <option value="new">New</option>
+            <option value="new_surplus">New Surplus</option>
+            <option value="etn">ETN</option>
+            <option value="refurbished">Refurbished</option>
+            <option value="used">Used</option>
+            <option value="pulls">Pulls</option>
+            <option value="as_is">As-Is</option>
+          </select>
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Packaging</label>
+          <input type="text" name="packaging" placeholder="Tape & Reel, Tray..."
+                 class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+        </div>
       </div>
-      <div>
-        <label class="block text-xs font-medium text-gray-500 mb-1">Manufacturer</label>
-        <input type="text" name="brand" placeholder="Brand"
-               class="px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 w-40">
+
+      {# Row 3: Date Codes, Firmware, Hardware Codes, Substitutes #}
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Date Codes</label>
+          <input type="text" name="date_codes" placeholder="2024+"
+                 class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Firmware</label>
+          <input type="text" name="firmware" placeholder="Firmware rev"
+                 class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Hardware Codes</label>
+          <input type="text" name="hardware_codes" placeholder="HW rev"
+                 class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+        </div>
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Substitutes</label>
+          <input type="text" name="substitutes" placeholder="Alt MPNs, comma-sep"
+                 class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+                 title="Approved substitute part numbers, comma-separated">
+        </div>
       </div>
-      <div>
-        <label class="block text-xs font-medium text-gray-500 mb-1">Target Price</label>
-        <input type="number" name="target_price" step="0.0001" min="0" placeholder="$0.0000"
-               class="px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 w-28">
+
+      {# Full-width: Notes #}
+      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+        <div class="col-span-2 md:col-span-4">
+          <label class="block text-xs text-gray-500 mb-1">Notes</label>
+          <textarea name="notes" rows="2" placeholder="Any additional details..."
+                    class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"></textarea>
+        </div>
       </div>
-      <div>
-        <label class="block text-xs font-medium text-gray-500 mb-1">Substitutes</label>
-        <input type="text" name="substitutes" placeholder="Alt MPNs, comma-sep"
-               class="px-3 py-1.5 border border-brand-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500 w-48"
-               title="Approved substitute part numbers, comma-separated">
-      </div>
+
       <button type="submit"
               class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 inline-flex items-center gap-1.5">
         <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">

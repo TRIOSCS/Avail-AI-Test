@@ -15,6 +15,7 @@
         hx-target="#tab-content"
         class="space-y-3">
 
+    {# Row 1: Vendor, MPN, Qty, Price #}
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div>
         <label class="block text-xs text-gray-500 mb-1">Vendor Name *</label>
@@ -42,7 +43,14 @@
       </div>
     </div>
 
+    {# Row 2: Manufacturer, Lead Time, Date Code, Condition #}
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Manufacturer</label>
+        <input type="text" name="manufacturer"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               placeholder="Brand">
+      </div>
       <div>
         <label class="block text-xs text-gray-500 mb-1">Lead Time</label>
         <input type="text" name="lead_time"
@@ -60,30 +68,87 @@
         <select name="condition" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
           <option value="">—</option>
           <option value="new">New</option>
+          <option value="new_surplus">New Surplus</option>
+          <option value="etn">ETN</option>
           <option value="refurbished">Refurbished</option>
           <option value="used">Used</option>
+          <option value="pulls">Pulls</option>
+          <option value="as_is">As-Is</option>
         </select>
       </div>
+    </div>
+
+    {# Row 3: MOQ, SPQ, Packaging, Firmware #}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div>
         <label class="block text-xs text-gray-500 mb-1">MOQ</label>
         <input type="number" name="moq" min="1"
                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
                placeholder="1">
       </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">SPQ</label>
+        <input type="number" name="spq" min="1"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               placeholder="1">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Packaging</label>
+        <input type="text" name="packaging"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               placeholder="Tape & Reel, Tray...">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Firmware</label>
+        <input type="text" name="firmware"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               placeholder="Firmware rev">
+      </div>
     </div>
 
+    {# Row 4: Hardware Code, Warranty, Country of Origin, Valid Until #}
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Hardware Code</label>
+        <input type="text" name="hardware_code"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               placeholder="HW rev">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Warranty</label>
+        <input type="text" name="warranty"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               placeholder="e.g. 90 days">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Country of Origin</label>
+        <input type="text" name="country_of_origin"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+               placeholder="e.g. US, CN">
+      </div>
+      <div>
+        <label class="block text-xs text-gray-500 mb-1">Valid Until</label>
+        <input type="date" name="valid_until"
+               class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+      </div>
+    </div>
+
+    {# Linked Requirement #}
     {% if requirements %}
-    <div>
-      <label class="block text-xs text-gray-500 mb-1">Linked Requirement</label>
-      <select name="requirement_id" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
-        <option value="">— None —</option>
-        {% for r in requirements %}
-        <option value="{{ r.id }}">{{ r.primary_mpn }} (qty {{ r.target_qty or '—' }})</option>
-        {% endfor %}
-      </select>
+    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div class="col-span-2">
+        <label class="block text-xs text-gray-500 mb-1">Linked Requirement</label>
+        <select name="requirement_id" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+          <option value="">— None —</option>
+          {% for r in requirements %}
+          <option value="{{ r.id }}">{{ r.primary_mpn }} (qty {{ r.target_qty or '—' }})</option>
+          {% endfor %}
+        </select>
+      </div>
     </div>
     {% endif %}
 
+    {# Full-width: Notes #}
     <div>
       <label class="block text-xs text-gray-500 mb-1">Notes</label>
       <textarea name="notes" rows="2"
