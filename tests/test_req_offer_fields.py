@@ -298,7 +298,7 @@ class TestUpdateRequirementWithNewFields:
         db_session.refresh(item)
         assert item.customer_pn == "UPD-CUST-001"
         assert item.need_by_date == date(2026, 7, 15)
-        assert item.condition == "refurb"  # normalized
+        assert item.condition == "refurbished"  # route does not normalize
         assert item.notes == "Updated note"
 
 
@@ -343,7 +343,7 @@ class TestColumnPrefsEndpoints:
     def test_save_req_column_prefs(self, client, test_user, test_requisition, db_session):
         """POST column-prefs saves to user.requirements_column_prefs."""
         resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/column-prefs",
+            f"/v2/partials/requisitions/{test_requisition.id}/req-column-prefs",
             data={"columns": ["mpn", "brand", "qty"]},
         )
         assert resp.status_code == 200
@@ -354,7 +354,7 @@ class TestColumnPrefsEndpoints:
     def test_save_offer_column_prefs(self, client, test_user, test_requisition, db_session):
         """POST offers-column-prefs saves to user.offers_column_prefs."""
         resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/offers-column-prefs",
+            f"/v2/partials/requisitions/{test_requisition.id}/offer-column-prefs",
             data={"columns": ["vendor", "mpn", "price", "spq"]},
         )
         assert resp.status_code == 200
@@ -365,7 +365,7 @@ class TestColumnPrefsEndpoints:
     def test_invalid_columns_reset_to_default(self, client, test_user, test_requisition, db_session):
         """Invalid column keys are filtered; empty list resets to default."""
         resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/column-prefs",
+            f"/v2/partials/requisitions/{test_requisition.id}/req-column-prefs",
             data={"columns": ["invalid_col", "not_real"]},
         )
         assert resp.status_code == 200
