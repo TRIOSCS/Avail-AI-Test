@@ -39,3 +39,5 @@ pydantic-settings==2.13.1
 sse-starlette>=1.6.0
 # HTMX integration helpers for FastAPI
 fasthx>=3.1.0
+# Anthropic Claude API (used by claude_client, enrichment, batch extraction)
+anthropic>=0.40.0
