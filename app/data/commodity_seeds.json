@@ -125,6 +125,17 @@
         "through-hole"
       ],
       "sort_order": 5
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "press-fit"
+      ],
+      "sort_order": 6
     }
   ],
   "resistors": [
@@ -168,6 +179,17 @@
         "through-hole"
       ],
       "sort_order": 4
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "press-fit"
+      ],
+      "sort_order": 5
     }
   ],
   "hdd": [
@@ -254,6 +276,31 @@
       "unit": "MB/s",
       "canonical_unit": "MB/s",
       "sort_order": 4
+    },
+    {
+      "spec_key": "write_speed_mbps",
+      "display_name": "Write Speed (MB/s)",
+      "data_type": "numeric",
+      "unit": "MB/s",
+      "canonical_unit": "MB/s",
+      "numeric_range": {
+        "min": 100,
+        "max": 7500
+      },
+      "sort_order": 5
+    },
+    {
+      "spec_key": "nand_type",
+      "display_name": "NAND Type",
+      "data_type": "enum",
+      "enum_values": [
+        "SLC",
+        "MLC",
+        "TLC",
+        "QLC",
+        "PLC"
+      ],
+      "sort_order": 6
     }
   ],
   "connectors": [
@@ -301,6 +348,25 @@
       "display_name": "Series",
       "data_type": "enum",
       "sort_order": 5
+    },
+    {
+      "spec_key": "connector_type",
+      "display_name": "Connector Type",
+      "data_type": "enum",
+      "enum_values": [
+        "USB",
+        "RJ45",
+        "HDMI",
+        "PCIe",
+        "D-Sub",
+        "JST",
+        "Molex",
+        "FPC/FFC",
+        "M.2",
+        "SATA",
+        "SAS"
+      ],
+      "sort_order": 6
     }
   ],
   "motherboards": [
@@ -348,6 +414,29 @@
         "max": 16
       },
       "sort_order": 4
+    },
+    {
+      "spec_key": "max_memory_gb",
+      "display_name": "Max Memory (GB)",
+      "data_type": "numeric",
+      "unit": "GB",
+      "canonical_unit": "GB",
+      "numeric_range": {
+        "min": 8,
+        "max": 6144
+      },
+      "sort_order": 5
+    },
+    {
+      "spec_key": "pcie_gen",
+      "display_name": "PCIe Generation",
+      "data_type": "enum",
+      "enum_values": [
+        "Gen3",
+        "Gen4",
+        "Gen5"
+      ],
+      "sort_order": 6
     }
   ],
   "cpu": [
@@ -388,6 +477,21 @@
       "display_name": "Architecture",
       "data_type": "enum",
       "sort_order": 5
+    },
+    {
+      "spec_key": "family",
+      "display_name": "Family",
+      "data_type": "enum",
+      "enum_values": [
+        "Xeon",
+        "Core i-series",
+        "Ryzen",
+        "EPYC",
+        "Threadripper",
+        "Atom",
+        "ARM"
+      ],
+      "sort_order": 6
     }
   ],
   "power_supplies": [
@@ -425,6 +529,45 @@
         "80+ Titanium"
       ],
       "sort_order": 3
+    },
+    {
+      "spec_key": "input_voltage",
+      "display_name": "Input Voltage",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "numeric_range": {
+        "min": 90,
+        "max": 480
+      },
+      "sort_order": 4
+    },
+    {
+      "spec_key": "output_voltage",
+      "display_name": "Output Voltage",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "numeric_range": {
+        "min": 1.0,
+        "max": 48.0
+      },
+      "sort_order": 5
+    },
+    {
+      "spec_key": "psu_connector_type",
+      "display_name": "Connector Type",
+      "data_type": "enum",
+      "enum_values": [
+        "ATX 24-pin",
+        "EPS 8-pin",
+        "PCIe 6-pin",
+        "PCIe 8-pin",
+        "Barrel",
+        "Molex",
+        "SATA"
+      ],
+      "sort_order": 6
     }
   ],
   "gpu": [
@@ -460,6 +603,34 @@
         "PCIe 5.0"
       ],
       "sort_order": 3
+    },
+    {
+      "spec_key": "gpu_family",
+      "display_name": "Family",
+      "data_type": "enum",
+      "enum_values": [
+        "GeForce",
+        "Quadro",
+        "RTX",
+        "Radeon",
+        "Radeon Pro",
+        "Tesla",
+        "A-series",
+        "H-series"
+      ],
+      "sort_order": 4
+    },
+    {
+      "spec_key": "tdp_watts",
+      "display_name": "TDP (W)",
+      "data_type": "numeric",
+      "unit": "W",
+      "canonical_unit": "W",
+      "numeric_range": {
+        "min": 25,
+        "max": 700
+      },
+      "sort_order": 5
     }
   ],
   "inductors": [
@@ -485,6 +656,30 @@
       "display_name": "Package",
       "data_type": "enum",
       "sort_order": 3
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "press-fit"
+      ],
+      "sort_order": 4
+    },
+    {
+      "spec_key": "inductor_type",
+      "display_name": "Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Ferrite",
+        "Wirewound",
+        "Multilayer",
+        "Film",
+        "Ceramic"
+      ],
+      "sort_order": 5
     }
   ],
   "diodes": [
@@ -522,6 +717,17 @@
       "display_name": "Package",
       "data_type": "enum",
       "sort_order": 4
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "press-fit"
+      ],
+      "sort_order": 5
     }
   ],
   "mosfets": [
@@ -565,6 +771,17 @@
       "display_name": "Package",
       "data_type": "enum",
       "sort_order": 5
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "press-fit"
+      ],
+      "sort_order": 6
     }
   ],
   "microcontrollers": [
@@ -613,6 +830,48 @@
       "display_name": "Package",
       "data_type": "enum",
       "sort_order": 5
+    },
+    {
+      "spec_key": "supply_voltage",
+      "display_name": "Supply Voltage",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "numeric_range": {
+        "min": 1.0,
+        "max": 5.5
+      },
+      "sort_order": 6
+    },
+    {
+      "spec_key": "has_uart",
+      "display_name": "UART",
+      "data_type": "boolean",
+      "sort_order": 7
+    },
+    {
+      "spec_key": "has_spi",
+      "display_name": "SPI",
+      "data_type": "boolean",
+      "sort_order": 8
+    },
+    {
+      "spec_key": "has_i2c",
+      "display_name": "I2C",
+      "data_type": "boolean",
+      "sort_order": 9
+    },
+    {
+      "spec_key": "has_usb",
+      "display_name": "USB",
+      "data_type": "boolean",
+      "sort_order": 10
+    },
+    {
+      "spec_key": "has_can",
+      "display_name": "CAN",
+      "data_type": "boolean",
+      "sort_order": 11
     }
   ],
   "network_cards": [
@@ -663,6 +922,17 @@
         "Mellanox"
       ],
       "sort_order": 4
+    },
+    {
+      "spec_key": "media_type",
+      "display_name": "Media Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Copper",
+        "Fiber",
+        "Copper/Fiber"
+      ],
+      "sort_order": 5
     }
   ],
   "flash": [
@@ -693,6 +963,31 @@
       "display_name": "Package",
       "data_type": "enum",
       "sort_order": 3
+    },
+    {
+      "spec_key": "voltage",
+      "display_name": "Voltage",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "numeric_range": {
+        "min": 1.2,
+        "max": 5.0
+      },
+      "sort_order": 4
+    },
+    {
+      "spec_key": "flash_form_factor",
+      "display_name": "Form Factor",
+      "data_type": "enum",
+      "enum_values": [
+        "DIP",
+        "TSOP",
+        "BGA",
+        "WSON",
+        "SOIC"
+      ],
+      "sort_order": 5
     }
   ]
 }

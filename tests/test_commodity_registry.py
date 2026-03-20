@@ -52,3 +52,11 @@ def test_seed_commodity_schemas_is_idempotent(db_session: Session):
     seed_commodity_schemas(db_session)
     count2 = seed_commodity_schemas(db_session)
     assert count2 == 0
+
+
+def test_expanded_seeds_have_minimum_specs():
+    """Every commodity should have at least 4 specs after expansion."""
+    from app.services.commodity_registry import COMMODITY_SPEC_SEEDS
+
+    for commodity, specs in COMMODITY_SPEC_SEEDS.items():
+        assert len(specs) >= 4, f"{commodity} has only {len(specs)} specs, expected >= 4"
