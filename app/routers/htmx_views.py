@@ -7562,9 +7562,17 @@ async def proactive_send_legacy(
     db.commit()
     logger.info("Proactive match {} sent by {}", match_id, user.email)
 
+    # Redirect to list with success message (send_success.html removed in redesign)
     return templates.TemplateResponse(
-        "htmx/partials/proactive/send_success.html",
-        {"request": request, "match": match},
+        "htmx/partials/proactive/list.html",
+        _base_ctx(request, user, "proactive")
+        | {
+            "matches": [],
+            "sent": [],
+            "tab": "matches",
+            "match_count": 0,
+            "success_msg": f"Offer for {match.mpn} marked as sent",
+        },
     )
 
 
