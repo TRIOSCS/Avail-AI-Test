@@ -663,13 +663,16 @@ def create_proactive_matches_for_excess(
             continue
 
         for req in requirements:
-            # Get the customer site from the requisition's company
-            requisition = db.get(Requisition, req.requisition_id)
-            customer_site_id = getattr(requisition, "customer_site_id", None) if requisition else None
+            # Get the customer site from the requisition (the buyer's side)
+            customer_site_id = None
+            requisition = db.get(Requisition, req.requisition_id) if req.requisition_id else None
 
-            # Fall back to a site from the excess list's company
-            if not customer_site_id and excess_list.company_id:
-                site = db.query(CustomerSite).filter_by(company_id=excess_list.company_id).first()
+            if requisition and getattr(requisition, "customer_site_id", None):
+                customer_site_id = requisition.customer_site_id
+
+            # Fall back to a site from the requisition's company (the buyer), not the seller
+            if not customer_site_id and requisition and requisition.company_id:
+                site = db.query(CustomerSite).filter_by(company_id=requisition.company_id).first()
                 customer_site_id = site.id if site else None
 
             if not customer_site_id:

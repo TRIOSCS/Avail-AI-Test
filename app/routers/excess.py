@@ -25,12 +25,14 @@ from ..schemas.excess import (
     BidResponse,
     BidSolicitationResponse,
     BidUpdate,
+    ConfirmImportRequest,
     ExcessLineItemCreate,
     ExcessLineItemResponse,
     ExcessListCreate,
     ExcessListResponse,
     ExcessListUpdate,
     ExcessStatsResponse,
+    ParseBidResponseRequest,
     SendBidSolicitationRequest,
 )
 from ..services.excess_service import (
@@ -314,14 +316,12 @@ async def api_preview_import(
 @router.post("/api/excess-lists/{list_id}/confirm-import")
 async def api_confirm_import(
     list_id: int,
-    payload: dict,
+    payload: ConfirmImportRequest,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Confirm import of pre-validated rows, then run demand matching."""
-    rows = payload.get("rows", [])
-    if not rows:
-        raise HTTPException(400, "No rows to import")
+    rows = [r.model_dump() for r in payload.rows]
     result = confirm_import(db, list_id, rows)
     match_result = match_excess_demand(db, list_id, user_id=user.id)
     return {
@@ -601,23 +601,18 @@ async def api_list_solicitations(
 @router.post("/api/excess-solicitations/{solicitation_id}/parse-response")
 async def api_parse_bid_response(
     solicitation_id: int,
-    payload: dict,
+    payload: ParseBidResponseRequest,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Parse a bid response from an email solicitation and create a Bid."""
-    unit_price = payload.get("unit_price")
-    quantity_wanted = payload.get("quantity_wanted")
-    if unit_price is None or quantity_wanted is None:
-        raise HTTPException(400, "unit_price and quantity_wanted are required")
-
     bid = parse_bid_response(
         db,
         solicitation_id=solicitation_id,
-        unit_price=float(unit_price),
-        quantity_wanted=int(quantity_wanted),
-        lead_time_days=payload.get("lead_time_days"),
-        notes=payload.get("notes"),
+        unit_price=payload.unit_price,
+        quantity_wanted=payload.quantity_wanted,
+        lead_time_days=payload.lead_time_days,
+        notes=payload.notes,
     )
     return BidResponse.model_validate(bid)
 

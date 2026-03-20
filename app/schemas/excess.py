@@ -204,7 +204,40 @@ class BidSolicitationResponse(BaseModel):
     status: str
     sent_at: datetime | None = None
     response_received_at: datetime | None = None
+    body_preview: str | None = None
     created_at: datetime | None = None
+
+
+# ── Parse Bid Response ──────────────────────────────────────────────
+
+
+class ParseBidResponseRequest(BaseModel):
+    """Request body for parsing a bid response from an email solicitation."""
+
+    unit_price: float = Field(ge=0)
+    quantity_wanted: int = Field(ge=1)
+    lead_time_days: int | None = Field(default=None, ge=0)
+    notes: str | None = None
+
+
+# ── Confirm Import ──────────────────────────────────────────────────
+
+
+class ConfirmImportRow(BaseModel):
+    """A single validated row for import confirmation."""
+
+    part_number: str
+    manufacturer: str | None = None
+    quantity: int = Field(default=1, ge=1)
+    date_code: str | None = None
+    condition: str | None = "New"
+    asking_price: float | None = Field(default=None, ge=0)
+
+
+class ConfirmImportRequest(BaseModel):
+    """Request body for confirming a bulk import."""
+
+    rows: list[ConfirmImportRow] = Field(min_length=1)
 
 
 # ── Stats ───────────────────────────────────────────────────────────
