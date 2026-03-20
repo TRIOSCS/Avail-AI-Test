@@ -2,20 +2,24 @@
 
 Handles CRUD operations for ExcessList and bulk import of ExcessLineItems
 with flexible header detection (part_number/mpn, quantity/qty, etc.).
+Phase 4 adds: stats, normalization display, proactive matching, email solicitations.
 
 Called by: routers/excess.py (Phase 3+)
 Depends on: models (ExcessList, ExcessLineItem, Company), database
 """
 
+from datetime import datetime, timezone
 from decimal import Decimal, InvalidOperation
 
 from fastapi import HTTPException
 from loguru import logger
+from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..models import Company
-from ..models.excess import Bid, ExcessLineItem, ExcessList
+from ..models import Company, CustomerSite
+from ..models.excess import Bid, BidSolicitation, ExcessLineItem, ExcessList
+from ..models.intelligence import ProactiveMatch
 from ..models.offers import Offer
 from ..models.sourcing import Requirement, Requisition
 from ..utils.normalization import normalize_mpn_key
@@ -239,6 +243,7 @@ def import_line_items(db: Session, list_id: int, rows: list[dict]) -> dict:
         item = ExcessLineItem(
             excess_list_id=list_id,
             part_number=part_number,
+            normalized_part_number=normalize_mpn_key(part_number) or None,
             manufacturer=manufacturer,
             quantity=quantity,
             date_code=date_code,
@@ -322,9 +327,11 @@ def confirm_import(db: Session, list_id: int, validated_rows: list[dict]) -> dic
     excess_list = get_excess_list(db, list_id)
     imported = 0
     for row in validated_rows:
+        pn = row["part_number"]
         item = ExcessLineItem(
             excess_list_id=list_id,
-            part_number=row["part_number"],
+            part_number=pn,
+            normalized_part_number=normalize_mpn_key(pn) or None,
             manufacturer=row.get("manufacturer"),
             quantity=row["quantity"],
             date_code=row.get("date_code"),
@@ -397,6 +404,7 @@ def match_excess_demand(db: Session, list_id: int, *, user_id: int) -> dict:
             offer = Offer(
                 requisition_id=req.requisition_id,
                 requirement_id=req.id,
+                excess_line_item_id=item.id,
                 vendor_name=vendor_name,
                 mpn=item.part_number,
                 normalized_mpn=norm_key,
@@ -518,3 +526,325 @@ def accept_bid(db: Session, bid_id: int, line_item_id: int, list_id: int) -> Bid
     db.refresh(bid)
     logger.info("Accepted Bid id={} on line_item={} list={}", bid_id, line_item_id, list_id)
     return bid
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Stats
+# ---------------------------------------------------------------------------
+
+
+def get_excess_stats(db: Session) -> dict:
+    """Compute aggregate stats for the excess list view.
+
+    Returns {total_lists, total_line_items, pending_bids, matched_items, total_bids,
+    awarded_items}.
+    """
+    total_lists = db.query(func.count(ExcessList.id)).scalar() or 0
+    total_line_items = db.query(func.count(ExcessLineItem.id)).scalar() or 0
+    pending_bids = db.query(func.count(Bid.id)).filter(Bid.status == "pending").scalar() or 0
+    total_bids = db.query(func.count(Bid.id)).scalar() or 0
+    matched_items = db.query(func.count(ExcessLineItem.id)).filter(ExcessLineItem.demand_match_count > 0).scalar() or 0
+    awarded_items = db.query(func.count(ExcessLineItem.id)).filter(ExcessLineItem.status == "awarded").scalar() or 0
+
+    return {
+        "total_lists": total_lists,
+        "total_line_items": total_line_items,
+        "pending_bids": pending_bids,
+        "matched_items": matched_items,
+        "total_bids": total_bids,
+        "awarded_items": awarded_items,
+    }
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Normalization backfill
+# ---------------------------------------------------------------------------
+
+
+def backfill_normalized_part_numbers(db: Session) -> int:
+    """Backfill normalized_part_number for existing line items that lack it.
+
+    Returns count of items updated.
+    """
+    items = db.query(ExcessLineItem).filter(ExcessLineItem.normalized_part_number.is_(None)).all()
+    updated = 0
+    for item in items:
+        norm = normalize_mpn_key(item.part_number)
+        if norm:
+            item.normalized_part_number = norm
+            updated += 1
+    if updated > 0:
+        _safe_commit(db, entity="normalization backfill")
+    logger.info("Backfilled normalized_part_number for {} excess line items", updated)
+    return updated
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: ProactiveMatch creation for archived deals
+# ---------------------------------------------------------------------------
+
+_ARCHIVED_STATUSES = {"closed", "expired"}
+
+
+def create_proactive_matches_for_excess(
+    db: Session,
+    list_id: int,
+    *,
+    user_id: int,
+) -> dict:
+    """When an excess list is archived (closed/expired), create ProactiveMatch entries.
+
+    Matches each line item against archived requirements so future offers can be
+    surfaced to salespeople.
+
+    Returns {matches_created: int}.
+    """
+    excess_list = get_excess_list(db, list_id)
+    if excess_list.status not in _ARCHIVED_STATUSES:
+        return {"matches_created": 0}
+
+    line_items = db.query(ExcessLineItem).filter_by(excess_list_id=list_id).all()
+    matches_created = 0
+
+    for item in line_items:
+        norm_key = normalize_mpn_key(item.part_number)
+        if not norm_key:
+            continue
+
+        # Find archived requirements with matching MPN
+        requirements = (
+            db.query(Requirement)
+            .join(Requisition, Requirement.requisition_id == Requisition.id)
+            .filter(
+                Requirement.normalized_mpn == norm_key,
+                Requisition.status.in_({"archived", "closed"}),
+            )
+            .all()
+        )
+
+        if not requirements:
+            continue
+
+        # Find the most recent offer from this excess list for this item
+        offer = (
+            db.query(Offer)
+            .filter(
+                Offer.source == "excess",
+                Offer.normalized_mpn == norm_key,
+                Offer.excess_line_item_id == item.id,
+            )
+            .first()
+        )
+
+        # If no offer exists from demand matching, create a standalone one
+        if not offer and requirements:
+            req = requirements[0]
+            vendor_name = excess_list.company.name if excess_list.company else "Unknown"
+            offer = Offer(
+                requisition_id=req.requisition_id,
+                requirement_id=req.id,
+                excess_line_item_id=item.id,
+                vendor_name=vendor_name,
+                mpn=item.part_number,
+                normalized_mpn=norm_key,
+                manufacturer=item.manufacturer,
+                qty_available=item.quantity,
+                unit_price=item.asking_price,
+                source="excess",
+                condition=item.condition,
+                date_code=item.date_code,
+                entered_by_id=user_id,
+                notes=f"Proactive match from archived excess list: {excess_list.title}",
+            )
+            db.add(offer)
+            db.flush()
+
+        if not offer:
+            continue
+
+        for req in requirements:
+            # Get the customer site from the requisition's company
+            requisition = db.get(Requisition, req.requisition_id)
+            customer_site_id = getattr(requisition, "customer_site_id", None) if requisition else None
+
+            # Fall back to a site from the excess list's company
+            if not customer_site_id and excess_list.company_id:
+                site = db.query(CustomerSite).filter_by(company_id=excess_list.company_id).first()
+                customer_site_id = site.id if site else None
+
+            if not customer_site_id:
+                continue
+
+            # Check for existing proactive match
+            existing = (
+                db.query(ProactiveMatch)
+                .filter(
+                    ProactiveMatch.offer_id == offer.id,
+                    ProactiveMatch.requirement_id == req.id,
+                )
+                .first()
+            )
+            if existing:
+                continue
+
+            pm = ProactiveMatch(
+                offer_id=offer.id,
+                requirement_id=req.id,
+                requisition_id=req.requisition_id,
+                customer_site_id=customer_site_id,
+                salesperson_id=user_id,
+                mpn=item.part_number,
+                status="new",
+                our_cost=float(item.asking_price) if item.asking_price else None,
+            )
+            db.add(pm)
+            matches_created += 1
+
+    if matches_created > 0:
+        _safe_commit(db, entity="proactive matches")
+
+    logger.info(
+        "Created {} proactive matches for archived ExcessList id={}",
+        matches_created,
+        list_id,
+    )
+    return {"matches_created": matches_created}
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: Email bid solicitations
+# ---------------------------------------------------------------------------
+
+
+def send_bid_solicitation(
+    db: Session,
+    *,
+    list_id: int,
+    line_item_ids: list[int],
+    recipient_email: str,
+    recipient_name: str | None,
+    contact_id: int,
+    user_id: int,
+    subject: str | None = None,
+    message: str | None = None,
+) -> list[BidSolicitation]:
+    """Create bid solicitation records for the given line items.
+
+    In production, this would also send an email via Microsoft Graph API. For now,
+    creates the solicitation records and marks them as 'sent'.
+
+    Returns list of created BidSolicitation records.
+    """
+    excess_list = get_excess_list(db, list_id)
+    solicitations = []
+
+    for item_id in line_item_ids:
+        item = db.get(ExcessLineItem, item_id)
+        if not item or item.excess_list_id != list_id:
+            raise HTTPException(404, f"Line item {item_id} not found in list {list_id}")
+
+        # Build email subject if not provided
+        email_subject = subject or (f"Bid Request: {item.part_number} x {item.quantity} — {excess_list.title}")
+
+        # Build email body preview
+        body_preview = message or (
+            f"We have {item.quantity} pcs of {item.part_number}"
+            f"{' (' + item.manufacturer + ')' if item.manufacturer else ''}"
+            f" available. Please send your best bid."
+        )
+
+        solicitation = BidSolicitation(
+            excess_line_item_id=item_id,
+            contact_id=contact_id,
+            sent_by=user_id,
+            recipient_email=recipient_email,
+            recipient_name=recipient_name,
+            subject=email_subject,
+            body_preview=body_preview[:500],
+            status="sent",
+            sent_at=datetime.now(timezone.utc),
+        )
+        db.add(solicitation)
+        solicitations.append(solicitation)
+
+    if solicitations:
+        _safe_commit(db, entity="bid solicitations")
+        for s in solicitations:
+            db.refresh(s)
+
+    logger.info(
+        "Created {} bid solicitations for ExcessList id={} to {}",
+        len(solicitations),
+        list_id,
+        recipient_email,
+    )
+    return solicitations
+
+
+def parse_bid_response(
+    db: Session,
+    *,
+    solicitation_id: int,
+    unit_price: float,
+    quantity_wanted: int,
+    lead_time_days: int | None = None,
+    notes: str | None = None,
+) -> Bid:
+    """Parse an incoming bid response and create a Bid from a solicitation.
+
+    Links the created bid back to the solicitation.
+
+    Returns the created Bid.
+    """
+    solicitation = db.get(BidSolicitation, solicitation_id)
+    if not solicitation:
+        raise HTTPException(404, f"BidSolicitation {solicitation_id} not found")
+
+    item = db.get(ExcessLineItem, solicitation.excess_line_item_id)
+    if not item:
+        raise HTTPException(404, f"Line item {solicitation.excess_line_item_id} not found")
+
+    bid = Bid(
+        excess_line_item_id=solicitation.excess_line_item_id,
+        unit_price=unit_price,
+        quantity_wanted=quantity_wanted,
+        lead_time_days=lead_time_days,
+        source="email_parsed",
+        notes=notes or f"Parsed from solicitation to {solicitation.recipient_email}",
+        created_by=solicitation.sent_by,
+    )
+    db.add(bid)
+    db.flush()
+
+    solicitation.status = "responded"
+    solicitation.response_received_at = datetime.now(timezone.utc)
+    solicitation.parsed_bid_id = bid.id
+
+    _safe_commit(db, entity="parsed bid response")
+    db.refresh(bid)
+    logger.info(
+        "Parsed bid response: Bid id={} from solicitation id={}",
+        bid.id,
+        solicitation_id,
+    )
+    return bid
+
+
+def list_solicitations(
+    db: Session,
+    list_id: int,
+    item_id: int | None = None,
+) -> list[BidSolicitation]:
+    """List solicitations for an excess list, optionally filtered by line item.
+
+    Returns list of BidSolicitation records.
+    """
+    get_excess_list(db, list_id)
+    query = (
+        db.query(BidSolicitation)
+        .join(ExcessLineItem, BidSolicitation.excess_line_item_id == ExcessLineItem.id)
+        .filter(ExcessLineItem.excess_list_id == list_id)
+    )
+    if item_id:
+        query = query.filter(BidSolicitation.excess_line_item_id == item_id)
+    return query.order_by(BidSolicitation.created_at.desc()).all()
