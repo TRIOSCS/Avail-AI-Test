@@ -554,10 +554,21 @@ async def add_requirement(
     target_qty: int = Form(1),
     brand: str = Form(""),
     substitutes: str = Form(""),
+    target_price: float | None = Form(None),
+    condition: str = Form(""),
+    date_codes: str = Form(""),
+    firmware: str = Form(""),
+    hardware_codes: str = Form(""),
+    packaging: str = Form(""),
+    notes: str = Form(""),
+    customer_pn: str = Form(""),
+    need_by_date: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Add a requirement to a requisition, return the new row HTML."""
+    from datetime import date as date_type
+
     from ..utils.normalization import parse_substitute_mpns
 
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
@@ -572,6 +583,15 @@ async def add_requirement(
         target_qty=target_qty,
         brand=brand or None,
         substitutes=sub_list,
+        target_price=target_price,
+        condition=condition or None,
+        date_codes=date_codes or None,
+        firmware=firmware or None,
+        hardware_codes=hardware_codes or None,
+        packaging=packaging or None,
+        notes=notes or None,
+        customer_pn=customer_pn or None,
+        need_by_date=date_type.fromisoformat(need_by_date) if need_by_date else None,
         sourcing_status="open",
     )
     db.add(r)
@@ -1371,6 +1391,8 @@ async def add_offer(
             status_code=400,
         )
 
+    from datetime import date as date_type
+
     from ..utils.normalization import normalize_mpn
     from ..vendor_utils import normalize_vendor_name
 
@@ -1386,6 +1408,14 @@ async def add_offer(
         date_code=form.get("date_code") or None,
         condition=form.get("condition") or None,
         moq=int(form["moq"]) if form.get("moq") else None,
+        manufacturer=form.get("manufacturer") or None,
+        spq=int(form["spq"]) if form.get("spq") else None,
+        packaging=form.get("packaging") or None,
+        firmware=form.get("firmware") or None,
+        hardware_code=form.get("hardware_code") or None,
+        warranty=form.get("warranty") or None,
+        country_of_origin=form.get("country_of_origin") or None,
+        valid_until=date_type.fromisoformat(form["valid_until"]) if form.get("valid_until") else None,
         notes=form.get("notes") or None,
         requirement_id=int(form["requirement_id"]) if form.get("requirement_id") else None,
         source="manual",
@@ -1465,14 +1495,31 @@ async def edit_offer(
         raise HTTPException(404, "Offer not found")
 
     form = await request.form()
-    trackable = ["vendor_name", "qty_available", "unit_price", "lead_time", "condition", "date_code", "moq", "notes"]
+    trackable = [
+        "vendor_name",
+        "qty_available",
+        "unit_price",
+        "lead_time",
+        "condition",
+        "date_code",
+        "moq",
+        "notes",
+        "manufacturer",
+        "spq",
+        "packaging",
+        "firmware",
+        "hardware_code",
+        "warranty",
+        "country_of_origin",
+        "valid_until",
+    ]
     now = datetime.now(timezone.utc)
 
     for field in trackable:
         new_val = form.get(field, "").strip()
         old_val = str(getattr(offer, field) or "")
         if new_val != old_val and new_val:
-            if field in ("qty_available", "moq"):
+            if field in ("qty_available", "moq", "spq"):
                 try:
                     setattr(offer, field, int(new_val))
                 except ValueError:
@@ -1480,6 +1527,13 @@ async def edit_offer(
             elif field == "unit_price":
                 try:
                     setattr(offer, field, float(new_val))
+                except ValueError:
+                    continue
+            elif field == "valid_until":
+                from datetime import date as date_type
+
+                try:
+                    setattr(offer, field, date_type.fromisoformat(new_val) if new_val else None)
                 except ValueError:
                     continue
             else:
@@ -6041,6 +6095,29 @@ async def materials_filters_sub_partial(
         }
     )
     return templates.TemplateResponse("htmx/partials/materials/filters/subfilters.html", ctx)
+
+
+@router.get("/v2/partials/materials/ai-interpret", response_class=HTMLResponse)
+async def materials_ai_interpret_partial(
+    request: Request,
+    q: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Interpret a natural language query using AI and return pre-selection chip."""
+    from ..services.materials_ai_search import get_parent_for_commodity, interpret_search_query
+
+    result = None
+    if q and len(q.strip().split()) >= 3:
+        result = await interpret_search_query(q)
+
+    ctx = _base_ctx(request, user, "materials")
+    ctx["ai_result"] = result
+    if result and result.get("commodity"):
+        ctx["ai_parent"] = get_parent_for_commodity(result["commodity"])
+    else:
+        ctx["ai_parent"] = ""
+    return templates.TemplateResponse("htmx/partials/materials/ai_interpret.html", ctx)
 
 
 @router.get("/v2/partials/materials/faceted", response_class=HTMLResponse)
