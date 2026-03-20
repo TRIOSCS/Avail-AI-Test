@@ -117,8 +117,8 @@ def enrich_card_from_sightings(
         should_overwrite = (
             not card.description
             or card.description.strip() == ""
-            # Overwrite old Gradient AI descriptions if we have authorized distributor data
-            or (best_desc_authorized and card.enrichment_source == "gradient_ai")
+            # Overwrite old Claude AI descriptions if we have authorized distributor data
+            or (best_desc_authorized and card.enrichment_source == "claude_ai")
         )
         if should_overwrite:
             updates["description"] = best_desc

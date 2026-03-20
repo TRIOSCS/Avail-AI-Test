@@ -1,8 +1,8 @@
-"""Material tagging background jobs — Gradient AI (free), prefix, sighting, boost.
+"""Material tagging background jobs — Claude Haiku AI, prefix, sighting, boost.
 
 Called by: app/jobs/__init__.py via register_tagging_jobs()
 Depends on: app.database, app.models, app.services.enrichment, app.services.tagging_backfill,
-            app.services.tagging_ai, app.services.gradient_service
+            app.services.tagging_ai, app.utils.claude_client
 """
 
 from apscheduler.triggers.interval import IntervalTrigger
@@ -14,10 +14,9 @@ from ..scheduler import _traced_job
 def register_tagging_jobs(scheduler, settings):
     """Register tagging jobs with the scheduler.
 
-    NOTE (2026-03-05): Paid API jobs DISABLED
-    (Nexar/DigiKey/Mouser/Element14/OEMSecrets). Gradient AI is FREE — runs every 30min
-    to classify untagged cards aggressively. Prefix/sighting/boost run frequently to
-    maximize non-API coverage.
+    NOTE (2026-03-20): Gradient removed, all AI via Claude Haiku. Paid connector jobs
+    DISABLED (Nexar/DigiKey/Mouser/Element14/OEMSecrets). Prefix/sighting/boost run
+    frequently to maximize non-API coverage.
     """
     # DISABLED — consumes DigiKey/Mouser/Element14/OEMSecrets/Nexar API quota
     # scheduler.add_job(
@@ -55,12 +54,12 @@ def register_tagging_jobs(scheduler, settings):
     #     name="Backfill untagged cards via Nexar (primary high-confidence source)",
     # )
 
-    # Gradient AI classification — FREE, runs every 30 min, 500 cards per batch
+    # Claude Haiku AI classification — runs every 30 min, 500 cards per batch
     scheduler.add_job(
-        _job_gradient_ai_tagging,
+        _job_ai_tagging,
         IntervalTrigger(minutes=30),
-        id="gradient_ai_tagging",
-        name="Classify untagged cards via Gradient AI (free)",
+        id="ai_tagging",
+        name="Classify untagged cards via Claude Haiku",
     )
 
     if settings.material_enrichment_enabled:
@@ -68,7 +67,7 @@ def register_tagging_jobs(scheduler, settings):
             _job_material_enrichment,
             IntervalTrigger(hours=2),
             id="material_enrichment",
-            name="Material card AI enrichment (Gradient)",
+            name="Material card AI enrichment (Claude Haiku)",
         )
 
 
@@ -206,12 +205,10 @@ async def _job_nexar_backfill():
 
 
 @_traced_job
-async def _job_gradient_ai_tagging():
-    """Classify untagged material cards via Gradient AI (FREE). Every 30 min, 500
-    cards/batch.
+async def _job_ai_tagging():
+    """Classify untagged material cards via Claude Haiku. Every 30 min, 500 cards/batch.
 
-    Waterfall: prefix_backfill + sighting_mining first (instant), then Gradient AI for remainder.
-    Uses Sonnet via Gradient for fast, accurate classification at zero cost.
+    Waterfall: prefix_backfill + sighting_mining first (instant), then Claude Haiku for remainder.
     """
     import asyncio
 
@@ -242,15 +239,15 @@ async def _job_gradient_ai_tagging():
         )
 
         if not untagged:
-            logger.info("Gradient AI tagging: no untagged cards remaining")
+            logger.info("AI tagging: no untagged cards remaining")
             return
 
-        logger.info(f"Gradient AI tagging: classifying {len(untagged)} cards")
+        logger.info(f"AI tagging: classifying {len(untagged)} cards")
 
         total_matched = 0
         total_unknown = 0
 
-        # Process in batches of 50 MPNs, 5 concurrent Gradient calls
+        # Process in batches of 50 MPNs, 5 concurrent Claude calls
         batch_size = 50
         concurrency = 5
         sem = asyncio.Semaphore(concurrency)
@@ -271,7 +268,7 @@ async def _job_gradient_ai_tagging():
 
             for batch, classified in zip(round_batches, results):
                 if isinstance(classified, Exception):
-                    logger.warning(f"Gradient batch failed: {classified}")
+                    logger.warning(f"AI batch failed: {classified}")
                     continue
                 batch_tuples = [(row.id, row.normalized_mpn) for row in batch]
                 matched, unknown = _apply_ai_results(classified, batch_tuples, db)
@@ -280,9 +277,7 @@ async def _job_gradient_ai_tagging():
 
             db.commit()
 
-        logger.info(
-            f"Gradient AI tagging done: {len(untagged)} processed, {total_matched} matched, {total_unknown} unknown"
-        )
+        logger.info(f"AI tagging done: {len(untagged)} processed, {total_matched} matched, {total_unknown} unknown")
     except Exception:
         db.rollback()
         raise
@@ -291,8 +286,8 @@ async def _job_gradient_ai_tagging():
 
 
 async def _job_material_enrichment():
-    """Every 2h — AI-enrich material cards missing descriptions/categories via
-    Gradient."""
+    """Every 2h — AI-enrich material cards missing descriptions/categories via Claude
+    Haiku."""
     from ..config import settings
     from ..database import SessionLocal
 

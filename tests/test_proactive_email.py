@@ -151,9 +151,9 @@ class TestFallbackDraft:
 
 class TestDraftProactiveEmail:
     @pytest.mark.asyncio
-    @patch("app.services.proactive_email.gradient_json", new_callable=AsyncMock)
-    async def test_successful_draft(self, mock_gradient):
-        mock_gradient.return_value = {
+    @patch("app.services.proactive_email.claude_json", new_callable=AsyncMock)
+    async def test_successful_draft(self, mock_claude):
+        mock_claude.return_value = {
             "subject": "Parts for You",
             "body": "We have great parts available for your needs.",
         }
@@ -179,20 +179,20 @@ class TestDraftProactiveEmail:
         assert "Alice" in result["html"]
 
     @pytest.mark.asyncio
-    @patch("app.services.proactive_email.gradient_json", new_callable=AsyncMock)
-    async def test_empty_parts_returns_none(self, mock_gradient):
+    @patch("app.services.proactive_email.claude_json", new_callable=AsyncMock)
+    async def test_empty_parts_returns_none(self, mock_claude):
         result = await draft_proactive_email(
             company_name="Acme",
             contact_name=None,
             parts=[],
         )
         assert result is None
-        mock_gradient.assert_not_called()
+        mock_claude.assert_not_called()
 
     @pytest.mark.asyncio
-    @patch("app.services.proactive_email.gradient_json", new_callable=AsyncMock)
-    async def test_ai_returns_none_fallback(self, mock_gradient):
-        mock_gradient.return_value = None
+    @patch("app.services.proactive_email.claude_json", new_callable=AsyncMock)
+    async def test_ai_returns_none_fallback(self, mock_claude):
+        mock_claude.return_value = None
         result = await draft_proactive_email(
             company_name="Acme",
             contact_name=None,
@@ -203,9 +203,9 @@ class TestDraftProactiveEmail:
         assert "Acme" in result["subject"]
 
     @pytest.mark.asyncio
-    @patch("app.services.proactive_email.gradient_json", new_callable=AsyncMock)
-    async def test_ai_returns_empty_body_fallback(self, mock_gradient):
-        mock_gradient.return_value = {"subject": "Hi", "body": ""}
+    @patch("app.services.proactive_email.claude_json", new_callable=AsyncMock)
+    async def test_ai_returns_empty_body_fallback(self, mock_claude):
+        mock_claude.return_value = {"subject": "Hi", "body": ""}
         result = await draft_proactive_email(
             company_name="BigCo",
             contact_name="Tom",
@@ -215,9 +215,9 @@ class TestDraftProactiveEmail:
         assert result["body"]  # non-empty fallback body
 
     @pytest.mark.asyncio
-    @patch("app.services.proactive_email.gradient_json", new_callable=AsyncMock)
-    async def test_ai_returns_no_subject(self, mock_gradient):
-        mock_gradient.return_value = {"subject": "", "body": "Here are some parts."}
+    @patch("app.services.proactive_email.claude_json", new_callable=AsyncMock)
+    async def test_ai_returns_no_subject(self, mock_claude):
+        mock_claude.return_value = {"subject": "", "body": "Here are some parts."}
         result = await draft_proactive_email(
             company_name="TestCo",
             contact_name=None,
@@ -226,9 +226,9 @@ class TestDraftProactiveEmail:
         assert result["subject"] == "Parts Available — TestCo"
 
     @pytest.mark.asyncio
-    @patch("app.services.proactive_email.gradient_json", new_callable=AsyncMock)
-    async def test_with_notes(self, mock_gradient):
-        mock_gradient.return_value = {
+    @patch("app.services.proactive_email.claude_json", new_callable=AsyncMock)
+    async def test_with_notes(self, mock_claude):
+        mock_claude.return_value = {
             "subject": "Special Offer",
             "body": "Discount available on these components.",
         }
@@ -249,13 +249,13 @@ class TestDraftProactiveEmail:
         )
         assert result is not None
         # Verify notes were included in the prompt sent to AI
-        call_args = mock_gradient.call_args
+        call_args = mock_claude.call_args
         assert "10% discount" in call_args[0][0]
 
     @pytest.mark.asyncio
-    @patch("app.services.proactive_email.gradient_json", new_callable=AsyncMock)
-    async def test_ai_returns_non_dict_fallback(self, mock_gradient):
-        mock_gradient.return_value = "not a dict"
+    @patch("app.services.proactive_email.claude_json", new_callable=AsyncMock)
+    async def test_ai_returns_non_dict_fallback(self, mock_claude):
+        mock_claude.return_value = "not a dict"
         result = await draft_proactive_email(
             company_name="Acme",
             contact_name=None,

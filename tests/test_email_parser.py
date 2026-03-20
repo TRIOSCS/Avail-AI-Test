@@ -1,4 +1,4 @@
-"""Tests for AI Email Parser — mocked Gradient calls, realistic email samples.
+"""Tests for AI Email Parser — mocked Claude calls, realistic email samples.
 
 Covers: single-part quotes, multi-part quotes, no-stock responses,
         multi-currency, partial quotes, price-on-request, edge cases,
@@ -8,7 +8,7 @@ Covers: single-part quotes, multi-part quotes, no-stock responses,
 import os
 
 os.environ["TESTING"] = "1"
-os.environ["DO_GRADIENT_API_KEY"] = "test-key"
+os.environ["ANTHROPIC_API_KEY"] = "test-key"
 
 from unittest.mock import AsyncMock, patch
 
@@ -25,8 +25,8 @@ from app.services.ai_email_parser import (
 # ── Helpers ────────────────────────────────────────────────────────────
 
 
-def _gradient_response(parsed_dict):
-    """Simulate gradient_json returning a parsed dict."""
+def _claude_response(parsed_dict):
+    """Simulate claude_json returning a parsed dict."""
     return parsed_dict
 
 
@@ -157,7 +157,7 @@ async def test_parse_single_quote():
         "vendor_notes": None,
     }
 
-    with patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_email_parser.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         result = await parse_email(SINGLE_QUOTE_EMAIL, "RE: RFQ STM32F407VGT6", "Arrow Electronics")
 
@@ -210,7 +210,7 @@ async def test_parse_multi_part_quote():
         "vendor_notes": None,
     }
 
-    with patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_email_parser.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         result = await parse_email(MULTI_PART_EMAIL, "RE: RFQ", "Mouser")
 
@@ -234,7 +234,7 @@ async def test_parse_no_stock():
         "vendor_notes": "Will notify if stock becomes available",
     }
 
-    with patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_email_parser.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         result = await parse_email(NO_STOCK_EMAIL)
 
@@ -270,7 +270,7 @@ async def test_parse_multi_currency():
         "vendor_notes": "Payment: T/T 30 days",
     }
 
-    with patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_email_parser.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         result = await parse_email(MULTI_CURRENCY_EMAIL, vendor_name="Beijing Components")
 
@@ -299,7 +299,7 @@ async def test_parse_price_on_request():
         "vendor_notes": None,
     }
 
-    with patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_email_parser.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         result = await parse_email(PRICE_ON_REQUEST_EMAIL)
 
@@ -318,7 +318,7 @@ async def test_parse_ooo_bounce():
         "vendor_notes": "Out of office until Feb 28. Contact backup@vendor.com",
     }
 
-    with patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_email_parser.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         result = await parse_email(OOO_EMAIL)
 
@@ -334,9 +334,9 @@ async def test_parse_empty_body():
 
 
 @pytest.mark.asyncio
-async def test_parse_gradient_failure():
-    """Returns None when Gradient API fails."""
-    with patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock:
+async def test_parse_claude_failure():
+    """Returns None when Claude API fails."""
+    with patch("app.services.ai_email_parser.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = None
         result = await parse_email("Some email content")
 
@@ -467,7 +467,7 @@ async def test_parse_html_table_email():
         "vendor_notes": None,
     }
 
-    with patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_email_parser.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         result = await parse_email(HTML_EMAIL, vendor_name="Test Vendor")
 
@@ -475,7 +475,7 @@ async def test_parse_html_table_email():
     assert len(result["quotes"]) == 1
     assert result["quotes"][0]["part_number"] == "LM358DR"
 
-    # Verify the prompt sent to gradient_json has table content intact
+    # Verify the prompt sent to claude_json has table content intact
     call_args = mock.call_args
     prompt = call_args.args[0] if call_args.args else call_args.kwargs.get("prompt", "")
     assert "LM358DR" in prompt
@@ -494,7 +494,7 @@ async def test_parse_long_email_truncation():
         "vendor_notes": None,
     }
 
-    with patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_email_parser.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         result = await parse_email(long_body)
 
@@ -507,8 +507,8 @@ async def test_parse_long_email_truncation():
 
 @pytest.mark.asyncio
 async def test_parse_non_dict_response():
-    """Returns None when gradient returns a list instead of dict."""
-    with patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock:
+    """Returns None when Claude returns a list instead of dict."""
+    with patch("app.services.ai_email_parser.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = [{"part_number": "LM358DR"}]
         result = await parse_email("Some email")
 
@@ -527,7 +527,7 @@ async def test_parse_quotes_as_string():
         "vendor_notes": None,
     }
 
-    with patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_email_parser.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         result = await parse_email("LM358DR $0.45/ea")
 
@@ -558,7 +558,7 @@ def test_parse_email_endpoint(client):
 
     with (
         patch("app.routers.ai.settings") as mock_settings,
-        patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock,
+        patch("app.services.ai_email_parser.claude_json", new_callable=AsyncMock) as mock,
     ):
         mock_settings.ai_features_enabled = "all"
         mock.return_value = mock_result
@@ -594,7 +594,7 @@ def test_parse_email_endpoint_failure(client):
     """Returns parsed=False when parser fails."""
     with (
         patch("app.routers.ai.settings") as mock_settings,
-        patch("app.services.ai_email_parser.gradient_json", new_callable=AsyncMock) as mock,
+        patch("app.services.ai_email_parser.claude_json", new_callable=AsyncMock) as mock,
     ):
         mock_settings.ai_features_enabled = "all"
         mock.return_value = None

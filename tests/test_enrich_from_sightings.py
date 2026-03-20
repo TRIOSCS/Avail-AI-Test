@@ -7,17 +7,16 @@ Called by: pytest
 Depends on: scripts/enrich_from_sightings.py
 """
 
-import sys
 import os
+import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from scripts.enrich_from_sightings import (
-    _extract_description,
     _extract_datasheet_url,
+    _extract_description,
     enrich_card_from_sightings,
 )
-
 
 # ── _extract_description tests ────────────────────────────────────────
 
@@ -114,15 +113,15 @@ class TestEnrichCardFromSightings:
         updates = enrich_card_from_sightings(card, sightings, dry_run=True)
         assert updates["description"] == "Samsung 16GB DDR4-3200"
 
-    def test_overwrites_gradient_ai_with_authorized(self):
-        card = _FakeCard(description="Old gradient desc", enrichment_source="gradient_ai")
+    def test_overwrites_claude_ai_with_authorized(self):
+        card = _FakeCard(description="Old claude desc", enrichment_source="claude_ai")
         sightings = [
             ("digikey", "Samsung", True, {"description": "Samsung 16GB DDR4-3200 ECC"}),
         ]
         updates = enrich_card_from_sightings(card, sightings, dry_run=True)
         assert "description" in updates
 
-    def test_keeps_existing_non_gradient(self):
+    def test_keeps_existing_non_claude(self):
         card = _FakeCard(description="Manually entered description", enrichment_source="manual")
         sightings = [
             ("digikey", "Samsung", True, {"description": "Samsung 16GB DDR4-3200 ECC"}),

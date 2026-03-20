@@ -1,4 +1,4 @@
-"""Tests for AI Part Number Normalizer — mocked Gradient calls.
+"""Tests for AI Part Number Normalizer — mocked Claude calls.
 
 Covers: single part, batch normalization, cache hits, low confidence fallback,
         manufacturer inference, package suffix extraction, cross-reference
@@ -8,7 +8,7 @@ Covers: single part, batch normalization, cache hits, low confidence fallback,
 import os
 
 os.environ["TESTING"] = "1"
-os.environ["DO_GRADIENT_API_KEY"] = "test-key"
+os.environ["ANTHROPIC_API_KEY"] = "test-key"
 
 from unittest.mock import AsyncMock, patch
 
@@ -65,7 +65,7 @@ async def test_normalize_single_part():
         )
     ]
 
-    with patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_part_normalizer.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         results = await normalize_parts(["lm358dr"])
 
@@ -92,7 +92,7 @@ async def test_normalize_stm32_part():
         )
     ]
 
-    with patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_part_normalizer.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         results = await normalize_parts(["stm32f407vgt6"])
 
@@ -113,7 +113,7 @@ async def test_normalize_batch():
         _norm_result("STM32F407VGT6", "STM32F407VGT6", manufacturer="STMicroelectronics", confidence=0.95),
     ]
 
-    with patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_part_normalizer.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         results = await normalize_parts(parts)
 
@@ -131,7 +131,7 @@ async def test_cache_hit():
     """Second call for the same part returns cached result without LLM call."""
     mock_result = [_norm_result("LM358DR", "LM358DR", confidence=0.9)]
 
-    with patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_part_normalizer.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         results1 = await normalize_parts(["LM358DR"])
         results2 = await normalize_parts(["LM358DR"])
@@ -145,13 +145,13 @@ async def test_partial_cache():
     """Mixed cached and uncached parts: only uncached parts trigger LLM call."""
     # First call: cache LM358DR
     mock1 = [_norm_result("LM358DR", "LM358DR", confidence=0.9)]
-    with patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_part_normalizer.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock1
         await normalize_parts(["LM358DR"])
 
     # Second call: LM358DR cached, NE555P uncached
     mock2 = [_norm_result("NE555P", "NE555P", confidence=0.9)]
-    with patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_part_normalizer.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock2
         results = await normalize_parts(["LM358DR", "NE555P"])
 
@@ -178,7 +178,7 @@ async def test_low_confidence_fallback():
     """Low confidence result returns original string unchanged."""
     mock_result = [_norm_result("XYZABC123", "XYZABC123", confidence=0.3)]
 
-    with patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_part_normalizer.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         results = await normalize_parts(["XYZABC123"])
 
@@ -203,7 +203,7 @@ async def test_alias_detection():
         )
     ]
 
-    with patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_part_normalizer.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         results = await normalize_parts(["296-1395-1-ND"])
 
@@ -224,7 +224,7 @@ async def test_normalize_variant_formats():
         _norm_result("LM358D/R", "LM358DR", base_part="LM358", package_code="DR", confidence=0.85),
     ]
 
-    with patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_part_normalizer.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         results = await normalize_parts(parts)
 
@@ -236,9 +236,9 @@ async def test_normalize_variant_formats():
 
 
 @pytest.mark.asyncio
-async def test_gradient_failure_returns_fallbacks():
-    """Returns fallback results when Gradient API fails."""
-    with patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
+async def test_claude_failure_returns_fallbacks():
+    """Returns fallback results when Claude API fails."""
+    with patch("app.services.ai_part_normalizer.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = None
         results = await normalize_parts(["LM358DR", "NE555P"])
 
@@ -261,7 +261,7 @@ async def test_dict_wrapped_response():
     """Handles LLM returning {parts: [...]} instead of bare array."""
     mock_result = {"parts": [_norm_result("LM358DR", "LM358DR", confidence=0.9)]}
 
-    with patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_part_normalizer.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         results = await normalize_parts(["LM358DR"])
 
@@ -276,7 +276,7 @@ async def test_fewer_results_than_inputs():
         # Missing second result
     ]
 
-    with patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock:
+    with patch("app.services.ai_part_normalizer.claude_json", new_callable=AsyncMock) as mock:
         mock.return_value = mock_result
         results = await normalize_parts(["LM358DR", "NE555P"])
 
@@ -343,7 +343,7 @@ def test_normalize_parts_endpoint(client):
 
     with (
         patch("app.routers.ai.settings") as mock_settings,
-        patch("app.services.ai_part_normalizer.gradient_json", new_callable=AsyncMock) as mock,
+        patch("app.services.ai_part_normalizer.claude_json", new_callable=AsyncMock) as mock,
     ):
         mock_settings.ai_features_enabled = "all"
         mock.return_value = mock_result
@@ -396,7 +396,7 @@ class TestCallNormalizerResponseFormats:
 
         mock_response = {"results": [{"original": "LM317T", "normalized": "LM317T", "confidence": 0.95}]}
         with patch(
-            "app.services.ai_part_normalizer.gradient_json",
+            "app.services.ai_part_normalizer.claude_json",
             new_callable=AsyncMock,
             return_value=mock_response,
         ):
@@ -413,7 +413,7 @@ class TestCallNormalizerResponseFormats:
 
         mock_response = {"normalized": [{"original": "LM358DR", "normalized": "LM358DR", "confidence": 0.9}]}
         with patch(
-            "app.services.ai_part_normalizer.gradient_json",
+            "app.services.ai_part_normalizer.claude_json",
             new_callable=AsyncMock,
             return_value=mock_response,
         ):
@@ -429,7 +429,7 @@ class TestCallNormalizerResponseFormats:
 
         mock_response = {"parts": [{"original": "NE555P", "normalized": "NE555P", "confidence": 0.85}]}
         with patch(
-            "app.services.ai_part_normalizer.gradient_json",
+            "app.services.ai_part_normalizer.claude_json",
             new_callable=AsyncMock,
             return_value=mock_response,
         ):
@@ -445,7 +445,7 @@ class TestCallNormalizerResponseFormats:
 
         mock_response = {"unexpected_key": "data"}
         with patch(
-            "app.services.ai_part_normalizer.gradient_json",
+            "app.services.ai_part_normalizer.claude_json",
             new_callable=AsyncMock,
             return_value=mock_response,
         ):
@@ -459,7 +459,7 @@ class TestCallNormalizerResponseFormats:
         from app.services.ai_part_normalizer import _call_normalizer
 
         with patch(
-            "app.services.ai_part_normalizer.gradient_json",
+            "app.services.ai_part_normalizer.claude_json",
             new_callable=AsyncMock,
             return_value="just a string",
         ):

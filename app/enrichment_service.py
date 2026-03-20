@@ -345,64 +345,6 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
         return []
 
 
-# ── Provider: Gradient AI (LLM knowledge, no web search) ─────────────────
-
-GRADIENT_COMPANY_SYSTEM = (
-    "You are a B2B company research assistant for an electronic component broker. "
-    "Using your training knowledge, return firmographic data about the requested company as JSON. "
-    "Return ONLY a JSON object with these keys: "
-    '{"legal_name", "industry", "employee_size", "hq_city", "hq_state", "hq_country", '
-    '"website", "linkedin_url"}. '
-    "Use null for any field you are not confident about. Do not guess or fabricate data."
-)
-
-
-async def _gradient_find_company(domain: str, name: str = "") -> Optional[dict]:
-    """Look up a company using Gradient AI (LLM knowledge).
-
-    Returns normalized company data.
-    """
-    from .config import settings
-
-    if not getattr(settings, "do_gradient_api_key", ""):
-        return None
-    try:
-        from .services.gradient_service import gradient_json
-
-        prompt = (
-            f"What do you know about the company with domain '{domain}'"
-            f"{f' (also known as {name})' if name else ''}?\n\n"
-            f"Return their: legal name, industry, approximate employee count or range, "
-            f"headquarters city/state/country, website URL, and LinkedIn company page URL.\n\n"
-            f"Return ONLY valid JSON. Use null for unknown fields."
-        )
-        data = await gradient_json(
-            prompt,
-            system=GRADIENT_COMPANY_SYSTEM,
-            model_tier="default",
-            max_tokens=512,
-            temperature=0.1,
-            timeout=15,
-        )
-        if not data or not isinstance(data, dict):
-            return None
-        return {
-            "source": "gradient",
-            "legal_name": data.get("legal_name") or data.get("name"),
-            "domain": domain,
-            "linkedin_url": data.get("linkedin_url"),
-            "industry": data.get("industry"),
-            "employee_size": data.get("employee_size") or data.get("employees"),
-            "hq_city": data.get("hq_city") or data.get("city"),
-            "hq_state": data.get("hq_state") or data.get("state"),
-            "hq_country": data.get("hq_country") or data.get("country"),
-            "website": data.get("website"),
-        }
-    except Exception as e:
-        logger.debug("Gradient company lookup error: %s", e)
-        return None
-
-
 # ── Provider: AI (Claude + Web Search) ───────────────────────────────────
 
 COMPANY_SEARCH_SYSTEM = (
@@ -505,9 +447,9 @@ async def _ai_find_contacts(domain: str, name: str = "", title_filter: str = "")
 async def enrich_entity(domain: str, name: str = "") -> dict:
     """Enrich a business entity (vendor or customer) by domain.
 
-    Phase 1: Explorium + Gradient run concurrently.
+    Phase 1: Explorium lookup.
     Phase 2: AI + web search fills remaining gaps (conditional).
-    Merge priority: Explorium > Gradient > AI.
+    Merge priority: Explorium > AI.
     Results cached in IntelCache with 14-day TTL keyed by domain.
     """
     from .cache.intel_cache import get_cached, set_cached
@@ -545,25 +487,15 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
         "linkedin_url",
     ]
 
-    # ── Phase 1: Explorium + Gradient concurrently ──
-    exp_result, grad_result = await asyncio.gather(
-        _explorium_find_company(domain, name),
-        _gradient_find_company(domain, name),
-        return_exceptions=True,
-    )
+    # ── Phase 1: Explorium ──
+    exp_result = await _explorium_find_company(domain, name)
 
-    # Merge in priority order: Explorium > Gradient
     sources = []
-    for provider_data, provider_name in [  # pragma: no cover
-        (exp_result, "explorium"),
-        (grad_result, "gradient"),
-    ]:
-        if isinstance(provider_data, Exception) or not provider_data:
-            continue
-        for k, v in provider_data.items():
+    if exp_result and not isinstance(exp_result, Exception):  # pragma: no cover
+        for k, v in exp_result.items():
             if v and not result.get(k):
                 result[k] = v
-        sources.append(provider_name)
+        sources.append("explorium")
 
     if sources:  # pragma: no cover
         result["source"] = "+".join(sources)

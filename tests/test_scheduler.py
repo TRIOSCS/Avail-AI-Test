@@ -210,13 +210,13 @@ def test_reset_connector_errors_registered():
     scheduler.remove_all_jobs()
 
 
-def test_gradient_ai_tagging_job_registered():
-    """Gradient AI tagging job is registered (replaced nexar_backfill +
+def test_ai_tagging_job_registered():
+    """AI tagging job is registered (Claude Haiku, replaced nexar_backfill +
     connector_enrichment)."""
     with patch("app.config.settings", _mock_settings()):
         configure_scheduler()
 
-    job = scheduler.get_job("gradient_ai_tagging")
+    job = scheduler.get_job("ai_tagging")
     assert job is not None
     # Runs every 30 minutes
     assert job.trigger.interval.total_seconds() == 1800

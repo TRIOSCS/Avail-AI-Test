@@ -2,7 +2,7 @@
 
 Covers:
   - EmailIntelligence model creation and querying
-  - AI email classification (mocked Gradient calls)
+  - AI email classification (mocked Claude calls)
   - Pricing intelligence extraction
   - store_email_intelligence persistence
   - process_email_intelligence pipeline
@@ -94,7 +94,7 @@ class TestClassifyEmailAI:
             "commodities_detected": ["regulators"],
         }
 
-        with patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=mock_result):
+        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=mock_result):
             result = asyncio.get_event_loop().run_until_complete(
                 classify_email_ai("Quote Response", "LM317T available at $0.50", "vendor@test.com")
             )
@@ -115,7 +115,7 @@ class TestClassifyEmailAI:
             "commodities_detected": [],
         }
 
-        with patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=mock_result):
+        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=mock_result):
             result = asyncio.get_event_loop().run_until_complete(
                 classify_email_ai("Out of Office", "I will be out until March 1", "person@test.com")
             )
@@ -135,16 +135,16 @@ class TestClassifyEmailAI:
             "commodities_detected": [],
         }
 
-        with patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=mock_result):
+        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=mock_result):
             result = asyncio.get_event_loop().run_until_complete(classify_email_ai("Test", "Body", "a@b.com"))
 
         assert result["classification"] == "general"
 
-    def test_classify_email_gradient_failure(self):
-        """Returns None when Gradient API fails."""
+    def test_classify_email_claude_failure(self):
+        """Returns None when Claude API fails."""
         from app.services.email_intelligence_service import classify_email_ai
 
-        with patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=None):
+        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=None):
             result = asyncio.get_event_loop().run_until_complete(classify_email_ai("Test", "Body", "a@b.com"))
 
         assert result is None
@@ -162,7 +162,7 @@ class TestClassifyEmailAI:
             "commodities_detected": [],
         }
 
-        with patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=mock_result):
+        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=mock_result):
             result = asyncio.get_event_loop().run_until_complete(classify_email_ai("Test", "Body", "a@b.com"))
 
         assert result["confidence"] == 1.0

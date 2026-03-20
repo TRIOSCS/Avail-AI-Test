@@ -26,7 +26,8 @@ class TestDetectSpecialtiesAI:
         """Batch AI detection returns normalized brand/commodity data."""
         from app.services.email_intelligence_service import detect_specialties_ai
 
-        mock_results = [
+        # Each claude_json call returns one result (asyncio.gather runs them in parallel)
+        individual_results = [
             {
                 "brands": ["Texas Instruments", "STMicro"],
                 "commodities": ["voltage regulators", "microcontrollers"],
@@ -40,9 +41,9 @@ class TestDetectSpecialtiesAI:
         ]
 
         with patch(
-            "app.services.gradient_service.gradient_batch_json",
+            "app.utils.claude_client.claude_json",
             new_callable=AsyncMock,
-            return_value=mock_results,
+            side_effect=individual_results,
         ):
             result = asyncio.get_event_loop().run_until_complete(
                 detect_specialties_ai(["email text 1", "email text 2"])
@@ -58,16 +59,17 @@ class TestDetectSpecialtiesAI:
         """Individual failures in batch return None for that entry."""
         from app.services.email_intelligence_service import detect_specialties_ai
 
-        mock_results = [
+        # Each claude_json call returns one result; None means that call failed
+        individual_results = [
             {"brands": ["NXP"], "commodities": ["ICs"], "sender_type": "broker"},
             None,  # Failed entry
             {"brands": [], "commodities": [], "sender_type": "unknown"},
         ]
 
         with patch(
-            "app.services.gradient_service.gradient_batch_json",
+            "app.utils.claude_client.claude_json",
             new_callable=AsyncMock,
-            return_value=mock_results,
+            side_effect=individual_results,
         ):
             result = asyncio.get_event_loop().run_until_complete(detect_specialties_ai(["text1", "text2", "text3"]))
 
@@ -80,14 +82,10 @@ class TestDetectSpecialtiesAI:
         """Non-list brands field normalized to empty list."""
         from app.services.email_intelligence_service import detect_specialties_ai
 
-        mock_results = [
-            {"brands": "not a list", "commodities": ["caps"], "sender_type": "unknown"},
-        ]
-
         with patch(
-            "app.services.gradient_service.gradient_batch_json",
+            "app.utils.claude_client.claude_json",
             new_callable=AsyncMock,
-            return_value=mock_results,
+            return_value={"brands": "not a list", "commodities": ["caps"], "sender_type": "unknown"},
         ):
             result = asyncio.get_event_loop().run_until_complete(detect_specialties_ai(["text"]))
 
@@ -99,9 +97,9 @@ class TestDetectSpecialtiesAI:
         from app.services.email_intelligence_service import detect_specialties_ai
 
         with patch(
-            "app.services.gradient_service.gradient_batch_json",
+            "app.utils.claude_client.claude_json",
             new_callable=AsyncMock,
-            return_value=[None, None],
+            return_value=None,
         ):
             result = asyncio.get_event_loop().run_until_complete(detect_specialties_ai(["text1", "text2"]))
 
@@ -145,7 +143,7 @@ class TestSummarizeThread:
 
         with (
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-            patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=mock_summary),
+            patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=mock_summary),
         ):
             result = asyncio.get_event_loop().run_until_complete(
                 summarize_thread("fake-token", "conv-sum-1", db_session, test_user.id)
@@ -179,7 +177,7 @@ class TestSummarizeThread:
         )
         db_session.commit()
 
-        # Should NOT call Graph API or Gradient
+        # Should NOT call Graph API or Claude
         with patch("app.utils.graph_client.GraphClient") as mock_gc_cls:
             result = asyncio.get_event_loop().run_until_complete(
                 summarize_thread("fake-token", "conv-cached", db_session, test_user.id)
@@ -217,7 +215,7 @@ class TestSummarizeThread:
         assert result is None
 
     def test_summarize_thread_ai_failure(self, db_session, test_user):
-        """Returns None when Gradient AI returns None."""
+        """Returns None when Claude AI returns None."""
         from app.services.email_intelligence_service import summarize_thread
 
         mock_gc = MagicMock()
@@ -234,7 +232,7 @@ class TestSummarizeThread:
 
         with (
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-            patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=None),
+            patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=None),
         ):
             result = asyncio.get_event_loop().run_until_complete(
                 summarize_thread("fake-token", "conv-ai-fail", db_session, test_user.id)
@@ -277,7 +275,7 @@ class TestSummarizeThread:
 
         with (
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-            patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock, return_value=mock_summary),
+            patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=mock_summary),
         ):
             result = asyncio.get_event_loop().run_until_complete(
                 summarize_thread("fake-token", "conv-to-cache", db_session, test_user.id)

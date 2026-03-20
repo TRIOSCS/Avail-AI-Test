@@ -2,7 +2,7 @@
 
 Replaces regex-only offer detection with a two-stage pipeline:
   1. Regex pre-filter → only call AI for ambiguous emails (0-1 regex matches)
-  2. AI classification via Gradient Sonnet for classification, Opus for pricing
+  2. AI classification via Claude Sonnet for classification, Opus for pricing
 
 Confidence routing:
   - >= 0.8: auto-create draft Offers linked to material cards
@@ -10,11 +10,12 @@ Confidence routing:
   - < 0.5: store classification only
 
 Called by: connectors/email_mining.py (scan_inbox), scheduler.py
-Depends on: gradient_service, ai_email_parser, models/email_intelligence
+Depends on: claude_client, ai_email_parser, models/email_intelligence
 """
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
@@ -57,20 +58,19 @@ async def classify_email_ai(
     body: str,
     sender_email: str = "",
 ) -> dict | None:
-    """Classify an email using Gradient AI (Sonnet tier).
+    """Classify an email using Claude AI (fast tier).
 
     Returns classification dict or None on failure.
     """
-    from app.services.gradient_service import gradient_json
+    from app.utils.claude_client import claude_json
 
     prompt = f"From: {sender_email}\nSubject: {subject}\n\nBody:\n{body[:3000]}"
 
-    result = await gradient_json(
+    result = await claude_json(
         prompt,
         system=CLASSIFICATION_SYSTEM,
-        model_tier="default",
+        model_tier="fast",
         max_tokens=512,
-        temperature=0.1,
         timeout=20,
     )
 
@@ -99,7 +99,7 @@ async def extract_pricing_intelligence(
     sender_email: str = "",
     vendor_name: str = "",
 ) -> dict | None:
-    """Extract structured pricing data from offer emails using Gradient Opus.
+    """Extract structured pricing data from offer emails using Claude Opus.
 
     Only called for emails classified as offers with has_pricing=True. Returns parsed
     quote data or None on failure.
@@ -331,7 +331,7 @@ async def detect_specialties_ai(texts: list[str]) -> list[dict | None]:
     """Detect brands and commodities from email texts using batch AI.
 
     Only called as a fallback when keyword-based specialty_detector finds nothing.
-    Uses Gradient batch processing for throughput.
+    Uses concurrent Claude calls for throughput.
 
     Args:
         texts: List of email subject+body snippets.
@@ -339,15 +339,15 @@ async def detect_specialties_ai(texts: list[str]) -> list[dict | None]:
     Returns:
         List of specialty dicts (one per input), None on individual failures.
     """
-    from app.services.gradient_service import gradient_batch_json
+    from app.utils.claude_client import claude_json
 
-    results = await gradient_batch_json(
-        texts,
-        system=SPECIALTY_SYSTEM,
-        model_tier="default",
-        max_tokens=256,
-        temperature=0.1,
-    )
+    sem = asyncio.Semaphore(10)
+
+    async def _limited(text: str):
+        async with sem:
+            return await claude_json(text, system=SPECIALTY_SYSTEM, model_tier="fast", max_tokens=256, timeout=30)
+
+    results = list(await asyncio.gather(*[_limited(t) for t in texts]))
 
     # Validate/normalize results
     normalized = []
@@ -387,7 +387,7 @@ Return ONLY valid JSON:
 async def summarize_thread(token: str, conversation_id: str, db: Session, user_id: int) -> dict | None:
     """Summarize an email thread by conversation_id using AI.
 
-    Fetches all messages via Graph API, then summarizes with Gradient Opus.
+    Fetches all messages via Graph API, then summarizes with Claude Opus.
     Caches result in EmailIntelligence.thread_summary to avoid re-processing.
 
     Args:
@@ -400,7 +400,7 @@ async def summarize_thread(token: str, conversation_id: str, db: Session, user_i
         Summary dict or None on failure.
     """
     from app.models import EmailIntelligence
-    from app.services.gradient_service import gradient_json
+    from app.utils.claude_client import claude_json
     from app.utils.graph_client import GraphClient
 
     # Check cache first
@@ -449,12 +449,11 @@ async def summarize_thread(token: str, conversation_id: str, db: Session, user_i
     # Truncate for token limits
     thread_text = thread_text[:8000]
 
-    result = await gradient_json(
+    result = await claude_json(
         thread_text,
         system=THREAD_SUMMARY_SYSTEM,
-        model_tier="strong",
+        model_tier="smart",
         max_tokens=1024,
-        temperature=0.2,
         timeout=45,
     )
 

@@ -65,16 +65,14 @@ def _make_entity(**kwargs):
 
 @pytest.mark.asyncio
 async def test_fire_all_sources_company():
-    """All 4 company sources should be called in parallel."""
+    """All 3 company sources should be called in parallel."""
     mock_apollo = AsyncMock(return_value={"legal_name": "Acme Corp", "source": "apollo"})
     mock_clearbit = AsyncMock(return_value={"legal_name": "Acme Corporation", "source": "clearbit"})
-    mock_gradient = AsyncMock(return_value={"industry": "Electronics", "source": "gradient"})
     mock_explorium = AsyncMock(return_value={"hq_city": "Austin", "source": "explorium"})
 
     patched_funcs = {
         "_safe_apollo_company": mock_apollo,
         "_safe_clearbit": mock_clearbit,
-        "_safe_gradient": mock_gradient,
         "_safe_explorium": mock_explorium,
     }
     with patch.dict("app.services.enrichment_orchestrator._SOURCE_FUNCS", patched_funcs):
@@ -82,13 +80,11 @@ async def test_fire_all_sources_company():
 
     assert "apollo" in results
     assert "clearbit" in results
-    assert "gradient" in results
     assert "explorium" in results
     assert results["apollo"]["legal_name"] == "Acme Corp"
     assert results["clearbit"]["legal_name"] == "Acme Corporation"
     mock_apollo.assert_called_once_with("acme.com")
     mock_clearbit.assert_called_once_with("acme.com")
-    mock_gradient.assert_called_once_with("acme.com")
     mock_explorium.assert_called_once_with("acme.com")
 
 
@@ -134,21 +130,18 @@ async def test_partial_failure_handling():
     """One source raising an exception should not crash others."""
     mock_apollo = AsyncMock(return_value={"legal_name": "Acme Corp"})
     mock_clearbit = AsyncMock(side_effect=RuntimeError("API key expired"))
-    mock_gradient = AsyncMock(return_value={"industry": "Electronics"})
     mock_explorium = AsyncMock(return_value=None)
 
     patched_funcs = {
         "_safe_apollo_company": mock_apollo,
         "_safe_clearbit": mock_clearbit,
-        "_safe_gradient": mock_gradient,
         "_safe_explorium": mock_explorium,
     }
     with patch.dict("app.services.enrichment_orchestrator._SOURCE_FUNCS", patched_funcs):
         results = await fire_all_sources("company", "acme.com")
 
-    # Apollo and gradient succeeded
+    # Apollo succeeded
     assert results["apollo"] == {"legal_name": "Acme Corp"}
-    assert results["gradient"] == {"industry": "Electronics"}
     # Clearbit raised — should be None
     assert results["clearbit"] is None
     # Explorium returned None explicitly
@@ -164,9 +157,8 @@ async def test_partial_failure_handling():
 async def test_claude_merge_picks_best():
     """Claude should pick best field values from multiple sources."""
     raw_results = {
-        "apollo": {"phone": "+1-555-0100", "legal_name": "Acme Corp"},
+        "apollo": {"phone": "+1-555-0100", "legal_name": "Acme Corp", "industry": "Electronics"},
         "clearbit": {"phone": "+1-555-0200", "legal_name": "Acme Corporation Inc."},
-        "gradient": {"phone": "+1-555-0100", "industry": "Electronics"},
     }
 
     claude_response = [
@@ -188,7 +180,7 @@ async def test_claude_merge_picks_best():
             "field": "industry",
             "value": "Electronics",
             "confidence": 0.85,
-            "source": "gradient",
+            "source": "apollo",
             "reasoning": "Only source with industry data",
         },
     ]
@@ -270,7 +262,7 @@ def test_apply_confident_below_threshold():
             "field": "industry",
             "value": "Maybe Electronics",
             "confidence": 0.60,
-            "source": "gradient",
+            "source": "apollo",
             "reasoning": "Low confidence guess",
         },
     ]
@@ -301,7 +293,6 @@ async def test_enrich_on_demand_end_to_end():
     source_results = {
         "apollo": {"legal_name": "Acme Corp", "industry": "Electronics"},
         "clearbit": {"legal_name": "Acme Corporation"},
-        "gradient": None,
         "explorium": None,
     }
 

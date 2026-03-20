@@ -1,11 +1,11 @@
 """Proactive email drafter — AI-generated sales emails for proactive offers.
 
-Uses Claude (via gradient_service) to draft personalized emails when
+Uses Claude (via claude_client) to draft personalized emails when
 salespeople want to proactively offer parts to customers based on
 purchase history matches.
 
 Called by: routers/proactive.py (POST /api/proactive/draft)
-Depends on: services/gradient_service.py
+Depends on: utils/claude_client.py
 """
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from typing import Any
 
 from loguru import logger
 
-from app.services.gradient_service import gradient_json
+from app.utils.claude_client import claude_json
 
 SYSTEM_PROMPT = """\
 You are a professional sales email writer for Trio Supply Chain Solutions, \
@@ -80,12 +80,11 @@ async def draft_proactive_email(
         prompt += f"Additional notes from salesperson: {notes}\n\n"
     prompt += "Draft a proactive sales email offering these parts."
 
-    result = await gradient_json(
+    result = await claude_json(
         prompt,
         system=SYSTEM_PROMPT,
-        model_tier="default",
+        model_tier="fast",
         max_tokens=600,
-        temperature=0.6,
         timeout=30,
     )
 

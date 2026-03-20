@@ -266,8 +266,8 @@ class TestEnrichCompanyPipeline:
                 "field": "hq_city",
                 "value": "Austin",
                 "confidence": 0.70,
-                "source": "gradient",
-                "reasoning": "Only Gradient reports city; others disagree",
+                "source": "explorium",
+                "reasoning": "Only Explorium reports city; others disagree",
             },
             {
                 "field": "hq_country",
@@ -319,7 +319,6 @@ class TestEnrichCompanyPipeline:
         raw_results = {
             "apollo": {"industry": "Semiconductors", "employee_size": "201-500"},
             "clearbit": None,
-            "gradient": None,
             "explorium": None,
         }
 

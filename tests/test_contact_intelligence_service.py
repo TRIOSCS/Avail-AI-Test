@@ -486,7 +486,7 @@ class TestGenerateContactSummary:
         result = generate_contact_summary(db_session, card2.id, vc.id)
         assert result == "Contact not found."
 
-    def test_template_summary_no_gradient(self, db_session, test_user):
+    def test_template_summary_ai_failure(self, db_session, test_user):
         card = _make_card(db_session, "TemplCo", "templco.com")
         vc = _make_contact(db_session, card, "tmpl@templco.com", full_name="Template Person")
         vc.interaction_count = 10
@@ -494,7 +494,7 @@ class TestGenerateContactSummary:
         vc.relationship_score = 65.0
         db_session.commit()
 
-        with patch("app.config.settings.do_gradient_api_key", None):
+        with patch("app.utils.claude_client.claude_text", new_callable=AsyncMock, return_value=None):
             result = generate_contact_summary(db_session, card.id, vc.id)
         assert "Template Person" in result
         assert "10" in result
@@ -1093,11 +1093,11 @@ class TestNudgeDaysSinceFallback:
         assert len(nudges) == 0
 
 
-# ── generate_contact_nudges: Gradient enrichment exception (lines 591-592) ──
+# ── generate_contact_nudges: AI enrichment exception (lines 591-592) ──
 
 
-class TestNudgeGradientEnrichmentError:
-    def test_gradient_enrichment_exception_swallowed(self, db_session):
+class TestNudgeAIEnrichmentError:
+    def test_ai_enrichment_exception_swallowed(self, db_session):
         """Lines 591-592: exception in _enrich_nudges_with_ai is caught."""
         card = _make_card(db_session, "EnrichErr", "enricherr.com")
         vc = _make_contact(db_session, card, "err@enricherr.com", full_name="Err Person")
@@ -1107,7 +1107,7 @@ class TestNudgeGradientEnrichmentError:
 
         with patch(
             "app.services.contact_intelligence._enrich_nudges_with_ai",
-            side_effect=Exception("Gradient API down"),
+            side_effect=Exception("Claude API down"),
         ):
             nudges = generate_contact_nudges(db_session, card.id)
 
@@ -1116,27 +1116,14 @@ class TestNudgeGradientEnrichmentError:
         assert nudges[0]["nudge_type"] == "dormant"
 
 
-# ── _enrich_nudges_with_ai (lines 604-626) ──────────────────────────
+# ── _enrich_nudges_with_ai (lines 632-656) ──────────────────────────
 
 
 class TestEnrichNudgesWithAI:
-    def test_no_gradient_key_returns_unchanged(self, db_session):
-        """Line 601-602: no API key returns nudges unchanged."""
+    def test_claude_enrichment_success(self, db_session):
+        """Successful Claude enrichment updates message."""
         from app.services.contact_intelligence import _enrich_nudges_with_ai
 
-        mock_settings = type("S", (), {"do_gradient_api_key": ""})()
-        nudges = [{"contact_name": "Test", "nudge_type": "dormant", "message": "original"}]
-
-        with patch("app.config.settings", mock_settings):
-            result = _enrich_nudges_with_ai(db_session, nudges, 1)
-
-        assert result[0]["message"] == "original"
-
-    def test_gradient_enrichment_success(self, db_session):
-        """Lines 604-626: successful Gradient enrichment updates message."""
-        from app.services.contact_intelligence import _enrich_nudges_with_ai
-
-        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
         nudges = [
             {
                 "contact_name": "Test",
@@ -1148,25 +1135,21 @@ class TestEnrichNudgesWithAI:
             }
         ]
 
-        # The function uses asyncio.get_event_loop().run_until_complete(gradient_json(...))
-        # We need to mock the entire chain.
         mock_loop = MagicMock()
         mock_loop.run_until_complete.return_value = {"message": "AI-enriched suggestion"}
 
         with (
-            patch("app.config.settings", mock_settings),
-            patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock),
+            patch("app.utils.claude_client.claude_json", new_callable=AsyncMock),
             patch("asyncio.get_event_loop", return_value=mock_loop),
         ):
             result = _enrich_nudges_with_ai(db_session, nudges, 1)
 
         assert result[0]["message"] == "AI-enriched suggestion"
 
-    def test_gradient_enrichment_per_nudge_exception(self, db_session):
-        """Lines 623-624: per-nudge exception keeps template message."""
+    def test_claude_enrichment_per_nudge_exception(self, db_session):
+        """Per-nudge exception keeps template message."""
         from app.services.contact_intelligence import _enrich_nudges_with_ai
 
-        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
         nudges = [
             {
                 "contact_name": "Test",
@@ -1182,8 +1165,7 @@ class TestEnrichNudgesWithAI:
         mock_loop.run_until_complete.side_effect = Exception("API error")
 
         with (
-            patch("app.config.settings", mock_settings),
-            patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock),
+            patch("app.utils.claude_client.claude_json", new_callable=AsyncMock),
             patch("asyncio.get_event_loop", return_value=mock_loop),
         ):
             result = _enrich_nudges_with_ai(db_session, nudges, 1)
@@ -1191,11 +1173,10 @@ class TestEnrichNudgesWithAI:
         # Template message preserved
         assert result[0]["message"] == "template message"
 
-    def test_gradient_enrichment_returns_non_dict(self, db_session):
-        """Line 621: Gradient returns non-dict — template message kept."""
+    def test_claude_enrichment_returns_non_dict(self, db_session):
+        """Claude returns non-dict — template message kept."""
         from app.services.contact_intelligence import _enrich_nudges_with_ai
 
-        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
         nudges = [
             {
                 "contact_name": "Test",
@@ -1211,8 +1192,7 @@ class TestEnrichNudgesWithAI:
         mock_loop.run_until_complete.return_value = "not a dict"
 
         with (
-            patch("app.config.settings", mock_settings),
-            patch("app.services.gradient_service.gradient_json", new_callable=AsyncMock),
+            patch("app.utils.claude_client.claude_json", new_callable=AsyncMock),
             patch("asyncio.get_event_loop", return_value=mock_loop),
         ):
             result = _enrich_nudges_with_ai(db_session, nudges, 1)
@@ -1220,12 +1200,12 @@ class TestEnrichNudgesWithAI:
         assert result[0]["message"] == "template msg"
 
 
-# ── generate_contact_summary: Gradient AI path (lines 665-679) ────────
+# ── generate_contact_summary: Claude AI path (lines 659-719) ────────
 
 
-class TestGenerateContactSummaryGradient:
-    def test_gradient_summary_success(self, db_session, test_user):
-        """Lines 665-677: Gradient AI generates a summary successfully."""
+class TestGenerateContactSummaryClaude:
+    def test_claude_summary_success(self, db_session, test_user):
+        """Claude AI generates a summary successfully."""
         card = _make_card(db_session, "SumCo", "sumco.com")
         vc = _make_contact(db_session, card, "sum@sumco.com", full_name="Summary Person")
         vc.interaction_count = 10
@@ -1233,21 +1213,19 @@ class TestGenerateContactSummaryGradient:
         vc.relationship_score = 65.0
         db_session.commit()
 
-        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
         mock_loop = MagicMock()
         mock_loop.run_until_complete.return_value = "AI-generated relationship summary here."
 
         with (
-            patch("app.config.settings", mock_settings),
-            patch("app.services.gradient_service.gradient_text", new_callable=AsyncMock),
+            patch("app.utils.claude_client.claude_text", new_callable=AsyncMock),
             patch("asyncio.get_event_loop", return_value=mock_loop),
         ):
             result = generate_contact_summary(db_session, card.id, vc.id)
 
         assert result == "AI-generated relationship summary here."
 
-    def test_gradient_summary_failure_falls_back_to_template(self, db_session, test_user):
-        """Lines 678-679: Gradient failure falls back to template summary."""
+    def test_claude_summary_failure_falls_back_to_template(self, db_session, test_user):
+        """Claude failure falls back to template summary."""
         card = _make_card(db_session, "FailSum", "failsum.com")
         vc = _make_contact(db_session, card, "fail@failsum.com", full_name="Fail Person")
         vc.interaction_count = 5
@@ -1255,13 +1233,11 @@ class TestGenerateContactSummaryGradient:
         vc.relationship_score = 80.0
         db_session.commit()
 
-        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
         mock_loop = MagicMock()
-        mock_loop.run_until_complete.side_effect = Exception("Gradient down")
+        mock_loop.run_until_complete.side_effect = Exception("Claude down")
 
         with (
-            patch("app.config.settings", mock_settings),
-            patch("app.services.gradient_service.gradient_text", new_callable=AsyncMock),
+            patch("app.utils.claude_client.claude_text", new_callable=AsyncMock),
             patch("asyncio.get_event_loop", return_value=mock_loop),
         ):
             result = generate_contact_summary(db_session, card.id, vc.id)
@@ -1270,8 +1246,8 @@ class TestGenerateContactSummaryGradient:
         assert "Fail Person" in result
         assert "improving" in result  # warming -> "improving"
 
-    def test_gradient_summary_returns_empty(self, db_session, test_user):
-        """Lines 676-677: Gradient returns empty string -> falls back to template."""
+    def test_claude_summary_returns_empty(self, db_session, test_user):
+        """Claude returns empty string -> falls back to template."""
         card = _make_card(db_session, "EmptySum", "emptysum.com")
         vc = _make_contact(db_session, card, "empty@emptysum.com", full_name="Empty Person")
         vc.interaction_count = 3
@@ -1279,17 +1255,15 @@ class TestGenerateContactSummaryGradient:
         vc.relationship_score = 40.0
         db_session.commit()
 
-        mock_settings = type("S", (), {"do_gradient_api_key": "fake-key"})()
         mock_loop = MagicMock()
         mock_loop.run_until_complete.return_value = ""
 
         with (
-            patch("app.config.settings", mock_settings),
-            patch("app.services.gradient_service.gradient_text", new_callable=AsyncMock),
+            patch("app.utils.claude_client.claude_text", new_callable=AsyncMock),
             patch("asyncio.get_event_loop", return_value=mock_loop),
         ):
             result = generate_contact_summary(db_session, card.id, vc.id)
 
-        # Empty string from Gradient -> falls to template
+        # Empty string from Claude -> falls to template
         assert "Empty Person" in result
         assert "declining" in result  # cooling -> "declining"

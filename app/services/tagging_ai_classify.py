@@ -1,8 +1,7 @@
 """AI classification — classify untagged parts via Claude Haiku.
 
-Last resort in the classification waterfall. Two modes:
-  - Gradient (primary, free): Submit MPNs via DigitalOcean Gradient
-  - Anthropic (fallback): Direct API call
+Last resort in the classification waterfall. Submits MPNs to Claude Haiku
+for manufacturer + commodity classification.
 
 Called by: tagging_ai_batch (batch backfill), app.routers.tagging_admin
 Depends on: app.utils.claude_client, app.services.tagging
@@ -43,36 +42,19 @@ _SYSTEM = "You are an expert electronic component classifier. Return only valid 
 
 
 async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:  # pragma: no cover
-    """Batch MPNs via Gradient (free) with Anthropic fallback.
-
-    Parse structured JSON response.
-    """
-    from app.services.gradient_service import gradient_json
+    """Batch MPNs via Claude Haiku for manufacturer + commodity classification."""
+    from app.utils.claude_client import claude_json
 
     mpn_list = "\n".join(f"- {mpn}" for mpn in part_numbers)
     prompt = _CLASSIFY_PROMPT.format(mpns=mpn_list)
 
-    # Primary: Gradient Claude Sonnet (free, unlimited, high accuracy for MPN classification)
-    result = await gradient_json(
+    result = await claude_json(
         prompt,
         system=_SYSTEM,
-        model="anthropic-claude-sonnet-4-6",
+        model_tier="fast",
         max_tokens=4096,
-        temperature=0.1,
         timeout=60,
     )
-
-    # Fallback: direct Anthropic API ($400 budget)
-    if not result or not isinstance(result, list):
-        from app.utils.claude_client import claude_json
-
-        result = await claude_json(
-            prompt,
-            system=_SYSTEM,
-            model_tier="fast",
-            max_tokens=4096,
-            timeout=60,
-        )
 
     if not result or not isinstance(result, list):
         logger.warning("AI classification returned invalid response")

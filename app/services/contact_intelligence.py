@@ -552,13 +552,13 @@ def compute_all_contact_scores(db: Session) -> dict:
     return {"updated": updated, "skipped": skipped}
 
 
-# ── AI Nudges (Gradient-powered) ────────────────────────────────────
+# ── AI Nudges (Claude-powered) ────────────────────────────────────
 
 
 def generate_contact_nudges(db: Session, vendor_card_id: int) -> list[dict]:
     """Generate nudge suggestions for dormant/cooling contacts.
 
-    Rule-based triage first, then Gradient AI enrichment for actionable messages.
+    Rule-based triage first, then Claude AI enrichment for actionable messages.
     """
     from ..config import settings
     from ..models import VendorContact
@@ -619,26 +619,21 @@ def generate_contact_nudges(db: Session, vendor_card_id: int) -> list[dict]:
             }
         )
 
-    # Try Gradient AI enrichment for personalized nudge messages
+    # Try Claude AI enrichment for personalized nudge messages
     if nudges:
         try:
             nudges = _enrich_nudges_with_ai(db, nudges, vendor_card_id)
         except Exception as e:
-            logger.debug("Gradient nudge enrichment skipped: %s", e)
+            logger.debug("Claude nudge enrichment skipped: %s", e)
 
     return nudges
 
 
 def _enrich_nudges_with_ai(db: Session, nudges: list[dict], vendor_card_id: int) -> list[dict]:
-    """Enrich nudge messages with AI suggestions via Gradient."""
-    from ..config import settings
-
-    if not settings.do_gradient_api_key:
-        return nudges
-
+    """Enrich nudge messages with AI suggestions via Claude Haiku."""
     import asyncio
 
-    from .gradient_service import gradient_json
+    from app.utils.claude_client import claude_json
 
     for nudge in nudges[:5]:  # Limit to 5 to avoid excessive API calls
         prompt = (
@@ -651,7 +646,12 @@ def _enrich_nudges_with_ai(db: Session, nudges: list[dict], vendor_card_id: int)
         )
         try:
             result = asyncio.get_event_loop().run_until_complete(
-                gradient_json(prompt, system="You are a B2B relationship advisor. Return ONLY valid JSON.", timeout=10)
+                claude_json(
+                    prompt,
+                    system="You are a B2B relationship advisor. Return ONLY valid JSON.",
+                    model_tier="fast",
+                    timeout=10,
+                )
             )
             if result and isinstance(result, dict) and result.get("message"):
                 nudge["message"] = result["message"]
@@ -662,7 +662,7 @@ def _enrich_nudges_with_ai(db: Session, nudges: list[dict], vendor_card_id: int)
 
 
 def generate_contact_summary(db: Session, vendor_card_id: int, contact_id: int) -> str:
-    """Generate a Gradient-powered summary of a contact's relationship."""
+    """Generate an AI-powered summary of a contact's relationship."""
     from ..models import ActivityLog, VendorContact
 
     contact = db.get(VendorContact, contact_id)
@@ -692,26 +692,22 @@ def generate_contact_summary(db: Session, vendor_card_id: int, contact_id: int) 
         f"Recent activity:\n" + ("\n".join(activity_summary) if activity_summary else "No recent activity")
     )
 
-    # Try Gradient AI
     try:
-        from ..config import settings
+        import asyncio
 
-        if settings.do_gradient_api_key:
-            import asyncio
+        from app.utils.claude_client import claude_text
 
-            from .gradient_service import gradient_text
-
-            prompt = (
-                f"Write a 2-3 sentence relationship summary for this vendor contact:\n\n{context}\n\n"
-                f"Focus on the health of the relationship and any recommended actions."
-            )
-            result = asyncio.get_event_loop().run_until_complete(
-                gradient_text(prompt, system="You are a B2B relationship analyst. Be concise.", timeout=15)
-            )
-            if result:
-                return result
+        prompt = (
+            f"Write a 2-3 sentence relationship summary for this vendor contact:\n\n{context}\n\n"
+            f"Focus on the health of the relationship and any recommended actions."
+        )
+        result = asyncio.get_event_loop().run_until_complete(
+            claude_text(prompt, system="You are a B2B relationship analyst. Be concise.", model_tier="fast", timeout=15)
+        )
+        if result:
+            return result
     except Exception as e:
-        logger.debug("Gradient summary failed: %s", e)
+        logger.debug("AI summary failed: %s", e)
 
     # Fallback: template-based summary
     trend_desc = {

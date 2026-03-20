@@ -2,7 +2,7 @@
 
 Purpose:
   Automatically parse vendor RFQ reply emails into structured quote data using
-  the Gradient inference API. Handles multi-part quotes, multi-currency, and
+  Claude API. Handles multi-part quotes, multi-currency, and
   common email formats (tabular, inline, partial quotes, "no stock" responses).
 
 Business Rules:
@@ -14,14 +14,14 @@ Business Rules:
   - Never auto-send anything — parsed data is always a draft
 
 Called by: routers/ai.py (POST /api/ai/parse-email)
-Depends on: services/gradient_service.py, utils/normalization.py
+Depends on: utils/claude_client.py, utils/normalization.py
 """
 
 import re
 
 from loguru import logger
 
-from app.services.gradient_service import gradient_json
+from app.utils.claude_client import claude_json
 from app.utils.normalization import (
     detect_currency,
     normalize_condition,
@@ -116,12 +116,11 @@ async def parse_email(
     prompt += f"Subject: {email_subject}\n\n" if email_subject else ""
     prompt += f"Email body:\n{body_truncated}"
 
-    result = await gradient_json(
+    result = await claude_json(
         prompt,
         system=SYSTEM_PROMPT,
-        model_tier="strong",
+        model_tier="smart",
         max_tokens=2048,
-        temperature=0.1,
         timeout=45,
     )
 

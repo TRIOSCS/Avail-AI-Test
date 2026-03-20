@@ -284,7 +284,7 @@ async def enrich_material(
             setattr(card, field, val)
             updated.append(field)
     if updated:
-        card.enrichment_source = body.get("source", "gradient_agent")
+        card.enrichment_source = body.get("source", "claude_agent")
         card.enriched_at = datetime.now(timezone.utc)
     db.commit()
     invalidate_prefix("material_list")

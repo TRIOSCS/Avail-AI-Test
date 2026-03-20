@@ -96,10 +96,6 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-6"
 
-    # --- DigitalOcean Gradient AI ---
-    do_gradient_api_key: str = ""
-    do_gradient_model: str = "anthropic-claude-sonnet-4-6"
-
     # --- Agent service-to-service auth ---
     agent_api_key: str = ""
 
@@ -193,6 +189,9 @@ class Settings(BaseSettings):
     eight_by_eight_timezone: str = "America/Los_Angeles"
     eight_by_eight_enabled: bool = False
     eight_by_eight_poll_interval_minutes: int = 30
+
+    # --- Trouble reporting (GitHub Issues via gh CLI) ---
+    github_trouble_report_repo: str = "TRIOSCS/Avail-AI-Test"
 
     # --- MVP Mode ---
     # When True, disables: Dashboard/Analytics, Enrichment, Teams, Task Manager

@@ -230,7 +230,7 @@ def test_material_card_to_dict_enrichment_fields(db_session):
         datasheet_url="https://ti.com/ds.pdf",
         cross_references=[{"mpn": "ALT123", "manufacturer": "NXP"}],
         specs_summary="32-bit ARM Cortex",
-        enrichment_source="gradient_agent",
+        enrichment_source="claude_agent",
         enriched_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
         search_count=5,
         created_at=datetime.now(timezone.utc),
@@ -242,7 +242,7 @@ def test_material_card_to_dict_enrichment_fields(db_session):
     assert result["lifecycle_status"] == "active"
     assert result["package_type"] == "QFP-64"
     assert result["pin_count"] == 64
-    assert result["enrichment_source"] == "gradient_agent"
+    assert result["enrichment_source"] == "claude_agent"
     assert result["enriched_at"] is not None
 
 
@@ -444,7 +444,7 @@ def test_enrich_material(client, db_session, test_material_card):
             "lifecycle_status": "active",
             "package_type": "TO-220",
             "manufacturer": "STMicroelectronics",
-            "source": "gradient_agent",
+            "source": "claude_agent",
         },
     )
     assert resp.status_code == 200

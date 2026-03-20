@@ -15,14 +15,14 @@ Business Rules:
   - Never modify the original part number stored in the database
 
 Called by: routers/ai.py (POST /api/ai/normalize-parts)
-Depends on: services/gradient_service.py
+Depends on: utils/claude_client.py
 """
 
 from __future__ import annotations
 
 from loguru import logger
 
-from app.services.gradient_service import gradient_json
+from app.utils.claude_client import claude_json
 
 CONFIDENCE_THRESHOLD = 0.7
 MAX_BATCH_SIZE = 25  # LLM context limit per call
@@ -120,16 +120,15 @@ async def normalize_parts(raw_parts: list[str]) -> list[dict]:
 
 
 async def _call_normalizer(parts: list[str]) -> list[dict] | None:
-    """Call Gradient to normalize a batch of part numbers."""
+    """Call Claude to normalize a batch of part numbers."""
     parts_list = "\n".join(f"{i + 1}. {p}" for i, p in enumerate(parts))
     prompt = f"Normalize these {len(parts)} electronic component part numbers:\n\n{parts_list}"
 
-    result = await gradient_json(
+    result = await claude_json(
         prompt,
         system=SYSTEM_PROMPT,
-        model_tier="default",
+        model_tier="fast",
         max_tokens=256 * len(parts),
-        temperature=0.1,
         timeout=30,
     )
 

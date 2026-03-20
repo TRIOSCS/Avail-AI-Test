@@ -49,7 +49,7 @@ def enriched_cards(db_session):
             display_mpn=f"DONE-MPN-{i:03d}",
             normalized_mpn=f"done-mpn-{i:03d}",
             enriched_at=datetime.now(timezone.utc),
-            enrichment_source="gradient_ai",
+            enrichment_source="claude_haiku",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(card)

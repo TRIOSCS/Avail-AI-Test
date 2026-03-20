@@ -21,7 +21,6 @@ from app.utils.claude_client import claude_json
 COMPANY_SOURCES = {
     "apollo": "_safe_apollo_company",
     "clearbit": "_safe_clearbit",
-    "gradient": "_safe_gradient",
     "explorium": "_safe_explorium",
 }
 
@@ -57,17 +56,6 @@ async def _safe_clearbit(identifier: str) -> dict | None:
         return await enrich_company(identifier)
     except Exception as e:
         logger.debug("Clearbit enrichment failed: {}", e)
-        return None
-
-
-async def _safe_gradient(identifier: str) -> dict | None:
-    """Gradient AI company enrichment by domain."""
-    try:
-        from app.enrichment_service import _gradient_find_company
-
-        return await _gradient_find_company(identifier)
-    except Exception as e:
-        logger.debug("Gradient enrichment failed: {}", e)
         return None
 
 
@@ -136,7 +124,6 @@ async def _safe_rocketreach(identifier: str) -> dict | None:
 _SOURCE_FUNCS = {
     "_safe_apollo_company": _safe_apollo_company,
     "_safe_clearbit": _safe_clearbit,
-    "_safe_gradient": _safe_gradient,
     "_safe_explorium": _safe_explorium,
     "_safe_apollo_contacts": _safe_apollo_contacts,
     "_safe_lusha": _safe_lusha,
