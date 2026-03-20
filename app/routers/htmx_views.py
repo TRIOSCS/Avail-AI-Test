@@ -2244,6 +2244,14 @@ async def update_requirement(
     brand: str = Form(""),
     target_price: float | None = Form(None),
     substitutes: str = Form(""),
+    customer_pn: str = Form(""),
+    need_by_date: str = Form(""),
+    condition: str = Form(""),
+    date_codes: str = Form(""),
+    firmware: str = Form(""),
+    hardware_codes: str = Form(""),
+    packaging: str = Form(""),
+    notes: str = Form(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -2251,6 +2259,8 @@ async def update_requirement(
 
     Returns the updated row HTML.
     """
+    from datetime import date as date_type
+
     from ..utils.normalization import parse_substitute_mpns
 
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
@@ -2265,6 +2275,21 @@ async def update_requirement(
     item.brand = brand.strip() or None
     item.target_price = target_price
     item.substitutes = parse_substitute_mpns(substitutes, primary_mpn)
+    item.customer_pn = customer_pn.strip() or None
+    item.condition = condition.strip() or None
+    item.date_codes = date_codes.strip() or None
+    item.firmware = firmware.strip() or None
+    item.hardware_codes = hardware_codes.strip() or None
+    item.packaging = packaging.strip() or None
+    item.notes = notes.strip() or None
+    # Parse need_by_date from ISO string
+    if need_by_date.strip():
+        try:
+            item.need_by_date = date_type.fromisoformat(need_by_date.strip())
+        except ValueError:
+            item.need_by_date = None
+    else:
+        item.need_by_date = None
     db.commit()
     db.refresh(item)
 
