@@ -30,6 +30,14 @@
         </button>
       </div>
 
+      {# Manufacturer filter — always visible, reloads on commodity change #}
+      <div id="manufacturer-filter-container"
+           hx-get="/v2/partials/materials/filters/manufacturers"
+           hx-trigger="load, commodity-changed from:body"
+           hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
+           hx-swap="innerHTML">
+      </div>
+
       {# "All Materials" button #}
       <button @click="selectCommodity(null)"
               :class="!commodity ? 'bg-brand-50 text-brand-700 font-medium border-l-2 border-brand-500' : 'text-gray-600 hover:bg-gray-50 border-l-2 border-transparent'"

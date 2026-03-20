@@ -156,3 +156,8 @@ def test_faceted_results_sub_filters_actually_filter(client, db_session: Session
     assert resp.status_code == 200
     assert "DDR5-CHIP" in resp.text
     assert "DDR4-CHIP" not in resp.text
+
+
+def test_manufacturer_filter_partial_renders(client):
+    resp = client.get("/v2/partials/materials/filters/manufacturers")
+    assert resp.status_code == 200

@@ -6152,6 +6152,22 @@ async def materials_workspace_partial(
     return templates.TemplateResponse("htmx/partials/materials/workspace.html", ctx)
 
 
+@router.get("/v2/partials/materials/filters/manufacturers", response_class=HTMLResponse)
+async def materials_filters_manufacturers_partial(
+    request: Request,
+    commodity: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render manufacturer filter dropdown."""
+    from ..services.faceted_search_service import get_manufacturer_options
+
+    options = get_manufacturer_options(db, commodity=commodity or None)
+    ctx = _base_ctx(request, user, "materials")
+    ctx["manufacturer_options"] = options
+    return templates.TemplateResponse("htmx/partials/materials/filters/manufacturers.html", ctx)
+
+
 @router.get("/v2/partials/materials/filters/tree", response_class=HTMLResponse)
 async def materials_filters_tree_partial(
     request: Request,
