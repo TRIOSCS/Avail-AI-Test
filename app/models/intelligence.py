@@ -26,14 +26,14 @@ class MaterialCard(Base):
     id = Column(Integer, primary_key=True)
     normalized_mpn = Column(String(255), nullable=False, unique=True, index=True)
     display_mpn = Column(String(255), nullable=False)
-    manufacturer = Column(String(255))
+    manufacturer = Column(String(255), index=True)
     description = Column(String(1000))
     search_count = Column(Integer, default=0)
     last_searched_at = Column(DateTime)
     search_vector = Column(TSVECTOR)
 
     # Enrichment fields (populated by AI agent)
-    lifecycle_status = Column(String(50))  # active, nrfnd, eol, obsolete, ltb
+    lifecycle_status = Column(String(50), index=True)  # active, nrfnd, eol, obsolete, ltb
     package_type = Column(String(100))  # QFP-64, BGA-256, 0603, etc.
     category = Column(String(255))  # Microcontroller, Capacitor, Connector, etc.
     rohs_status = Column(String(50))  # compliant, non-compliant, exempt
