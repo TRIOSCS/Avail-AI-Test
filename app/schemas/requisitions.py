@@ -97,16 +97,16 @@ class RequirementCreate(BaseModel):
     primary_mpn: str
     target_qty: int = Field(default=1, ge=1)
     target_price: float | None = Field(default=None, ge=0)
+    brand: str | None = None
     substitutes: list[str] = Field(default_factory=list, max_length=20)
     condition: str | None = None
     date_codes: str | None = None
     firmware: str | None = None
     hardware_codes: str | None = None
     packaging: str | None = None
-    notes: str | None = None
-    brand: str | None = None
     customer_pn: str | None = None
     need_by_date: date | None = None
+    notes: str | None = None
 
     @field_validator("primary_mpn")
     @classmethod
@@ -144,17 +144,17 @@ class RequirementUpdate(BaseModel):
     primary_mpn: str | None = None
     target_qty: int | None = Field(default=None, ge=1)
     target_price: float | None = Field(default=None, ge=0)
+    brand: str | None = None
     substitutes: list[str] | None = None
     firmware: str | None = None
     date_codes: str | None = None
     hardware_codes: str | None = None
     packaging: str | None = None
     condition: str | None = None
-    notes: str | None = None
-    sale_notes: str | None = None
-    brand: str | None = None
     customer_pn: str | None = None
     need_by_date: date | None = None
+    notes: str | None = None
+    sale_notes: str | None = None
 
     @field_validator("primary_mpn")
     @classmethod
@@ -193,17 +193,17 @@ class RequirementOut(BaseModel):
     primary_mpn: str
     target_qty: int = 1
     target_price: float | None = None
-    substitutes: list[str] = Field(default_factory=list)
-    sighting_count: int = 0
     brand: str | None = None
-    customer_pn: str | None = None
-    need_by_date: date | None = None
+    substitutes: list[str] = Field(default_factory=list)
     condition: str | None = None
     date_codes: str | None = None
     firmware: str | None = None
     hardware_codes: str | None = None
     packaging: str | None = None
+    customer_pn: str | None = None
+    need_by_date: date | None = None
     notes: str | None = None
+    sighting_count: int = 0
 
 
 class SightingUnavailableIn(BaseModel):

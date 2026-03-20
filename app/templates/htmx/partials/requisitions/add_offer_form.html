@@ -15,7 +15,7 @@
         hx-target="#tab-content"
         class="space-y-3">
 
-    {# Row 1: Vendor, MPN, Qty, Price #}
+    {# Row 1: Vendor Name, MPN, Qty Available, Unit Price #}
     <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
       <div>
         <label class="block text-xs text-gray-500 mb-1">Vendor Name *</label>
@@ -49,7 +49,7 @@
         <label class="block text-xs text-gray-500 mb-1">Manufacturer</label>
         <input type="text" name="manufacturer"
                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
-               placeholder="Brand">
+               placeholder="e.g. Texas Instruments">
       </div>
       <div>
         <label class="block text-xs text-gray-500 mb-1">Lead Time</label>
@@ -66,14 +66,10 @@
       <div>
         <label class="block text-xs text-gray-500 mb-1">Condition</label>
         <select name="condition" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
-          <option value="">—</option>
+          <option value="">--</option>
           <option value="new">New</option>
-          <option value="new_surplus">New Surplus</option>
-          <option value="etn">ETN</option>
-          <option value="refurbished">Refurbished</option>
+          <option value="refurb">Refurbished</option>
           <option value="used">Used</option>
-          <option value="pulls">Pulls</option>
-          <option value="as_is">As-Is</option>
         </select>
       </div>
     </div>
@@ -96,13 +92,13 @@
         <label class="block text-xs text-gray-500 mb-1">Packaging</label>
         <input type="text" name="packaging"
                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
-               placeholder="Tape & Reel, Tray...">
+               placeholder="e.g. Tape & Reel">
       </div>
       <div>
         <label class="block text-xs text-gray-500 mb-1">Firmware</label>
         <input type="text" name="firmware"
                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
-               placeholder="Firmware rev">
+               placeholder="Rev / version">
       </div>
     </div>
 
@@ -118,7 +114,7 @@
         <label class="block text-xs text-gray-500 mb-1">Warranty</label>
         <input type="text" name="warranty"
                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
-               placeholder="e.g. 90 days">
+               placeholder="e.g. 1 year">
       </div>
       <div>
         <label class="block text-xs text-gray-500 mb-1">Country of Origin</label>
@@ -135,20 +131,18 @@
 
     {# Linked Requirement #}
     {% if requirements %}
-    <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
-      <div class="col-span-2">
-        <label class="block text-xs text-gray-500 mb-1">Linked Requirement</label>
-        <select name="requirement_id" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
-          <option value="">— None —</option>
-          {% for r in requirements %}
-          <option value="{{ r.id }}">{{ r.primary_mpn }} (qty {{ r.target_qty or '—' }})</option>
-          {% endfor %}
-        </select>
-      </div>
+    <div>
+      <label class="block text-xs text-gray-500 mb-1">Linked Requirement</label>
+      <select name="requirement_id" class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+        <option value="">— None —</option>
+        {% for r in requirements %}
+        <option value="{{ r.id }}">{{ r.primary_mpn }} (qty {{ r.target_qty or '—' }})</option>
+        {% endfor %}
+      </select>
     </div>
     {% endif %}
 
-    {# Full-width: Notes #}
+    {# Notes #}
     <div>
       <label class="block text-xs text-gray-500 mb-1">Notes</label>
       <textarea name="notes" rows="2"

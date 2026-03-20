@@ -14,7 +14,6 @@ Depends on: pydantic
 
 from __future__ import annotations
 
-from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
@@ -408,8 +407,7 @@ class OfferUpdate(BaseModel):
     firmware: str | None = None
     hardware_code: str | None = None
     moq: int | None = None
-    spq: int | None = None
-    valid_until: date | None = None
+    spq: int | None = Field(default=None, ge=1)
     warranty: str | None = None
     country_of_origin: str | None = None
     notes: str | None = None
@@ -454,7 +452,6 @@ class OfferOut(BaseModel):
     spq: int | None = None
     warranty: str | None = None
     country_of_origin: str | None = None
-    valid_until: date | None = None
     notes: str | None = None
     status: str | None = None
 
