@@ -249,3 +249,18 @@ class TestSendValidation:
             },
         )
         assert resp.status_code == 422
+
+
+class TestPolishEmail:
+    """AI email polish endpoint."""
+
+    @patch("app.routers.excess.claude_text", new_callable=AsyncMock)
+    def test_polish_returns_cleaned_text(self, mock_claude, client):
+        mock_claude.return_value = "Polished version of the email."
+        resp = client.post("/api/excess-lists/polish-email", json={"text": "hey we got parts u want sum?"})
+        assert resp.status_code == 200
+        assert resp.json()["text"] == "Polished version of the email."
+
+    def test_polish_empty_text_returns_422(self, client):
+        resp = client.post("/api/excess-lists/polish-email", json={"text": ""})
+        assert resp.status_code == 422

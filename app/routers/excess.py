@@ -33,6 +33,8 @@ from ..schemas.excess import (
     ExcessListUpdate,
     ExcessStatsResponse,
     ParseBidResponseRequest,
+    PolishEmailRequest,
+    PolishEmailResponse,
     SendBidSolicitationRequest,
 )
 from ..services.excess_service import (
@@ -54,6 +56,7 @@ from ..services.excess_service import (
     send_bid_solicitation,
     update_excess_list,
 )
+from ..utils.claude_client import claude_text
 from ..utils.normalization import normalize_mpn_key
 
 router = APIRouter(tags=["excess"])
@@ -706,6 +709,23 @@ async def api_parse_bid_response(
         notes=payload.notes,
     )
     return BidResponse.model_validate(bid)
+
+
+# ── AI Email Polish ───────────────────────────────────────────────────
+
+
+@router.post("/api/excess-lists/polish-email")
+async def api_polish_email(
+    payload: PolishEmailRequest,
+    user: User = Depends(require_user),
+):
+    """Polish a draft email message using AI."""
+    polished = await claude_text(
+        prompt=f"Polish this business email for grammar and professional tone. Keep it concise. Don't change the meaning. Return ONLY the polished text, nothing else.\n\n{payload.text}",
+        system="You are a professional email editor. Return only the polished email text.",
+        max_tokens=1024,
+    )
+    return PolishEmailResponse(text=polished.strip())
 
 
 # ── Phase 4: Proactive Matching on Archive ────────────────────────────
