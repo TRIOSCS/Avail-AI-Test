@@ -14,11 +14,14 @@ from sqlalchemy.orm import Session
 from app.models import Company, User
 from app.models.excess import ExcessLineItem, ExcessList
 from app.services.excess_service import (
+    accept_bid,
     confirm_import,
+    create_bid,
     create_excess_list,
     delete_excess_list,
     get_excess_list,
     import_line_items,
+    list_bids,
     list_excess_lists,
     preview_import,
     update_excess_list,
@@ -495,3 +498,237 @@ class TestMatchExcessDemand:
         confirm_import(db_session, el.id, [{"part_number": "LM358N", "quantity": 500}])
         result = match_excess_demand(db_session, el.id, user_id=trader.id)
         assert result["matches_created"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Bid helpers
+# ---------------------------------------------------------------------------
+
+
+def _make_line_item(db: Session, excess_list: ExcessList, part_number: str = "LM317T", quantity: int = 100):
+    item = ExcessLineItem(
+        excess_list_id=excess_list.id,
+        part_number=part_number,
+        quantity=quantity,
+        asking_price=1.50,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+# ---------------------------------------------------------------------------
+# TestCreateBid
+# ---------------------------------------------------------------------------
+
+
+class TestCreateBid:
+    def test_creates_bid_with_required_fields(self, db_session: Session):
+        company = _make_company(db_session)
+        user = _make_user(db_session)
+        el = _make_excess_list(db_session, company, user)
+        item = _make_line_item(db_session, el)
+
+        bid = create_bid(
+            db_session,
+            line_item_id=item.id,
+            list_id=el.id,
+            unit_price=1.25,
+            quantity_wanted=50,
+            user_id=user.id,
+        )
+
+        assert bid.id is not None
+        assert float(bid.unit_price) == 1.25
+        assert bid.quantity_wanted == 50
+        assert bid.status == "pending"
+        assert bid.source == "manual"
+        assert bid.created_by == user.id
+
+    def test_creates_bid_with_all_fields(self, db_session: Session):
+        company = _make_company(db_session)
+        buyer_company = _make_company(db_session, name="Buyer Corp")
+        user = _make_user(db_session)
+        el = _make_excess_list(db_session, company, user)
+        item = _make_line_item(db_session, el)
+
+        bid = create_bid(
+            db_session,
+            line_item_id=item.id,
+            list_id=el.id,
+            unit_price=2.00,
+            quantity_wanted=100,
+            user_id=user.id,
+            bidder_company_id=buyer_company.id,
+            lead_time_days=5,
+            source="phone",
+            notes="Urgent order",
+        )
+
+        assert bid.bidder_company_id == buyer_company.id
+        assert bid.lead_time_days == 5
+        assert bid.source == "phone"
+        assert bid.notes == "Urgent order"
+
+    def test_invalid_line_item_raises_404(self, db_session: Session):
+        company = _make_company(db_session)
+        user = _make_user(db_session)
+        el = _make_excess_list(db_session, company, user)
+
+        with pytest.raises(HTTPException) as exc_info:
+            create_bid(
+                db_session,
+                line_item_id=99999,
+                list_id=el.id,
+                unit_price=1.00,
+                quantity_wanted=10,
+                user_id=user.id,
+            )
+        assert exc_info.value.status_code == 404
+
+    def test_item_not_in_list_raises_404(self, db_session: Session):
+        company = _make_company(db_session)
+        user = _make_user(db_session)
+        el1 = _make_excess_list(db_session, company, user, title="List A")
+        el2 = _make_excess_list(db_session, company, user, title="List B")
+        item = _make_line_item(db_session, el1)
+
+        with pytest.raises(HTTPException) as exc_info:
+            create_bid(
+                db_session,
+                line_item_id=item.id,
+                list_id=el2.id,
+                unit_price=1.00,
+                quantity_wanted=10,
+                user_id=user.id,
+            )
+        assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# TestListBids
+# ---------------------------------------------------------------------------
+
+
+class TestListBids:
+    def test_returns_bids_sorted_by_price(self, db_session: Session):
+        company = _make_company(db_session)
+        user = _make_user(db_session)
+        el = _make_excess_list(db_session, company, user)
+        item = _make_line_item(db_session, el)
+
+        create_bid(
+            db_session, line_item_id=item.id, list_id=el.id, unit_price=3.00, quantity_wanted=10, user_id=user.id
+        )
+        create_bid(
+            db_session, line_item_id=item.id, list_id=el.id, unit_price=1.00, quantity_wanted=20, user_id=user.id
+        )
+        create_bid(
+            db_session, line_item_id=item.id, list_id=el.id, unit_price=2.00, quantity_wanted=30, user_id=user.id
+        )
+
+        bids = list_bids(db_session, item.id, el.id)
+        assert len(bids) == 3
+        prices = [float(b.unit_price) for b in bids]
+        assert prices == [1.00, 2.00, 3.00]
+
+    def test_empty_list_returns_empty(self, db_session: Session):
+        company = _make_company(db_session)
+        user = _make_user(db_session)
+        el = _make_excess_list(db_session, company, user)
+        item = _make_line_item(db_session, el)
+
+        bids = list_bids(db_session, item.id, el.id)
+        assert bids == []
+
+    def test_invalid_item_raises_404(self, db_session: Session):
+        company = _make_company(db_session)
+        user = _make_user(db_session)
+        el = _make_excess_list(db_session, company, user)
+
+        with pytest.raises(HTTPException) as exc_info:
+            list_bids(db_session, 99999, el.id)
+        assert exc_info.value.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# TestAcceptBid
+# ---------------------------------------------------------------------------
+
+
+class TestAcceptBid:
+    def test_accepts_bid_and_rejects_others(self, db_session: Session):
+        company = _make_company(db_session)
+        user = _make_user(db_session)
+        el = _make_excess_list(db_session, company, user)
+        item = _make_line_item(db_session, el)
+
+        bid1 = create_bid(
+            db_session, line_item_id=item.id, list_id=el.id, unit_price=1.00, quantity_wanted=10, user_id=user.id
+        )
+        bid2 = create_bid(
+            db_session, line_item_id=item.id, list_id=el.id, unit_price=2.00, quantity_wanted=20, user_id=user.id
+        )
+        bid3 = create_bid(
+            db_session, line_item_id=item.id, list_id=el.id, unit_price=3.00, quantity_wanted=30, user_id=user.id
+        )
+
+        accepted = accept_bid(db_session, bid1.id, item.id, el.id)
+
+        assert accepted.status == "accepted"
+
+        db_session.refresh(bid2)
+        db_session.refresh(bid3)
+        assert bid2.status == "rejected"
+        assert bid3.status == "rejected"
+
+        db_session.refresh(item)
+        assert item.status == "awarded"
+
+    def test_accepts_bid_preserves_non_pending(self, db_session: Session):
+        company = _make_company(db_session)
+        user = _make_user(db_session)
+        el = _make_excess_list(db_session, company, user)
+        item = _make_line_item(db_session, el)
+
+        bid1 = create_bid(
+            db_session, line_item_id=item.id, list_id=el.id, unit_price=1.00, quantity_wanted=10, user_id=user.id
+        )
+        bid2 = create_bid(
+            db_session, line_item_id=item.id, list_id=el.id, unit_price=2.00, quantity_wanted=20, user_id=user.id
+        )
+
+        # Manually set bid2 to withdrawn before accepting bid1
+        bid2.status = "withdrawn"
+        db_session.commit()
+
+        accept_bid(db_session, bid1.id, item.id, el.id)
+
+        db_session.refresh(bid2)
+        assert bid2.status == "withdrawn"  # Should NOT be changed to rejected
+
+    def test_invalid_bid_raises_404(self, db_session: Session):
+        company = _make_company(db_session)
+        user = _make_user(db_session)
+        el = _make_excess_list(db_session, company, user)
+        item = _make_line_item(db_session, el)
+
+        with pytest.raises(HTTPException) as exc_info:
+            accept_bid(db_session, 99999, item.id, el.id)
+        assert exc_info.value.status_code == 404
+
+    def test_bid_wrong_item_raises_404(self, db_session: Session):
+        company = _make_company(db_session)
+        user = _make_user(db_session)
+        el = _make_excess_list(db_session, company, user)
+        item1 = _make_line_item(db_session, el, part_number="PART-A")
+        item2 = _make_line_item(db_session, el, part_number="PART-B")
+
+        bid = create_bid(
+            db_session, line_item_id=item1.id, list_id=el.id, unit_price=1.00, quantity_wanted=10, user_id=user.id
+        )
+
+        with pytest.raises(HTTPException) as exc_info:
+            accept_bid(db_session, bid.id, item2.id, el.id)
+        assert exc_info.value.status_code == 404

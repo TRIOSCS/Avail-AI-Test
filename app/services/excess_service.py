@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..models import Company
-from ..models.excess import ExcessLineItem, ExcessList
+from ..models.excess import Bid, ExcessLineItem, ExcessList
 from ..models.offers import Offer
 from ..models.sourcing import Requirement, Requisition
 from ..utils.normalization import normalize_mpn_key
@@ -427,3 +427,94 @@ def match_excess_demand(db: Session, list_id: int, *, user_id: int) -> dict:
         items_matched,
     )
     return {"matches_created": matches_created, "items_matched": items_matched}
+
+
+# ---------------------------------------------------------------------------
+# Bid operations
+# ---------------------------------------------------------------------------
+
+
+def create_bid(
+    db: Session,
+    *,
+    line_item_id: int,
+    list_id: int,
+    unit_price: float,
+    quantity_wanted: int,
+    user_id: int,
+    bidder_company_id: int | None = None,
+    bidder_vendor_card_id: int | None = None,
+    lead_time_days: int | None = None,
+    source: str = "manual",
+    notes: str | None = None,
+) -> Bid:
+    """Create a bid on an excess line item.
+
+    Validates that the list and item exist, and that the item belongs to the list.
+    """
+    excess_list = get_excess_list(db, list_id)
+    item = db.get(ExcessLineItem, line_item_id)
+    if not item or item.excess_list_id != excess_list.id:
+        raise HTTPException(404, f"Line item {line_item_id} not found in list {list_id}")
+
+    bid = Bid(
+        excess_line_item_id=line_item_id,
+        unit_price=unit_price,
+        quantity_wanted=quantity_wanted,
+        lead_time_days=lead_time_days,
+        bidder_company_id=bidder_company_id,
+        bidder_vendor_card_id=bidder_vendor_card_id,
+        source=source,
+        notes=notes,
+        created_by=user_id,
+    )
+    db.add(bid)
+    _safe_commit(db, entity="bid")
+    db.refresh(bid)
+    logger.info("Created Bid id={} on line_item={} list={}", bid.id, line_item_id, list_id)
+    return bid
+
+
+def list_bids(db: Session, line_item_id: int, list_id: int) -> list[Bid]:
+    """List all bids for a line item, sorted by unit_price ASC (best first).
+
+    Validates that the list and item exist.
+    """
+    excess_list = get_excess_list(db, list_id)
+    item = db.get(ExcessLineItem, line_item_id)
+    if not item or item.excess_list_id != excess_list.id:
+        raise HTTPException(404, f"Line item {line_item_id} not found in list {list_id}")
+
+    return db.query(Bid).filter(Bid.excess_line_item_id == line_item_id).order_by(Bid.unit_price.asc()).all()
+
+
+def accept_bid(db: Session, bid_id: int, line_item_id: int, list_id: int) -> Bid:
+    """Accept a bid: mark it accepted, reject other pending bids, award the line item.
+
+    Validates list/item/bid ownership chain.
+    """
+    excess_list = get_excess_list(db, list_id)
+    item = db.get(ExcessLineItem, line_item_id)
+    if not item or item.excess_list_id != excess_list.id:
+        raise HTTPException(404, f"Line item {line_item_id} not found in list {list_id}")
+
+    bid = db.get(Bid, bid_id)
+    if not bid or bid.excess_line_item_id != line_item_id:
+        raise HTTPException(404, f"Bid {bid_id} not found on line item {line_item_id}")
+
+    bid.status = "accepted"
+
+    # Reject all other pending bids on the same line item
+    db.query(Bid).filter(
+        Bid.excess_line_item_id == line_item_id,
+        Bid.id != bid_id,
+        Bid.status == "pending",
+    ).update({"status": "rejected"})
+
+    # Award the line item
+    item.status = "awarded"
+
+    _safe_commit(db, entity="bid acceptance")
+    db.refresh(bid)
+    logger.info("Accepted Bid id={} on line_item={} list={}", bid_id, line_item_id, list_id)
+    return bid

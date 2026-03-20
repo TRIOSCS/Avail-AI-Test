@@ -7,6 +7,8 @@ Called by: main.py (router mount)
 Depends on: services/excess_service, schemas/excess, file_utils, dependencies
 """
 
+import json
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
@@ -16,8 +18,11 @@ from ..database import get_db
 from ..dependencies import require_user
 from ..file_utils import parse_tabular_file
 from ..models import Company, User
-from ..models.excess import ExcessLineItem
+from ..models.excess import Bid, ExcessLineItem
 from ..schemas.excess import (
+    BidCreateRequest,
+    BidResponse,
+    BidUpdate,
     ExcessLineItemCreate,
     ExcessLineItemResponse,
     ExcessListCreate,
@@ -25,11 +30,17 @@ from ..schemas.excess import (
     ExcessListUpdate,
 )
 from ..services.excess_service import (
+    accept_bid,
+    confirm_import,
+    create_bid,
     create_excess_list,
     delete_excess_list,
     get_excess_list,
     import_line_items,
+    list_bids,
     list_excess_lists,
+    match_excess_demand,
+    preview_import,
     update_excess_list,
 )
 
@@ -121,6 +132,39 @@ async def partial_excess_detail(
             "user": user,
             "list": el,
             "line_items": items,
+        },
+    )
+
+
+@router.post("/v2/partials/excess/{list_id}/import-preview", response_class=HTMLResponse)
+async def partial_import_preview(
+    request: Request,
+    list_id: int,
+    file: UploadFile,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Parse uploaded file and render an import preview partial for HTMX."""
+    get_excess_list(db, list_id)
+    filename = file.filename or ""
+    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported file type '{ext}'")
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(400, "File too large")
+    rows = parse_tabular_file(content, filename)
+    if not rows:
+        raise HTTPException(400, "No data rows found")
+    result = preview_import(rows)
+    return templates.TemplateResponse(
+        "htmx/partials/excess/import_preview.html",
+        {
+            "request": request,
+            "list_id": list_id,
+            "filename": filename,
+            **result,
+            "all_valid_rows_json": json.dumps(result["all_valid_rows"]),
         },
     )
 
@@ -230,6 +274,50 @@ async def api_import_file(
     return result
 
 
+# ── Import Preview / Confirm ──────────────────────────────────────────
+
+
+@router.post("/api/excess-lists/{list_id}/preview-import")
+async def api_preview_import(
+    list_id: int,
+    file: UploadFile,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Upload a file and return a validation preview (no DB writes)."""
+    get_excess_list(db, list_id)
+    filename = file.filename or ""
+    ext = "." + filename.rsplit(".", 1)[-1].lower() if "." in filename else ""
+    if ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(400, f"Unsupported file type '{ext}'")
+    content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(400, "File too large")
+    rows = parse_tabular_file(content, filename)
+    if not rows:
+        raise HTTPException(400, "No data rows found")
+    return preview_import(rows)
+
+
+@router.post("/api/excess-lists/{list_id}/confirm-import")
+async def api_confirm_import(
+    list_id: int,
+    payload: dict,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Confirm import of pre-validated rows, then run demand matching."""
+    rows = payload.get("rows", [])
+    if not rows:
+        raise HTTPException(400, "No rows to import")
+    result = confirm_import(db, list_id, rows)
+    match_result = match_excess_demand(db, list_id, user_id=user.id)
+    return {
+        "imported": result["imported"],
+        "matches_created": match_result["matches_created"],
+    }
+
+
 # ── Line Items ────────────────────────────────────────────────────────
 
 
@@ -301,3 +389,141 @@ async def api_list_line_items(
         "limit": limit,
         "offset": offset,
     }
+
+
+# ── Bids ──────────────────────────────────────────────────────────────
+
+
+@router.post("/api/excess-lists/{list_id}/line-items/{item_id}/bids", status_code=201)
+async def api_create_bid(
+    list_id: int,
+    item_id: int,
+    payload: BidCreateRequest,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Record a bid on an excess line item."""
+    bid = create_bid(
+        db,
+        line_item_id=item_id,
+        list_id=list_id,
+        unit_price=payload.unit_price,
+        quantity_wanted=payload.quantity_wanted,
+        user_id=user.id,
+        bidder_company_id=payload.bidder_company_id,
+        bidder_vendor_card_id=payload.bidder_vendor_card_id,
+        lead_time_days=payload.lead_time_days,
+        source=payload.source or "manual",
+        notes=payload.notes,
+    )
+    return BidResponse.model_validate(bid)
+
+
+@router.get("/api/excess-lists/{list_id}/line-items/{item_id}/bids")
+async def api_list_bids(
+    list_id: int,
+    item_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """List all bids for a line item, sorted by price (best first)."""
+    bids = list_bids(db, item_id, list_id)
+    return {
+        "items": [BidResponse.model_validate(b) for b in bids],
+        "total": len(bids),
+    }
+
+
+@router.patch("/api/excess-lists/{list_id}/line-items/{item_id}/bids/{bid_id}")
+async def api_update_bid(
+    list_id: int,
+    item_id: int,
+    bid_id: int,
+    payload: BidUpdate,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Update a bid.
+
+    If status=='accepted', triggers accept_bid logic.
+    """
+    updates = payload.model_dump(exclude_unset=True)
+
+    if updates.get("status") == "accepted":
+        bid = accept_bid(db, bid_id, item_id, list_id)
+        return BidResponse.model_validate(bid)
+
+    # Verify ownership chain
+    get_excess_list(db, list_id)
+    item = db.get(ExcessLineItem, item_id)
+    if not item or item.excess_list_id != list_id:
+        raise HTTPException(404, f"Line item {item_id} not found in list {list_id}")
+
+    bid = db.get(Bid, bid_id)
+    if not bid or bid.excess_line_item_id != item_id:
+        raise HTTPException(404, f"Bid {bid_id} not found on line item {item_id}")
+
+    for key, value in updates.items():
+        if value is not None and hasattr(bid, key):
+            setattr(bid, key, value)
+
+    db.commit()
+    db.refresh(bid)
+    return BidResponse.model_validate(bid)
+
+
+# ── Bid HTMX Partials ─────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/excess/{list_id}/line-items/{item_id}/bid-form", response_class=HTMLResponse)
+async def partial_bid_form(
+    request: Request,
+    list_id: int,
+    item_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the bid recording form modal."""
+    get_excess_list(db, list_id)
+    item = db.get(ExcessLineItem, item_id)
+    if not item or item.excess_list_id != list_id:
+        raise HTTPException(404, f"Line item {item_id} not found in list {list_id}")
+    companies = db.query(Company).order_by(Company.name).all()
+    return templates.TemplateResponse(
+        "htmx/partials/excess/bid_form.html",
+        {
+            "request": request,
+            "list_id": list_id,
+            "item_id": item_id,
+            "item": item,
+            "companies": companies,
+        },
+    )
+
+
+@router.get("/v2/partials/excess/{list_id}/line-items/{item_id}/bids", response_class=HTMLResponse)
+async def partial_bid_list(
+    request: Request,
+    list_id: int,
+    item_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the bid list modal for a line item."""
+    get_excess_list(db, list_id)
+    item = db.get(ExcessLineItem, item_id)
+    if not item or item.excess_list_id != list_id:
+        raise HTTPException(404, f"Line item {item_id} not found in list {list_id}")
+    bids = list_bids(db, item_id, list_id)
+    companies = db.query(Company).order_by(Company.name).all()
+    return templates.TemplateResponse(
+        "htmx/partials/excess/bid_list.html",
+        {
+            "request": request,
+            "list_id": list_id,
+            "item_id": item_id,
+            "item": item,
+            "bids": bids,
+            "companies": companies,
+        },
+    )

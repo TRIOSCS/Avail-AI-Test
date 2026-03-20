@@ -130,48 +130,49 @@
 
   {# ── File Upload / Import ───────────────────────────────────────── #}
   {% if list.status == "draft" %}
-  <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-6"
-       x-data="{ dragging: false, uploading: false, result: null }">
-    <h2 class="text-lg font-semibold text-gray-900 mb-4">Import Line Items</h2>
+  <div id="import-area">
+    <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-6"
+         x-data="{ dragging: false, uploading: false }">
+      <h2 class="text-lg font-semibold text-gray-900 mb-4">Import Line Items</h2>
 
-    <form hx-post="/api/excess-lists/{{ list.id }}/import"
-          hx-encoding="multipart/form-data"
-          hx-target="#line-items-section"
-          hx-swap="outerHTML"
-          hx-get="/v2/partials/excess/{{ list.id }}"
-          @htmx:before-request.camel="uploading = true"
-          @htmx:after-request.camel="uploading = false">
+      <form hx-post="/v2/partials/excess/{{ list.id }}/import-preview"
+            hx-encoding="multipart/form-data"
+            hx-target="#import-area"
+            hx-swap="innerHTML"
+            @htmx:before-request.camel="uploading = true"
+            @htmx:after-request.camel="uploading = false">
 
-      <div @dragover.prevent="dragging = true"
-           @dragleave.prevent="dragging = false"
-           @drop.prevent="dragging = false; $refs.fileInput.files = $event.dataTransfer.files; $el.closest('form').requestSubmit()"
-           :class="dragging ? 'border-brand-500 bg-brand-50' : 'border-gray-300 bg-gray-50'"
-           class="border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer"
-           @click="$refs.fileInput.click()">
+        <div @dragover.prevent="dragging = true"
+             @dragleave.prevent="dragging = false"
+             @drop.prevent="dragging = false; $refs.fileInput.files = $event.dataTransfer.files; $el.closest('form').requestSubmit()"
+             :class="dragging ? 'border-brand-500 bg-brand-50' : 'border-gray-300 bg-gray-50'"
+             class="border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer"
+             @click="$refs.fileInput.click()">
 
-        <input type="file" name="file" x-ref="fileInput" accept=".csv,.tsv,.xlsx,.xls"
-               @change="if ($refs.fileInput.files.length) $el.closest('form').requestSubmit()"
-               class="hidden">
+          <input type="file" name="file" x-ref="fileInput" accept=".csv,.tsv,.xlsx,.xls"
+                 @change="if ($refs.fileInput.files.length) $el.closest('form').requestSubmit()"
+                 class="hidden">
 
-        <template x-if="!uploading">
-          <div>
-            <svg class="mx-auto h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-              <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
-            </svg>
-            <p class="mt-2 text-sm text-gray-600">
-              <span class="font-medium text-brand-600">Click to upload</span> or drag and drop
-            </p>
-            <p class="mt-1 text-xs text-gray-500">CSV, TSV, or Excel files (max 10 MB)</p>
-          </div>
-        </template>
-        <template x-if="uploading">
-          <div class="flex items-center justify-center gap-2 text-brand-600">
-            <svg class="h-5 w-5 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
-            <span class="text-sm font-medium">Importing...</span>
-          </div>
-        </template>
-      </div>
-    </form>
+          <template x-if="!uploading">
+            <div>
+              <svg class="mx-auto h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+                <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
+              </svg>
+              <p class="mt-2 text-sm text-gray-600">
+                <span class="font-medium text-brand-600">Click to upload</span> or drag and drop
+              </p>
+              <p class="mt-1 text-xs text-gray-500">CSV, TSV, or Excel files (max 10 MB)</p>
+            </div>
+          </template>
+          <template x-if="uploading">
+            <div class="flex items-center justify-center gap-2 text-brand-600">
+              <svg class="h-5 w-5 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+              <span class="text-sm font-medium">Processing...</span>
+            </div>
+          </template>
+        </div>
+      </form>
+    </div>
   </div>
   {% endif %}
 
@@ -205,6 +206,8 @@
               <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Date Code</th>
               <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Asking Price</th>
               <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Matches</th>
+              <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Bids</th>
               <th class="px-4 py-3 w-10"></th>
             </tr>
           </thead>

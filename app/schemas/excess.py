@@ -126,6 +126,18 @@ class ExcessLineItemImportRow(BaseModel):
 # ── Bid ──────────────────────────────────────────────────────────────
 
 
+class BidCreateRequest(BaseModel):
+    """Request body for creating a bid — excess_line_item_id comes from URL path."""
+
+    unit_price: float = Field(ge=0)
+    quantity_wanted: int = Field(ge=1)
+    lead_time_days: int | None = Field(default=None, ge=0)
+    bidder_company_id: int | None = None
+    bidder_vendor_card_id: int | None = None
+    source: Literal["manual", "phone"] | None = "manual"
+    notes: str | None = None
+
+
 class BidCreate(BaseModel):
     excess_line_item_id: int
     unit_price: float = Field(ge=0)
