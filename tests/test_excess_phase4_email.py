@@ -17,8 +17,8 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Company, User
-from app.models.excess import ExcessLineItem, ExcessList
-from app.services.excess_service import send_bid_solicitation
+from app.models.excess import BidSolicitation, ExcessLineItem, ExcessList
+from app.services.excess_service import parse_bid_from_email, send_bid_solicitation
 from app.utils.normalization import normalize_mpn_key
 from tests.conftest import engine  # noqa: F401
 
@@ -216,3 +216,85 @@ class TestGraphEmailSending:
         call_payload = mock_post.call_args[0][1]
         assert "Special Offer for You" in call_payload["message"]["subject"]
         assert "great deal" in call_payload["message"]["body"]["content"]
+
+
+# ---------------------------------------------------------------------------
+# Helpers for bid parsing tests
+# ---------------------------------------------------------------------------
+
+
+def _setup_solicitation(db: Session):
+    """Create user, company, excess list, line item, and a BidSolicitation
+    (status=sent)."""
+    user = _make_user(db)
+    company = _make_company(db)
+    el = _make_excess_list(db, company, user)
+    item = _make_line_item(db, el, "PARSE-001", quantity=5000)
+    db.flush()
+    sol = BidSolicitation(
+        excess_line_item_id=item.id,
+        contact_id=1,
+        sent_by=user.id,
+        recipient_email="vendor@example.com",
+        status="sent",
+    )
+    db.add(sol)
+    db.commit()
+    db.refresh(sol)
+    return user, company, el, item, sol
+
+
+class TestParseBidFromEmail:
+    @pytest.mark.asyncio
+    @patch("app.services.excess_service._call_claude_bid_parse", new_callable=AsyncMock)
+    async def test_parses_bid_successfully(self, mock_claude, db_session: Session):
+        """Claude returns valid bid JSON -> Bid created, solicitation responded."""
+        mock_claude.return_value = (
+            '{"unit_price": 0.35, "quantity_wanted": 3000, "lead_time_days": 5, "notes": "Can ship Friday"}'
+        )
+
+        user, company, el, item, sol = _setup_solicitation(db_session)
+
+        bid = await parse_bid_from_email(db_session, sol.id, "I can offer 3000 at $0.35")
+
+        assert bid is not None
+        assert float(bid.unit_price) == 0.35
+        assert bid.quantity_wanted == 3000
+        assert bid.lead_time_days == 5
+        assert bid.notes == "Can ship Friday"
+        assert bid.source == "email_parsed"
+
+        db_session.refresh(sol)
+        assert sol.status == "responded"
+        assert sol.response_received_at is not None
+
+    @pytest.mark.asyncio
+    @patch("app.services.excess_service._call_claude_bid_parse", new_callable=AsyncMock)
+    async def test_handles_decline(self, mock_claude, db_session: Session):
+        """Claude returns declined JSON -> no Bid, solicitation status=responded."""
+        mock_claude.return_value = '{"declined": true}'
+
+        user, company, el, item, sol = _setup_solicitation(db_session)
+
+        bid = await parse_bid_from_email(db_session, sol.id, "Not interested, thanks")
+
+        assert bid is None
+
+        db_session.refresh(sol)
+        assert sol.status == "responded"
+        assert sol.response_received_at is not None
+
+    @pytest.mark.asyncio
+    @patch("app.services.excess_service._call_claude_bid_parse", new_callable=AsyncMock)
+    async def test_handles_parse_failure(self, mock_claude, db_session: Session):
+        """Claude returns invalid JSON -> no Bid, solicitation stays sent."""
+        mock_claude.return_value = "not valid json"
+
+        user, company, el, item, sol = _setup_solicitation(db_session)
+
+        bid = await parse_bid_from_email(db_session, sol.id, "garbled email")
+
+        assert bid is None
+
+        db_session.refresh(sol)
+        assert sol.status == "sent"  # unchanged

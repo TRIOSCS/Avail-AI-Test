@@ -923,3 +923,93 @@ def list_solicitations(
     if item_id:
         query = query.filter(BidSolicitation.excess_line_item_id == item_id)
     return query.order_by(BidSolicitation.created_at.desc()).all()
+
+
+async def _call_claude_bid_parse(email_body: str) -> str:
+    """Call Claude to extract structured bid data from an email body.
+
+    Returns raw text response from Claude (expected to be JSON).
+    Called by: parse_bid_from_email
+    Depends on: anthropic SDK, app settings
+    """
+    import anthropic
+
+    from ..config import settings
+
+    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
+    prompt = (
+        "Extract bid information from this email response to a parts solicitation. "
+        'Return ONLY valid JSON: {"unit_price": float|null, "quantity_wanted": int|null, '
+        '"lead_time_days": int|null, "notes": str|null}. '
+        'If the email declines or is not a bid response, return: {"declined": true}\n\n'
+        f"{email_body[:2000]}"
+    )
+    response = await client.messages.create(
+        model=settings.anthropic_model,
+        max_tokens=256,
+        messages=[{"role": "user", "content": prompt}],
+    )
+    return response.content[0].text
+
+
+async def parse_bid_from_email(
+    db: Session,
+    solicitation_id: int,
+    email_body: str,
+) -> Bid | None:
+    """Use Claude to parse a bid response email and create a Bid record.
+
+    Returns the created Bid, or None if parsing fails / email is a decline.
+    Called by: inbox scanner (Task 3)
+    Depends on: _call_claude_bid_parse, parse_bid_response
+    """
+    import json
+    import re
+
+    solicitation = db.get(BidSolicitation, solicitation_id)
+    if not solicitation:
+        logger.warning("BidSolicitation {} not found for email parsing", solicitation_id)
+        return None
+
+    raw = await _call_claude_bid_parse(email_body)
+
+    # Strip markdown code fences if present
+    cleaned = re.sub(r"^```(?:json)?\s*", "", raw.strip())
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+
+    try:
+        data = json.loads(cleaned)
+    except (json.JSONDecodeError, ValueError):
+        logger.warning(
+            "Failed to parse Claude bid response as JSON for solicitation {}: {}",
+            solicitation_id,
+            raw[:200],
+        )
+        return None
+
+    if data.get("declined"):
+        solicitation.status = "responded"
+        solicitation.response_received_at = datetime.now(timezone.utc)
+        _safe_commit(db, entity="declined bid solicitation")
+        logger.info("Solicitation {} marked as declined", solicitation_id)
+        return None
+
+    unit_price = data.get("unit_price")
+    quantity_wanted = data.get("quantity_wanted")
+
+    if unit_price is None or quantity_wanted is None:
+        logger.warning(
+            "Incomplete bid data from Claude for solicitation {}: {}",
+            solicitation_id,
+            data,
+        )
+        return None
+
+    return parse_bid_response(
+        db,
+        solicitation_id=solicitation_id,
+        unit_price=float(unit_price),
+        quantity_wanted=int(quantity_wanted),
+        lead_time_days=data.get("lead_time_days"),
+        notes=data.get("notes"),
+    )
