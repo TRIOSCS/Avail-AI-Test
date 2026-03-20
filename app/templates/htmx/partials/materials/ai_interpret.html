@@ -1,0 +1,46 @@
+{# AI search interpretation result — returns OOB swaps to pre-select commodity + filters.
+   Called by: htmx_views.py materials_ai_interpret endpoint
+   Depends on: Alpine.js materialsFilter() component in workspace
+#}
+
+{% if ai_result %}
+{# AI interpreted chip — dismissible, shown above results #}
+<div id="ai-interpret-chip" class="flex items-center gap-2 px-3 py-1.5 bg-violet-50 border border-violet-200 rounded-lg text-sm"
+     hx-swap-oob="true:#ai-chip-container">
+  <svg class="w-4 h-4 text-violet-500 flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+    <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"/>
+  </svg>
+  <span class="text-violet-700">
+    AI interpreted: <strong>{{ ai_result.summary }}</strong>
+  </span>
+  <button @click="$el.closest('#ai-interpret-chip').remove()"
+          class="ml-auto text-violet-400 hover:text-violet-600 flex-shrink-0" aria-label="Dismiss AI interpretation">
+    <svg class="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+    </svg>
+  </button>
+</div>
+
+{# Inline script to apply AI-suggested filters to the Alpine component #}
+<div id="ai-apply-trigger" hx-swap-oob="true:#ai-script-container"
+     x-data x-init="
+       const ws = document.querySelector('#materials-workspace');
+       if (ws) {
+         const d = Alpine.evaluate(ws, '$data');
+         {% if ai_result.commodity %}
+         d.commodity = '{{ ai_result.commodity }}';
+         {% endif %}
+         {% if ai_result.filters %}
+         d.subFilters = JSON.parse('{{ ai_result.filters | tojson }}');
+         {% endif %}
+         d.page = 0;
+         d.pushURL();
+         document.body.dispatchEvent(new CustomEvent('commodity-changed'));
+         document.body.dispatchEvent(new CustomEvent('filters-changed'));
+       }
+     ">
+</div>
+{% else %}
+{# No result / error — show empty #}
+<div id="ai-interpret-chip" hx-swap-oob="true:#ai-chip-container"></div>
+{% endif %}

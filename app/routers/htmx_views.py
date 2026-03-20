@@ -631,6 +631,10 @@ async def requisition_tab(
         for r in requirements:
             r.sighting_count = len(r.sightings) if r.sightings else 0
         ctx["requirements"] = requirements
+        ctx["req_visible_cols"] = user.requirements_column_prefs or _DEFAULT_REQ_COLUMNS
+        ctx["req_all_columns"] = [
+            {"key": k, "label": label, "default": k in _DEFAULT_REQ_COLUMNS} for k, label in _ALL_REQ_COLUMNS
+        ]
         return templates.TemplateResponse("htmx/partials/requisitions/tabs/parts.html", ctx)
 
     elif tab == "offers":
@@ -646,6 +650,10 @@ async def requisition_tab(
         )
         ctx["offers"] = offers
         ctx["draft_quote"] = draft_quote
+        ctx["offer_visible_cols"] = user.offers_column_prefs or _DEFAULT_OFFER_COLUMNS
+        ctx["offer_all_columns"] = [
+            {"key": k, "label": label, "default": k in _DEFAULT_OFFER_COLUMNS} for k, label in _ALL_OFFER_COLUMNS
+        ]
         return templates.TemplateResponse("htmx/partials/requisitions/tabs/offers.html", ctx)
 
     elif tab == "quotes":
@@ -712,6 +720,43 @@ async def requisition_tab(
         ctx["activities"] = activities
         ctx["req"] = req
         return templates.TemplateResponse("htmx/partials/requisitions/tabs/activity.html", ctx)
+
+
+# ── Column Prefs Save Endpoints ──────────────────────────────────────────────
+
+
+@router.post("/v2/partials/requisitions/{req_id}/req-column-prefs", response_class=HTMLResponse)
+async def save_req_column_prefs(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save user's visible requirement column preferences and re-render parts tab."""
+    form = await request.form()
+    cols = [c for c in form.getlist("columns") if c in dict(_ALL_REQ_COLUMNS)]
+    if not cols:
+        cols = list(_DEFAULT_REQ_COLUMNS)
+    user.requirements_column_prefs = cols
+    db.commit()
+    return await requisition_tab(request=request, req_id=req_id, tab="parts", user=user, db=db)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/offer-column-prefs", response_class=HTMLResponse)
+async def save_offer_column_prefs(
+    request: Request,
+    req_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save user's visible offer column preferences and re-render offers tab."""
+    form = await request.form()
+    cols = [c for c in form.getlist("columns") if c in dict(_ALL_OFFER_COLUMNS)]
+    if not cols:
+        cols = list(_DEFAULT_OFFER_COLUMNS)
+    user.offers_column_prefs = cols
+    db.commit()
+    return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
 
 # ── AI Parsing in Requisition Offers (Phase 3B) ───────────────────────
@@ -7657,6 +7702,71 @@ async def strategic_drop(
     ctx["search"] = ""
     return templates.TemplateResponse("htmx/partials/strategic/list.html", ctx)
 
+
+# ── Requirements Tab Column Picker ───────────────────────────────────────────
+
+_ALL_REQ_COLUMNS = [
+    ("mpn", "MPN"),
+    ("brand", "Brand"),
+    ("qty", "Qty"),
+    ("target_price", "Target Price"),
+    ("customer_pn", "Customer PN"),
+    ("need_by_date", "Need-by Date"),
+    ("condition", "Condition"),
+    ("date_codes", "Date Codes"),
+    ("firmware", "Firmware"),
+    ("hardware_codes", "Hardware Codes"),
+    ("packaging", "Packaging"),
+    ("notes", "Notes"),
+    ("substitutes", "Substitutes"),
+    ("status", "Status"),
+    ("sightings", "Sightings"),
+]
+
+_DEFAULT_REQ_COLUMNS = [
+    "mpn",
+    "brand",
+    "qty",
+    "target_price",
+    "customer_pn",
+    "need_by_date",
+    "status",
+    "sightings",
+]
+
+# ── Offers Tab Column Picker ────────────────────────────────────────────────
+
+_ALL_OFFER_COLUMNS = [
+    ("vendor", "Vendor"),
+    ("mpn", "MPN"),
+    ("qty", "Qty"),
+    ("price", "Price"),
+    ("condition", "Condition"),
+    ("date_code", "Date Code"),
+    ("lead_time", "Lead Time"),
+    ("manufacturer", "Manufacturer"),
+    ("moq", "MOQ"),
+    ("spq", "SPQ"),
+    ("packaging", "Packaging"),
+    ("firmware", "Firmware"),
+    ("hardware_code", "Hardware Code"),
+    ("warranty", "Warranty"),
+    ("country", "Country"),
+    ("valid_until", "Valid Until"),
+    ("notes", "Notes"),
+    ("status", "Status"),
+]
+
+_DEFAULT_OFFER_COLUMNS = [
+    "vendor",
+    "mpn",
+    "qty",
+    "price",
+    "condition",
+    "date_code",
+    "lead_time",
+    "status",
+]
 
 # ── Parts Workspace (split-panel) ────────────────────────────────────────────
 
