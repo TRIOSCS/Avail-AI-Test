@@ -266,3 +266,16 @@ class SendBidSolicitationRequest(BaseModel):
     contact_id: int
     subject: str | None = None
     message: str | None = None
+    bundled: bool = True
+
+
+class PolishEmailRequest(BaseModel):
+    """Request body for AI email polish."""
+
+    text: str = Field(min_length=1, max_length=5000)
+
+
+class PolishEmailResponse(BaseModel):
+    """Response from AI email polish."""
+
+    text: str
