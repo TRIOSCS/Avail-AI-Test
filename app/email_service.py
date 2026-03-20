@@ -431,9 +431,14 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
     # Email and domain maps are USER-SCOPED to prevent cross-user data leaks
     email_map = {}  # vendor_email -> Contact (only this user's contacts)
     domain_map = {}  # vendor_domain -> Contact (only this user's contacts)
+    # O(1) lookup for Tier 2 subject-token matching: (req_id, email) -> Contact
+    req_email_map: dict[tuple[int, str], Contact] = {}
     for c in all_contacts:
         if c.graph_conversation_id:
             conv_id_map[c.graph_conversation_id] = c
+        # Build req+email map for Tier 2 (all contacts, not just this user's)
+        if c.requisition_id and c.vendor_contact:
+            req_email_map.setdefault((c.requisition_id, c.vendor_contact.lower()), c)
         # Only build email/domain maps for the scanning user
         if scanned_by_user_id and c.user_id == scanned_by_user_id:
             if c.vendor_contact:
@@ -480,14 +485,10 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
             token_match = avail_token_re.search(subj)
             if token_match:
                 avail_req_id = int(token_match.group(1))
-                # Verify this req exists and find the contact
-                req_contacts = [
-                    c
-                    for c in all_contacts
-                    if c.requisition_id == avail_req_id and c.vendor_contact and c.vendor_contact.lower() == email_addr
-                ]
-                if req_contacts:
-                    matched_contact = req_contacts[0]
+                # O(1) dict lookup instead of O(n) list comprehension
+                req_contact = req_email_map.get((avail_req_id, email_addr))
+                if req_contact:
+                    matched_contact = req_contact
                     matched_req_id = avail_req_id
                     match_method = "subject_token"
                 else:

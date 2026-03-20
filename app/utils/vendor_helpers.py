@@ -25,46 +25,13 @@ from ..models import VendorCard, VendorReview
 from ..services.credential_service import get_credential_cached
 from ..services.specialty_detector import commodity_slug_to_display
 from ..services.vendor_analysis_service import _analyze_vendor_materials
-from ..vendor_utils import normalize_vendor_name
+from ..shared_constants import JUNK_DOMAINS as _JUNK_DOMAINS
+from ..shared_constants import JUNK_EMAIL_PREFIXES as _JUNK_EMAILS
+from ..vendor_utils import fuzzy_score_vendor, normalize_vendor_name
 
 # ── Constants ────────────────────────────────────────────────────────────
 
 _EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
-_JUNK_EMAILS = {
-    "noreply",
-    "no-reply",
-    "donotreply",
-    "mailer-daemon",
-    "postmaster",
-    "webmaster",
-    "privacy",
-    "abuse",
-    "spam",
-    "unsubscribe",
-    "root",
-    "hostmaster",
-    "example",
-    "test",
-    "admin@example",
-}
-_JUNK_DOMAINS = {
-    "example.com",
-    "sentry.io",
-    "googleapis.com",
-    "google.com",
-    "facebook.com",
-    "twitter.com",
-    "youtube.com",
-    "linkedin.com",
-    "schema.org",
-    "w3.org",
-    "cloudflare.com",
-    "jquery.com",
-    "bootstrapcdn.com",
-    "gstatic.com",
-    "gravatar.com",
-    "wordpress.org",
-}
 
 
 # ── Helper Functions ─────────────────────────────────────────────────────
@@ -141,12 +108,10 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
             pass  # pg_trgm not available -- fall through to rapidfuzz
 
     try:
-        from rapidfuzz import fuzz
-
         existing = db.query(VendorCard.id, VendorCard.normalized_name, VendorCard.display_name).limit(500).all()
         best_score, best_card_id = 0, None
         for row in existing:
-            score = fuzz.token_sort_ratio(norm, row.normalized_name)
+            score = fuzzy_score_vendor(norm, row.normalized_name)
             if score > best_score:
                 best_score = score
                 best_card_id = row.id

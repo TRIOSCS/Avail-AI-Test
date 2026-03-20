@@ -18,6 +18,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import relationship
 
+from ..constants import ProactiveMatchStatus
 from .base import Base
 
 
@@ -130,7 +131,7 @@ class ProactiveMatch(Base):
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id"), nullable=False)
     salesperson_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     mpn = Column(String(255), nullable=False)
-    status = Column(String(20), default="new")  # new | sent | dismissed | converted
+    status = Column(String(20), default=ProactiveMatchStatus.NEW)  # new | sent | dismissed | converted
 
     # CPH-enriched fields (populated by matching engine)
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))

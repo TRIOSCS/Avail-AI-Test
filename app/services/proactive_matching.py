@@ -15,6 +15,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..constants import ProactiveMatchStatus
 from ..models import (
     ActivityLog,
     Company,
@@ -26,6 +27,7 @@ from ..models import (
 )
 from ..models.config import SystemConfig
 from ..models.purchase_history import CustomerPartHistory
+from ..utils.normalization import normalize_mpn
 from .proactive_helpers import build_batch_dno_set, build_batch_throttle_set
 
 # ── Scoring ──────────────────────────────────────────────────────────────
@@ -148,7 +150,7 @@ def _find_matches(
     — matches without historical requisitions are valid.
     """
     min_margin = settings.proactive_min_margin_pct
-    mpn_upper = mpn.upper().strip()
+    mpn_upper = normalize_mpn(mpn) or mpn.upper().strip()
 
     # Find all CPH entries for this part
     cph_rows = db.query(CustomerPartHistory).filter(CustomerPartHistory.material_card_id == material_card_id).all()
@@ -183,7 +185,7 @@ def _find_matches(
         for row in db.query(ProactiveMatch.company_id)
         .filter(
             ProactiveMatch.material_card_id == material_card_id,
-            ProactiveMatch.status.in_(["new", "sent"]),
+            ProactiveMatch.status.in_([ProactiveMatchStatus.NEW, ProactiveMatchStatus.SENT]),
         )
         .all()
     }
@@ -201,6 +203,23 @@ def _find_matches(
         .all()
     ):
         req_by_site.setdefault(requisition.customer_site_id, (req_item, requisition))
+
+    # 7. Fallback offer (queried once, not per-row — fixes N+1)
+    fallback_offer_id: int | None = None
+    if source_offer:
+        fallback_offer_id = source_offer.id
+    else:
+        fallback_offer = (
+            db.query(Offer.id)
+            .filter(Offer.material_card_id == material_card_id)
+            .order_by(Offer.created_at.desc())
+            .first()
+        )
+        if fallback_offer:
+            fallback_offer_id = fallback_offer[0]
+
+    if not fallback_offer_id:
+        return []
 
     # ── Loop uses dict lookups instead of queries ────────────────────
     matches = []
@@ -238,20 +257,6 @@ def _find_matches(
         if margin_pct is not None and margin_pct < min_margin:
             continue
 
-        # Resolve offer_id — required NOT NULL FK
-        if source_offer:
-            offer_id = source_offer.id
-        else:
-            fallback_offer = (
-                db.query(Offer.id)
-                .filter(Offer.material_card_id == material_card_id)
-                .order_by(Offer.created_at.desc())
-                .first()
-            )
-            if not fallback_offer:
-                continue
-            offer_id = fallback_offer[0]
-
         # Optional: requisition history (nullable FKs)
         req_row = req_by_site.get(site.id)
         requirement_id = req_row[0].id if req_row else None
@@ -260,7 +265,7 @@ def _find_matches(
         last_price = float(cph.last_unit_price) if cph.last_unit_price else None
 
         match = ProactiveMatch(
-            offer_id=offer_id,
+            offer_id=fallback_offer_id,
             requirement_id=requirement_id,
             requisition_id=requisition_id,
             customer_site_id=site.id,
@@ -369,7 +374,7 @@ def dismiss_match(match_id: int, user_id: int, reason: str, db: Session) -> None
         raise ValueError("Match not found")
     if match.salesperson_id != user_id:
         raise ValueError("Not your match")
-    match.status = "dismissed"
+    match.status = ProactiveMatchStatus.DISMISSED
     match.dismiss_reason = reason
     db.commit()
 
@@ -381,7 +386,7 @@ def mark_match_sent(match_id: int, user_id: int, db: Session) -> None:
         raise ValueError("Match not found")
     if match.salesperson_id != user_id:
         raise ValueError("Not your match")
-    match.status = "sent"
+    match.status = ProactiveMatchStatus.SENT
     db.commit()
 
 
@@ -394,10 +399,10 @@ def expire_old_matches(db: Session) -> int:
     count = (
         db.query(ProactiveMatch)
         .filter(
-            ProactiveMatch.status == "new",
+            ProactiveMatch.status == ProactiveMatchStatus.NEW,
             ProactiveMatch.created_at < cutoff,
         )
-        .update({"status": "expired"}, synchronize_session=False)
+        .update({"status": ProactiveMatchStatus.EXPIRED}, synchronize_session=False)
     )
     if count:
         db.commit()

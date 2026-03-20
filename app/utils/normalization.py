@@ -48,6 +48,11 @@ _CURRENCY_CODES = {
     "MYR",
 }
 
+_CURRENCY_CODE_RE = re.compile(
+    r"\b(?:" + "|".join(_CURRENCY_CODES) + r")\b",
+    re.IGNORECASE,
+)
+
 
 def normalize_price(raw: Any) -> float | None:
     """Parse price string to float.
@@ -67,9 +72,7 @@ def normalize_price(raw: Any) -> float | None:
     for sym in _CURRENCY_SYMBOLS:
         s = s.replace(sym, "")
     # Remove currency codes (USD, EUR, GBP, etc.)
-    for code in _CURRENCY_CODES:
-        s = re.sub(rf"\b{code}\b", "", s, flags=re.IGNORECASE)
-    s = s.strip()
+    s = _CURRENCY_CODE_RE.sub("", s).strip()
 
     # Remove commas (thousand separators)
     s = s.replace(",", "")

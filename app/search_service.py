@@ -1505,8 +1505,7 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
     norm = normalize_mpn_key(pn)
     if not norm:
         return None
-    pn_key = normalize_mpn_key(pn)
-    pn_sightings = [s for s in sightings if normalize_mpn_key(s.mpn_matched or "") == pn_key]
+    pn_sightings = [s for s in sightings if normalize_mpn_key(s.mpn_matched or "") == norm]
     if not pn_sightings:
         return None
 
@@ -1522,17 +1521,16 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
 
     # Batch fetch all existing vendor histories for this card (avoids N+1).
     # Key by normalized vendor name so "ARROW", "Arrow", "arrow" all match.
-    from .vendor_utils import normalize_vendor_name as _nvn
-
     existing_vh = {
-        _nvn(vh.vendor_name): vh for vh in db.query(MaterialVendorHistory).filter_by(material_card_id=card.id).all()
+        normalize_vendor_name(vh.vendor_name): vh
+        for vh in db.query(MaterialVendorHistory).filter_by(material_card_id=card.id).all()
     }
 
     for s in pn_sightings:
         if not s.vendor_name:
             continue
         raw = s.raw_data or {}
-        vn_key = _nvn(s.vendor_name)
+        vn_key = normalize_vendor_name(s.vendor_name)
         vh = existing_vh.get(vn_key)
 
         if vh:
@@ -1560,7 +1558,7 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
             if raw.get("vendor_sku"):
                 vh.vendor_sku = raw["vendor_sku"]
         else:
-            vn_norm = _nvn(s.vendor_name) or s.vendor_name
+            vn_norm = normalize_vendor_name(s.vendor_name) or s.vendor_name
             new_vh = MaterialVendorHistory(
                 material_card_id=card.id,
                 vendor_name=vn_norm,

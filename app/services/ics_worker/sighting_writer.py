@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from app.models import Requirement, Sighting
 from app.vendor_utils import normalize_vendor_name
 
-from .mpn_normalizer import normalize_mpn
+from .mpn_normalizer import strip_packaging_suffixes
 from .result_parser import IcsSighting
 
 
@@ -55,7 +55,7 @@ def save_ics_sightings(
             continue
 
         vendor_norm = normalize_vendor_name(ics.vendor_name)
-        mpn_norm = normalize_mpn(ics.part_number)
+        mpn_norm = strip_packaging_suffixes(ics.part_number)
 
         # Dedup check
         dedup_key = (vendor_norm.lower(), mpn_norm.lower(), ics.quantity)

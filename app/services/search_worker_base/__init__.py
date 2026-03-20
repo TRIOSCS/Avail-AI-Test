@@ -15,7 +15,7 @@ from .ai_gate import AIGate
 from .circuit_breaker import CircuitBreakerBase
 from .config import build_worker_config
 from .human_behavior import HumanBehavior
-from .mpn_normalizer import normalize_mpn
+from .mpn_normalizer import strip_packaging_suffixes
 from .queue_manager import QueueManager
 from .scheduler import SearchScheduler
 
@@ -26,5 +26,5 @@ __all__ = [
     "QueueManager",
     "SearchScheduler",
     "build_worker_config",
-    "normalize_mpn",
+    "strip_packaging_suffixes",
 ]

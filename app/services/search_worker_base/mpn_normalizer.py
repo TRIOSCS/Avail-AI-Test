@@ -36,7 +36,7 @@ _STRIP_SUFFIXES = re.compile(
 _REEL_SUFFIX = re.compile(r"-RL\d*$", re.IGNORECASE)
 
 
-def normalize_mpn(mpn: str) -> str:
+def strip_packaging_suffixes(mpn: str) -> str:
     """Normalize an MPN for deduplication comparison.
 
     - Uppercase

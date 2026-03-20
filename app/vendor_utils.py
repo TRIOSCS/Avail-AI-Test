@@ -165,28 +165,40 @@ def merge_phones_into_card(card, new_phones: list[str]) -> int:
     return added
 
 
+def fuzzy_score_vendor(name_a: str, name_b: str) -> int:
+    """Return rapidfuzz token_sort_ratio between two vendor names (normalized).
+
+    Shared scoring function used by fuzzy_match_vendor and find_vendor_dedup_candidates
+    to ensure consistent fuzzy matching across the codebase.
+
+    Called by: fuzzy_match_vendor, find_vendor_dedup_candidates, utils/vendor_helpers.py
+    Depends on: rapidfuzz, normalize_vendor_name
+    """
+    from rapidfuzz import fuzz
+
+    a = normalize_vendor_name(name_a)
+    b = normalize_vendor_name(name_b)
+    if not a or not b:
+        return 0
+    return int(fuzz.token_sort_ratio(a, b))
+
+
 def fuzzy_match_vendor(query: str, candidates: list[str], threshold: int = 80) -> list[dict]:
     """Fuzzy match a vendor name against a list of candidate names.
 
     Returns list of {"name": str, "score": int} sorted by score descending. Only returns
     matches at or above the threshold.
     """
-    from rapidfuzz import fuzz
-
-    query_norm = normalize_vendor_name(query)
-    if not query_norm:
+    if not normalize_vendor_name(query):
         return []
 
     results = []
     for name in candidates:
-        name_norm = normalize_vendor_name(name)
-        if not name_norm:
-            continue
-        score = fuzz.token_sort_ratio(query_norm, name_norm)
+        score = fuzzy_score_vendor(query, name)
         if score >= threshold:
             results.append({"name": name, "score": score})
 
-    results.sort(key=lambda x: x["score"], reverse=True)
+    results.sort(key=lambda x: x["score"], reverse=True)  # type: ignore[arg-type,return-value]
     return results
 
 
@@ -195,8 +207,6 @@ def find_vendor_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> li
 
     Returns groups of vendors that may be duplicates, sorted by match score.
     """
-    from rapidfuzz import fuzz
-
     from .models import VendorCard
 
     cards = (
@@ -215,7 +225,7 @@ def find_vendor_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> li
             if pair_key in seen_pairs:
                 continue
 
-            score = fuzz.token_sort_ratio(card_a.normalized_name, card_b.normalized_name)
+            score = fuzzy_score_vendor(card_a.normalized_name, card_b.normalized_name)
             if score >= threshold:
                 seen_pairs.add(pair_key)
                 candidates.append(
@@ -239,5 +249,5 @@ def find_vendor_dedup_candidates(db, threshold: int = 85, limit: int = 50) -> li
         if len(candidates) >= limit:
             break
 
-    candidates.sort(key=lambda x: x["score"], reverse=True)
+    candidates.sort(key=lambda x: x["score"], reverse=True)  # type: ignore[arg-type,return-value]
     return candidates

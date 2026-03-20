@@ -18,7 +18,7 @@ from sqlalchemy.orm import Session
 from app.models import Requirement, Sighting
 from app.models.sourcing import Requisition
 
-from .mpn_normalizer import normalize_mpn
+from .mpn_normalizer import strip_packaging_suffixes
 
 # Requisition statuses that indicate active sourcing work
 _ACTIVE_STATUSES = {"active", "sourcing", "offers", "quoting", "reopened"}
@@ -90,7 +90,7 @@ class QueueManager:
             logger.debug("{} enqueue skip: requirement {} has no MPN", self.log_prefix, requirement_id)
             return None
 
-        norm_mpn = normalize_mpn(req.primary_mpn)
+        norm_mpn = strip_packaging_suffixes(req.primary_mpn)
         if not norm_mpn:
             return None
 

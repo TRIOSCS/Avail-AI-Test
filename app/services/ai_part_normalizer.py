@@ -23,6 +23,7 @@ from __future__ import annotations
 from loguru import logger
 
 from app.utils.claude_client import claude_json
+from app.utils.normalization import normalize_mpn as _normalize_mpn
 
 CONFIDENCE_THRESHOLD = 0.7
 MAX_BATCH_SIZE = 25  # LLM context limit per call
@@ -179,7 +180,7 @@ def _fallback(raw: str) -> dict:
     """Return original part number unchanged (safe default)."""
     return {
         "original": raw,
-        "normalized": raw.strip().upper(),
+        "normalized": _normalize_mpn(raw) or raw.strip().upper(),
         "manufacturer": None,
         "base_part": None,
         "package_code": None,

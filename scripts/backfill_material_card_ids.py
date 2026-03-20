@@ -17,28 +17,26 @@ sys.path.insert(0, "/root/availai")
 
 from app.database import SessionLocal
 from app.models import MaterialCard, Offer, Requirement, Sighting
+from app.search_service import resolve_material_card
 from app.utils.normalization import normalize_mpn, normalize_mpn_key
 
 BATCH_SIZE = 1000
 
 
 def _resolve_or_create(norm_key: str, display_mpn: str, db, card_cache: dict) -> int | None:
-    """Find or create a material card, using a local cache to avoid repeated queries."""
+    """Find or create a material card, using a local cache to avoid repeated queries.
+
+    On cache miss, delegates to resolve_material_card for atomic find-or-create.
+    """
     if not norm_key:
         return None
     if norm_key in card_cache:
         return card_cache[norm_key]
-    card = db.query(MaterialCard).filter_by(normalized_mpn=norm_key).first()
-    if not card:
-        card = MaterialCard(
-            normalized_mpn=norm_key,
-            display_mpn=display_mpn,
-            search_count=0,
-        )
-        db.add(card)
-        db.flush()
-    card_cache[norm_key] = card.id
-    return card.id
+    card = resolve_material_card(display_mpn, db)
+    if card:
+        card_cache[norm_key] = card.id
+        return card.id
+    return None
 
 
 def backfill(dry_run: bool = False) -> dict:
@@ -51,7 +49,7 @@ def backfill(dry_run: bool = False) -> dict:
     card_cache: dict[str, int] = {}
 
     try:
-        # Pre-warm cache with all existing material cards (757K × 2 strings ≈ 100MB, acceptable)
+        # Pre-warm cache with all existing material cards (757K x 2 strings ~ 100MB, acceptable)
         logger.info("Loading material card lookup table...")
         for norm, card_id in db.query(MaterialCard.normalized_mpn, MaterialCard.id).all():
             card_cache[norm] = card_id
@@ -125,29 +123,35 @@ def backfill(dry_run: bool = False) -> dict:
             offset += BATCH_SIZE
             logger.info(f"  Sightings: {offset} processed...")
 
-        # --- Offers ---
+        # --- Offers (batched) ---
         logger.info("Backfilling offers...")
-        all_offers = db.query(Offer).filter(Offer.material_card_id.is_(None)).all()
-        for o in all_offers:
-            mpn = o.mpn
-            if not mpn:
-                stats["offers"]["skipped"] += 1
-                continue
-            norm_key = normalize_mpn_key(mpn)
-            if not norm_key:
-                stats["offers"]["skipped"] += 1
-                continue
-            display = normalize_mpn(mpn) or mpn.strip()
-            was_new = norm_key not in card_cache
-            card_id = _resolve_or_create(norm_key, display, db, card_cache)
-            if card_id:
-                if not dry_run:
-                    o.material_card_id = card_id
-                stats["offers"]["linked"] += 1
-                if was_new:
-                    stats["offers"]["created"] += 1
-        if not dry_run:
-            db.commit()
+        offset = 0
+        while True:
+            batch = db.query(Offer).filter(Offer.material_card_id.is_(None)).limit(BATCH_SIZE).offset(offset).all()
+            if not batch:
+                break
+            for o in batch:
+                mpn = o.mpn
+                if not mpn:
+                    stats["offers"]["skipped"] += 1
+                    continue
+                norm_key = normalize_mpn_key(mpn)
+                if not norm_key:
+                    stats["offers"]["skipped"] += 1
+                    continue
+                display = normalize_mpn(mpn) or mpn.strip()
+                was_new = norm_key not in card_cache
+                card_id = _resolve_or_create(norm_key, display, db, card_cache)
+                if card_id:
+                    if not dry_run:
+                        o.material_card_id = card_id
+                    stats["offers"]["linked"] += 1
+                    if was_new:
+                        stats["offers"]["created"] += 1
+            if not dry_run:
+                db.commit()
+            offset += BATCH_SIZE
+            logger.info(f"  Offers: {offset} processed...")
 
         logger.info("Backfill complete!")
         for table, s in stats.items():
