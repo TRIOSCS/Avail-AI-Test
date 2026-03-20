@@ -15,6 +15,7 @@ def register_all_jobs(scheduler, settings):
     from .health_jobs import register_health_jobs
     from .inventory_jobs import register_inventory_jobs
     from .knowledge_jobs import register_knowledge_jobs
+    from .lifecycle_jobs import register_lifecycle_jobs
     from .maintenance_jobs import register_maintenance_jobs
     from .offers_jobs import register_offers_jobs
     from .prospecting_jobs import register_prospecting_jobs
@@ -34,6 +35,7 @@ def register_all_jobs(scheduler, settings):
     register_knowledge_jobs(scheduler, settings)
     register_eight_by_eight_jobs(scheduler, settings)
     register_task_jobs(scheduler, settings)
+    register_lifecycle_jobs(scheduler, settings)
 
     job_count = len(scheduler.get_jobs())
     logger.info(f"APScheduler configured with {job_count} jobs")
