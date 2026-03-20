@@ -64,29 +64,18 @@ async def _job_proactive_matching():
     try:
         from ..models import ProactiveMatch
         from ..services.proactive_matching import expire_old_matches, run_proactive_scan
-        from ..services.proactive_service import scan_new_offers_for_matches
 
         loop = asyncio.get_running_loop()
 
-        # Legacy scan (archived requisitions)
-        result = await asyncio.wait_for(
-            loop.run_in_executor(None, scan_new_offers_for_matches, db),
-            timeout=300,
-        )
-        if result.get("matches_created"):
-            logger.info(
-                f"Proactive matching (legacy): {result['matches_created']} new matches from {result['scanned']} offers"
-            )
-
         # CPH-based scan (purchase history)
-        cph_result = await asyncio.wait_for(
+        scan_result = await asyncio.wait_for(
             loop.run_in_executor(None, run_proactive_scan, db),
             timeout=300,
         )
-        if cph_result.get("matches_created"):
+        if scan_result.get("matches_created"):
             logger.info(
-                f"Proactive matching (CPH): {cph_result['matches_created']} new matches "
-                f"from {cph_result['scanned_offers']} offers + {cph_result['scanned_sightings']} sightings"
+                f"Proactive matching: {scan_result['matches_created']} new matches "
+                f"from {scan_result['scanned_offers']} offers"
             )
 
         # Expire stale matches
@@ -95,7 +84,7 @@ async def _job_proactive_matching():
             logger.info(f"Proactive matching: expired {expired} old matches")
 
         # Summary log with total pending
-        new_matches = result.get("matches_created", 0) + cph_result.get("matches_created", 0)
+        new_matches = scan_result.get("matches_created", 0)
         total_pending = db.query(ProactiveMatch).filter(ProactiveMatch.status == "new").count()
         logger.info(f"Proactive scan complete: {new_matches} new matches, {total_pending} pending")
     except asyncio.TimeoutError:

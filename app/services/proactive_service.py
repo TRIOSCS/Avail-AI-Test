@@ -15,9 +15,7 @@ from decimal import Decimal
 from loguru import logger
 from sqlalchemy.orm import Session, joinedload
 
-from ..config import settings
 from ..models import (
-    ActivityLog,
     BuyPlan,
     CustomerSite,
     Offer,
@@ -32,137 +30,6 @@ from ..models import (
     User,
 )
 from ..vendor_utils import normalize_vendor_name
-
-_last_proactive_scan = datetime.min.replace(tzinfo=timezone.utc)
-
-
-# ── Background Matching ──────────────────────────────────────────────────
-
-
-def scan_new_offers_for_matches(db: Session) -> dict:
-    """Scan recently logged offers for matches against archived requirements.
-
-    Called by scheduler every tick. Returns {scanned, matches_created}.
-    """
-    global _last_proactive_scan
-    now = datetime.now(timezone.utc)
-    archive_cutoff = now - timedelta(days=settings.proactive_archive_age_days)
-    throttle_cutoff = now - timedelta(days=settings.proactive_throttle_days)
-
-    # Find offers created since last scan
-    new_offers = (
-        db.query(Offer)
-        .filter(
-            Offer.created_at > _last_proactive_scan,
-            Offer.mpn.isnot(None),
-        )
-        .limit(5000)  # Safety limit — prevents unbounded result sets
-        .all()
-    )
-
-    _last_proactive_scan = now
-
-    if not new_offers:
-        return {"scanned": 0, "matches_created": 0}
-
-    matches_created = 0
-    for offer in new_offers:
-        if not offer.material_card_id:
-            continue
-
-        offer_mpn = (offer.mpn or "").strip().upper()
-
-        # Find archived requirements with matching material card
-        candidates = (
-            db.query(Requirement, Requisition)
-            .join(Requisition, Requirement.requisition_id == Requisition.id)
-            .filter(
-                Requirement.material_card_id == offer.material_card_id,
-                Requisition.status.in_(["archived", "won", "lost"]),
-                Requisition.customer_site_id.isnot(None),
-                Requisition.id != offer.requisition_id,
-                Requisition.created_at < archive_cutoff,
-            )
-            .all()
-        )
-
-        for req_item, requisition in candidates:
-            site_id = requisition.customer_site_id
-            sales_id = requisition.created_by
-
-            # Check do-not-offer suppression
-            _site = db.get(CustomerSite, site_id)
-            if _site and _site.company_id:
-                dno = (
-                    db.query(ProactiveDoNotOffer)
-                    .filter(
-                        ProactiveDoNotOffer.mpn == offer_mpn,
-                        ProactiveDoNotOffer.company_id == _site.company_id,
-                    )
-                    .first()
-                )
-                if dno:
-                    continue
-
-            # Check throttle
-            throttled = (
-                db.query(ProactiveThrottle)
-                .filter(
-                    ProactiveThrottle.mpn == offer_mpn,
-                    ProactiveThrottle.customer_site_id == site_id,
-                    ProactiveThrottle.last_offered_at > throttle_cutoff,
-                )
-                .first()
-            )
-            if throttled:
-                continue
-
-            # Check dedup
-            existing = (
-                db.query(ProactiveMatch)
-                .filter(
-                    ProactiveMatch.offer_id == offer.id,
-                    ProactiveMatch.requirement_id == req_item.id,
-                )
-                .first()
-            )
-            if existing:
-                continue
-
-            db.add(
-                ProactiveMatch(
-                    offer_id=offer.id,
-                    requirement_id=req_item.id,
-                    requisition_id=requisition.id,
-                    customer_site_id=site_id,
-                    salesperson_id=sales_id,
-                    mpn=offer_mpn,
-                )
-            )
-            # In-app notification for salesperson
-            if sales_id:
-                db.add(
-                    ActivityLog(
-                        user_id=sales_id,
-                        activity_type="proactive_match",
-                        channel="system",
-                        requisition_id=requisition.id,
-                        contact_name=offer.vendor_name,
-                        subject=f"Proactive match: {offer_mpn} available — {offer.vendor_name or 'Unknown'}",
-                    )
-                )
-            matches_created += 1
-
-    if matches_created:
-        try:
-            db.commit()
-        except Exception as e:
-            logger.error(f"Failed to commit proactive matches: {e}")
-            db.rollback()
-            return {"scanned": len(new_offers), "matches_created": 0}
-
-    return {"scanned": len(new_offers), "matches_created": matches_created}
-
 
 # ── Match Retrieval ──────────────────────────────────────────────────────
 
@@ -550,7 +417,6 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
     offer_ids = []
     for item in po.line_items or []:
         # Create a requirement
-        from ..models import Requirement
         from ..utils.normalization import normalize_mpn, normalize_mpn_key, normalize_quantity
 
         norm_mpn = normalize_mpn(item["mpn"]) or item["mpn"]

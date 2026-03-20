@@ -43,9 +43,12 @@ def _clear_scheduler_jobs():
 
 
 def test_proactive_matching_calls_scan(scheduler_db):
-    """Proactive matching job delegates to scan_new_offers_for_matches."""
-    with patch("app.services.proactive_service.scan_new_offers_for_matches") as mock_scan:
-        mock_scan.return_value = {"matches_created": 3, "scanned": 10}
+    """Proactive matching job delegates to run_proactive_scan."""
+    with (
+        patch("app.services.proactive_matching.run_proactive_scan") as mock_scan,
+        patch("app.services.proactive_matching.expire_old_matches", return_value=0),
+    ):
+        mock_scan.return_value = {"matches_created": 3, "scanned_offers": 10}
         from app.jobs.offers_jobs import _job_proactive_matching
 
         asyncio.run(_job_proactive_matching())
@@ -54,8 +57,11 @@ def test_proactive_matching_calls_scan(scheduler_db):
 
 def test_proactive_matching_no_matches(scheduler_db):
     """Proactive matching runs cleanly when no matches are created."""
-    with patch("app.services.proactive_service.scan_new_offers_for_matches") as mock_scan:
-        mock_scan.return_value = {"matches_created": 0, "scanned": 5}
+    with (
+        patch("app.services.proactive_matching.run_proactive_scan") as mock_scan,
+        patch("app.services.proactive_matching.expire_old_matches", return_value=0),
+    ):
+        mock_scan.return_value = {"matches_created": 0, "scanned_offers": 5}
         from app.jobs.offers_jobs import _job_proactive_matching
 
         asyncio.run(_job_proactive_matching())
@@ -65,7 +71,7 @@ def test_proactive_matching_no_matches(scheduler_db):
 def test_proactive_matching_error_handling(scheduler_db):
     """Proactive matching handles errors gracefully."""
     with patch(
-        "app.services.proactive_service.scan_new_offers_for_matches",
+        "app.services.proactive_matching.run_proactive_scan",
         side_effect=Exception("DB connection lost"),
     ):
         from app.jobs.offers_jobs import _job_proactive_matching
@@ -84,7 +90,7 @@ def test_proactive_matching_timeout(scheduler_db):
         raise asyncio.TimeoutError()
 
     with (
-        patch("app.services.proactive_service.scan_new_offers_for_matches"),
+        patch("app.services.proactive_matching.run_proactive_scan"),
         patch("asyncio.wait_for", side_effect=_mock_wait_for),
     ):
         from app.jobs.offers_jobs import _job_proactive_matching
@@ -95,13 +101,11 @@ def test_proactive_matching_timeout(scheduler_db):
 def test_proactive_matching_logs_summary(scheduler_db):
     """Proactive matching logs a summary with new matches and total pending."""
     with (
-        patch("app.services.proactive_service.scan_new_offers_for_matches") as mock_legacy,
-        patch("app.services.proactive_matching.run_proactive_scan") as mock_cph,
+        patch("app.services.proactive_matching.run_proactive_scan") as mock_scan,
         patch("app.services.proactive_matching.expire_old_matches") as mock_expire,
         patch("app.jobs.offers_jobs.logger") as mock_logger,
     ):
-        mock_legacy.return_value = {"matches_created": 2, "scanned": 10}
-        mock_cph.return_value = {"matches_created": 1, "scanned_offers": 5, "scanned_sightings": 3}
+        mock_scan.return_value = {"matches_created": 3, "scanned_offers": 5}
         mock_expire.return_value = 0
         from app.jobs.offers_jobs import _job_proactive_matching
 
@@ -113,14 +117,12 @@ def test_proactive_matching_logs_summary(scheduler_db):
 
 def test_proactive_matching_expired_branch(scheduler_db):
     """When expire_old_matches returns a nonzero count, logger.info is called."""
-    mock_scan = MagicMock(return_value={"matches_created": 0, "scanned": 5})
-    mock_cph = MagicMock(return_value={"matches_created": 0, "scanned_offers": 3, "scanned_sightings": 2})
+    mock_scan = MagicMock(return_value={"matches_created": 0, "scanned_offers": 3})
     mock_expire = MagicMock(return_value=7)  # 7 expired matches
 
     with (
         patch("app.services.proactive_matching.expire_old_matches", mock_expire),
-        patch("app.services.proactive_service.scan_new_offers_for_matches", mock_scan),
-        patch("app.services.proactive_matching.run_proactive_scan", mock_cph),
+        patch("app.services.proactive_matching.run_proactive_scan", mock_scan),
     ):
         from app.jobs.offers_jobs import _job_proactive_matching
 

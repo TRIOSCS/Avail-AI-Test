@@ -14,7 +14,6 @@ from app.models import (
     ProactiveMatch,
     Requirement,
     Requisition,
-    Sighting,
     User,
 )
 from app.models.intelligence import ProactiveDoNotOffer, ProactiveThrottle
@@ -27,7 +26,6 @@ from app.services.proactive_matching import (
     dismiss_match,
     expire_old_matches,
     find_matches_for_offer,
-    find_matches_for_sighting,
     mark_match_sent,
     run_proactive_scan,
 )
@@ -272,44 +270,6 @@ def test_find_matches_dedup(db_session):
     assert len(matches2) == 0
 
 
-# ── find_matches_for_sighting ────────────────────────────────────────────
-
-
-def test_find_matches_for_sighting(db_session):
-    """Sighting with CPH data creates a scored match (needs existing offer for FK)."""
-    data = _setup_scenario(db_session)
-
-    # Sighting-triggered matches need a fallback offer_id (NOT NULL FK)
-    offer = Offer(
-        requisition_id=data["requisition"].id,
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="Arrow",
-        mpn="STM32F407",
-        unit_price=Decimal("8.00"),
-        status="active",
-    )
-    db_session.add(offer)
-    db_session.flush()
-
-    sighting = Sighting(
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="DigiKey",
-        mpn_matched="STM32F407",
-        unit_price=Decimal("9.00"),
-        qty_available=100,
-    )
-    db_session.add(sighting)
-    db_session.commit()
-
-    matches = find_matches_for_sighting(sighting.id, db_session)
-    db_session.commit()
-
-    assert len(matches) == 1
-    assert matches[0].our_cost == 9.0
-
-
 # ── run_proactive_scan ───────────────────────────────────────────────────
 
 
@@ -330,10 +290,16 @@ def test_run_proactive_scan(db_session):
     db_session.add(offer)
     db_session.commit()
 
-    # Reset scan timestamp so it picks up the offer
-    import app.services.proactive_matching as pm
+    # Set watermark so it picks up the offer
+    from app.models.config import SystemConfig
 
-    pm._last_scan_at = datetime.now(timezone.utc) - timedelta(hours=1)
+    db_session.add(
+        SystemConfig(
+            key="proactive_last_scan",
+            value=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+        )
+    )
+    db_session.commit()
 
     result = run_proactive_scan(db_session)
     assert result["scanned_offers"] >= 1
@@ -493,27 +459,6 @@ def test_find_matches_offer_no_material_card(db_session):
     db_session.commit()
 
     matches = find_matches_for_offer(offer.id, db_session)
-    assert matches == []
-
-
-# ── sighting with no material_card_id (line 114) ─────────────────────────
-
-
-def test_find_matches_for_sighting_no_card(db_session):
-    """Sighting with no material_card_id returns [] early."""
-    data = _setup_scenario(db_session)
-
-    sighting = Sighting(
-        requirement_id=data["requirement"].id,
-        material_card_id=None,
-        vendor_name="DigiKey",
-        mpn_matched="STM32F407",
-        unit_price=Decimal("9.00"),
-    )
-    db_session.add(sighting)
-    db_session.commit()
-
-    matches = find_matches_for_sighting(sighting.id, db_session)
     assert matches == []
 
 
@@ -738,97 +683,23 @@ def test_find_matches_no_requisition_history(db_session):
     assert len(matches) == 0
 
 
-# ── sighting-triggered, no fallback offer (line 245) ─────────────────────
+# ── run_proactive_scan dedup (lines 308-314) ──────────────────────────────
 
 
-def test_find_matches_sighting_no_fallback_offer(db_session):
-    """Sighting-triggered match without any existing offer for the part is skipped."""
-    owner = User(
-        email="sales3@trioscs.com",
-        name="Sales3",
-        role="sales",
-        azure_id="sales-003",
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(owner)
-    db_session.flush()
-
-    company = Company(
-        name="NoOffer Corp",
-        is_active=True,
-        account_owner_id=owner.id,
-    )
-    db_session.add(company)
-    db_session.flush()
-
-    site = CustomerSite(
-        company_id=company.id,
-        site_name="NoOffer HQ",
-        is_active=True,
-    )
-    db_session.add(site)
-    db_session.flush()
-
-    card = MaterialCard(normalized_mpn="pic16f877a", display_mpn="PIC16F877A", search_count=1)
-    db_session.add(card)
-    db_session.flush()
-
-    req = Requisition(
-        name="PIC Req",
-        customer_site_id=site.id,
-        status="archived",
-        created_by=owner.id,
-    )
-    db_session.add(req)
-    db_session.flush()
-
-    requirement = Requirement(
-        requisition_id=req.id,
-        primary_mpn="PIC16F877A",
-        normalized_mpn="pic16f877a",
-        material_card_id=card.id,
-    )
-    db_session.add(requirement)
-    db_session.flush()
-
-    cph = CustomerPartHistory(
-        company_id=company.id,
-        material_card_id=card.id,
-        mpn="PIC16F877A",
-        source="avail_offer",
-        purchase_count=4,
-        last_purchased_at=datetime.now(timezone.utc) - timedelta(days=30),
-        avg_unit_price=Decimal("10.00"),
-        last_unit_price=Decimal("11.00"),
-        total_quantity=200,
-    )
-    db_session.add(cph)
-    db_session.flush()
-
-    # NO offer exists for this card — sighting won't find fallback
-    sighting = Sighting(
-        requirement_id=requirement.id,
-        material_card_id=card.id,
-        vendor_name="Mouser",
-        mpn_matched="PIC16F877A",
-        unit_price=Decimal("7.00"),
-    )
-    db_session.add(sighting)
-    db_session.commit()
-
-    matches = find_matches_for_sighting(sighting.id, db_session)
-    assert len(matches) == 0
-
-
-# ── run_proactive_scan dedup + sightings (lines 322, 328-332) ────────────
-
-
-def test_run_proactive_scan_dedup_and_sightings(db_session):
-    """Batch scan deduplicates same material_card_id across offers and scans
-    sightings."""
-    import app.services.proactive_matching as pm
+def test_run_proactive_scan_dedup(db_session):
+    """Batch scan deduplicates same material_card_id across offers."""
+    from app.models.config import SystemConfig
 
     data = _setup_scenario(db_session)
+
+    # Set watermark to 1 hour ago so new offers are picked up
+    db_session.add(
+        SystemConfig(
+            key="proactive_last_scan",
+            value=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+        )
+    )
+    db_session.flush()
 
     # Two offers with the same material_card_id — second should be deduped
     offer1 = Offer(
@@ -852,93 +723,12 @@ def test_run_proactive_scan_dedup_and_sightings(db_session):
         created_at=datetime.now(timezone.utc),
     )
     db_session.add_all([offer1, offer2])
-    db_session.flush()
-
-    # A sighting with the same card — should also be deduped
-    sighting = Sighting(
-        requirement_id=data["requirement"].id,
-        material_card_id=data["card"].id,
-        vendor_name="DigiKey",
-        mpn_matched="STM32F407",
-        unit_price=Decimal("9.50"),
-        is_unavailable=False,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(sighting)
-    db_session.flush()
-
-    # Also add a sighting with a DIFFERENT card to test the sighting scan path
-    card2 = MaterialCard(normalized_mpn="lm358n", display_mpn="LM358N", search_count=1)
-    db_session.add(card2)
-    db_session.flush()
-
-    # Need CPH, requisition, requirement, and an existing offer for this second card
-    req2 = Requisition(
-        name="Req2",
-        customer_site_id=data["site"].id,
-        status="archived",
-        created_by=data["owner"].id,
-    )
-    db_session.add(req2)
-    db_session.flush()
-
-    requirement2 = Requirement(
-        requisition_id=req2.id,
-        primary_mpn="LM358N",
-        normalized_mpn="lm358n",
-        material_card_id=card2.id,
-    )
-    db_session.add(requirement2)
-    db_session.flush()
-
-    cph2 = CustomerPartHistory(
-        company_id=data["company"].id,
-        material_card_id=card2.id,
-        mpn="LM358N",
-        source="avail_offer",
-        purchase_count=5,
-        last_purchased_at=datetime.now(timezone.utc) - timedelta(days=10),
-        avg_unit_price=Decimal("2.00"),
-        last_unit_price=Decimal("2.50"),
-        total_quantity=1000,
-    )
-    db_session.add(cph2)
-    db_session.flush()
-
-    # Offer for card2 so sighting-triggered match can use it as fallback
-    offer3 = Offer(
-        requisition_id=req2.id,
-        requirement_id=requirement2.id,
-        material_card_id=card2.id,
-        vendor_name="Arrow",
-        mpn="LM358N",
-        unit_price=Decimal("1.00"),
-        status="active",
-        created_at=datetime.now(timezone.utc) - timedelta(hours=2),
-    )
-    db_session.add(offer3)
-    db_session.flush()
-
-    sighting2 = Sighting(
-        requirement_id=requirement2.id,
-        material_card_id=card2.id,
-        vendor_name="Mouser",
-        mpn_matched="LM358N",
-        unit_price=Decimal("1.20"),
-        is_unavailable=False,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(sighting2)
     db_session.commit()
-
-    pm._last_scan_at = datetime.now(timezone.utc) - timedelta(hours=1)
 
     result = run_proactive_scan(db_session)
 
-    # offer1 scanned (card1), offer2 deduped, sighting1 deduped (card1 already in set),
-    # sighting2 scanned (card2 is new)
-    assert result["scanned_offers"] == 2  # Both offers fetched from DB
-    assert result["scanned_sightings"] >= 1
+    # Both offers fetched, but only one card scanned for matches
+    assert result["scanned_offers"] == 2
     assert result["matches_created"] >= 1
 
 
@@ -947,7 +737,7 @@ def test_run_proactive_scan_dedup_and_sightings(db_session):
 
 def test_run_proactive_scan_commit_failure(db_session):
     """Commit failure in batch scan triggers rollback and returns matches_created=0."""
-    import app.services.proactive_matching as pm
+    from app.models.config import SystemConfig
 
     data = _setup_scenario(db_session)
 
@@ -962,9 +752,13 @@ def test_run_proactive_scan_commit_failure(db_session):
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(offer)
+    db_session.add(
+        SystemConfig(
+            key="proactive_last_scan",
+            value=(datetime.now(timezone.utc) - timedelta(hours=1)).isoformat(),
+        )
+    )
     db_session.commit()
-
-    pm._last_scan_at = datetime.now(timezone.utc) - timedelta(hours=1)
 
     with patch.object(db_session, "commit", side_effect=Exception("DB error")):
         result = run_proactive_scan(db_session)

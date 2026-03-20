@@ -22,12 +22,9 @@ from ..models import (
     ProactiveThrottle,
     Requirement,
     Requisition,
-    Sighting,
 )
+from ..models.config import SystemConfig
 from ..models.purchase_history import CustomerPartHistory
-
-_last_scan_at = datetime.min.replace(tzinfo=timezone.utc)
-
 
 # ── Scoring ──────────────────────────────────────────────────────────────
 
@@ -110,17 +107,28 @@ def find_matches_for_offer(offer_id: int, db: Session) -> list[ProactiveMatch]:
     )
 
 
-def find_matches_for_sighting(sighting_id: int, db: Session) -> list[ProactiveMatch]:
-    """Find customer matches for a confirmed sighting via CPH."""
-    sighting = db.get(Sighting, sighting_id)
-    if not sighting or not sighting.material_card_id:
-        return []
-    return _find_matches(
-        db,
-        material_card_id=sighting.material_card_id,
-        mpn=sighting.mpn_matched or "",
-        our_cost=float(sighting.unit_price) if sighting.unit_price else None,
-    )
+_WATERMARK_KEY = "proactive_last_scan"
+
+
+def _get_watermark(db: Session) -> datetime:
+    """Get last scan timestamp from SystemConfig (survives restarts)."""
+    row = db.query(SystemConfig).filter(SystemConfig.key == _WATERMARK_KEY).first()
+    if row and row.value:
+        ts = datetime.fromisoformat(row.value)
+        if ts.tzinfo is None:
+            ts = ts.replace(tzinfo=timezone.utc)
+        return ts
+    return datetime.now(timezone.utc) - timedelta(hours=settings.proactive_scan_interval_hours)
+
+
+def _set_watermark(db: Session, ts: datetime):
+    """Persist scan watermark to SystemConfig."""
+    row = db.query(SystemConfig).filter(SystemConfig.key == _WATERMARK_KEY).first()
+    if row:
+        row.value = ts.isoformat()
+    else:
+        db.add(SystemConfig(key=_WATERMARK_KEY, value=ts.isoformat(), description="Proactive scan watermark"))
+    db.flush()
 
 
 def _find_matches(
@@ -275,36 +283,28 @@ def _find_matches(
 
 
 def run_proactive_scan(db: Session) -> dict:
-    """Batch scan: find matches for all new offers/sightings since last run.
+    """Batch scan: find matches for all new offers since last run.
 
-    Called by scheduler. Returns {scanned_offers, scanned_sightings, matches_created}.
+    Called by scheduler. Returns {scanned_offers, matches_created}.
+    Watermark is persisted to SystemConfig so it survives restarts.
     """
-    global _last_scan_at
-    now = datetime.now(timezone.utc)
-    since = _last_scan_at
+    since = _get_watermark(db)
 
-    # Scan new offers
+    # Oldest-first so the limit processes chronologically
     new_offers = (
         db.query(Offer)
         .filter(
             Offer.created_at > since,
             Offer.material_card_id.isnot(None),
         )
+        .order_by(Offer.created_at.asc())
+        .limit(5000)
         .all()
     )
 
-    # Scan new sightings (only high-confidence confirmed ones)
-    new_sightings = (
-        db.query(Sighting)
-        .filter(
-            Sighting.created_at > since,
-            Sighting.material_card_id.isnot(None),
-            Sighting.is_unavailable.is_(False),
-        )
-        .all()
-    )
+    if len(new_offers) >= 5000:
+        logger.warning("Proactive scan hit 5000-offer cap — remaining will be picked up next run")
 
-    _last_scan_at = now
     total_matches = 0
 
     # Deduplicate: don't scan the same material_card_id twice
@@ -317,34 +317,27 @@ def run_proactive_scan(db: Session) -> dict:
         matches = find_matches_for_offer(offer.id, db)
         total_matches += len(matches)
 
-    for sighting in new_sightings:
-        if sighting.material_card_id in scanned_cards:
-            continue
-        scanned_cards.add(sighting.material_card_id)
-        matches = find_matches_for_sighting(sighting.id, db)
-        total_matches += len(matches)
+    # Advance watermark to last processed offer (not now) so capped runs resume correctly
+    if new_offers:
+        _set_watermark(db, new_offers[-1].created_at)
 
-    if total_matches:
-        try:
-            db.commit()
-        except Exception as e:
-            logger.error("Failed to commit proactive matches: %s", e)
-            db.rollback()
-            return {
-                "scanned_offers": len(new_offers),
-                "scanned_sightings": len(new_sightings),
-                "matches_created": 0,
-            }
+    try:
+        db.commit()
+    except Exception as e:
+        logger.error("Failed to commit proactive matches: %s", e)
+        db.rollback()
+        return {
+            "scanned_offers": len(new_offers),
+            "matches_created": 0,
+        }
 
     logger.info(
-        "Proactive scan: %d offers, %d sightings → %d matches",
+        "Proactive scan: %d offers → %d matches",
         len(new_offers),
-        len(new_sightings),
         total_matches,
     )
     return {
         "scanned_offers": len(new_offers),
-        "scanned_sightings": len(new_sightings),
         "matches_created": total_matches,
     }
 

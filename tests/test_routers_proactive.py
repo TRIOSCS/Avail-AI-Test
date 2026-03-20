@@ -341,30 +341,15 @@ class TestConvertExtended:
 class TestRefresh:
     @patch(
         "app.services.proactive_matching.run_proactive_scan",
-        return_value={"scanned_offers": 2, "scanned_sightings": 0, "matches_created": 1},
+        return_value={"scanned_offers": 5, "matches_created": 3},
     )
-    @patch(
-        "app.services.proactive_service.scan_new_offers_for_matches", return_value={"scanned": 3, "matches_created": 2}
-    )
-    def test_refresh_success(self, mock_legacy, mock_cph, client):
-        """Refresh triggers both scans and returns combined count."""
+    def test_refresh_success(self, mock_scan, client):
+        """Refresh triggers proactive scan and returns result."""
         resp = client.post("/api/proactive/refresh")
         assert resp.status_code == 200
         data = resp.json()
-        assert data["legacy_matches"] == 2
-        assert data["cph_matches"] == 1
-        assert data["total_new"] == 3
-
-    @patch("app.services.proactive_matching.run_proactive_scan", side_effect=Exception("CPH scan failed"))
-    @patch(
-        "app.services.proactive_service.scan_new_offers_for_matches", return_value={"scanned": 1, "matches_created": 0}
-    )
-    def test_refresh_cph_failure_graceful(self, mock_legacy, mock_cph, client):
-        """CPH scan failure doesn't break the endpoint."""
-        resp = client.post("/api/proactive/refresh")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["cph_matches"] == 0
+        assert data["scanned_offers"] == 5
+        assert data["matches_created"] == 3
 
 
 class TestDraftEndpoint:
