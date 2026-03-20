@@ -488,6 +488,94 @@ async def api_update_bid(
 # ── Bid HTMX Partials ─────────────────────────────────────────────────
 
 
+@router.get("/v2/partials/excess/{list_id}/solicit-form", response_class=HTMLResponse)
+async def partial_solicit_form(
+    request: Request,
+    list_id: int,
+    item_ids: str = Query(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render bid solicitation modal form."""
+    get_excess_list(db, list_id)
+    ids = [int(i) for i in item_ids.split(",") if i.strip().isdigit()]
+    items = (
+        db.query(ExcessLineItem).filter(ExcessLineItem.id.in_(ids), ExcessLineItem.excess_list_id == list_id).all()
+        if ids
+        else []
+    )
+    return templates.TemplateResponse(
+        "htmx/partials/excess/solicit_modal.html",
+        {"request": request, "list_id": list_id, "items": items},
+    )
+
+
+@router.post("/v2/partials/excess/{list_id}/solicit", response_class=HTMLResponse)
+async def htmx_solicit(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_user),
+    token: str = Depends(require_fresh_token),
+    db: Session = Depends(get_db),
+):
+    """Send solicitations and re-render detail page."""
+    form = await request.form()
+    item_ids = [int(i) for i in form.getlist("item_ids") if str(i).isdigit()]
+    recipient_email = form.get("recipient_email", "").strip()
+    if not item_ids or not recipient_email:
+        raise HTTPException(400, "Missing required fields")
+
+    await send_bid_solicitation(
+        db,
+        token=token,
+        list_id=list_id,
+        line_item_ids=item_ids,
+        recipient_email=recipient_email,
+        recipient_name=form.get("recipient_name", "").strip() or None,
+        contact_id=0,
+        user_id=user.id,
+        subject=form.get("subject", "").strip() or None,
+        message=form.get("message", "").strip() or None,
+    )
+
+    el = get_excess_list(db, list_id)
+    items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
+    return templates.TemplateResponse(
+        "htmx/partials/excess/detail.html",
+        {
+            "request": request,
+            "user": user,
+            "list": el,
+            "line_items": items,
+            "success_msg": f"Sent {len(item_ids)} solicitation(s) to {recipient_email}",
+        },
+    )
+
+
+@router.post("/v2/partials/excess/{list_id}/proactive-matches", response_class=HTMLResponse)
+async def htmx_create_proactive_matches(
+    request: Request,
+    list_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create proactive matches for a closed/expired excess list."""
+    result = create_proactive_matches_for_excess(db, list_id, user.id)
+    count = result.get("matches_created", 0)
+
+    el = get_excess_list(db, list_id)
+    items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
+    msg = (
+        f"Created {count} proactive match{'es' if count != 1 else ''}"
+        if count
+        else "No matching archived requirements found"
+    )
+    return templates.TemplateResponse(
+        "htmx/partials/excess/detail.html",
+        {"request": request, "user": user, "list": el, "line_items": items, "success_msg": msg},
+    )
+
+
 @router.get("/v2/partials/excess/{list_id}/line-items/{item_id}/bid-form", response_class=HTMLResponse)
 async def partial_bid_form(
     request: Request,

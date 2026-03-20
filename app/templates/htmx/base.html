@@ -138,9 +138,7 @@
   {% endblock %}
 
   {# ── Trouble report button (bottom-right) ─────────────────── #}
-  {% if trouble_reporting_enabled %}
   {% include "htmx/partials/shared/trouble_report_button.html" %}
-  {% endif %}
 
   {# ── Modal (global) ──────────────────────────────────────────── #}
   <div x-data="{ open: false }" x-show="open" x-cloak x-transition

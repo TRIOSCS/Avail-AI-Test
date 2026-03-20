@@ -64,6 +64,8 @@ class Offer(Base):
     promoted_by_id = Column(Integer, ForeignKey("users.id"))
     promoted_at = Column(DateTime)
 
+    excess_line_item_id = Column(Integer, ForeignKey("excess_line_items.id", ondelete="SET NULL"))
+
     notes = Column(Text)
     status = Column(String(20), default="active")  # active | sold
     is_stale = Column(

@@ -319,3 +319,42 @@ class TestUpdateTicket:
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "wont_fix"
+
+
+# ── HTMX Form / Submit ──────────────────────────────────────────
+
+
+class TestTroubleTicketForm:
+    def test_form_returns_html(self, client):
+        resp = client.get("/api/trouble-tickets/form")
+        assert resp.status_code == 200
+        assert "Report a Problem" in resp.text
+        assert 'name="message"' in resp.text
+
+    def test_submit_creates_ticket(self, client, db_session):
+        resp = client.post(
+            "/api/trouble-tickets/submit",
+            data={"message": "The filter button is broken", "current_url": "https://app.example.com/search"},
+        )
+        assert resp.status_code == 200
+        assert "Report submitted" in resp.text
+        assert "TT-" in resp.text
+
+    def test_submit_empty_message_rejected(self, client):
+        resp = client.post(
+            "/api/trouble-tickets/submit",
+            data={"message": "   "},
+        )
+        assert resp.status_code == 422
+
+    def test_submit_stores_in_db(self, client, db_session):
+        client.post(
+            "/api/trouble-tickets/submit",
+            data={"message": "Cannot save column changes"},
+        )
+        ticket = (
+            db_session.query(TroubleTicket).filter(TroubleTicket.description == "Cannot save column changes").first()
+        )
+        assert ticket is not None
+        assert ticket.source == "report_button"
+        assert ticket.status == "submitted"

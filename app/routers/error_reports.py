@@ -1,16 +1,18 @@
-"""Error Reports / Trouble Tickets API — simplified ticket CRUD.
+"""Error Reports / Trouble Tickets API — simplified ticket CRUD + HTMX form.
 
-Handles both /api/error-reports and /api/trouble-tickets paths.
-Basic submit/list/view — no AI diagnosis or automation.
+Handles /api/error-reports, /api/trouble-tickets paths, and the floating
+report button form/submit endpoints.
 
-Called by: main.py (app.include_router)
+Called by: main.py (app.include_router), base.html (HTMX button)
 Depends on: models/trouble_ticket.py
 """
 
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 from loguru import logger
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, func
@@ -22,15 +24,12 @@ from ..models import User
 from ..models.trouble_ticket import TroubleTicket
 
 router = APIRouter(tags=["error-reports"])
-
-
-MAX_SCREENSHOT_B64_BYTES = 2 * 1024 * 1024  # 2MB
+templates = Jinja2Templates(directory="app/templates")
 
 
 class ErrorReportCreate(BaseModel):
     message: str = Field(..., min_length=1, max_length=5000)
     current_url: Optional[str] = None
-    screenshot: Optional[str] = Field(None, max_length=MAX_SCREENSHOT_B64_BYTES)
 
 
 class TicketUpdate(BaseModel):
@@ -43,6 +42,65 @@ def _next_ticket_number(db: Session) -> str:
     return f"TT-{last + 1:04d}"
 
 
+# ── HTMX form endpoints (floating button) ────────────────────────
+
+
+@router.get("/api/trouble-tickets/form", response_class=HTMLResponse)
+async def trouble_ticket_form(request: Request, user: User = Depends(require_user)):
+    """Return the trouble report form partial for the modal."""
+    return templates.TemplateResponse(
+        "htmx/partials/shared/trouble_report_form.html",
+        {"request": request},
+    )
+
+
+@router.post("/api/trouble-tickets/submit", response_class=HTMLResponse)
+async def submit_trouble_ticket_form(
+    request: Request,
+    message: str = Form(...),
+    current_url: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Handle form submission from the floating report button."""
+    msg = message.strip()
+    if not msg:
+        return HTMLResponse(
+            '<div class="p-4 text-rose-600 text-sm">Please describe the problem.</div>',
+            status_code=422,
+        )
+
+    ticket = TroubleTicket(
+        ticket_number=_next_ticket_number(db),
+        submitted_by=user.id,
+        title=msg[:120],
+        description=msg,
+        current_page=current_url or None,
+        source="report_button",
+        status="submitted",
+        risk_tier="low",
+        category="other",
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(ticket)
+    db.commit()
+    db.refresh(ticket)
+
+    logger.info("Trouble ticket %s created by user %d", ticket.ticket_number, user.id)
+
+    return HTMLResponse(
+        '<div class="p-4 text-center">'
+        '<div class="text-emerald-600 font-medium mb-2">Report submitted!</div>'
+        f'<div class="text-sm text-gray-500 mb-3">Ticket {ticket.ticket_number}</div>'
+        '<button type="button" @click="$dispatch(\'close-modal\')" '
+        'class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Close</button>'
+        "</div>"
+    )
+
+
+# ── JSON API endpoints ────────────────────────────────────────────
+
+
 @router.post("/api/error-reports")
 @router.post("/api/trouble-tickets")
 async def create_error_report(
@@ -51,14 +109,11 @@ async def create_error_report(
     db: Session = Depends(get_db),
 ):
     """Submit a trouble report (any authenticated user)."""
-    title = body.message[:120]
-    message = body.message
-
     ticket = TroubleTicket(
         ticket_number=_next_ticket_number(db),
         submitted_by=user.id,
-        title=title,
-        description=message,
+        title=body.message[:120],
+        description=body.message,
         current_page=body.current_url,
         source="report_button",
         status="submitted",

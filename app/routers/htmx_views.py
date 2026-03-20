@@ -161,7 +161,6 @@ def _fmtdate_filter(value, fmt: str = "%b %d, %H:%M", default: str = "—") -> s
 
 
 templates.env.filters["fmtdate"] = _fmtdate_filter
-templates.env.globals["trouble_reporting_enabled"] = True  # Always enabled since gh CLI is available
 
 
 def _is_htmx(request: Request) -> bool:

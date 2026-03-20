@@ -1,11 +1,5 @@
 {# Trouble report form — loaded into the global modal via HTMX #}
-<div x-data="{
-    page_url: window.location.href,
-    user_agent: navigator.userAgent,
-    viewport: window.innerWidth + 'x' + window.innerHeight,
-    error_log: JSON.stringify($store.errorLog ? $store.errorLog.entries : []),
-    submitting: false
-}" class="p-6">
+<div x-data="{ submitting: false }" class="p-6">
   <div class="flex items-center gap-3 mb-4">
     <div class="flex-shrink-0 w-10 h-10 bg-rose-100 rounded-full flex items-center justify-center">
       <svg class="w-5 h-5 text-rose-600" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
@@ -15,11 +9,11 @@
     </div>
     <div>
       <h3 class="text-lg font-semibold text-gray-900">Report a Problem</h3>
-      <p class="text-sm text-gray-500">Describe the issue and we'll file it for review.</p>
+      <p class="text-sm text-gray-500">Describe the issue and we'll look into it.</p>
     </div>
   </div>
 
-  <form hx-post="/api/trouble-report"
+  <form hx-post="/api/trouble-tickets/submit"
         hx-target="#modal-content"
         hx-swap="innerHTML"
         @htmx:before-request="submitting = true"
@@ -31,19 +25,15 @@
       </label>
       <textarea
         id="tr-description"
-        name="description"
+        name="message"
         rows="4"
         required
-        minlength="10"
+        minlength="1"
         placeholder="Describe the problem you encountered..."
         class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-gray-400"></textarea>
     </div>
 
-    {# Hidden context fields populated by Alpine #}
-    <input type="hidden" name="page_url" :value="page_url">
-    <input type="hidden" name="user_agent" :value="user_agent">
-    <input type="hidden" name="viewport" :value="viewport">
-    <input type="hidden" name="error_log" :value="error_log">
+    <input type="hidden" name="current_url" :value="window.location.href">
 
     <div class="flex items-center justify-between pt-2 border-t border-gray-100">
       <button type="button"
@@ -60,13 +50,9 @@
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
             <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
           </svg>
-          Filing...
+          Submitting...
         </span>
       </button>
     </div>
   </form>
-
-  <div class="mt-3 text-xs text-gray-400 text-center">
-    Page URL, browser info, and recent errors will be included automatically.
-  </div>
 </div>
