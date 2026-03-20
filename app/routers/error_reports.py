@@ -3,7 +3,7 @@
 Handles /api/error-reports, /api/trouble-tickets paths, and the floating
 report button form/submit endpoints.
 
-Called by: main.py (app.include_router), base.html (HTMX button)
+Called by: main.py (app.include_router), htmx/base.html (HTMX button)
 Depends on: models/trouble_ticket.py
 """
 
@@ -14,8 +14,9 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from loguru import logger
+from markupsafe import escape
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func
+from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -26,10 +27,12 @@ from ..models.trouble_ticket import TroubleTicket
 router = APIRouter(tags=["error-reports"])
 templates = Jinja2Templates(directory="app/templates")
 
+MAX_MESSAGE_LEN = 5000
+
 
 class ErrorReportCreate(BaseModel):
-    message: str = Field(..., min_length=1, max_length=5000)
-    current_url: Optional[str] = None
+    message: str = Field(..., min_length=1, max_length=MAX_MESSAGE_LEN)
+    current_url: Optional[str] = Field(None, max_length=500)
 
 
 class TicketUpdate(BaseModel):
@@ -37,9 +40,34 @@ class TicketUpdate(BaseModel):
     resolution_notes: Optional[str] = Field(None, max_length=5000)
 
 
-def _next_ticket_number(db: Session) -> str:
-    last = db.query(func.max(TroubleTicket.id)).scalar() or 0
-    return f"TT-{last + 1:04d}"
+def _create_ticket(
+    db: Session,
+    user_id: int,
+    message: str,
+    current_url: Optional[str] = None,
+) -> TroubleTicket:
+    """Create and persist a trouble ticket.
+
+    Commits the session.
+    """
+    ticket = TroubleTicket(
+        ticket_number="PENDING",
+        submitted_by=user_id,
+        title=message[:120],
+        description=message,
+        current_page=current_url or None,
+        source="report_button",
+        status="submitted",
+        risk_tier="low",
+        category="other",
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(ticket)
+    db.flush()
+    ticket.ticket_number = f"TT-{ticket.id:04d}"
+    db.commit()
+    logger.info("Trouble ticket %s created by user %d", ticket.ticket_number, user_id)
+    return ticket
 
 
 # ── HTMX form endpoints (floating button) ────────────────────────
@@ -69,29 +97,26 @@ async def submit_trouble_ticket_form(
             '<div class="p-4 text-rose-600 text-sm">Please describe the problem.</div>',
             status_code=422,
         )
+    if len(msg) > MAX_MESSAGE_LEN:
+        return HTMLResponse(
+            f'<div class="p-4 text-rose-600 text-sm">Message too long (max {MAX_MESSAGE_LEN} characters).</div>',
+            status_code=422,
+        )
 
-    ticket = TroubleTicket(
-        ticket_number=_next_ticket_number(db),
-        submitted_by=user.id,
-        title=msg[:120],
-        description=msg,
-        current_page=current_url or None,
-        source="report_button",
-        status="submitted",
-        risk_tier="low",
-        category="other",
-        created_at=datetime.now(timezone.utc),
-    )
-    db.add(ticket)
-    db.commit()
-    db.refresh(ticket)
-
-    logger.info("Trouble ticket %s created by user %d", ticket.ticket_number, user.id)
+    try:
+        ticket = _create_ticket(db, user.id, msg, current_url)
+    except Exception:
+        db.rollback()
+        logger.exception("Failed to create trouble ticket for user %d", user.id)
+        return HTMLResponse(
+            '<div class="p-4 text-rose-600 text-sm">Something went wrong saving your report. Please try again.</div>',
+            status_code=500,
+        )
 
     return HTMLResponse(
         '<div class="p-4 text-center">'
         '<div class="text-emerald-600 font-medium mb-2">Report submitted!</div>'
-        f'<div class="text-sm text-gray-500 mb-3">Ticket {ticket.ticket_number}</div>'
+        f'<div class="text-sm text-gray-500 mb-3">Ticket {escape(ticket.ticket_number)}</div>'
         '<button type="button" @click="$dispatch(\'close-modal\')" '
         'class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Close</button>'
         "</div>"
@@ -109,23 +134,7 @@ async def create_error_report(
     db: Session = Depends(get_db),
 ):
     """Submit a trouble report (any authenticated user)."""
-    ticket = TroubleTicket(
-        ticket_number=_next_ticket_number(db),
-        submitted_by=user.id,
-        title=body.message[:120],
-        description=body.message,
-        current_page=body.current_url,
-        source="report_button",
-        status="submitted",
-        risk_tier="low",
-        category="other",
-        created_at=datetime.now(timezone.utc),
-    )
-    db.add(ticket)
-    db.commit()
-    db.refresh(ticket)
-
-    logger.info("Trouble ticket %s created by user %d", ticket.ticket_number, user.id)
+    ticket = _create_ticket(db, user.id, body.message, body.current_url)
     return {"id": ticket.id, "status": "created"}
 
 
@@ -138,7 +147,7 @@ async def list_error_reports(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """List trouble reports."""
+    """List trouble reports (source='report_button' only)."""
     q = db.query(TroubleTicket).filter(TroubleTicket.source == "report_button")
     if status:
         q = q.filter(TroubleTicket.status == status)
@@ -195,7 +204,7 @@ async def update_ticket(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Update a trouble ticket status or add resolution notes."""
+    """Update a trouble ticket status or resolution notes."""
     ticket = db.get(TroubleTicket, report_id)
     if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")

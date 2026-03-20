@@ -1,8 +1,7 @@
-"""test_routers_error_reports.py — Tests for the simplified error report / trouble
-ticket router.
+"""test_routers_error_reports.py — Tests for the error report / trouble ticket router.
 
-The error_reports router provides basic ticket CRUD: submit, list, detail.
-No AI diagnosis, no admin-only gates, no status update or export endpoints.
+The error_reports router provides ticket CRUD: submit, list, detail, and
+status update (PATCH). Includes both JSON API and HTMX form endpoints.
 
 Called by: pytest
 Depends on: app/routers/error_reports.py, conftest.py
@@ -119,6 +118,18 @@ class TestCreateErrorReport:
         ticket = db_session.get(TroubleTicket, ticket_id)
         assert ticket.title == msg[:120]
 
+    def test_long_title_truncated(self, client, db_session):
+        msg = "A" * 200
+        resp = client.post(
+            "/api/error-reports",
+            json={"message": msg},
+        )
+        assert resp.status_code == 200
+        ticket_id = resp.json()["id"]
+        ticket = db_session.get(TroubleTicket, ticket_id)
+        assert len(ticket.title) == 120
+        assert ticket.description == msg
+
     def test_current_url_stored(self, client, db_session):
         resp = client.post(
             "/api/error-reports",
@@ -150,6 +161,23 @@ class TestCreateErrorReport:
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "created"
+
+    def test_ticket_number_derived_from_id(self, client, db_session):
+        resp = client.post(
+            "/api/error-reports",
+            json={"message": "First ticket"},
+        )
+        ticket_id = resp.json()["id"]
+        ticket = db_session.get(TroubleTicket, ticket_id)
+        assert ticket.ticket_number == f"TT-{ticket.id:04d}"
+
+    def test_sequential_ticket_numbers(self, client, db_session):
+        resp1 = client.post("/api/error-reports", json={"message": "Ticket one"})
+        resp2 = client.post("/api/error-reports", json={"message": "Ticket two"})
+        t1 = db_session.get(TroubleTicket, resp1.json()["id"])
+        t2 = db_session.get(TroubleTicket, resp2.json()["id"])
+        assert t2.id > t1.id
+        assert t2.ticket_number > t1.ticket_number
 
 
 # ── List ─────────────────────────────────────────────────────────────
@@ -273,7 +301,7 @@ class TestUpdateTicket:
         assert resp.status_code == 200
         assert resp.json()["status"] == "resolved"
 
-    def test_resolve_sets_resolved_at(self, client, sample_report, db_session):
+    def test_resolve_sets_resolved_at_and_by(self, client, sample_report, db_session, test_user):
         client.patch(
             f"/api/trouble-tickets/{sample_report.id}",
             json={"status": "resolved"},
@@ -281,6 +309,7 @@ class TestUpdateTicket:
         db_session.expire_all()
         ticket = db_session.get(TroubleTicket, sample_report.id)
         assert ticket.resolved_at is not None
+        assert ticket.resolved_by_id == test_user.id
 
     def test_update_status_to_in_progress(self, client, sample_report):
         resp = client.patch(
@@ -289,6 +318,24 @@ class TestUpdateTicket:
         )
         assert resp.status_code == 200
         assert resp.json()["status"] == "in_progress"
+
+    def test_wont_fix_does_not_set_resolved_at(self, client, sample_report, db_session):
+        client.patch(
+            f"/api/trouble-tickets/{sample_report.id}",
+            json={"status": "wont_fix"},
+        )
+        db_session.expire_all()
+        ticket = db_session.get(TroubleTicket, sample_report.id)
+        assert ticket.resolved_at is None
+
+    def test_update_sets_updated_at(self, client, sample_report, db_session):
+        client.patch(
+            f"/api/trouble-tickets/{sample_report.id}",
+            json={"resolution_notes": "Looking into it"},
+        )
+        db_session.expire_all()
+        ticket = db_session.get(TroubleTicket, sample_report.id)
+        assert ticket.updated_at is not None
 
     def test_update_resolution_notes_only(self, client, sample_report):
         resp = client.patch(
@@ -358,3 +405,17 @@ class TestTroubleTicketForm:
         assert ticket is not None
         assert ticket.source == "report_button"
         assert ticket.status == "submitted"
+
+    def test_submit_db_error_returns_html(self, client, db_session):
+        """If ticket creation fails, the HTMX endpoint returns an HTML error, not
+        JSON."""
+        from unittest.mock import patch
+
+        with patch("app.routers.error_reports._create_ticket", side_effect=Exception("DB down")):
+            resp = client.post(
+                "/api/trouble-tickets/submit",
+                data={"message": "Something broke on the search page"},
+            )
+        assert resp.status_code == 500
+        assert "Something went wrong" in resp.text
+        assert "text/html" in resp.headers.get("content-type", "")
