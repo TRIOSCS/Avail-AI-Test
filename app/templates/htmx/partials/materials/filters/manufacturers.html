@@ -8,18 +8,18 @@
   <input type="text" x-model="mfgSearch"
          @focus="mfgExpanded = true"
          placeholder="Search manufacturers..."
-         class="w-full px-2 py-1 text-xs border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 mb-1">
+         class="w-full px-2 py-1.5 text-xs border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 mb-1">
   <div class="max-h-40 overflow-y-auto space-y-0.5" x-show="mfgExpanded || (subFilters.manufacturers && subFilters.manufacturers.length > 0)">
     {% for mfr in manufacturer_options %}
     <label x-data="{name: {{ mfr.name | tojson }}}"
            x-show="!mfgSearch || name.toLowerCase().includes(mfgSearch.toLowerCase())"
-           class="flex items-center gap-2 px-1 py-0.5 rounded hover:bg-gray-50 cursor-pointer text-xs">
+           class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-xs">
       <input type="checkbox"
              :checked="(subFilters.manufacturers || []).includes(name)"
              @change="toggleFilter('manufacturers', name)"
-             class="rounded border-gray-300 text-brand-500 focus:ring-brand-500 h-3 w-3">
+             class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
       <span class="truncate flex-1" x-text="name"></span>
-      <span class="text-gray-400 text-[10px]">{{ mfr.count }}</span>
+      <span class="text-gray-400 text-[11px]">{{ mfr.count }}</span>
     </label>
     {% endfor %}
   </div>

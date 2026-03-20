@@ -385,7 +385,7 @@ Alpine.data('materialsFilter', () => ({
     }
   },
 
-  pushURL() {
+  pushURL(push = false) {
     const params = new URLSearchParams();
     if (this.commodity) params.set('commodity', this.commodity);
     if (this.q) params.set('q', this.q);
@@ -399,7 +399,8 @@ Alpine.data('materialsFilter', () => ({
     }
     const search = params.toString();
     const url = window.location.pathname + (search ? '?' + search : '');
-    history.pushState({}, '', url);
+    const method = push ? 'pushState' : 'replaceState';
+    history[method]({}, '', url);
   },
 
   selectCommodity(commodity) {
@@ -463,7 +464,7 @@ Alpine.data('materialsFilter', () => ({
 
   goToPage(newPage) {
     this.page = newPage;
-    this.pushURL();
+    this.pushURL(true);
     document.body.dispatchEvent(new CustomEvent('filters-changed'));
   },
 }));

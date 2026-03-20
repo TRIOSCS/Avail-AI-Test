@@ -2,7 +2,7 @@
    Called by: htmx_views.py materials_workspace route
    Depends on: Alpine.js materialsFilter() in htmx_app.js
 #}
-<div id="materials-workspace" x-data="materialsFilter" class="flex gap-0 h-full">
+<div id="materials-workspace" x-data="materialsFilter" class="flex h-full">
 
   {# -- Mobile drawer backdrop -- #}
   <div x-show="drawerOpen" x-transition:enter="transition-opacity ease-out duration-200"
@@ -10,6 +10,7 @@
        x-transition:leave="transition-opacity ease-in duration-150"
        x-transition:leave-start="opacity-100" x-transition:leave-end="opacity-0"
        @click="drawerOpen = false"
+       aria-hidden="true"
        class="fixed inset-0 bg-gray-900/40 z-40 lg:hidden" style="display:none"></div>
 
   {# -- Sidebar (desktop: static, mobile: slide-over drawer) -- #}
@@ -104,6 +105,7 @@
           <input type="text" x-model="q"
                  @input.debounce.400ms="applyFilters()"
                  placeholder="Search by MPN, manufacturer, or description..."
+                 aria-label="Search materials by MPN, manufacturer, or description"
                  class="w-full pl-10 pr-4 py-2 border border-gray-200 rounded-lg text-sm focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
           <svg class="absolute left-3 top-2.5 w-4 h-4 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
@@ -115,9 +117,9 @@
       <template x-if="commodity || q || Object.keys(subFilters).length > 0">
         <div class="flex flex-wrap gap-1.5 mt-2">
           <template x-if="q">
-            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-purple-50 text-purple-700 rounded-full text-xs">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs">
               Search: <span x-text="q"></span>
-              <button @click="q = ''; applyFilters()" class="hover:text-purple-900" aria-label="Remove filter">&times;</button>
+              <button @click="q = ''; applyFilters()" class="hover:text-blue-900" aria-label="Remove filter">&times;</button>
             </span>
           </template>
           <template x-if="commodity">

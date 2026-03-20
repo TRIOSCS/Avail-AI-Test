@@ -22,6 +22,7 @@
   </div>
   {% if values|length > 6 %}
   <button @click="expanded = !expanded"
+          :aria-expanded="expanded"
           class="text-[11px] text-brand-600 hover:text-brand-700 font-medium mt-1 px-2"
           x-text="expanded ? 'Show less' : 'Show all ({{ values|length }})'"></button>
   {% endif %}
@@ -38,12 +39,14 @@
     <input type="number" placeholder="{{ '%.4g'|format(range_data.min) }}"
            :value="subFilters['{{ spec_key }}_min'] || ''"
            @input.debounce.600ms="setRange('{{ spec_key }}', 'min', $event.target.value)"
+           aria-label="{{ display_name }} minimum"
            class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 tabular-nums"
            min="{{ range_data.min }}" max="{{ range_data.max }}" step="any">
     <span class="text-gray-300 text-xs flex-shrink-0">&ndash;</span>
     <input type="number" placeholder="{{ '%.4g'|format(range_data.max) }}"
            :value="subFilters['{{ spec_key }}_max'] || ''"
            @input.debounce.600ms="setRange('{{ spec_key }}', 'max', $event.target.value)"
+           aria-label="{{ display_name }} maximum"
            class="w-full px-2 py-1.5 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 tabular-nums"
            min="{{ range_data.min }}" max="{{ range_data.max }}" step="any">
   </div>
