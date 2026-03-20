@@ -14,7 +14,7 @@ Depends on: pydantic
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import date, datetime
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -104,6 +104,9 @@ class RequirementCreate(BaseModel):
     hardware_codes: str | None = None
     packaging: str | None = None
     notes: str | None = None
+    brand: str | None = None
+    customer_pn: str | None = None
+    need_by_date: date | None = None
 
     @field_validator("primary_mpn")
     @classmethod
@@ -149,6 +152,9 @@ class RequirementUpdate(BaseModel):
     condition: str | None = None
     notes: str | None = None
     sale_notes: str | None = None
+    brand: str | None = None
+    customer_pn: str | None = None
+    need_by_date: date | None = None
 
     @field_validator("primary_mpn")
     @classmethod
@@ -189,6 +195,15 @@ class RequirementOut(BaseModel):
     target_price: float | None = None
     substitutes: list[str] = Field(default_factory=list)
     sighting_count: int = 0
+    brand: str | None = None
+    customer_pn: str | None = None
+    need_by_date: date | None = None
+    condition: str | None = None
+    date_codes: str | None = None
+    firmware: str | None = None
+    hardware_codes: str | None = None
+    packaging: str | None = None
+    notes: str | None = None
 
 
 class SightingUnavailableIn(BaseModel):
