@@ -100,6 +100,18 @@ Alpine.store('preferences', Alpine.$persist({
     compactTables: false,
 }).as('avail_preferences'));
 
+Alpine.store('errorLog', { entries: [] });
+window.onerror = function(msg, src, line, col) {
+    var log = Alpine.store('errorLog').entries;
+    log.push({ msg: String(msg), src: src, line: line, col: col, ts: new Date().toISOString() });
+    if (log.length > 10) log.shift();
+};
+window.onunhandledrejection = function(e) {
+    var log = Alpine.store('errorLog').entries;
+    log.push({ msg: String(e.reason), ts: new Date().toISOString() });
+    if (log.length > 10) log.shift();
+};
+
 Alpine.store('shortlist', {
     items: [],
     toggle(item) {

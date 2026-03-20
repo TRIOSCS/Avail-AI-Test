@@ -626,6 +626,7 @@ from .routers.tagging_admin import router as tagging_admin_router
 from .routers.tags import router as tags_router
 from .routers.task import my_tasks_router
 from .routers.task import router as task_router
+from .routers.trouble_report import router as trouble_report_router
 from .routers.v13_features import router as v13_router
 from .routers.vendor_analytics import router as vendor_analytics_router
 from .routers.vendor_contacts import router as vendor_contacts_router
@@ -666,5 +667,6 @@ app.include_router(v13_router)
 app.include_router(vendor_analytics_router)
 app.include_router(vendor_contacts_router)
 app.include_router(vendor_inquiry_router)
+app.include_router(trouble_report_router)
 app.include_router(vendors_crud_router)
 app.include_router(htmx_views_router)
