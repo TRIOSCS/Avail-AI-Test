@@ -13,13 +13,20 @@ const BASE_URL = process.env.LIGHTHOUSE_URL || 'http://127.0.0.1:8000';
 
 const PAGES = [
   { name: 'Login Page', path: '/' },
+  { name: 'App Shell', path: '/v2' },
+  { name: 'Requisitions', path: '/v2/requisitions' },
+  { name: 'Vendors', path: '/v2/vendors' },
+  { name: 'Companies', path: '/v2/companies' },
+  { name: 'Materials', path: '/v2/materials' },
+  { name: 'Search', path: '/v2/search' },
+  { name: 'Settings', path: '/v2/settings' },
 ];
 
 const THRESHOLDS = {
-  performance: 50,
-  accessibility: 70,
-  'best-practices': 70,
-  seo: 60,
+  performance: 60,
+  accessibility: 80,
+  'best-practices': 80,
+  seo: 70,
 };
 
 async function auditPage(chrome, name, url) {

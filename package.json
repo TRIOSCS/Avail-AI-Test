@@ -17,6 +17,9 @@
     "test:html": "html-validate 'app/templates/**/*.html' || true",
     "test:vitest": "vitest run",
     "test:vitest:watch": "vitest",
+    "test:mega": "bash scripts/run-ux-mega-test.sh",
+    "test:mega:python": "TESTING=1 PYTHONPATH=/root/availai pytest tests/ux_mega/ -v",
+    "test:mega:playwright": "npx playwright test --project=dead-ends --project=workflows",
     "test:all-frontend": "npm run lint && npm run build && npm run test:frontend && npx playwright test && npm run test:html"
   },
   "dependencies": {
