@@ -587,11 +587,15 @@ def test_find_matches_below_min_margin(db_session):
     assert len(matches) == 0
 
 
-# ── no requisition history (line 216) ────────────────────────────────────
+# ── no requisition history — match still valid (nullable FKs) ────────────
 
 
 def test_find_matches_no_requisition_history(db_session):
-    """Company with CPH but no requisition for the part is skipped."""
+    """Company with CPH but no requisition for the part still creates a match.
+
+    With nullable requirement_id/requisition_id, matches without historical requisitions
+    are valid — the match has requirement_id=None, requisition_id=None.
+    """
     owner = User(
         email="sales2@trioscs.com",
         name="Sales2",
@@ -676,14 +680,54 @@ def test_find_matches_no_requisition_history(db_session):
     db_session.add(offer)
     db_session.commit()
 
-    # The match logic queries Requisition.customer_site_id == site.id
-    # (the first site). But the requisition is on other_site. So no match
-    # for the CPH company because the requirement join won't match.
+    # With nullable FKs, match is created even without requisition history
+    # for the primary site. requirement_id and requisition_id will be None.
     matches = find_matches_for_offer(offer.id, db_session)
-    assert len(matches) == 0
+    assert len(matches) == 1
+    assert matches[0].requirement_id is None
+    assert matches[0].requisition_id is None
+    assert matches[0].company_id == company.id
 
 
-# ── run_proactive_scan dedup (lines 308-314) ──────────────────────────────
+# ── cross-offer dedup (tightened dedup) ───────────────────────────────────
+
+
+def test_find_matches_batch_dedup_across_offers(db_session):
+    """Two offers for same part+company should not create duplicate matches."""
+    data = _setup_scenario(db_session)
+
+    offer1 = Offer(
+        requisition_id=data["requisition"].id,
+        requirement_id=data["requirement"].id,
+        material_card_id=data["card"].id,
+        vendor_name="Arrow",
+        mpn="STM32F407",
+        unit_price=Decimal("8.00"),
+        status="active",
+    )
+    offer2 = Offer(
+        requisition_id=data["requisition"].id,
+        requirement_id=data["requirement"].id,
+        material_card_id=data["card"].id,
+        vendor_name="DigiKey",
+        mpn="STM32F407",
+        unit_price=Decimal("7.50"),
+        status="active",
+    )
+    db_session.add_all([offer1, offer2])
+    db_session.commit()
+
+    matches1 = find_matches_for_offer(offer1.id, db_session)
+    db_session.commit()
+    assert len(matches1) == 1
+
+    # Second offer for same part+company should be deduped
+    matches2 = find_matches_for_offer(offer2.id, db_session)
+    db_session.commit()
+    assert len(matches2) == 0
+
+
+# ── run_proactive_scan dedup ──────────────────────────────────────────
 
 
 def test_run_proactive_scan_dedup(db_session):

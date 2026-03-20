@@ -1,0 +1,71 @@
+{#
+  proactive/_match_row.html — Table row for a single proactive match.
+  Receives: match (dict), group (dict with customer_site_id).
+  Called by: proactive/list.html loop.
+  Depends on: Alpine.js (parent proactiveGroup scope), Tailwind CSS.
+#}
+<tr id="match-row-{{ match.id }}"
+    class="hover:bg-gray-50 transition-colors"
+    :class="selected[{{ match.id }}] && 'bg-brand-50'">
+  {# Checkbox #}
+  <td class="w-10 px-3 py-2.5">
+    <input type="checkbox"
+           :checked="selected[{{ match.id }}]"
+           @change="toggle({{ match.id }})"
+           class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
+  </td>
+  {# MPN + Manufacturer #}
+  <td class="px-3 py-2.5">
+    <p class="text-sm font-medium text-gray-900 font-mono">{{ match.mpn | default('--') }}</p>
+    {% if match.manufacturer %}
+    <p class="text-xs text-gray-400 mt-0.5">{{ match.manufacturer }}</p>
+    {% endif %}
+    {% if match.customer_purchase_count %}
+    <span class="inline-flex items-center gap-0.5 text-[10px] text-gray-400 mt-0.5"
+          title="Customer bought {{ match.customer_purchase_count }}x{% if match.customer_last_purchased_at %}, last {{ match.customer_last_purchased_at }}{% endif %}">
+      <svg class="h-2.5 w-2.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
+      {{ match.customer_purchase_count }}&times;
+    </span>
+    {% endif %}
+  </td>
+  {# Vendor + reliability #}
+  <td class="px-3 py-2.5 text-sm text-gray-700">
+    {{ match.vendor_name | default('--') }}
+    {% if match.ghost_rate is not none and match.ghost_rate > 30 %}
+    <span class="ml-1 text-[10px] text-rose-500 font-medium">unreliable</span>
+    {% elif match.vendor_score is not none and match.vendor_score >= 70 %}
+    <span class="ml-1 text-[10px] text-emerald-500 font-medium">trusted</span>
+    {% endif %}
+  </td>
+  {# Qty #}
+  <td class="px-3 py-2.5 text-sm text-gray-700 text-right tabular-nums">
+    {{ "{:,}".format(match.qty_available|int) if match.qty_available else '--' }}
+  </td>
+  {# Unit Price #}
+  <td class="px-3 py-2.5 text-sm text-gray-700 text-right tabular-nums">
+    {% if match.unit_price %}${{ "%.4f"|format(match.unit_price) }}{% else %}--{% endif %}
+  </td>
+  {# Margin pill #}
+  <td class="px-3 py-2.5">
+    {% if match.margin_pct is not none %}
+    <span class="inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded
+      {{ 'bg-emerald-50 text-emerald-700' if match.margin_pct >= 20 else
+         'bg-amber-50 text-amber-700' if match.margin_pct >= 10 else
+         'bg-rose-50 text-rose-700' }}">
+      {{ "%.0f"|format(match.margin_pct) }}%
+    </span>
+    {% else %}
+    <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded bg-gray-100 text-gray-400">N/A</span>
+    {% endif %}
+  </td>
+  {# Score pill #}
+  <td class="px-3 py-2.5">
+    {% set score = match.match_score|default(0) %}
+    <span class="inline-flex px-1.5 py-0.5 text-[10px] font-bold rounded
+      {{ 'bg-emerald-50 text-emerald-700' if score >= 75 else
+         'bg-amber-50 text-amber-700' if score >= 50 else
+         'bg-gray-100 text-gray-500' }}">
+      {{ score }}
+    </span>
+  </td>
+</tr>

@@ -1,9 +1,12 @@
 """Proactive matching engine — finds customer matches for new inventory.
 
 Uses customer_part_history (CPH) as the primary matching backbone.
-Falls back to archived requisitions for customers without CPH data.
+Only confirmed buyer-entered Offers trigger proactive matches.
 
-Scoring: composite of recency (40%), frequency (30%), margin potential (30%).
+Scoring: composite of recency (40%) + frequency (30%) + margin potential (30%).
+
+Called by: scheduler.py (background scan), routers/proactive.py (endpoints)
+Depends on: models, config, services/proactive_helpers
 """
 
 from datetime import datetime, timedelta, timezone
@@ -17,14 +20,13 @@ from ..models import (
     Company,
     CustomerSite,
     Offer,
-    ProactiveDoNotOffer,
     ProactiveMatch,
-    ProactiveThrottle,
     Requirement,
     Requisition,
 )
 from ..models.config import SystemConfig
 from ..models.purchase_history import CustomerPartHistory
+from .proactive_helpers import build_batch_dno_set, build_batch_throttle_set
 
 # ── Scoring ──────────────────────────────────────────────────────────────
 
@@ -139,50 +141,88 @@ def _find_matches(
     our_cost: float | None,
     source_offer: Offer | None = None,
 ) -> list[ProactiveMatch]:
-    """Core matching logic — query CPH, score, create ProactiveMatch records."""
-    throttle_cutoff = datetime.now(timezone.utc) - timedelta(days=settings.proactive_throttle_days)
+    """Core matching logic — query CPH, score, create ProactiveMatch records.
+
+    Uses batch-loaded lookups to avoid N+1 queries. Tightened dedup: material_card_id +
+    company_id only (no offer_id filter). requirement_id and requisition_id are nullable
+    — matches without historical requisitions are valid.
+    """
     min_margin = settings.proactive_min_margin_pct
+    mpn_upper = mpn.upper().strip()
 
     # Find all CPH entries for this part
     cph_rows = db.query(CustomerPartHistory).filter(CustomerPartHistory.material_card_id == material_card_id).all()
     if not cph_rows:
         return []
 
+    # ── Batch pre-load all needed data (fixes N+1) ──────────────────
+    company_ids = {cph.company_id for cph in cph_rows}
+
+    # 1. Companies (with account_owner_id check)
+    companies = {c.id: c for c in db.query(Company).filter(Company.id.in_(company_ids)).all()}
+
+    # 2. First active site per company
+    sites: dict[int, CustomerSite] = {}
+    for s in (
+        db.query(CustomerSite)
+        .filter(CustomerSite.company_id.in_(company_ids), CustomerSite.is_active == True)  # noqa: E712
+        .all()
+    ):
+        sites.setdefault(s.company_id, s)
+
+    # 3. Do-not-offer suppression set
+    dno_company_ids = build_batch_dno_set(db, mpn_upper, company_ids)
+
+    # 4. Throttled site IDs
+    site_ids = {s.id for s in sites.values()}
+    throttled_site_ids = build_batch_throttle_set(db, mpn_upper, site_ids)
+
+    # 5. Existing active match company IDs (tightened dedup — no offer_id filter)
+    existing_match_company_ids = {
+        row[0]
+        for row in db.query(ProactiveMatch.company_id)
+        .filter(
+            ProactiveMatch.material_card_id == material_card_id,
+            ProactiveMatch.status.in_(["new", "sent"]),
+        )
+        .all()
+    }
+
+    # 6. Requisition history per site (optional — nullable FKs)
+    req_by_site: dict[int, tuple] = {}
+    for req_item, requisition in (
+        db.query(Requirement, Requisition)
+        .join(Requisition, Requirement.requisition_id == Requisition.id)
+        .filter(
+            Requirement.material_card_id == material_card_id,
+            Requisition.customer_site_id.in_(site_ids),
+        )
+        .order_by(Requisition.created_at.desc())
+        .all()
+    ):
+        req_by_site.setdefault(requisition.customer_site_id, (req_item, requisition))
+
+    # ── Loop uses dict lookups instead of queries ────────────────────
     matches = []
     for cph in cph_rows:
-        # Need a company → site → owner chain
-        company = db.get(Company, cph.company_id)
+        company = companies.get(cph.company_id)
         if not company or not company.account_owner_id:
             continue
 
-        # Get the primary site for this company
-        site = db.query(CustomerSite).filter_by(company_id=cph.company_id, is_active=True).first()
+        site = sites.get(cph.company_id)
         if not site:
             continue
 
-        # Check do-not-offer suppression
-        dno = (
-            db.query(ProactiveDoNotOffer)
-            .filter(
-                ProactiveDoNotOffer.mpn == mpn.upper().strip(),
-                ProactiveDoNotOffer.company_id == cph.company_id,
-            )
-            .first()
-        )
-        if dno:
+        # Check do-not-offer
+        if cph.company_id in dno_company_ids:
             continue
 
         # Check throttle
-        throttled = (
-            db.query(ProactiveThrottle)
-            .filter(
-                ProactiveThrottle.mpn == mpn.upper().strip(),
-                ProactiveThrottle.customer_site_id == site.id,
-                ProactiveThrottle.last_offered_at > throttle_cutoff,
-            )
-            .first()
-        )
-        if throttled:
+        if site.id in throttled_site_ids:
+            continue
+
+        # Dedup: one active match per part per customer
+        if cph.company_id in existing_match_company_ids:
             continue
 
         # Score the match
@@ -198,42 +238,10 @@ def _find_matches(
         if margin_pct is not None and margin_pct < min_margin:
             continue
 
-        # We need a requirement_id and requisition_id for the existing ProactiveMatch model.
-        # Find the most recent archived requisition for this company+part.
-        req_row = (
-            db.query(Requirement, Requisition)
-            .join(Requisition, Requirement.requisition_id == Requisition.id)
-            .filter(
-                Requirement.material_card_id == material_card_id,
-                Requisition.customer_site_id == site.id,
-            )
-            .order_by(Requisition.created_at.desc())
-            .first()
-        )
-        if not req_row:
-            # No requisition history — skip (can't populate required FK)
-            continue
-        req_item, requisition = req_row
-
-        # Dedup: don't create duplicate matches
-        dedup_filter = [
-            ProactiveMatch.material_card_id == material_card_id,
-            ProactiveMatch.company_id == cph.company_id,
-            ProactiveMatch.status.in_(["new", "sent"]),
-        ]
-        if source_offer:
-            dedup_filter.append(ProactiveMatch.offer_id == source_offer.id)
-        existing = db.query(ProactiveMatch).filter(*dedup_filter).first()
-        if existing:
-            continue
-
-        last_price = float(cph.last_unit_price) if cph.last_unit_price else None
-
         # Resolve offer_id — required NOT NULL FK
         if source_offer:
             offer_id = source_offer.id
         else:
-            # Sighting-triggered: find most recent offer for this part
             fallback_offer = (
                 db.query(Offer.id)
                 .filter(Offer.material_card_id == material_card_id)
@@ -241,16 +249,23 @@ def _find_matches(
                 .first()
             )
             if not fallback_offer:
-                continue  # Can't create match without an offer FK
+                continue
             offer_id = fallback_offer[0]
+
+        # Optional: requisition history (nullable FKs)
+        req_row = req_by_site.get(site.id)
+        requirement_id = req_row[0].id if req_row else None
+        requisition_id = req_row[1].id if req_row else None
+
+        last_price = float(cph.last_unit_price) if cph.last_unit_price else None
 
         match = ProactiveMatch(
             offer_id=offer_id,
-            requirement_id=req_item.id,
-            requisition_id=requisition.id,
+            requirement_id=requirement_id,
+            requisition_id=requisition_id,
             customer_site_id=site.id,
             salesperson_id=company.account_owner_id,
-            mpn=mpn.upper().strip(),
+            mpn=mpn_upper,
             material_card_id=material_card_id,
             company_id=cph.company_id,
             match_score=score,
@@ -263,18 +278,20 @@ def _find_matches(
         db.add(match)
         matches.append(match)
 
+        # Track for dedup within this batch
+        existing_match_company_ids.add(cph.company_id)
+
         # In-app notification
-        if company.account_owner_id:
-            db.add(
-                ActivityLog(
-                    user_id=company.account_owner_id,
-                    activity_type="proactive_match",
-                    channel="system",
-                    requisition_id=requisition.id,
-                    contact_name=company.name,
-                    subject=f"Proactive match: {mpn.upper().strip()} — {company.name} (score {score})",
-                )
+        db.add(
+            ActivityLog(
+                user_id=company.account_owner_id,
+                activity_type="proactive_match",
+                channel="system",
+                requisition_id=requisition_id,
+                contact_name=company.name,
+                subject=f"Proactive match: {mpn_upper} — {company.name} (score {score})",
             )
+        )
 
     return matches
 
@@ -371,19 +388,17 @@ def mark_match_sent(match_id: int, user_id: int, db: Session) -> None:
 def expire_old_matches(db: Session) -> int:
     """Expire matches older than proactive_match_expiry_days.
 
-    Returns count expired.
+    Uses single UPDATE instead of load-then-loop. Returns count expired.
     """
     cutoff = datetime.now(timezone.utc) - timedelta(days=settings.proactive_match_expiry_days)
-    expired = (
+    count = (
         db.query(ProactiveMatch)
         .filter(
             ProactiveMatch.status == "new",
             ProactiveMatch.created_at < cutoff,
         )
-        .all()
+        .update({"status": "expired"}, synchronize_session=False)
     )
-    for m in expired:
-        m.status = "expired"
-    if expired:
+    if count:
         db.commit()
-    return len(expired)
+    return count

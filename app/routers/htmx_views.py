@@ -111,6 +111,43 @@ def _timesince_filter(dt):
 templates.env.filters["timesince"] = _timesince_filter
 
 
+def _timeago_filter(dt):
+    """Compact relative time: '2h ago', '3d ago', '2w ago'."""
+    if not dt:
+        return "--"
+    from datetime import datetime as _dt
+    from datetime import timezone as _tz
+
+    if isinstance(dt, str):
+        try:
+            dt = _dt.fromisoformat(dt)
+        except (ValueError, TypeError):
+            return "--"
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=_tz.utc)
+    now = _dt.now(_tz.utc)
+    seconds = int((now - dt).total_seconds())
+    if seconds < 60:
+        return "just now"
+    minutes = seconds // 60
+    if minutes < 60:
+        return f"{minutes}m ago"
+    hours = minutes // 60
+    if hours < 24:
+        return f"{hours}h ago"
+    days = hours // 24
+    if days < 7:
+        return f"{days}d ago"
+    weeks = days // 7
+    if weeks < 5:
+        return f"{weeks}w ago"
+    months = days // 30
+    return f"{months}mo ago"
+
+
+templates.env.filters["timeago"] = _timeago_filter
+
+
 def _fmtdate_filter(value, fmt: str = "%b %d, %H:%M", default: str = "—") -> str:
     """Safe date formatter — handles None, strings, and datetime objects."""
     if not value:
@@ -7029,80 +7066,309 @@ async def proactive_list_partial(
     ctx["sent"] = sent
     ctx["tab"] = tab
     ctx["match_count"] = match_count
+    ctx["success_msg"] = request.query_params.get("success_msg", "")
     return templates.TemplateResponse("htmx/partials/proactive/list.html", ctx)
 
 
-@router.post("/v2/partials/proactive/{match_id}/dismiss", response_class=HTMLResponse)
-async def proactive_dismiss(
-    match_id: int,
+@router.post("/v2/partials/proactive/batch-dismiss", response_class=HTMLResponse)
+async def proactive_batch_dismiss(
     request: Request,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Dismiss a proactive match and reload the list."""
+    """Batch dismiss selected proactive matches and reload the list."""
     from ..models import ProactiveMatch
 
-    db.query(ProactiveMatch).filter(
-        ProactiveMatch.id == match_id,
-        ProactiveMatch.salesperson_id == user.id,
-        ProactiveMatch.status == "new",
-    ).update({"status": "dismissed"}, synchronize_session=False)
-    db.commit()
+    form = await request.form()
+    match_ids_raw = form.getlist("match_ids")
+    match_ids = [int(mid) for mid in match_ids_raw if mid and str(mid).isdigit()]
+
+    if match_ids:
+        db.query(ProactiveMatch).filter(
+            ProactiveMatch.id.in_(match_ids),
+            ProactiveMatch.salesperson_id == user.id,
+            ProactiveMatch.status == "new",
+        ).update({"status": "dismissed", "dismiss_reason": "batch_dismiss"}, synchronize_session=False)
+        db.commit()
 
     # Re-render list
     from ..services.proactive_service import get_matches_for_user
 
-    matches = get_matches_for_user(db, user.id, status="new")
+    result = get_matches_for_user(db, user.id, status="new")
+    groups = result.get("groups", []) if isinstance(result, dict) else result
+    match_count = result.get("stats", {}).get("total", 0) if isinstance(result, dict) else 0
     ctx = _base_ctx(request, user, "proactive")
-    ctx["matches"] = matches
+    ctx["matches"] = groups
     ctx["sent"] = []
     ctx["tab"] = "matches"
+    ctx["match_count"] = match_count
+    ctx["success_msg"] = ""
     return templates.TemplateResponse("htmx/partials/proactive/list.html", ctx)
 
 
-# ── Sprint 8: Proactive Selling + Prospecting Completion ───────────────
-
-
-@router.post("/v2/partials/proactive/{match_id}/draft", response_class=HTMLResponse)
-async def proactive_draft(
+@router.post("/v2/proactive/prepare/{site_id}", response_class=HTMLResponse)
+async def proactive_prepare_page(
+    site_id: int,
     request: Request,
-    match_id: int,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """AI-draft a proactive offer email for a match."""
-    from ..models import ProactiveMatch
+    """Full-page prepare/send workflow for proactive offers."""
+    import json
 
-    match = (
-        db.query(ProactiveMatch).filter(ProactiveMatch.id == match_id, ProactiveMatch.salesperson_id == user.id).first()
+    from ..models import ProactiveMatch, SiteContact
+    from ..models.crm import CustomerSite as _CS
+
+    form = await request.form()
+    match_ids_raw = form.getlist("match_ids")
+    match_ids = [int(mid) for mid in match_ids_raw if mid and str(mid).isdigit()]
+
+    if not match_ids:
+        from starlette.responses import RedirectResponse
+
+        return RedirectResponse("/v2/proactive", status_code=303)
+
+    matches = (
+        db.query(ProactiveMatch)
+        .filter(ProactiveMatch.id.in_(match_ids), ProactiveMatch.salesperson_id == user.id)
+        .all()
     )
-    if not match:
-        raise HTTPException(404, "Match not found")
+    if not matches:
+        from starlette.responses import RedirectResponse
 
-    # Try AI draft via proactive service
-    draft_body = ""
-    draft_subject = ""
+        return RedirectResponse("/v2/proactive", status_code=303)
+
+    site = db.get(_CS, site_id)
+    company = site.company if site else None
+    contacts = (
+        db.query(SiteContact)
+        .filter(SiteContact.customer_site_id == site_id)
+        .order_by(SiteContact.is_primary.desc(), SiteContact.full_name)
+        .all()
+    )
+
+    match_data = []
+    for m in matches:
+        offer = m.offer
+        match_data.append(
+            {
+                "id": m.id,
+                "mpn": m.mpn,
+                "vendor_name": offer.vendor_name if offer else "",
+                "manufacturer": offer.manufacturer if offer else "",
+                "qty_available": offer.qty_available if offer else 0,
+                "unit_price": float(offer.unit_price) if offer and offer.unit_price else None,
+                "margin_pct": m.margin_pct,
+                "match_score": m.match_score or 0,
+            }
+        )
+
+    contact_data = [
+        {
+            "id": c.id,
+            "full_name": c.full_name,
+            "email": c.email,
+            "title": c.title,
+            "is_primary": c.is_primary,
+            "has_email": bool(c.email),
+        }
+        for c in contacts
+    ]
+
+    ctx = _base_ctx(request, user, "proactive")
+    ctx.update(
+        {
+            "site_id": site_id,
+            "company_name": company.name if company else "Customer",
+            "site_name": site.site_name if site else "",
+            "matches": match_data,
+            "match_ids_json": json.dumps([m["id"] for m in match_data]),
+            "contacts": contact_data,
+            "error_msg": "",
+        }
+    )
+    return templates.TemplateResponse("htmx/partials/proactive/prepare.html", ctx)
+
+
+@router.post("/v2/partials/proactive/draft", response_class=HTMLResponse)
+async def proactive_draft_for_prepare(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """AI-draft a proactive offer email for the prepare page."""
+    from ..models import ProactiveMatch, SiteContact
+    from ..models.crm import CustomerSite as _CS
+
+    form = await request.form()
+    match_ids_raw = form.getlist("match_ids") or (form.get("match_ids", "") or "").split(",")
+    match_ids = [int(mid) for mid in match_ids_raw if mid and str(mid).isdigit()]
+    contact_ids_raw = form.getlist("contact_ids") or (form.get("contact_ids", "") or "").split(",")
+    contact_ids = [int(cid) for cid in contact_ids_raw if cid and str(cid).isdigit()]
+
+    if not match_ids:
+        return HTMLResponse('<div class="text-sm text-rose-600">No matches selected.</div>')
+
+    matches = (
+        db.query(ProactiveMatch)
+        .filter(ProactiveMatch.id.in_(match_ids), ProactiveMatch.salesperson_id == user.id)
+        .all()
+    )
+    if not matches:
+        return HTMLResponse('<div class="text-sm text-rose-600">No valid matches found.</div>')
+
+    site_id = matches[0].customer_site_id
+    site = db.get(_CS, site_id)
+    company = site.company if site else None
+    company_name = company.name if company else "Customer"
+
+    # Resolve contact name
+    contact_name = None
+    if contact_ids:
+        primary = db.get(SiteContact, contact_ids[0])
+        if primary and primary.full_name:
+            contact_name = primary.full_name.split()[0]
+
+    # Build parts list for AI
+    parts = []
+    for m in matches:
+        offer = m.offer
+        cost = float(offer.unit_price) if offer and offer.unit_price else 0
+        sell = cost * 1.3
+        parts.append(
+            {
+                "mpn": m.mpn,
+                "manufacturer": offer.manufacturer if offer else "",
+                "qty": offer.qty_available if offer else 0,
+                "sell_price": float(sell),
+                "condition": offer.condition if offer else "",
+                "lead_time": offer.lead_time if offer else "",
+                "customer_purchase_count": m.customer_purchase_count or 0,
+                "customer_last_purchased_at": (
+                    m.customer_last_purchased_at.strftime("%b %Y") if m.customer_last_purchased_at else None
+                ),
+            }
+        )
+
+    salesperson_name = user.name or user.email.split("@")[0]
+
     try:
         from ..services.proactive_email import draft_proactive_email
 
-        result = await draft_proactive_email(match, db, user)
-        draft_body = result.get("body", "")
-        draft_subject = result.get("subject", f"Stock Available: {match.mpn}")
-    except (ImportError, RuntimeError, Exception) as exc:
-        logger.warning("Proactive draft failed: {}", exc)
-        draft_subject = f"Stock Available: {match.mpn}"
-        draft_body = (
-            f"Dear Customer,\n\nWe have {match.mpn} available. Please let us know if you're interested.\n\nBest regards"
+        result = await draft_proactive_email(
+            company_name=company_name,
+            contact_name=contact_name,
+            parts=parts,
+            salesperson_name=salesperson_name,
+        )
+        if result:
+            subject = result.get("subject", f"Parts Available — {company_name}")
+            body = result.get("body", "")
+            return HTMLResponse(f"""
+                <input type="hidden" name="ai_subject" id="ai-subject" value="{subject}">
+                <input type="hidden" name="ai_body" id="ai-body" value="">
+                <script>
+                    document.getElementById('subject-input').value = {repr(subject)};
+                    document.getElementById('body-input').value = {repr(body)};
+                </script>
+                <div class="text-sm text-emerald-600 flex items-center gap-1">
+                    <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                        <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
+                    </svg>
+                    Draft generated — edit as needed
+                </div>
+            """)
+    except Exception as exc:
+        logger.warning("Proactive AI draft failed: {}", exc)
+
+    return HTMLResponse("""
+        <div class="text-sm text-amber-600 flex items-center gap-1">
+            Auto-draft unavailable. Write your message manually.
+            <button type="button"
+                    hx-post="/v2/partials/proactive/draft"
+                    hx-target="#draft-status"
+                    hx-include="[name='match_ids'],[name='contact_ids']"
+                    class="ml-2 text-brand-600 underline text-xs">Retry</button>
+        </div>
+    """)
+
+
+@router.post("/v2/proactive/send", response_class=HTMLResponse)
+async def proactive_send_offer(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Send a proactive offer email from the prepare page."""
+    form = await request.form()
+    match_ids_raw = form.getlist("match_ids") or (form.get("match_ids", "") or "").split(",")
+    match_ids = [int(mid) for mid in match_ids_raw if mid and str(mid).isdigit()]
+    contact_ids_raw = form.getlist("contact_ids") or (form.get("contact_ids", "") or "").split(",")
+    contact_ids = [int(cid) for cid in contact_ids_raw if cid and str(cid).isdigit()]
+    subject = form.get("subject", "").strip()
+    body = form.get("body", "").strip()
+
+    if not match_ids:
+        raise HTTPException(400, "No matches selected")
+    if not contact_ids:
+        raise HTTPException(400, "No contacts selected")
+
+    # Get token
+    from ..scheduler import get_valid_token
+
+    token = await get_valid_token(user, db)
+
+    try:
+        from ..services.proactive_service import send_proactive_offer
+
+        # Build email HTML from body text
+        email_html = None
+        if body:
+            import html as html_mod
+
+            body_html = html_mod.escape(body).replace("\n", "<br>")
+            email_html = f'<div style="font-family:Arial,sans-serif;max-width:700px"><p>{body_html}</p></div>'
+
+        result = await send_proactive_offer(
+            db=db,
+            user=user,
+            token=token or "no-token",
+            match_ids=match_ids,
+            contact_ids=contact_ids,
+            sell_prices={},
+            subject=subject or None,
+            email_html=email_html,
         )
 
-    return templates.TemplateResponse(
-        "htmx/partials/proactive/draft_form.html",
-        {"request": request, "match": match, "draft_subject": draft_subject, "draft_body": draft_body},
-    )
+        # Success — reload matches list with success banner
+        from ..services.proactive_service import get_matches_for_user
+
+        match_result = get_matches_for_user(db, user.id, status="new")
+        groups = match_result.get("groups", []) if isinstance(match_result, dict) else match_result
+        match_count = match_result.get("stats", {}).get("total", 0) if isinstance(match_result, dict) else 0
+        parts_count = len(result.get("line_items", []))
+        contacts_count = len(result.get("recipient_emails", []))
+
+        ctx = _base_ctx(request, user, "proactive")
+        ctx["matches"] = groups
+        ctx["sent"] = []
+        ctx["tab"] = "matches"
+        ctx["match_count"] = match_count
+        ctx["success_msg"] = f"Offer sent to {contacts_count} contact(s) ({parts_count} parts)."
+        return templates.TemplateResponse("htmx/partials/proactive/list.html", ctx)
+
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+    except Exception as exc:
+        logger.error("Proactive send failed: {}", exc)
+        raise HTTPException(500, f"Send failed: {str(exc)[:100]}")
+
+
+# ── Sprint 8: Proactive Selling + Prospecting Completion (legacy routes kept for compat) ──
 
 
 @router.post("/v2/partials/proactive/{match_id}/send", response_class=HTMLResponse)
-async def proactive_send(
+async def proactive_send_legacy(
     request: Request,
     match_id: int,
     user: User = Depends(require_user),
@@ -7208,8 +7474,9 @@ async def proactive_do_not_offer(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Add an MPN+customer combo to the do-not-offer list."""
+    """Add an MPN+customer combo to the do-not-offer list (with dedup check)."""
     from ..models.intelligence import ProactiveDoNotOffer
+    from ..services.proactive_helpers import is_do_not_offer
 
     form = await request.form()
     mpn = form.get("mpn", "").strip()
@@ -7218,14 +7485,16 @@ async def proactive_do_not_offer(
     if not mpn or not company_id:
         raise HTTPException(400, "MPN and company are required")
 
-    dno = ProactiveDoNotOffer(
-        mpn=mpn,
-        company_id=int(company_id),
-        created_by_id=user.id,
-    )
-    db.add(dno)
-    db.commit()
-    logger.info("Do-not-offer: {} for company {} by {}", mpn, company_id, user.email)
+    cid = int(company_id)
+    if not is_do_not_offer(db, mpn, cid):
+        dno = ProactiveDoNotOffer(
+            mpn=mpn.upper(),
+            company_id=cid,
+            created_by_id=user.id,
+        )
+        db.add(dno)
+        db.commit()
+        logger.info("Do-not-offer: {} for company {} by {}", mpn, company_id, user.email)
 
     return HTMLResponse('<span class="text-xs text-gray-500">Suppressed</span>')
 

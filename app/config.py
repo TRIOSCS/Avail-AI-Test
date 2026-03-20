@@ -151,7 +151,6 @@ class Settings(BaseSettings):
 
     # --- Proactive offers ---
     proactive_matching_enabled: bool = True
-    proactive_archive_age_days: int = 30
     proactive_throttle_days: int = 21
     proactive_scan_interval_hours: int = 4
     proactive_min_margin_pct: float = 10.0

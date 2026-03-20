@@ -624,7 +624,7 @@ class TestScorecardAndSentOffers:
         assert "breakdown" not in result
 
     def test_get_sent_offers(self, db_session, test_user, test_company, test_customer_site):
-        """Returns list of sent offers for the user."""
+        """Returns sent offers grouped by customer."""
         po = ProactiveOffer(
             customer_site_id=test_customer_site.id,
             salesperson_id=test_user.id,
@@ -639,12 +639,18 @@ class TestScorecardAndSentOffers:
         db_session.add(po)
         db_session.commit()
 
-        offers = get_sent_offers(db_session, test_user.id)
-        assert len(offers) == 1
-        assert offers[0]["subject"] == "Sent Offer"
-        assert offers[0]["total_sell"] == 250.0
-        assert offers[0]["status"] == "sent"
-        assert len(offers[0]["line_items"]) == 1
+        groups = get_sent_offers(db_session, test_user.id)
+        assert len(groups) >= 1
+        # Each group has company_name and offers list
+        group = groups[0]
+        assert "company_name" in group
+        assert "offers" in group
+        assert len(group["offers"]) >= 1
+        offer = group["offers"][0]
+        assert offer["subject"] == "Sent Offer"
+        assert offer["total_sell"] == 250.0
+        assert offer["status"] == "sent"
+        assert len(offer["line_items"]) == 1
 
 
 # ── get_matches_for_user ──────────────────────────────────────────
