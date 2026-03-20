@@ -47,6 +47,7 @@ class Offer(Base):
     firmware = Column(String(100))
     hardware_code = Column(String(100))
     moq = Column(Integer)
+    spq = Column(Integer)  # Standard Pack Quantity
     valid_until = Column(Date)
     warranty = Column(String(100))
     country_of_origin = Column(String(100))

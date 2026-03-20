@@ -35,6 +35,10 @@ class User(Base):
     # Parts workspace — which columns the user wants visible in the split-panel view
     parts_column_prefs = Column(JSON, default=list)
 
+    # Requirements & Offers workspace — column visibility prefs
+    requirements_column_prefs = Column(JSON, default=list)
+    offers_column_prefs = Column(JSON, default=list)
+
     # Mailbox settings (from Graph /me/mailboxSettings)
     timezone = Column(String(100))
     working_hours_start = Column(String(10))  # e.g. "08:00"

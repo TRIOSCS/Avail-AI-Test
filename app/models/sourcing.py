@@ -6,6 +6,7 @@ from sqlalchemy import (
     JSON,
     Boolean,
     Column,
+    Date,
     DateTime,
     FetchedValue,
     Float,
@@ -91,6 +92,8 @@ class Requirement(Base):
     packaging = Column(String(100))
     condition = Column(String(50))
     sale_notes = Column(Text)
+    customer_pn = Column(String(255))
+    need_by_date = Column(Date)
     sourcing_status = Column(String(20), default="open")  # open | sourcing | offered | quoted | won | lost
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
