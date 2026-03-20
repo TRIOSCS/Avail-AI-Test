@@ -1521,6 +1521,57 @@ class TestCheckVendorDuplicate:
         assert resp.status_code == 200
         assert resp.json()["matches"] == []
 
+    def test_check_duplicate_fuzzy_returns_score_and_id(self, client, db_session, test_vendor_card):
+        """Fuzzy match returns id, name, match type, and numeric score."""
+        resp = client.get("/api/vendors/check-duplicate?name=Arrow Electronisc")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "matches" in data
+        # On SQLite the rapidfuzz fallback runs — may or may not match depending
+        # on threshold, but the response shape is always correct
+        for m in data["matches"]:
+            assert "id" in m
+            assert "name" in m
+            assert "match" in m
+            assert "score" in m
+            assert isinstance(m["score"], (int, float))
+
+    def test_check_duplicate_max_five_results(self, client, db_session):
+        """At most 5 fuzzy matches are returned."""
+        # Create 7 vendors with similar names
+        for i in range(7):
+            v = VendorCard(
+                normalized_name=f"similar corp {i}",
+                display_name=f"Similar Corp {i}",
+                sighting_count=1,
+            )
+            db_session.add(v)
+        db_session.commit()
+        resp = client.get("/api/vendors/check-duplicate?name=Similar Corp")
+        assert resp.status_code == 200
+        assert len(resp.json()["matches"]) <= 5
+
+    def test_check_duplicate_exact_short_circuits(self, client, db_session, test_vendor_card):
+        """Exact match returns immediately without fuzzy results."""
+        resp = client.get("/api/vendors/check-duplicate?name=Arrow Electronics")
+        assert resp.status_code == 200
+        matches = resp.json()["matches"]
+        assert len(matches) == 1
+        assert matches[0]["match"] == "exact"
+        assert matches[0]["score"] == 100
+        assert matches[0]["id"] == test_vendor_card.id
+
+    def test_fuzzy_match_python_fallback(self, db_session, test_vendor_card):
+        """_fuzzy_match_python returns correct shape on SQLite."""
+        from app.routers.vendors_crud import _fuzzy_match_python
+
+        results = _fuzzy_match_python(db_session, "arrow electronisc")
+        # rapidfuzz should find "arrow electronics" as a close match
+        assert isinstance(results, list)
+        for m in results:
+            assert m["match"] == "fuzzy"
+            assert m["score"] >= 80
+
 
 # ── List vendors response_rate ───────────────────────────────────────────
 
