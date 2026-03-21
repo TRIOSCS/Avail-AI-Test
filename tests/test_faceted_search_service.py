@@ -283,3 +283,83 @@ def test_search_faceted_filters_by_manufacturer(db_session: Session):
     results, total = search_materials_faceted(db_session, commodity="resistors", manufacturers=["TI"])
     assert total == 1
     assert results[0].manufacturer == "TI"
+
+
+class TestFacetedSearchEdgeCases:
+    """Boundary and validation edge cases for faceted search."""
+
+    def test_empty_commodity_returns_all(self, db_session):
+        _seed_dram_schema(db_session)
+        _make_dram_card(db_session, "MEM-001", "DDR4", 16)
+        _make_dram_card(db_session, "MEM-002", "DDR5", 32)
+        results, total = search_materials_faceted(db_session, commodity=None)
+        assert total >= 2
+
+    def test_nonexistent_commodity_returns_empty(self, db_session):
+        _seed_dram_schema(db_session)
+        _make_dram_card(db_session, "MEM-001", "DDR4", 16)
+        results, total = search_materials_faceted(db_session, commodity="nonexistent_xyz")
+        assert total == 0
+        assert results == []
+
+    def test_offset_beyond_total_returns_empty(self, db_session):
+        _seed_dram_schema(db_session)
+        _make_dram_card(db_session, "MEM-001", "DDR4", 16)
+        results, total = search_materials_faceted(db_session, commodity="dram", offset=9999)
+        assert results == []
+        assert total == 1  # total still reflects full count
+
+    def test_limit_zero_returns_empty_results(self, db_session):
+        _seed_dram_schema(db_session)
+        _make_dram_card(db_session, "MEM-001", "DDR4", 16)
+        results, total = search_materials_faceted(db_session, commodity="dram", limit=0)
+        assert results == []
+
+    def test_special_chars_in_text_search(self, db_session):
+        _seed_dram_schema(db_session)
+        _make_dram_card(db_session, "MEM-001", "DDR4", 16)
+        results, total = search_materials_faceted(db_session, q="'; DROP TABLE--")
+        assert isinstance(results, list)  # no SQL injection crash
+
+    def test_numeric_range_min_equals_max(self, db_session):
+        _seed_dram_schema(db_session)
+        _make_dram_card(db_session, "MEM-001", "DDR4", 16)
+        _make_dram_card(db_session, "MEM-002", "DDR5", 32)
+        results, total = search_materials_faceted(
+            db_session,
+            commodity="dram",
+            sub_filters={"capacity_gb_min": 16, "capacity_gb_max": 16},
+        )
+        assert total == 1
+
+    def test_unicode_manufacturer_filter(self, db_session):
+        _seed_dram_schema(db_session)
+        results, total = search_materials_faceted(
+            db_session,
+            manufacturers=["éèü"],
+        )
+        assert results == []
+
+    def test_get_commodity_counts_empty_db(self, db_session):
+        counts = get_commodity_counts(db_session)
+        assert counts == {} or len(counts) == 0
+
+    def test_get_manufacturer_options_empty_db(self, db_session):
+        options = get_manufacturer_options(db_session)
+        assert options == []
+
+    def test_get_subfilter_options_nonexistent_commodity(self, db_session):
+        options = get_subfilter_options(db_session, "nonexistent_xyz")
+        assert options == []
+
+    def test_search_with_empty_manufacturers_list(self, db_session):
+        _seed_dram_schema(db_session)
+        _make_dram_card(db_session, "MEM-001", "DDR4", 16)
+        results, total = search_materials_faceted(db_session, manufacturers=[])
+        assert total >= 1  # empty list should not filter
+
+    def test_search_with_empty_sub_filters(self, db_session):
+        _seed_dram_schema(db_session)
+        _make_dram_card(db_session, "MEM-001", "DDR4", 16)
+        results, total = search_materials_faceted(db_session, sub_filters={})
+        assert total >= 1
