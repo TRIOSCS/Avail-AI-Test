@@ -735,13 +735,17 @@ async def requisition_import_save(
     db.flush()
 
     # Create requirements
+    from ..search_service import resolve_material_card
+
     added = len(requirements)
     for item in requirements:
         mpn = item["primary_mpn"]
+        card = resolve_material_card(mpn, db)
         r = Requirement(
             requisition_id=req.id,
             primary_mpn=mpn,
             normalized_mpn=normalize_mpn_key(mpn),
+            material_card_id=card.id if card else None,
             target_qty=item["target_qty"],
             target_price=item.get("target_price"),
             brand=item.get("brand"),
@@ -1013,6 +1017,9 @@ async def requisition_create(
     db.flush()
 
     # Parse parts text (format: "MPN, Qty" per line)
+    from ..search_service import resolve_material_card
+    from ..utils.normalization import normalize_mpn_key
+
     part_count = 0
     if parts_text.strip():
         for line in parts_text.strip().split("\n"):
@@ -1028,9 +1035,12 @@ async def requisition_create(
                 except ValueError:
                     qty = 1
             if mpn:
+                card = resolve_material_card(mpn, db)
                 r = Requirement(
                     requisition_id=req.id,
                     primary_mpn=mpn,
+                    normalized_mpn=normalize_mpn_key(mpn),
+                    material_card_id=card.id if card else None,
                     target_qty=qty,
                     sourcing_status="open",
                 )
@@ -1083,9 +1093,15 @@ async def add_requirement(
 
     sub_list = parse_substitute_mpns(substitutes, primary_mpn)
 
+    from ..search_service import resolve_material_card
+    from ..utils.normalization import normalize_mpn_key
+
+    card = resolve_material_card(primary_mpn, db)
     r = Requirement(
         requisition_id=req_id,
         primary_mpn=primary_mpn,
+        normalized_mpn=normalize_mpn_key(primary_mpn),
+        material_card_id=card.id if card else None,
         target_qty=target_qty,
         brand=brand or None,
         substitutes=sub_list,
@@ -2803,7 +2819,13 @@ async def update_requirement(
     if not item:
         raise HTTPException(404, "Requirement not found")
 
+    from ..search_service import resolve_material_card
+    from ..utils.normalization import normalize_mpn_key
+
     item.primary_mpn = primary_mpn.strip()
+    item.normalized_mpn = normalize_mpn_key(primary_mpn)
+    card = resolve_material_card(primary_mpn, db)
+    item.material_card_id = card.id if card else None
     item.target_qty = target_qty
     item.brand = brand.strip() or None
     item.target_price = target_price
