@@ -292,8 +292,14 @@
           var target = document.getElementById('parts-list');
           target.innerHTML = html;  /* nosec: trusted server response */
           htmx.process(target);
+          /* Fire HTMX lifecycle events so listeners (scroll sync, clearPartIfGone) run */
+          htmx.trigger(target, 'htmx:afterSwap', {target: target});
+          htmx.trigger(target, 'htmx:afterSettle', {target: target});
         }).catch(function() {
-          window.dispatchEvent(new CustomEvent('show-toast', {detail: {message: 'Action failed, please try again', type: 'error'}}));
+          var t = Alpine.store('toast');
+          t.message = 'Action failed. Please try again.';
+          t.type = 'error';
+          t.show = true;
         });
       },
       bulkArchive: function() {
