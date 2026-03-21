@@ -1,0 +1,5 @@
+{# spec_display.html — Display fragment for a single spec field value.
+   Called by: PATCH /v2/partials/parts/{id}/save-spec
+   Depends on: field_value (str or None)
+#}
+<span class="{{ 'font-medium text-gray-900' if field_value else 'text-gray-400 italic' }}">{{ field_value or '—' }}</span>

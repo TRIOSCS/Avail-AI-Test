@@ -98,19 +98,14 @@
               'brand': ('Brand', 'brand'),
               'qty': ('Qty', 'qty'),
               'target_price': ('Tgt $', 'target_price'),
-              'customer_pn': ('Cust PN', None),
-              'condition': ('Cond', None),
-              'date_codes': ('DC', None),
-              'packaging': ('Pkg', None),
-              'firmware': ('FW', None),
-              'hardware_codes': ('HW', None),
+              'specs': ('Specs', None),
               'status': ('Status', 'status'),
               'requisition': ('Req', 'requisition'),
               'customer': ('Customer', 'customer'),
               'offers': ('Ofrs', None),
               'best_price': ('Best $', None),
               'owner': ('Owner', None),
-              'need_by_date': ('Need By', None),
+              'need_by_date': ('Bid Due', None),
               'created': ('Created', 'created'),
             } %}
             {% for col_key in col_defs %}
@@ -198,20 +193,15 @@
                     {% else %}—{% endif %}
                   {% elif col_key == 'created' %}
                     {{ req.created_at.strftime('%m/%d') if req.created_at else '—' }}
-                  {% elif col_key == 'date_codes' %}
-                    {{ req.date_codes or '—' }}
-                  {% elif col_key == 'condition' %}
-                    {{ req.condition or '—' }}
-                  {% elif col_key == 'packaging' %}
-                    {{ req.packaging or '—' }}
-                  {% elif col_key == 'customer_pn' %}
-                    {{ req.customer_pn or '—' }}
                   {% elif col_key == 'substitutes' %}
                     {{ req.substitutes|join(', ') if req.substitutes else '—' }}
-                  {% elif col_key == 'firmware' %}
-                    {{ req.firmware or '—' }}
-                  {% elif col_key == 'hardware_codes' %}
-                    {{ req.hardware_codes or '—' }}
+                  {% elif col_key == 'specs' %}
+                    {% set spec_count = [req.customer_pn, req.condition, req.date_codes, req.packaging, req.firmware, req.hardware_codes]|reject('none')|reject('equalto', '')|list|length %}
+                    {% if spec_count > 0 %}
+                      <span class="inline-flex items-center px-1.5 py-0 text-[10px] font-semibold rounded
+                                   {{ 'bg-emerald-100 text-emerald-700' if spec_count == 6 else 'bg-brand-100 text-brand-700' }}"
+                            title="Cust PN, Condition, Date Codes, Packaging, Firmware, Hardware">{{ spec_count }}/6</span>
+                    {% else %}—{% endif %}
                   {% elif col_key == 'need_by_date' %}
                     {{ req.need_by_date or '—' }}
                   {% endif %}
