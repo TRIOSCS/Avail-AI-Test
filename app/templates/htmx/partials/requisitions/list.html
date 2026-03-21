@@ -25,7 +25,7 @@
 
   {# Filter bar #}
   <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-4">
-    <form id="req-filters" class="space-y-3"
+    <form id="req-filters" class="space-y-3" onsubmit="return false"
           hx-indicator="#req-loading"
           hx-target-error="#req-error">
       <div class="flex flex-wrap gap-3 items-end">
@@ -42,7 +42,7 @@
                  hx-swap="innerHTML"
                  hx-push-url="true"
                  hx-include="#req-filters"
-                 hx-trigger="keyup changed delay:300ms"
+                 hx-trigger="input delay:300ms"
                  class="w-full pl-10 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
 
           {# Search scope indicators — show what matched when actively searching #}

@@ -34,7 +34,7 @@
   {# Filter bar #}
   <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6"
        x-data="{ view: '{{ view|default('table') }}' }">
-    <form id="vendor-filters" class="flex flex-wrap gap-3 items-end">
+    <form id="vendor-filters" class="flex flex-wrap gap-3 items-end" onsubmit="return false">
       <div class="flex-1 min-w-[200px]">
         <input type="text" name="q" value="{{ q }}" placeholder="Search vendors, brands, commodities..."
                hx-get="/v2/partials/vendors"
@@ -42,7 +42,7 @@
                hx-swap="morph"
                hx-push-url="true"
                hx-include="#vendor-filters"
-               hx-trigger="keyup changed delay:300ms"
+               hx-trigger="input delay:300ms"
                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
       </div>
       {% if my_only %}<input type="hidden" name="my_only" value="1">{% endif %}

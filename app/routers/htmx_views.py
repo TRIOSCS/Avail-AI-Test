@@ -8581,7 +8581,7 @@ async def parts_list_partial(
     owner: int = 0,
     date_from: str = "",
     date_to: str = "",
-    include_archived: str = "",
+    include_archived: bool | None = None,
     sort: str = "created",
     dir: str = "desc",
     offset: int = 0,
