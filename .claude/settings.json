@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "deny": [
+      "Bash(docker compose down*)",
+      "Bash(docker volume rm*)",
+      "Bash(docker volume prune*)",
+      "Bash(*DROP DATABASE*)",
+      "Bash(*dropdb*)",
+      "Bash(rm -rf /root/backups*)",
+      "Bash(*TRUNCATE *)"
+    ]
+  }
+}
