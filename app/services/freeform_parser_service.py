@@ -38,6 +38,8 @@ RFQ_PARSE_SCHEMA = {
                     "target_price": {"type": "number", "description": "Target or max price"},
                     "substitutes": {"type": "array", "items": {"type": "string"}},
                     "notes": {"type": "string"},
+                    "brand": {"type": "string", "description": "Manufacturer/brand name"},
+                    "condition": {"type": "string", "description": "Part condition: new, refurbished, used"},
                 },
                 "required": ["primary_mpn"],
             },
@@ -56,6 +58,8 @@ Rules:
 - target_qty: quantity needed. Default 1 if not stated.
 - target_price: max/target price if mentioned. Omit if unknown.
 - substitutes: alternate part numbers if listed.
+- brand: manufacturer name if stated (e.g. Texas Instruments, STMicroelectronics). Omit if unknown.
+- condition: new, refurbished, used, pull. Default "new" if not stated.
 - Infer customer_name from sender, signature, or context.
 - deadline: YYYY-MM-DD if date given, or "ASAP" if urgent/ASAP.
 - name: project name, PO reference, or "CustomerName - Parts" if unclear."""
@@ -129,6 +133,10 @@ async def parse_freeform_rfq(raw_text: str) -> dict | None:
             r["target_price"] = normalize_price(r["target_price"])
         if r.get("substitutes") is None:
             r["substitutes"] = []
+        if r.get("condition"):
+            r["condition"] = normalize_condition(r["condition"]) or r["condition"]
+        if not r.get("condition"):
+            r["condition"] = "new"
     return result
 
 
