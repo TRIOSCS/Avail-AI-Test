@@ -8,7 +8,7 @@ Depends on: conftest fixtures (client, db_session, test_user)
 from datetime import datetime, timezone
 
 
-def _make_requisition_and_parts(db_session, test_user, num_parts=2):
+def _make_requisition_and_parts(db_session, test_user, num_parts=2, **part_kwargs):
     """Helper: create a requisition with sibling parts."""
     from app.models import Requirement, Requisition
 
@@ -26,12 +26,15 @@ def _make_requisition_and_parts(db_session, test_user, num_parts=2):
 
     parts = []
     for i in range(num_parts):
-        part = Requirement(
-            requisition_id=reqn.id,
-            primary_mpn=f"MPN-{i:03d}",
-            target_qty=(i + 1) * 100,
-            sourcing_status="open",
-        )
+        defaults = {
+            "requisition_id": reqn.id,
+            "primary_mpn": f"MPN-{i:03d}",
+            "target_qty": (i + 1) * 100,
+            "sourcing_status": "open",
+        }
+        if i == 0:
+            defaults.update(part_kwargs)
+        part = Requirement(**defaults)
         db_session.add(part)
         parts.append(part)
     db_session.commit()
