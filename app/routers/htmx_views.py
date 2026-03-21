@@ -13,7 +13,7 @@ import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from loguru import logger
@@ -57,6 +57,7 @@ from ..services.faceted_search_service import (
     get_subfilter_options,
     search_materials_faceted,
 )
+from ..services.freeform_parser_service import parse_freeform_rfq
 from ..utils.search_builder import SearchBuilder
 
 router = APIRouter(tags=["htmx-views"])
@@ -554,6 +555,151 @@ async def requisition_import_form(
     """Return the import requisition modal form."""
     ctx = _base_ctx(request, user, "requisitions")
     return templates.TemplateResponse("htmx/partials/requisitions/import_modal.html", ctx)
+
+
+@router.post("/v2/partials/requisitions/import-parse", response_class=HTMLResponse)
+async def requisition_import_parse(
+    request: Request,
+    name: str = Form(...),
+    customer_name: str = Form(""),
+    deadline: str = Form(""),
+    urgency: str = Form("normal"),
+    raw_text: str = Form(""),
+    file: UploadFile | None = File(None),
+    user: User = Depends(require_user),
+):
+    """Parse pasted text or uploaded file with AI, return editable preview."""
+    # Extract text from file if uploaded
+    text = raw_text.strip()
+    if file and file.filename:
+        content = await file.read()
+        fname = file.filename.lower()
+        if fname.endswith((".xlsx", ".xls")):
+            from io import BytesIO
+
+            import openpyxl
+
+            wb = openpyxl.load_workbook(BytesIO(content), read_only=True, data_only=True)
+            rows = []
+            for ws in wb.worksheets:
+                for row in ws.iter_rows(values_only=True):
+                    cells = [str(c) if c is not None else "" for c in row]
+                    if any(cells):
+                        rows.append("\t".join(cells))
+            text = "\n".join(rows)
+        elif fname.endswith(".csv"):
+            text = content.decode("utf-8", errors="replace")
+        else:
+            text = content.decode("utf-8", errors="replace")
+
+    if not text:
+        ctx = _base_ctx(request, user, "requisitions")
+        ctx["error"] = "No data provided. Paste text or upload a file."
+        return templates.TemplateResponse("htmx/partials/requisitions/import_modal.html", ctx)
+
+    # AI parse
+    result = await parse_freeform_rfq(text)
+    requirements = result.get("requirements", []) if result else []
+
+    # Use AI-extracted name/customer as fallback if user left them blank
+    if not name.strip() and result:
+        name = result.get("name", "Untitled")
+    if not customer_name.strip() and result:
+        customer_name = result.get("customer_name", "")
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update(
+        {
+            "requirements": requirements,
+            "req_name": name,
+            "customer_name": customer_name,
+            "deadline": deadline,
+            "urgency": urgency,
+            "count": len(requirements),
+        }
+    )
+    return templates.TemplateResponse("htmx/partials/requisitions/import_preview.html", ctx)
+
+
+@router.post("/v2/partials/requisitions/import-save", response_class=HTMLResponse)
+async def requisition_import_save(
+    request: Request,
+    name: str = Form(...),
+    customer_name: str = Form(""),
+    deadline: str = Form(""),
+    urgency: str = Form("normal"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save AI-parsed requirements as a new requisition."""
+    from app.utils.normalization import normalize_mpn_key
+
+    form = await request.form()
+
+    # Collect requirement rows from indexed form fields
+    requirements = []
+    idx = 0
+    while f"reqs[{idx}].primary_mpn" in form:
+        mpn = form.get(f"reqs[{idx}].primary_mpn", "").strip()
+        if mpn:
+            requirements.append(
+                {
+                    "primary_mpn": mpn,
+                    "target_qty": int(form.get(f"reqs[{idx}].target_qty", "1") or "1"),
+                    "brand": form.get(f"reqs[{idx}].brand", "").strip() or None,
+                    "target_price": float(form.get(f"reqs[{idx}].target_price") or "0") or None,
+                    "condition": form.get(f"reqs[{idx}].condition", "new").strip(),
+                    "notes": form.get(f"reqs[{idx}].notes", "").strip() or None,
+                }
+            )
+        idx += 1
+
+    if not requirements:
+        ctx = _base_ctx(request, user, "requisitions")
+        ctx["error"] = "No valid parts to save."
+        return templates.TemplateResponse("htmx/partials/requisitions/import_modal.html", ctx)
+
+    # Create requisition
+    req = Requisition(
+        name=name.strip() or "Untitled",
+        customer_name=customer_name.strip() or None,
+        deadline=deadline.strip() or None,
+        urgency=urgency,
+        status="active",
+        created_by=user.id,
+    )
+    db.add(req)
+    db.flush()
+
+    # Create requirements
+    added = len(requirements)
+    for item in requirements:
+        mpn = item["primary_mpn"]
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn=mpn,
+            normalized_mpn=normalize_mpn_key(mpn),
+            target_qty=item["target_qty"],
+            target_price=item.get("target_price"),
+            brand=item.get("brand"),
+            condition=item.get("condition", ""),
+            notes=item.get("notes", ""),
+        )
+        db.add(r)
+
+    db.commit()
+
+    # Return success — close modal + refresh parts list + toast
+    return HTMLResponse(f"""
+    <div hx-trigger="load" hx-get="/v2/partials/parts" hx-target="#parts-list" hx-swap="innerHTML">
+    </div>
+    <script>
+      document.dispatchEvent(new CustomEvent('close-modal'));
+      Alpine.store('toast').message = 'Requisition created with {added} parts';
+      Alpine.store('toast').type = 'success';
+      Alpine.store('toast').show = true;
+    </script>
+    """)
 
 
 @router.get("/v2/partials/requisitions/{req_id}", response_class=HTMLResponse)
