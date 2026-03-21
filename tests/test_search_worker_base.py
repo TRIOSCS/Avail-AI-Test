@@ -494,13 +494,13 @@ class TestSharedMPNNormalizer:
     """Test the shared mpn_normalizer moved into search_worker_base."""
 
     def test_import_from_base(self):
-        from app.services.search_worker_base.mpn_normalizer import normalize_mpn as base_norm
+        from app.services.search_worker_base.mpn_normalizer import strip_packaging_suffixes as base_norm
 
         assert base_norm("LM358/TR") == "LM358"
 
     def test_matches_ics_version(self):
-        from app.services.ics_worker.mpn_normalizer import normalize_mpn as ics_norm
-        from app.services.search_worker_base.mpn_normalizer import normalize_mpn as base_norm
+        from app.services.ics_worker.mpn_normalizer import strip_packaging_suffixes as ics_norm
+        from app.services.search_worker_base.mpn_normalizer import strip_packaging_suffixes as base_norm
 
         test_cases = [
             "",
@@ -515,9 +515,9 @@ class TestSharedMPNNormalizer:
             assert base_norm(mpn) == ics_norm(mpn), f"Mismatch for {mpn!r}"
 
     def test_export_from_init(self):
-        from app.services.search_worker_base import normalize_mpn
+        from app.services.search_worker_base import strip_packaging_suffixes
 
-        assert normalize_mpn("LM358-CT") == "LM358"
+        assert strip_packaging_suffixes("LM358-CT") == "LM358"
 
 
 class TestSharedCircuitBreakerBase:

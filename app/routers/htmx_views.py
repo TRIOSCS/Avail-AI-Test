@@ -17,6 +17,7 @@ from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from loguru import logger
+from sqlalchemy import desc
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
@@ -284,6 +285,8 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/materials", response_class=HTMLResponse)
 @router.get("/v2/materials/{card_id:int}", response_class=HTMLResponse)
 @router.get("/v2/follow-ups", response_class=HTMLResponse)
+@router.get("/v2/trouble-tickets", response_class=HTMLResponse)
+@router.get("/v2/trouble-tickets/{ticket_id:int}", response_class=HTMLResponse)
 async def v2_page(request: Request, db: Session = Depends(get_db)):
     """Full page load — serves base.html with initial content via HTMX."""
 
@@ -309,6 +312,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         current_view = "materials"
     elif "/follow-ups" in path:
         current_view = "follow-ups"
+    elif "/trouble-tickets" in path:
+        current_view = "tickets"
     elif "/vendors" in path:
         current_view = "vendors"
     elif "/companies" in path:
@@ -324,6 +329,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     if current_view == "requisitions":
         # Split-panel workspace is the new default for requisitions
         partial_url = "/v2/partials/parts/workspace"
+    elif current_view == "tickets":
+        partial_url = "/v2/partials/trouble-tickets/workspace"
     else:
         partial_url = f"/v2/partials/{current_view}"
     # Pass path params for detail views
@@ -355,6 +362,10 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         parts = path.split("/prospecting/")
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/prospecting/{parts[1]}"
+    elif current_view == "tickets" and "/trouble-tickets/" in path:
+        parts = path.split("/trouble-tickets/")
+        if len(parts) > 1 and parts[1].isdigit():
+            partial_url = f"/v2/partials/trouble-tickets/{parts[1]}"
 
     ctx = _base_ctx(request, user, current_view)
     ctx["partial_url"] = partial_url
@@ -8896,6 +8907,80 @@ async def bulk_unarchive(
     db.commit()
     logger.info(
         "Bulk unarchive by {}: {} parts, {} requisitions", user.email, len(requirement_ids), len(requisition_ids)
+    )
+
+    return await parts_list_partial(request=request, user=user, db=db)
+
+
+# ── Trouble Tickets ──────────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/trouble-tickets/workspace", response_class=HTMLResponse)
+async def trouble_tickets_workspace(request: Request, user: User = Depends(require_user)):
+    """Trouble Tickets workspace — loaded into #main-content."""
+    return templates.TemplateResponse(
+        "htmx/partials/tickets/workspace.html",
+        {**_base_ctx(request, user, "tickets")},
+    )
+
+
+@router.get("/v2/partials/trouble-tickets/list", response_class=HTMLResponse)
+async def trouble_tickets_list(
+    request: Request,
+    status: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Trouble Tickets list partial — grouped by root cause, filterable by status."""
+    from app.models.root_cause_group import RootCauseGroup
+    from app.models.trouble_ticket import TroubleTicket
+
+    q = db.query(TroubleTicket).filter(TroubleTicket.source == "report_button")
+    if status:
+        q = q.filter(TroubleTicket.status == status)
+    q = q.order_by(desc(TroubleTicket.created_at))
+    total = q.count()
+    tickets = q.limit(200).all()
+
+    groups = db.query(RootCauseGroup).order_by(RootCauseGroup.title).all()
+    grouped: dict = {}
+    ungrouped = []
+    for t in tickets:
+        if t.root_cause_group_id:
+            grouped.setdefault(t.root_cause_group_id, []).append(t)
+        else:
+            ungrouped.append(t)
+
+    return templates.TemplateResponse(
+        "htmx/partials/tickets/list.html",
+        {
+            **_base_ctx(request, user, "tickets"),
+            "tickets": tickets,
+            "total": total,
+            "groups": groups,
+            "grouped": grouped,
+            "ungrouped": ungrouped,
+            "current_status": status,
+        },
+    )
+
+
+@router.get("/v2/partials/trouble-tickets/{ticket_id}", response_class=HTMLResponse)
+async def trouble_ticket_detail(
+    request: Request,
+    ticket_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Trouble Ticket detail partial — swapped into #main-content."""
+    from app.models.trouble_ticket import TroubleTicket
+
+    ticket = db.get(TroubleTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(404, "Ticket not found")
+    return templates.TemplateResponse(
+        "htmx/partials/tickets/detail.html",
+        {**_base_ctx(request, user, "tickets"), "ticket": ticket},
     )
 
     return await parts_list_partial(request=request, user=user, db=db)

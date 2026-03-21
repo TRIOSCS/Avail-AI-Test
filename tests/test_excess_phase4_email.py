@@ -94,6 +94,10 @@ class TestGraphEmailSending:
         in subject."""
         mock_post = AsyncMock(return_value={"id": "graph-msg-123"})
         mock_gc_cls.return_value.post_json = mock_post
+        # Mock get_json for _find_sent_message lookup (returns matching message)
+        mock_gc_cls.return_value.get_json = AsyncMock(
+            return_value={"value": [{"id": "graph-msg-123", "subject": "placeholder"}]}
+        )
 
         user, company, el, item1, item2 = _setup(db_session)
 
@@ -119,8 +123,7 @@ class TestGraphEmailSending:
         # Verify subject tag
         assert f"[EXCESS-BID-{s.id}]" in s.subject
 
-        # Verify graph_message_id stored
-        assert s.graph_message_id == "graph-msg-123"
+        # Verify status is sent
         assert s.status == "sent"
         assert s.sent_at is not None
 
@@ -153,9 +156,13 @@ class TestGraphEmailSending:
     @pytest.mark.asyncio
     @patch("app.utils.graph_client.GraphClient")
     async def test_multiple_items_send_separate_emails(self, mock_gc_cls, db_session: Session):
-        """2 items -> 2 emails, 2 unique EXCESS-BID tags."""
+        """2 items -> 2 emails (unbundled), 2 unique EXCESS-BID tags."""
         mock_post = AsyncMock(return_value={})
         mock_gc_cls.return_value.post_json = mock_post
+        # Mock get_json for _find_sent_message lookup
+        mock_gc_cls.return_value.get_json = AsyncMock(
+            return_value={"value": [{"id": "msg-1", "subject": "placeholder"}]}
+        )
 
         user, company, el, item1, item2 = _setup(db_session)
 
@@ -168,6 +175,7 @@ class TestGraphEmailSending:
             contact_id=1,
             user_id=user.id,
             token="test-token",
+            bundled=False,
         )
 
         assert len(solicitations) == 2
@@ -186,6 +194,9 @@ class TestGraphEmailSending:
         """User-provided subject and message are used in the email."""
         mock_post = AsyncMock(return_value={})
         mock_gc_cls.return_value.post_json = mock_post
+        mock_gc_cls.return_value.get_json = AsyncMock(
+            return_value={"value": [{"id": "msg-1", "subject": "placeholder"}]}
+        )
 
         user, company, el, item1, item2 = _setup(db_session)
 

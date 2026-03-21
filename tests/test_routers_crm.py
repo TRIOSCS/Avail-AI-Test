@@ -2669,8 +2669,9 @@ class TestOneDrive:
         )
         assert resp.status_code == 400
 
+    @patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token")
     @patch("app.http_client.http.put", new_callable=AsyncMock)
-    def test_upload_attachment_success(self, mock_http_put, client, db_session, test_offer, test_user):
+    def test_upload_attachment_success(self, mock_http_put, mock_token, client, db_session, test_offer, test_user):
         import io
 
         test_user.access_token = "fake-token"
@@ -2690,8 +2691,11 @@ class TestOneDrive:
         assert data["file_name"] == "test.pdf"
         assert data["onedrive_url"] == "https://onedrive.com/file"
 
+    @patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token")
     @patch("app.http_client.http.put", new_callable=AsyncMock)
-    def test_upload_attachment_onedrive_error(self, mock_http_put, client, db_session, test_offer, test_user):
+    def test_upload_attachment_onedrive_error(
+        self, mock_http_put, mock_token, client, db_session, test_offer, test_user
+    ):
         import io
 
         test_user.access_token = "fake-token"

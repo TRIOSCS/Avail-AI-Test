@@ -26,7 +26,7 @@ from app.services.nc_worker.monitoring import (
     check_html_structure_hash,
     log_daily_report,
 )
-from app.services.nc_worker.mpn_normalizer import normalize_mpn
+from app.services.nc_worker.mpn_normalizer import strip_packaging_suffixes as normalize_mpn
 from app.services.nc_worker.queue_manager import (
     enqueue_for_nc_search,
     get_next_queued_item,

@@ -84,7 +84,6 @@ JUNK_EMAIL_PREFIXES: set[str] = {
     "newsletter",
     "marketing",
     "support",
-    "info",
     "billing",
     "privacy",
     "abuse",

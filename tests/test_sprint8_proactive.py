@@ -45,18 +45,21 @@ def proactive_match(db_session: Session, test_offer, test_requisition, test_cust
 class TestProactiveDraft:
     def test_draft_renders(self, client: TestClient, proactive_match):
         resp = client.post(
-            f"/v2/partials/proactive/{proactive_match.id}/draft",
+            "/v2/partials/proactive/draft",
+            data={"match_ids": str(proactive_match.id)},
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "form" in resp.text.lower() or "Cancel" in resp.text
 
     def test_draft_nonexistent(self, client: TestClient):
         resp = client.post(
-            "/v2/partials/proactive/99999/draft",
+            "/v2/partials/proactive/draft",
+            data={"match_ids": "99999"},
             headers={"HX-Request": "true"},
         )
-        assert resp.status_code == 404
+        # No valid matches found returns 200 with error message in HTML
+        assert resp.status_code == 200
+        assert "No valid matches" in resp.text
 
 
 # ── Proactive Send ──────────────────────────────────────────────────

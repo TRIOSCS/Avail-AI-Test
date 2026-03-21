@@ -376,7 +376,7 @@ class TestTroubleTicketForm:
         resp = client.get("/api/trouble-tickets/form")
         assert resp.status_code == 200
         assert "Report a Problem" in resp.text
-        assert 'name="message"' in resp.text
+        assert 'id="tr-description"' in resp.text
 
     def test_submit_creates_ticket(self, client, db_session):
         resp = client.post(
