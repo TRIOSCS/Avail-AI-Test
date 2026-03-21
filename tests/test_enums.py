@@ -1,51 +1,61 @@
-"""Tests for app/enums.py — verify enum values match expected strings."""
+"""Tests for app/constants.py — verify StrEnum values match expected strings.
 
-from app.enums import OfferStatus, QuoteStatus, RequirementSourcingStatus, RequisitionStatus, UserRole
+Called by: pytest
+Depends on: app.constants
+"""
+
+from app.constants import (
+    OfferStatus,
+    QuoteStatus,
+    RequisitionStatus,
+    SourcingStatus,
+    UserRole,
+)
 
 
 def test_requisition_status_values():
-    assert RequisitionStatus.draft == "draft"
-    assert RequisitionStatus.active == "active"
-    assert RequisitionStatus.sourcing == "sourcing"
-    assert RequisitionStatus.offers == "offers"
-    assert RequisitionStatus.quoting == "quoting"
-    assert RequisitionStatus.quoted == "quoted"
-    assert RequisitionStatus.reopened == "reopened"
-    assert RequisitionStatus.won == "won"
-    assert RequisitionStatus.lost == "lost"
-    assert RequisitionStatus.archived == "archived"
+    assert RequisitionStatus.DRAFT == "draft"
+    assert RequisitionStatus.ACTIVE == "active"
+    assert RequisitionStatus.SOURCING == "sourcing"
+    assert RequisitionStatus.OFFERS == "offers"
+    assert RequisitionStatus.QUOTING == "quoting"
+    assert RequisitionStatus.QUOTED == "quoted"
+    assert RequisitionStatus.REOPENED == "reopened"
+    assert RequisitionStatus.WON == "won"
+    assert RequisitionStatus.LOST == "lost"
+    assert RequisitionStatus.ARCHIVED == "archived"
 
 
 def test_offer_status_values():
-    assert OfferStatus.active == "active"
-    assert OfferStatus.rejected == "rejected"
-    assert OfferStatus.sold == "sold"
-    assert OfferStatus.won == "won"
+    assert OfferStatus.ACTIVE == "active"
+    assert OfferStatus.REJECTED == "rejected"
+    assert OfferStatus.SOLD == "sold"
+    assert OfferStatus.WON == "won"
 
 
 def test_quote_status_values():
-    assert QuoteStatus.draft == "draft"
-    assert QuoteStatus.sent == "sent"
-    assert QuoteStatus.won == "won"
-    assert QuoteStatus.lost == "lost"
-    assert QuoteStatus.revised == "revised"
+    assert QuoteStatus.DRAFT == "draft"
+    assert QuoteStatus.SENT == "sent"
+    assert QuoteStatus.WON == "won"
+    assert QuoteStatus.LOST == "lost"
+    assert QuoteStatus.REVISED == "revised"
 
 
 def test_user_role_values():
-    assert UserRole.buyer == "buyer"
-    assert UserRole.sales == "sales"
-    assert UserRole.trader == "trader"
-    assert UserRole.manager == "manager"
-    assert UserRole.admin == "admin"
+    assert UserRole.BUYER == "buyer"
+    assert UserRole.SALES == "sales"
+    assert UserRole.TRADER == "trader"
+    assert UserRole.MANAGER == "manager"
+    assert UserRole.ADMIN == "admin"
 
 
-def test_requirement_sourcing_status_has_archived():
-    assert RequirementSourcingStatus.archived == "archived"
-    assert "archived" in [s.value for s in RequirementSourcingStatus]
+def test_sourcing_status_has_archived():
+    assert SourcingStatus.ARCHIVED == "archived"
+    assert "archived" in [s.value for s in SourcingStatus]
 
 
 def test_enum_is_str():
     """StrEnum values are equal to plain strings."""
-    assert RequisitionStatus.active == "active"
-    assert "active" == RequisitionStatus.active
-    assert RequisitionStatus.active in {"active", "sourcing"}
+    assert RequisitionStatus.ACTIVE == "active"
+    assert "active" == RequisitionStatus.ACTIVE
+    assert RequisitionStatus.ACTIVE in {"active", "sourcing"}

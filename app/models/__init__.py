@@ -103,6 +103,7 @@ from .quotes import Quote, QuoteLine  # noqa: F401
 
 # Risk Flags (structured deal intelligence)
 from .risk_flag import RiskFlag  # noqa: F401
+from .root_cause_group import RootCauseGroup  # noqa: F401
 
 # Core: Requisitions, Requirements & Attachments
 from .sourcing import (  # noqa: F401

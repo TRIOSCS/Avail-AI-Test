@@ -3,8 +3,9 @@
 Replaces scattered string literals with type-safe enums that are
 drop-in compatible (StrEnum members compare equal to their string values).
 
-Called by: models/intelligence.py, services/proactive_matching.py,
-           email_service.py, routers/proactive.py
+Single source of truth — supersedes the older app/enums.py (str, Enum) style.
+
+Called by: models, routers, services
 Depends on: nothing (leaf module)
 """
 
@@ -33,6 +34,7 @@ class ContactStatus(StrEnum):
     OPENED = "opened"
     OOO = "ooo"
     BOUNCED = "bounced"
+    RETRIED = "retried"
 
 
 class MatchMethod(StrEnum):
@@ -75,6 +77,7 @@ class OfferStatus(StrEnum):
     APPROVED = "approved"
     REJECTED = "rejected"
     SOLD = "sold"
+    WON = "won"
 
 
 class AttributionStatus(StrEnum):
@@ -88,12 +91,21 @@ class AttributionStatus(StrEnum):
 class RequisitionStatus(StrEnum):
     """Status lifecycle for Requisition records."""
 
+    DRAFT = "draft"
     ACTIVE = "active"
+    SOURCING = "sourcing"
+    OFFERS = "offers"
+    QUOTING = "quoting"
+    QUOTED = "quoted"
+    REOPENED = "reopened"
+    WON = "won"
+    LOST = "lost"
     ARCHIVED = "archived"
 
 
 class SourcingStatus(StrEnum):
-    """Status lifecycle for Requirement sourcing progress."""
+    """Status lifecycle for Requirement sourcing progress (per-part within a
+    requisition)."""
 
     OPEN = "open"
     SOURCING = "sourcing"
@@ -101,6 +113,7 @@ class SourcingStatus(StrEnum):
     QUOTED = "quoted"
     WON = "won"
     LOST = "lost"
+    ARCHIVED = "archived"
 
 
 class ExcessListStatus(StrEnum):
@@ -147,3 +160,31 @@ class QuoteStatus(StrEnum):
 
     DRAFT = "draft"
     SENT = "sent"
+    WON = "won"
+    LOST = "lost"
+    REVISED = "revised"
+
+
+class VendorResponseStatus(StrEnum):
+    """Vendor response queue status."""
+
+    NEW = "new"
+    REVIEWED = "reviewed"
+    REJECTED = "rejected"
+
+
+class UserRole(StrEnum):
+    """User role assignments."""
+
+    BUYER = "buyer"
+    SALES = "sales"
+    TRADER = "trader"
+    MANAGER = "manager"
+    ADMIN = "admin"
+
+
+class ProactiveOfferStatus(StrEnum):
+    """Status lifecycle for ProactiveOffer records."""
+
+    SENT = "sent"
+    CONVERTED = "converted"

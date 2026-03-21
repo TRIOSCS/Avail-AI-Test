@@ -26,12 +26,10 @@ class TestSanitizeText:
         assert sanitize_text("a & b") == "a &amp; b"
 
     def test_angle_brackets_in_tag_like_pattern_stripped(self):
-        # `< 2 >` matches _TAG_RE as a tag-like pattern and gets stripped
         result = sanitize_text("1 < 2 > 0")
         assert result == "1  0"
 
     def test_lone_angle_brackets_escaped(self):
-        # A bare `<` without a closing `>` is not a tag — it survives and gets escaped
         assert sanitize_text("a < b") == "a &lt; b"
 
     def test_quotes_escaped(self):

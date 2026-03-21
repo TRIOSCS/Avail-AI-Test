@@ -476,6 +476,9 @@ async def import_stock_list_standalone(
             except IntegrityError:
                 db.rollback()
                 card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
+                if not card:
+                    skipped += 1
+                    continue
 
         # Upsert MaterialVendorHistory
         mvh = db.query(MaterialVendorHistory).filter_by(material_card_id=card.id, vendor_name=norm_vendor).first()

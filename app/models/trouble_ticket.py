@@ -84,6 +84,13 @@ class TroubleTicket(Base):
     performance_timings = Column(JSON)
     reproduction_steps = Column(JSON)
 
+    # Trouble Ticket Redesign (2026-03-21)
+    screenshot_path = Column(String(255))
+    ai_summary = Column(Text)
+    root_cause_group_id = Column(Integer, ForeignKey("root_cause_groups.id", ondelete="SET NULL"))
+
+    root_cause_group = relationship("RootCauseGroup", foreign_keys=[root_cause_group_id])
+
     submitter = relationship("User", foreign_keys=[submitted_by])
     resolved_by = relationship("User", foreign_keys=[resolved_by_id])
     parent_ticket = relationship("TroubleTicket", remote_side=[id], foreign_keys=[parent_ticket_id])

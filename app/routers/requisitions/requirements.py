@@ -1161,6 +1161,8 @@ async def import_stock_list(
     content = await file.read()
     if len(content) > 10_000_000:
         raise HTTPException(413, "File too large — 10MB maximum")
+    if not file.filename:
+        raise HTTPException(400, "Uploaded file has no filename")
     fname = file.filename.lower()
 
     from ...file_utils import parse_tabular_file

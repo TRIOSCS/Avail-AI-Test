@@ -30,10 +30,10 @@ def _constraint_exists(name: str) -> bool:
     """Check whether a constraint already exists (PostgreSQL)."""
     conn = op.get_bind()
     result = conn.execute(
-        sa.text("SELECT 1 FROM information_schema.table_constraints WHERE constraint_name = :name"),
+        sa.text("SELECT 1 FROM pg_constraint WHERE conname = :name"),
         {"name": name},
     )
-    return result.scalar() is not None
+    return result.fetchone() is not None
 
 
 # (constraint_name, table, expression)

@@ -15,7 +15,7 @@ from datetime import datetime, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from ..enums import RequirementSourcingStatus
+from ..constants import SourcingStatus as RequirementSourcingStatus
 from ..models import ActivityLog, Requirement, Requisition, User
 
 # Valid per-part status transitions

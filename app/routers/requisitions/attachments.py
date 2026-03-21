@@ -228,6 +228,8 @@ async def upload_requirement_attachment(
         raise HTTPException(401, "Microsoft account not connected — please re-login")
     from ...http_client import http
 
+    if not file.filename:
+        raise HTTPException(400, "Uploaded file has no filename")
     safe_name = file.filename.replace("/", "_").replace("\\", "_")
     drive_path = f"/me/drive/root:/AvailAI/Requirements/{req_id}/{safe_name}:/content"
     resp = await http.put(

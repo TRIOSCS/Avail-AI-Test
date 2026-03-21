@@ -14,7 +14,7 @@ os.environ["TESTING"] = "1"
 
 import pytest
 
-from app.enums import RequisitionStatus
+from app.constants import RequisitionStatus
 from app.models import ActivityLog
 from app.services.requisition_state import ALLOWED_TRANSITIONS, transition
 
@@ -31,7 +31,7 @@ class TestTransition:
         test_requisition.status = "active"
         db_session.commit()
 
-        transition(test_requisition, RequisitionStatus.offers, test_user, db_session)
+        transition(test_requisition, RequisitionStatus.OFFERS, test_user, db_session)
         assert test_requisition.status == "offers"
 
     def test_illegal_transition_raises(self, db_session, test_requisition, test_user):

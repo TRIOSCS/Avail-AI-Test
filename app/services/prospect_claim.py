@@ -350,6 +350,9 @@ async def trigger_deep_enrichment_bg(prospect_id: int) -> None:
 
         # Step 3: Update prospect with results
         prospect = db.get(ProspectAccount, prospect_id)
+        if not prospect:
+            logger.error("Deep enrichment: prospect {} disappeared after async steps", prospect_id)
+            return
         ed = dict(prospect.enrichment_data or {})
         ed["claim_enrichment_status"] = "complete"
         ed["contacts_created_count"] = len(contacts_created)

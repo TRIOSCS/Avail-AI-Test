@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 
 import pytest
 
-from app.enums import RequirementSourcingStatus
+from app.constants import SourcingStatus as RequirementSourcingStatus
 from app.models import ActivityLog, User
 from app.services.requirement_status import (
     ALLOWED_TRANSITIONS,
@@ -46,7 +46,7 @@ class TestTransitionRequirement:
         req_item.sourcing_status = "open"
         db_session.commit()
 
-        changed = transition_requirement(req_item, RequirementSourcingStatus.offered, db_session, actor=test_user)
+        changed = transition_requirement(req_item, RequirementSourcingStatus.OFFERED, db_session, actor=test_user)
         assert changed is True
         assert req_item.sourcing_status == "offered"
 

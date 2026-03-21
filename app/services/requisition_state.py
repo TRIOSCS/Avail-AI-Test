@@ -10,7 +10,7 @@ Depends on: enums.py, models (ActivityLog)
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from ..enums import RequisitionStatus
+from ..constants import RequisitionStatus
 from ..models import ActivityLog
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
