@@ -47,12 +47,12 @@
         <thead class="bg-gray-50 sticky top-0">
           <tr class="text-left text-[10px] font-semibold text-gray-500 uppercase">
             <th class="px-2 py-2">MPN</th>
+            <th class="px-2 py-2">Subs</th>
             <th class="px-2 py-2">Qty</th>
             <th class="px-2 py-2">Brand</th>
             <th class="px-2 py-2">Target $</th>
-            <th class="px-2 py-2">Cond</th>
-            <th class="px-2 py-2">Subs</th>
             <th class="px-2 py-2">Cust PN</th>
+            <th class="px-2 py-2">Cond</th>
             <th class="px-2 py-2">Date Code</th>
             <th class="px-2 py-2">Pkg</th>
             <th class="px-2 py-2">FW</th>
@@ -71,6 +71,12 @@
                      class="w-full min-w-[120px] px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 font-mono"
                      required>
             </td>
+            <td class="px-2 py-1" x-data="{ subs: '{{ (r.substitutes or [])|join(", ") }}' }">
+              <input type="text" name="reqs[{{ loop.index0 }}].substitutes"
+                     x-model="subs"
+                     placeholder="Comma-separated"
+                     class="w-full min-w-[100px] px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 font-mono">
+            </td>
             <td class="px-2 py-1">
               <input type="number" name="reqs[{{ loop.index0 }}].target_qty"
                      value="{{ r.target_qty or 1 }}" min="1"
@@ -87,23 +93,17 @@
                      class="w-24 px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
             </td>
             <td class="px-2 py-1">
+              <input type="text" name="reqs[{{ loop.index0 }}].customer_pn"
+                     value="{{ r.customer_pn or '' }}"
+                     class="w-full min-w-[80px] px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+            </td>
+            <td class="px-2 py-1">
               <select name="reqs[{{ loop.index0 }}].condition"
                       class="px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
                 <option value="new" {{ 'selected' if (r.condition or 'new') == 'new' }}>New</option>
                 <option value="refurbished" {{ 'selected' if r.condition == 'refurbished' }}>Refurb</option>
                 <option value="used" {{ 'selected' if r.condition == 'used' }}>Used</option>
               </select>
-            </td>
-            <td class="px-2 py-1" x-data="{ subs: '{{ (r.substitutes or [])|join(", ") }}' }">
-              <input type="text" name="reqs[{{ loop.index0 }}].substitutes"
-                     x-model="subs"
-                     placeholder="Comma-separated"
-                     class="w-full min-w-[100px] px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 font-mono">
-            </td>
-            <td class="px-2 py-1">
-              <input type="text" name="reqs[{{ loop.index0 }}].customer_pn"
-                     value="{{ r.customer_pn or '' }}"
-                     class="w-full min-w-[80px] px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
             </td>
             <td class="px-2 py-1">
               <input type="text" name="reqs[{{ loop.index0 }}].date_codes"
