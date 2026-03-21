@@ -1,8 +1,21 @@
-{# Excess Inventory list partial — searchable, filterable table with create modal.
-   Receives: lists, total, limit, offset, companies, q, status_filter, user, request.
+{# Resell list partial — searchable, filterable, sortable table with create modal.
+   Receives: lists, total, limit, offset, companies, q, status_filter, user, request,
+             owner_id, owners, sort_by, sort_dir.
    Called by: partial_excess_list route.
    Depends on: excess/row.html, brand palette, Alpine.js modal system.
 #}
+
+{# Sort header macro #}
+{% macro sort_header(label, field, align="left") %}
+<th class="px-4 py-3 text-{{ align }} text-xs font-medium text-gray-500 uppercase tracking-wider cursor-pointer hover:text-brand-600"
+    hx-get="/v2/partials/resell?sort_by={{ field }}&sort_dir={{ 'asc' if sort_by == field and sort_dir == 'desc' else 'desc' }}&q={{ q }}&status={{ status_filter }}&owner_id={{ owner_id if owner_id is not none else '' }}"
+    hx-target="#main-content" hx-push-url="true">
+  {{ label }}
+  {% if sort_by == field %}
+  <span class="ml-0.5">{{ "&#9650;" if sort_dir == "asc" else "&#9660;" }}</span>
+  {% endif %}
+</th>
+{% endmacro %}
 
 <div class="max-w-7xl mx-auto">
 
@@ -12,7 +25,7 @@
       <p class="text-sm text-gray-500 mt-1">{{ total }} list{{ "s" if total != 1 else "" }}</p>
     </div>
     <button @click="$dispatch('open-modal')"
-            hx-get="/v2/partials/excess/create-form"
+            hx-get="/v2/partials/resell/create-form"
             hx-target="#modal-content"
             data-loading-disable
             class="inline-flex items-center px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors">
@@ -22,32 +35,7 @@
     </button>
   </div>
 
-  {# Stats cards #}
-  {% if stats %}
-  <div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-6">
-    {% set cards = [
-      ("Total Lists", stats.total_lists, "M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"),
-      ("Total Items", stats.total_line_items, "M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"),
-      ("Pending Bids", stats.pending_bids, "M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"),
-      ("Awarded", stats.awarded_items, "M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"),
-    ] %}
-    {% for label, value, icon_path in cards %}
-    <div class="bg-white rounded-lg border border-gray-200 px-4 py-3 flex items-center gap-3">
-      <div class="flex-shrink-0 w-9 h-9 rounded-lg bg-brand-50 flex items-center justify-center">
-        <svg class="h-4 w-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="{{ icon_path }}"/>
-        </svg>
-      </div>
-      <div>
-        <p class="text-lg font-bold text-gray-900 tabular-nums">{{ value }}</p>
-        <p class="text-[10px] text-gray-500 uppercase tracking-wider">{{ label }}</p>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  {% endif %}
-
-  {# Filter bar: search + status pills #}
+  {# Filter bar: search + status pills + owner dropdown #}
   <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
     <div class="flex flex-wrap gap-3 items-center">
       {# Search input #}
@@ -56,12 +44,26 @@
           <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
         </svg>
         <input type="text" name="q" value="{{ q }}" placeholder="Search lists..."
-               hx-get="/v2/partials/excess" hx-target="#main-content" hx-push-url="true"
+               hx-get="/v2/partials/resell" hx-target="#main-content" hx-push-url="true"
                hx-swap="morph"
                hx-trigger="keyup changed delay:300ms"
-               hx-include="[name='status']"
+               hx-include="[name='status'], [name='owner_id']"
                class="w-full pl-10 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
       </div>
+
+      {# Owner dropdown #}
+      <select name="owner_id"
+              hx-get="/v2/partials/resell" hx-target="#main-content" hx-push-url="true"
+              hx-include="[name='q'], [name='status']"
+              class="px-3 py-1.5 border border-gray-200 rounded-lg text-sm">
+        <option value="{{ user.id }}" {{ "selected" if owner_id == user.id }}>My Lists</option>
+        <option value="0" {{ "selected" if owner_id is none }}>All</option>
+        {% for o in owners %}
+        {% if o.id != user.id %}
+        <option value="{{ o.id }}" {{ "selected" if owner_id == o.id }}>{{ o.name }}</option>
+        {% endif %}
+        {% endfor %}
+      </select>
 
       {# Status pills #}
       <input type="hidden" name="status" value="{{ status_filter }}">
@@ -79,7 +81,7 @@
         "closed": "ring-2 ring-slate-400",
       } %}
       {% for s in statuses %}
-      <a hx-get="/v2/partials/excess?status={{ '' if status_filter == s else s }}&q={{ q }}"
+      <a hx-get="/v2/partials/resell?status={{ '' if status_filter == s else s }}&q={{ q }}&owner_id={{ owner_id if owner_id is not none else '' }}"
          hx-target="#main-content" hx-push-url="true" hx-swap="morph"
          class="inline-flex px-3 py-1 text-xs font-medium rounded-full cursor-pointer transition-all {{ pill_colors[s] }} {{ pill_active[s] if status_filter == s else '' }}">
         {{ s|capitalize }}
@@ -95,17 +97,17 @@
       <table class="min-w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Title</th>
+            {{ sort_header("Title", "title") }}
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Company</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Status</th>
-            <th class="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase tracking-wider">Line Items</th>
-            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Created</th>
+            {{ sort_header("Status", "status") }}
+            {{ sort_header("Line Items", "total_line_items", "center") }}
+            {{ sort_header("Created", "created_at") }}
             <th class="px-4 py-3 w-10"></th>
           </tr>
         </thead>
         <tbody id="excess-table-body" class="divide-y divide-gray-200">
           {% for list in lists %}
-          {% include "htmx/partials/excess/row.html" %}
+          {% include "htmx/partials/resell/row.html" %}
           {% endfor %}
         </tbody>
       </table>
@@ -117,13 +119,13 @@
   <div class="mt-4 flex justify-center">
     <nav class="flex gap-1 items-center">
       {% if offset > 0 %}
-      <a hx-get="/v2/partials/excess?offset={{ offset - limit }}&q={{ q }}&status={{ status_filter }}"
+      <a hx-get="/v2/partials/resell?offset={{ offset - limit }}&q={{ q }}&status={{ status_filter }}&owner_id={{ owner_id if owner_id is not none else '' }}&sort_by={{ sort_by }}&sort_dir={{ sort_dir }}"
          hx-target="#main-content" hx-swap="morph"
          class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
       {% endif %}
       <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
       {% if offset + limit < total %}
-      <a hx-get="/v2/partials/excess?offset={{ offset + limit }}&q={{ q }}&status={{ status_filter }}"
+      <a hx-get="/v2/partials/resell?offset={{ offset + limit }}&q={{ q }}&status={{ status_filter }}&owner_id={{ owner_id if owner_id is not none else '' }}&sort_by={{ sort_by }}&sort_dir={{ sort_dir }}"
          hx-target="#main-content" hx-swap="morph"
          class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
       {% endif %}
@@ -137,18 +139,18 @@
     <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
       <path stroke-linecap="round" stroke-linejoin="round" d="M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4"/>
     </svg>
-    <h3 class="mt-3 text-sm font-medium text-gray-900">No excess lists</h3>
+    <h3 class="mt-3 text-sm font-medium text-gray-900">No resell lists</h3>
     <p class="mt-1 text-sm text-gray-500">
       {% if q or status_filter %}
-        No lists match your filters. <a hx-get="/v2/partials/excess" hx-target="#main-content" hx-push-url="true" class="text-brand-500 hover:text-brand-600 cursor-pointer">Clear filters</a>
+        No lists match your filters. <a hx-get="/v2/partials/resell" hx-target="#main-content" hx-push-url="true" class="text-brand-500 hover:text-brand-600 cursor-pointer">Clear filters</a>
       {% else %}
-        Get started by creating your first excess inventory list.
+        Get started by creating your first resell list.
       {% endif %}
     </p>
     {% if not q and not status_filter %}
     <div class="mt-4">
       <button @click="$dispatch('open-modal')"
-              hx-get="/v2/partials/excess/create-form"
+              hx-get="/v2/partials/resell/create-form"
               hx-target="#modal-content"
               class="inline-flex items-center px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors">
         <svg class="h-4 w-4 mr-1.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>

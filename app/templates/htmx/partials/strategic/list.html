@@ -6,15 +6,10 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
-<div id="breadcrumb" hx-swap-oob="true">
-  <span class="text-brand-600 font-medium">My Vendors</span>
-</div>
-
 <div class="max-w-7xl mx-auto" x-data="{ showPool: false }">
   {# Header with slot info #}
   <div class="flex items-center justify-between mb-4">
     <div>
-      <h1 class="text-2xl font-bold text-gray-900">My Strategic Vendors</h1>
       <p class="text-sm text-gray-500 mt-1">
         <span class="font-medium text-gray-700">{{ slot_count }}</span> of
         <span class="font-medium text-gray-700">{{ max_slots }}</span> slots used

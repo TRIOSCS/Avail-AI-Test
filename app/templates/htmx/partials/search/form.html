@@ -3,12 +3,7 @@
    Called by: htmx_views.search_form_partial
    Depends on: partials/search/results.html (loaded into #search-results by form post) #}
 
-<div id="breadcrumb" hx-swap-oob="true">Part Search</div>
-
 <div class="max-w-7xl mx-auto space-y-3">
-  {# Header #}
-  <h1 class="text-xl font-bold text-gray-900 tracking-tight">Part Search</h1>
-
   {# Search form card #}
   <div class="bg-white border border-brand-200 rounded-lg shadow-sm p-3">
     <form hx-post="/v2/partials/search/run"

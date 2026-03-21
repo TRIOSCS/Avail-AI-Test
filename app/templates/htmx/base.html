@@ -96,13 +96,7 @@
           "
           @_tt-capture.window="
             var doCapture = window.html2canvas ? html2canvas(document.body, {scale:0.5, logging:false, useCORS:true}).then(function(c){return c.toDataURL('image/png')}) : Promise.resolve(null);
-            doCapture.then(function(img){
-              window._ttScreenshot = img;
-              htmx.ajax('GET', '/api/trouble-tickets/form', {target:'#modal-content'});
-              $dispatch('open-modal');
-              capturing = false;
-            }).catch(function(){
-              window._ttScreenshot = null;
+            doCapture.then(function(img){ window._ttScreenshot = img; }).catch(function(){ window._ttScreenshot = null; }).finally(function(){
               htmx.ajax('GET', '/api/trouble-tickets/form', {target:'#modal-content'});
               $dispatch('open-modal');
               capturing = false;
@@ -118,9 +112,6 @@
       </div>
     </div>
   </header>
-  {# Breadcrumb sink — absorbs OOB swaps, always hidden #}
-  <div id="breadcrumb" class="hidden" aria-hidden="true"></div>
-
   {# ── Page-level loading bar ──────────────────────────────────── #}
   <div id="page-loading-bar" class="fixed top-0 left-0 right-0 h-0.5 z-50 bg-brand-500 origin-left scale-x-0 transition-transform duration-300"
        style="display: none;"></div>
@@ -174,9 +165,6 @@
   </nav>
 
   {% endblock %}
-
-  {# ── Trouble report button (bottom-right) ─────────────────── #}
-  {% include "htmx/partials/shared/trouble_report_button.html" %}
 
   {# ── Modal (global) ──────────────────────────────────────────── #}
   <div x-data="{ open: false }" x-show="open" x-cloak x-transition

@@ -6,15 +6,10 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
-<div id="breadcrumb" hx-swap-oob="true">
-  <span class="text-brand-600 font-medium">Proactive</span>
-</div>
-
 <div class="max-w-7xl mx-auto" x-data="{ showScorecard: false }">
   {# Header #}
   <div class="flex items-center justify-between mb-6">
     <div>
-      <h1 class="text-2xl font-bold text-gray-900">Proactive Part Match</h1>
       <p class="text-sm text-gray-500 mt-1">AI-matched vendor stock to customer purchase history</p>
     </div>
     <button @click="showScorecard = !showScorecard"

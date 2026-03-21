@@ -5,15 +5,12 @@
   Called by: htmx_views.py buy_plans_list_partial endpoint.
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
-{# OOB breadcrumb update #}
-<div id="breadcrumb" hx-swap-oob="true">Buy Plans</div>
 <title hx-swap-oob="true">Buy Plans — AvailAI</title>
 
 <div class="max-w-7xl mx-auto" x-data="{ status: '{{ status }}', mine: {{ 'true' if mine else 'false' }} }">
 
   {# Header #}
   <div class="flex items-center justify-between mb-4">
-    <h1 class="text-2xl font-bold text-gray-900">Buy Plans</h1>
     <span class="text-sm text-gray-500">{{ total }} total</span>
   </div>
 

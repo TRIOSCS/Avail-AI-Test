@@ -6,12 +6,6 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS.
 #}
 
-<div id="breadcrumb" hx-swap-oob="true">
-  <a hx-get="/v2/partials/proactive?tab=matches" hx-target="#main-content" class="text-brand-600 hover:underline">Proactive</a>
-  <span class="text-gray-400 mx-1">/</span>
-  <span class="text-brand-600 font-medium">Prepare Offer</span>
-</div>
-
 <div class="max-w-4xl mx-auto"
      x-data="{
        selectedContacts: {

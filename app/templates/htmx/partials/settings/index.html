@@ -5,11 +5,7 @@
   Depends on: HTMX, Alpine.js, Tailwind CSS with brand palette.
 #}
 
-<div id="breadcrumb" hx-swap-oob="true">Settings</div>
-
 <div class="max-w-7xl mx-auto" x-data="{ tab: '{{ active_tab }}' }">
-  <h1 class="text-2xl font-bold text-gray-900 mb-6">Settings</h1>
-
   {# Tab buttons #}
   <div class="flex gap-1 mb-6 border-b border-brand-200">
     <button @click="tab = 'sources'"

@@ -5,14 +5,9 @@
   Depends on: HTMX, Tailwind CSS with brand palette.
 #}
 
-<div id="breadcrumb" hx-swap-oob="true">
-  <span class="text-brand-600 font-medium">Offer Review</span>
-</div>
-
 <div id="review-queue-content" class="max-w-7xl mx-auto">
   <div class="flex items-center justify-between mb-6">
     <div>
-      <h1 class="text-2xl font-bold text-gray-900">Offer Review Queue</h1>
       <p class="text-sm text-gray-500 mt-1">
         <span class="font-medium text-amber-600">{{ offers|length }}</span> offer{{ 's' if offers|length != 1 }} pending review
       </p>

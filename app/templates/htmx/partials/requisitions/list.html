@@ -5,15 +5,11 @@
    Depends on: partials/requisitions/req_row.html, brand palette.
 #}
 
-{# OOB breadcrumb update #}
-<div id="breadcrumb" hx-swap-oob="true">Requisitions</div>
-
 <div class="max-w-7xl mx-auto" x-data="{ selectedIds: new Set() }">
 
   {# Header #}
   <div class="flex items-center justify-between mb-4">
     <div>
-      <h1 class="text-2xl font-bold text-gray-900">Requisitions</h1>
       <p class="text-sm text-gray-500 mt-1">{{ total }} total</p>
     </div>
     <button @click="$dispatch('open-modal')"

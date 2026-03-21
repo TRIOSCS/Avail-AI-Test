@@ -7,12 +7,10 @@
 #}
 {% from "htmx/partials/shared/_macros.html" import status_badge %}
 
-<div id="breadcrumb" hx-swap-oob="true">Quotes</div>
 <title hx-swap-oob="true">Quotes — AvailAI</title>
 
 <div class="max-w-7xl mx-auto" x-data="{ currentStatus: '{{ status }}' }">
   <div class="flex items-center justify-between mb-4">
-    <h1 class="text-2xl font-bold text-gray-900">Quotes</h1>
     <span class="text-sm text-gray-500">{{ total }} total</span>
   </div>
 

@@ -6,28 +6,6 @@
    Context vars: lead, evidence, evidence_by_category, category_labels, requirement,
                  vendor_card, best_sighting #}
 
-{# OOB breadcrumb #}
-<div id="breadcrumb" hx-swap-oob="true">
-  <a href="/requisitions" hx-get="/v2/partials/requisitions" hx-target="#main-content"
-     hx-push-url="true" class="text-brand-500 hover:text-brand-600">Requisitions</a>
-  <span class="text-gray-400 mx-1">/</span>
-  <a href="/requisitions/{{ lead.requisition_id }}"
-     hx-get="/v2/partials/requisitions/{{ lead.requisition_id }}"
-     hx-target="#main-content" hx-push-url="true"
-     class="text-brand-500 hover:text-brand-600">
-    {{ requirement.requisition.name if requirement and requirement.requisition else '' }}
-  </a>
-  <span class="text-gray-400 mx-1">/</span>
-  <a href="/sourcing/{{ lead.requirement_id }}"
-     hx-get="/v2/partials/sourcing/{{ lead.requirement_id }}"
-     hx-target="#main-content" hx-push-url="true"
-     class="text-brand-500 hover:text-brand-600">
-    {{ requirement.primary_mpn if requirement else '' }}
-  </a>
-  <span class="text-gray-400 mx-1">/</span>
-  <span class="text-gray-900">{{ lead.vendor_name }}</span>
-</div>
-
 <div class="space-y-6 max-w-4xl">
 
   {# ===== Lead Summary Card ===== #}
