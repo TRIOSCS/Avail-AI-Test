@@ -55,8 +55,11 @@ router = APIRouter(tags=["vendors"])
 @router.get("/api/materials")
 async def list_materials(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
     q = request.query_params.get("q", "").strip().lower()
-    limit = min(int(request.query_params.get("limit", "200")), 1000)
-    offset = max(int(request.query_params.get("offset", "0")), 0)
+    try:
+        limit = min(int(request.query_params.get("limit", "200")), 1000)
+        offset = max(int(request.query_params.get("offset", "0")), 0)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "limit and offset must be integers")
 
     if q and len(q) < 2:
         req_id = getattr(request.state, "request_id", "unknown")

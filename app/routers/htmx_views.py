@@ -627,7 +627,7 @@ async def add_requirement(
         packaging=packaging or None,
         notes=notes or None,
         customer_pn=customer_pn or None,
-        need_by_date=date_type.fromisoformat(need_by_date) if need_by_date else None,
+        need_by_date=_parse_date_safe(need_by_date, date_type),
         sourcing_status="open",
     )
     db.add(r)
@@ -1054,6 +1054,16 @@ def _safe_float(val) -> float | None:
         return None
 
 
+def _parse_date_safe(val, date_cls):
+    """Safely parse an ISO date/datetime string, returning None on failure."""
+    if not val:
+        return None
+    try:
+        return date_cls.fromisoformat(val)
+    except (ValueError, TypeError):
+        return None
+
+
 @router.post("/v2/partials/requisitions/bulk/{action}", response_class=HTMLResponse)
 async def requisitions_bulk_action(
     request: Request,
@@ -1090,8 +1100,11 @@ async def requisitions_bulk_action(
     elif action == "assign":
         owner_id = form.get("owner_id")
         if owner_id:
+            new_owner = _safe_int(owner_id)
+            if new_owner is None:
+                raise HTTPException(400, "owner_id must be an integer")
             for r in reqs:
-                r.created_by = int(owner_id)
+                r.created_by = new_owner
 
     db.commit()
     logger.info("Bulk {} applied to {} requisitions by {}", action, len(reqs), user.email)
@@ -1483,22 +1496,22 @@ async def add_offer(
         vendor_name_normalized=normalize_vendor_name(vendor_name),
         mpn=mpn,
         normalized_mpn=normalize_mpn(mpn),
-        qty_available=int(form["qty_available"]) if form.get("qty_available") else None,
-        unit_price=float(form["unit_price"]) if form.get("unit_price") else None,
+        qty_available=_safe_int(form.get("qty_available")),
+        unit_price=_safe_float(form.get("unit_price")),
         lead_time=form.get("lead_time") or None,
         date_code=form.get("date_code") or None,
         condition=form.get("condition") or None,
-        moq=int(form["moq"]) if form.get("moq") else None,
+        moq=_safe_int(form.get("moq")),
         manufacturer=form.get("manufacturer") or None,
-        spq=int(form["spq"]) if form.get("spq") else None,
+        spq=_safe_int(form.get("spq")),
         packaging=form.get("packaging") or None,
         firmware=form.get("firmware") or None,
         hardware_code=form.get("hardware_code") or None,
         warranty=form.get("warranty") or None,
         country_of_origin=form.get("country_of_origin") or None,
-        valid_until=date_type.fromisoformat(form["valid_until"]) if form.get("valid_until") else None,
+        valid_until=_parse_date_safe(form.get("valid_until"), date_type),
         notes=form.get("notes") or None,
-        requirement_id=int(form["requirement_id"]) if form.get("requirement_id") else None,
+        requirement_id=_safe_int(form.get("requirement_id")),
         source="manual",
         status="active",
         entered_by_id=user.id,
@@ -3288,7 +3301,10 @@ async def add_vendor_review(
         raise HTTPException(404, "Vendor not found")
 
     form = await request.form()
-    rating = int(form.get("rating", "3"))
+    try:
+        rating = int(form.get("rating", "3"))
+    except (ValueError, TypeError):
+        rating = 3
     comment = form.get("comment", "").strip()
 
     review = VendorReview(
@@ -3939,7 +3955,10 @@ async def create_site(
         return HTMLResponse('<div class="p-2 text-xs text-rose-600">Site name is required.</div>')
 
     # Enforce one-owner-per-site rule: each user can only own one site
-    parsed_owner_id = int(owner_id) if owner_id else None
+    try:
+        parsed_owner_id = int(owner_id) if owner_id else None
+    except (ValueError, TypeError):
+        parsed_owner_id = None
     if parsed_owner_id:
         existing = (
             db.query(CustomerSite)
@@ -6472,7 +6491,10 @@ async def update_material_card(
         if field in form:
             val = form[field].strip() if form[field] else None
             if field == "pin_count" and val:
-                val = int(val)
+                try:
+                    val = int(val)
+                except (ValueError, TypeError):
+                    val = None
             setattr(card, field, val or None)
 
     db.commit()
@@ -6558,11 +6580,20 @@ async def update_quote_line(
     if "manufacturer" in form:
         line.manufacturer = form["manufacturer"]
     if "qty" in form:
-        line.qty = int(form["qty"])
+        try:
+            line.qty = int(form["qty"])
+        except (ValueError, TypeError):
+            raise HTTPException(400, "qty must be an integer")
     if "cost_price" in form:
-        line.cost_price = float(form["cost_price"])
+        try:
+            line.cost_price = float(form["cost_price"])
+        except (ValueError, TypeError):
+            raise HTTPException(400, "cost_price must be a number")
     if "sell_price" in form:
-        line.sell_price = float(form["sell_price"])
+        try:
+            line.sell_price = float(form["sell_price"])
+        except (ValueError, TypeError):
+            raise HTTPException(400, "sell_price must be a number")
     if line.sell_price and float(line.sell_price) > 0 and line.cost_price is not None:
         line.margin_pct = round((float(line.sell_price) - float(line.cost_price)) / float(line.sell_price) * 100, 2)
     db.commit()
@@ -6776,8 +6807,11 @@ async def add_offers_to_draft_quote(
     except (ValueError, TypeError):
         raise HTTPException(400, "Invalid JSON body")
 
-    offer_ids = [int(x) for x in data.get("offer_ids", []) if x]
-    quote_id = int(data.get("quote_id", 0))
+    try:
+        offer_ids = [int(x) for x in data.get("offer_ids", []) if x]
+        quote_id = int(data.get("quote_id", 0))
+    except (ValueError, TypeError):
+        raise HTTPException(400, "offer_ids must be integers and quote_id must be an integer")
 
     if not offer_ids or not quote_id:
         raise HTTPException(400, "Missing offer_ids or quote_id")
@@ -7661,7 +7695,10 @@ async def proactive_do_not_offer(
     if not mpn or not company_id:
         raise HTTPException(400, "MPN and company are required")
 
-    cid = int(company_id)
+    try:
+        cid = int(company_id)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "company_id must be an integer")
     if not is_do_not_offer(db, mpn, cid):
         dno = ProactiveDoNotOffer(
             mpn=mpn.upper(),
@@ -8466,7 +8503,10 @@ async def part_header_save(
                 "Status transition rejected: {} → {} for part {}", req.sourcing_status, value, requirement_id
             )
     elif field == "target_qty":
-        req.target_qty = int(value) if value else None
+        try:
+            req.target_qty = int(value) if value else None
+        except (ValueError, TypeError):
+            req.target_qty = None
     elif field == "target_price":
         from decimal import Decimal, InvalidOperation
 
@@ -8574,7 +8614,7 @@ async def create_part_task(
         requirement_id=requirement_id,
         title=title,
         description=(form.get("notes") or "").strip() or None,
-        assigned_to_id=int(form["assigned_to"]) if form.get("assigned_to") else None,
+        assigned_to_id=_safe_int(form.get("assigned_to")),
         created_by=user.id,
         due_at=form.get("due_date") or None,
         status="todo",

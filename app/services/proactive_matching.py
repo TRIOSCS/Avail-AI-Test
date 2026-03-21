@@ -118,10 +118,13 @@ def _get_watermark(db: Session) -> datetime:
     """Get last scan timestamp from SystemConfig (survives restarts)."""
     row = db.query(SystemConfig).filter(SystemConfig.key == _WATERMARK_KEY).first()
     if row and row.value:
-        ts = datetime.fromisoformat(row.value)
-        if ts.tzinfo is None:
-            ts = ts.replace(tzinfo=timezone.utc)
-        return ts
+        try:
+            ts = datetime.fromisoformat(row.value)
+            if ts.tzinfo is None:
+                ts = ts.replace(tzinfo=timezone.utc)
+            return ts
+        except (ValueError, TypeError):
+            pass
     return datetime.now(timezone.utc) - timedelta(hours=settings.proactive_scan_interval_hours)
 
 

@@ -147,8 +147,11 @@ def get_account_timeline_endpoint(
 
     from ..services.activity_service import get_account_timeline
 
-    df = dt.fromisoformat(date_from) if date_from else None
-    dto = dt.fromisoformat(date_to) if date_to else None
+    try:
+        df = dt.fromisoformat(date_from) if date_from else None
+        dto = dt.fromisoformat(date_to) if date_to else None
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid date format — expected ISO 8601")
 
     items, total = get_account_timeline(
         db,
@@ -192,8 +195,11 @@ def get_contact_timeline_endpoint(
 
     from datetime import datetime as dt
 
-    df = dt.fromisoformat(date_from) if date_from else None
-    dto = dt.fromisoformat(date_to) if date_to else None
+    try:
+        df = dt.fromisoformat(date_from) if date_from else None
+        dto = dt.fromisoformat(date_to) if date_to else None
+    except (ValueError, TypeError):
+        raise HTTPException(400, "Invalid date format — expected ISO 8601")
 
     items, total = get_contact_timeline(
         db,

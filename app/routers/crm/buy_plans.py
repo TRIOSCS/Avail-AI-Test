@@ -25,7 +25,7 @@ Depends on: models/buy_plan.py, services/buyplan_service.py, schemas/buy_plan.py
 
 from datetime import datetime, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from fastapi.responses import JSONResponse
 from loguru import logger
 from sqlalchemy.orm import Session, joinedload, selectinload
@@ -41,6 +41,7 @@ from ...models.buy_plan import (
     BuyPlanStatus,
     VerificationGroupMember,
 )
+from ...rate_limit import limiter
 from ...schemas.buy_plan import (
     BuyPlanLineIssue,
     BuyPlanTokenApproval,
@@ -339,7 +340,8 @@ def _token_expired(expires_at) -> bool:
 
 
 @router.get("/api/buy-plans/token/{token}")
-async def get_plan_by_token(token: str, db: Session = Depends(get_db)):
+@limiter.limit("10/minute")
+async def get_plan_by_token(token: str, request: Request, db: Session = Depends(get_db)):
     """Public endpoint — no auth required.
 
     Get plan details by approval token. Returns V1-shaped response.
@@ -353,7 +355,8 @@ async def get_plan_by_token(token: str, db: Session = Depends(get_db)):
 
 
 @router.put("/api/buy-plans/token/{token}/approve")
-async def approve_by_token(token: str, body: BuyPlanTokenApproval, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def approve_by_token(token: str, request: Request, body: BuyPlanTokenApproval, db: Session = Depends(get_db)):
     """Public token-based approval.
 
     Sets SO number and activates plan. Returns V1-shaped response.
@@ -380,7 +383,8 @@ async def approve_by_token(token: str, body: BuyPlanTokenApproval, db: Session =
 
 
 @router.put("/api/buy-plans/token/{token}/reject")
-async def reject_by_token(token: str, body: BuyPlanTokenReject, db: Session = Depends(get_db)):
+@limiter.limit("5/minute")
+async def reject_by_token(token: str, request: Request, body: BuyPlanTokenReject, db: Session = Depends(get_db)):
     """Public token-based rejection.
 
     Resets plan to draft. Returns V1-shaped response.

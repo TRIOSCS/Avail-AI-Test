@@ -202,6 +202,9 @@ class Settings(BaseSettings):
     # --- On-demand enrichment orchestrator ---
     on_demand_enrichment_enabled: bool = True
 
+    # --- Backup monitoring ---
+    backup_max_age_hours: int = 26  # Alert if last backup is older than this
+
     # --- Prospecting ---
     prospecting_enabled: bool = True
     prospecting_min_fit_for_contacts: int = 60

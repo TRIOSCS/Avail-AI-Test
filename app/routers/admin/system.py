@@ -316,12 +316,19 @@ def api_material_audit(
 
     card_id = request.query_params.get("card_id")
     action = request.query_params.get("action")
-    limit = min(int(request.query_params.get("limit", "100")), 500)
-    offset = max(int(request.query_params.get("offset", "0")), 0)
+    try:
+        limit = min(int(request.query_params.get("limit", "100")), 500)
+        offset = max(int(request.query_params.get("offset", "0")), 0)
+    except (ValueError, TypeError):
+        raise HTTPException(400, "limit and offset must be integers")
 
     query = db.query(MaterialCardAudit)
     if card_id:
-        query = query.filter(MaterialCardAudit.material_card_id == int(card_id))
+        try:
+            card_id_int = int(card_id)
+        except (ValueError, TypeError):
+            raise HTTPException(400, "card_id must be an integer")
+        query = query.filter(MaterialCardAudit.material_card_id == card_id_int)
     if action:
         query = query.filter(MaterialCardAudit.action == action)
     total = query.count()

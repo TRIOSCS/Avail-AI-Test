@@ -74,7 +74,7 @@ services:
     build: .
     restart: always
     env_file: .env
-    stop_grace_period: 30s
+    stop_grace_period: 60s
     depends_on:
       db:
         condition: service_healthy
@@ -121,6 +121,12 @@ services:
         condition: service_healthy
     volumes:
       - ./scripts:/app/scripts:ro
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
     deploy:
       resources:
         limits:

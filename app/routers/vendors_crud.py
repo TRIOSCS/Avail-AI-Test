@@ -374,7 +374,10 @@ async def autocomplete_names(
     q = request.query_params.get("q", "").strip().lower()
     if len(q) < 2:
         return []
-    limit = min(int(request.query_params.get("limit", "8")), 20)
+    try:
+        limit = min(int(request.query_params.get("limit", "8")), 20)
+    except (ValueError, TypeError):
+        limit = 8
     sb = SearchBuilder(q)
 
     from sqlalchemy import String, cast

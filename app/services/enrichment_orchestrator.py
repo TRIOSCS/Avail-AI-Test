@@ -289,7 +289,9 @@ async def claude_merge(
                 {
                     "field": entry["field"],
                     "value": entry["value"],
-                    "confidence": float(entry.get("confidence", 0.5)),
+                    "confidence": float(entry.get("confidence") or 0.5)
+                    if isinstance(entry.get("confidence"), (int, float))
+                    else 0.5,
                     "source": entry.get("source", "unknown"),
                     "reasoning": entry.get("reasoning", ""),
                 }

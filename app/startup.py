@@ -600,8 +600,12 @@ def _backfill_proactive_offer_qty() -> None:
                     item["qty"] = new_qty
                     new_items.append(item)
 
-                    sell_price = float(item.get("sell_price") or item.get("unit_price", 0))
-                    cost_price = float(item.get("unit_price", 0))
+                    try:
+                        sell_price = float(item.get("sell_price") or item.get("unit_price", 0))
+                        cost_price = float(item.get("unit_price", 0))
+                    except (ValueError, TypeError):
+                        sell_price = 0.0
+                        cost_price = 0.0
                     total_sell += Decimal(str(sell_price)) * new_qty
                     total_cost += Decimal(str(cost_price)) * new_qty
 
