@@ -8510,6 +8510,11 @@ _ALL_PARTS_COLUMNS = [
     ("date_codes", "Date Codes"),
     ("condition", "Condition"),
     ("packaging", "Packaging"),
+    ("customer_pn", "Customer PN"),
+    ("substitutes", "Substitutes"),
+    ("firmware", "Firmware"),
+    ("hardware_codes", "HW Codes"),
+    ("need_by_date", "Need By"),
     ("notes", "Notes"),
 ]
 

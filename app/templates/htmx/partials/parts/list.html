@@ -124,6 +124,11 @@
               'date_codes': ('DC', None),
               'condition': ('Cond', None),
               'packaging': ('Pkg', None),
+              'customer_pn': ('Cust PN', None),
+              'substitutes': ('Subs', None),
+              'firmware': ('FW', None),
+              'hardware_codes': ('HW', None),
+              'need_by_date': ('Need By', None),
               'notes': ('Notes', None),
             } %}
             {% for col_key in visible_cols %}
@@ -195,6 +200,16 @@
                   {{ req.condition or '\u2014' }}
                 {% elif col_key == 'packaging' %}
                   {{ req.packaging or '\u2014' }}
+                {% elif col_key == 'customer_pn' %}
+                  {{ req.customer_pn or '\u2014' }}
+                {% elif col_key == 'substitutes' %}
+                  {{ req.substitutes|join(', ') if req.substitutes else '\u2014' }}
+                {% elif col_key == 'firmware' %}
+                  {{ req.firmware or '\u2014' }}
+                {% elif col_key == 'hardware_codes' %}
+                  {{ req.hardware_codes or '\u2014' }}
+                {% elif col_key == 'need_by_date' %}
+                  {{ req.need_by_date or '\u2014' }}
                 {% elif col_key == 'notes' %}
                   <span class="max-w-[120px] truncate block text-gray-500">{{ req.notes or '\u2014' }}</span>
                 {% endif %}
