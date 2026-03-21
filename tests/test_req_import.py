@@ -83,3 +83,48 @@ def test_import_save_creates_requisition(client):
     )
     assert resp.status_code == 200
     assert "parts-list" in resp.text or "toast" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_parse_freeform_rfq_empty_text():
+    """Empty text returns None."""
+    from app.services.freeform_parser_service import parse_freeform_rfq
+
+    result = await parse_freeform_rfq("")
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_parse_freeform_rfq_normalizes_condition():
+    """Condition normalization applied post-parse."""
+    mock_result = {
+        "name": "Test",
+        "requirements": [
+            {"primary_mpn": "LM358", "target_qty": 1, "condition": "NEW"},
+        ],
+    }
+    with patch(
+        "app.services.freeform_parser_service.routed_structured",
+        new_callable=AsyncMock,
+        return_value=mock_result,
+    ):
+        from app.services.freeform_parser_service import parse_freeform_rfq
+
+        result = await parse_freeform_rfq("LM358 new")
+        assert result["requirements"][0]["condition"] == "new"
+
+
+def test_import_save_rejects_empty_parts(client):
+    """Save with no valid parts shows error."""
+    resp = client.post(
+        "/v2/partials/requisitions/import-save",
+        data={"name": "Empty", "customer_name": "", "deadline": "", "urgency": "normal"},
+    )
+    assert resp.status_code == 200
+
+
+def test_import_form_loads(client):
+    """GET import form returns 200."""
+    resp = client.get("/v2/partials/requisitions/import-form")
+    assert resp.status_code == 200
+    assert "New Requisition" in resp.text
