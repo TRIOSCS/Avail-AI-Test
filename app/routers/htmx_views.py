@@ -788,6 +788,10 @@ async def company_lookup(
               var el=btn.closest('.space-y-1');
               el.replaceChildren();
               el.insertAdjacentHTML('afterbegin',html);
+              var meta=el.querySelector('[data-site-id]');
+              if(meta)document.dispatchEvent(new CustomEvent('customer-created',{{
+                detail:{{siteId:meta.dataset.siteId,displayName:meta.dataset.display}}
+              }}));
             }}catch(e){{btn.textContent='Failed — retry';btn.disabled=false;}}
           }})(this)"
                 class="px-3 py-1 text-xs font-semibold bg-emerald-600 text-white rounded hover:bg-emerald-700">
@@ -823,16 +827,12 @@ async def company_quick_create(
         site = existing.sites[0] if existing.sites else None
         site_id = site.id if site else ""
         display = html_mod.escape(f"{existing.name} — {site.site_name}" if site else existing.name)
-        return HTMLResponse(f"""
-        <div class="mt-1 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
-          Customer already exists. Selected automatically.
-        </div>
-        <script>
-          document.dispatchEvent(new CustomEvent('customer-created', {{
-            detail: {{ siteId: '{site_id}', displayName: '{display}' }}
-          }}));
-        </script>
-        """)
+        return HTMLResponse(
+            f'<div class="mt-1 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">'
+            f"Customer already exists. Selected automatically."
+            f"</div>"
+            f'<span class="hidden" data-site-id="{site_id}" data-display="{display}"></span>'
+        )
 
     # Create company
     domain = ""
@@ -876,17 +876,12 @@ async def company_quick_create(
 
     display = html_mod.escape(f"{company.name} — {site.site_name}")
 
-    return HTMLResponse(f"""
-    <div class="mt-1 p-2 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-700">
-      Created: {display}
-    </div>
-    <script>
-      // Select the newly created customer in the picker via custom event
-      document.dispatchEvent(new CustomEvent('customer-created', {{
-        detail: {{ siteId: '{site.id}', displayName: '{display}' }}
-      }}));
-    </script>
-    """)
+    return HTMLResponse(
+        f'<div class="mt-1 p-2 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-700">'
+        f"Created: {display}"
+        f"</div>"
+        f'<span class="hidden" data-site-id="{site.id}" data-display="{display}"></span>'
+    )
 
 
 @router.get("/v2/partials/requisitions/{req_id}", response_class=HTMLResponse)
