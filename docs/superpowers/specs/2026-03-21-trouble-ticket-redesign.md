@@ -25,7 +25,7 @@ Replace the floating bug icon with a red "Trouble Ticket" button in the header. 
    - Submit button
 
 ### Auto-captured hidden fields:
-- `screenshot` — base64 PNG (max 2MB)
+- `screenshot` — base64 PNG (max 2MB, validated server-side)
 - `page_url` — `window.location.href`
 - `user_agent` — `navigator.userAgent`
 - `viewport` — width x height
@@ -33,10 +33,12 @@ Replace the floating bug icon with a red "Trouble Ticket" button in the header. 
 - `network_log` — last 10 HTMX request/response pairs from new Alpine store
 
 ### Submit flow:
-1. POST JSON to `/api/trouble-tickets/submit`
-2. Backend saves ticket, writes screenshot PNG to `uploads/tickets/TT-{id}.png`
-3. Fires async Claude call for AI summary (non-blocking)
-4. Toast confirmation: "Ticket TT-XXXX created"
+1. POST JSON to `/api/trouble-tickets/submit` (content type: `application/json`)
+2. Backend validates screenshot size (max 2MB base64), decodes to PNG, saves to `uploads/tickets/TT-{id}.png`
+3. If screenshot write fails (disk full, permissions), ticket still saves — `screenshot_path` stays null
+4. Title auto-generated: `description[:120]` (same as current behavior)
+5. Fires async Claude call for AI summary via `FastAPI BackgroundTasks`
+6. Returns HTML response for HTMX swap: toast confirmation "Ticket TT-XXXX created"
 
 ### html2canvas:
 - Loaded lazily on first button click (~40KB)
@@ -63,14 +65,18 @@ htmx.on('htmx:afterRequest', function(evt) {
 
 ## 4. Data Model Changes
 
-### TroubleTicket — new columns (Alembic migration):
-- `screenshot_path` — `String(255)`, nullable
+### TroubleTicket — column changes (Alembic migration):
+
+**New columns:**
+- `screenshot_path` — `String(255)`, nullable (replaces legacy `screenshot_b64`; old column left as-is for backwards compat)
 - `ai_summary` — `Text`, nullable
 - `root_cause_group_id` — FK to `root_cause_groups.id`, nullable
-- `browser_info` — `Text`, nullable (JSON string)
-- `network_log` — `Text`, nullable (JSON string)
 
-Existing columns reused: `description`, `current_page`, `status`, `submitted_by`, `created_at`, `console_errors` (for JS error log).
+**Existing columns reused (no migration needed):**
+- `description`, `current_page`, `status`, `submitted_by`, `created_at` — as-is
+- `console_errors` — `Text`, stores JS error log JSON
+- `browser_info` — `String(512)`, already exists, stores user agent + viewport JSON
+- `network_errors` — `JSON`, already exists, reused for network log capture (renamed conceptually to "network log" in the UI but same column)
 
 ### New table: `root_cause_groups`
 - `id` — PK, auto-increment
@@ -82,26 +88,27 @@ Existing columns reused: `description`, `current_page`, `status`, `submitted_by`
 
 ## 5. API Endpoints
 
-### Existing (keep):
-- `POST /api/trouble-tickets` — JSON API create
-- `GET /api/trouble-tickets` — list
-- `GET /api/trouble-tickets/{id}` — detail
-- `PATCH /api/trouble-tickets/{id}` — update status
+### Existing (keep as-is):
+- `POST /api/error-reports` / `POST /api/trouble-tickets` — JSON API create (legacy)
+- `GET /api/error-reports` / `GET /api/trouble-tickets` — list
+- `GET /api/error-reports/{id}` / `GET /api/trouble-tickets/{id}` — detail
+- `PATCH /api/error-reports/{id}` / `PATCH /api/trouble-tickets/{id}` — update status
 
 ### Modified:
-- `POST /api/trouble-tickets/submit` — HTMX form submit, now accepts screenshot + context fields
-- `GET /api/trouble-tickets/form` — return the new form partial with screenshot preview
+- `POST /api/trouble-tickets/submit` — now accepts JSON with screenshot + context fields (was form-encoded; old form contract replaced)
+- `GET /api/trouble-tickets/form` — return the new form partial with screenshot preview slot
 
 ### New:
-- `POST /api/trouble-tickets/analyze` — batch AI analysis (summarize + group by root cause)
-- `GET /api/trouble-tickets/{id}/screenshot` — serve screenshot PNG from disk
+- `POST /api/trouble-tickets/analyze` — batch AI analysis (summarize + group), max 50 tickets per call
+- `GET /api/trouble-tickets/{id}/screenshot` — serve screenshot PNG from disk (falls back to `screenshot_b64` for legacy tickets)
+- `GET /v2/trouble-tickets` — full-page route, renders `base.html` with workspace partial
 - `GET /v2/partials/trouble-tickets/workspace` — HTMX list view partial
 - `GET /v2/partials/trouble-tickets/{id}` — HTMX detail view partial
 
 ## 6. Management UI
 
 ### List view — `/v2/trouble-tickets`
-- Bottom nav tab: "Tickets" (new, 12th tab)
+- Bottom nav tab: "Tickets" (new tab; consider consolidating with an existing low-use tab if 12 is too many)
 - Table columns: Ticket #, AI Summary, Status, Page, Submitted By, Date
 - Filter pills: All / Open / Resolved / Won't Fix
 - Root cause grouping: collapsible headers showing group title + ticket count + suggested fix
@@ -120,17 +127,18 @@ Existing columns reused: `description`, `current_page`, `status`, `submitted_by`
 ## 7. AI Integration
 
 ### Per-ticket summary (on creation, async):
-- After ticket saved, background task calls Claude
+- After ticket saved, `FastAPI BackgroundTasks` calls Claude
 - Prompt: "Summarize this trouble report in one sentence. Context: {description}, {page_url}, {js_errors}, {network_errors}"
 - Updates `ai_summary` column
-- Graceful failure: if Claude unavailable, summary stays null
+- Graceful failure: if Claude unavailable, summary stays null — no retry
 
 ### Batch analyze (on-demand):
 - Triggered by "Analyze" button on list view
-- Gathers all open tickets: descriptions, URLs, JS errors, network logs
+- Gathers open tickets (max 50 most recent) with descriptions, URLs, JS errors, network logs
 - Single Claude call: "Group these trouble tickets by root cause. For each group provide a title and suggested fix. Return JSON: [{title, suggested_fix, ticket_ids}]"
 - Creates/updates `RootCauseGroup` records, assigns `root_cause_group_id` on tickets
 - Tickets not matching any group stay ungrouped
+- If >50 open tickets, UI shows warning "Analyzing 50 most recent tickets"
 
 ### No scheduled jobs. Analysis is manual/on-demand only.
 
@@ -138,8 +146,10 @@ Existing columns reused: `description`, `current_page`, `status`, `submitted_by`
 
 - Screenshots saved to `/app/uploads/tickets/TT-{id}.png`
 - Directory created on first ticket if not exists
-- Served via `GET /api/trouble-tickets/{id}/screenshot` (reads file, returns PNG)
-- Docker volume mount needed for persistence: `./uploads:/app/uploads`
+- Served via `GET /api/trouble-tickets/{id}/screenshot` (reads file, returns PNG; falls back to `screenshot_b64` for legacy)
+- If screenshot write fails, ticket still saves — screenshot_path stays null, logged as warning
+- Server-side validation: reject base64 payloads > 2MB before decoding
+- Docker volume mount for persistence: `./uploads:/app/uploads` (added to docker-compose.yml)
 
 ## 9. Frontend Dependencies
 
@@ -147,10 +157,18 @@ Existing columns reused: `description`, `current_page`, `status`, `submitted_by`
 - No other new dependencies
 - Uses existing: Alpine.js stores, HTMX, Tailwind, DM Sans font, btn-danger class
 
-## 10. Migration Plan
+## 10. Migration & Deployment
 
-One Alembic migration:
-1. Add columns to `trouble_tickets`: `screenshot_path`, `ai_summary`, `root_cause_group_id`, `browser_info`, `network_log`
+### Alembic migration:
+1. Add columns to `trouble_tickets`: `screenshot_path`, `ai_summary`, `root_cause_group_id`
 2. Create `root_cause_groups` table
 3. Add FK constraint on `root_cause_group_id`
 4. Add index on `root_cause_group_id`
+
+(Note: `browser_info`, `network_errors`, `console_errors` already exist — no migration needed)
+
+### Docker:
+- Add volume mount `./uploads:/app/uploads` to `docker-compose.yml`
+
+### Deployment:
+- Standard: `docker compose up -d --build` (entrypoint runs `alembic upgrade head`)
