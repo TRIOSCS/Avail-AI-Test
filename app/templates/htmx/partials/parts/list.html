@@ -5,7 +5,8 @@
 #}
 
 <div class="flex flex-col h-full" x-data="partsListSelection()"
-     @part-updated.window="htmx.ajax('GET', '/v2/partials/parts' + window.location.search, {target: '#parts-list', swap: 'innerHTML'})">
+     @part-updated.window="htmx.ajax('GET', '/v2/partials/parts' + window.location.search, {target: '#parts-list', swap: 'innerHTML'})"
+     @part-archived.window="htmx.ajax('GET', '/v2/partials/parts' + window.location.search, {target: '#parts-list', swap: 'innerHTML'})">
 
   {# ── Filter bar + top scrollbar ──────────────────────────── #}
   <div class="panel-header flex-wrap gap-y-1">
@@ -138,7 +139,8 @@
         <tbody>
           {% for req in requirements %}
           {% set stats = offer_stats.get(req.id, {}) %}
-          <tr :class="selectedPartId === {{ req.id }} ? 'row-selected' : ''"
+          <tr data-part-id="{{ req.id }}"
+              :class="selectedPartId === {{ req.id }} ? 'row-selected' : ''"
               @click="selectPart({{ req.id }}); htmx.ajax('GET', '/v2/partials/parts/{{ req.id }}/tab/' + activeTab, {target: '#part-detail'})">
             <td class="w-6" @click.stop>
               <input type="checkbox" class="h-3 w-3 rounded border-gray-300 text-brand-500"
@@ -277,25 +279,25 @@
         }
       },
       clearSelection: function() { this.selectedIds = []; },
+      _postJson: function(url, data) {
+        fetch(url, {
+          method: 'POST',
+          headers: {'Content-Type': 'application/json'},
+          body: JSON.stringify(data)
+        }).then(function(r) { return r.text(); }).then(function(html) {
+          /* Response is server-rendered HTMX partial — safe to swap */
+          var target = document.getElementById('parts-list');
+          target.innerHTML = html;  /* nosec: trusted server response */
+          htmx.process(target);
+        });
+      },
       bulkArchive: function() {
         if (!confirm('Archive ' + this.selectedIds.length + ' selected part(s)?')) return;
-        var ids = this.selectedIds.slice();
-        htmx.ajax('POST', '/v2/partials/parts/bulk-archive', {
-          target: '#parts-list',
-          swap: 'innerHTML',
-          values: JSON.stringify({requirement_ids: ids, requisition_ids: []}),
-          headers: {'Content-Type': 'application/json'}
-        });
+        this._postJson('/v2/partials/parts/bulk-archive', {requirement_ids: this.selectedIds.slice(), requisition_ids: []});
       },
       bulkUnarchive: function() {
         if (!confirm('Unarchive ' + this.selectedIds.length + ' selected items?')) return;
-        var ids = this.selectedIds.slice();
-        htmx.ajax('POST', '/v2/partials/parts/bulk-unarchive', {
-          target: '#parts-list',
-          swap: 'innerHTML',
-          values: JSON.stringify({requirement_ids: ids, requisition_ids: []}),
-          headers: {'Content-Type': 'application/json'}
-        });
+        this._postJson('/v2/partials/parts/bulk-unarchive', {requirement_ids: this.selectedIds.slice(), requisition_ids: []});
       }
     };
   }

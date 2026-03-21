@@ -22,7 +22,7 @@ from sqlalchemy import desc, exists, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
-from ..constants import OfferStatus, QuoteStatus, RequisitionStatus, TicketSource
+from ..constants import OfferStatus, QuoteStatus, RequisitionStatus, SourcingStatus, TicketSource
 from ..database import get_db
 from ..dependencies import get_user, require_user
 from ..models import (
@@ -8590,6 +8590,22 @@ async def parts_list_partial(
     """Return parts (requirements) list as HTML partial with filters and sorting."""
     from sqlalchemy import case
 
+    # Clamp pagination params
+    offset = max(0, offset)
+    limit = max(1, min(200, limit))
+
+    # Validate date filters
+    if date_from:
+        try:
+            datetime.strptime(date_from, "%Y-%m-%d")
+        except ValueError:
+            date_from = ""
+    if date_to:
+        try:
+            datetime.strptime(date_to, "%Y-%m-%d")
+        except ValueError:
+            date_to = ""
+
     query = db.query(Requirement).join(Requisition, Requirement.requisition_id == Requisition.id)
 
     # Archive visibility logic:
@@ -8647,7 +8663,7 @@ async def parts_list_partial(
     query = query.order_by(sort_col.desc() if dir == "desc" else sort_col.asc())
     query = query.offset(offset).limit(limit)
 
-    requirements = query.options(joinedload(Requirement.requisition)).all()
+    requirements = query.options(joinedload(Requirement.requisition).joinedload(Requisition.claimed_by)).all()
 
     # Aggregate offer count + best price per requirement
     req_ids = [r.id for r in requirements]
@@ -8764,7 +8780,7 @@ async def part_tab_sourcing(
     )
     raw_by_vendor: dict[str, list] = {}
     for s in raw_sightings:
-        vn = (s.vendor_name or "unknown").lower().strip()
+        vn = (s.vendor_name or "unknown").strip()
         raw_by_vendor.setdefault(vn, []).append(s)
 
     ctx = _base_ctx(request, user, "requisitions")
@@ -8876,8 +8892,12 @@ async def part_header_edit_cell(
     input_type = "number" if field in ("target_qty", "target_price") else "text"
     step = ' step="0.0001"' if field == "target_price" else ""
 
+    from markupsafe import escape
+
+    safe_current = escape(current)
+
     return HTMLResponse(
-        f'<input type="{input_type}" name="value" id="{cell_id}" value="{current}" '
+        f'<input type="{input_type}" name="value" id="{cell_id}" value="{safe_current}" '
         f'hx-patch="{save_url}" hx-target="#part-header-wrap" hx-swap="innerHTML" '
         f'hx-vals=\'{{"field": "{field}"}}\' '
         f"hx-trigger=\"keyup[key=='Enter']\" "
@@ -8907,7 +8927,10 @@ async def part_header_save(
     if field == "sourcing_status":
         from app.services.requirement_status import transition_requirement
 
-        ok = transition_requirement(req, value, db, user)
+        try:
+            ok = transition_requirement(req, value, db, user)
+        except ValueError:
+            ok = False
         if not ok:
             logger.warning(
                 "Status transition rejected: {} → {} for part {}", req.sourcing_status, value, requirement_id
@@ -8997,8 +9020,10 @@ async def part_tab_comms(
 
     users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
 
+    from datetime import date
+
     ctx = _base_ctx(request, user, "requisitions")
-    ctx.update({"requirement": req, "tasks": tasks, "users": users_list})
+    ctx.update({"requirement": req, "tasks": tasks, "users": users_list, "today": date.today()})
     return templates.TemplateResponse("htmx/partials/parts/tabs/comms.html", ctx)
 
 
@@ -9141,7 +9166,7 @@ async def archive_single_part(
     if not part:
         raise HTTPException(404, "Part not found")
 
-    part.sourcing_status = "archived"
+    part.sourcing_status = SourcingStatus.ARCHIVED
     db.commit()
     logger.info("Part {} archived by {}", requirement_id, user.email)
 
@@ -9162,7 +9187,7 @@ async def unarchive_single_part(
     if not part:
         raise HTTPException(404, "Part not found")
 
-    part.sourcing_status = "open"
+    part.sourcing_status = SourcingStatus.OPEN
     db.commit()
     logger.info("Part {} unarchived by {}", requirement_id, user.email)
 
@@ -9183,7 +9208,7 @@ async def archive_requisition(
 
     requisition.status = RequisitionStatus.ARCHIVED
     for child in requisition.requirements:
-        child.sourcing_status = "archived"
+        child.sourcing_status = SourcingStatus.ARCHIVED
     db.commit()
     logger.info("Requisition {} ({} parts) archived by {}", req_id, len(requisition.requirements), user.email)
 
@@ -9204,8 +9229,8 @@ async def unarchive_requisition(
 
     requisition.status = RequisitionStatus.ACTIVE
     for child in requisition.requirements:
-        if child.sourcing_status == "archived":
-            child.sourcing_status = "open"
+        if child.sourcing_status == SourcingStatus.ARCHIVED:
+            child.sourcing_status = SourcingStatus.OPEN
     db.commit()
     logger.info("Requisition {} unarchived by {}", req_id, user.email)
 
@@ -9230,7 +9255,7 @@ async def bulk_archive(
     if requirement_ids:
         db.query(Requirement).filter(
             Requirement.id.in_(requirement_ids),
-        ).update({"sourcing_status": "archived"}, synchronize_session="fetch")
+        ).update({"sourcing_status": SourcingStatus.ARCHIVED}, synchronize_session="fetch")
 
     # Archive requisitions and cascade to their children
     if requisition_ids:
@@ -9240,7 +9265,7 @@ async def bulk_archive(
         # Cascade: archive all children of these requisitions
         db.query(Requirement).filter(
             Requirement.requisition_id.in_(requisition_ids),
-        ).update({"sourcing_status": "archived"}, synchronize_session="fetch")
+        ).update({"sourcing_status": SourcingStatus.ARCHIVED}, synchronize_session="fetch")
 
     db.commit()
     logger.info("Bulk archive by {}: {} parts, {} requisitions", user.email, len(requirement_ids), len(requisition_ids))
@@ -9266,8 +9291,8 @@ async def bulk_unarchive(
     if requirement_ids:
         db.query(Requirement).filter(
             Requirement.id.in_(requirement_ids),
-            Requirement.sourcing_status == "archived",
-        ).update({"sourcing_status": "open"}, synchronize_session="fetch")
+            Requirement.sourcing_status == SourcingStatus.ARCHIVED,
+        ).update({"sourcing_status": SourcingStatus.OPEN}, synchronize_session="fetch")
 
     # Unarchive requisitions and cascade to their children
     if requisition_ids:
@@ -9277,8 +9302,8 @@ async def bulk_unarchive(
         # Cascade: restore archived children of these requisitions
         db.query(Requirement).filter(
             Requirement.requisition_id.in_(requisition_ids),
-            Requirement.sourcing_status == "archived",
-        ).update({"sourcing_status": "open"}, synchronize_session="fetch")
+            Requirement.sourcing_status == SourcingStatus.ARCHIVED,
+        ).update({"sourcing_status": SourcingStatus.OPEN}, synchronize_session="fetch")
 
     db.commit()
     logger.info(

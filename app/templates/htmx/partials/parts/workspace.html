@@ -10,6 +10,11 @@
        dragging: false,
        selectedPartId: null,
        activeTab: 'offers',
+       clearPartIfGone() {
+         if (this.selectedPartId && !document.querySelector('[data-part-id=\'' + this.selectedPartId + '\']')) {
+           this.selectedPartId = null;
+         }
+       },
        startDrag(e) {
          this.dragging = true;
          e.preventDefault();
@@ -38,7 +43,8 @@
      }"
      x-ref="container"
      @mousemove.window="onDrag($event)"
-     @mouseup.window="stopDrag()">
+     @mouseup.window="stopDrag()"
+     @htmx:after-swap.window="$nextTick(() => clearPartIfGone())">
 
   {# ── Left Panel: Parts Table ──────────────────────────────── #}
   <div class="flex flex-col min-w-0 border-r border-gray-200" :style="'width: ' + (splitRatio * 100) + '%'">
@@ -71,8 +77,6 @@
       <div>
         {# Part header — persistent context strip #}
         <div id="part-header-wrap"
-             hx-get :hx-vals="JSON.stringify({})"
-             x-init="htmx.ajax('GET', '/v2/partials/parts/' + selectedPartId + '/header', {target: '#part-header-wrap', swap: 'innerHTML'})"
              x-effect="if (selectedPartId) htmx.ajax('GET', '/v2/partials/parts/' + selectedPartId + '/header', {target: '#part-header-wrap', swap: 'innerHTML'})">
         </div>
         {# Tab bar #}

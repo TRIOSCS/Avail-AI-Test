@@ -3,14 +3,14 @@
    Called by: GET /v2/partials/parts/{id}/tab/notes.
    Depends on: HTMX, Alpine.js, brand palette.
 #}
-<div class="space-y-3">
+<div id="notes-tab-content" class="space-y-3">
   <div class="bg-white rounded-lg border border-brand-200 p-4">
     <div class="flex items-center justify-between mb-3">
       <h3 class="text-sm font-semibold text-gray-900">Sales Notes</h3>
       <span class="text-[10px] text-gray-400">{{ requirement.primary_mpn }}</span>
     </div>
     <form hx-patch="/v2/partials/parts/{{ requirement.id }}/notes"
-          hx-target="this"
+          hx-target="#notes-tab-content"
           hx-swap="outerHTML"
           x-data="{ saving: false }"
           @htmx:before-request="saving = true"
