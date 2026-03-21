@@ -123,3 +123,47 @@ def test_build_batch_dno_set_empty(db_session):
 def test_build_batch_throttle_set_empty(db_session):
     result = build_batch_throttle_set(db_session, "LM358N", set())
     assert result == set()
+
+
+# ── Helper edge cases ─────────────────────────────────────────────────────
+
+
+class TestHelperEdgeCases:
+    """Edge cases for DNO/throttle helpers."""
+
+    def test_is_throttled_exactly_at_boundary(self, db_session):
+        """Throttle entry created exactly throttle_days ago → should NOT be throttled
+        (expired)."""
+        from unittest.mock import patch
+
+        company, site = _make_company_and_site(db_session)
+        cutoff = datetime.now(timezone.utc) - timedelta(days=90)
+        throttle = ProactiveThrottle(
+            customer_site_id=site.id,
+            mpn="TEST-MPN",
+            last_offered_at=cutoff,
+        )
+        db_session.add(throttle)
+        db_session.flush()
+        with patch("app.services.proactive_helpers.settings") as mock_s:
+            mock_s.proactive_throttle_days = 90
+            result = is_throttled(db_session, "TEST-MPN", site.id)
+        assert result is False
+
+    def test_batch_dno_with_duplicate_company_ids(self, db_session):
+        """Passing duplicate company_ids should still work (set dedup)."""
+        company, site = _make_company_and_site(db_session)
+        owner = db_session.query(User).first()
+        dno = ProactiveDoNotOffer(
+            company_id=company.id,
+            mpn="DUP-MPN",
+            created_by_id=owner.id,
+        )
+        db_session.add(dno)
+        db_session.flush()
+        result = build_batch_dno_set(db_session, "DUP-MPN", {company.id, company.id})
+        assert company.id in result
+
+    def test_batch_throttle_empty_returns_empty(self, db_session):
+        result = build_batch_throttle_set(db_session, "ANY-MPN", set())
+        assert result == set()

@@ -898,3 +898,94 @@ def test_mark_match_sent_wrong_user(db_session):
 
     with pytest.raises(ValueError, match="Not your match"):
         mark_match_sent(matches[0].id, other_user.id, db_session)
+
+
+# ── Scoring boundary tests ────────────────────────────────────────────────
+
+
+class TestScoringBoundaries:
+    """Exact boundary tests for scoring tier transitions."""
+
+    def test_margin_exactly_zero_scores_10(self):
+        score, margin = _score_margin(100.0, 100.0)  # (100-100)/100 = 0%
+        assert score == 10
+        assert margin == pytest.approx(0.0)
+
+    def test_margin_exactly_10_pct_scores_60(self):
+        score, margin = _score_margin(100.0, 90.0)
+        assert score == 60
+        assert margin == pytest.approx(10.0, rel=0.01)
+
+    def test_margin_just_below_10_pct_scores_40(self):
+        score, margin = _score_margin(100.0, 90.01)
+        assert score == 40
+
+    def test_margin_exactly_20_pct_scores_80(self):
+        score, margin = _score_margin(100.0, 80.0)
+        assert score == 80
+
+    def test_margin_exactly_30_pct_scores_100(self):
+        score, margin = _score_margin(100.0, 70.0)
+        assert score == 100
+        assert margin == pytest.approx(30.0, rel=0.01)
+
+    def test_margin_just_below_30_pct_scores_80(self):
+        score, margin = _score_margin(100.0, 70.01)
+        assert score == 80
+
+    def test_margin_unknown_both_none_scores_50(self):
+        score, margin = _score_margin(None, None)
+        assert score == 50
+        assert margin is None
+
+    def test_margin_unknown_cost_none_scores_50(self):
+        score, margin = _score_margin(100.0, None)
+        assert score == 50
+        assert margin is None
+
+    def test_recency_exactly_180_days_scores_100(self):
+        dt = datetime.now(timezone.utc) - timedelta(days=180)
+        score = _score_recency(dt)
+        assert score == 100
+
+    def test_recency_181_days_scores_80(self):
+        dt = datetime.now(timezone.utc) - timedelta(days=181)
+        score = _score_recency(dt)
+        assert score == 80
+
+    def test_recency_730_days_scores_60(self):
+        dt = datetime.now(timezone.utc) - timedelta(days=730)
+        score = _score_recency(dt)
+        assert score == 60
+
+    def test_recency_731_days_scores_40(self):
+        dt = datetime.now(timezone.utc) - timedelta(days=731)
+        score = _score_recency(dt)
+        assert score == 40
+
+    def test_recency_none_scores_20(self):
+        score = _score_recency(None)
+        assert score == 20
+
+    def test_recency_future_date_scores_100(self):
+        dt = datetime.now(timezone.utc) + timedelta(days=30)
+        score = _score_recency(dt)
+        assert score == 100  # negative days_ago → <=180
+
+    def test_frequency_zero_scores_40(self):
+        score = _score_frequency(0)
+        assert score == 40  # 0 falls into count < 2 branch → 40
+
+    def test_frequency_exactly_5_scores_100(self):
+        score = _score_frequency(5)
+        assert score == 100
+
+    def test_frequency_exactly_3_scores_80(self):
+        score = _score_frequency(3)
+        assert score == 80
+
+    def test_composite_score_weights(self):
+        """Verify composite = recency*0.4 + frequency*0.3 + margin*0.3."""
+        dt = datetime.now(timezone.utc) - timedelta(days=90)  # recency=100
+        score, margin = compute_match_score(dt, 5, 100.0, 70.0)
+        assert score == 100  # 100*0.4 + 100*0.3 + 100*0.3 = 100
