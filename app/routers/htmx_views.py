@@ -546,6 +546,16 @@ async def requisition_create_form(
     return templates.TemplateResponse("htmx/partials/requisitions/create_modal.html", ctx)
 
 
+@router.get("/v2/partials/requisitions/import-form", response_class=HTMLResponse)
+async def requisition_import_form(
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Return the import requisition modal form."""
+    ctx = _base_ctx(request, user, "requisitions")
+    return templates.TemplateResponse("htmx/partials/requisitions/import_modal.html", ctx)
+
+
 @router.get("/v2/partials/requisitions/{req_id}", response_class=HTMLResponse)
 async def requisition_detail_partial(
     request: Request,

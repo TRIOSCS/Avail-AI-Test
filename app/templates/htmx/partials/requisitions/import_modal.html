@@ -1,0 +1,94 @@
+{# import_modal.html — Requisition import: paste or upload customer data for AI cleanup.
+   Called by: "+ Req" button in parts workspace filter bar.
+   Depends on: Alpine.js, HTMX, brand palette.
+#}
+<div class="p-6" x-data="{ mode: 'paste', parsing: false }">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-lg font-semibold text-gray-900">New Requisition</h2>
+    <button type="button" @click="$dispatch('close-modal')" class="text-gray-400 hover:text-gray-600">
+      <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+      </svg>
+    </button>
+  </div>
+
+  <form hx-post="/v2/partials/requisitions/import-parse"
+        hx-target="#modal-content"
+        hx-swap="innerHTML"
+        hx-encoding="multipart/form-data"
+        @htmx:before-request="parsing = true"
+        @htmx:after-request="parsing = false">
+
+    {# Req basics #}
+    <div class="grid grid-cols-2 gap-3 mb-4">
+      <div>
+        <label class="block text-xs font-medium text-gray-700 mb-1">Name <span class="text-rose-500">*</span></label>
+        <input type="text" name="name" required placeholder="e.g. Acme Q2 Order"
+               class="w-full px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-700 mb-1">Customer</label>
+        <input type="text" name="customer_name" placeholder="Company name"
+               class="w-full px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-700 mb-1">Deadline</label>
+        <input type="date" name="deadline"
+               class="w-full px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+      </div>
+      <div>
+        <label class="block text-xs font-medium text-gray-700 mb-1">Urgency</label>
+        <select name="urgency" class="w-full px-3 py-1.5 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+          <option value="normal">Normal</option>
+          <option value="hot">Hot</option>
+          <option value="critical">Critical</option>
+        </select>
+      </div>
+    </div>
+
+    {# Input mode toggle #}
+    <div class="flex gap-1 mb-3">
+      <button type="button" @click="mode = 'paste'"
+              :class="mode === 'paste' ? 'bg-brand-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+              class="px-3 py-1 text-xs font-semibold rounded-lg transition-colors">Paste</button>
+      <button type="button" @click="mode = 'upload'"
+              :class="mode === 'upload' ? 'bg-brand-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+              class="px-3 py-1 text-xs font-semibold rounded-lg transition-colors">Upload File</button>
+    </div>
+
+    {# Paste input #}
+    <div x-show="mode === 'paste'">
+      <textarea name="raw_text" rows="8"
+                placeholder="Paste anything here — email text, spreadsheet data, part lists...&#10;&#10;Example:&#10;LM358DR  500  Texas Instruments&#10;STM32F407VGT6  100&#10;TL074CDR  1000  TI  $0.85 target"
+                class="w-full px-3 py-2 border border-brand-200 rounded-lg text-sm font-mono focus:ring-2 focus:ring-brand-500 focus:border-brand-500 placeholder:text-gray-300"></textarea>
+      <p class="mt-1 text-xs text-gray-400">AI will extract part numbers, quantities, brands, prices, and conditions from any format.</p>
+    </div>
+
+    {# File upload #}
+    <div x-show="mode === 'upload'" x-cloak>
+      <label class="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed border-brand-200 rounded-lg cursor-pointer hover:border-brand-400 hover:bg-brand-50/50 transition-colors">
+        <svg class="h-8 w-8 text-gray-400 mb-2" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M3 16.5v2.25A2.25 2.25 0 005.25 21h13.5A2.25 2.25 0 0021 18.75V16.5m-13.5-9L12 3m0 0l4.5 4.5M12 3v13.5"/>
+        </svg>
+        <span class="text-sm text-gray-500">Drop a file or click to browse</span>
+        <span class="text-xs text-gray-400 mt-1">.xlsx, .csv, .txt</span>
+        <input type="file" name="file" accept=".xlsx,.csv,.txt,.xls" class="hidden"
+               @change="$el.closest('label').querySelector('span').textContent = $el.files[0]?.name || 'Drop a file or click to browse'">
+      </label>
+    </div>
+
+    {# Submit #}
+    <div class="flex items-center gap-3 mt-4 pt-4 border-t border-gray-100">
+      <button type="submit" :disabled="parsing"
+              class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-50 inline-flex items-center gap-2">
+        <svg x-show="parsing" x-cloak class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span x-text="parsing ? 'Processing...' : 'Process with AI'"></span>
+      </button>
+      <button type="button" @click="$dispatch('close-modal')"
+              class="px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700">Cancel</button>
+    </div>
+  </form>
+</div>
