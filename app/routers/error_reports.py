@@ -347,6 +347,104 @@ async def get_error_report(
     }
 
 
+@router.post("/api/trouble-tickets/analyze", response_class=HTMLResponse)
+async def analyze_tickets(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Batch AI analysis — group open tickets by root cause."""
+    from ..models.root_cause_group import RootCauseGroup
+    from ..utils.claude_client import claude_structured
+
+    tickets = (
+        db.query(TroubleTicket)
+        .filter(TroubleTicket.status.in_(["submitted", "in_progress"]))
+        .filter(TroubleTicket.source == "report_button")
+        .order_by(desc(TroubleTicket.created_at))
+        .limit(50)
+        .all()
+    )
+
+    if not tickets:
+        return HTMLResponse('<div class="text-center py-4 text-sm text-gray-500">No open tickets to analyze.</div>')
+
+    ticket_data = []
+    for t in tickets:
+        ticket_data.append(
+            {
+                "id": t.id,
+                "description": (t.description or "")[:300],
+                "page": t.current_page or "",
+                "js_errors": (t.console_errors or "")[:200],
+                "network": str(t.network_errors or "")[:200],
+            }
+        )
+
+    tool_schema = {
+        "type": "object",
+        "properties": {
+            "groups": {
+                "type": "array",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string"},
+                        "suggested_fix": {"type": "string"},
+                        "ticket_ids": {"type": "array", "items": {"type": "integer"}},
+                    },
+                    "required": ["title", "ticket_ids"],
+                },
+            }
+        },
+        "required": ["groups"],
+    }
+
+    import json as _json
+
+    result = await claude_structured(
+        prompt=(
+            "Group these trouble tickets by root cause. For each group, provide a short title "
+            "and a suggested fix. Return JSON with a 'groups' array.\n\n"
+            f"Tickets:\n{_json.dumps(ticket_data, indent=2)}"
+        ),
+        system="You are a bug triage assistant. Group related bug reports by their likely root cause.",
+        output_schema=tool_schema,
+        model_tier="fast",
+    )
+
+    if not result or "groups" not in result:
+        return HTMLResponse(
+            '<div class="text-center py-4 text-sm text-amber-600">AI analysis returned no results. Try again later.</div>'
+        )
+
+    ticket_map = {t.id: t for t in tickets}
+    for group_data in result["groups"]:
+        title = (group_data.get("title") or "Unknown")[:200]
+        fix = group_data.get("suggested_fix")
+        ticket_ids = group_data.get("ticket_ids", [])
+
+        group = db.query(RootCauseGroup).filter(RootCauseGroup.title == title).first()
+        if not group:
+            group = RootCauseGroup(title=title, suggested_fix=fix)
+            db.add(group)
+            db.flush()
+        elif fix and not group.suggested_fix:
+            group.suggested_fix = fix
+
+        for tid in ticket_ids:
+            if tid in ticket_map:
+                ticket_map[tid].root_cause_group_id = group.id
+
+    db.commit()
+    logger.info("AI analysis grouped %d tickets into %d groups", len(tickets), len(result["groups"]))
+
+    # Return empty response with HX-Trigger to reload list
+    resp = HTMLResponse("")
+    resp.headers["HX-Trigger"] = "ticketsUpdated"
+    return resp
+
+
 @router.patch("/api/error-reports/{report_id}")
 @router.patch("/api/trouble-tickets/{report_id}")
 async def update_ticket(

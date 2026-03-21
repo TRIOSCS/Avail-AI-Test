@@ -1,0 +1,103 @@
+{# Trouble Ticket detail view #}
+<div class="max-w-4xl mx-auto px-4 py-6">
+  {# Back button #}
+  <a hx-get="/v2/partials/trouble-tickets/workspace" hx-target="#main-content" hx-push-url="/v2/trouble-tickets"
+     @click="currentView = 'tickets'"
+     class="inline-flex items-center gap-1 text-sm text-gray-500 hover:text-gray-700 mb-4 cursor-pointer">
+    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M15 19l-7-7 7-7"/></svg>
+    Back to Tickets
+  </a>
+
+  {# Header #}
+  <div class="flex items-start justify-between mb-6">
+    <div>
+      <h1 class="text-xl font-bold text-gray-900">{{ ticket.ticket_number }}</h1>
+      <p class="text-sm text-gray-500 mt-1">
+        Submitted {{ ticket.created_at|fmtdate("%b %d, %Y %H:%M") }}
+        {% if ticket.submitter %} by {{ ticket.submitter.name or ticket.submitter.email }}{% endif %}
+      </p>
+    </div>
+
+    {# Status dropdown #}
+    <div x-data="{ status: '{{ ticket.status }}' }">
+      <select x-model="status"
+              @change="fetch('/api/trouble-tickets/' + {{ ticket.id }}, {
+                method: 'PATCH',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({status: status})
+              }).then(function(){ Alpine.store('toast').show = true; Alpine.store('toast').message = 'Status updated'; Alpine.store('toast').type = 'success'; })"
+              class="text-sm border border-gray-300 rounded-md px-3 py-1.5 focus:border-brand-500 focus:ring-1 focus:ring-brand-500">
+        <option value="submitted">Submitted</option>
+        <option value="in_progress">In Progress</option>
+        <option value="resolved">Resolved</option>
+        <option value="wont_fix">Won't Fix</option>
+      </select>
+    </div>
+  </div>
+
+  {# AI Summary #}
+  {% if ticket.ai_summary %}
+  <div class="bg-brand-50 border border-brand-200 rounded-lg p-4 mb-6">
+    <div class="flex items-center gap-2 mb-1">
+      <svg class="w-4 h-4 text-brand-500" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+      </svg>
+      <span class="text-xs font-medium text-brand-600">AI Summary</span>
+    </div>
+    <p class="text-sm text-gray-700">{{ ticket.ai_summary }}</p>
+  </div>
+  {% endif %}
+
+  {# Root cause group badge #}
+  {% if ticket.root_cause_group %}
+  <div class="flex items-center gap-2 mb-4">
+    <span class="text-xs font-medium text-amber-700 bg-amber-100 px-2 py-1 rounded">
+      Root Cause: {{ ticket.root_cause_group.title }}
+    </span>
+  </div>
+  {% endif %}
+
+  {# Screenshot #}
+  {% if ticket.screenshot_path or ticket.screenshot_b64 %}
+  <div class="mb-6">
+    <h3 class="text-sm font-medium text-gray-700 mb-2">Screenshot</h3>
+    <div class="border border-gray-200 rounded-lg overflow-hidden">
+      <img src="/api/trouble-tickets/{{ ticket.id }}/screenshot"
+           alt="Screenshot" class="w-full cursor-pointer"
+           @click="window.open('/api/trouble-tickets/{{ ticket.id }}/screenshot', '_blank')">
+    </div>
+  </div>
+  {% endif %}
+
+  {# Description #}
+  <div class="mb-6">
+    <h3 class="text-sm font-medium text-gray-700 mb-2">Description</h3>
+    <div class="bg-gray-50 rounded-lg p-4 text-sm text-gray-700 whitespace-pre-wrap">{{ ticket.description }}</div>
+  </div>
+
+  {# Captured Context (collapsible) #}
+  <div x-data="{ open: false }" class="mb-6">
+    <button @click="open = !open" class="flex items-center gap-2 text-sm font-medium text-gray-700 mb-2">
+      <svg :class="open ? 'rotate-90' : ''" class="w-4 h-4 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
+      Captured Context
+    </button>
+    <div x-show="open" x-collapse class="space-y-3">
+      {% if ticket.current_page %}
+      <div><span class="text-xs font-medium text-gray-500">Page URL:</span>
+        <span class="text-xs text-gray-700 ml-1">{{ ticket.current_page }}</span></div>
+      {% endif %}
+      {% if ticket.browser_info %}
+      <div><span class="text-xs font-medium text-gray-500">Browser:</span>
+        <pre class="text-xs text-gray-700 mt-1 bg-gray-100 rounded p-2 overflow-x-auto">{{ ticket.browser_info }}</pre></div>
+      {% endif %}
+      {% if ticket.console_errors %}
+      <div><span class="text-xs font-medium text-gray-500">JS Errors:</span>
+        <pre class="text-xs text-gray-700 mt-1 bg-gray-100 rounded p-2 overflow-x-auto max-h-40">{{ ticket.console_errors }}</pre></div>
+      {% endif %}
+      {% if ticket.network_errors %}
+      <div><span class="text-xs font-medium text-gray-500">Network Log:</span>
+        <pre class="text-xs text-gray-700 mt-1 bg-gray-100 rounded p-2 overflow-x-auto max-h-40">{{ ticket.network_errors|tojson(indent=2) }}</pre></div>
+      {% endif %}
+    </div>
+  </div>
+</div>

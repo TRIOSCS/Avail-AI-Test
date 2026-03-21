@@ -1,0 +1,41 @@
+{# Trouble Tickets workspace — loaded into #main-content #}
+<div class="max-w-6xl mx-auto px-4 py-6">
+  <div class="flex items-center justify-between mb-6">
+    <h1 class="text-2xl font-bold text-gray-900">Trouble Tickets</h1>
+    <button hx-post="/api/trouble-tickets/analyze"
+            hx-target="#ticket-list"
+            hx-swap="innerHTML"
+            hx-indicator="#analyze-spinner"
+            class="inline-flex items-center gap-2 px-4 py-2 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M9.813 15.904L9 18.75l-.813-2.846a4.5 4.5 0 00-3.09-3.09L2.25 12l2.846-.813a4.5 4.5 0 003.09-3.09L9 5.25l.813 2.846a4.5 4.5 0 003.09 3.09L15.75 12l-2.846.813a4.5 4.5 0 00-3.09 3.09z"/>
+      </svg>
+      Analyze
+      <svg id="analyze-spinner" class="htmx-indicator animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+      </svg>
+    </button>
+  </div>
+
+  {# Filter pills #}
+  <div class="flex gap-2 mb-4" x-data="{ filter: '' }">
+    {% set filters = [('', 'All'), ('submitted', 'Open'), ('resolved', 'Resolved'), ('wont_fix', "Won't Fix")] %}
+    {% for val, label in filters %}
+    <button @click="filter = '{{ val }}'"
+            hx-get="/v2/partials/trouble-tickets/list?status={{ val }}"
+            hx-target="#ticket-list"
+            :class="filter === '{{ val }}' ? 'bg-brand-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
+            class="px-3 py-1.5 text-xs font-medium rounded-full transition-colors">
+      {{ label }}
+    </button>
+    {% endfor %}
+  </div>
+
+  <div id="ticket-list"
+       hx-get="/v2/partials/trouble-tickets/list"
+       hx-trigger="load"
+       hx-target="this">
+    <div class="text-center py-8 text-gray-400 text-sm">Loading...</div>
+  </div>
+</div>

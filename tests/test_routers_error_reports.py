@@ -8,6 +8,7 @@ Depends on: app/routers/error_reports.py, conftest.py
 """
 
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -488,3 +489,28 @@ class TestNewSubmitFlow:
         )
         assert resp.status_code == 200
         assert "Report submitted" in resp.text
+
+
+# ── Batch AI Analysis ─────────────────────────────────────────────
+
+
+class TestBatchAnalyze:
+    def test_analyze_no_tickets(self, client):
+        resp = client.post("/api/trouble-tickets/analyze")
+        assert resp.status_code == 200
+        assert "No open tickets" in resp.text
+
+    @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
+    def test_analyze_groups_tickets(self, mock_claude, client, sample_report, db_session):
+        mock_claude.return_value = {
+            "groups": [{"title": "Search Bug", "suggested_fix": "Fix query", "ticket_ids": [sample_report.id]}]
+        }
+        resp = client.post("/api/trouble-tickets/analyze")
+        assert resp.status_code == 200
+
+    @patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock)
+    def test_analyze_claude_returns_none(self, mock_claude, client, sample_report):
+        mock_claude.return_value = None
+        resp = client.post("/api/trouble-tickets/analyze")
+        assert resp.status_code == 200
+        assert "no results" in resp.text
