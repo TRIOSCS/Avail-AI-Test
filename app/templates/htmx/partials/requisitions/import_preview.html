@@ -136,9 +136,8 @@
                      class="w-32 px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
             </td>
             <td class="px-2 py-1">
-              <input type="text" name="reqs[{{ loop.index0 }}].notes"
-                     value="{{ r.notes or '' }}"
-                     class="w-full min-w-[80px] px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+              <textarea name="reqs[{{ loop.index0 }}].notes" rows="2"
+                        class="w-full min-w-[200px] px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">{{ r.notes or '' }}</textarea>
             </td>
             <td class="px-2 py-1">
               <button type="button"
