@@ -1,0 +1,38 @@
+{# Inline edit input for a table cell.
+   Called by: GET /v2/partials/parts/{id}/cell/edit/{field}
+   Depends on: requirement, field, cell_id
+#}
+<td id="{{ cell_id }}" @click.stop class="!p-0.5">
+  {% if field == 'sourcing_status' %}
+    <select name="value"
+            hx-patch="/v2/partials/parts/{{ requirement.id }}/cell"
+            hx-target="#{{ cell_id }}" hx-swap="outerHTML"
+            hx-vals='{"field": "{{ field }}"}'
+            @keydown.escape.prevent="htmx.ajax('GET', '/v2/partials/parts/{{ requirement.id }}/cell/display/{{ field }}', {target: '#{{ cell_id }}', swap: 'outerHTML'})"
+            class="text-[11px] px-1 py-0.5 rounded border border-brand-300 focus:ring-1 focus:ring-brand-500"
+            x-init="$el.focus()" autofocus>
+      {% for s in ['open', 'sourcing', 'offered', 'quoted', 'won', 'lost', 'archived'] %}
+        <option value="{{ s }}" {{ 'selected' if s == requirement.sourcing_status }}>{{ s|capitalize }}</option>
+      {% endfor %}
+    </select>
+  {% elif field == 'target_qty' %}
+    <input type="number" name="value" value="{{ requirement.target_qty or '' }}"
+           hx-patch="/v2/partials/parts/{{ requirement.id }}/cell"
+           hx-target="#{{ cell_id }}" hx-swap="outerHTML"
+           hx-vals='{"field": "{{ field }}"}'
+           hx-trigger="keyup[key=='Enter']"
+           @keydown.escape.prevent="htmx.ajax('GET', '/v2/partials/parts/{{ requirement.id }}/cell/display/{{ field }}', {target: '#{{ cell_id }}', swap: 'outerHTML'})"
+           class="text-[11px] font-mono px-1 py-0.5 rounded border border-brand-300 focus:ring-1 focus:ring-brand-500 w-16"
+           x-init="$el.focus(); $el.select()" autofocus />
+  {% elif field == 'target_price' %}
+    <input type="number" name="value" step="0.0001"
+           value="{{ requirement.target_price if requirement.target_price else '' }}"
+           hx-patch="/v2/partials/parts/{{ requirement.id }}/cell"
+           hx-target="#{{ cell_id }}" hx-swap="outerHTML"
+           hx-vals='{"field": "{{ field }}"}'
+           hx-trigger="keyup[key=='Enter']"
+           @keydown.escape.prevent="htmx.ajax('GET', '/v2/partials/parts/{{ requirement.id }}/cell/display/{{ field }}', {target: '#{{ cell_id }}', swap: 'outerHTML'})"
+           class="text-[11px] font-mono px-1 py-0.5 rounded border border-brand-300 focus:ring-1 focus:ring-brand-500 w-20"
+           x-init="$el.focus(); $el.select()" autofocus />
+  {% endif %}
+</td>

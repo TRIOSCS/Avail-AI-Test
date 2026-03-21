@@ -1,0 +1,29 @@
+{# Display-mode table cell for an inline-editable field.
+   Called by: PATCH /v2/partials/parts/{id}/cell and GET .../cell/display/{field}
+   Depends on: requirement, field, cell_id
+#}
+{% set status_colors = {
+  'open': 'bg-blue-600 text-white',
+  'sourcing': 'bg-amber-500 text-white',
+  'offered': 'bg-emerald-600 text-white',
+  'quoted': 'bg-violet-600 text-white',
+  'won': 'bg-emerald-700 text-white',
+  'lost': 'bg-gray-400 text-white',
+  'archived': 'bg-gray-300 text-gray-600'
+} %}
+
+<td id="{{ cell_id }}" @click.stop
+    hx-get="/v2/partials/parts/{{ requirement.id }}/cell/edit/{{ field }}"
+    hx-target="#{{ cell_id }}" hx-swap="outerHTML"
+    class="cursor-pointer hover:bg-brand-50 transition-colors"
+    title="Click to edit">
+  {% if field == 'sourcing_status' %}
+    <span class="badge-primary {{ status_colors.get(requirement.sourcing_status, 'bg-gray-400 text-white') }}">
+      {{ requirement.sourcing_status or 'open' }}
+    </span>
+  {% elif field == 'target_qty' %}
+    {{ '{:,}'.format(requirement.target_qty) if requirement.target_qty else '—' }}
+  {% elif field == 'target_price' %}
+    {{ '${:,.4f}'.format(requirement.target_price) if requirement.target_price else '—' }}
+  {% endif %}
+</td>

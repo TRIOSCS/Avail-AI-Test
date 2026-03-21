@@ -1,18 +1,25 @@
 {# inline_cell.html — Inline edit form for requisition fields.
    Renders a form that saves on blur/Enter and cancels on Escape.
-   Works in both 'row' (list table) and 'header' (detail page) contexts.
+   Works in 'row' (list table), 'header' (detail page), and 'tab' (req details tab) contexts.
 
-   Receives: req, field (str), users (list, for owner), context ('row'|'header').
+   Receives: req, field (str), users (list, for owner), context ('row'|'header'|'tab').
    Called by: GET /v2/partials/requisitions/{id}/edit/{field}
    Depends on: HTMX, Alpine.js, brand palette.
 #}
 
-{% set target_id = "req-row-" ~ req.id if context == "row" else "req-header" %}
-{% set swap_style = "outerHTML" if context == "row" else "outerHTML" %}
+{% if context == "tab" %}
+  {% set target_id = "this" %}
+  {% set swap_style = "innerHTML" %}
+  {% set escape_action = "document.body.dispatchEvent(new CustomEvent('reqDetailsRefresh'))" %}
+{% else %}
+  {% set target_id = "req-row-" ~ req.id if context == "row" else "req-header" %}
+  {% set swap_style = "outerHTML" %}
+  {% set escape_action = "htmx.ajax('GET', '/v2/partials/requisitions/" ~ req.id ~ "', {target: '#main-content'})" %}
+{% endif %}
 
 {% if field == 'name' %}
 <form hx-patch="/v2/partials/requisitions/{{ req.id }}/inline"
-      hx-target="#{{ target_id }}"
+      hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
       class="inline">
   <input type="hidden" name="field" value="name">
@@ -23,12 +30,12 @@
          x-init="$el.focus(); $el.select()"
          @blur="$el.form.requestSubmit()"
          @keydown.enter.prevent="$el.form.requestSubmit()"
-         @keydown.escape.prevent="htmx.ajax('GET', '/v2/partials/requisitions/{{ req.id }}', {target: '#main-content'})">
+         @keydown.escape.prevent="{{ escape_action }}">
 </form>
 
 {% elif field == 'status' %}
 <form hx-patch="/v2/partials/requisitions/{{ req.id }}/inline"
-      hx-target="#{{ target_id }}"
+      hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
       class="inline">
   <input type="hidden" name="field" value="status">
@@ -39,7 +46,7 @@
           x-init="$el.focus()"
           @change="$el.form.requestSubmit()"
           @blur="$el.form.requestSubmit()"
-          @keydown.escape.prevent="htmx.ajax('GET', '/v2/partials/requisitions/{{ req.id }}', {target: '#main-content'})">
+          @keydown.escape.prevent="{{ escape_action }}">
     {% for s in ['draft', 'active', 'sourcing', 'offers', 'quoting', 'quoted', 'won', 'lost', 'archived'] %}
     <option value="{{ s }}" {{ 'selected' if req.status == s else '' }}>{{ s|capitalize }}</option>
     {% endfor %}
@@ -48,7 +55,7 @@
 
 {% elif field == 'urgency' %}
 <form hx-patch="/v2/partials/requisitions/{{ req.id }}/inline"
-      hx-target="#{{ target_id }}"
+      hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
       class="inline">
   <input type="hidden" name="field" value="urgency">
@@ -59,7 +66,7 @@
           x-init="$el.focus()"
           @change="$el.form.requestSubmit()"
           @blur="$el.form.requestSubmit()"
-          @keydown.escape.prevent="htmx.ajax('GET', '/v2/partials/requisitions/{{ req.id }}', {target: '#main-content'})">
+          @keydown.escape.prevent="{{ escape_action }}">
     {% for u in ['normal', 'hot', 'critical'] %}
     <option value="{{ u }}" {{ 'selected' if req.urgency == u else '' }}>{{ u|capitalize }}</option>
     {% endfor %}
@@ -68,7 +75,7 @@
 
 {% elif field == 'deadline' %}
 <form hx-patch="/v2/partials/requisitions/{{ req.id }}/inline"
-      hx-target="#{{ target_id }}"
+      hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
       class="inline">
   <input type="hidden" name="field" value="deadline">
@@ -80,12 +87,12 @@
          x-init="$el.focus()"
          @change="$el.form.requestSubmit()"
          @blur="$el.form.requestSubmit()"
-         @keydown.escape.prevent="htmx.ajax('GET', '/v2/partials/requisitions/{{ req.id }}', {target: '#main-content'})">
+         @keydown.escape.prevent="{{ escape_action }}">
 </form>
 
 {% elif field == 'owner' %}
 <form hx-patch="/v2/partials/requisitions/{{ req.id }}/inline"
-      hx-target="#{{ target_id }}"
+      hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
       class="inline">
   <input type="hidden" name="field" value="owner">
@@ -96,7 +103,7 @@
           x-init="$el.focus()"
           @change="$el.form.requestSubmit()"
           @blur="$el.form.requestSubmit()"
-          @keydown.escape.prevent="htmx.ajax('GET', '/v2/partials/requisitions/{{ req.id }}', {target: '#main-content'})">
+          @keydown.escape.prevent="{{ escape_action }}">
     {% for u in users %}
     <option value="{{ u.id }}" {{ 'selected' if req.created_by == u.id else '' }}>{{ u.name or u.email }}</option>
     {% endfor %}

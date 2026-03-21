@@ -11,7 +11,7 @@ Depends on: models, dependencies, database, search_service
 import html as html_mod
 import json
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
@@ -1680,6 +1680,17 @@ async def requisition_inline_save(
     req.updated_by_id = user.id
     db.commit()
     db.refresh(req)
+
+    if context == "tab":
+        # Tab context — return empty response with trigger to reload the tab
+        response = HTMLResponse("")
+        response.headers["HX-Trigger"] = json.dumps(
+            {
+                "showToast": {"message": msg},
+                "reqDetailsRefresh": True,
+            }
+        )
+        return response
 
     if context == "header":
         # Re-fetch with relationships for detail header
@@ -8794,6 +8805,40 @@ async def part_tab_sourcing(
     return templates.TemplateResponse("htmx/partials/parts/tabs/sourcing.html", ctx)
 
 
+@router.get("/v2/partials/parts/{requirement_id}/tab/req-details", response_class=HTMLResponse)
+async def part_tab_req_details(
+    requirement_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return the Req Details tab showing parent requisition fields and sibling
+    parts."""
+    req = db.get(Requirement, requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+
+    requisition = req.requisition
+    sibling_parts = (
+        db.query(Requirement)
+        .filter(Requirement.requisition_id == requisition.id)
+        .order_by(Requirement.primary_mpn)
+        .all()
+    )
+    users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update(
+        {
+            "requirement": req,
+            "requisition": requisition,
+            "sibling_parts": sibling_parts,
+            "users": users_list,
+        }
+    )
+    return templates.TemplateResponse("htmx/partials/parts/tabs/req_details.html", ctx)
+
+
 @router.get("/v2/partials/parts/{requirement_id}/header", response_class=HTMLResponse)
 async def part_header(
     requirement_id: int,
@@ -8961,6 +9006,105 @@ async def part_header_save(
     return response
 
 
+# ── Inline table-cell editing ────────────────────────────────────────
+
+_CELL_EDITABLE = {"sourcing_status", "target_qty", "target_price"}
+
+
+@router.get("/v2/partials/parts/{requirement_id}/cell/edit/{field}", response_class=HTMLResponse)
+async def part_cell_edit(
+    requirement_id: int,
+    field: str,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return an inline edit widget for a single table cell."""
+    if field not in _CELL_EDITABLE:
+        return HTMLResponse("Invalid field", status_code=400)
+
+    req = db.get(Requirement, requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+
+    cell_id = f"cell-{field}-{requirement_id}"
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update({"requirement": req, "field": field, "cell_id": cell_id})
+    return templates.TemplateResponse("htmx/partials/parts/cell_edit.html", ctx)
+
+
+@router.get("/v2/partials/parts/{requirement_id}/cell/display/{field}", response_class=HTMLResponse)
+async def part_cell_display(
+    requirement_id: int,
+    field: str,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return display-mode table cell (used for Escape cancel)."""
+    if field not in _CELL_EDITABLE:
+        return HTMLResponse("Invalid field", status_code=400)
+
+    req = db.get(Requirement, requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+
+    cell_id = f"cell-{field}-{requirement_id}"
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update({"requirement": req, "field": field, "cell_id": cell_id})
+    return templates.TemplateResponse("htmx/partials/parts/cell_display.html", ctx)
+
+
+@router.patch("/v2/partials/parts/{requirement_id}/cell", response_class=HTMLResponse)
+async def part_cell_save(
+    requirement_id: int,
+    request: Request,
+    field: str = Form(...),
+    value: str = Form(default=""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save an inline table-cell edit and return the display-mode cell."""
+    if field not in _CELL_EDITABLE:
+        return HTMLResponse("Invalid field", status_code=400)
+
+    req = db.get(Requirement, requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+
+    if field == "sourcing_status":
+        from app.services.requirement_status import transition_requirement
+
+        try:
+            transition_requirement(req, value, db, user)
+        except ValueError:
+            logger.warning(
+                "Cell status transition rejected: {} → {} for part {}", req.sourcing_status, value, requirement_id
+            )
+    elif field == "target_qty":
+        try:
+            req.target_qty = int(value) if value else None
+        except (ValueError, TypeError):
+            req.target_qty = None
+    elif field == "target_price":
+        from decimal import Decimal, InvalidOperation
+
+        try:
+            req.target_price = Decimal(value) if value else None
+        except InvalidOperation:
+            req.target_price = None
+
+    db.commit()
+    logger.info("Part {} cell '{}' updated by {}", requirement_id, field, user.email)
+
+    cell_id = f"cell-{field}-{requirement_id}"
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update({"requirement": req, "field": field, "cell_id": cell_id})
+    response = templates.TemplateResponse("htmx/partials/parts/cell_display.html", ctx)
+    response.headers["HX-Trigger"] = json.dumps({"part-updated": {"id": requirement_id}})
+    return response
+
+
 @router.get("/v2/partials/parts/{requirement_id}/tab/activity", response_class=HTMLResponse)
 async def part_tab_activity(
     requirement_id: int,
@@ -9016,8 +9160,6 @@ async def part_tab_comms(
     )
 
     users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
-
-    from datetime import date
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update({"requirement": req, "tasks": tasks, "users": users_list, "today": date.today()})
