@@ -140,6 +140,248 @@ def test_inline_save_tab_context_updates_urgency(client, db_session, test_user):
     assert updated.urgency == "hot"
 
 
+def test_req_details_tab_shows_new_columns(client, db_session, test_user):
+    """The sibling table shows Brand, Tgt $, Cust PN, Subs, and Offers columns."""
+    from decimal import Decimal
+
+    from app.models import Requirement, Requisition
+    from app.models.offers import Offer
+
+    reqn = Requisition(
+        name="Col Test",
+        status="active",
+        urgency="normal",
+        customer_name="TestCo",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(reqn)
+    db_session.commit()
+    db_session.refresh(reqn)
+
+    part = Requirement(
+        requisition_id=reqn.id,
+        primary_mpn="LM358",
+        brand="Texas Instruments",
+        target_qty=500,
+        target_price=Decimal("1.25"),
+        customer_pn="CUST-001",
+        substitutes=["LM358A", "LM358B"],
+        sourcing_status="sourcing",
+    )
+    db_session.add(part)
+    db_session.commit()
+    db_session.refresh(part)
+
+    offer = Offer(
+        requisition_id=reqn.id,
+        requirement_id=part.id,
+        vendor_name="Digi-Key",
+        mpn="LM358",
+        unit_price=Decimal("0.85"),
+        qty_available=1000,
+    )
+    db_session.add(offer)
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/parts/{part.id}/tab/req-details")
+    assert resp.status_code == 200
+    assert "Texas Instruments" in resp.text
+    assert "$1.25" in resp.text
+    assert "CUST-001" in resp.text
+    assert ">2<" in resp.text or ">2 " in resp.text  # 2 subs
+    assert "$0.85" in resp.text  # best offer price
+
+
+def test_req_details_tab_shows_part_specs_section(client, db_session, test_user):
+    """The tab shows a Part Specifications section with the 6 spec fields."""
+    from app.models import Requirement, Requisition
+
+    reqn = Requisition(
+        name="Spec Test",
+        status="active",
+        urgency="normal",
+        customer_name="TestCo",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(reqn)
+    db_session.commit()
+    db_session.refresh(reqn)
+
+    part = Requirement(
+        requisition_id=reqn.id,
+        primary_mpn="LM358",
+        customer_pn="CUST-ABC",
+        condition="New",
+        firmware="v2.1",
+        sourcing_status="open",
+    )
+    db_session.add(part)
+    db_session.commit()
+    db_session.refresh(part)
+
+    resp = client.get(f"/v2/partials/parts/{part.id}/tab/req-details")
+    assert resp.status_code == 200
+    assert "Part Specifications" in resp.text
+    assert "CUST-ABC" in resp.text
+    assert "New" in resp.text
+    assert "v2.1" in resp.text
+    assert "edit-spec/customer_pn" in resp.text
+
+
+def test_spec_edit_returns_form(client, db_session, test_user):
+    """GET /v2/partials/parts/{id}/edit-spec/{field} returns an edit form."""
+    from app.models import Requirement, Requisition
+
+    reqn = Requisition(
+        name="Edit Test",
+        status="active",
+        urgency="normal",
+        customer_name="TestCo",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(reqn)
+    db_session.commit()
+    db_session.refresh(reqn)
+
+    part = Requirement(
+        requisition_id=reqn.id,
+        primary_mpn="ABC123",
+        firmware="v1.0",
+        sourcing_status="open",
+    )
+    db_session.add(part)
+    db_session.commit()
+    db_session.refresh(part)
+
+    resp = client.get(f"/v2/partials/parts/{part.id}/edit-spec/firmware?context=tab")
+    assert resp.status_code == 200
+    assert "v1.0" in resp.text
+    assert "save-spec" in resp.text
+
+
+def test_spec_edit_invalid_field(client, db_session, test_user):
+    """GET /v2/partials/parts/{id}/edit-spec/bad_field returns 400."""
+    reqn, parts = _make_requisition_and_parts(db_session, test_user)
+    resp = client.get(f"/v2/partials/parts/{parts[0].id}/edit-spec/bad_field")
+    assert resp.status_code == 400
+
+
+def test_spec_save_updates_field(client, db_session, test_user):
+    """PATCH /v2/partials/parts/{id}/save-spec persists the value."""
+    import json
+
+    from app.models import Requirement, Requisition
+
+    reqn = Requisition(
+        name="Save Test",
+        status="active",
+        urgency="normal",
+        customer_name="TestCo",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(reqn)
+    db_session.commit()
+    db_session.refresh(reqn)
+
+    part = Requirement(
+        requisition_id=reqn.id,
+        primary_mpn="XYZ789",
+        sourcing_status="open",
+    )
+    db_session.add(part)
+    db_session.commit()
+    db_session.refresh(part)
+
+    resp = client.patch(
+        f"/v2/partials/parts/{part.id}/save-spec",
+        data={"field": "packaging", "value": "Tape & Reel"},
+    )
+    assert resp.status_code == 200
+    assert "Tape &amp; Reel" in resp.text or "Tape & Reel" in resp.text
+
+    trigger = json.loads(resp.headers["HX-Trigger"])
+    assert "part-updated" in trigger
+    assert "showToast" in trigger
+
+    db_session.expire_all()
+    updated = db_session.get(Requirement, part.id)
+    assert updated.packaging == "Tape & Reel"
+
+
+def test_spec_save_clears_empty_value(client, db_session, test_user):
+    """PATCH with empty value sets field to None."""
+    from app.models import Requirement, Requisition
+
+    reqn = Requisition(
+        name="Clear Test",
+        status="active",
+        urgency="normal",
+        customer_name="TestCo",
+        created_by=test_user.id,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(reqn)
+    db_session.commit()
+    db_session.refresh(reqn)
+
+    part = Requirement(
+        requisition_id=reqn.id,
+        primary_mpn="ABC",
+        condition="New",
+        sourcing_status="open",
+    )
+    db_session.add(part)
+    db_session.commit()
+    db_session.refresh(part)
+
+    resp = client.patch(
+        f"/v2/partials/parts/{part.id}/save-spec",
+        data={"field": "condition", "value": ""},
+    )
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    updated = db_session.get(Requirement, part.id)
+    assert updated.condition is None
+
+
+def test_spec_edit_blocked_on_archived_part(client, db_session, test_user):
+    """Spec edit and save return 403 for archived parts."""
+    reqn, parts = _make_requisition_and_parts(db_session, test_user, num_parts=1)
+    parts[0].sourcing_status = "archived"
+    db_session.commit()
+
+    resp = client.get(f"/v2/partials/parts/{parts[0].id}/edit-spec/firmware")
+    assert resp.status_code == 403
+
+    resp = client.patch(
+        f"/v2/partials/parts/{parts[0].id}/save-spec",
+        data={"field": "firmware", "value": "v3.0"},
+    )
+    assert resp.status_code == 403
+
+
+def test_spec_save_whitespace_only_becomes_null(client, db_session, test_user):
+    """PATCH with whitespace-only value sets field to None, not empty string."""
+    reqn, parts = _make_requisition_and_parts(db_session, test_user, num_parts=1)
+
+    resp = client.patch(
+        f"/v2/partials/parts/{parts[0].id}/save-spec",
+        data={"field": "firmware", "value": "   "},
+    )
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    from app.models import Requirement
+
+    updated = db_session.get(Requirement, parts[0].id)
+    assert updated.firmware is None
+
+
 def test_workspace_tab_bar_includes_req_details(client, db_session, test_user):
     """The workspace template includes the req-details tab in the tab bar."""
     # The workspace partial is loaded as part of the requisition detail page;

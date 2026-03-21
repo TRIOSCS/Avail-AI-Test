@@ -8821,6 +8821,7 @@ async def part_tab_req_details(
     requisition = req.requisition
     sibling_parts = (
         db.query(Requirement)
+        .options(joinedload(Requirement.offers))
         .filter(Requirement.requisition_id == requisition.id)
         .order_by(Requirement.primary_mpn)
         .all()
@@ -8860,11 +8861,8 @@ _PART_HEADER_EDITABLE = {
     "brand",
     "target_qty",
     "target_price",
-    "condition",
     "sourcing_status",
     "notes",
-    "date_codes",
-    "packaging",
     "substitutes",
 }
 _CONDITION_CHOICES = ["New", "Used", "Refurbished", "Any"]
@@ -9009,6 +9007,14 @@ async def part_header_save(
 # ── Inline table-cell editing ────────────────────────────────────────
 
 _CELL_EDITABLE = {"sourcing_status", "target_qty", "target_price"}
+_SPEC_LABELS = {
+    "customer_pn": "Customer PN",
+    "condition": "Condition",
+    "date_codes": "Date Codes",
+    "packaging": "Packaging",
+    "firmware": "Firmware",
+    "hardware_codes": "Hardware",
+}
 
 
 @router.get("/v2/partials/parts/{requirement_id}/cell/edit/{field}", response_class=HTMLResponse)
@@ -9102,6 +9108,74 @@ async def part_cell_save(
     ctx.update({"requirement": req, "field": field, "cell_id": cell_id})
     response = templates.TemplateResponse("htmx/partials/parts/cell_display.html", ctx)
     response.headers["HX-Trigger"] = json.dumps({"part-updated": {"id": requirement_id}})
+    return response
+
+
+@router.get("/v2/partials/parts/{requirement_id}/edit-spec/{field}", response_class=HTMLResponse)
+async def part_spec_edit(
+    requirement_id: int,
+    field: str,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return inline edit form for a requirement spec field."""
+    if field not in _SPEC_LABELS:
+        return HTMLResponse("Invalid field", status_code=400)
+
+    req = db.get(Requirement, requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+
+    if req.sourcing_status == "archived":
+        return HTMLResponse("Cannot edit archived part", status_code=403)
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update(
+        {
+            "requirement": req,
+            "field": field,
+            "field_label": _SPEC_LABELS[field],
+            "field_value": getattr(req, field, None) or "",
+            "condition_choices": _CONDITION_CHOICES,
+        }
+    )
+    return templates.TemplateResponse("htmx/partials/parts/spec_edit.html", ctx)
+
+
+@router.patch("/v2/partials/parts/{requirement_id}/save-spec", response_class=HTMLResponse)
+async def part_spec_save(
+    requirement_id: int,
+    request: Request,
+    field: str = Form(...),
+    value: str = Form(default=""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save an inline spec field edit and return the updated display."""
+    if field not in _SPEC_LABELS:
+        return HTMLResponse("Invalid field", status_code=400)
+
+    req = db.get(Requirement, requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+
+    if req.sourcing_status == "archived":
+        return HTMLResponse("Cannot edit archived part", status_code=403)
+
+    clean = (value or "").strip() or None
+    setattr(req, field, clean)
+    db.commit()
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update({"field_value": clean})
+    response = templates.TemplateResponse("htmx/partials/parts/spec_display.html", ctx)
+    response.headers["HX-Trigger"] = json.dumps(
+        {
+            "part-updated": {"id": requirement_id},
+            "showToast": {"message": f"{_SPEC_LABELS[field]} updated", "type": "success"},
+        }
+    )
     return response
 
 
