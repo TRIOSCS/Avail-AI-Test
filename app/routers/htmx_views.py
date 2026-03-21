@@ -1397,7 +1397,10 @@ async def create_quote_from_offers(
     """
     form = await request.form()
     offer_ids_raw = form.getlist("offer_ids")
-    offer_ids = [int(x) for x in offer_ids_raw if x]
+    try:
+        offer_ids = [int(x) for x in offer_ids_raw if x]
+    except (ValueError, TypeError):
+        raise HTTPException(400, "offer_ids must be integers")
 
     if not offer_ids:
         raise HTTPException(400, "No offers selected")
