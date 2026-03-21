@@ -43,6 +43,8 @@ RFQ_PARSE_SCHEMA = {
                     "customer_pn": {"type": "string", "description": "Customer's internal part number"},
                     "date_codes": {"type": "string", "description": "Date code requirements (e.g. 2024+, 2339)"},
                     "packaging": {"type": "string", "description": "Packaging: tape & reel, tray, tube, bulk"},
+                    "firmware": {"type": "string", "description": "Firmware version requirement"},
+                    "hardware_codes": {"type": "string", "description": "Hardware revision codes"},
                     "need_by_date": {"type": "string", "description": "Line-item need-by date (YYYY-MM-DD)"},
                 },
                 "required": ["primary_mpn"],
@@ -67,6 +69,8 @@ Rules:
 - customer_pn: customer's internal part number if listed. Omit if not stated.
 - date_codes: date code requirements (e.g. "2024+", "2339"). Omit if not stated.
 - packaging: tape & reel, tray, tube, bulk. Omit if not stated.
+- firmware: firmware version if specified (e.g. "v2.1", "Rev C"). Omit if not stated.
+- hardware_codes: hardware revision codes if specified. Omit if not stated.
 - need_by_date: per-line need-by date in YYYY-MM-DD. Omit if not stated.
 - Infer customer_name from sender, signature, or context.
 - deadline: YYYY-MM-DD if date given, or "ASAP" if urgent/ASAP.

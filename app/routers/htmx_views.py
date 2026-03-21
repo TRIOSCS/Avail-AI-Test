@@ -656,6 +656,11 @@ async def requisition_import_save(
                     "customer_pn": form.get(f"reqs[{idx}].customer_pn", "").strip() or None,
                     "date_codes": form.get(f"reqs[{idx}].date_codes", "").strip() or None,
                     "packaging": form.get(f"reqs[{idx}].packaging", "").strip() or None,
+                    "substitutes": [
+                        s.strip() for s in form.get(f"reqs[{idx}].substitutes", "").split(",") if s.strip()
+                    ],
+                    "firmware": form.get(f"reqs[{idx}].firmware", "").strip() or None,
+                    "hardware_codes": form.get(f"reqs[{idx}].hardware_codes", "").strip() or None,
                     "need_by_date": form.get(f"reqs[{idx}].need_by_date", "").strip() or None,
                     "notes": form.get(f"reqs[{idx}].notes", "").strip() or None,
                 }
@@ -693,9 +698,12 @@ async def requisition_import_save(
             target_price=item.get("target_price"),
             brand=item.get("brand"),
             condition=item.get("condition", ""),
+            substitutes=item.get("substitutes", []),
             customer_pn=item.get("customer_pn", ""),
             date_codes=item.get("date_codes", ""),
             packaging=item.get("packaging", ""),
+            firmware=item.get("firmware", ""),
+            hardware_codes=item.get("hardware_codes", ""),
             need_by_date=item.get("need_by_date"),
             notes=item.get("notes", ""),
         )

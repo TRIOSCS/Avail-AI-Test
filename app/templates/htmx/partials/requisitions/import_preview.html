@@ -51,9 +51,12 @@
             <th class="px-2 py-2">Brand</th>
             <th class="px-2 py-2">Target $</th>
             <th class="px-2 py-2">Cond</th>
+            <th class="px-2 py-2">Subs</th>
             <th class="px-2 py-2">Cust PN</th>
             <th class="px-2 py-2">Date Code</th>
             <th class="px-2 py-2">Pkg</th>
+            <th class="px-2 py-2">FW</th>
+            <th class="px-2 py-2">HW</th>
             <th class="px-2 py-2">Need By</th>
             <th class="px-2 py-2">Notes</th>
             <th class="px-2 py-2 w-8"></th>
@@ -91,6 +94,12 @@
                 <option value="used" {{ 'selected' if r.condition == 'used' }}>Used</option>
               </select>
             </td>
+            <td class="px-2 py-1" x-data="{ subs: '{{ (r.substitutes or [])|join(", ") }}' }">
+              <input type="text" name="reqs[{{ loop.index0 }}].substitutes"
+                     x-model="subs"
+                     placeholder="Comma-separated"
+                     class="w-full min-w-[100px] px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 font-mono">
+            </td>
             <td class="px-2 py-1">
               <input type="text" name="reqs[{{ loop.index0 }}].customer_pn"
                      value="{{ r.customer_pn or '' }}"
@@ -110,6 +119,16 @@
                 <option value="tube" {{ 'selected' if r.packaging == 'tube' }}>Tube</option>
                 <option value="bulk" {{ 'selected' if r.packaging == 'bulk' }}>Bulk</option>
               </select>
+            </td>
+            <td class="px-2 py-1">
+              <input type="text" name="reqs[{{ loop.index0 }}].firmware"
+                     value="{{ r.firmware or '' }}"
+                     class="w-20 px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+            </td>
+            <td class="px-2 py-1">
+              <input type="text" name="reqs[{{ loop.index0 }}].hardware_codes"
+                     value="{{ r.hardware_codes or '' }}"
+                     class="w-20 px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
             </td>
             <td class="px-2 py-1">
               <input type="date" name="reqs[{{ loop.index0 }}].need_by_date"
