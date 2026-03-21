@@ -15,6 +15,7 @@
   <td data-col-key="qty" class="px-4 py-2.5 text-sm text-gray-500 text-right tabular-nums" x-show="!editing">
     {{ "{:,}".format(r.target_qty) if r.target_qty else "—" }}
   </td>
+  <td data-col-key="customer_pn" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing">{{ r.customer_pn or "—" }}</td>
   <td data-col-key="target_price" class="px-4 py-2.5 text-sm text-right tabular-nums" x-show="!editing">
     {% if r.target_price %}
       <span class="text-emerald-700 font-medium">${{ "{:,.4f}".format(r.target_price) }}</span>
@@ -22,7 +23,6 @@
       <span class="text-gray-500">—</span>
     {% endif %}
   </td>
-  <td data-col-key="customer_pn" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing">{{ r.customer_pn or "—" }}</td>
   <td data-col-key="need_by_date" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing">
     {{ r.need_by_date.strftime('%b %d, %Y') if r.need_by_date else "—" }}
   </td>
@@ -67,7 +67,9 @@
   <td class="px-4 py-2.5 text-center" x-show="!editing">
     <div class="flex items-center justify-center gap-2">
       <button hx-post="/v2/partials/search/run?requirement_id={{ r.id }}&mpn={{ r.primary_mpn or '' }}"
-              hx-target="#search-results-{{ r.id }}"
+              hx-target="#search-results-{{ r.id }} td"
+              hx-swap="innerHTML"
+              hx-on::after-request="document.getElementById('search-results-{{ r.id }}').style.display='table-row'"
               hx-indicator="#spinner-{{ r.id }}"
               class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-brand-500 hover:text-brand-700 hover:bg-brand-50 rounded transition-colors"
               @click.stop>
@@ -151,4 +153,8 @@
       </div>
     </form>
   </td>
+</tr>
+{# Search results appear here — hidden until populated by hx-target #}
+<tr id="search-results-{{ r.id }}" class="bg-gray-50" style="display:none">
+  <td colspan="16" class="p-0"></td>
 </tr>

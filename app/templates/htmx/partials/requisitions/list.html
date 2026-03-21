@@ -35,7 +35,7 @@
           <svg class="pointer-events-none absolute left-3 bottom-2 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
           </svg>
-          <input type="text" id="req-search" name="q" value="{{ q }}" placeholder="Name, customer..."
+          <input type="text" id="req-search" name="q" value="{{ q }}" placeholder="Search by name, customer, or part #..."
                  aria-label="Search requisitions"
                  hx-get="/v2/partials/requisitions"
                  hx-target="#main-content"
@@ -44,6 +44,29 @@
                  hx-include="#req-filters"
                  hx-trigger="keyup changed delay:300ms"
                  class="w-full pl-10 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
+
+          {# Search scope indicators — show what matched when actively searching #}
+          {% if match_counts %}
+          <div class="flex items-center gap-1.5 mt-1.5 animate-fade-in">
+            <span class="text-[10px] text-gray-400 uppercase tracking-wide mr-0.5">Matched:</span>
+            {% set scopes = [
+              ("name", "Names", "bg-brand-50 text-brand-600 border-brand-200", match_counts.name),
+              ("customer", "Customers", "bg-sky-50 text-sky-600 border-sky-200", match_counts.customer),
+              ("part", "Parts", "bg-violet-50 text-violet-600 border-violet-200", match_counts.part)
+            ] %}
+            {% for key, label, colors, count in scopes %}
+              {% if count > 0 %}
+              <span class="inline-flex items-center gap-1 px-2 py-0.5 text-[10px] font-semibold rounded-full border transition-all duration-300 {{ colors }}">
+                <span class="tabular-nums">{{ count }}</span> {{ label }}
+              </span>
+              {% else %}
+              <span class="inline-flex items-center px-2 py-0.5 text-[10px] font-medium rounded-full border border-gray-100 text-gray-300">
+                {{ label }}
+              </span>
+              {% endif %}
+            {% endfor %}
+          </div>
+          {% endif %}
         </div>
 
         {# Hidden inputs for filter state #}
@@ -123,6 +146,17 @@
           {{ u_label }}
         </button>
         {% endfor %}
+
+        {# Clear all filters #}
+        {% if q or status or urgency or date_from or date_to or (owner and owner != 0) %}
+        <span class="text-gray-300 mx-1 self-center">|</span>
+        <a hx-get="/v2/partials/requisitions"
+           hx-target="#main-content"
+           hx-push-url="true"
+           class="px-3 py-1 text-xs font-medium text-gray-500 hover:text-gray-700 rounded-full border border-gray-200 hover:bg-gray-50 cursor-pointer self-center">
+          Clear filters
+        </a>
+        {% endif %}
       </div>
     </form>
     {# Error target for failed filter requests #}
@@ -165,9 +199,6 @@
             hx-include="#bulk-form"
             class="px-3 py-1 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Activate</button>
   </div>
-
-  {# Edit hint #}
-  <p class="text-xs text-gray-400 mb-2">Double-click cells to edit inline</p>
 
   {# Table #}
   <div class="bg-white rounded-lg shadow border border-gray-200">

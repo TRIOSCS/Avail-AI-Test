@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Reques
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from loguru import logger
-from sqlalchemy import desc
+from sqlalchemy import desc, exists, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
@@ -465,9 +465,25 @@ async def requisitions_list_partial(
         joinedload(Requisition.offers),
     )
 
-    if q.strip():
-        sb = SearchBuilder(q.strip())
-        query = query.filter(sb.ilike_filter(Requisition.name, Requisition.customer_name))
+    search_term = q.strip()
+    if search_term:
+        sb = SearchBuilder(search_term)
+        safe = f"%{sb.safe}%"
+        mpn_match = exists(
+            select(Requirement.id).where(
+                Requirement.requisition_id == Requisition.id,
+                or_(
+                    Requirement.primary_mpn.ilike(safe),
+                    Requirement.customer_pn.ilike(safe),
+                ),
+            )
+        )
+        query = query.filter(
+            or_(
+                sb.ilike_filter(Requisition.name, Requisition.customer_name),
+                mpn_match,
+            )
+        )
     if status:
         query = query.filter(Requisition.status == status)
     if owner:
@@ -505,10 +521,40 @@ async def requisitions_list_partial(
     order = sort_col.desc() if dir == "desc" else sort_col.asc()
     reqs = query.order_by(order).offset(offset).limit(limit).all()
 
-    # Attach counts
+    # Attach counts + match reason when searching
     for req in reqs:
         req.req_count = len(req.requirements) if req.requirements else 0
         req.offer_count = len(req.offers) if req.offers else 0
+        req.match_reason = None
+        req.matched_mpn = None
+        if search_term:
+            term_lower = search_term.lower()
+            if req.name and term_lower in req.name.lower():
+                req.match_reason = "name"
+            elif req.customer_name and term_lower in req.customer_name.lower():
+                req.match_reason = "customer"
+            else:
+                matched_mpn = next(
+                    (
+                        r.primary_mpn
+                        for r in (req.requirements or [])
+                        if (r.primary_mpn and term_lower in r.primary_mpn.lower())
+                        or (r.customer_pn and term_lower in r.customer_pn.lower())
+                    ),
+                    None,
+                )
+                if matched_mpn:
+                    req.match_reason = "part"
+                    req.matched_mpn = matched_mpn
+
+    # Match stats for search scope indicators
+    match_counts = None
+    if search_term:
+        match_counts = {"name": 0, "customer": 0, "part": 0}
+        for req in reqs:
+            reason = req.match_reason
+            if reason and reason in match_counts:
+                match_counts[reason] += 1
 
     # Fetch team users for owner dropdown (non-sales only)
     users = []
@@ -520,6 +566,7 @@ async def requisitions_list_partial(
         {
             "requisitions": reqs,
             "q": q,
+            "match_counts": match_counts,
             "status": status,
             "owner": owner,
             "urgency": urgency,

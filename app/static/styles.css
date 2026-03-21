@@ -558,6 +558,18 @@ hr { border-color: #c8d5e2; }
     animation-delay: calc(var(--i, 0) * 50ms);
 }
 
+/* Search scope & match badge animations */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-4px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+@keyframes slideInRight {
+    from { opacity: 0; transform: translateX(-6px); }
+    to { opacity: 1; transform: translateX(0); }
+}
+.animate-fade-in { animation: fadeIn 0.25s ease-out both; }
+.match-badge { animation: slideInRight 0.3s ease-out both; }
+
 /* Faceted search — loading state */
 #materials-results.htmx-request {
   opacity: 0.5;
