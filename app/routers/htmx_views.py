@@ -8982,5 +8982,3 @@ async def trouble_ticket_detail(
         "htmx/partials/tickets/detail.html",
         {**_base_ctx(request, user, "tickets"), "ticket": ticket},
     )
-
-    return await parts_list_partial(request=request, user=user, db=db)
