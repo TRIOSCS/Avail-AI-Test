@@ -352,3 +352,60 @@ class TestAnalyzeVendorMaterials:
             await _analyze_vendor_materials(1, db_session=None)
             mock_db.rollback.assert_called()
             mock_db.close.assert_called()
+
+
+class TestVendorAnalysisEdgeCases:
+    """Edge cases for vendor material analysis."""
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
+    async def test_vendor_single_transaction(self, mock_claude, db_session):
+        """Vendor with exactly 1 MVH row → still calls Claude."""
+        card = _make_vendor_card(db_session)
+        mc = _make_material_card(db_session, mpn="SINGLE-001")
+        _make_mvh(db_session, mc.id, card.normalized_name, manufacturer="TI")
+        db_session.commit()
+        mock_claude.return_value = {"brands": ["TI"], "commodities": ["IC"]}
+        await _analyze_vendor_materials(card.id, db_session)
+        mock_claude.assert_called_once()
+        db_session.refresh(card)
+        assert card.brand_tags == ["TI"]
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
+    async def test_vendor_all_null_manufacturer(self, mock_claude, db_session):
+        """MVH rows with no manufacturer → still sends MPNs to Claude."""
+        card = _make_vendor_card(db_session)
+        mc = _make_material_card(db_session, mpn="NULL-MFR-001", manufacturer=None)
+        _make_mvh(db_session, mc.id, card.normalized_name, manufacturer=None)
+        db_session.commit()
+        mock_claude.return_value = {"brands": [], "commodities": ["Passive"]}
+        await _analyze_vendor_materials(card.id, db_session)
+        mock_claude.assert_called_once()
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
+    async def test_vendor_exactly_5_tags_no_truncation(self, mock_claude, db_session):
+        """Claude returns exactly 5 → no truncation needed."""
+        card = _make_vendor_card(db_session)
+        mc = _make_material_card(db_session)
+        _make_mvh(db_session, mc.id, card.normalized_name)
+        db_session.commit()
+        mock_claude.return_value = {"brands": ["A", "B", "C", "D", "E"], "commodities": ["X"]}
+        await _analyze_vendor_materials(card.id, db_session)
+        db_session.refresh(card)
+        assert len(card.brand_tags) == 5
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
+    async def test_vendor_claude_returns_empty_lists(self, mock_claude, db_session):
+        """Claude returns empty lists → tags set to empty, updated_at set."""
+        card = _make_vendor_card(db_session)
+        mc = _make_material_card(db_session)
+        _make_mvh(db_session, mc.id, card.normalized_name)
+        db_session.commit()
+        mock_claude.return_value = {"brands": [], "commodities": []}
+        await _analyze_vendor_materials(card.id, db_session)
+        db_session.refresh(card)
+        assert card.brand_tags == []
+        assert card.material_tags_updated_at is not None

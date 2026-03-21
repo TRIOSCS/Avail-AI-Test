@@ -246,3 +246,50 @@ class TestAnalyzeCustomerMaterials:
         await analyze_customer_materials(999, db_session=None)
         mock_db.close.assert_called_once()
         mock_claude.assert_not_called()
+
+
+class TestCustomerAnalysisEdgeCases:
+    """Edge cases for customer material analysis."""
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
+    async def test_customer_single_requirement(self, mock_claude, db_session, company_with_reqs):
+        """Company with minimal data still gets analyzed."""
+        from app.services.customer_analysis_service import analyze_customer_materials
+
+        mock_claude.return_value = {"brands": ["Intel"], "commodities": ["Memory"]}
+        await analyze_customer_materials(company_with_reqs.id, db_session)
+        mock_claude.assert_called_once()
+        db_session.refresh(company_with_reqs)
+        assert company_with_reqs.brand_tags == ["Intel"]
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
+    async def test_customer_claude_returns_string_no_crash(self, mock_claude, db_session, company_with_reqs):
+        """Claude returns unexpected type → no crash."""
+        from app.services.customer_analysis_service import analyze_customer_materials
+
+        mock_claude.return_value = "unexpected string"
+        await analyze_customer_materials(company_with_reqs.id, db_session)
+        # Should not raise
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
+    async def test_customer_exactly_5_tags_boundary(self, mock_claude, db_session, company_with_reqs):
+        """Claude returns exactly 5 brands → no truncation; extra commodities truncated
+        to 5."""
+        from app.services.customer_analysis_service import analyze_customer_materials
+
+        mock_claude.return_value = {"brands": ["A", "B", "C", "D", "E"], "commodities": ["X", "Y", "Z"]}
+        await analyze_customer_materials(company_with_reqs.id, db_session)
+        db_session.refresh(company_with_reqs)
+        assert len(company_with_reqs.brand_tags) == 5
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.claude_json", new_callable=AsyncMock)
+    async def test_customer_company_id_zero(self, mock_claude, db_session):
+        """company_id=0 → no company found, early return."""
+        from app.services.customer_analysis_service import analyze_customer_materials
+
+        await analyze_customer_materials(0, db_session)
+        mock_claude.assert_not_called()
