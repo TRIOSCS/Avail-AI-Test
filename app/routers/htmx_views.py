@@ -717,7 +717,7 @@ async def requisition_import_save(
     <div hx-trigger="load" hx-get="/v2/partials/parts" hx-target="#parts-list" hx-swap="innerHTML">
     </div>
     <script>
-      document.dispatchEvent(new CustomEvent('close-modal'));
+      window.dispatchEvent(new CustomEvent('close-modal'));
       Alpine.store('toast').message = 'Requisition created with {added} parts';
       Alpine.store('toast').type = 'success';
       Alpine.store('toast').show = true;
