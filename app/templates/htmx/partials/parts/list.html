@@ -99,7 +99,6 @@
               'owner': ('Owner', None),
               'need_by_date': ('Need By', None),
               'created': ('Created', 'created'),
-              'notes': ('Notes', None),
             } %}
             {% for col_key in col_defs %}
               {% set label, sort_key = col_defs.get(col_key, (col_key, None)) %}
@@ -135,7 +134,7 @@
                      @change="toggleId({{ req.id }}, $event)">
             </td>
             {% for col_key in col_defs %}
-              <td{% if col_key in ('requisition', 'customer', 'owner', 'notes') %} class="td-label"{% endif %}>
+              <td{% if col_key in ('requisition', 'customer', 'owner') %} class="td-label"{% endif %}>
                 {% if col_key == 'mpn' %}
                   <span class="font-semibold text-gray-900">{{ req.primary_mpn or '—' }}</span>
                 {% elif col_key == 'brand' %}
@@ -180,8 +179,6 @@
                   {{ req.hardware_codes or '—' }}
                 {% elif col_key == 'need_by_date' %}
                   {{ req.need_by_date or '—' }}
-                {% elif col_key == 'notes' %}
-                  <span class="max-w-[120px] truncate block text-gray-500">{{ req.notes or '—' }}</span>
                 {% endif %}
               </td>
             {% endfor %}

@@ -58,7 +58,7 @@
             <th class="px-2 py-2">FW</th>
             <th class="px-2 py-2">HW</th>
             <th class="px-2 py-2">Need By</th>
-            <th class="px-2 py-2">Notes</th>
+            <th class="px-2 py-2">Sales Notes</th>
             <th class="px-2 py-2 w-8"></th>
           </tr>
         </thead>
@@ -136,7 +136,7 @@
                      class="w-32 px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
             </td>
             <td class="px-2 py-1">
-              <textarea name="reqs[{{ loop.index0 }}].notes" rows="2"
+              <textarea name="reqs[{{ loop.index0 }}].sale_notes" rows="2"
                         class="w-full min-w-[200px] px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">{{ r.notes or '' }}</textarea>
             </td>
             <td class="px-2 py-1">

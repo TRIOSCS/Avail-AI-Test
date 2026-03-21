@@ -662,7 +662,7 @@ async def requisition_import_save(
                     "firmware": form.get(f"reqs[{idx}].firmware", "").strip() or None,
                     "hardware_codes": form.get(f"reqs[{idx}].hardware_codes", "").strip() or None,
                     "need_by_date": form.get(f"reqs[{idx}].need_by_date", "").strip() or None,
-                    "notes": form.get(f"reqs[{idx}].notes", "").strip() or None,
+                    "sale_notes": form.get(f"reqs[{idx}].sale_notes", "").strip() or None,
                 }
             )
         idx += 1
@@ -706,7 +706,7 @@ async def requisition_import_save(
             firmware=item.get("firmware", ""),
             hardware_codes=item.get("hardware_codes", ""),
             need_by_date=item.get("need_by_date"),
-            notes=item.get("notes", ""),
+            sale_notes=item.get("sale_notes", ""),
         )
         db.add(r)
 
@@ -8946,6 +8946,41 @@ async def part_tab_comms(
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update({"requirement": req, "tasks": tasks, "users": users_list})
     return templates.TemplateResponse("htmx/partials/parts/tabs/comms.html", ctx)
+
+
+@router.get("/v2/partials/parts/{requirement_id}/tab/notes", response_class=HTMLResponse)
+async def part_tab_notes(
+    requirement_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return sales notes tab for a requirement."""
+    req = db.get(Requirement, requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["requirement"] = req
+    return templates.TemplateResponse("htmx/partials/parts/tabs/notes.html", ctx)
+
+
+@router.patch("/v2/partials/parts/{requirement_id}/notes", response_class=HTMLResponse)
+async def save_part_notes(
+    requirement_id: int,
+    request: Request,
+    sale_notes: str = Form(""),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Save sales notes for a requirement."""
+    req = db.get(Requirement, requirement_id)
+    if not req:
+        raise HTTPException(404, "Part not found")
+    req.sale_notes = sale_notes.strip() or None
+    db.commit()
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["requirement"] = req
+    return templates.TemplateResponse("htmx/partials/parts/tabs/notes.html", ctx)
 
 
 @router.post("/v2/partials/parts/{requirement_id}/tasks", response_class=HTMLResponse)
