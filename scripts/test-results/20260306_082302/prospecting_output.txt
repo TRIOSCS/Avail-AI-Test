@@ -1,1 +1,0 @@
-I need permission to use the Playwright browser navigation tool. Could you grant access to the Playwright MCP tools so I can proceed with the prospecting tests?

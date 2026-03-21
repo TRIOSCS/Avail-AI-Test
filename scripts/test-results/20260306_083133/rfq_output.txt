@@ -1,1 +1,0 @@
-I need permission to run Playwright code to set the session cookie. Without this, I can't authenticate in the browser. Could you approve the `browser_run_code` tool so I can set the session cookie and proceed with testing?

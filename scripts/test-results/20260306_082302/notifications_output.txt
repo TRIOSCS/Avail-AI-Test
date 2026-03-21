@@ -1,1 +1,0 @@
-I need permission to use the Playwright browser tools. Could you approve the `mcp__playwright__browser_navigate` tool so I can proceed with testing the Notifications area?

@@ -1,5 +1,0 @@
-I need your permission to use `browser_evaluate` to authenticate. This tool will make a POST request to the agent-session endpoint from the browser to set the session cookie. Could you approve the `mcp__plugin_playwright_playwright__browser_evaluate` or `mcp__playwright__browser_evaluate` tool so I can proceed with authentication?
-
-Alternatively, I can proceed with API-only testing using `curl` and file trouble tickets for anything I find that way — but I won't be able to test the frontend UI interactions (clicks, forms, drawer tabs, XSS rendering, etc.) without browser access.
-
-Which would you prefer?

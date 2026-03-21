@@ -1,1 +1,0 @@
-It seems the Playwright navigation permission hasn't been granted yet. Could you approve the Playwright browser tools so I can proceed with testing the search functionality?

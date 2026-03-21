@@ -1,1 +1,0 @@
-It seems browser navigation permissions need to be granted. Could you approve the Playwright browser tools so I can proceed with testing?
