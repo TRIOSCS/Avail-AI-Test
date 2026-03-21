@@ -214,8 +214,10 @@ function customerPicker() {
         formData.append('location', this.newLocation);
         const resp = await fetch('/v2/partials/companies/lookup', {method: 'POST', body: formData});
         const resultEl = document.getElementById('company-lookup-result');
-        resultEl.textContent = '';
+        // Server HTML is trusted (same-origin, auth-protected endpoint)
+        resultEl.replaceChildren();
         resultEl.insertAdjacentHTML('afterbegin', await resp.text());
+        htmx.process(resultEl);
       } catch(e) {
         const resultEl = document.getElementById('company-lookup-result');
         resultEl.textContent = 'Lookup failed. Try again.';

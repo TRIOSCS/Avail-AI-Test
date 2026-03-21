@@ -771,7 +771,7 @@ async def company_lookup(
       {"<div class='text-gray-600'>📞 " + phone + "</div>" if phone else ""}
       {"<div class='text-gray-600'>📍 " + address_display + "</div>" if address_display else ""}
       <form hx-post="/v2/partials/companies/quick-create"
-            hx-target="closest div"
+            hx-target="closest .space-y-1"
             hx-swap="innerHTML">
         <input type="hidden" name="company_name" value="{name}">
         <input type="hidden" name="website" value="{website}">
