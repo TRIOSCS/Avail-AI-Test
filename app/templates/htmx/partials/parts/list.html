@@ -9,7 +9,7 @@
 
   {# ── Filter bar + top scrollbar ──────────────────────────── #}
   <div class="panel-header flex-wrap gap-y-1">
-    <form id="parts-filters" class="w-full">
+    <form id="parts-filters" class="w-full" onsubmit="return false">
       <div class="flex gap-2 items-center">
         {# Hidden filter state #}
         <input type="hidden" name="status" value="{{ status }}">
@@ -38,7 +38,7 @@
                  hx-get="/v2/partials/parts"
                  hx-target="#parts-list"
                  hx-include="#parts-filters"
-                 hx-trigger="keyup changed delay:300ms"
+                 hx-trigger="input delay:300ms"
                  class="w-full pl-7 pr-2 py-0.5 text-[10px] border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 placeholder:text-gray-400">
         </div>
 

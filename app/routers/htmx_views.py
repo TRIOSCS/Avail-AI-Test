@@ -8581,7 +8581,7 @@ async def parts_list_partial(
     owner: int = 0,
     date_from: str = "",
     date_to: str = "",
-    include_archived: bool = False,
+    include_archived: str = "",
     sort: str = "created",
     dir: str = "desc",
     offset: int = 0,
@@ -8610,6 +8610,7 @@ async def parts_list_partial(
                 Requirement.primary_mpn,
                 Requirement.customer_pn,
                 Requirement.brand,
+                Requirement.substitutes_text,
                 Requisition.name,
                 Requisition.customer_name,
             )
