@@ -16,7 +16,7 @@ Focus on modules where edge cases pose the highest risk of production bugs. All 
 
 ## Priority 1: Enrichment Module
 
-**Why**: 56K LOC with ~12 tests. The 95% confidence gate is a core business rule.
+**Why**: Enrichment-related files total ~450+ lines in orchestrator alone, with only ~7 tests. The confidence gate (default threshold 0.90) is a core business rule.
 
 **Source files**:
 - `app/services/enrichment_orchestrator.py`
@@ -26,14 +26,15 @@ Focus on modules where edge cases pose the highest risk of production bugs. All 
 
 **Edge cases to add**:
 
-### Confidence Gate (boundary)
-- Confidence exactly 0.95 → should apply
-- Confidence 0.9499 → should NOT apply
-- Confidence 0.9501 → should apply
+### Confidence Gate (boundary — default threshold=0.90)
+- Confidence exactly 0.90 → should apply
+- Confidence 0.8999 → should NOT apply
+- Confidence 0.9001 → should apply
 - Confidence None → should NOT apply, should not raise
 - Confidence 0.0 → should NOT apply
 - Confidence 1.0 → should apply
-- Confidence > 1.0 → should reject/clamp
+- Confidence > 1.0 (e.g. 1.5) → should still apply (no upper bound in code)
+- Custom threshold: pass threshold=0.95, confidence=0.94 → should NOT apply
 
 ### Input Validation (null/boundary)
 - Empty company name for enrichment
@@ -48,7 +49,7 @@ Focus on modules where edge cases pose the highest risk of production bugs. All 
 - All sources return null → graceful empty result
 - Partial source failures (2 of 4 sources fail) → use remaining
 
-### Batch Enrichment (error paths)
+### Batch Enrichment (error paths — target: `tests/test_enrich_batch.py` → `app/services/enrichment.py`)
 - Batch with 0 items → no-op, no crash
 - Batch with 1 item → works like single
 - Batch with item that causes DB integrity error → skip, continue rest
@@ -69,11 +70,11 @@ Focus on modules where edge cases pose the highest risk of production bugs. All 
 **Edge cases to add**:
 
 ### State Transitions (business logic)
-- archived → won (should fail)
-- lost → sourcing (should fail)
-- won → archived → active (round-trip)
+- archived → won (should fail — archived only allows → active)
+- lost → sourcing (should fail — lost allows → active, archived, reopened)
+- won → archived → active (round-trip — both transitions allowed)
 - Same status transition twice in rapid succession
-- Transition with None actor
+- Note: "Transition with None actor" already tested — skip
 
 ### Create/Update (null/boundary)
 - Create with empty name → should reject
@@ -109,20 +110,25 @@ Focus on modules where edge cases pose the highest risk of production bugs. All 
 
 **Edge cases to add**:
 
-### Scoring Boundaries
-- Margin exactly 0% → should score as lowest tier
-- Margin exactly 10% → boundary between tiers
-- Margin exactly 20% → boundary between tiers
-- Negative margin (-5%) → should not generate match
-- Recency exactly 365 days → boundary
-- Recency exactly 730 days → boundary
+### Scoring Boundaries (per _score_margin: >=30→100, >=20→80, >=10→60, >0→40, <=0→10; per _score_recency: <=180→100, <=365→80, <=730→60, >730→40)
+- Margin exactly 0% → score 10 (<=0 tier)
+- Margin exactly 10% → score 60 (>=10 tier boundary)
+- Margin exactly 20% → score 80 (>=20 tier boundary)
+- Margin exactly 30% → score 100 (>=30 tier boundary)
+- Margin 9.99% → score 40 (>0 tier, just below >=10)
+- Negative margin (-5%) with min_margin_pct=0 → filtered out (margin < min_margin)
+- Negative margin (-5%) with min_margin_pct=-10 → NOT filtered, score 10
+- Recency exactly 180 days → score 100 (<=180 tier boundary)
+- Recency 181 days → score 80 (drops to <=365 tier)
+- Recency exactly 365 days → score 80 (<=365 tier boundary)
+- Recency exactly 730 days → score 60 (<=730 tier boundary)
+- Recency 731 days → score 40 (>730 tier)
 - Frequency of 0 purchases → no match
 - Purchase date in the future → handle gracefully
 
 ### Match Input (null/boundary)
-- Offer with quantity = 0 → skip
-- Offer with negative price → skip
-- Offer with None material_card → skip (tested but verify)
+- Offer with negative price → skip or score 0
+- Offer with None margin_pct → handle gracefully (code checks `if margin_pct is not None`)
 - Batch with 0 offers → no-op
 - Batch with 1 offer → works
 - Batch with 10,000 offers → doesn't OOM
@@ -130,8 +136,9 @@ Focus on modules where edge cases pose the highest risk of production bugs. All 
 ### Suppression/Throttle (business logic)
 - DNO list with duplicate MPNs → deduped
 - Throttle window exactly expired (boundary second)
-- DNO + throttle both active → DNO takes precedence
+- Both DNO and throttle active for same company → both checked independently, company skipped
 - Empty DNO set → no suppression
+- Empty throttle set → no throttle
 
 ---
 
@@ -162,11 +169,9 @@ Focus on modules where edge cases pose the highest risk of production bugs. All 
 - Empty MPN → should reject before API call
 - MPN with only whitespace
 
-### Circuit Breaker (boundary)
-- Exactly at failure threshold → should open
-- One below threshold → should stay closed
-- Half-open state: success → close, failure → re-open
-- Multiple connectors failing simultaneously → independent breakers
+### Circuit Breaker (boundary — first two already covered, only add new ones)
+- Half-open state: failure → re-open (not yet tested)
+- Multiple connectors failing simultaneously → independent breakers (not yet tested)
 
 ### Rate Limiting (boundary)
 - Request at exactly the rate limit
@@ -249,9 +254,9 @@ All new tests follow existing project conventions:
 | Priority | Module | New Tests |
 |----------|--------|-----------|
 | 1 | Enrichment | ~25 |
-| 2 | Requisition Service | ~20 |
-| 3 | Proactive Matching | ~18 |
-| 4 | Sourcing Connectors | ~18 |
+| 2 | Requisition Service | ~18 |
+| 3 | Proactive Matching | ~20 |
+| 4 | Sourcing Connectors | ~14 |
 | 5 | Vendor/Customer Analysis | ~12 |
 | 6 | Faceted Search | ~12 |
-| **Total** | | **~105** |
+| **Total** | | **~101** |
