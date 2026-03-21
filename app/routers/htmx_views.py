@@ -20,6 +20,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
+from ..constants import OfferStatus, QuoteStatus, RequisitionStatus
 from ..database import get_db
 from ..dependencies import get_user, require_user
 from ..models import (
@@ -1146,10 +1147,10 @@ async def requisitions_bulk_action(
 
     if action == "archive":
         for r in reqs:
-            r.status = "archived"
+            r.status = RequisitionStatus.ARCHIVED
     elif action == "activate":
         for r in reqs:
-            r.status = "active"
+            r.status = RequisitionStatus.ACTIVE
     elif action == "assign":
         owner_id = form.get("owner_id")
         if owner_id:
@@ -1484,13 +1485,13 @@ async def review_offer(
         raise HTTPException(404, "Offer not found")
 
     if action == "approve":
-        offer.status = "approved"
+        offer.status = OfferStatus.APPROVED
         offer.approved_by_id = user.id
         from datetime import datetime, timezone
 
         offer.approved_at = datetime.now(timezone.utc)
     else:
-        offer.status = "rejected"
+        offer.status = OfferStatus.REJECTED
 
     db.commit()
     logger.info("Offer {} {} by {}", offer_id, action, user.email)
@@ -1745,7 +1746,7 @@ async def mark_offer_sold_htmx(
         return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
     old_status = offer.status
-    offer.status = "sold"
+    offer.status = OfferStatus.SOLD
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
     db.add(
@@ -1792,7 +1793,7 @@ async def promote_offer_htmx(
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be promoted")
 
-    offer.status = "active"
+    offer.status = OfferStatus.ACTIVE
     offer.approved_by_id = user.id
     offer.approved_at = datetime.now(timezone.utc)
     offer.updated_at = datetime.now(timezone.utc)
@@ -1817,7 +1818,7 @@ async def reject_offer_htmx(
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be rejected")
 
-    offer.status = "rejected"
+    offer.status = OfferStatus.REJECTED
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
     db.commit()
@@ -4466,7 +4467,7 @@ async def reopen_quote(
     if quote.status not in ("sent", "won", "lost"):
         raise HTTPException(400, "Only sent/won/lost quotes can be reopened")
 
-    quote.status = "draft"
+    quote.status = QuoteStatus.DRAFT
     quote.updated_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("Quote {} reopened by {}", quote_id, user.email)
@@ -6754,7 +6755,7 @@ async def send_quote_htmx(
     quote = db.get(Quote, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
-    quote.status = "sent"
+    quote.status = QuoteStatus.SENT
     quote.sent_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("Quote {} marked as sent by {}", quote.quote_number, user.email)
@@ -7482,7 +7483,8 @@ async def proactive_draft_for_prepare(
     if contact_ids:
         primary = db.get(SiteContact, contact_ids[0])
         if primary and primary.full_name:
-            contact_name = primary.full_name.split()[0]
+            _fn_parts = primary.full_name.split()
+            contact_name = _fn_parts[0] if _fn_parts else None
 
     # Build parts list for AI
     parts = []
@@ -8789,7 +8791,7 @@ async def archive_requisition(
     if not requisition:
         raise HTTPException(404, "Requisition not found")
 
-    requisition.status = "archived"
+    requisition.status = RequisitionStatus.ARCHIVED
     for child in requisition.requirements:
         child.sourcing_status = "archived"
     db.commit()
@@ -8810,7 +8812,7 @@ async def unarchive_requisition(
     if not requisition:
         raise HTTPException(404, "Requisition not found")
 
-    requisition.status = "active"
+    requisition.status = RequisitionStatus.ACTIVE
     for child in requisition.requirements:
         if child.sourcing_status == "archived":
             child.sourcing_status = "open"
@@ -8844,7 +8846,7 @@ async def bulk_archive(
     if requisition_ids:
         reqs = db.query(Requisition).filter(Requisition.id.in_(requisition_ids)).all()
         for requisition in reqs:
-            requisition.status = "archived"
+            requisition.status = RequisitionStatus.ARCHIVED
         # Cascade: archive all children of these requisitions
         db.query(Requirement).filter(
             Requirement.requisition_id.in_(requisition_ids),
@@ -8881,7 +8883,7 @@ async def bulk_unarchive(
     if requisition_ids:
         reqs = db.query(Requisition).filter(Requisition.id.in_(requisition_ids)).all()
         for requisition in reqs:
-            requisition.status = "active"
+            requisition.status = RequisitionStatus.ACTIVE
         # Cascade: restore archived children of these requisitions
         db.query(Requirement).filter(
             Requirement.requisition_id.in_(requisition_ids),

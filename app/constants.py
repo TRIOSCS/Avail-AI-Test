@@ -66,3 +66,84 @@ class ResponseClassification(StrEnum):
     CLARIFICATION_NEEDED = "clarification_needed"
     PARTIAL_AVAILABILITY = "partial_availability"
     FOLLOW_UP_PENDING = "follow_up_pending"
+
+
+class OfferStatus(StrEnum):
+    """Status lifecycle for Offer records."""
+
+    ACTIVE = "active"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+    SOLD = "sold"
+
+
+class AttributionStatus(StrEnum):
+    """Attribution lifecycle for Offer records."""
+
+    ACTIVE = "active"
+    EXPIRED = "expired"
+    CONVERTED = "converted"
+
+
+class RequisitionStatus(StrEnum):
+    """Status lifecycle for Requisition records."""
+
+    ACTIVE = "active"
+    ARCHIVED = "archived"
+
+
+class SourcingStatus(StrEnum):
+    """Status lifecycle for Requirement sourcing progress."""
+
+    OPEN = "open"
+    SOURCING = "sourcing"
+    OFFERED = "offered"
+    QUOTED = "quoted"
+    WON = "won"
+    LOST = "lost"
+
+
+class ExcessListStatus(StrEnum):
+    """Status lifecycle for ExcessList records."""
+
+    DRAFT = "draft"
+    ACTIVE = "active"
+    BIDDING = "bidding"
+    CLOSED = "closed"
+    EXPIRED = "expired"
+
+
+class ExcessLineItemStatus(StrEnum):
+    """Status lifecycle for ExcessLineItem records."""
+
+    AVAILABLE = "available"
+    BIDDING = "bidding"
+    AWARDED = "awarded"
+    WITHDRAWN = "withdrawn"
+
+
+class BidStatus(StrEnum):
+    """Status lifecycle for Bid records."""
+
+    PENDING = "pending"
+    ACCEPTED = "accepted"
+    REJECTED = "rejected"
+    EXPIRED = "expired"
+    WITHDRAWN = "withdrawn"
+
+
+class BidSolicitationStatus(StrEnum):
+    """Status lifecycle for BidSolicitation records."""
+
+    PENDING = "pending"
+    SENT = "sent"
+    RESPONDED = "responded"
+    EXPIRED = "expired"
+    FAILED = "failed"
+
+
+class QuoteStatus(StrEnum):
+    """Status lifecycle for Quote records."""
+
+    DRAFT = "draft"
+    SENT = "sent"

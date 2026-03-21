@@ -27,7 +27,7 @@ class Quote(Base):
     __tablename__ = "quotes"
     id = Column(Integer, primary_key=True)
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
-    customer_site_id = Column(Integer, ForeignKey("customer_sites.id"), nullable=False)
+    customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"), nullable=True)
 
     quote_number = Column(String(50), nullable=False, unique=True)
     revision = Column(Integer, default=1)

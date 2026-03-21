@@ -17,6 +17,7 @@ from sqlalchemy import and_, case, exists, literal, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
+from ...constants import RequisitionStatus
 from ...database import get_db
 from ...dependencies import get_req_for_user, require_admin, require_user
 from ...models import (
@@ -531,9 +532,9 @@ async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Se
     if not req:
         raise HTTPException(404, "Requisition not found")
     if req.status in ("archived", "won", "lost"):
-        req.status = "active"
+        req.status = RequisitionStatus.ACTIVE
     else:
-        req.status = "archived"
+        req.status = RequisitionStatus.ARCHIVED
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "status": req.status}

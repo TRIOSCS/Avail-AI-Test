@@ -5,6 +5,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from ...constants import OfferStatus
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin
 from ...dependencies import require_buyer, require_user
@@ -598,7 +599,7 @@ async def approve_offer(
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be approved")
     old_status = offer.status
-    offer.status = "active"
+    offer.status = OfferStatus.ACTIVE
     offer.approved_by_id = user.id
     offer.approved_at = datetime.now(timezone.utc)
     offer.updated_at = datetime.now(timezone.utc)
@@ -622,7 +623,7 @@ async def reject_offer(
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be rejected")
     old_status = offer.status
-    offer.status = "rejected"
+    offer.status = OfferStatus.REJECTED
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
     if reason:
@@ -650,7 +651,7 @@ async def mark_offer_sold(
     if offer.status == "sold":
         return {"ok": True, "status": "sold", "message": "Already marked sold"}
     old_status = offer.status
-    offer.status = "sold"
+    offer.status = OfferStatus.SOLD
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
     record_changes(db, "offer", offer_id, user.id, {"status": old_status}, {"status": "sold"}, ["status"])
@@ -950,7 +951,7 @@ async def promote_offer(
         raise HTTPException(400, "Only T4 offers can be promoted")
 
     offer.evidence_tier = "T5"
-    offer.status = "active"
+    offer.status = OfferStatus.ACTIVE
     offer.promoted_by_id = user.id
     offer.promoted_at = datetime.now(timezone.utc)
     db.commit()
@@ -976,7 +977,7 @@ async def reject_offer_t4_review(
     if offer.status not in ("pending_review",):
         raise HTTPException(400, "Only pending_review offers can be rejected")
 
-    offer.status = "rejected"
+    offer.status = OfferStatus.REJECTED
     offer.updated_by_id = user.id
     offer.updated_at = datetime.now(timezone.utc)
     db.commit()

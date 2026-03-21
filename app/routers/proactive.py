@@ -171,7 +171,8 @@ async def draft_proactive_email(
     if body.contact_ids:
         primary = db.get(SiteContact, body.contact_ids[0])
         if primary and primary.full_name:
-            contact_name = primary.full_name.split()[0]  # First name
+            parts = primary.full_name.split()
+            contact_name = parts[0] if parts else None  # First name
 
     # Build parts list for AI
     parts = []

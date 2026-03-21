@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 from sqlalchemy.orm import Session, joinedload
 
+from ...constants import QuoteStatus
 from ...database import get_db
 from ...dependencies import require_user
 from ...models import ActivityLog, CustomerSite, Offer, Quote, Requisition, User
@@ -394,7 +395,7 @@ async def send_quote(
     if "error" in result:
         raise HTTPException(502, f"Failed to send quote email: {result.get('detail', '')}")
 
-    quote.status = "sent"
+    quote.status = QuoteStatus.SENT
     quote.sent_at = datetime.now(timezone.utc)
     req = db.get(Requisition, quote.requisition_id)
     old_status = req.status if req else None
@@ -529,7 +530,7 @@ async def reopen_quote(
         db.commit()
         return quote_to_dict(new_quote, db)
     else:
-        quote.status = "sent"
+        quote.status = QuoteStatus.SENT
         quote.result = None
         quote.result_reason = None
         quote.result_notes = None

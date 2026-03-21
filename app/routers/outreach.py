@@ -57,10 +57,11 @@ async def send_outreach(
     for r in req.recipients:
         # Personalise greeting: replace generic "Hi" / "Hi," with "Hi {name},"
         body_text = req.body
-        if r.name:
+        name_parts = r.name.split() if r.name else []
+        if name_parts:
             for greeting in ["Hi,", "Hi\n", "Hello,", "Hello\n"]:
                 if body_text.startswith(greeting):
-                    body_text = f"Hi {r.name.split()[0]}," + body_text[len(greeting) - 1 :]
+                    body_text = f"Hi {name_parts[0]}," + body_text[len(greeting) - 1 :]
                     break
 
         html_body = _build_html_body(body_text)
