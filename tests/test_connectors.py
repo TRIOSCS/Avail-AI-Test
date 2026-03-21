@@ -2606,3 +2606,105 @@ class TestEmailMinerAIClassification:
             result = await miner.scan_inbox(use_delta=False)
             # Should not raise — error is caught and logged
             assert result["messages_scanned"] == 1
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  CircuitBreaker Edge Cases
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestCircuitBreakerEdgeCases:
+    """New edge cases: half-open failure, independent breakers."""
+
+    def test_half_open_failure_reopens(self):
+        from app.connectors.sources import CircuitBreaker
+
+        cb = CircuitBreaker("test-reopen", fail_max=2, reset_timeout=0.01)
+        cb.record_failure()
+        cb.record_failure()
+        assert cb.current_state == "open"
+        time.sleep(0.02)
+        assert cb.current_state == "half_open"
+        cb.record_failure()
+        assert cb.current_state == "open"
+
+    def test_independent_breakers(self):
+        from app.connectors.sources import CircuitBreaker
+
+        cb1 = CircuitBreaker("breaker-a", fail_max=2, reset_timeout=60)
+        cb2 = CircuitBreaker("breaker-b", fail_max=2, reset_timeout=60)
+        cb1.record_failure()
+        cb1.record_failure()
+        assert cb1.current_state == "open"
+        assert cb2.current_state == "closed"
+
+    def test_success_from_half_open_closes(self):
+        from app.connectors.sources import CircuitBreaker
+
+        cb = CircuitBreaker("test-close", fail_max=1, reset_timeout=0.01)
+        cb.record_failure()
+        assert cb.current_state == "open"
+        time.sleep(0.02)
+        assert cb.current_state == "half_open"
+        cb.record_success()
+        assert cb.current_state == "closed"
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Connector Malformed Response Edge Cases
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestConnectorMalformedResponses:
+    """Test connectors handle malformed API responses gracefully."""
+
+    def _make_connector(self):
+        """Create a concrete BaseConnector subclass for testing."""
+        from app.connectors.sources import BaseConnector, _breakers
+
+        _breakers.pop("TestEdgeConnector", None)
+
+        class TestEdgeConnector(BaseConnector):
+            source_name = "TestEdge"
+
+            async def _do_search(self, mpn):
+                return []
+
+        return TestEdgeConnector()
+
+    @pytest.mark.asyncio
+    async def test_empty_json_response(self):
+        """Connector returns [] → should return empty results, no crash."""
+        connector = self._make_connector()
+        results = await connector.search("LM317T")
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_search_empty_mpn_returns_empty(self):
+        connector = self._make_connector()
+        results = await connector.search("")
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_search_whitespace_mpn_returns_empty(self):
+        connector = self._make_connector()
+        results = await connector.search("   ")
+        assert results == []
+
+    @pytest.mark.asyncio
+    async def test_search_unicode_mpn_no_crash(self):
+        connector = self._make_connector()
+        results = await connector.search("LM317T-éè")
+        assert isinstance(results, list)
+
+    @pytest.mark.asyncio
+    async def test_search_special_chars_mpn(self):
+        connector = self._make_connector()
+        results = await connector.search("IC/123#A&B")
+        assert isinstance(results, list)
+
+    @pytest.mark.asyncio
+    async def test_search_very_long_mpn(self):
+        connector = self._make_connector()
+        results = await connector.search("A" * 500)
+        assert isinstance(results, list)
