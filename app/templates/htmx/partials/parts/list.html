@@ -94,18 +94,17 @@
             </th>
             {% set col_defs = {
               'mpn': ('MPN', 'mpn'),
-              'substitutes': ('Subs', None),
               'brand': ('Brand', 'brand'),
+              'status': ('Status', 'status'),
               'qty': ('Qty', 'qty'),
               'target_price': ('Tgt $', 'target_price'),
-              'specs': ('Specs', None),
-              'status': ('Status', 'status'),
-              'requisition': ('Req', 'requisition'),
-              'customer': ('Customer', 'customer'),
               'offers': ('Ofrs', None),
               'best_price': ('Best $', None),
-              'owner': ('Owner', None),
               'need_by_date': ('Bid Due', None),
+              'specs': ('FW/HW/DC', None),
+              'requisition': ('Req', 'requisition'),
+              'customer': ('Customer', 'customer'),
+              'owner': ('Owner', None),
               'created': ('Created', 'created'),
             } %}
             {% for col_key in col_defs %}
@@ -193,8 +192,6 @@
                     {% else %}—{% endif %}
                   {% elif col_key == 'created' %}
                     {{ req.created_at.strftime('%m/%d') if req.created_at else '—' }}
-                  {% elif col_key == 'substitutes' %}
-                    {{ req.substitutes|join(', ') if req.substitutes else '—' }}
                   {% elif col_key == 'specs' %}
                     {% set spec_count = [req.customer_pn, req.condition, req.date_codes, req.packaging, req.firmware, req.hardware_codes]|reject('none')|reject('equalto', '')|list|length %}
                     {% if spec_count > 0 %}
