@@ -337,3 +337,135 @@ async def test_enrich_on_demand_end_to_end():
     assert len(result["applied"]) == 2
     assert mock_entity.legal_name == "Acme Corporation"
     assert mock_entity.industry == "Electronics"
+
+
+class TestApplyConfidentBoundaries:
+    """Edge cases for the 0.90 confidence threshold gate."""
+
+    def _make_entity(self):
+        entity = MagicMock()
+        for attr in ("legal_name", "domain", "industry", "last_enriched_at", "enrichment_source"):
+            setattr(entity, attr, None)
+        entity.__class__.__name__ = "Company"
+        return entity
+
+    def test_confidence_exactly_at_threshold(self, db_session):
+        entity = self._make_entity()
+        merged = [{"field": "legal_name", "value": "Acme", "confidence": 0.90, "source": "s1", "reasoning": "x"}]
+        result = apply_confident_data(entity, merged, db_session, threshold=0.90)
+        assert len(result["applied"]) == 1
+        assert result["applied"][0]["value"] == "Acme"
+
+    def test_confidence_just_below_threshold(self, db_session):
+        entity = self._make_entity()
+        merged = [{"field": "legal_name", "value": "Acme", "confidence": 0.8999, "source": "s1", "reasoning": "x"}]
+        result = apply_confident_data(entity, merged, db_session, threshold=0.90)
+        assert len(result["applied"]) == 0
+        assert len(result["rejected"]) == 1
+
+    def test_confidence_just_above_threshold(self, db_session):
+        entity = self._make_entity()
+        merged = [{"field": "legal_name", "value": "Acme", "confidence": 0.9001, "source": "s1", "reasoning": "x"}]
+        result = apply_confident_data(entity, merged, db_session, threshold=0.90)
+        assert len(result["applied"]) == 1
+
+    def test_confidence_none_raises_type_error(self, db_session):
+        """Confidence=None triggers TypeError on >= comparison.
+
+        This documents current behavior.
+        """
+        entity = self._make_entity()
+        merged = [{"field": "legal_name", "value": "Acme", "confidence": None, "source": "s1", "reasoning": "x"}]
+        with pytest.raises(TypeError):
+            apply_confident_data(entity, merged, db_session, threshold=0.90)
+
+    def test_confidence_zero(self, db_session):
+        entity = self._make_entity()
+        merged = [{"field": "legal_name", "value": "Acme", "confidence": 0.0, "source": "s1", "reasoning": "x"}]
+        result = apply_confident_data(entity, merged, db_session, threshold=0.90)
+        assert len(result["applied"]) == 0
+        assert len(result["rejected"]) == 1
+
+    def test_confidence_one(self, db_session):
+        entity = self._make_entity()
+        merged = [{"field": "legal_name", "value": "Acme", "confidence": 1.0, "source": "s1", "reasoning": "x"}]
+        result = apply_confident_data(entity, merged, db_session, threshold=0.90)
+        assert len(result["applied"]) == 1
+
+    def test_confidence_above_one_still_applies(self, db_session):
+        entity = self._make_entity()
+        merged = [{"field": "legal_name", "value": "Acme", "confidence": 1.5, "source": "s1", "reasoning": "x"}]
+        result = apply_confident_data(entity, merged, db_session, threshold=0.90)
+        assert len(result["applied"]) == 1
+
+    def test_custom_threshold(self, db_session):
+        entity = self._make_entity()
+        merged = [{"field": "legal_name", "value": "Acme", "confidence": 0.94, "source": "s1", "reasoning": "x"}]
+        result = apply_confident_data(entity, merged, db_session, threshold=0.95)
+        assert len(result["applied"]) == 0
+        assert len(result["rejected"]) == 1
+
+    def test_empty_merged_list(self, db_session):
+        entity = self._make_entity()
+        result = apply_confident_data(entity, [], db_session)
+        assert result["applied"] == []
+        assert result["rejected"] == []
+        assert result["sources_used"] == []
+
+    def test_field_not_on_entity_skipped(self, db_session):
+        entity = MagicMock(spec=[])  # no attributes
+        merged = [{"field": "nonexistent_field", "value": "x", "confidence": 0.95, "source": "s1", "reasoning": "x"}]
+        result = apply_confident_data(entity, merged, db_session)
+        assert len(result["applied"]) == 0
+        assert len(result["rejected"]) == 0
+
+    def test_mixed_apply_and_reject(self, db_session):
+        entity = self._make_entity()
+        merged = [
+            {"field": "legal_name", "value": "Acme", "confidence": 0.95, "source": "s1", "reasoning": "x"},
+            {"field": "domain", "value": "acme.com", "confidence": 0.50, "source": "s2", "reasoning": "y"},
+            {"field": "industry", "value": "Electronics", "confidence": 0.91, "source": "s3", "reasoning": "z"},
+        ]
+        result = apply_confident_data(entity, merged, db_session)
+        assert len(result["applied"]) == 2
+        assert len(result["rejected"]) == 1
+        assert result["rejected"][0]["field"] == "domain"
+
+
+class TestFireAllSourcesEdges:
+    """Edge cases for async source orchestration."""
+
+    @pytest.mark.asyncio
+    @patch("app.services.enrichment_orchestrator._SOURCE_FUNCS", {})
+    async def test_unknown_entity_type_returns_empty(self):
+        result = await fire_all_sources("unknown_type", "test-id")
+        assert result == {}
+
+    @pytest.mark.asyncio
+    async def test_all_sources_return_none(self):
+        """When every source function returns None, all values in result are None."""
+        null_fn = AsyncMock(return_value=None)
+        with (
+            patch("app.services.enrichment_orchestrator.COMPANY_SOURCES", {"null_src": "_safe_null"}),
+            patch.dict("app.services.enrichment_orchestrator._SOURCE_FUNCS", {"_safe_null": null_fn}),
+        ):
+            result = await fire_all_sources("company", "test-id")
+            assert all(v is None for v in result.values())
+
+
+class TestClaudeMergeEdges:
+    """Edge cases for multi-source merge logic."""
+
+    @pytest.mark.asyncio
+    async def test_no_valid_sources_returns_empty(self):
+        result = await claude_merge({"src1": None, "src2": None}, "company")
+        assert result == []
+
+    @pytest.mark.asyncio
+    @patch("app.services.enrichment_orchestrator.claude_json", new_callable=AsyncMock)
+    async def test_single_source_skips_claude(self, mock_claude):
+        raw = {"src1": {"legal_name": "Acme"}}
+        result = await claude_merge(raw, "company")
+        mock_claude.assert_not_called()
+        assert len(result) > 0
+        assert all(item["confidence"] == 0.85 for item in result)
