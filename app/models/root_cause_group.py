@@ -6,13 +6,14 @@ Depends on: models/base.py
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, Index, Integer, String, Text
 
 from .base import Base
 
 
 class RootCauseGroup(Base):
     __tablename__ = "root_cause_groups"
+    __table_args__ = (Index("ix_root_cause_groups_title", "title"),)
 
     id = Column(Integer, primary_key=True)
     title = Column(String(200), nullable=False)

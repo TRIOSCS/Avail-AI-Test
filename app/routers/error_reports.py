@@ -8,6 +8,7 @@ Depends on: models/trouble_ticket.py
 """
 
 import base64
+import json
 import os
 from datetime import datetime, timezone
 from typing import Optional
@@ -21,6 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc
 from sqlalchemy.orm import Session
 
+from ..constants import TicketSource, TicketStatus
 from ..database import get_db
 from ..dependencies import require_user
 from ..models import User
@@ -33,6 +35,8 @@ MAX_MESSAGE_LEN = 5000
 UPLOAD_DIR = "/app/uploads/tickets"
 MAX_SCREENSHOT_B64_SIZE = 2 * 1024 * 1024  # 2MB base64
 
+_upload_dir_ready = False
+
 
 class ErrorReportCreate(BaseModel):
     message: str = Field(..., min_length=1, max_length=MAX_MESSAGE_LEN)
@@ -41,8 +45,15 @@ class ErrorReportCreate(BaseModel):
 
 
 class TicketUpdate(BaseModel):
-    status: Optional[str] = Field(None, pattern="^(submitted|in_progress|resolved|wont_fix)$")
+    status: Optional[TicketStatus] = None
     resolution_notes: Optional[str] = Field(None, max_length=5000)
+
+
+def _ensure_upload_dir() -> None:
+    global _upload_dir_ready
+    if not _upload_dir_ready:
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        _upload_dir_ready = True
 
 
 def _save_screenshot(ticket_id: int, b64_data: str) -> str | None:
@@ -56,7 +67,7 @@ def _save_screenshot(ticket_id: int, b64_data: str) -> str | None:
         if "," in b64_data[:100]:
             b64_data = b64_data.split(",", 1)[1]
         png_bytes = base64.b64decode(b64_data)
-        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        _ensure_upload_dir()
         path = os.path.join(UPLOAD_DIR, f"TT-{ticket_id}.png")
         with open(path, "wb") as f:
             f.write(png_bytes)
@@ -71,27 +82,27 @@ def _create_ticket(
     user_id: int,
     message: str,
     current_url: Optional[str] = None,
-    user_agent: Optional[str] = None,
-    browser_info: Optional[str] = None,
-    console_errors: Optional[str] = None,
-    network_errors: Optional[str] = None,
+    context: Optional[dict] = None,
 ) -> TroubleTicket:
     """Create and persist a trouble ticket.
 
-    Commits the session.
+    Args:
+        context: optional dict with keys user_agent, browser_info,
+                 console_errors, network_errors.
     """
+    ctx = context or {}
     ticket = TroubleTicket(
         ticket_number="PENDING",
         submitted_by=user_id,
         title=message[:120],
         description=message,
         current_page=current_url or None,
-        user_agent=user_agent or None,
-        browser_info=browser_info or None,
-        console_errors=console_errors or None,
-        network_errors=network_errors if network_errors else None,
-        source="report_button",
-        status="submitted",
+        user_agent=ctx.get("user_agent") or None,
+        browser_info=ctx.get("browser_info") or None,
+        console_errors=ctx.get("console_errors") or None,
+        network_errors=ctx.get("network_errors") or None,
+        source=TicketSource.REPORT_BUTTON,
+        status=TicketStatus.SUBMITTED,
         risk_tier="low",
         category="other",
         created_at=datetime.now(timezone.utc),
@@ -203,16 +214,14 @@ async def submit_trouble_ticket(
             status_code=422,
         )
 
-    import json as _json
-
     browser_info = None
     if ua or viewport:
-        browser_info = _json.dumps({"user_agent": ua, "viewport": viewport})
+        browser_info = json.dumps({"user_agent": ua, "viewport": viewport})
 
     network_errors = None
     if network_log_raw:
         try:
-            network_errors = _json.loads(network_log_raw) if isinstance(network_log_raw, str) else network_log_raw
+            network_errors = json.loads(network_log_raw) if isinstance(network_log_raw, str) else network_log_raw
         except (ValueError, TypeError):
             network_errors = None
 
@@ -222,11 +231,18 @@ async def submit_trouble_ticket(
             user.id,
             description,
             current_url=page_url,
-            user_agent=ua,
-            browser_info=browser_info,
-            console_errors=error_log,
-            network_errors=network_errors,
+            context={
+                "user_agent": ua,
+                "browser_info": browser_info,
+                "console_errors": error_log,
+                "network_errors": network_errors,
+            },
         )
+        if screenshot_b64:
+            path = _save_screenshot(ticket.id, screenshot_b64)
+            if path:
+                ticket.screenshot_path = path
+                db.commit()
     except Exception:
         db.rollback()
         logger.exception("Failed to create trouble ticket for user %d", user.id)
@@ -234,12 +250,6 @@ async def submit_trouble_ticket(
             '<div class="p-4 text-rose-600 text-sm">Something went wrong saving your report. Please try again.</div>',
             status_code=500,
         )
-
-    if screenshot_b64:
-        path = _save_screenshot(ticket.id, screenshot_b64)
-        if path:
-            ticket.screenshot_path = path
-            db.commit()
 
     background_tasks.add_task(_generate_ai_summary, ticket.id)
 
@@ -299,7 +309,7 @@ async def list_error_reports(
     db: Session = Depends(get_db),
 ):
     """List trouble reports (source='report_button' only)."""
-    q = db.query(TroubleTicket).filter(TroubleTicket.source == "report_button")
+    q = db.query(TroubleTicket).filter(TroubleTicket.source == TicketSource.REPORT_BUTTON)
     if status:
         q = q.filter(TroubleTicket.status == status)
     q = q.order_by(desc(TroubleTicket.created_at))
@@ -359,8 +369,8 @@ async def analyze_tickets(
 
     tickets = (
         db.query(TroubleTicket)
-        .filter(TroubleTicket.status.in_(["submitted", "in_progress"]))
-        .filter(TroubleTicket.source == "report_button")
+        .filter(TroubleTicket.status.in_([TicketStatus.SUBMITTED, TicketStatus.IN_PROGRESS]))
+        .filter(TroubleTicket.source == TicketSource.REPORT_BUTTON)
         .order_by(desc(TroubleTicket.created_at))
         .limit(50)
         .all()
@@ -400,13 +410,11 @@ async def analyze_tickets(
         "required": ["groups"],
     }
 
-    import json as _json
-
     result = await claude_structured(
         prompt=(
             "Group these trouble tickets by root cause. For each group, provide a short title "
             "and a suggested fix. Return JSON with a 'groups' array.\n\n"
-            f"Tickets:\n{_json.dumps(ticket_data, indent=2)}"
+            f"Tickets:\n{json.dumps(ticket_data, indent=2)}"
         ),
         system="You are a bug triage assistant. Group related bug reports by their likely root cause.",
         output_schema=tool_schema,
@@ -439,7 +447,6 @@ async def analyze_tickets(
     db.commit()
     logger.info("AI analysis grouped %d tickets into %d groups", len(tickets), len(result["groups"]))
 
-    # Return empty response with HX-Trigger to reload list
     resp = HTMLResponse("")
     resp.headers["HX-Trigger"] = "ticketsUpdated"
     return resp
@@ -460,7 +467,7 @@ async def update_ticket(
 
     if body.status:
         ticket.status = body.status
-        if body.status == "resolved":
+        if body.status == TicketStatus.RESOLVED:
             ticket.resolved_at = datetime.now(timezone.utc)
             ticket.resolved_by_id = user.id
     if body.resolution_notes is not None:

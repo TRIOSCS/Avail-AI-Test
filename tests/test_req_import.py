@@ -128,3 +128,37 @@ def test_import_form_loads(client):
     resp = client.get("/v2/partials/requisitions/import-form")
     assert resp.status_code == 200
     assert "New Requisition" in resp.text
+
+
+def test_company_lookup_form_accessible(client):
+    """The lookup endpoint should return HTML."""
+    with patch(
+        "app.utils.claude_client.claude_structured",
+        new_callable=AsyncMock,
+        return_value=None,
+    ):
+        resp = client.post(
+            "/v2/partials/companies/lookup",
+            data={"company_name": "Test Corp", "location": "Dallas, TX"},
+        )
+        # Claude returns None in test → fallback message
+        assert resp.status_code == 200
+
+
+def test_company_quick_create(client, db_session):
+    """Quick-create should create a company and site."""
+    resp = client.post(
+        "/v2/partials/companies/quick-create",
+        data={
+            "company_name": "Test Import Corp",
+            "website": "testimportcorp.com",
+            "phone": "555-0100",
+            "address_line1": "123 Main St",
+            "city": "Dallas",
+            "state": "TX",
+            "zip": "75201",
+            "country": "US",
+        },
+    )
+    assert resp.status_code == 200
+    assert "Created" in resp.text or "already exists" in resp.text

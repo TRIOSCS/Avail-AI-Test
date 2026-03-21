@@ -94,6 +94,7 @@ class QuoteLine(Base):
         Index("ix_quote_lines_quote", "quote_id"),
         Index("ix_quote_lines_card", "material_card_id"),
         Index("ix_quote_lines_mpn", "mpn"),
+        Index("ix_quote_lines_offer", "offer_id"),
     )
 
 

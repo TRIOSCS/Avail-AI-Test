@@ -8606,7 +8606,13 @@ async def parts_list_partial(
     if q:
         sb_q = SearchBuilder(q)
         query = query.filter(
-            sb_q.ilike_filter(Requirement.primary_mpn, Requirement.brand, Requisition.name, Requisition.customer_name)
+            sb_q.ilike_filter(
+                Requirement.primary_mpn,
+                Requirement.customer_pn,
+                Requirement.brand,
+                Requisition.name,
+                Requisition.customer_name,
+            )
         )
     if requisition_name:
         query = query.filter(SearchBuilder(requisition_name).ilike_filter(Requisition.name))

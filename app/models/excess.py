@@ -87,6 +87,8 @@ class ExcessLineItem(Base):
     __table_args__ = (
         Index("ix_excess_line_items_list", "excess_list_id"),
         Index("ix_excess_line_items_status", "status"),
+        Index("ix_excess_line_items_pn_status", "part_number", "status"),
+        Index("ix_excess_line_items_demand", "demand_match_count", "status"),
     )
 
 

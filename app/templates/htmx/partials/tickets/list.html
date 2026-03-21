@@ -29,6 +29,6 @@
 {% include "htmx/partials/tickets/_row.html" %}
 {% endfor %}
 
-{% if not tickets %}
+{% if total == 0 %}
 <div class="text-center py-12 text-gray-400 text-sm">No tickets found.</div>
 {% endif %}

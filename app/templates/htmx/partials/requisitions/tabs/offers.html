@@ -6,35 +6,42 @@
 #}
 <div x-data="{ selectedOffers: [] }">
 
-  {# ── AI Parse & Add Buttons ────────────────────────────── #}
-  <div class="flex items-center gap-2 mb-4">
-    <button hx-get="/v2/partials/requisitions/{{ req.id }}/add-offer-form"
-            hx-target="#parse-area"
-            hx-swap="innerHTML"
-            class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 inline-flex items-center gap-1.5">
-      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-      </svg>
-      Add Offer
-    </button>
-    <button hx-get="/v2/partials/requisitions/{{ req.id }}/parse-email-form"
-            hx-target="#parse-area"
-            hx-swap="innerHTML"
-            class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 inline-flex items-center gap-1.5">
-      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/>
-      </svg>
-      Parse Email
-    </button>
-    <button hx-get="/v2/partials/requisitions/{{ req.id }}/paste-offer-form"
-            hx-target="#parse-area"
-            hx-swap="innerHTML"
-            class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 inline-flex items-center gap-1.5">
-      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/>
-      </svg>
-      Paste Offer
-    </button>
+  {# ── Add Offer dropdown ────────────────────────────────── #}
+  <div class="mb-4" x-data="{ addOpen: false }">
+    <div class="relative inline-block">
+      <button @click="addOpen = !addOpen" type="button"
+              class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 inline-flex items-center gap-1.5">
+        <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        Add Offer
+        <svg class="h-3 w-3 ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
+      </button>
+      <div x-show="addOpen" @click.outside="addOpen = false" x-cloak x-transition
+           class="absolute left-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
+        <button hx-get="/v2/partials/requisitions/{{ req.id }}/add-offer-form"
+                hx-target="#parse-area" hx-swap="innerHTML"
+                @click="addOpen = false"
+                class="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-brand-50 inline-flex items-center gap-2">
+          <svg class="h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/></svg>
+          Manual Entry
+        </button>
+        <button hx-get="/v2/partials/requisitions/{{ req.id }}/parse-email-form"
+                hx-target="#parse-area" hx-swap="innerHTML"
+                @click="addOpen = false"
+                class="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-brand-50 inline-flex items-center gap-2">
+          <svg class="h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"/></svg>
+          Parse Email
+        </button>
+        <button hx-get="/v2/partials/requisitions/{{ req.id }}/paste-offer-form"
+                hx-target="#parse-area" hx-swap="innerHTML"
+                @click="addOpen = false"
+                class="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-brand-50 inline-flex items-center gap-2">
+          <svg class="h-3.5 w-3.5 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
+          Paste Offer
+        </button>
+      </div>
+    </div>
   </div>
 
   {# Area where parse forms and results appear #}
@@ -43,18 +50,9 @@
   {% if offers %}
   {# Action bar — appears when offers are selected #}
   <div class="flex items-center justify-between mb-4">
-    <div class="flex items-center gap-2">
-      <p class="text-sm text-gray-500">
-        <span class="font-semibold text-gray-900">{{ offers|length }}</span> offer{{ "s" if offers|length != 1 }}
-      </p>
-      {# Column picker #}
-      {% set picker_id = "offers" %}
-      {% set columns = [] %}
-      {% for key, label in all_offer_columns %}
-        {% set _ = columns.append({"key": key, "label": label, "default": key in visible_offer_cols}) %}
-      {% endfor %}
-      {% include "htmx/partials/shared/column_picker.html" %}
-    </div>
+    <p class="text-sm text-gray-500">
+      <span class="font-semibold text-gray-900">{{ offers|length }}</span> offer{{ "s" if offers|length != 1 }}
+    </p>
     <div class="flex items-center gap-2">
       <template x-if="selectedOffers.length > 0">
         <span class="text-xs text-gray-500 mr-2" x-text="selectedOffers.length + ' selected'"></span>

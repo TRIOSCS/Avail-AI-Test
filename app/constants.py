@@ -188,3 +188,19 @@ class ProactiveOfferStatus(StrEnum):
 
     SENT = "sent"
     CONVERTED = "converted"
+
+
+class TicketStatus(StrEnum):
+    """Status lifecycle for TroubleTicket records."""
+
+    SUBMITTED = "submitted"
+    IN_PROGRESS = "in_progress"
+    RESOLVED = "resolved"
+    WONT_FIX = "wont_fix"
+
+
+class TicketSource(StrEnum):
+    """Origin of a TroubleTicket."""
+
+    REPORT_BUTTON = "report_button"
+    TICKET_FORM = "ticket_form"

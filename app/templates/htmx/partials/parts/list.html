@@ -11,8 +11,7 @@
   <div class="panel-header flex-wrap gap-y-1">
     <form id="parts-filters" class="w-full">
       <div class="flex gap-2 items-center">
-        {# Status pills #}
-        <input type="hidden" name="q" value="{{ q }}">
+        {# Hidden filter state #}
         <input type="hidden" name="status" value="{{ status }}">
         <input type="hidden" name="sort" value="{{ sort }}">
         <input type="hidden" name="dir" value="{{ dir }}">
@@ -29,6 +28,19 @@
           </svg>
           Req
         </button>
+
+        {# Search input — searches MPN, brand, req name, customer #}
+        <div class="relative flex-shrink-0" style="width: 180px;">
+          <svg class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
+            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
+          </svg>
+          <input type="text" name="q" value="{{ q }}" placeholder="MPN, customer, req..."
+                 hx-get="/v2/partials/parts"
+                 hx-target="#parts-list"
+                 hx-include="#parts-filters"
+                 hx-trigger="keyup changed delay:300ms"
+                 class="w-full pl-7 pr-2 py-0.5 text-[10px] border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 placeholder:text-gray-400">
+        </div>
 
         {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('sourcing', 'Src'), ('offered', 'Ofd'), ('quoted', 'Qtd'), ('archived', 'Arc')] %}
         <button type="button"

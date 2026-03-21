@@ -358,6 +358,7 @@ class ActivityLog(Base):
             "created_at",
             postgresql_where=Column("requisition_id").isnot(None),
         ),
+        Index("ix_activity_created_at", "created_at"),
     )
 
 

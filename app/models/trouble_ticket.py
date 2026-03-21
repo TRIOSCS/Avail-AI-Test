@@ -34,6 +34,7 @@ class TroubleTicket(Base):
         Index("ix_trouble_tickets_submitted_by", "submitted_by"),
         Index("ix_trouble_tickets_created_at", "created_at"),
         Index("ix_trouble_tickets_source", "source"),
+        Index("ix_trouble_tickets_source_status_created", "source", "status", "created_at"),
     )
 
     id = Column(Integer, primary_key=True)

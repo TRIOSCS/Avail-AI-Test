@@ -109,6 +109,11 @@ class VendorCard(Base):
     __table_args__ = (
         Index("ix_vendor_cards_created_at", "created_at"),
         Index("ix_vendor_cards_score_computed_at", "vendor_score_computed_at"),
+        Index(
+            "ix_vendor_cards_active",
+            "created_at",
+            postgresql_where=Column("is_blacklisted").is_(False),
+        ),
     )
 
 

@@ -78,36 +78,33 @@
       </div>
 
       {# Right: Trouble Ticket button #}
-      <div class="flex items-center justify-end"
-           x-data="{ capturing: false }">
+      <div class="flex items-center justify-end">
         <button
-          :disabled="capturing"
           @click="
-            capturing = true;
-            if (!window._html2canvasLoaded) {
+            window._ttScreenshot = null;
+            htmx.ajax('GET', '/api/trouble-tickets/form', {target:'#modal-content'});
+            $dispatch('open-modal');
+            if (window.html2canvas) {
+              html2canvas(document.body, {scale:0.5, logging:false, useCORS:true})
+                .then(function(c){ window._ttScreenshot = c.toDataURL('image/png'); })
+                .catch(function(){});
+            } else if (!window._html2canvasLoaded) {
               var s = document.createElement('script');
               s.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
-              s.onload = function() { window._html2canvasLoaded = true; $dispatch('_tt-capture'); };
-              s.onerror = function() { capturing = false; $dispatch('_tt-capture'); };
+              s.onload = function(){
+                window._html2canvasLoaded = true;
+                html2canvas(document.body, {scale:0.5, logging:false, useCORS:true})
+                  .then(function(c){ window._ttScreenshot = c.toDataURL('image/png'); })
+                  .catch(function(){});
+              };
               document.head.appendChild(s);
-            } else {
-              $dispatch('_tt-capture');
             }
           "
-          @_tt-capture.window="
-            var doCapture = window.html2canvas ? html2canvas(document.body, {scale:0.5, logging:false, useCORS:true}).then(function(c){return c.toDataURL('image/png')}) : Promise.resolve(null);
-            doCapture.then(function(img){ window._ttScreenshot = img; }).catch(function(){ window._ttScreenshot = null; }).finally(function(){
-              htmx.ajax('GET', '/api/trouble-tickets/form', {target:'#modal-content'});
-              $dispatch('open-modal');
-              capturing = false;
-            });
-          "
-          class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-rose-500 text-white hover:bg-rose-600 disabled:opacity-50 transition-colors">
+          class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-rose-500 text-white hover:bg-rose-600 transition-colors">
           <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
             <path stroke-linecap="round" stroke-linejoin="round" d="M12 12.75c1.148 0 2.278.08 3.383.237 1.037.146 1.866.966 1.866 2.013 0 3.728-2.35 6.75-5.25 6.75S6.75 18.728 6.75 15c0-1.046.83-1.867 1.866-2.013A24.204 24.204 0 0112 12.75zm0 0c2.883 0 5.647.508 8.207 1.44a23.91 23.91 0 01-1.152-6.135c-.117-1.09-.564-2.055-1.24-2.647-.676-.593-1.548-.858-2.44-.658C14.26 5.053 13.16 5.25 12 5.25s-2.26-.197-3.375-.5c-.892-.2-1.764.065-2.44.658-.676.592-1.123 1.558-1.24 2.647a23.907 23.907 0 01-1.152 6.135C6.354 13.258 9.118 12.75 12 12.75z"/>
           </svg>
-          <span x-show="!capturing">Trouble Ticket</span>
-          <span x-show="capturing" x-cloak>Capturing...</span>
+          Trouble Ticket
         </button>
       </div>
     </div>
