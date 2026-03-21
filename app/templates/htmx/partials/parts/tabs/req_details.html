@@ -6,6 +6,7 @@
 {% from "htmx/partials/shared/_macros.html" import status_badge, urgency_badge %}
 
 {% set req = requisition %}
+{% set is_archived = req.status == 'archived' or requirement.sourcing_status == 'archived' %}
 
 {# ── Part detail + Requisition fields ──────────────────────── #}
 <div id="req-details-fields"
@@ -29,6 +30,7 @@
     {% for field_key, field_label, field_value in spec_fields %}
     <div class="flex items-center gap-1">
       <span class="text-xs text-gray-500 whitespace-nowrap">{{ field_label }}:</span>
+      {% if not is_archived %}
       <div id="reqd-spec-{{ field_key }}"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors min-w-0"
            hx-get="/v2/partials/parts/{{ requirement.id }}/edit-spec/{{ field_key }}"
@@ -36,6 +38,11 @@
            hx-swap="innerHTML">
         <span class="{{ 'font-medium text-gray-900' if field_value else 'text-gray-400 italic' }} truncate">{{ field_value or '—' }}</span>
       </div>
+      {% else %}
+      <div class="px-1 py-0.5 min-w-0">
+        <span class="{{ 'font-medium text-gray-900' if field_value else 'text-gray-400' }} truncate">{{ field_value or '—' }}</span>
+      </div>
+      {% endif %}
     </div>
     {% endfor %}
   </div>
@@ -49,6 +56,7 @@
     {# Name #}
     <div class="flex items-center gap-1">
       <span class="text-xs text-gray-500 whitespace-nowrap">Name:</span>
+      {% if not is_archived %}
       <div id="reqd-name"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors min-w-0"
            hx-get="/v2/partials/requisitions/{{ req.id }}/edit/name?context=tab"
@@ -56,11 +64,15 @@
            hx-swap="innerHTML">
         <span class="font-medium text-gray-900 truncate">{{ req.name or '—' }}</span>
       </div>
+      {% else %}
+      <div class="px-1 py-0.5 min-w-0"><span class="font-medium text-gray-900 truncate">{{ req.name or '—' }}</span></div>
+      {% endif %}
     </div>
 
     {# Status #}
     <div class="flex items-center gap-1">
       <span class="text-xs text-gray-500 whitespace-nowrap">Status:</span>
+      {% if not is_archived %}
       <div id="reqd-status"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors"
            hx-get="/v2/partials/requisitions/{{ req.id }}/edit/status?context=tab"
@@ -68,6 +80,9 @@
            hx-swap="innerHTML">
         {{ status_badge(req.status) }}
       </div>
+      {% else %}
+      <div class="px-1 py-0.5">{{ status_badge(req.status) }}</div>
+      {% endif %}
     </div>
 
     {# Customer (read-only) #}
@@ -81,6 +96,7 @@
     {# Urgency #}
     <div class="flex items-center gap-1">
       <span class="text-xs text-gray-500 whitespace-nowrap">Urgency:</span>
+      {% if not is_archived %}
       <div id="reqd-urgency"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors"
            hx-get="/v2/partials/requisitions/{{ req.id }}/edit/urgency?context=tab"
@@ -88,11 +104,15 @@
            hx-swap="innerHTML">
         {{ urgency_badge(req.urgency or 'normal') }}
       </div>
+      {% else %}
+      <div class="px-1 py-0.5">{{ urgency_badge(req.urgency or 'normal') }}</div>
+      {% endif %}
     </div>
 
     {# Deadline #}
     <div class="flex items-center gap-1">
       <span class="text-xs text-gray-500 whitespace-nowrap">Deadline:</span>
+      {% if not is_archived %}
       <div id="reqd-deadline"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors"
            hx-get="/v2/partials/requisitions/{{ req.id }}/edit/deadline?context=tab"
@@ -100,11 +120,15 @@
            hx-swap="innerHTML">
         <span class="text-gray-900">{{ req.deadline or '—' }}</span>
       </div>
+      {% else %}
+      <div class="px-1 py-0.5"><span class="text-gray-900">{{ req.deadline or '—' }}</span></div>
+      {% endif %}
     </div>
 
     {# Owner #}
     <div class="flex items-center gap-1">
       <span class="text-xs text-gray-500 whitespace-nowrap">Owner:</span>
+      {% if not is_archived %}
       <div id="reqd-owner"
            class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors"
            hx-get="/v2/partials/requisitions/{{ req.id }}/edit/owner?context=tab"
@@ -112,6 +136,9 @@
            hx-swap="innerHTML">
         <span class="text-gray-900">{{ req.creator.name if req.creator else '—' }}</span>
       </div>
+      {% else %}
+      <div class="px-1 py-0.5"><span class="text-gray-900">{{ req.creator.name if req.creator else '—' }}</span></div>
+      {% endif %}
     </div>
   </div>
 
