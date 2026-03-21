@@ -1,0 +1,37 @@
+{# spec_edit.html — Inline edit form for requirement spec fields.
+   Renders a text input that saves on blur/Enter and cancels on Escape.
+
+   Receives: requirement, field (str), field_label (str), field_value (str).
+   Called by: GET /v2/partials/parts/{id}/edit-spec/{field}?context=tab
+   Depends on: HTMX, Alpine.js, brand palette.
+#}
+
+<form hx-patch="/v2/partials/parts/{{ requirement.id }}/save-spec"
+      hx-target="#reqd-spec-{{ field }}"
+      hx-swap="innerHTML"
+      class="inline">
+  <input type="hidden" name="field" value="{{ field }}">
+  {% if field == 'condition' %}
+  <select name="value"
+          class="w-full px-2 py-1 border border-brand-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+          autofocus
+          x-init="$el.focus()"
+          @change="$el.form.requestSubmit()"
+          @blur="$el.form.requestSubmit()"
+          @keydown.escape.prevent="document.body.dispatchEvent(new CustomEvent('reqDetailsRefresh'))">
+    <option value="">—</option>
+    {% for c in condition_choices %}
+    <option value="{{ c }}" {{ 'selected' if field_value == c else '' }}>{{ c }}</option>
+    {% endfor %}
+  </select>
+  {% else %}
+  <input type="text" name="value" value="{{ field_value or '' }}"
+         class="w-full px-2 py-1 border border-brand-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+         placeholder="{{ field_label }}"
+         autofocus
+         x-init="$el.focus(); $el.select()"
+         @blur="$el.form.requestSubmit()"
+         @keydown.enter.prevent="$el.form.requestSubmit()"
+         @keydown.escape.prevent="document.body.dispatchEvent(new CustomEvent('reqDetailsRefresh'))">
+  {% endif %}
+</form>
