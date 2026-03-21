@@ -7,11 +7,13 @@ Called by: main.py (app.include_router), htmx/base.html (HTMX button)
 Depends on: models/trouble_ticket.py
 """
 
+import base64
+import os
 from datetime import datetime, timezone
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
+from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.templating import Jinja2Templates
 from loguru import logger
 from markupsafe import escape
@@ -28,11 +30,14 @@ router = APIRouter(tags=["error-reports"])
 templates = Jinja2Templates(directory="app/templates")
 
 MAX_MESSAGE_LEN = 5000
+UPLOAD_DIR = "/app/uploads/tickets"
+MAX_SCREENSHOT_B64_SIZE = 2 * 1024 * 1024  # 2MB base64
 
 
 class ErrorReportCreate(BaseModel):
     message: str = Field(..., min_length=1, max_length=MAX_MESSAGE_LEN)
     current_url: Optional[str] = Field(None, max_length=500)
+    screenshot: Optional[str] = Field(None, max_length=MAX_SCREENSHOT_B64_SIZE)
 
 
 class TicketUpdate(BaseModel):
@@ -40,11 +45,36 @@ class TicketUpdate(BaseModel):
     resolution_notes: Optional[str] = Field(None, max_length=5000)
 
 
+def _save_screenshot(ticket_id: int, b64_data: str) -> str | None:
+    """Decode base64 PNG and save to disk.
+
+    Returns path or None on failure.
+    """
+    if not b64_data or len(b64_data) > MAX_SCREENSHOT_B64_SIZE:
+        return None
+    try:
+        if "," in b64_data[:100]:
+            b64_data = b64_data.split(",", 1)[1]
+        png_bytes = base64.b64decode(b64_data)
+        os.makedirs(UPLOAD_DIR, exist_ok=True)
+        path = os.path.join(UPLOAD_DIR, f"TT-{ticket_id}.png")
+        with open(path, "wb") as f:
+            f.write(png_bytes)
+        return path
+    except Exception:
+        logger.warning("Failed to save screenshot for ticket %d", ticket_id)
+        return None
+
+
 def _create_ticket(
     db: Session,
     user_id: int,
     message: str,
     current_url: Optional[str] = None,
+    user_agent: Optional[str] = None,
+    browser_info: Optional[str] = None,
+    console_errors: Optional[str] = None,
+    network_errors: Optional[str] = None,
 ) -> TroubleTicket:
     """Create and persist a trouble ticket.
 
@@ -56,6 +86,10 @@ def _create_ticket(
         title=message[:120],
         description=message,
         current_page=current_url or None,
+        user_agent=user_agent or None,
+        browser_info=browser_info or None,
+        console_errors=console_errors or None,
+        network_errors=network_errors if network_errors else None,
         source="report_button",
         status="submitted",
         risk_tier="low",
@@ -68,6 +102,46 @@ def _create_ticket(
     db.commit()
     logger.info("Trouble ticket %s created by user %d", ticket.ticket_number, user_id)
     return ticket
+
+
+async def _generate_ai_summary(ticket_id: int):
+    """Generate a one-sentence AI summary for a trouble ticket.
+
+    Runs as BackgroundTask.
+    """
+    from ..database import SessionLocal
+    from ..utils.claude_client import claude_text
+
+    db = SessionLocal()
+    try:
+        ticket = db.get(TroubleTicket, ticket_id)
+        if not ticket or ticket.ai_summary:
+            return
+
+        prompt = (
+            "Summarize this trouble report in one sentence. "
+            f"Description: {ticket.description[:500]}. "
+            f"Page: {ticket.current_page or 'unknown'}. "
+            f"JS errors: {(ticket.console_errors or 'none')[:300]}. "
+            f"Network errors: {str(ticket.network_errors or 'none')[:300]}"
+        )
+
+        summary = await claude_text(
+            prompt=prompt,
+            system="You are a bug report summarizer. Return exactly one sentence.",
+            model_tier="fast",
+        )
+
+        if summary:
+            ticket.ai_summary = summary.strip()[:500]
+            ticket.updated_at = datetime.now(timezone.utc)
+            db.commit()
+            logger.debug("AI summary generated for ticket %s", ticket.ticket_number)
+    except Exception:
+        logger.warning("AI summary failed for ticket %d", ticket_id)
+        db.rollback()
+    finally:
+        db.close()
 
 
 # ── HTMX form endpoints (floating button) ────────────────────────
@@ -83,28 +157,76 @@ async def trouble_ticket_form(request: Request, user: User = Depends(require_use
 
 
 @router.post("/api/trouble-tickets/submit", response_class=HTMLResponse)
-async def submit_trouble_ticket_form(
+async def submit_trouble_ticket(
     request: Request,
-    message: str = Form(...),
-    current_url: str = Form(""),
+    background_tasks: BackgroundTasks,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Handle form submission from the floating report button."""
-    msg = message.strip()
-    if not msg:
+    """Handle submission from trouble ticket form — accepts JSON or form data."""
+    content_type = request.headers.get("content-type", "")
+
+    if "application/json" in content_type:
+        try:
+            body = await request.json()
+        except Exception:
+            return HTMLResponse(
+                '<div class="p-4 text-rose-600 text-sm">Invalid request.</div>',
+                status_code=422,
+            )
+        description = (body.get("description") or "").strip()
+        page_url = body.get("page_url")
+        screenshot_b64 = body.get("screenshot")
+        ua = body.get("user_agent")
+        viewport = body.get("viewport")
+        error_log = body.get("error_log")
+        network_log_raw = body.get("network_log")
+    else:
+        # Legacy form-encoded fallback
+        form = await request.form()
+        description = (form.get("message") or "").strip()
+        page_url = form.get("current_url")
+        screenshot_b64 = None
+        ua = None
+        viewport = None
+        error_log = None
+        network_log_raw = None
+
+    if not description:
         return HTMLResponse(
             '<div class="p-4 text-rose-600 text-sm">Please describe the problem.</div>',
             status_code=422,
         )
-    if len(msg) > MAX_MESSAGE_LEN:
+    if len(description) > MAX_MESSAGE_LEN:
         return HTMLResponse(
             f'<div class="p-4 text-rose-600 text-sm">Message too long (max {MAX_MESSAGE_LEN} characters).</div>',
             status_code=422,
         )
 
+    import json as _json
+
+    browser_info = None
+    if ua or viewport:
+        browser_info = _json.dumps({"user_agent": ua, "viewport": viewport})
+
+    network_errors = None
+    if network_log_raw:
+        try:
+            network_errors = _json.loads(network_log_raw) if isinstance(network_log_raw, str) else network_log_raw
+        except (ValueError, TypeError):
+            network_errors = None
+
     try:
-        ticket = _create_ticket(db, user.id, msg, current_url)
+        ticket = _create_ticket(
+            db,
+            user.id,
+            description,
+            current_url=page_url,
+            user_agent=ua,
+            browser_info=browser_info,
+            console_errors=error_log,
+            network_errors=network_errors,
+        )
     except Exception:
         db.rollback()
         logger.exception("Failed to create trouble ticket for user %d", user.id)
@@ -112,6 +234,14 @@ async def submit_trouble_ticket_form(
             '<div class="p-4 text-rose-600 text-sm">Something went wrong saving your report. Please try again.</div>',
             status_code=500,
         )
+
+    if screenshot_b64:
+        path = _save_screenshot(ticket.id, screenshot_b64)
+        if path:
+            ticket.screenshot_path = path
+            db.commit()
+
+    background_tasks.add_task(_generate_ai_summary, ticket.id)
 
     return HTMLResponse(
         '<div class="p-4 text-center">'
@@ -121,6 +251,27 @@ async def submit_trouble_ticket_form(
         'class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">Close</button>'
         "</div>"
     )
+
+
+# ── Screenshot serving ────────────────────────────────────────────
+
+
+@router.get("/api/trouble-tickets/{ticket_id}/screenshot")
+async def get_ticket_screenshot(
+    ticket_id: int,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Serve screenshot PNG from disk; fall back to legacy screenshot_b64."""
+    ticket = db.get(TroubleTicket, ticket_id)
+    if not ticket:
+        raise HTTPException(404, "Ticket not found")
+    if ticket.screenshot_path and os.path.isfile(ticket.screenshot_path):
+        return FileResponse(ticket.screenshot_path, media_type="image/png")
+    if ticket.screenshot_b64:
+        png_bytes = base64.b64decode(ticket.screenshot_b64)
+        return Response(content=png_bytes, media_type="image/png")
+    raise HTTPException(404, "No screenshot available")
 
 
 # ── JSON API endpoints ────────────────────────────────────────────

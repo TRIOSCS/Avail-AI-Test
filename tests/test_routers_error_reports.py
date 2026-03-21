@@ -419,3 +419,72 @@ class TestTroubleTicketForm:
         assert resp.status_code == 500
         assert "Something went wrong" in resp.text
         assert "text/html" in resp.headers.get("content-type", "")
+
+
+# ── Screenshot serving ───────────────────────────────────────────
+
+
+class TestScreenshot:
+    def test_screenshot_not_found(self, client):
+        resp = client.get("/api/trouble-tickets/99999/screenshot")
+        assert resp.status_code == 404
+
+    def test_screenshot_no_screenshot(self, client, sample_report):
+        resp = client.get(f"/api/trouble-tickets/{sample_report.id}/screenshot")
+        assert resp.status_code == 404
+
+    def test_screenshot_legacy_b64(self, client, sample_report, db_session):
+        import base64
+
+        sample_report.screenshot_b64 = base64.b64encode(b"fakepng").decode()
+        db_session.commit()
+        resp = client.get(f"/api/trouble-tickets/{sample_report.id}/screenshot")
+        assert resp.status_code == 200
+
+
+# ── New JSON submit flow ─────────────────────────────────────────
+
+
+class TestNewSubmitFlow:
+    def test_json_submit_minimal(self, client):
+        resp = client.post(
+            "/api/trouble-tickets/submit",
+            json={"description": "Button doesn't work"},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        assert "Report submitted" in resp.text
+
+    def test_json_submit_with_context(self, client):
+        resp = client.post(
+            "/api/trouble-tickets/submit",
+            json={
+                "description": "Search results empty",
+                "page_url": "/v2/search",
+                "user_agent": "Mozilla/5.0",
+                "viewport": "1920x1080",
+                "error_log": '[{"msg":"TypeError","ts":"2026-03-21"}]',
+                "network_log": '[{"url":"/api/search","status":500}]',
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+
+    def test_json_submit_empty_description_422(self, client):
+        resp = client.post(
+            "/api/trouble-tickets/submit", json={"description": ""}, headers={"Content-Type": "application/json"}
+        )
+        assert resp.status_code == 422
+
+    def test_json_submit_no_body_422(self, client):
+        resp = client.post(
+            "/api/trouble-tickets/submit", content=b"not json", headers={"Content-Type": "application/json"}
+        )
+        assert resp.status_code == 422
+
+    def test_legacy_form_submit_still_works(self, client):
+        resp = client.post(
+            "/api/trouble-tickets/submit", data={"message": "Old form still works", "current_url": "/v2/test"}
+        )
+        assert resp.status_code == 200
+        assert "Report submitted" in resp.text
