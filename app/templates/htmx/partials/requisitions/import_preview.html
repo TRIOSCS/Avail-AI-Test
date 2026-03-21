@@ -1,0 +1,134 @@
+{# import_preview.html — Step 2: editable table of AI-parsed requirements.
+   User reviews, edits, removes rows, then saves to create the requisition.
+   Receives: requirements (list of dicts), req_name, customer_name, deadline, urgency, count.
+   Called by: POST /v2/partials/requisitions/import-parse.
+   Depends on: HTMX, Alpine.js, brand palette.
+#}
+<div class="p-6" x-data="{ saving: false, rows: {{ count }} }">
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-lg font-semibold text-gray-900">Review Requirements</h2>
+    <button type="button" @click="$dispatch('close-modal')" class="text-gray-400 hover:text-gray-600">
+      <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+      </svg>
+    </button>
+  </div>
+
+  {# Summary #}
+  <div class="flex items-center justify-between bg-brand-50 rounded-lg border border-brand-200 px-4 py-2 mb-4">
+    <span class="text-sm font-medium text-brand-700">
+      <span class="font-bold" x-text="rows">{{ count }}</span> parts found for
+      <span class="font-bold">{{ req_name }}</span>
+      {% if customer_name %}<span class="text-brand-500">— {{ customer_name }}</span>{% endif %}
+    </span>
+    <button type="button"
+            hx-get="/v2/partials/requisitions/import-form"
+            hx-target="#modal-content"
+            class="text-xs text-brand-500 hover:text-brand-700 font-medium">Re-process</button>
+  </div>
+
+  {% if requirements %}
+  <form hx-post="/v2/partials/requisitions/import-save"
+        hx-target="#modal-content"
+        hx-swap="innerHTML"
+        @htmx:before-request="saving = true"
+        @htmx:after-request="saving = false">
+
+    {# Pass through req metadata #}
+    <input type="hidden" name="name" value="{{ req_name }}">
+    <input type="hidden" name="customer_name" value="{{ customer_name }}">
+    <input type="hidden" name="deadline" value="{{ deadline }}">
+    <input type="hidden" name="urgency" value="{{ urgency }}">
+
+    {# Editable table #}
+    <div class="overflow-x-auto max-h-[50vh] overflow-y-auto border border-gray-200 rounded-lg">
+      <table class="w-full text-sm">
+        <thead class="bg-gray-50 sticky top-0">
+          <tr class="text-left text-[10px] font-semibold text-gray-500 uppercase">
+            <th class="px-2 py-2">MPN</th>
+            <th class="px-2 py-2">Qty</th>
+            <th class="px-2 py-2">Brand</th>
+            <th class="px-2 py-2">Target $</th>
+            <th class="px-2 py-2">Condition</th>
+            <th class="px-2 py-2">Notes</th>
+            <th class="px-2 py-2 w-8"></th>
+          </tr>
+        </thead>
+        <tbody id="import-rows">
+          {% for r in requirements %}
+          <tr class="border-t border-gray-100 hover:bg-gray-50" id="import-row-{{ loop.index0 }}">
+            <td class="px-2 py-1">
+              <input type="text" name="reqs[{{ loop.index0 }}].primary_mpn"
+                     value="{{ r.primary_mpn or '' }}"
+                     class="w-full px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 font-mono"
+                     required>
+            </td>
+            <td class="px-2 py-1">
+              <input type="number" name="reqs[{{ loop.index0 }}].target_qty"
+                     value="{{ r.target_qty or 1 }}" min="1"
+                     class="w-20 px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+            </td>
+            <td class="px-2 py-1">
+              <input type="text" name="reqs[{{ loop.index0 }}].brand"
+                     value="{{ r.brand or '' }}"
+                     class="w-full px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+            </td>
+            <td class="px-2 py-1">
+              <input type="number" step="0.01" name="reqs[{{ loop.index0 }}].target_price"
+                     value="{{ r.target_price or '' }}"
+                     class="w-24 px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+            </td>
+            <td class="px-2 py-1">
+              <select name="reqs[{{ loop.index0 }}].condition"
+                      class="px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+                <option value="new" {{ 'selected' if (r.condition or 'new') == 'new' }}>New</option>
+                <option value="refurbished" {{ 'selected' if r.condition == 'refurbished' }}>Refurb</option>
+                <option value="used" {{ 'selected' if r.condition == 'used' }}>Used</option>
+              </select>
+            </td>
+            <td class="px-2 py-1">
+              <input type="text" name="reqs[{{ loop.index0 }}].notes"
+                     value="{{ r.notes or '' }}"
+                     class="w-full px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+            </td>
+            <td class="px-2 py-1">
+              <button type="button"
+                      @click="$el.closest('tr').remove(); rows--"
+                      class="text-gray-400 hover:text-rose-500 p-1" title="Remove">
+                <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+    </div>
+
+    {# Actions #}
+    <div class="flex items-center gap-3 mt-4 pt-4 border-t border-gray-100">
+      <button type="submit" :disabled="saving || rows === 0"
+              class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-50 inline-flex items-center gap-2">
+        <svg x-show="saving" x-cloak class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        <span x-text="saving ? 'Saving...' : 'Create Requisition (' + rows + ' parts)'"></span>
+      </button>
+      <button type="button" @click="$dispatch('close-modal')"
+              class="px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700">Cancel</button>
+    </div>
+  </form>
+
+  {% else %}
+  <div class="p-8 text-center bg-white rounded-lg border border-gray-200">
+    <p class="text-sm text-gray-500">No parts could be extracted from the input.</p>
+    <p class="text-xs text-gray-400 mt-1">Try pasting more structured data or a different format.</p>
+    <button type="button"
+            hx-get="/v2/partials/requisitions/import-form"
+            hx-target="#modal-content"
+            class="mt-3 px-4 py-2 text-sm font-medium text-brand-500 hover:text-brand-700">Try Again</button>
+  </div>
+  {% endif %}
+</div>
