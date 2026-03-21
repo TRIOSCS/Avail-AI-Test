@@ -44,7 +44,7 @@
      x-ref="container"
      @mousemove.window="onDrag($event)"
      @mouseup.window="stopDrag()"
-     @htmx:after-swap.window="$nextTick(() => clearPartIfGone())">
+     @htmx:after-swap.window="if ($event.detail.target && $event.detail.target.id === 'parts-list') $nextTick(() => clearPartIfGone())">
 
   {# ── Left Panel: Parts Table ──────────────────────────────── #}
   <div class="flex flex-col min-w-0 border-r border-gray-200" :style="'width: ' + (splitRatio * 100) + '%'">

@@ -8841,7 +8841,10 @@ async def part_header_edit_cell(
     if not req:
         raise HTTPException(404, "Part not found")
 
+    from markupsafe import escape
+
     current = getattr(req, field, "") or ""
+    safe_current = escape(current)
     cell_id = f"hdr-{field}"
     cancel_url = f"/v2/partials/parts/{requirement_id}/header"
     save_url = f"/v2/partials/parts/{requirement_id}/header"
@@ -8874,8 +8877,6 @@ async def part_header_edit_cell(
         )
 
     if field == "substitutes":
-        from markupsafe import escape
-
         subs_csv = escape(", ".join(req.substitutes)) if req.substitutes else ""
         return HTMLResponse(
             f'<div id="{cell_id}" class="flex items-center gap-2">'
@@ -8891,10 +8892,6 @@ async def part_header_edit_cell(
 
     input_type = "number" if field in ("target_qty", "target_price") else "text"
     step = ' step="0.0001"' if field == "target_price" else ""
-
-    from markupsafe import escape
-
-    safe_current = escape(current)
 
     return HTMLResponse(
         f'<input type="{input_type}" name="value" id="{cell_id}" value="{safe_current}" '
