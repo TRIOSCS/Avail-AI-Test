@@ -207,6 +207,7 @@ htmx.on('htmx:sendError', function(evt) {
 // ── 401 → redirect to login ─────────────────────────────────
 document.body.addEventListener('htmx:beforeSwap', (evt) => {
     if (evt.detail.xhr.status === 401) {
+        evt.detail.shouldSwap = false;
         window.location.href = '/auth/login';
     }
 });

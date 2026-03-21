@@ -37,7 +37,7 @@
   {# ── Header Card ────────────────────────────────────────────────── #}
   <div class="bg-white rounded-xl shadow-sm border border-brand-200 p-6">
     <div class="flex items-start justify-between">
-      <div class="flex-1 min-w-0" x-data="{ editing: false, title: '{{ list.title|e }}' }">
+      <div class="flex-1 min-w-0" x-data="{ editing: false, title: {{ list.title|tojson }} }">
         {# Inline-editable title #}
         <div x-show="!editing" @dblclick="editing = true" class="cursor-pointer group/title">
           <h1 class="text-2xl font-bold text-gray-900 inline">

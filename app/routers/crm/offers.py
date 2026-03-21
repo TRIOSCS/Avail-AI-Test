@@ -706,12 +706,12 @@ async def upload_offer_attachment(
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(400, "File too large (max 10 MB)")
     # Upload to OneDrive: AvailAI/Offers/{req_id}/{filename}
-    from ...utils.graph_client import GraphClient
+    from ...scheduler import get_valid_token
 
-    if not user.access_token:
+    token = await get_valid_token(user, db)
+    if not token:
         raise HTTPException(401, "Microsoft account not connected — please re-login")
-    GraphClient(user.access_token)
-    safe_name = file.filename.replace("/", "_").replace("\\", "_")
+    safe_name = (file.filename or "unnamed_file").replace("/", "_").replace("\\", "_")
     drive_path = f"/me/drive/root:/AvailAI/Offers/{offer.requisition_id}/{safe_name}:/content"
     from ...http_client import http
 
@@ -719,7 +719,7 @@ async def upload_offer_attachment(
         f"https://graph.microsoft.com/v1.0{drive_path}",
         content=content,
         headers={
-            "Authorization": f"Bearer {user.access_token}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": file.content_type or "application/octet-stream",
         },
         timeout=30,

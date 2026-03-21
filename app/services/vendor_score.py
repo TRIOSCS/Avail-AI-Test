@@ -128,6 +128,8 @@ async def compute_all_vendor_scores(db: Session) -> dict:
 
     # ── Preload all offer_ids grouped by vendor_card_id ──
     offer_rows = db.query(Offer.id, Offer.vendor_card_id, Offer.vendor_name).limit(50000).all()
+    if len(offer_rows) >= 50000:
+        logger.warning("Vendor score query hit %d limit — scores may be inaccurate", 50000)
 
     # Map vendor_card_id → set of offer_ids
     card_offer_ids: dict[int, set[int]] = {}
@@ -145,6 +147,8 @@ async def compute_all_vendor_scores(db: Session) -> dict:
 
     # ── Preload quote line_items to find offer_ids used in quotes ──
     quotes = db.query(Quote.line_items, Quote.status).filter(Quote.status.in_(QUOTE_USED_STATUSES)).limit(10000).all()
+    if len(quotes) >= 10000:
+        logger.warning("Vendor score quote query hit %d limit — scores may be inaccurate", 10000)
     quote_offer_id_set: set[int] = set()
     for line_items, _status in quotes:
         if line_items:
@@ -161,6 +165,8 @@ async def compute_all_vendor_scores(db: Session) -> dict:
         .limit(50000)
         .all()
     )
+    if len(bp_lines) >= 50000:
+        logger.warning("Vendor score buyplan query hit %d limit — scores may be inaccurate", 50000)
     awarded_offer_id_set: set[int] = set()
     po_confirmed_offer_id_set: set[int] = set()
     for oid, bp_status in bp_lines:

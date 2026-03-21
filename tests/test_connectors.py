@@ -1941,8 +1941,11 @@ class TestNexarConnector:
 
     @pytest.mark.asyncio
     async def test_run_query_401_retry(self):
+        import time
+
         c = self._make_connector()
         c._token = "old-token"
+        c._token_expires_at = time.monotonic() + 600  # ensure cached token is considered valid
         resp_401 = _mock_response(401, text="Unauthorized")
         resp_401.raise_for_status = MagicMock()
         token_resp = _mock_response(200, {"access_token": "new-token"})

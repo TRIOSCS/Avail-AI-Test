@@ -11,7 +11,7 @@ Depends on: SQLAlchemy models, app/utils/sql_helpers.py, app/utils/claude_client
 import hashlib
 
 from loguru import logger
-from sqlalchemy import String, cast, func
+from sqlalchemy import String, cast, func, or_
 from sqlalchemy.orm import Session
 
 from app.models.crm import Company, SiteContact
@@ -356,13 +356,7 @@ def _run_intent_query(search_op: dict, db: Session) -> tuple[str, list[dict]]:
     if not conditions:
         return (group_key, [])
 
-    q = db.query(model).filter(
-        conditions[0]
-        if len(conditions) == 1
-        else conditions[0] | conditions[1]
-        if len(conditions) == 2
-        else conditions[0] | conditions[1] | conditions[2]
-    )
+    q = db.query(model).filter(or_(*conditions))
 
     # Apply structured filters
     for filter_name, filter_value in (filters or {}).items():

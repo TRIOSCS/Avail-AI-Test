@@ -56,7 +56,7 @@
         <p class="text-xs text-gray-500 mb-2 font-medium">{{ msg.subject }}</p>
         {% endif %}
         <div class="text-sm text-gray-700 prose prose-sm max-w-none">
-          {{ msg.get('body', {}).get('content', '')|safe }}
+          {{ msg.get('body', {}).get('content', '')|sanitize_html|safe }}
         </div>
       </div>
       {% endfor %}

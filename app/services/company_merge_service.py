@@ -92,7 +92,8 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
     # 7. Handle sites — move or delete empty HQs
     remove_sites = db.query(CustomerSite).filter(CustomerSite.company_id == remove.id).all()
     keep_site_names = {
-        s.site_name.strip().upper() for s in db.query(CustomerSite).filter(CustomerSite.company_id == keep.id).all()
+        (s.site_name or "").strip().upper()
+        for s in db.query(CustomerSite).filter(CustomerSite.company_id == keep.id).all()
     }
 
     sites_deleted = 0
@@ -110,10 +111,10 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
             db.delete(s)
             sites_deleted += 1
         else:
-            if s.site_name.strip().upper() in keep_site_names:
-                s.site_name = f"{remove.name} - {s.site_name}"
+            if (s.site_name or "").strip().upper() in keep_site_names:
+                s.site_name = f"{remove.name} - {s.site_name or ''}"
             s.company_id = keep.id
-            keep_site_names.add(s.site_name.strip().upper())
+            keep_site_names.add((s.site_name or "").strip().upper())
             sites_moved += 1
 
     # Flush site changes and expire the relationship so ORM cascade doesn't

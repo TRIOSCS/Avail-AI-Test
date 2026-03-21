@@ -218,11 +218,15 @@ class NexarConnector(BaseConnector):
         self.client_id = client_id
         self.client_secret = client_secret
         self.octopart_api_key = octopart_api_key
-        self._token = None
+        self._token: str | None = None
+        self._token_expires_at: float = 0  # monotonic time when token expires
 
     async def _get_token(self) -> str:
-        if self._token:
+        # Return cached token if still valid (with 60s safety margin)
+        if self._token and time.monotonic() < self._token_expires_at - 60:
             return self._token
+        self._token = None
+
         from ..http_client import http
 
         r = await http.post(
@@ -235,7 +239,12 @@ class NexarConnector(BaseConnector):
             timeout=15,
         )
         r.raise_for_status()
-        self._token = r.json()["access_token"]
+        body = r.json()
+        self._token = body["access_token"]
+        # Nexar tokens typically expire in ~300s; track it
+        expires_in = int(body.get("expires_in", 300))
+        self._token_expires_at = time.monotonic() + expires_in
+        logger.debug(f"Nexar: new token acquired, expires in {expires_in}s")
         return self._token
 
     async def _run_query(self, query: str, part_number: str) -> dict:

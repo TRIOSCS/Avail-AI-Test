@@ -402,7 +402,6 @@ async def api_version_middleware(request: Request, call_next):
 
 # ── Health Check ──────────────────────────────────────────────────────
 BACKUP_TIMESTAMP_FILE = "/app/uploads/.last_backup"
-BACKUP_MAX_AGE_HOURS = 25  # Backups older than this are "stale"
 
 
 def _check_backup_freshness() -> str:
@@ -428,7 +427,7 @@ def _check_backup_freshness() -> str:
         if backup_time.tzinfo is None:
             backup_time = backup_time.replace(tzinfo=timezone.utc)
         age = datetime.now(timezone.utc) - backup_time
-        if age < timedelta(hours=BACKUP_MAX_AGE_HOURS):
+        if age < timedelta(hours=settings.backup_max_age_hours):
             return "ok"
         return "stale"
     except (ValueError, OSError):

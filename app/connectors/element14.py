@@ -57,6 +57,17 @@ class Element14Connector(BaseConnector):
         if r.status_code == 400:
             logger.debug(f"element14: 400 Bad Request for term '{term}' — skipping")
             return []
+
+        # 429 — rate limited; return empty instead of tripping circuit breaker
+        if r.status_code == 429:
+            logger.warning(f"element14: 429 rate limited for term '{term}', returning empty results")
+            return []
+
+        # 401 — auth failure; return empty and log error
+        if r.status_code == 401:
+            logger.error(f"element14: 401 Unauthorized for term '{term}' — check API key")
+            return []
+
         r.raise_for_status()
         data = r.json()
 

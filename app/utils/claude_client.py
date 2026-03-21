@@ -16,9 +16,11 @@ Usage:
     )
 """
 
+import asyncio
 import json
 from typing import Any
 
+import httpx
 import sentry_sdk
 from loguru import logger
 
@@ -121,50 +123,73 @@ async def claude_structured(
     ]
     body["tool_choice"] = {"type": "tool", "name": "structured_output"}
 
-    try:
-        with sentry_sdk.start_span(
-            op="ai.chat_completions.create",
-            description=f"claude_structured ({model_tier})",
-        ) as span:
-            span.set_data("ai.model_id", model)
-            span.set_data("ai.streaming", False)
-            span.set_data("ai.pipeline.name", "claude_structured")
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with sentry_sdk.start_span(
+                op="ai.chat_completions.create",
+                description=f"claude_structured ({model_tier})",
+            ) as span:
+                span.set_data("ai.model_id", model)
+                span.set_data("ai.streaming", False)
+                span.set_data("ai.pipeline.name", "claude_structured")
 
-            resp = await http.post(
-                API_URL,
-                headers=_headers(cache=cache_system),
-                json=body,
-                timeout=timeout,
-            )
+                resp = await http.post(
+                    API_URL,
+                    headers=_headers(cache=cache_system),
+                    json=body,
+                    timeout=timeout,
+                )
 
-            if resp.status_code != 200:
-                span.set_data("ai.response.status_code", resp.status_code)
-                logger.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
+                # Retry on transient errors (429 rate limit, 503 overloaded)
+                if resp.status_code in (429, 503) and attempt < max_attempts:
+                    delay = 2**attempt
+                    logger.warning(
+                        f"Claude API {resp.status_code} (attempt {attempt}/{max_attempts}), retrying in {delay}s"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
+
+                if resp.status_code != 200:
+                    span.set_data("ai.response.status_code", resp.status_code)
+                    logger.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
+                    return None
+
+                data = resp.json()
+                usage = data.get("usage", {})
+                span.set_data("ai.prompt_tokens.used", usage.get("input_tokens", 0))
+                span.set_data("ai.completion_tokens.used", usage.get("output_tokens", 0))
+                span.set_data(
+                    "ai.total_tokens.used",
+                    usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+                )
+                if usage.get("cache_read_input_tokens"):
+                    span.set_data("ai.cache_read_tokens", usage["cache_read_input_tokens"])
+
+                # Tool use response — extract the tool input (guaranteed valid JSON)
+                for block in data.get("content", []):
+                    if block.get("type") == "tool_use" and block.get("name") == "structured_output":
+                        return block.get("input")
+
+                logger.warning("Claude structured output: no tool_use block in response")
                 return None
 
-            data = resp.json()
-            usage = data.get("usage", {})
-            span.set_data("ai.prompt_tokens.used", usage.get("input_tokens", 0))
-            span.set_data("ai.completion_tokens.used", usage.get("output_tokens", 0))
-            span.set_data(
-                "ai.total_tokens.used",
-                usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
-            )
-            if usage.get("cache_read_input_tokens"):
-                span.set_data("ai.cache_read_tokens", usage["cache_read_input_tokens"])
-
-            # Tool use response — extract the tool input (guaranteed valid JSON)
-            for block in data.get("content", []):
-                if block.get("type") == "tool_use" and block.get("name") == "structured_output":
-                    return block.get("input")
-
-            logger.warning("Claude structured output: no tool_use block in response")
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            if attempt < max_attempts:
+                delay = 2**attempt
+                logger.warning(
+                    f"Claude structured {type(e).__name__} (attempt {attempt}/{max_attempts}), retrying in {delay}s"
+                )
+                await asyncio.sleep(delay)
+                continue
+            logger.warning("Claude structured call failed: {} ({})", type(e).__name__, e)
+            return None
+        except Exception as e:
+            logger.warning("Claude structured call failed: {} ({})", type(e).__name__, e)
+            logger.debug("Claude structured call traceback:", exc_info=True)
             return None
 
-    except Exception as e:
-        logger.warning("Claude structured call failed: {} ({})", type(e).__name__, e)
-        logger.debug("Claude structured call traceback:", exc_info=True)
-        return None
+    return None
 
 
 async def claude_text(
@@ -216,45 +241,68 @@ async def claude_text(
     if tools:
         body["tools"] = tools
 
-    try:
-        with sentry_sdk.start_span(
-            op="ai.chat_completions.create",
-            description=f"claude_text ({model_tier})",
-        ) as span:
-            span.set_data("ai.model_id", model)
-            span.set_data("ai.streaming", False)
-            span.set_data("ai.pipeline.name", "claude_text")
+    max_attempts = 3
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with sentry_sdk.start_span(
+                op="ai.chat_completions.create",
+                description=f"claude_text ({model_tier})",
+            ) as span:
+                span.set_data("ai.model_id", model)
+                span.set_data("ai.streaming", False)
+                span.set_data("ai.pipeline.name", "claude_text")
 
-            resp = await http.post(
-                API_URL,
-                headers=_headers(cache=cache_system),
-                json=body,
-                timeout=timeout,
-            )
+                resp = await http.post(
+                    API_URL,
+                    headers=_headers(cache=cache_system),
+                    json=body,
+                    timeout=timeout,
+                )
 
-            if resp.status_code != 200:
-                span.set_data("ai.response.status_code", resp.status_code)
-                logger.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
-                return None
+                # Retry on transient errors (429 rate limit, 503 overloaded)
+                if resp.status_code in (429, 503) and attempt < max_attempts:
+                    delay = 2**attempt
+                    logger.warning(
+                        f"Claude API {resp.status_code} (attempt {attempt}/{max_attempts}), retrying in {delay}s"
+                    )
+                    await asyncio.sleep(delay)
+                    continue
 
-            data = resp.json()
-            usage = data.get("usage", {})
-            span.set_data("ai.prompt_tokens.used", usage.get("input_tokens", 0))
-            span.set_data("ai.completion_tokens.used", usage.get("output_tokens", 0))
-            span.set_data(
-                "ai.total_tokens.used",
-                usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
-            )
-            if usage.get("cache_read_input_tokens"):
-                span.set_data("ai.cache_read_tokens", usage["cache_read_input_tokens"])
+                if resp.status_code != 200:
+                    span.set_data("ai.response.status_code", resp.status_code)
+                    logger.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
+                    return None
 
-            # Extract text from response (may be interleaved with tool use)
-            texts = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
-            return "\n".join(texts) if texts else None
+                data = resp.json()
+                usage = data.get("usage", {})
+                span.set_data("ai.prompt_tokens.used", usage.get("input_tokens", 0))
+                span.set_data("ai.completion_tokens.used", usage.get("output_tokens", 0))
+                span.set_data(
+                    "ai.total_tokens.used",
+                    usage.get("input_tokens", 0) + usage.get("output_tokens", 0),
+                )
+                if usage.get("cache_read_input_tokens"):
+                    span.set_data("ai.cache_read_tokens", usage["cache_read_input_tokens"])
 
-    except Exception as e:
-        logger.warning(f"Claude text call failed: {e}")
-        return None
+                # Extract text from response (may be interleaved with tool use)
+                texts = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
+                return "\n".join(texts) if texts else None
+
+        except (httpx.ConnectError, httpx.TimeoutException) as e:
+            if attempt < max_attempts:
+                delay = 2**attempt
+                logger.warning(
+                    f"Claude text {type(e).__name__} (attempt {attempt}/{max_attempts}), retrying in {delay}s"
+                )
+                await asyncio.sleep(delay)
+                continue
+            logger.warning(f"Claude text call failed: {e}")
+            return None
+        except Exception as e:
+            logger.warning(f"Claude text call failed: {e}")
+            return None
+
+    return None
 
 
 async def claude_json(

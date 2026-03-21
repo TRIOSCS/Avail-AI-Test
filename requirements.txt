@@ -41,3 +41,7 @@ sse-starlette>=1.6.0
 fasthx>=3.1.0
 # Anthropic Claude API (used by claude_client, enrichment, batch extraction)
 anthropic>=0.40.0
+# HTML sanitization for untrusted email content (XSS prevention)
+nh3>=0.2.0
+# Safe XML parsing (XXE prevention)
+defusedxml>=0.7.0

@@ -540,7 +540,7 @@ async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Se
 
 
 @router.put("/api/requisitions/bulk-archive")
-async def bulk_archive(user: User = Depends(require_user), db: Session = Depends(get_db)):
+async def bulk_archive(user: User = Depends(require_admin), db: Session = Depends(get_db)):
     """Archive all active requisitions NOT created by the current user."""
     from . import invalidate_prefix
 

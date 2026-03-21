@@ -64,6 +64,10 @@ def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | N
             logger.debug("Cache MISS: %s", cache_key)
             result = func(*args, **kwargs)
 
+            # Don't cache error responses
+            if isinstance(result, dict) and "error" in result:
+                return result
+
             # Only cache dict/list results (not Response objects)
             if isinstance(result, (dict, list)):
                 try:

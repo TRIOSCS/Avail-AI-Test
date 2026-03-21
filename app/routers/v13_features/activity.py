@@ -68,7 +68,6 @@ async def graph_webhook(
         await handle_notification(payload_dict, db, validated=validated)
     except Exception:
         logger.exception("Webhook notification processing failed")
-        raise HTTPException(502, "Notification processing failed")
     return {"status": "accepted"}
 
 

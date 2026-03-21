@@ -74,8 +74,8 @@ async def partial_excess_list(
     request: Request,
     q: str = "",
     status: str = "",
-    limit: int = 50,
-    offset: int = 0,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):

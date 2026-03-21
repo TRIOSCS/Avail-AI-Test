@@ -163,6 +163,59 @@ def _fmtdate_filter(value, fmt: str = "%b %d, %H:%M", default: str = "—") -> s
 templates.env.filters["fmtdate"] = _fmtdate_filter
 
 
+def _sanitize_html_filter(value: str) -> str:
+    """Sanitize HTML to prevent XSS — allows safe formatting tags only."""
+    if not value:
+        return ""
+    import nh3
+
+    return nh3.clean(
+        value,
+        tags={
+            "p",
+            "br",
+            "div",
+            "span",
+            "table",
+            "tr",
+            "td",
+            "th",
+            "thead",
+            "tbody",
+            "a",
+            "b",
+            "i",
+            "strong",
+            "em",
+            "ul",
+            "ol",
+            "li",
+            "h1",
+            "h2",
+            "h3",
+            "h4",
+            "h5",
+            "h6",
+            "img",
+            "blockquote",
+            "pre",
+            "code",
+            "hr",
+        },
+        attributes={
+            "*": {"class", "style"},
+            "a": {"href", "title", "target"},
+            "img": {"src", "alt", "title", "width", "height"},
+            "td": {"colspan", "rowspan", "width", "height"},
+            "th": {"colspan", "rowspan", "width", "height"},
+        },
+        url_schemes={"http", "https", "mailto"},
+    )
+
+
+templates.env.filters["sanitize_html"] = _sanitize_html_filter
+
+
 def _is_htmx(request: Request) -> bool:
     """Check if this is an HTMX partial request (vs full page load)."""
     return request.headers.get("HX-Request") == "true"

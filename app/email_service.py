@@ -135,8 +135,14 @@ async def send_batch_rfq(
         send_tasks.append(gc.post_json("/me/sendMail", payload))
         send_groups.append(group)
 
-    # Fire all sends in parallel
-    send_results = await asyncio.gather(*send_tasks, return_exceptions=True)
+    # Fire all sends with bounded parallelism (max 5 concurrent)
+    sem = asyncio.Semaphore(5)
+
+    async def _throttled_send(coro):
+        async with sem:
+            return await coro
+
+    send_results = await asyncio.gather(*[_throttled_send(task) for task in send_tasks], return_exceptions=True)
 
     # Process results: create Contact records, then batch-lookup sent message IDs
     contacts_to_lookup = []  # (contact, tagged_subject) pairs

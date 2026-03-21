@@ -65,17 +65,20 @@ async def upload_requisition_attachment(
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(400, "File too large (max 10 MB)")
-    if not user.access_token:
+    from ...scheduler import get_valid_token
+
+    token = await get_valid_token(user, db)
+    if not token:
         raise HTTPException(401, "Microsoft account not connected — please re-login")
     from ...http_client import http
 
-    safe_name = file.filename.replace("/", "_").replace("\\", "_")
+    safe_name = (file.filename or "unnamed_file").replace("/", "_").replace("\\", "_")
     drive_path = f"/me/drive/root:/AvailAI/Requisitions/{req_id}/{safe_name}:/content"
     resp = await http.put(
         f"https://graph.microsoft.com/v1.0{drive_path}",
         content=content,
         headers={
-            "Authorization": f"Bearer {user.access_token}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": file.content_type or "application/octet-stream",
         },
         timeout=30,
@@ -165,7 +168,10 @@ async def delete_requisition_attachment(
                 timeout=15,
             )
         except (ConnectionError, TimeoutError, OSError) as e:
-            logger.warning(f"Failed to delete OneDrive item {att.onedrive_item_id}: {e}")
+            logger.error(f"Failed to delete OneDrive item {att.onedrive_item_id}: {e}")
+            db.delete(att)
+            db.commit()
+            return {"ok": True, "warning": "DB record deleted but cloud file may need manual cleanup"}
     db.delete(att)
     db.commit()
     return {"ok": True}
@@ -215,7 +221,10 @@ async def upload_requirement_attachment(
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(400, "File too large (max 10 MB)")
-    if not user.access_token:
+    from ...scheduler import get_valid_token
+
+    token = await get_valid_token(user, db)
+    if not token:
         raise HTTPException(401, "Microsoft account not connected — please re-login")
     from ...http_client import http
 
@@ -225,7 +234,7 @@ async def upload_requirement_attachment(
         f"https://graph.microsoft.com/v1.0{drive_path}",
         content=content,
         headers={
-            "Authorization": f"Bearer {user.access_token}",
+            "Authorization": f"Bearer {token}",
             "Content-Type": file.content_type or "application/octet-stream",
         },
         timeout=30,
@@ -273,7 +282,10 @@ async def delete_requirement_attachment(
                 timeout=15,
             )
         except (ConnectionError, TimeoutError, OSError) as e:
-            logger.warning(f"Failed to delete OneDrive item {att.onedrive_item_id}: {e}")
+            logger.error(f"Failed to delete OneDrive item {att.onedrive_item_id}: {e}")
+            db.delete(att)
+            db.commit()
+            return {"ok": True, "warning": "DB record deleted but cloud file may need manual cleanup"}
     db.delete(att)
     db.commit()
     return {"ok": True}

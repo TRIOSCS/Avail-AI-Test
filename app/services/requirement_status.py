@@ -131,21 +131,26 @@ def claim_requisition(requisition: Requisition, buyer: User, db: Session) -> boo
     Returns True if claim was set, False if already claimed by this buyer. Raises
     ValueError if already claimed by someone else.
     """
-    if requisition.claimed_by_id == buyer.id:
+    # Re-query with FOR UPDATE to prevent TOCTOU race between concurrent claims
+    locked = db.query(Requisition).filter(Requisition.id == requisition.id).with_for_update().first()
+    if locked is None:
+        raise ValueError("Requisition not found")
+
+    if locked.claimed_by_id == buyer.id:
         return False
 
-    if requisition.claimed_by_id is not None:
-        raise ValueError(f"Requisition already claimed by user {requisition.claimed_by_id}")
+    if locked.claimed_by_id is not None:
+        raise ValueError(f"Requisition already claimed by user {locked.claimed_by_id}")
 
-    requisition.claimed_by_id = buyer.id
-    requisition.claimed_at = datetime.now(timezone.utc)
+    locked.claimed_by_id = buyer.id
+    locked.claimed_at = datetime.now(timezone.utc)
 
     try:
         log_entry = ActivityLog(
             user_id=buyer.id,
             activity_type="requisition_claimed",
             channel="system",
-            requisition_id=requisition.id,
+            requisition_id=locked.id,
             subject=f"Claimed by {buyer.name or buyer.email}",
         )
         db.add(log_entry)

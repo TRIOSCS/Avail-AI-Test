@@ -9,8 +9,8 @@ Depends on: httpx (app.http_client), prospect_account model
 """
 
 from datetime import datetime, timezone
-from xml.etree import ElementTree
 
+from defusedxml.ElementTree import fromstring as _safe_xml_fromstring
 from loguru import logger
 from sqlalchemy.orm.attributes import flag_modified
 
@@ -118,7 +118,7 @@ async def enrich_from_google_news(prospect: ProspectAccount, max_items: int = 5)
             logger.debug("Google News RSS returned {} for '{}'", resp.status_code, name)
             return []
 
-        root = ElementTree.fromstring(resp.content)
+        root = _safe_xml_fromstring(resp.content)
         channel = root.find("channel")
         if channel is None:
             return []

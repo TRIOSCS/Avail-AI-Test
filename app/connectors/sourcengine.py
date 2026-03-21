@@ -34,6 +34,17 @@ class SourcengineConnector(BaseConnector):
         }
 
         r = await http.get(self.SEARCH_URL, headers=headers, params=params, timeout=self.timeout)
+
+        # 429 — rate limited; return empty instead of tripping circuit breaker
+        if r.status_code == 429:
+            logger.warning(f"Sourcengine: 429 rate limited for {part_number}, returning empty results")
+            return []
+
+        # 401 — auth failure; return empty and log error
+        if r.status_code == 401:
+            logger.error(f"Sourcengine: 401 Unauthorized for {part_number} — check API key")
+            return []
+
         r.raise_for_status()
         data = r.json()
 

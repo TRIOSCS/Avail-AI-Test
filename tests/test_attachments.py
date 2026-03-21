@@ -85,8 +85,9 @@ def test_list_requisition_attachments_not_found(att_client):
     assert resp.status_code == 404
 
 
+@patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token-for-testing")
 @patch("app.http_client.http")
-def test_upload_requisition_attachment(mock_http, att_client, test_requisition):
+def test_upload_requisition_attachment(mock_http, _mock_token, att_client, test_requisition):
     """POST /api/requisitions/{id}/attachments uploads to OneDrive."""
     mock_resp = MagicMock()
     mock_resp.status_code = 201
@@ -124,8 +125,9 @@ def test_upload_requisition_attachment_too_large(mock_http, att_client, test_req
     assert resp.status_code == 400
 
 
+@patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token-for-testing")
 @patch("app.http_client.http")
-def test_upload_requisition_onedrive_error(mock_http, att_client, test_requisition):
+def test_upload_requisition_onedrive_error(mock_http, _mock_token, att_client, test_requisition):
     """OneDrive upload failure returns 502."""
     mock_resp = MagicMock()
     mock_resp.status_code = 500
@@ -203,8 +205,9 @@ def test_list_requirement_attachments_not_found(att_client):
     assert resp.status_code == 404
 
 
+@patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token-for-testing")
 @patch("app.http_client.http")
-def test_upload_requirement_attachment(mock_http, att_client, test_requisition, db_session):
+def test_upload_requirement_attachment(mock_http, _mock_token, att_client, test_requisition, db_session):
     """POST /api/requirements/{id}/attachments uploads to OneDrive."""
     req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     mock_resp = MagicMock()
@@ -438,8 +441,9 @@ def test_upload_requirement_no_token(notoken_client, test_requisition, db_sessio
 # ── Requirement: OneDrive upload failure (lines 1410-1411) ──────────
 
 
+@patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token-for-testing")
 @patch("app.http_client.http")
-def test_upload_requirement_onedrive_error(mock_http, att_client, test_requisition, db_session):
+def test_upload_requirement_onedrive_error(mock_http, _mock_token, att_client, test_requisition, db_session):
     """requisitions.py lines 1410-1411: OneDrive upload failure → 502."""
     req = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
     mock_resp = MagicMock()

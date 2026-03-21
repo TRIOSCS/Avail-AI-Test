@@ -66,6 +66,7 @@ def _score_margin(customer_avg_price: float | None, our_cost: float | None) -> t
     if not customer_avg_price or not our_cost or our_cost <= 0:
         return 50, None  # Unknown margin = neutral score
     margin_pct = (customer_avg_price - our_cost) / customer_avg_price * 100
+    margin_pct = max(-100.0, min(1000.0, margin_pct))
     if margin_pct >= 30:
         return 100, round(margin_pct, 1)
     if margin_pct >= 20:
