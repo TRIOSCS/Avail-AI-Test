@@ -682,6 +682,7 @@ async def requisition_import_save(
         urgency=urgency,
         status="active",
         created_by=user.id,
+        claimed_by_id=user.id,
     )
     db.add(req)
     db.flush()
@@ -959,6 +960,7 @@ async def requisition_create(
         urgency=urgency,
         status="active",
         created_by=user.id,
+        claimed_by_id=user.id,
     )
     db.add(req)
     db.flush()
