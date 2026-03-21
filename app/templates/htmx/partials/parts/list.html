@@ -206,6 +206,24 @@
               {% endif %}
             {% endfor %}
           </tr>
+          {# ── Substitute rows — always expanded beneath primary ── #}
+          {% if req.substitutes %}
+            {% for sub_mpn in req.substitutes %}
+            <tr class="bg-amber-50/30 hover:bg-amber-100/40 cursor-pointer border-t-0"
+                :class="selectedPartId === {{ req.id }} ? 'bg-amber-100/50' : ''"
+                title="Sources as alternative for {{ req.primary_mpn }}"
+                @click="selectPart({{ req.id }}); htmx.ajax('GET', '/v2/partials/parts/{{ req.id }}/tab/' + activeTab, {target: '#part-detail'})">
+              <td></td>
+              <td colspan="{{ col_defs|length }}" class="!py-0.5 !pl-6">
+                <div class="flex items-center gap-1.5">
+                  <span class="border-l-2 border-amber-300 h-4 -ml-2"></span>
+                  <span class="text-[9px] font-semibold text-amber-500 uppercase tracking-wider">Sub</span>
+                  <span class="inline-flex px-1.5 py-0.5 text-[11px] font-mono font-medium rounded bg-amber-50 text-amber-700 border border-amber-200">{{ sub_mpn }}</span>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          {% endif %}
           {% endfor %}
         </tbody>
       </table>
