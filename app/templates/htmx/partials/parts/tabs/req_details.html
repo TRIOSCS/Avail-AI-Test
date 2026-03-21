@@ -186,7 +186,10 @@
         </thead>
         <tbody>
           {% for part in sibling_parts %}
-          <tr class="{{ 'bg-brand-50' if part.id == requirement.id }}">
+          <tr class="{{ 'bg-brand-50 font-medium' if part.id == requirement.id else 'cursor-pointer hover:bg-gray-50 transition-colors' }}"
+              {% if part.id != requirement.id %}
+              @click="selectPart({{ part.id }}); htmx.ajax('GET', '/v2/partials/parts/{{ part.id }}/tab/' + activeTab, {target: '#part-detail'})"
+              {% endif %}>
             <td @click.stop>
               <input type="checkbox"
                      class="h-3 w-3 rounded border-gray-300 text-brand-500"
