@@ -159,3 +159,55 @@ def test_clone_requisition_duplicate_mpn_preserves_offer_mapping(db_session, tes
 
     assert len(cloned_offers) == 2
     assert len({o.requirement_id for o in cloned_offers}) == 2
+
+
+class TestCloneEdgeCases:
+    """Edge cases for clone_requisition."""
+
+    def test_clone_with_zero_requirements(self, db_session, test_user):
+        from app.models import Requisition
+
+        source = Requisition(name="empty", status="active", created_by=test_user.id)
+        db_session.add(source)
+        db_session.flush()
+        clone = clone_requisition(db_session, source, test_user.id)
+        assert clone.id != source.id
+        assert clone.name.startswith("empty")
+
+    def test_clone_preserves_name_prefix(self, db_session, test_user):
+        from app.models import Requisition
+
+        source = Requisition(name="Original RFQ", status="active", created_by=test_user.id)
+        db_session.add(source)
+        db_session.flush()
+        clone = clone_requisition(db_session, source, test_user.id)
+        assert "Original RFQ" in clone.name
+
+
+class TestParseEdgeCases:
+    """Boundary cases for parsing helpers."""
+
+    def test_parse_date_field_whitespace_only_raises(self):
+        with pytest.raises(HTTPException) as exc_info:
+            parse_date_field("   ", "deadline")
+        assert exc_info.value.status_code == 400
+
+    def test_parse_positive_int_float_string_raises(self):
+        with pytest.raises(HTTPException) as exc_info:
+            parse_positive_int("3.14", "quantity")
+        assert exc_info.value.status_code == 400
+
+    def test_parse_positive_int_max_value(self):
+        result = parse_positive_int(999999999, "quantity")
+        assert result == 999999999
+
+    def test_to_utc_with_far_future_date(self):
+        from datetime import datetime, timezone
+
+        dt = datetime(2099, 12, 31, 23, 59, 59, tzinfo=timezone.utc)
+        assert to_utc(dt) == dt
+
+    def test_safe_commit_on_generic_exception(self, db_session):
+        db_session.commit = MagicMock(side_effect=Exception("unexpected"))
+        with pytest.raises(Exception, match="unexpected"):
+            safe_commit(db_session, entity="test")

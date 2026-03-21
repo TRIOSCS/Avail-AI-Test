@@ -125,3 +125,49 @@ class TestTransition:
 
         # Transition succeeded despite log failure
         assert test_requisition.status == "sourcing"
+
+
+class TestTransitionEdgeCases:
+    """Boundary and illegal transition edge cases."""
+
+    def test_archived_to_won_fails(self, db_session, test_requisition, test_user):
+        test_requisition.status = "archived"
+        db_session.commit()
+        with pytest.raises(ValueError, match="Invalid transition"):
+            transition(test_requisition, "won", test_user, db_session)
+
+    def test_lost_to_sourcing_fails(self, db_session, test_requisition, test_user):
+        test_requisition.status = "lost"
+        db_session.commit()
+        with pytest.raises(ValueError, match="Invalid transition"):
+            transition(test_requisition, "sourcing", test_user, db_session)
+
+    def test_won_to_archived_to_active_roundtrip(self, db_session, test_requisition, test_user):
+        test_requisition.status = "won"
+        db_session.commit()
+        transition(test_requisition, "archived", test_user, db_session)
+        assert test_requisition.status == "archived"
+        transition(test_requisition, "active", test_user, db_session)
+        assert test_requisition.status == "active"
+
+    def test_rapid_double_transition(self, db_session, test_requisition, test_user):
+        test_requisition.status = "active"
+        db_session.commit()
+        transition(test_requisition, "sourcing", test_user, db_session)
+        transition(test_requisition, "active", test_user, db_session)
+        assert test_requisition.status == "active"
+
+    def test_every_illegal_transition_from_archived(self, db_session, test_user):
+        """Archived can ONLY go to active.
+
+        All others must fail.
+        """
+        from app.models import Requisition
+
+        illegal = {"won", "lost", "sourcing", "offers", "quoting", "quoted", "reopened", "draft", "open"}
+        for target in illegal:
+            req = Requisition(name=f"test-{target}", status="archived", created_by=test_user.id)
+            db_session.add(req)
+            db_session.flush()
+            with pytest.raises(ValueError):
+                transition(req, target, test_user, db_session)
