@@ -770,24 +770,30 @@ async def company_lookup(
       {"<div class='text-gray-600'>🌐 " + website + "</div>" if website else ""}
       {"<div class='text-gray-600'>📞 " + phone + "</div>" if phone else ""}
       {"<div class='text-gray-600'>📍 " + address_display + "</div>" if address_display else ""}
-      <form hx-post="/v2/partials/companies/quick-create"
-            hx-target="closest .space-y-1"
-            hx-swap="innerHTML">
-        <input type="hidden" name="company_name" value="{name}">
-        <input type="hidden" name="website" value="{website}">
-        <input type="hidden" name="phone" value="{phone}">
-        <input type="hidden" name="address_line1" value="{addr1_val}">
-        <input type="hidden" name="city" value="{city_val}">
-        <input type="hidden" name="state" value="{state_val}">
-        <input type="hidden" name="zip" value="{zip_val}">
-        <input type="hidden" name="country" value="{country_val}">
-        <div class="flex gap-2 mt-2">
-          <button type="submit"
-                  class="px-3 py-1 text-xs font-semibold bg-emerald-600 text-white rounded hover:bg-emerald-700">
-            Use This Customer
-          </button>
-        </div>
-      </form>
+      <div class="flex gap-2 mt-2">
+        <button type="button" onclick="(async function(btn){{
+            btn.disabled=true; btn.textContent='Saving...';
+            var fd=new FormData();
+            fd.append('company_name','{name}');
+            fd.append('website','{website}');
+            fd.append('phone','{phone}');
+            fd.append('address_line1','{addr1_val}');
+            fd.append('city','{city_val}');
+            fd.append('state','{state_val}');
+            fd.append('zip','{zip_val}');
+            fd.append('country','{country_val}');
+            try{{
+              var r=await fetch('/v2/partials/companies/quick-create',{{method:'POST',body:fd}});
+              var html=await r.text();
+              var el=btn.closest('.space-y-1');
+              el.replaceChildren();
+              el.insertAdjacentHTML('afterbegin',html);
+            }}catch(e){{btn.textContent='Failed — retry';btn.disabled=false;}}
+          }})(this)"
+                class="px-3 py-1 text-xs font-semibold bg-emerald-600 text-white rounded hover:bg-emerald-700">
+          Use This Customer
+        </button>
+      </div>
     </div>
     """
     return HTMLResponse(html_out)
