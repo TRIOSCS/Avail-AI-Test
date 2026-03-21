@@ -69,7 +69,18 @@ run_step "Self-Repair Toolkit" env TESTING=1 PYTHONPATH=/root/availai \
 
 # System 8: Lighthouse (optional — skip if no Chrome)
 if command -v google-chrome &> /dev/null || command -v chromium-browser &> /dev/null; then
-    run_step "Lighthouse Audit" npm run test:lighthouse
+    LH_PORT=8789
+    TESTING=1 DATABASE_URL=sqlite:// REDIS_URL="" CACHE_BACKEND=none PYTHONPATH=/root/availai \
+        python3 -m uvicorn app.main:app --host 127.0.0.1 --port "$LH_PORT" &
+    LH_PID=$!
+    # Wait for server to be ready
+    for i in $(seq 1 30); do
+        if curl -sf "http://127.0.0.1:$LH_PORT/" > /dev/null 2>&1; then break; fi
+        sleep 0.5
+    done
+    LIGHTHOUSE_URL="http://127.0.0.1:$LH_PORT" run_step "Lighthouse Audit" npm run test:lighthouse
+    kill "$LH_PID" 2>/dev/null || true
+    wait "$LH_PID" 2>/dev/null || true
 else
     echo -e "\n${YELLOW}=== Lighthouse Audit ===${NC}"
     echo -e "${YELLOW}Skipped (Chrome not installed)${NC}"

@@ -209,9 +209,9 @@ class TestMPNNormalizer:
     """Test MPN normalization edge cases."""
 
     def _normalize(self, mpn):
-        from app.services.ics_worker.mpn_normalizer import normalize_mpn
+        from app.services.ics_worker.mpn_normalizer import strip_packaging_suffixes
 
-        return normalize_mpn(mpn)
+        return strip_packaging_suffixes(mpn)
 
     def test_empty_string(self):
         assert self._normalize("") == ""
