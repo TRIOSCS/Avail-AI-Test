@@ -21,7 +21,7 @@ from sqlalchemy import desc
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
-from ..constants import OfferStatus, QuoteStatus, RequisitionStatus
+from ..constants import OfferStatus, QuoteStatus, RequisitionStatus, TicketSource
 from ..database import get_db
 from ..dependencies import get_user, require_user
 from ..models import (
@@ -273,15 +273,14 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/companies/{company_id:int}", response_class=HTMLResponse)
 @router.get("/v2/buy-plans", response_class=HTMLResponse)
 @router.get("/v2/buy-plans/{bp_id:int}", response_class=HTMLResponse)
-@router.get("/v2/resell", response_class=HTMLResponse)
-@router.get("/v2/resell/{list_id:int}", response_class=HTMLResponse)
+@router.get("/v2/excess", response_class=HTMLResponse)
+@router.get("/v2/excess/{list_id:int}", response_class=HTMLResponse)
 @router.get("/v2/quotes", response_class=HTMLResponse)
 @router.get("/v2/quotes/{quote_id:int}", response_class=HTMLResponse)
 @router.get("/v2/settings", response_class=HTMLResponse)
 @router.get("/v2/prospecting", response_class=HTMLResponse)
 @router.get("/v2/prospecting/{prospect_id:int}", response_class=HTMLResponse)
 @router.get("/v2/proactive", response_class=HTMLResponse)
-@router.get("/v2/strategic", response_class=HTMLResponse)
 @router.get("/v2/materials", response_class=HTMLResponse)
 @router.get("/v2/materials/{card_id:int}", response_class=HTMLResponse)
 @router.get("/v2/follow-ups", response_class=HTMLResponse)
@@ -296,16 +295,14 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         return templates.TemplateResponse("htmx/login.html", {"request": request, **_vite_assets()})
     if "/buy-plans" in path:
         current_view = "buy-plans"
-    elif "/resell" in path:
-        current_view = "resell"
+    elif "/excess" in path:
+        current_view = "excess"
     elif "/quotes" in path:
         current_view = "quotes"
     elif "/prospecting" in path:
         current_view = "prospecting"
     elif "/proactive" in path:
         current_view = "proactive"
-    elif "/strategic" in path:
-        current_view = "strategic"
     elif "/settings" in path:
         current_view = "settings"
     elif "/materials" in path:
@@ -350,10 +347,10 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         parts = path.split("/buy-plans/")
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/buy-plans/{parts[1]}"
-    elif current_view == "resell" and "/resell/" in path:
-        parts = path.split("/resell/")
+    elif current_view == "excess" and "/excess/" in path:
+        parts = path.split("/excess/")
         if len(parts) > 1 and parts[1].isdigit():
-            partial_url = f"/v2/partials/resell/{parts[1]}"
+            partial_url = f"/v2/partials/excess/{parts[1]}"
     elif current_view == "quotes" and "/quotes/" in path:
         parts = path.split("/quotes/")
         if len(parts) > 1 and parts[1].isdigit():
@@ -8056,82 +8053,6 @@ async def admin_data_ops(
     )
 
 
-# ── Strategic Vendors (My Vendors) ───────────────────────────────────
-
-
-@router.get("/v2/partials/strategic", response_class=HTMLResponse)
-async def strategic_list_partial(
-    request: Request,
-    search: str = "",
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """My Vendors list partial — claimed vendors + open pool."""
-    from ..services import strategic_vendor_service as svc
-
-    my_vendors = svc.get_my_strategic(db, user.id)
-    open_vendors, open_total = svc.get_open_pool(db, limit=20, offset=0, search=search or None)
-
-    ctx = _base_ctx(request, user, "strategic")
-    ctx["my_vendors"] = my_vendors
-    ctx["slot_count"] = len(my_vendors)
-    ctx["max_slots"] = svc.MAX_STRATEGIC_VENDORS
-    ctx["open_vendors"] = open_vendors
-    ctx["open_total"] = open_total
-    ctx["search"] = search
-    return templates.TemplateResponse("htmx/partials/strategic/list.html", ctx)
-
-
-@router.post("/v2/partials/strategic/claim/{vendor_card_id}", response_class=HTMLResponse)
-async def strategic_claim(
-    vendor_card_id: int,
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Claim a vendor as strategic and reload the list."""
-    from ..services import strategic_vendor_service as svc
-
-    svc.claim_vendor(db, user.id, vendor_card_id)
-
-    my_vendors = svc.get_my_strategic(db, user.id)
-    open_vendors, open_total = svc.get_open_pool(db, limit=20, offset=0)
-
-    ctx = _base_ctx(request, user, "strategic")
-    ctx["my_vendors"] = my_vendors
-    ctx["slot_count"] = len(my_vendors)
-    ctx["max_slots"] = svc.MAX_STRATEGIC_VENDORS
-    ctx["open_vendors"] = open_vendors
-    ctx["open_total"] = open_total
-    ctx["search"] = ""
-    return templates.TemplateResponse("htmx/partials/strategic/list.html", ctx)
-
-
-@router.delete("/v2/partials/strategic/{vendor_card_id}/drop", response_class=HTMLResponse)
-async def strategic_drop(
-    vendor_card_id: int,
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Drop a strategic vendor and reload the list."""
-    from ..services import strategic_vendor_service as svc
-
-    svc.drop_vendor(db, user.id, vendor_card_id)
-
-    my_vendors = svc.get_my_strategic(db, user.id)
-    open_vendors, open_total = svc.get_open_pool(db, limit=20, offset=0)
-
-    ctx = _base_ctx(request, user, "strategic")
-    ctx["my_vendors"] = my_vendors
-    ctx["slot_count"] = len(my_vendors)
-    ctx["max_slots"] = svc.MAX_STRATEGIC_VENDORS
-    ctx["open_vendors"] = open_vendors
-    ctx["open_total"] = open_total
-    ctx["search"] = ""
-    return templates.TemplateResponse("htmx/partials/strategic/list.html", ctx)
-
-
 # ── Requirements Tab Column Picker ───────────────────────────────────────────
 
 _ALL_REQ_COLUMNS = [
@@ -8935,14 +8856,24 @@ async def trouble_tickets_list(
     from app.models.root_cause_group import RootCauseGroup
     from app.models.trouble_ticket import TroubleTicket
 
-    q = db.query(TroubleTicket).filter(TroubleTicket.source == "report_button")
+    q = (
+        db.query(TroubleTicket)
+        .options(joinedload(TroubleTicket.root_cause_group), joinedload(TroubleTicket.submitter))
+        .filter(TroubleTicket.source == TicketSource.REPORT_BUTTON)
+    )
     if status:
         q = q.filter(TroubleTicket.status == status)
     q = q.order_by(desc(TroubleTicket.created_at))
-    total = q.count()
     tickets = q.limit(200).all()
+    total = len(tickets)
 
-    groups = db.query(RootCauseGroup).order_by(RootCauseGroup.title).all()
+    # Build group lookup only from group IDs present in results
+    group_ids = {t.root_cause_group_id for t in tickets if t.root_cause_group_id}
+    groups = (
+        db.query(RootCauseGroup).filter(RootCauseGroup.id.in_(group_ids)).order_by(RootCauseGroup.title).all()
+        if group_ids
+        else []
+    )
     grouped: dict = {}
     ungrouped = []
     for t in tickets:
@@ -8955,7 +8886,6 @@ async def trouble_tickets_list(
         "htmx/partials/tickets/list.html",
         {
             **_base_ctx(request, user, "tickets"),
-            "tickets": tickets,
             "total": total,
             "groups": groups,
             "grouped": grouped,
@@ -8975,7 +8905,12 @@ async def trouble_ticket_detail(
     """Trouble Ticket detail partial — swapped into #main-content."""
     from app.models.trouble_ticket import TroubleTicket
 
-    ticket = db.get(TroubleTicket, ticket_id)
+    ticket = (
+        db.query(TroubleTicket)
+        .options(joinedload(TroubleTicket.root_cause_group), joinedload(TroubleTicket.submitter))
+        .filter(TroubleTicket.id == ticket_id)
+        .first()
+    )
     if not ticket:
         raise HTTPException(404, "Ticket not found")
     return templates.TemplateResponse(
