@@ -137,51 +137,51 @@
             {% for col_key in col_defs %}
               <td{% if col_key in ('requisition', 'customer', 'owner', 'notes') %} class="td-label"{% endif %}>
                 {% if col_key == 'mpn' %}
-                  <span class="font-semibold text-gray-900">{{ req.primary_mpn or '\u2014' }}</span>
+                  <span class="font-semibold text-gray-900">{{ req.primary_mpn or '—' }}</span>
                 {% elif col_key == 'brand' %}
-                  {{ req.brand or '\u2014' }}
+                  {{ req.brand or '—' }}
                 {% elif col_key == 'qty' %}
-                  {{ '{:,}'.format(req.target_qty) if req.target_qty else '\u2014' }}
+                  {{ '{:,}'.format(req.target_qty) if req.target_qty else '—' }}
                 {% elif col_key == 'target_price' %}
-                  {{ '${:,.4f}'.format(req.target_price) if req.target_price else '\u2014' }}
+                  {{ '${:,.4f}'.format(req.target_price) if req.target_price else '—' }}
                 {% elif col_key == 'status' %}
                   {% set sc = {'open': 'bg-blue-600 text-white', 'sourcing': 'bg-amber-500 text-white', 'offered': 'bg-emerald-600 text-white', 'quoted': 'bg-violet-600 text-white', 'won': 'bg-emerald-700 text-white', 'lost': 'bg-gray-400 text-white', 'archived': 'bg-gray-300 text-gray-600'} %}
                   <span class="badge-primary {{ sc.get(req.sourcing_status, 'bg-gray-400 text-white') }}">
                     {{ req.sourcing_status or 'open' }}
                   </span>
                 {% elif col_key == 'requisition' %}
-                  {{ req.requisition.name if req.requisition else '\u2014' }}
+                  {{ req.requisition.name if req.requisition else '—' }}
                 {% elif col_key == 'customer' %}
-                  {{ req.requisition.customer_name if req.requisition else '\u2014' }}
+                  {{ req.requisition.customer_name if req.requisition else '—' }}
                 {% elif col_key == 'offers' %}
                   {% set cnt = stats.get('count', 0) %}
-                  {% if cnt > 0 %}<span class="text-emerald-600 font-semibold">{{ cnt }}</span>{% else %}\u2014{% endif %}
+                  {% if cnt > 0 %}<span class="text-emerald-600 font-semibold">{{ cnt }}</span>{% else %}—{% endif %}
                 {% elif col_key == 'best_price' %}
-                  {% if stats.get('best_price') %}<span class="text-emerald-600">${{ '{:,.4f}'.format(stats.get('best_price')) }}</span>{% else %}\u2014{% endif %}
+                  {% if stats.get('best_price') %}<span class="text-emerald-600">${{ '{:,.4f}'.format(stats.get('best_price')) }}</span>{% else %}—{% endif %}
                 {% elif col_key == 'owner' %}
                   {% if req.requisition and req.requisition.claimed_by %}
                     <span class="inline-flex items-center justify-center h-5 w-5 rounded-full bg-brand-100 text-brand-600 text-[9px] font-bold" title="{{ req.requisition.claimed_by.name }}">{{ req.requisition.claimed_by.name[:1] }}</span>
-                  {% else %}\u2014{% endif %}
+                  {% else %}—{% endif %}
                 {% elif col_key == 'created' %}
-                  {{ req.created_at.strftime('%m/%d') if req.created_at else '\u2014' }}
+                  {{ req.created_at.strftime('%m/%d') if req.created_at else '—' }}
                 {% elif col_key == 'date_codes' %}
-                  {{ req.date_codes or '\u2014' }}
+                  {{ req.date_codes or '—' }}
                 {% elif col_key == 'condition' %}
-                  {{ req.condition or '\u2014' }}
+                  {{ req.condition or '—' }}
                 {% elif col_key == 'packaging' %}
-                  {{ req.packaging or '\u2014' }}
+                  {{ req.packaging or '—' }}
                 {% elif col_key == 'customer_pn' %}
-                  {{ req.customer_pn or '\u2014' }}
+                  {{ req.customer_pn or '—' }}
                 {% elif col_key == 'substitutes' %}
-                  {{ req.substitutes|join(', ') if req.substitutes else '\u2014' }}
+                  {{ req.substitutes|join(', ') if req.substitutes else '—' }}
                 {% elif col_key == 'firmware' %}
-                  {{ req.firmware or '\u2014' }}
+                  {{ req.firmware or '—' }}
                 {% elif col_key == 'hardware_codes' %}
-                  {{ req.hardware_codes or '\u2014' }}
+                  {{ req.hardware_codes or '—' }}
                 {% elif col_key == 'need_by_date' %}
-                  {{ req.need_by_date or '\u2014' }}
+                  {{ req.need_by_date or '—' }}
                 {% elif col_key == 'notes' %}
-                  <span class="max-w-[120px] truncate block text-gray-500">{{ req.notes or '\u2014' }}</span>
+                  <span class="max-w-[120px] truncate block text-gray-500">{{ req.notes or '—' }}</span>
                 {% endif %}
               </td>
             {% endfor %}
