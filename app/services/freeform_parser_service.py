@@ -40,6 +40,10 @@ RFQ_PARSE_SCHEMA = {
                     "notes": {"type": "string"},
                     "brand": {"type": "string", "description": "Manufacturer/brand name"},
                     "condition": {"type": "string", "description": "Part condition: new, refurbished, used"},
+                    "customer_pn": {"type": "string", "description": "Customer's internal part number"},
+                    "date_codes": {"type": "string", "description": "Date code requirements (e.g. 2024+, 2339)"},
+                    "packaging": {"type": "string", "description": "Packaging: tape & reel, tray, tube, bulk"},
+                    "need_by_date": {"type": "string", "description": "Line-item need-by date (YYYY-MM-DD)"},
                 },
                 "required": ["primary_mpn"],
             },
@@ -60,6 +64,10 @@ Rules:
 - substitutes: alternate part numbers if listed.
 - brand: manufacturer name if stated (e.g. Texas Instruments, STMicroelectronics). Omit if unknown.
 - condition: new, refurbished, used, pull. Default "new" if not stated.
+- customer_pn: customer's internal part number if listed. Omit if not stated.
+- date_codes: date code requirements (e.g. "2024+", "2339"). Omit if not stated.
+- packaging: tape & reel, tray, tube, bulk. Omit if not stated.
+- need_by_date: per-line need-by date in YYYY-MM-DD. Omit if not stated.
 - Infer customer_name from sender, signature, or context.
 - deadline: YYYY-MM-DD if date given, or "ASAP" if urgent/ASAP.
 - name: project name, PO reference, or "CustomerName - Parts" if unclear."""
@@ -137,6 +145,10 @@ async def parse_freeform_rfq(raw_text: str) -> dict | None:
             r["condition"] = normalize_condition(r["condition"]) or r["condition"]
         if not r.get("condition"):
             r["condition"] = "new"
+        if r.get("packaging"):
+            r["packaging"] = normalize_packaging(r["packaging"]) or r["packaging"]
+        if r.get("date_codes"):
+            r["date_codes"] = normalize_date_code(r["date_codes"]) or r["date_codes"]
     return result
 
 

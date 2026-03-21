@@ -37,6 +37,7 @@
     {# Pass through req metadata #}
     <input type="hidden" name="name" value="{{ req_name }}">
     <input type="hidden" name="customer_name" value="{{ customer_name }}">
+    <input type="hidden" name="customer_site_id" value="{{ customer_site_id }}">
     <input type="hidden" name="deadline" value="{{ deadline }}">
     <input type="hidden" name="urgency" value="{{ urgency }}">
 
@@ -49,7 +50,11 @@
             <th class="px-2 py-2">Qty</th>
             <th class="px-2 py-2">Brand</th>
             <th class="px-2 py-2">Target $</th>
-            <th class="px-2 py-2">Condition</th>
+            <th class="px-2 py-2">Cond</th>
+            <th class="px-2 py-2">Cust PN</th>
+            <th class="px-2 py-2">Date Code</th>
+            <th class="px-2 py-2">Pkg</th>
+            <th class="px-2 py-2">Need By</th>
             <th class="px-2 py-2">Notes</th>
             <th class="px-2 py-2 w-8"></th>
           </tr>
@@ -60,7 +65,7 @@
             <td class="px-2 py-1">
               <input type="text" name="reqs[{{ loop.index0 }}].primary_mpn"
                      value="{{ r.primary_mpn or '' }}"
-                     class="w-full px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 font-mono"
+                     class="w-full min-w-[120px] px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 font-mono"
                      required>
             </td>
             <td class="px-2 py-1">
@@ -71,7 +76,7 @@
             <td class="px-2 py-1">
               <input type="text" name="reqs[{{ loop.index0 }}].brand"
                      value="{{ r.brand or '' }}"
-                     class="w-full px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+                     class="w-full min-w-[80px] px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
             </td>
             <td class="px-2 py-1">
               <input type="number" step="0.01" name="reqs[{{ loop.index0 }}].target_price"
@@ -87,9 +92,34 @@
               </select>
             </td>
             <td class="px-2 py-1">
+              <input type="text" name="reqs[{{ loop.index0 }}].customer_pn"
+                     value="{{ r.customer_pn or '' }}"
+                     class="w-full min-w-[80px] px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+            </td>
+            <td class="px-2 py-1">
+              <input type="text" name="reqs[{{ loop.index0 }}].date_codes"
+                     value="{{ r.date_codes or '' }}"
+                     class="w-20 px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+            </td>
+            <td class="px-2 py-1">
+              <select name="reqs[{{ loop.index0 }}].packaging"
+                      class="px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+                <option value="">—</option>
+                <option value="tape & reel" {{ 'selected' if r.packaging == 'tape & reel' }}>T&R</option>
+                <option value="tray" {{ 'selected' if r.packaging == 'tray' }}>Tray</option>
+                <option value="tube" {{ 'selected' if r.packaging == 'tube' }}>Tube</option>
+                <option value="bulk" {{ 'selected' if r.packaging == 'bulk' }}>Bulk</option>
+              </select>
+            </td>
+            <td class="px-2 py-1">
+              <input type="date" name="reqs[{{ loop.index0 }}].need_by_date"
+                     value="{{ r.need_by_date or '' }}"
+                     class="w-32 px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+            </td>
+            <td class="px-2 py-1">
               <input type="text" name="reqs[{{ loop.index0 }}].notes"
                      value="{{ r.notes or '' }}"
-                     class="w-full px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
+                     class="w-full min-w-[80px] px-1.5 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
             </td>
             <td class="px-2 py-1">
               <button type="button"
