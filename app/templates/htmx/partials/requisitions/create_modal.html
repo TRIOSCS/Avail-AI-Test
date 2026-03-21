@@ -140,6 +140,13 @@ function customerPicker() {
         .then(r => r.json())
         .then(data => this.companies = data)
         .catch(() => {});
+      document.addEventListener('customer-created', (e) => {
+        this.selectById(e.detail.siteId, e.detail.displayName);
+        fetch('/api/companies/typeahead')
+          .then(r => r.json())
+          .then(data => this.companies = data)
+          .catch(() => {});
+      });
     },
     get filtered() {
       if (!this.query.trim()) return this.companies.slice(0, 20);

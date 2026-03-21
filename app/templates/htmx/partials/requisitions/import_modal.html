@@ -174,6 +174,15 @@ function customerPicker() {
         .then(r => r.json())
         .then(data => this.companies = data)
         .catch(() => {});
+      // Listen for customer-created event from quick-create
+      document.addEventListener('customer-created', (e) => {
+        this.selectById(e.detail.siteId, e.detail.displayName);
+        // Refresh typeahead so new company appears in future searches
+        fetch('/api/companies/typeahead')
+          .then(r => r.json())
+          .then(data => this.companies = data)
+          .catch(() => {});
+      });
     },
     get filtered() {
       if (!this.query.trim()) return this.companies.slice(0, 20);

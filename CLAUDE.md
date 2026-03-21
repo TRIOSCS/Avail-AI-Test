@@ -1,18 +1,20 @@
 # CLAUDE.md
 
-PROJECT: AVAIL AI - Electronic component sourcing platform and CRM for Trio Supply Chain Solutions
-STACK: Python, FastAPI, PostgreSQL, hosted on DigitalOcean
-DEVELOPER LEVEL: Beginner - explain things simply, use examples from this project
+PROJECT: AvailAI — Electronic component sourcing platform and CRM for Trio Supply Chain Solutions
+VERSION: 3.1.0 (single source of truth: `app/config.py` → `APP_VERSION`)
+STACK: FastAPI + SQLAlchemy 2.0 + PostgreSQL 16 + HTMX 2.x + Alpine.js 3.x + Jinja2 + Tailwind CSS
+DEPLOY: Docker Compose (app, db, redis, caddy) on DigitalOcean
+DEVELOPER LEVEL: Beginner — explain things simply, use examples from this project
 
 ## What This Is
 
-AvailAI is an electronic component sourcing engine. It searches multiple supplier APIs in parallel, tracks vendor intelligence, automates RFQ workflows, mines email inboxes for vendor offers, and includes CRM features for managing companies, quotes, and buyer routing.
+AvailAI is an electronic component sourcing engine. It searches 6 supplier APIs in parallel (BrokerBin, Nexar, DigiKey, Mouser, OEMSecrets, Element14), tracks vendor intelligence via material cards, automates RFQ workflows via Microsoft Graph API, mines email inboxes for vendor offers using Claude AI, and includes full CRM for companies, quotes, buy plans, and proactive matching.
 
 ## CODE RULES
 
 - Always write tests with any new code. Don't ask, just include them.
 - Give exact file paths for everything.
-- Never use placeholder comments like "# rest of code here" - give complete code.
+- Never use placeholder comments like "# rest of code here" — give complete code.
 - Keep responses under 150 lines. Break big tasks into steps.
 - Simple beats clever. 20 readable lines > 10 clever lines.
 - Use Loguru for logging, never print().
@@ -21,72 +23,141 @@ AvailAI is an electronic component sourcing engine. It searches multiple supplie
 
 ## PROJECT STRUCTURE
 
-- `app/routers/` = thin route handlers (HTTP endpoints grouped by domain)
-- `app/services/` = business logic goes here (decoupled from HTTP)
-- `app/models/` = SQLAlchemy models (42 models split into domain modules)
-- `app/schemas/` = Pydantic schemas (request/response models)
-- `app/connectors/` = external API integrations (Nexar, BrokerBin, DigiKey, Mouser, eBay, OEMSecrets, Sourcengine, email_mining)
-- `app/config.py` = Settings class reading from env vars
-- `app/dependencies.py` = auth middleware (require_user, require_buyer, require_fresh_token)
-- `app/startup.py` = boot-time setup (FTS triggers, seed data, backfills — NO schema DDL)
-- `app/scheduler.py` = background tasks (token refresh, inbox scan, contacts sync)
-- `specs/` = business rules (if present)
-- `tests/` = pytest tests
-
-## FILE RULES
-
-- Every new file needs a header comment explaining: what it does, what calls it, what it depends on.
-
-## SAFETY
-
-- WARN before any destructive operation (DROP, DELETE, production changes). Include backup and rollback steps.
-- Flag security issues, missing error handling, N+1 queries, missing indexes.
-
-## DEPLOY RULE
-
-When changes are ready to test, always provide a **single copy-paste command block** for Termius that does everything needed to get it live. No separate steps, no explanation needed. Example:
-```bash
-cd /root/availai && git pull origin main && docker compose up -d --build && echo "Done — hard refresh browser"
 ```
-Always merge into main and push before giving the deploy command. The user should never need more than one paste to go live.
+app/
+├── main.py                    # FastAPI app, router registration (34 routers), lifespan, middleware stack
+├── config.py                  # Pydantic Settings (env vars, APP_VERSION, MVP_MODE)
+├── database.py                # SQLAlchemy engine, SessionLocal, UTCDateTime type
+├── dependencies.py            # Auth: require_user, require_admin, require_buyer, require_fresh_token, get_db
+├── constants.py               # StrEnum status enums (19 enums — ALWAYS use these, never raw strings)
+├── shared_constants.py        # JUNK_DOMAINS (68), JUNK_EMAIL_PREFIXES (17) — don't duplicate
+├── startup.py                 # Runtime DB ops: triggers, seeds, backfills, ANALYZE (NO DDL)
+├── scheduler.py               # APScheduler coordinator
+├── scoring.py                 # Sighting/lead/vendor scoring functions
+├── vendor_utils.py            # fuzzy_score_vendor() — don't inline rapidfuzz calls
+├── search_service.py          # Requirement search coordinator (all 6 sources)
+├── email_service.py           # Graph API: batch RFQ, inbox monitor, AI parse
+├── enrichment_service.py      # Customer/vendor enrichment orchestrator
+├── rate_limit.py              # Slowapi rate limiting
+│
+├── models/                    # SQLAlchemy models (47 models across domain modules)
+├── schemas/                   # Pydantic request/response schemas (26 files)
+├── routers/                   # API route handlers (34 routers, 200+ endpoints)
+│   ├── auth.py                # /auth/* — OAuth2 login/callback/logout
+│   ├── htmx_views.py          # /v2/* — Main HTMX frontend (all page/partial routes)
+│   ├── ai.py                  # /api/ai/* — AI features
+│   ├── requisitions/          # /api/requisitions/*, /v2/partials/* (core.py, requirements.py, attachments.py)
+│   ├── crm/                   # /api/companies/*, sites, offers, quotes, buy_plans, enrichment, clone
+│   ├── excess.py              # /api/excess-*, /v2/partials/excess/*
+│   ├── materials.py           # /api/materials/*
+│   ├── proactive.py           # /api/proactive/*
+│   └── ...                    # 25+ more router files
+│
+├── services/                  # Business logic (120+ service files, decoupled from HTTP)
+│   ├── search_worker_base/    # Search connector base + mpn_normalizer.py
+│   ├── ics_worker/            # ICS search worker
+│   ├── nc_worker/             # NC search worker
+│   └── ...                    # AI, enrichment, proactive, tagging, scoring, etc.
+│
+├── connectors/                # External API integrations (DigiKey, Mouser, Nexar, etc.)
+├── jobs/                      # APScheduler job definitions (14 job modules)
+├── cache/                     # Redis caching: @cached_endpoint(prefix, ttl_hours, key_params)
+├── utils/                     # Shared utilities (claude_client, graph_client, normalization, etc.)
+│
+├── templates/                 # Jinja2 templates (164 files)
+│   ├── base.html              # App shell (topbar, mobile nav, toast, modal)
+│   ├── htmx/base_page.html    # Lazy-loader: spinner → hx-get partial
+│   ├── htmx/partials/         # 158 HTMX partials across 29 subdirectories
+│   └── documents/             # PDF templates (quote_report, rfq_summary)
+│
+└── static/                    # Frontend assets
+    ├── htmx_app.js            # Alpine.js + HTMX bootstrap, stores, components (19KB)
+    ├── styles.css             # Tailwind + component styles (16KB)
+    ├── htmx_mobile.css        # Mobile overrides (8KB)
+    └── dist/                  # Vite build output (minified, content-hashed)
+```
 
-## SESSION RULES
+## Frontend
 
-- End sessions with: what changed, git commands, what to test, any tech debt.
-- After 15-20 messages, suggest starting fresh to avoid context problems.
+**HTMX 2.x + Alpine.js 3.x + Jinja2 partials + Tailwind CSS.** No React, no SPA framework.
 
-## TRIGGERS
+- All navigation is HTMX-driven: links fire `hx-get`, server returns HTML partials, HTMX swaps into `#main-content`
+- Alpine.js handles component state (stores: sidebar, toast, preferences, shortlist)
+- 9 Alpine plugins loaded: focus, persist, intersect, collapse, morph, mask, sort, anchor, resize
+- 14 HTMX extensions active: alpine-morph, preload, sse, loading-states, multi-swap, etc.
+- Tailwind config: DM Sans font, brand color palette (50-900)
+- Build: Vite → `app/static/dist/`
 
-- "new feature" = make a plan first, don't just start coding
-- "bug" or "error" = ask for the full error message before trying to fix
-- "refactor" = check what's stable first
-- "quick" or "just" = warn about hidden complexity
+### Template Routing — CRITICAL
+
+**ALWAYS trace route → view function → template_response() before editing any template.**
+
+Key gotcha: Requisitions parts tab loads `parts/list.html`, NOT `requisitions/list.html`.
+
+## Key Request Flows
+
+**Search**: User submits part numbers → `search_service.search_requirement()` fires all connectors via `asyncio.gather()` → results deduped and scored by `scoring.py` (6 weighted factors) → material cards auto-upserted.
+
+**RFQ**: `email_service.send_batch_rfq()` sends via Graph API, tagged with `[AVAIL-{id}]` → scheduler polls inbox every 30min → `response_parser.py` uses Claude to extract structured data → confidence >=0.8 auto-creates Offer, 0.5-0.8 flags for review.
+
+**Proactive Matching**: Offers matched to customer purchase history → SQL scorecard (0-100) → batch prepare/send workflow → sent offers grouped by customer.
+
+## Auth & Sessions
+
+Azure AD OAuth2 via Microsoft Graph API. Session middleware stores `user_id` in cookie. Dependency levels:
+- `require_user` — any logged-in user
+- `require_buyer` — buyer role
+- `require_admin` — admin role
+- `require_fresh_token` — validates M365 token freshness (15-min buffer)
+
+## Response Format Standards
+
+**JSON errors**: `{"error": "message", "status_code": 400, "request_id": "abc123"}`
+- Tests check `response.json()["error"]`, NOT `["detail"]`
+
+**List responses**: `{"items": [...], "total": 100, "limit": 50, "offset": 0}`
+- Companies list returns this format — NOT a plain array
+
+**HTMX responses**: HTMLResponse from Jinja2 templates
+
+**Schemas**: All in `app/schemas/responses.py`, use `extra="allow"` on Pydantic models
+
+## Coding Conventions
+
+- `db.get(Model, id)` — NOT `db.query(Model).get(id)` (SQLAlchemy 2.0)
+- Status values: use StrEnum constants from `app/constants.py` — never raw strings
+- Vendor matching: use `fuzzy_score_vendor()` from `app/vendor_utils.py`
+- MPN dedup: use `strip_packaging_suffixes()` from `app/services/search_worker_base/mpn_normalizer.py`
+- Shared junk lists: use `JUNK_DOMAINS`/`JUNK_EMAIL_PREFIXES` from `app/shared_constants.py`
+- Caching: `@cached_endpoint(prefix, ttl_hours, key_params)` from `app/cache/decorators.py`
+- Structured logging via Loguru with request_id context
+- `TESTING=1` env var disables scheduler and real API calls in test mode
+- Pyright LSP plugin is active — stage only intentionally changed files
+
+## MVP Mode
+
+`config.py: mvp_mode = True` — gates Dashboard, Enrichment, Teams, Task Manager.
+Core MVP: Requisitions, Customers, Vendors, Sourcing Engine.
 
 ## Commands
 
 ### Run (Docker)
 ```bash
-docker compose up -d                # Start all containers (app, db, caddy)
+docker compose up -d                # Start all containers (app, db, caddy, redis)
 docker compose up -d --build        # Rebuild and start
 docker compose logs -f app          # Tail app logs
 ```
 
-### Run Locally (no Docker)
-```bash
-uvicorn app.main:app --host 0.0.0.0 --port 8000
-```
-
-### Tests — Tiered Strategy
+### Tests — Tiered Strategy (8,030 tests)
 
 **During development: run only tests for changed files (fast feedback)**
 ```bash
-TESTING=1 PYTHONPATH=/root/availai pytest tests/test_<changed_module>.py -v    # Targeted tests (~seconds)
-TESTING=1 PYTHONPATH=/root/availai pytest -m "not slow" -v                     # All fast tests (~2-3 min)
+TESTING=1 PYTHONPATH=/root/availai pytest tests/test_<changed_module>.py -v
 ```
 
 **Before commit: full suite**
 ```bash
-TESTING=1 PYTHONPATH=/root/availai pytest tests/ -v                            # Full suite with parallel (~3-4 min)
+TESTING=1 PYTHONPATH=/root/availai pytest tests/ -v
 ```
 
 **Coverage check: only before PR creation**
@@ -94,96 +165,80 @@ TESTING=1 PYTHONPATH=/root/availai pytest tests/ -v                            #
 TESTING=1 PYTHONPATH=/root/availai pytest tests/ --cov=app --cov-report=term-missing --tb=no -q
 ```
 
-**Rules for Claude:**
+**Rules:**
 - When editing code, run ONLY the test file(s) related to the changed module
 - Run full suite only before committing
 - Run coverage only when explicitly asked or before PR
 - Never run `--cov` during iterative development — it adds significant overhead
 - Tests run in parallel via pytest-xdist (`-n auto` in pytest.ini)
-- Slow tests (marked `@pytest.mark.slow`) are included by default but can be skipped with `-m "not slow"`
-
-Tests use in-memory SQLite with auth overrides (no real DB or M365 tokens needed). PostgreSQL-only features (ARRAY columns, e.g. `buyer_profiles` table) are excluded from the SQLite test DB.
+- Target: 100% coverage — no commit should reduce it
+- Tests use in-memory SQLite (no real DB or M365 tokens needed)
+- `conftest.py` sets `RATE_LIMIT_ENABLED=false`
+- Mock lazy imports at source module, not importing module
+- Use `from tests.conftest import engine` for test SQLite engine
 
 ### Database Migrations
 ```bash
-alembic upgrade head                              # Apply migrations
+alembic upgrade head                              # Apply migrations (runs automatically at startup)
 alembic revision --autogenerate -m "description"  # Generate new migration
 ```
 
-Schema is defined in `app/models/` (split into domain modules). Alembic manages all schema evolution. The entrypoint runs `alembic upgrade head` before app start. Production DB is at migration `048`.
+80+ migration revisions. Schema defined in `app/models/`. Alembic manages all schema evolution.
 
 ## Database & Migration Rules
 
 ### ABSOLUTE RULES — NEVER VIOLATE
-1. **ALL schema changes go through Alembic.** Never use raw DDL (ALTER TABLE, CREATE INDEX, ADD COLUMN, ADD CONSTRAINT, DROP anything) in:
-   - startup.py
-   - any service file
-   - any router file
-   - any ad-hoc script
-   The ONLY place DDL belongs is inside `alembic/versions/` migration files.
-
-2. **Never use Base.metadata.create_all() for schema changes.** It exists only as a legacy safety net with logging. If a table is missing, write a migration — don't rely on create_all().
-
-3. **Never run raw SQL against production** outside of a migration. No `docker compose exec db psql` schema changes. No scripts that ALTER tables.
-
+1. **ALL schema changes go through Alembic.** Never use raw DDL in startup.py, services, routers, or scripts.
+2. **Never use Base.metadata.create_all() for schema changes.**
+3. **Never run raw SQL against production** outside of a migration.
 4. **Migration workflow — every time:**
-   a. Make your model change in `app/models/`
-   b. Run: `alembic revision --autogenerate -m "description"` (inside Docker)
-   c. REVIEW the generated migration (autogenerate is not perfect)
-   d. Test: `alembic upgrade head` then `alembic downgrade -1` then `alembic upgrade head`
-   e. Commit the migration file with the model change
-   f. Deploy: entrypoint runs `alembic upgrade head` automatically
+   a. Make model change in `app/models/`
+   b. Run: `alembic revision --autogenerate -m "description"`
+   c. REVIEW the generated migration
+   d. Test: upgrade → downgrade → upgrade
+   e. Commit migration with model change
 
-5. **If `alembic revision --autogenerate` generates a non-empty migration when you haven't changed models, there is schema drift.** Stop and investigate before proceeding.
-
-6. **startup.py is for runtime operations ONLY:**
-   - FTS triggers (PostgreSQL-specific, can't be expressed in Alembic cleanly)
-   - Seed data (system_config defaults, initial admin user)
+5. **startup.py is for runtime operations ONLY:**
+   - FTS triggers (PostgreSQL-specific)
+   - Seed data (system_config defaults)
    - ANALYZE on hot tables
-   - Backfill queries that run on NULL values (idempotent)
-   - Count triggers (PG-specific, recreated idempotently)
+   - Idempotent backfill queries
+   - Count triggers (PG-specific)
    - NOTHING that creates, alters, or drops tables/columns/indexes/constraints
 
-### Deploy / Update
+## Deploy
+
+When I say "deploy", that means: commit + push + rebuild + verify logs. No questions asked.
+
 ```bash
-bash scripts/deploy.sh    # Full DigitalOcean setup (first time)
-bash scripts/update.sh    # Pull, rebuild, migrate
+cd /root/availai && git pull origin main && docker compose up -d --build && docker compose logs -f app
 ```
 
-## Architecture
+## Safety
 
-**Stack**: FastAPI (async) + SQLAlchemy 2.0 + PostgreSQL 16 + Jinja2 templates + vanilla JS frontend. Deployed via Docker Compose (app, db, caddy) on DigitalOcean.
+- WARN before any destructive operation (DROP, DELETE, production changes). Include backup and rollback steps.
+- Flag security issues, missing error handling, N+1 queries, missing indexes.
 
-### Key Request Flows
+## File Rules
 
-**Search**: User submits part numbers -> `search_service.search_requirement()` fires all connectors via `asyncio.gather()` -> results deduped and scored by `scoring.py` (6 weighted factors: recency, quantity, vendor reliability, data completeness, source credibility, price) -> material cards auto-upserted.
+- Every new file needs a header comment explaining: what it does, what calls it, what it depends on.
 
-**RFQ**: `email_service.send_batch_rfq()` sends via Graph API, tagged with `[AVAIL-{id}]` -> scheduler polls inbox every 30min -> `response_parser.py` uses Claude to extract structured data -> confidence >=0.8 auto-creates Offer, 0.5-0.8 flags for review.
+## Session Rules
 
-**Email Mining**: Scheduler scans Outlook for vendor offers/stock lists -> `attachment_parser` detects Excel columns (cached by vendor domain + fingerprint) -> creates Sighting and VendorCard records.
+- End sessions with: what changed, git commands, what to test, any tech debt.
 
-### Auth & Sessions
+## Triggers
 
-Azure AD OAuth2 via Microsoft Graph API. Session middleware stores `user_id` in cookie. Three dependency levels: `require_user` (any logged-in), `require_buyer` (buyer role), admin check via `ADMIN_EMAILS` env var. Tokens auto-refreshed by scheduler.
-
-### Frontend
-
-Two vanilla JS files serve the entire UI: `app/static/app.js` (search, requisitions, vendors, upload) and `app/static/crm.js` (companies, quotes, activity). Single Jinja2 template at `app/templates/index.html`.
+- "new feature" = make a plan first, don't just start coding
+- "bug" or "error" = ask for the full error message before trying to fix
+- "refactor" = check what's stable first
+- "quick" or "just" = warn about hidden complexity
 
 ## Configuration
 
 All config via `.env` (see `.env.example`). Key groups:
 - Azure OAuth: `AZURE_CLIENT_ID`, `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`
 - AI: `ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`
-- Data sources: individual API keys for each connector
+- Data sources: individual API keys per connector
 - Feature flags: `EMAIL_MINING_ENABLED`, `ACTIVITY_TRACKING_ENABLED`, `CONTACTS_SYNC_ENABLED`
 - DB: `DATABASE_URL=postgresql://availai:availai@db:5432/availai`
-
-## Conventions
-
-- Database models use `created_at` with UTC timezone. The `UTCTimestamp` type decorator in `database.py` enforces this.
-- Vendor names are normalized to lowercase for deduplication (`normalized_name` field on `VendorCard`).
-- All connector search methods return a list of dicts with keys: `vendor_name`, `mpn`, `qty`, `price`, `source_type`, etc.
-- API versioning middleware rewrites `/api/v1/...` to `/api/...` internally; `X-API-Version: v1` header on all responses.
-- Structured logging via loguru with request_id context.
-- `TESTING=1` env var disables scheduler and real API calls in test mode.

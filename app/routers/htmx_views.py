@@ -771,7 +771,7 @@ async def company_lookup(
       {"<div class='text-gray-600'>📞 " + phone + "</div>" if phone else ""}
       {"<div class='text-gray-600'>📍 " + address_display + "</div>" if address_display else ""}
       <form hx-post="/v2/partials/companies/quick-create"
-            hx-target="#company-lookup-result"
+            hx-target="closest div"
             hx-swap="innerHTML">
         <input type="hidden" name="company_name" value="{name}">
         <input type="hidden" name="website" value="{website}">
@@ -822,8 +822,9 @@ async def company_quick_create(
           Customer already exists. Selected automatically.
         </div>
         <script>
-          var picker = document.querySelector('[x-data]').__x_comp || Alpine.$data(document.querySelector('[x-data*="customerPicker"]'));
-          if (picker && picker.selectById) picker.selectById('{site_id}', '{display}');
+          document.dispatchEvent(new CustomEvent('customer-created', {{
+            detail: {{ siteId: '{site_id}', displayName: '{display}' }}
+          }}));
         </script>
         """)
 
@@ -871,19 +872,13 @@ async def company_quick_create(
 
     return HTMLResponse(f"""
     <div class="mt-1 p-2 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-700">
-      ✓ Created: {display}
+      Created: {display}
     </div>
     <script>
-      // Select the newly created customer in the picker
-      var el = document.querySelector('[x-data*="customerPicker"]');
-      if (el) {{
-        var data = Alpine.$data(el);
-        if (data) {{
-          data.selectById('{site.id}', '{display}');
-          // Refresh the typeahead cache
-          fetch('/api/companies/typeahead').then(r => r.json()).then(d => data.companies = d);
-        }}
-      }}
+      // Select the newly created customer in the picker via custom event
+      document.dispatchEvent(new CustomEvent('customer-created', {{
+        detail: {{ siteId: '{site.id}', displayName: '{display}' }}
+      }}));
     </script>
     """)
 
