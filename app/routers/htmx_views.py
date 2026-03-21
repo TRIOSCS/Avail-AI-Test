@@ -8,6 +8,7 @@ Called by: main.py (router mount)
 Depends on: models, dependencies, database, search_service
 """
 
+import html as html_mod
 import json
 import time
 from datetime import datetime, timedelta, timezone
@@ -698,6 +699,191 @@ async def requisition_import_save(
       Alpine.store('toast').message = 'Requisition created with {added} parts';
       Alpine.store('toast').type = 'success';
       Alpine.store('toast').show = true;
+    </script>
+    """)
+
+
+@router.post("/v2/partials/companies/lookup", response_class=HTMLResponse)
+async def company_lookup(
+    request: Request,
+    company_name: str = Form(...),
+    location: str = Form(""),
+    user: User = Depends(require_user),
+):
+    """AI-powered company lookup using Claude with web search."""
+    from app.utils.claude_client import claude_json
+
+    search_query = company_name.strip()
+    if location.strip():
+        search_query += f", {location.strip()}"
+
+    result = await claude_json(
+        prompt=f"Search the web for this company: {search_query}\n\n"
+        f"Find their official website, main phone number, and physical address.\n\n"
+        f"Return ONLY a JSON object with these fields:\n"
+        f'{{"company_name": "...", "website": "...", "phone": "...", '
+        f'"address_line1": "...", "city": "...", "state": "...", "zip": "...", "country": "..."}}\n\n'
+        f"Use empty strings for any field you cannot verify from search results. "
+        f"Do NOT guess or make up information — only include data you found online.",
+        system="You look up company information using web search. "
+        "ONLY return data you can verify from search results. "
+        "If you cannot find a phone number or address, return empty strings — never guess.",
+        model_tier="smart",
+        max_tokens=512,
+        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
+        timeout=45,
+    )
+
+    if not result:
+        return HTMLResponse(
+            '<p class="text-xs text-rose-500 mt-1">Could not look up company. Enter details manually.</p>'
+        )
+
+    # Render an approval card — escape all AI-provided strings for XSS safety
+    name = html_mod.escape(result.get("company_name", company_name))
+    website = html_mod.escape(result.get("website", ""))
+    phone = html_mod.escape(result.get("phone", ""))
+    addr_parts = [
+        p
+        for p in [
+            result.get("address_line1", ""),
+            result.get("city", ""),
+            (result.get("state", "") + " " + result.get("zip", "")).strip(),
+            result.get("country", ""),
+        ]
+        if p
+    ]
+    address_display = html_mod.escape(", ".join(addr_parts))
+
+    # Hidden field values also escaped
+    addr1_val = html_mod.escape(result.get("address_line1", ""))
+    city_val = html_mod.escape(result.get("city", ""))
+    state_val = html_mod.escape(result.get("state", ""))
+    zip_val = html_mod.escape(result.get("zip", ""))
+    country_val = html_mod.escape(result.get("country", "US"))
+
+    html_out = f"""
+    <div class="mt-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs space-y-1">
+      <div class="flex items-center justify-between">
+        <span class="font-semibold text-emerald-700">Found: {name}</span>
+      </div>
+      {"<div class='text-gray-600'>🌐 " + website + "</div>" if website else ""}
+      {"<div class='text-gray-600'>📞 " + phone + "</div>" if phone else ""}
+      {"<div class='text-gray-600'>📍 " + address_display + "</div>" if address_display else ""}
+      <form hx-post="/v2/partials/companies/quick-create"
+            hx-target="#company-lookup-result"
+            hx-swap="innerHTML">
+        <input type="hidden" name="company_name" value="{name}">
+        <input type="hidden" name="website" value="{website}">
+        <input type="hidden" name="phone" value="{phone}">
+        <input type="hidden" name="address_line1" value="{addr1_val}">
+        <input type="hidden" name="city" value="{city_val}">
+        <input type="hidden" name="state" value="{state_val}">
+        <input type="hidden" name="zip" value="{zip_val}">
+        <input type="hidden" name="country" value="{country_val}">
+        <div class="flex gap-2 mt-2">
+          <button type="submit"
+                  class="px-3 py-1 text-xs font-semibold bg-emerald-600 text-white rounded hover:bg-emerald-700">
+            Use This Customer
+          </button>
+        </div>
+      </form>
+    </div>
+    """
+    return HTMLResponse(html_out)
+
+
+@router.post("/v2/partials/companies/quick-create", response_class=HTMLResponse)
+async def company_quick_create(
+    request: Request,
+    company_name: str = Form(...),
+    website: str = Form(""),
+    phone: str = Form(""),
+    address_line1: str = Form(""),
+    city: str = Form(""),
+    state: str = Form(""),
+    zip: str = Form(""),
+    country: str = Form("US"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Create Company + default site from AI lookup, return JS to select it in
+    picker."""
+    from app.cache.decorators import invalidate_prefix
+
+    # Check for duplicates
+    existing = db.query(Company).filter(Company.name.ilike(company_name.strip())).first()
+    if existing:
+        site = existing.sites[0] if existing.sites else None
+        site_id = site.id if site else ""
+        display = html_mod.escape(f"{existing.name} — {site.site_name}" if site else existing.name)
+        return HTMLResponse(f"""
+        <div class="mt-1 p-2 bg-amber-50 border border-amber-200 rounded text-xs text-amber-700">
+          Customer already exists. Selected automatically.
+        </div>
+        <script>
+          var picker = document.querySelector('[x-data]').__x_comp || Alpine.$data(document.querySelector('[x-data*="customerPicker"]'));
+          if (picker && picker.selectById) picker.selectById('{site_id}', '{display}');
+        </script>
+        """)
+
+    # Create company
+    domain = ""
+    if website:
+        from urllib.parse import urlparse
+
+        parsed = urlparse(website if "://" in website else f"https://{website}")
+        domain = parsed.netloc.lower().replace("www.", "")
+
+    company = Company(
+        name=company_name.strip(),
+        website=website.strip() or None,
+        domain=domain or None,
+        phone=phone.strip() or None,
+        hq_city=city.strip() or None,
+        hq_state=state.strip() or None,
+        hq_country=country.strip() or "US",
+        source="ai_lookup",
+        is_active=True,
+    )
+    db.add(company)
+    db.flush()
+
+    # Create default site
+    site_name = city.strip() or "HQ"
+    site = CustomerSite(
+        company_id=company.id,
+        site_name=site_name,
+        address_line1=address_line1.strip() or None,
+        city=city.strip() or None,
+        state=state.strip() or None,
+        zip=zip.strip() or None,
+        country=country.strip() or "US",
+        contact_phone=phone.strip() or None,
+    )
+    db.add(site)
+    db.commit()
+
+    invalidate_prefix("companies_typeahead")
+    invalidate_prefix("company_list")
+
+    display = html_mod.escape(f"{company.name} — {site.site_name}")
+
+    return HTMLResponse(f"""
+    <div class="mt-1 p-2 bg-emerald-50 border border-emerald-200 rounded text-xs text-emerald-700">
+      ✓ Created: {display}
+    </div>
+    <script>
+      // Select the newly created customer in the picker
+      var el = document.querySelector('[x-data*="customerPicker"]');
+      if (el) {{
+        var data = Alpine.$data(el);
+        if (data) {{
+          data.selectById('{site.id}', '{display}');
+          // Refresh the typeahead cache
+          fetch('/api/companies/typeahead').then(r => r.json()).then(d => data.companies = d);
+        }}
+      }}
     </script>
     """)
 
