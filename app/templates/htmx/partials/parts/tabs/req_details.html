@@ -1,4 +1,4 @@
-{# req_details.html — Req Details tab showing parent requisition fields and sibling parts.
+{# req_details.html — REQ Detail tab showing parent requisition fields and sibling parts.
    Called by: GET /v2/partials/parts/{requirement_id}/tab/req-details
    Depends on: requirement, requisition, sibling_parts, users
 #}
@@ -117,8 +117,11 @@
                      @change="selectedSiblings = $el.checked ? [{% for p in sibling_parts %}{{ p.id }}{{ ',' if not loop.last }}{% endfor %}] : []">
             </th>
             <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">MPN</th>
+            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Brand</th>
             <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
             <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
+            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Tgt $</th>
+            <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Need By</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100">
@@ -132,6 +135,7 @@
                      @change="$el.checked ? selectedSiblings.push({{ part.id }}) : selectedSiblings = selectedSiblings.filter(id => id !== {{ part.id }})">
             </td>
             <td class="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{{ part.primary_mpn or '—' }}</td>
+            <td class="px-3 py-2 whitespace-nowrap text-gray-600">{{ part.brand or '—' }}</td>
             <td class="px-3 py-2 whitespace-nowrap">
               {% set part_status_colors = {
                 'open': 'bg-blue-100 text-blue-700',
@@ -147,7 +151,9 @@
                 {{ (part.sourcing_status or 'open')|capitalize }}
               </span>
             </td>
-            <td class="px-3 py-2 whitespace-nowrap text-gray-700">{{ part.target_qty or '—' }}</td>
+            <td class="px-3 py-2 whitespace-nowrap text-gray-700">{{ '{:,}'.format(part.target_qty) if part.target_qty else '—' }}</td>
+            <td class="px-3 py-2 whitespace-nowrap text-gray-700">{{ '${:,.4f}'.format(part.target_price) if part.target_price else '—' }}</td>
+            <td class="px-3 py-2 whitespace-nowrap text-gray-600">{{ part.need_by_date.strftime('%m/%d') if part.need_by_date else '—' }}</td>
           </tr>
           {% endfor %}
         </tbody>

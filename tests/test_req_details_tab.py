@@ -148,4 +148,4 @@ def test_workspace_tab_bar_includes_req_details(client, db_session, test_user):
 
     ws = pathlib.Path("app/templates/htmx/partials/parts/workspace.html").read_text()
     assert "req-details" in ws
-    assert "Req Details" in ws
+    assert "REQ Detail" in ws
