@@ -9,50 +9,76 @@
     </div>
     <div>
       <h3 class="text-lg font-semibold text-gray-900">Report a Problem</h3>
-      <p class="text-sm text-gray-500">Describe the issue and we'll look into it.</p>
+      <p class="text-sm text-gray-500">Describe the issue — a screenshot has been captured automatically.</p>
     </div>
   </div>
 
-  <form hx-post="/api/trouble-tickets/submit"
-        hx-target="#modal-content"
-        hx-swap="innerHTML"
-        @htmx:before-request="submitting = true"
-        @htmx:after-request="submitting = false">
+  {# Screenshot preview #}
+  <div x-show="window._ttScreenshot" class="mb-4 border border-gray-200 rounded-lg overflow-hidden">
+    <img x-bind:src="window._ttScreenshot || ''" class="w-full max-h-40 object-cover object-top" alt="Screenshot">
+  </div>
 
-    <div class="mb-4">
-      <label for="tr-description" class="block text-sm font-medium text-gray-700 mb-1">
-        What went wrong?
-      </label>
-      <textarea
-        id="tr-description"
-        name="message"
-        rows="4"
-        required
-        minlength="1"
-        placeholder="Describe the problem you encountered..."
-        class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-gray-400"></textarea>
-    </div>
+  <div class="mb-4">
+    <label for="tr-description" class="block text-sm font-medium text-gray-700 mb-1">
+      What went wrong?
+    </label>
+    <textarea
+      id="tr-description"
+      rows="4"
+      required
+      minlength="1"
+      placeholder="Describe the problem you encountered..."
+      class="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-500 focus:ring-1 focus:ring-brand-500 placeholder-gray-400"></textarea>
+  </div>
 
-    <input type="hidden" name="current_url" :value="window.location.href">
-
-    <div class="flex items-center justify-between pt-2 border-t border-gray-100">
-      <button type="button"
-              @click="$dispatch('close-modal')"
-              class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">
-        Cancel
-      </button>
-      <button type="submit"
-              :disabled="submitting"
-              class="px-4 py-2 bg-rose-500 text-white text-sm font-medium rounded-md hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-        <span x-show="!submitting">Submit Report</span>
-        <span x-show="submitting" x-cloak class="flex items-center gap-2">
-          <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-          </svg>
-          Submitting...
-        </span>
-      </button>
-    </div>
-  </form>
+  <div class="flex items-center justify-between pt-2 border-t border-gray-100">
+    <button type="button"
+            @click="$dispatch('close-modal')"
+            class="px-4 py-2 text-sm text-gray-600 hover:text-gray-800">
+      Cancel
+    </button>
+    <button type="button"
+            :disabled="submitting"
+            @click="
+              var desc = document.getElementById('tr-description').value.trim();
+              if (!desc) return;
+              submitting = true;
+              var payload = {
+                description: desc,
+                screenshot: window._ttScreenshot || null,
+                page_url: window.location.href,
+                user_agent: navigator.userAgent,
+                viewport: window.innerWidth + 'x' + window.innerHeight,
+                error_log: JSON.stringify(Alpine.store('errorLog').entries),
+                network_log: JSON.stringify(Alpine.store('networkLog').entries)
+              };
+              fetch('/api/trouble-tickets/submit', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify(payload)
+              }).then(function(r){ return r.text(); })
+              .then(function(html){
+                var el = document.getElementById('modal-content');
+                el.textContent = '';
+                var tpl = document.createElement('template');
+                tpl.innerHTML = html;
+                el.appendChild(tpl.content);
+                submitting = false;
+              }).catch(function(){
+                var el = document.getElementById('modal-content');
+                el.textContent = 'Something went wrong. Please try again.';
+                submitting = false;
+              });
+            "
+            class="px-4 py-2 bg-rose-500 text-white text-sm font-medium rounded-md hover:bg-rose-600 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+      <span x-show="!submitting">Submit Report</span>
+      <span x-show="submitting" x-cloak class="flex items-center gap-2">
+        <svg class="animate-spin h-4 w-4" fill="none" viewBox="0 0 24 24">
+          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+        </svg>
+        Submitting...
+      </span>
+    </button>
+  </div>
 </div>

@@ -112,6 +112,20 @@ window.onunhandledrejection = function(e) {
     if (log.length > 10) log.shift();
 };
 
+// ── Network log capture for trouble tickets ──────────────────
+Alpine.store('networkLog', { entries: [] });
+
+htmx.on('htmx:afterRequest', function(evt) {
+    var log = Alpine.store('networkLog').entries;
+    log.push({
+        url: evt.detail.pathInfo.requestPath,
+        method: evt.detail.requestConfig.verb.toUpperCase(),
+        status: evt.detail.xhr.status,
+        ts: new Date().toISOString()
+    });
+    if (log.length > 10) log.shift();
+});
+
 Alpine.store('shortlist', {
     items: [],
     toggle(item) {
