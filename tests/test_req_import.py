@@ -133,7 +133,7 @@ def test_import_form_loads(client):
 def test_company_lookup_form_accessible(client):
     """The lookup endpoint should return HTML."""
     with patch(
-        "app.utils.claude_client.claude_structured",
+        "app.utils.claude_client.claude_json",
         new_callable=AsyncMock,
         return_value=None,
     ):

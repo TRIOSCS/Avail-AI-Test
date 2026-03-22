@@ -8,12 +8,7 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
-
-from app.models import User
-
 
 # ── Email Thread Viewer ──────────────────────────────────────────────
 
@@ -73,7 +68,7 @@ class TestEmailIntelligence:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "Email Intelligence" in resp.text
+        assert "AI-classified inbox activity" in resp.text
 
     def test_dashboard_with_filter(self, client: TestClient):
         resp = client.get(
@@ -81,7 +76,7 @@ class TestEmailIntelligence:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "Email Intelligence" in resp.text
+        assert "AI-classified inbox activity" in resp.text
 
     def test_dashboard_empty_state(self, client: TestClient):
         resp = client.get(

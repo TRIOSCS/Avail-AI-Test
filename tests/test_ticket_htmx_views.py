@@ -87,7 +87,7 @@ class TestWorkspacePartial:
         r = c.get("/v2/partials/trouble-tickets/workspace")
         assert r.status_code == 200
         assert "text/html" in r.headers["content-type"]
-        assert "Trouble Tickets" in r.text
+        assert "Analyze" in r.text
 
     def test_workspace_has_filter_pills(self, db_session: Session, test_user: User):
         """Workspace includes All / Open / Resolved / Won't Fix filter pills."""

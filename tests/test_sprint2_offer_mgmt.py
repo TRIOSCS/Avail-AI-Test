@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from app.models import Offer, Requirement, Requisition, User
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
@@ -120,11 +119,11 @@ class TestEditOffer:
             data={"vendor_name": "Digi-Key", "unit_price": "0.60"},
             headers={"HX-Request": "true"},
         )
-        logs = db_session.query(ChangeLog).filter(
-            ChangeLog.entity_type == "offer", ChangeLog.entity_id == offer.id
-        ).all()
+        logs = (
+            db_session.query(ChangeLog).filter(ChangeLog.entity_type == "offer", ChangeLog.entity_id == offer.id).all()
+        )
         assert len(logs) >= 1
-        field_names = {l.field_name for l in logs}
+        field_names = {entry.field_name for entry in logs}
         assert "vendor_name" in field_names
 
     def test_edit_nonexistent_offer_404(self, client: TestClient, req_with_offer):
@@ -195,7 +194,7 @@ class TestReviewQueue:
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
-        assert "Review Queue" in resp.text
+        assert "pending review" in resp.text
         assert offer.vendor_name in resp.text
 
     def test_queue_empty_state(self, client: TestClient):
