@@ -9021,6 +9021,7 @@ async def part_header(
 
 _PART_HEADER_EDITABLE = {
     "brand",
+    "condition",
     "manufacturer",
     "target_qty",
     "target_price",
