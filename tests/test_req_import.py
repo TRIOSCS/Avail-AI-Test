@@ -33,8 +33,8 @@ async def test_parse_freeform_rfq_returns_brand_and_condition():
         assert req["condition"] == "new"
 
 
-def test_import_parse_returns_preview(client, monkeypatch):
-    """POST /v2/partials/requisitions/import-parse returns editable preview."""
+def test_import_parse_html_returns_unified_modal(client, monkeypatch):
+    """POST /v2/partials/requisitions/import-parse (HTML path) returns unified modal."""
     mock_result = {
         "name": "Test RFQ",
         "customer_name": "Acme Corp",
@@ -53,9 +53,8 @@ def test_import_parse_returns_preview(client, monkeypatch):
         data={"name": "Test RFQ", "raw_text": "LM358DR 500 TI\nSTM32F407 100"},
     )
     assert resp.status_code == 200
-    assert "LM358DR" in resp.text
-    assert "STM32F407" in resp.text
-    assert 'name="reqs[0].primary_mpn"' in resp.text
+    # HTML path now returns unified modal (Alpine.js-driven, not server-rendered rows)
+    assert "unifiedReqModal" in resp.text
 
 
 def test_import_save_creates_requisition(client):

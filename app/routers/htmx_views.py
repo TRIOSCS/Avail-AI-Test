@@ -685,7 +685,7 @@ async def requisition_import_parse(
             "count": len(requirements),
         }
     )
-    return templates.TemplateResponse("htmx/partials/requisitions/import_preview.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/unified_modal.html", ctx)
 
 
 @router.post("/v2/partials/requisitions/import-save", response_class=HTMLResponse)

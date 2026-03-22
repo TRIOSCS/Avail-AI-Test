@@ -492,7 +492,7 @@ Alpine.data('materialsFilter', () => ({
  * Usage: x-data="customerPicker()" on a container div.
  * The container must include a <div data-lookup-result></div> for lookup results.
  *
- * Called by: requisitions/import_modal.html, requisitions/create_modal.html
+ * Called by: requisitions/unified_modal.html
  * Depends on: /api/companies/typeahead, /v2/partials/companies/lookup
  */
 Alpine.data('customerPicker', () => ({
@@ -562,6 +562,120 @@ Alpine.data('customerPicker', () => ({
         }
         this.lookingUp = false;
     }
+}));
+
+Alpine.data('unifiedReqModal', () => ({
+    // Metadata
+    reqName: '',
+    customerSiteId: '',
+    customerName: '',
+    deadline: '',
+    urgency: 'normal',
+    // Input mode
+    inputMode: 'paste',
+    rawText: '',
+    // State
+    parsed: false,
+    parsing: false,
+    saving: false,
+    parseError: '',
+    parts: [],
+    showAllColumns: false,
+    init() {
+        // No-op: modal opens fresh each time
+    },
+    get errorCount() {
+        return this.parts.filter(p => p.primary_mpn && !p.manufacturer).length;
+    },
+    get validCount() {
+        return this.parts.filter(p => p.primary_mpn && p.manufacturer).length;
+    },
+    get hasErrors() {
+        return this.errorCount > 0;
+    },
+    addBlankPart() {
+        this.parts.push({
+            _id: Date.now() + Math.random(),
+            primary_mpn: '',
+            manufacturer: '',
+            target_qty: 1,
+            brand: '',
+            condition: 'new',
+            target_price: '',
+            customer_pn: '',
+            date_codes: '',
+            packaging: '',
+            firmware: '',
+            hardware_codes: '',
+            need_by_date: '',
+            sale_notes: '',
+            substitutes: [],
+        });
+    },
+    removePart(idx) {
+        this.parts.splice(idx, 1);
+    },
+    resetParse() {
+        this.parsed = false;
+        this.parts = [];
+        this.parseError = '';
+    },
+    async parseWithAI() {
+        this.parsing = true;
+        this.parseError = '';
+        try {
+            const formData = new FormData();
+            formData.append('name', this.reqName || 'Untitled');
+            formData.append('raw_text', this.rawText);
+            formData.append('customer_name', this.customerName || '');
+            formData.append('customer_site_id', this.customerSiteId || '');
+            formData.append('deadline', this.deadline || '');
+            formData.append('urgency', this.urgency || 'normal');
+            if (this.inputMode === 'upload' && this.$refs.fileInput?.files?.[0]) {
+                formData.append('file', this.$refs.fileInput.files[0]);
+            }
+            const resp = await fetch('/v2/partials/requisitions/import-parse?format=json', {
+                method: 'POST',
+                body: formData,
+            });
+            const data = await resp.json();
+            if (data.error) {
+                this.parseError = data.error;
+            } else {
+                this.parts = (data.requirements || []).map((r, i) => ({
+                    _id: i + Date.now(),
+                    primary_mpn: r.primary_mpn || '',
+                    manufacturer: r.manufacturer || '',
+                    target_qty: r.target_qty || 1,
+                    brand: r.brand || '',
+                    condition: r.condition || 'new',
+                    target_price: r.target_price || '',
+                    customer_pn: r.customer_pn || '',
+                    date_codes: r.date_codes || '',
+                    packaging: r.packaging || '',
+                    firmware: r.firmware || '',
+                    hardware_codes: r.hardware_codes || '',
+                    need_by_date: r.need_by_date || '',
+                    sale_notes: r.notes || r.sale_notes || '',
+                    substitutes: r.substitutes || [],
+                }));
+                if (data.inferred_name && !this.reqName.trim()) {
+                    this.reqName = data.inferred_name;
+                }
+                if (data.inferred_customer && !this.customerName.trim()) {
+                    this.customerName = data.inferred_customer;
+                }
+                this.parsed = true;
+                if (this.parts.length === 0) {
+                    this.parseError = 'No parts could be extracted. Try a different format.';
+                    this.parsed = false;
+                }
+            }
+        } catch (e) {
+            this.parseError = 'Parse failed. Please try again.';
+        }
+        this.parsing = false;
+    },
 }));
 
 Alpine.start();
