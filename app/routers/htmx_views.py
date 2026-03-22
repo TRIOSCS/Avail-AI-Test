@@ -207,7 +207,7 @@ def _sanitize_html_filter(value: str) -> str:
             "hr",
         },
         attributes={
-            "*": {"class", "style"},
+            "*": {"class"},
             "a": {"href", "title", "target"},
             "img": {"src", "alt", "title", "width", "height"},
             "td": {"colspan", "rowspan", "width", "height"},
@@ -760,6 +760,8 @@ async def requisition_import_save(
             sale_notes=item.get("sale_notes", ""),
         )
         db.add(r)
+        for sub_mpn in item.get("substitutes", []):
+            resolve_material_card(sub_mpn, db)
 
     db.commit()
 
@@ -1117,6 +1119,8 @@ async def add_requirement(
         sourcing_status="open",
     )
     db.add(r)
+    for sub_mpn in sub_list:
+        resolve_material_card(sub_mpn, db)
     db.commit()
     db.refresh(r)
 
@@ -2830,6 +2834,8 @@ async def update_requirement(
     item.brand = brand.strip() or None
     item.target_price = target_price
     item.substitutes = parse_substitute_mpns(substitutes, primary_mpn)
+    for sub_mpn in item.substitutes:
+        resolve_material_card(sub_mpn, db)
     item.customer_pn = customer_pn.strip() or None
     item.condition = condition.strip() or None
     item.date_codes = date_codes.strip() or None
@@ -8715,6 +8721,33 @@ async def parts_list_partial(
         for row in stats:
             offer_stats[row.requirement_id] = {"count": row.cnt, "best_price": row.best}
 
+    # Build sub MPN → material card ID mapping for click-through
+    from ..models.intelligence import MaterialCard
+    from ..utils.normalization import normalize_mpn_key as _norm_key
+
+    all_sub_mpns = []
+    for r in requirements:
+        if r.substitutes:
+            all_sub_mpns.extend(r.substitutes)
+
+    sub_card_map = {}
+    if all_sub_mpns:
+        norm_to_mpn = {}
+        for mpn in all_sub_mpns:
+            nk = _norm_key(mpn)
+            if nk:
+                norm_to_mpn[nk] = mpn
+        if norm_to_mpn:
+            cards = (
+                db.query(MaterialCard.normalized_mpn, MaterialCard.id)
+                .filter(MaterialCard.normalized_mpn.in_(list(norm_to_mpn.keys())))
+                .filter(MaterialCard.deleted_at.is_(None))
+                .all()
+            )
+            for card_norm, card_id in cards:
+                if card_norm in norm_to_mpn:
+                    sub_card_map[norm_to_mpn[card_norm]] = card_id
+
     # User column prefs
     visible_cols = user.parts_column_prefs or _DEFAULT_PARTS_COLUMNS
 
@@ -8744,6 +8777,7 @@ async def parts_list_partial(
             "visible_cols": visible_cols,
             "all_columns": _ALL_PARTS_COLUMNS,
             "user_role": user.role,
+            "sub_card_map": sub_card_map,
         }
     )
     return templates.TemplateResponse("htmx/partials/parts/list.html", ctx)
