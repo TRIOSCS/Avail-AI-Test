@@ -30,8 +30,11 @@
        hx-get="{{ partial }}"
        hx-target="#main-content"
        hx-push-url="{{ href }}"
-       class="flex min-h-[48px] flex-1 flex-col items-center justify-center gap-0.5 py-2 text-center transition-colors
-              {{ 'text-brand-600 font-semibold' if current_view == id else 'text-gray-500 hover:text-gray-700' }}">
+       class="relative flex min-h-[48px] flex-1 flex-col items-center justify-center gap-0.5 py-2 text-center transition-colors
+              {{ 'text-brand-600 font-semibold' if current_view == id else 'text-brand-400 hover:text-brand-500' }}">
+      {% if current_view == id %}
+      <span class="absolute -top-px left-1/2 h-[3px] w-8 -translate-x-1/2 rounded-b-full bg-brand-600"></span>
+      {% endif %}
       <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none"
            viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">
@@ -45,7 +48,7 @@
     <div class="relative flex flex-1 items-stretch">
       <button @click="moreOpen = !moreOpen"
               class="flex w-full flex-col items-center justify-center gap-0.5 py-2 text-center transition-colors
-                     text-gray-500 hover:text-gray-700"
+                     text-brand-400 hover:text-brand-500"
               :class="moreOpen && 'text-brand-600'"
               aria-label="More options">
         <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5" fill="none"
@@ -92,7 +95,7 @@
            @click="moreOpen = false"
            class="flex items-center gap-3 px-4 py-2.5 text-sm transition-colors
                   {{ 'text-brand-600 font-medium' if current_view == id else 'text-gray-700 hover:bg-gray-50' }}">
-          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0 {{ 'text-brand-500' if current_view == id else 'text-gray-400' }}" fill="none"
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0 {{ 'text-brand-600' if current_view == id else 'text-brand-300' }}" fill="none"
                viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
                stroke-linecap="round" stroke-linejoin="round">
             <path d="{{ icon_path }}"/>
@@ -105,7 +108,7 @@
         <div class="border-t border-gray-100 mt-1 pt-1">
           <a href="/auth/logout"
              class="flex items-center gap-3 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 transition-colors">
-            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0 text-gray-400" fill="none"
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0 text-brand-300" fill="none"
                  viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
                  stroke-linecap="round" stroke-linejoin="round">
               <path d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/>

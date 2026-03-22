@@ -98,7 +98,7 @@
           <button @click="selectLine(idx)"
                   :data-req-id="line.requirement_id"
                   :class="{
-                    'bg-brand-50 shadow-[inset_3px_0_0_#3d6895]': activeIdx === idx,
+                    'bg-brand-50 shadow-[inset_3px_0_0_#5B8FB8]': activeIdx === idx,
                     'hover:bg-gray-50': activeIdx !== idx
                   }"
                   class="w-full px-4 py-2.5 flex items-center gap-3 text-left border-b border-gray-100 transition-colors">
@@ -216,7 +216,7 @@
                 <template x-for="(offer, oIdx) in activeLine.offers" :key="offer.id">
                   <tr @click="selectOffer(offer)"
                       :class="{
-                        'bg-brand-50 shadow-[inset_2px_0_0_#3d6895]': activeLine.selected_offer_id === offer.id,
+                        'bg-brand-50 shadow-[inset_2px_0_0_#5B8FB8]': activeLine.selected_offer_id === offer.id,
                         'opacity-50': offer.qty_available < activeLine.target_qty
                       }"
                       class="cursor-pointer hover:bg-gray-50 transition-colors">

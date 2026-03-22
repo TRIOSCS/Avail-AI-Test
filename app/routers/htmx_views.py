@@ -312,7 +312,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     elif "/follow-ups" in path:
         current_view = "follow-ups"
     elif "/trouble-tickets" in path:
-        current_view = "tickets"
+        current_view = "trouble-tickets"
     elif "/vendors" in path:
         current_view = "vendors"
     elif "/companies" in path:
@@ -328,7 +328,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     if current_view == "requisitions":
         # Split-panel workspace is the new default for requisitions
         partial_url = "/v2/partials/parts/workspace"
-    elif current_view == "tickets":
+    elif current_view == "trouble-tickets":
         partial_url = "/v2/partials/trouble-tickets/workspace"
     else:
         partial_url = f"/v2/partials/{current_view}"
@@ -361,7 +361,7 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         parts = path.split("/prospecting/")
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/prospecting/{parts[1]}"
-    elif current_view == "tickets" and "/trouble-tickets/" in path:
+    elif current_view == "trouble-tickets" and "/trouble-tickets/" in path:
         parts = path.split("/trouble-tickets/")
         if len(parts) > 1 and parts[1].isdigit():
             partial_url = f"/v2/partials/trouble-tickets/{parts[1]}"
