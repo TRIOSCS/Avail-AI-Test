@@ -80,6 +80,7 @@ class Requirement(Base):
     normalized_mpn = Column(String(255), index=True)
     oem_pn = Column(String(255))
     brand = Column(String(255))
+    manufacturer = Column(String(255), nullable=False, server_default="")
     sku = Column(String(255))
     target_qty = Column(Integer, default=1)
     target_price = Column(Numeric(12, 4))
