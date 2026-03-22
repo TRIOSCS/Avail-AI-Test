@@ -111,6 +111,21 @@ class Requirement(Base):
     )
 
 
+class Manufacturer(Base):
+    """Manufacturer lookup for typeahead normalization.
+
+    Called by: typeahead endpoint, startup seed
+    Depends on: Base
+    """
+
+    __tablename__ = "manufacturers"
+    id = Column(Integer, primary_key=True)
+    canonical_name = Column(String(255), nullable=False, unique=True, index=True)
+    aliases = Column(JSON, default=list)
+    website = Column(String(500))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
 class Sighting(Base):
     __tablename__ = "sightings"
     id = Column(Integer, primary_key=True)

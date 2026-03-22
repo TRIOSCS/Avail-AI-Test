@@ -107,6 +107,7 @@ from .root_cause_group import RootCauseGroup  # noqa: F401
 
 # Core: Requisitions, Requirements & Attachments
 from .sourcing import (  # noqa: F401
+    Manufacturer,
     Requirement,
     RequirementAttachment,
     Requisition,

@@ -41,6 +41,7 @@ def run_startup_migrations() -> None:
         _backfill_fts(conn)
         _seed_system_config(conn)
         _seed_site_contacts(conn)
+        _seed_manufacturers(conn)
         _create_count_triggers(conn)
         _backfill_company_counts(conn)
         _exec(conn, "UPDATE api_sources SET is_active = false WHERE status = 'disabled' AND is_active = true")
@@ -253,6 +254,76 @@ def _seed_system_config(conn) -> None:
             VALUES (:key, :value, :desc)
             ON CONFLICT (key) DO NOTHING""",
             {"key": key, "value": value, "desc": desc},
+        )
+
+
+def _seed_manufacturers(conn) -> None:
+    """Seed manufacturer lookup table (INSERT ON CONFLICT DO NOTHING).
+
+    Called by: run_startup_migrations
+    Depends on: manufacturers table
+    """
+    import json
+
+    seeds = [
+        ("Texas Instruments", ["TI", "Texas Inst"]),
+        ("Analog Devices", ["ADI", "Analog"]),
+        ("Microchip Technology", ["Microchip", "MCHP"]),
+        ("STMicroelectronics", ["ST", "STMicro"]),
+        ("NXP Semiconductors", ["NXP", "Freescale"]),
+        ("ON Semiconductor", ["ON Semi", "onsemi"]),
+        ("Infineon Technologies", ["Infineon", "IFX"]),
+        ("Renesas Electronics", ["Renesas"]),
+        ("Vishay Intertechnology", ["Vishay"]),
+        ("Murata Manufacturing", ["Murata"]),
+        ("TDK Corporation", ["TDK"]),
+        ("Samsung Electronics", ["Samsung"]),
+        ("SK Hynix", ["Hynix"]),
+        ("Micron Technology", ["Micron"]),
+        ("Intel Corporation", ["Intel"]),
+        ("AMD", ["Advanced Micro Devices"]),
+        ("Broadcom Inc.", ["Broadcom", "Avago"]),
+        ("Qualcomm", ["QCOM"]),
+        ("NVIDIA", []),
+        ("Xilinx", ["AMD/Xilinx"]),
+        ("Lattice Semiconductor", ["Lattice"]),
+        ("Maxim Integrated", ["Maxim", "ADI/Maxim"]),
+        ("TE Connectivity", ["TE", "Tyco"]),
+        ("Amphenol", []),
+        ("Molex", []),
+        ("Wurth Elektronik", ["Wurth", "Wuerth"]),
+        ("KEMET", ["Yageo/KEMET"]),
+        ("Yageo Corporation", ["Yageo"]),
+        ("AVX Corporation", ["AVX", "Kyocera/AVX"]),
+        ("Panasonic", []),
+        ("Rohm Semiconductor", ["Rohm", "ROHM"]),
+        ("Diodes Incorporated", ["Diodes Inc"]),
+        ("Nexperia", []),
+        ("Toshiba Electronic Devices", ["Toshiba"]),
+        ("Cypress Semiconductor", ["Cypress", "Infineon/Cypress"]),
+        ("Silicon Labs", ["SiLabs", "Silicon Laboratories"]),
+        ("Allegro MicroSystems", ["Allegro"]),
+        ("Sensata Technologies", ["Sensata"]),
+        ("Littelfuse", []),
+        ("Bourns", []),
+        ("CUI Devices", ["CUI"]),
+        ("MEAN WELL", ["MeanWell"]),
+        ("Winbond Electronics", ["Winbond"]),
+        ("ISSI", ["Integrated Silicon Solution"]),
+        ("Alliance Memory", []),
+        ("Seagate Technology", ["Seagate"]),
+        ("Western Digital", ["WD"]),
+        ("IBM", []),
+        ("Hewlett Packard Enterprise", ["HPE", "HP"]),
+        ("Dell Technologies", ["Dell"]),
+    ]
+    for canonical_name, aliases in seeds:
+        _exec(
+            conn,
+            """INSERT INTO manufacturers (canonical_name, aliases)
+            VALUES (:name, :aliases)
+            ON CONFLICT (canonical_name) DO NOTHING""",
+            {"name": canonical_name, "aliases": json.dumps(aliases)},
         )
 
 
