@@ -158,7 +158,19 @@
 
   {# Requirements table #}
   {% if requirements %}
-  <p class="text-xs text-gray-400 mb-2">{{ requirements|length }} requirement{{ "s" if requirements|length != 1 }}. Double-click any row to edit inline.</p>
+  <div class="flex items-center justify-between mb-3">
+    <p class="text-xs text-gray-400">{{ requirements|length }} requirement{{ "s" if requirements|length != 1 }}. Double-click any row to edit inline.</p>
+    <button hx-get="/v2/partials/quote-builder/{{ req.id }}"
+            hx-target="#quote-builder-content"
+            hx-swap="innerHTML"
+            hx-on::after-swap="$dispatch('open-quote-builder')"
+            class="px-3 py-1.5 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 transition-colors flex items-center gap-1.5">
+      <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+      </svg>
+      Build Quote
+    </button>
+  </div>
   <div class="overflow-x-auto bg-white rounded-lg border border-brand-200">
     <table class="min-w-full divide-y divide-gray-200">
       <thead class="bg-gray-50 sticky top-0">

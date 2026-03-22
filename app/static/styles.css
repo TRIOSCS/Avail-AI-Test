@@ -584,3 +584,24 @@ hr { border-color: #c8d5e2; }
     top: 60px;
   }
 }
+
+/* ── Quote Builder ─────────────────────────────────────────── */
+@keyframes qbPanelSlide {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.qb-panel-enter {
+  animation: qbPanelSlide 0.2s ease-out;
+}
+
+@keyframes qbDecisionFlash {
+  0% { background-color: rgba(16, 185, 129, 0.15); }
+  100% { background-color: transparent; }
+}
+.qb-decision-flash {
+  animation: qbDecisionFlash 0.8s ease-out;
+}
+
+.qb-list::-webkit-scrollbar { width: 4px; }
+.qb-list::-webkit-scrollbar-track { background: transparent; }
+.qb-list::-webkit-scrollbar-thumb { background: #b7c7d8; border-radius: 2px; }

@@ -177,6 +177,8 @@
     </div>
   </div>
 
+  {% include "htmx/partials/shared/quote_builder_shell.html" %}
+
   {# ── Toast (global) ──────────────────────────────────────────── #}
   <div x-data x-show="$store.toast.show" x-cloak x-transition
        @click="$store.toast.show = false"
