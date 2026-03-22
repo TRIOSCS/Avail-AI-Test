@@ -1,5 +1,4 @@
-"""
-test_browser_back_navigation.py — Tests for browser back/forward navigation support.
+"""test_browser_back_navigation.py — Tests for browser back/forward navigation support.
 
 Verifies: HTMX history cache is enabled, popstate sidebar sync is present,
 and the _viewFromPath helper covers all nav sections.
@@ -24,7 +23,7 @@ class TestHistoryCacheEnabled:
         assert "historyCacheSize = 10" in JS_CONTENT
 
     def test_no_full_page_reload_on_back(self):
-        """historyCacheSize > 0 means HTMX restores from cache, not reload."""
+        """HistoryCacheSize > 0 means HTMX restores from cache, not reload."""
         # Just confirm the setting is present and positive
         import re
 
@@ -59,13 +58,15 @@ class TestViewFromPathCoverage:
             "quotes",
             "prospecting",
             "proactive",
-            "strategic",
             "settings",
             "vendors",
             "companies",
             "search",
-            "tasks",
             "requisitions",
+            "trouble-tickets",
+            "follow-ups",
+            "materials",
+            "excess",
         ],
     )
     def test_view_from_path_handles_section(self, section):

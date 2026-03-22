@@ -162,18 +162,20 @@ document.body.addEventListener('htmx:configRequest', (evt) => {
 });
 
 // ── Derive currentView from URL path ────────────────────────
+// SYNC: These must match the nav item IDs in htmx/base.html bottom_items list.
 function _viewFromPath(path) {
     if (/\/buy-plans(\/|$)/.test(path)) return 'buy-plans';
+    if (/\/trouble-tickets(\/|$)/.test(path)) return 'trouble-tickets';
+    if (/\/follow-ups(\/|$)/.test(path)) return 'follow-ups';
     if (/\/quotes(\/|$)/.test(path)) return 'quotes';
     if (/\/prospecting(\/|$)/.test(path)) return 'prospecting';
     if (/\/proactive(\/|$)/.test(path)) return 'proactive';
-    if (/\/strategic(\/|$)/.test(path)) return 'strategic';
     if (/\/settings(\/|$)/.test(path)) return 'settings';
-    if (/\/my-vendors(\/|$)/.test(path)) return 'my-vendors';
     if (/\/vendors(\/|$)/.test(path)) return 'vendors';
     if (/\/companies(\/|$)/.test(path)) return 'companies';
     if (/\/search(\/|$)/.test(path)) return 'search';
-    if (/\/tasks(\/|$)/.test(path)) return 'tasks';
+    if (/\/excess(\/|$)/.test(path)) return 'excess';
+    if (/\/materials(\/|$)/.test(path)) return 'materials';
     if (/\/requisitions(\/|$)/.test(path)) return 'requisitions';
     return 'requisitions';
 }
