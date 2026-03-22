@@ -687,6 +687,7 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite) => ({
   saving: false,
   saved: false,
   loading: true,
+  loadError: null,
   quoteId: null,
   quoteNumber: null,
   saveError: null,
@@ -706,13 +707,19 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite) => ({
   async loadData() {
     try {
       const resp = await fetch(`/v2/partials/quote-builder/${this.reqId}/data`);
+      if (!resp.ok) {
+        this.loadError = `Failed to load quote data (HTTP ${resp.status}). Please close and try again.`;
+        this.loading = false;
+        return;
+      }
       const data = await resp.json();
       this.lines = data.lines || [];
+      this._autoSelectFirst();
     } catch (e) {
-      this.saveError = 'Failed to load data';
+      this.loadError = 'Network error loading quote data. Please check your connection.';
+    } finally {
+      this.loading = false;
     }
-    this.loading = false;
-    this._autoSelectFirst();
   },
 
   _autoSelectFirst() {
@@ -793,6 +800,7 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite) => ({
   },
   get decidedCount() { return this._stats.decided; },
   get skippedCount() { return this._stats.skipped; },
+  get totalCount() { return this.lines.length; },
   get decidedPct() { return this.lines.length ? Math.round(this.decidedCount / this.lines.length * 100) : 0; },
   get totalCost() { return this._stats.cost; },
   get totalSell() { return this._stats.sell; },
@@ -903,9 +911,13 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite) => ({
       };
     });
     try {
+      const csrfToken = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
       const resp = await fetch(`/v2/partials/quote-builder/${this.reqId}/save`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          'X-CSRFToken': csrfToken,
+        },
         body: JSON.stringify({
           lines: linePayload,
           quote_id: this.quoteId,
@@ -920,7 +932,7 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite) => ({
         Alpine.store('toast').type = 'success';
         Alpine.store('toast').show = true;
       } else {
-        this.saveError = data.error || 'Save failed';
+        this.saveError = data.error || data.detail || 'Save failed';
       }
     } catch (e) {
       this.saveError = 'Network error';

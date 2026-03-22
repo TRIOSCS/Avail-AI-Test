@@ -113,9 +113,11 @@ async def quote_builder_save(
 
     try:
         result = save_quote_from_builder(db, req_id=req_id, payload=payload, user=user)
+    except ValueError as e:
+        raise HTTPException(404, str(e))
     except Exception as e:
-        logger.error("Quote builder save failed for req %d: %s", req_id, e)
-        raise HTTPException(500, f"Save failed: {e}")
+        logger.error("Quote builder save failed for req {}: {}", req_id, e)
+        raise HTTPException(500, "Failed to save quote. Please try again.")
 
     return result
 
@@ -140,11 +142,15 @@ async def quote_builder_export_excel(
     if quote.customer_site and quote.customer_site.company:
         customer_name = quote.customer_site.company.name or ""
 
-    xlsx_bytes = build_excel_export(
-        line_items=quote.line_items or [],
-        quote_number=quote.quote_number,
-        customer_name=customer_name,
-    )
+    try:
+        xlsx_bytes = build_excel_export(
+            line_items=quote.line_items or [],
+            quote_number=quote.quote_number,
+            customer_name=customer_name,
+        )
+    except Exception as e:
+        logger.error("Excel export failed for quote {}: {}", quote_id, e)
+        raise HTTPException(500, "Excel export failed. Please try again.")
 
     filename = f"{quote.quote_number}.xlsx"
     return Response(
@@ -180,7 +186,7 @@ async def quote_builder_export_pdf(
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
-        logger.error("PDF generation failed for quote %d: %s", quote_id, e)
+        logger.error("PDF generation failed for quote {}: {}", quote_id, e)
         raise HTTPException(500, "PDF generation failed")
 
     return Response(

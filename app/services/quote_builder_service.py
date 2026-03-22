@@ -46,6 +46,7 @@ def get_builder_data(
                     "packaging": o.packaging,
                     "moq": o.moq,
                     "confidence": o.parse_confidence,
+                    "material_card_id": o.material_card_id,
                     "notes": o.notes,
                 }
             )
@@ -99,8 +100,10 @@ def get_builder_data(
                         }
                     ],
                 }
-    except Exception:
-        pass  # Pricing history is non-critical; degrade gracefully
+    except Exception as e:
+        from loguru import logger
+
+        logger.warning("Pricing history unavailable for req {}: {} — lines will show no history", req_id, e)
 
     return lines
 
@@ -241,9 +244,8 @@ def save_quote_from_builder(
     total_cost = sum(li["qty"] * li["cost_price"] for li in line_items)
     margin_pct = round((total_sell - total_cost) / total_sell * 100, 2) if total_sell > 0 else 0
 
-    # Handle revision
+    # Handle revision vs new quote
     revision = 1
-    quote_number = next_quote_number(db)
     if payload.quote_id:
         old_quote = db.get(Quote, payload.quote_id)
         if old_quote:
@@ -252,9 +254,15 @@ def save_quote_from_builder(
             revision = old_revision + 1
             old_quote.quote_number = f"{quote_number}-R{old_revision}"
             old_quote.status = QuoteStatus.REVISED
+        else:
+            quote_number = next_quote_number(db)
+    else:
+        quote_number = next_quote_number(db)
 
     # Advance requisition status to "quoting" if appropriate
-    if req.status in ("active", "sourcing", "offers"):
+    from app.constants import RequisitionStatus
+
+    if req.status in (RequisitionStatus.ACTIVE, RequisitionStatus.SOURCING, RequisitionStatus.OFFERS):
         try:
             from app.services.requisition_state import transition as req_transition
 
