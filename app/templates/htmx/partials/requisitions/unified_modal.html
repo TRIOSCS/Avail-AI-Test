@@ -205,7 +205,7 @@
         </thead>
         <tbody>
           <template x-for="(part, i) in parts" :key="part._id">
-            <tr class="border-t border-gray-100 hover:bg-gray-50">
+            <tr class="border-t border-gray-100 hover:bg-gray-50" :class="part.primary_mpn && !part.manufacturer ? 'border-l-2 border-red-400' : ''">
               {# MPN #}
               <td class="px-1.5 py-1">
                 <input type="text" name="mpn_display" x-model="part.primary_mpn" placeholder="MPN *"
@@ -220,7 +220,7 @@
                        hx-vals="js:{q: event.target.value}"
                        hx-swap="innerHTML"
                        class="w-full min-w-[90px] px-1 py-0.5 text-[10px] border border-gray-300 rounded focus:ring-1 focus:ring-brand-500"
-                       :class="part.primary_mpn && !part.manufacturer ? 'border-amber-400 bg-amber-50' : ''">
+                       :class="part.primary_mpn && !part.manufacturer ? 'border-red-400' : 'border-gray-300'">
                 <div class="mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-brand-200 rounded-lg shadow-lg max-h-32 overflow-y-auto"
                      x-cloak></div>
               </td>
@@ -322,6 +322,7 @@
           hx-encoding="multipart/form-data"
           @htmx:before-request="saving = true"
           @htmx:after-request="saving = false"
+          @submit="if (hasErrors) { $event.preventDefault(); const firstError = $el.querySelector('.border-red-400'); if (firstError) firstError.scrollIntoView({behavior: 'smooth', block: 'center'}); }"
           class="flex items-center gap-3 w-full">
 
       {# Hidden metadata #}
@@ -351,13 +352,16 @@
         </div>
       </template>
 
-      <button type="submit" :disabled="saving || validCount === 0"
-              class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-50 inline-flex items-center gap-2">
-        <svg x-show="saving" x-cloak class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
-          <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-          <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-        </svg>
-        <span x-text="saving ? 'Saving...' : 'Create Requisition (' + validCount + ' parts)'"></span>
+      <button type="submit"
+              :disabled="parts.length === 0 || hasErrors || saving"
+              :class="hasErrors ? 'bg-amber-500' : 'bg-brand-500'"
+              class="px-4 py-1.5 text-xs font-semibold text-white rounded hover:opacity-90 transition-colors disabled:opacity-50">
+        <template x-if="!hasErrors">
+          <span x-text="saving ? 'Saving...' : 'Create Requisition (' + validCount + ' parts)'"></span>
+        </template>
+        <template x-if="hasErrors">
+          <span x-text="validCount + ' OK · ' + errorCount + ' need manufacturer'"></span>
+        </template>
       </button>
       <button type="button" @click="$dispatch('close-modal')"
               class="px-4 py-2 text-sm font-medium text-gray-500 hover:text-gray-700">Cancel</button>
