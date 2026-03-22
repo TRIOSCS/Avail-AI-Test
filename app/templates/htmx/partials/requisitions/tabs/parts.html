@@ -156,10 +156,9 @@
     </div>
   </div>
 
-  {# Requirements table #}
-  {% if requirements %}
+  {# Build Quote button — always visible #}
   <div class="flex items-center justify-between mb-3">
-    <p class="text-xs text-gray-400">{{ requirements|length }} requirement{{ "s" if requirements|length != 1 }}. Double-click any row to edit inline.</p>
+    <p class="text-xs text-gray-400">{% if requirements %}{{ requirements|length }} requirement{{ "s" if requirements|length != 1 }}. Double-click any row to edit inline.{% else %}No requirements yet.{% endif %}</p>
     <button hx-get="/v2/partials/quote-builder/{{ req.id }}"
             hx-target="#quote-builder-content"
             hx-swap="innerHTML"
@@ -171,6 +170,8 @@
       Build Quote
     </button>
   </div>
+
+  {% if requirements %}
   <div class="overflow-x-auto bg-white rounded-lg border border-brand-200">
     <table class="min-w-full divide-y divide-gray-200">
       <thead class="bg-gray-50 sticky top-0">
