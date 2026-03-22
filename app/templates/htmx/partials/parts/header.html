@@ -37,7 +37,7 @@
         {% if requirement.substitutes %}
           <span class="text-[10px] text-gray-400 uppercase tracking-wide mr-0.5">Subs:</span>
           {% for sub in requirement.substitutes %}
-            <span class="inline-flex px-1.5 py-0.5 text-[11px] font-mono font-medium rounded bg-amber-50 text-amber-700 border border-amber-200 cursor-pointer hover:bg-amber-100 transition-colors">{{ sub }}</span>
+            <span class="inline-flex px-1 py-0 text-[10px] font-mono font-medium rounded bg-gray-50 text-gray-600 border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors">{{ sub }}</span>
           {% endfor %}
         {% else %}
           <span class="text-[10px] text-gray-400 cursor-pointer hover:text-brand-500 transition-colors">+ Add substitutes</span>
