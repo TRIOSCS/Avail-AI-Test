@@ -723,14 +723,13 @@ def test_inline_save_owner(client, test_requisition, test_user):
     assert resp.status_code == 200
 
 
-def test_inline_save_empty_name_no_change(client, test_requisition):
-    """PATCH inline with empty name does not change it."""
+def test_inline_save_empty_name_rejected(client, test_requisition):
+    """PATCH inline with empty name returns 422."""
     resp = client.patch(
         f"/requisitions2/{test_requisition.id}/inline",
         data={"field": "name", "value": "  "},
     )
-    assert resp.status_code == 200
-    assert test_requisition.name in resp.text
+    assert resp.status_code == 422
 
 
 def test_inline_save_not_found(client):

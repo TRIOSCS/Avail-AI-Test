@@ -4093,6 +4093,21 @@ async def companies_redirect(request: Request, path: str = ""):
     from fastapi.responses import RedirectResponse
 
     new_url = f"/v2/customers/{path}" if path else "/v2/customers"
+    if request.url.query:
+        new_url += f"?{request.url.query}"
+    return RedirectResponse(url=new_url, status_code=301)
+
+
+# Redirect old /v2/partials/companies URLs to /v2/partials/customers
+@router.get("/v2/partials/companies", response_class=HTMLResponse)
+@router.get("/v2/partials/companies/{path:path}", response_class=HTMLResponse)
+async def partials_companies_redirect(request: Request, path: str = ""):
+    """Redirect old /v2/partials/companies URLs to /v2/partials/customers."""
+    from fastapi.responses import RedirectResponse
+
+    new_url = f"/v2/partials/customers/{path}" if path else "/v2/partials/customers"
+    if request.url.query:
+        new_url += f"?{request.url.query}"
     return RedirectResponse(url=new_url, status_code=301)
 
 

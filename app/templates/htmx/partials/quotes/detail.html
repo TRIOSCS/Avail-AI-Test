@@ -31,7 +31,7 @@
           {% if quote.customer_site and quote.customer_site.company %}
           <p>
             <span class="text-gray-400">Customer:</span>
-            <a hx-get="/v2/partials/companies/{{ quote.customer_site.company.id }}"
+            <a hx-get="/v2/partials/customers/{{ quote.customer_site.company.id }}"
                hx-target="#main-content" hx-push-url="/v2/companies/{{ quote.customer_site.company.id }}"
                preload="mouseover"
                class="text-brand-500 hover:text-brand-400 cursor-pointer font-medium">{{ quote.customer_site.company.name }}</a>

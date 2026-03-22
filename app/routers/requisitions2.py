@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
 from fastapi.templating import Jinja2Templates
+from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -53,7 +54,8 @@ def _parse_filters(request: Request) -> ReqListFilters:
     cleaned = {k: v for k, v in params.items() if v != ""}
     try:
         return ReqListFilters(**cleaned)
-    except Exception:
+    except Exception as e:
+        logger.warning(f"Invalid filter params ignored: {cleaned} — {e}")
         return ReqListFilters()
 
 
@@ -243,6 +245,11 @@ async def inline_save(
     user: User = Depends(require_user),
 ):
     """Save an inline edit and return the updated full row."""
+    # Validate field against enum
+    valid_fields = {e.value for e in InlineEditField}
+    if field not in valid_fields:
+        return HTMLResponse(f"Invalid field: {field}", status_code=422)
+
     req = get_req_for_user(db, user, req_id, options=[])
     if not req:
         return HTMLResponse("Not found", status_code=404)
@@ -251,9 +258,10 @@ async def inline_save(
 
     if field == "name":
         clean = value.strip()
-        if clean:
-            req.name = clean
-            msg = f"Renamed to '{clean}'"
+        if not clean:
+            return HTMLResponse("Name cannot be empty", status_code=422)
+        req.name = clean
+        msg = f"Renamed to '{clean}'"
 
     elif field == "status":
         from ..services.requisition_state import transition
@@ -262,15 +270,23 @@ async def inline_save(
             transition(req, value, user, db)
             msg = f"Status changed to {value}"
         except ValueError as e:
-            msg = str(e)
+            return HTMLResponse(str(e), status_code=422)
 
     elif field == "urgency":
-        if value in ("normal", "hot", "critical"):
-            req.urgency = value
-            msg = f"Urgency set to {value}"
+        if value not in ("normal", "hot", "critical"):
+            return HTMLResponse(f"Invalid urgency: {value}", status_code=422)
+        req.urgency = value
+        msg = f"Urgency set to {value}"
 
     elif field == "deadline":
-        req.deadline = value if value else None
+        if value:
+            try:
+                datetime.strptime(value, "%Y-%m-%d")
+            except ValueError:
+                return HTMLResponse("Invalid date format", status_code=422)
+            req.deadline = value
+        else:
+            req.deadline = None
         msg = f"Deadline {'set to ' + value if value else 'cleared'}"
 
     elif field == "owner":

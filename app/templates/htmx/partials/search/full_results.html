@@ -104,7 +104,7 @@
     } %}
     {% set bm_partials_map = {
       "requisition": "/v2/partials/requisitions/" ~ bm.id,
-      "company": "/v2/partials/companies/" ~ bm.id,
+      "company": "/v2/partials/customers/" ~ bm.id,
       "vendor": "/v2/partials/vendors/" ~ bm.id,
       "vendor_contact": "/v2/partials/vendors/" ~ (bm.vendor_card_id|default(bm.id)),
       "part": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("")),
@@ -172,7 +172,7 @@
               {% elif group_key == "companies" %}
               <td class="px-4 py-2.5">
                 <a href="/v2/companies/{{ item.id }}"
-                   hx-get="/v2/partials/companies/{{ item.id }}"
+                   hx-get="/v2/partials/customers/{{ item.id }}"
                    hx-target="#main-content"
                    hx-push-url="/v2/companies/{{ item.id }}"
                    class="font-medium text-gray-900 hover:text-brand-600">{{ item.name }}</a>
@@ -294,7 +294,7 @@
             {% elif group_key == "companies" %}
             <td class="px-4 py-2.5">
               <a href="/v2/companies/{{ item.id }}"
-                 hx-get="/v2/partials/companies/{{ item.id }}"
+                 hx-get="/v2/partials/customers/{{ item.id }}"
                  hx-target="#main-content"
                  hx-push-url="/v2/companies/{{ item.id }}"
                  class="font-medium text-gray-900 hover:text-brand-600">{{ item.name }}</a>

@@ -38,7 +38,7 @@
       } %}
       {% set bm_partials_map = {
         "requisition": "/v2/partials/requisitions/" ~ bm.id,
-        "company": "/v2/partials/companies/" ~ bm.id,
+        "company": "/v2/partials/customers/" ~ bm.id,
         "vendor": "/v2/partials/vendors/" ~ bm.id,
         "vendor_contact": "/v2/partials/vendors/" ~ (bm.vendor_card_id|default(bm.id)),
         "part": "/v2/partials/requisitions/" ~ (bm.requisition_id|default("")),
@@ -142,7 +142,7 @@
           {# ── Companies ── #}
           {% elif group_key == "companies" %}
           <a href="/v2/companies/{{ item.id }}"
-             hx-get="/v2/partials/companies/{{ item.id }}"
+             hx-get="/v2/partials/customers/{{ item.id }}"
              hx-target="#main-content"
              hx-push-url="/v2/companies/{{ item.id }}"
              @click="searchOpen = false"
