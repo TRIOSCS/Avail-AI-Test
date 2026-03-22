@@ -360,13 +360,16 @@ async def add_requirements(
     if not req:
         raise HTTPException(404, "Requisition not found")
     raw = await request.json()
-    items = raw if isinstance(raw, list) else [raw]
+    is_batch = isinstance(raw, list)
+    items = raw if is_batch else [raw]
     created = []
     skipped = []
     for idx, item in enumerate(items):
         try:
             parsed = RequirementCreate.model_validate(item)
         except (ValueError, TypeError) as exc:
+            if not is_batch:
+                raise HTTPException(422, str(exc))
             skipped.append({"index": idx, "error": str(exc)})
             continue
         seen_keys = {normalize_mpn_key(parsed.primary_mpn)}
@@ -381,7 +384,7 @@ async def add_requirements(
         mat_card = None
         try:
             nested = db.begin_nested()
-            mat_card = resolve_material_card(parsed.primary_mpn, db)
+            mat_card = resolve_material_card(parsed.primary_mpn, db, parsed.manufacturer)
             nested.commit()
         except Exception:
             nested.rollback()
@@ -391,6 +394,7 @@ async def add_requirements(
             requisition_id=req_id,
             primary_mpn=parsed.primary_mpn,
             normalized_mpn=normalize_mpn_key(parsed.primary_mpn),
+            manufacturer=parsed.manufacturer,
             material_card_id=mat_card.id if mat_card else None,
             target_qty=parsed.target_qty,
             target_price=parsed.target_price,
@@ -668,6 +672,7 @@ async def update_requirement(
         raise HTTPException(403, "Not authorized for this requisition")
     _req_track_fields = [
         "primary_mpn",
+        "manufacturer",
         "target_qty",
         "target_price",
         "firmware",
@@ -679,6 +684,8 @@ async def update_requirement(
         "sale_notes",
     ]
     old_vals = {f: getattr(r, f) for f in _req_track_fields}
+    if data.manufacturer is not None:
+        r.manufacturer = data.manufacturer.strip()
     if data.primary_mpn is not None:
         r.primary_mpn = normalize_mpn(data.primary_mpn) or data.primary_mpn.strip()
         r.normalized_mpn = normalize_mpn_key(data.primary_mpn)
@@ -686,7 +693,7 @@ async def update_requirement(
 
         try:
             nested = db.begin_nested()
-            mat_card = resolve_material_card(data.primary_mpn, db)
+            mat_card = resolve_material_card(data.primary_mpn, db, r.manufacturer or "")
             r.material_card_id = mat_card.id if mat_card else None
             nested.commit()
         except Exception:

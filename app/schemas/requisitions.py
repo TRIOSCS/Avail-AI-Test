@@ -95,6 +95,7 @@ class RequisitionArchiveOut(BaseModel):
 
 class RequirementCreate(BaseModel):
     primary_mpn: str
+    manufacturer: str
     target_qty: int = Field(default=1, ge=1)
     target_price: float | None = Field(default=None, ge=0)
     brand: str | None = None
@@ -107,6 +108,14 @@ class RequirementCreate(BaseModel):
     customer_pn: str | None = None
     need_by_date: date | None = None
     notes: str | None = None
+
+    @field_validator("manufacturer")
+    @classmethod
+    def manufacturer_not_blank(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("manufacturer must not be blank")
+        return v
 
     @field_validator("primary_mpn")
     @classmethod
@@ -142,6 +151,7 @@ class RequirementCreate(BaseModel):
 
 class RequirementUpdate(BaseModel):
     primary_mpn: str | None = None
+    manufacturer: str | None = None
     target_qty: int | None = Field(default=None, ge=1)
     target_price: float | None = Field(default=None, ge=0)
     brand: str | None = None
