@@ -641,7 +641,13 @@ async def requisition_import_parse(
         else:
             text = content.decode("utf-8", errors="replace")
 
+    json_mode = request.query_params.get("format") == "json"
+
     if not text:
+        if json_mode:
+            from fastapi.responses import JSONResponse
+
+            return JSONResponse({"error": "No data provided", "requirements": []})
         ctx = _base_ctx(request, user, "requisitions")
         ctx["error"] = "No data provided. Paste text or upload a file."
         return templates.TemplateResponse("htmx/partials/requisitions/import_modal.html", ctx)
@@ -655,6 +661,17 @@ async def requisition_import_parse(
         name = result.get("name", "Untitled")
     if not customer_name.strip() and result:
         customer_name = result.get("customer_name", "")
+
+    if json_mode:
+        from fastapi.responses import JSONResponse
+
+        return JSONResponse(
+            {
+                "requirements": requirements,
+                "inferred_name": name,
+                "inferred_customer": customer_name,
+            }
+        )
 
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(
