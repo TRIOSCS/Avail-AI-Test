@@ -678,4 +678,257 @@ Alpine.data('unifiedReqModal', () => ({
     },
 }));
 
+Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite) => ({
+  lines: initialLines,
+  reqId: reqId,
+  hasCustomerSite: hasCustomerSite,
+  activeIdx: 0,
+  activeFilter: 'has_offers',
+  saving: false,
+  saved: false,
+  quoteId: null,
+  quoteNumber: null,
+  saveError: null,
+  bulkMarkupPct: 25,
+
+  init() {
+    // Auto-select first line with offers
+    const idx = this.filteredLines.findIndex(l => l.status === 'needs_review' || l.status === 'decided');
+    if (idx >= 0) this.activeIdx = idx;
+    // Keyboard handler
+    this._keyHandler = (e) => this.handleKeydown(e);
+    window.addEventListener('keydown', this._keyHandler);
+  },
+  destroy() {
+    window.removeEventListener('keydown', this._keyHandler);
+  },
+
+  // ── Computed ──
+  get activeLine() { return this.filteredLines[this.activeIdx] ?? null; },
+  get selectedOffer() {
+    if (!this.activeLine) return null;
+    return this.activeLine.offers.find(o => o.id === this.activeLine.selected_offer_id) ?? null;
+  },
+  get margin() {
+    if (!this.activeLine?.sell_price || !this.selectedOffer) return null;
+    const sell = this.activeLine.sell_price;
+    const cost = this.selectedOffer.unit_price;
+    return sell > 0 ? ((sell - cost) / sell * 100) : 0;
+  },
+  get extCost() {
+    if (!this.activeLine || !this.selectedOffer) return 0;
+    return (this.activeLine.target_qty || 0) * this.selectedOffer.unit_price;
+  },
+  get extSell() {
+    if (!this.activeLine) return 0;
+    return (this.activeLine.target_qty || 0) * (this.activeLine.sell_price || 0);
+  },
+  get lineProfit() { return this.extSell - this.extCost; },
+  get minPrice() {
+    if (!this.activeLine?.offers.length) return 0;
+    return Math.min(...this.activeLine.offers.map(o => o.unit_price));
+  },
+  get maxPrice() {
+    if (!this.activeLine?.offers.length) return 0;
+    return Math.max(...this.activeLine.offers.map(o => o.unit_price));
+  },
+  pricePosition(price) {
+    const range = this.maxPrice - this.minPrice;
+    if (range === 0) return 50;
+    return Math.round(((price - this.minPrice) / range) * 100);
+  },
+
+  get filterOptions() {
+    return [
+      { key: 'all', label: 'All', count: this.lines.length },
+      { key: 'has_offers', label: 'Has Offers', count: this.lines.filter(l => l.offer_count > 0).length },
+      { key: 'needs_review', label: 'Needs Review', count: this.lines.filter(l => l.status === 'needs_review').length },
+      { key: 'decided', label: 'Decided', count: this.decidedCount },
+      { key: 'skipped', label: 'Skipped', count: this.skippedCount },
+    ];
+  },
+  get filteredLines() {
+    if (this.activeFilter === 'all') return this.lines;
+    if (this.activeFilter === 'has_offers') return this.lines.filter(l => l.offer_count > 0);
+    return this.lines.filter(l => l.status === this.activeFilter);
+  },
+  get decidedCount() { return this.lines.filter(l => l.status === 'decided').length; },
+  get skippedCount() { return this.lines.filter(l => l.status === 'skipped').length; },
+  get totalCount() { return this.lines.length; },
+  get decidedPct() { return this.totalCount ? Math.round(this.decidedCount / this.totalCount * 100) : 0; },
+
+  get totalCost() {
+    return this.lines.filter(l => l.status === 'decided').reduce((s, l) => {
+      const offer = l.offers.find(o => o.id === l.selected_offer_id);
+      return s + (l.target_qty || 0) * (offer?.unit_price || 0);
+    }, 0);
+  },
+  get totalSell() {
+    return this.lines.filter(l => l.status === 'decided').reduce((s, l) => {
+      return s + (l.target_qty || 0) * (l.sell_price || 0);
+    }, 0);
+  },
+  get blendedMargin() {
+    return this.totalSell > 0 ? ((this.totalSell - this.totalCost) / this.totalSell * 100) : 0;
+  },
+
+  // ── Actions ──
+  selectLine(idx) { this.activeIdx = idx; },
+  setFilter(f) { this.activeFilter = f; this.activeIdx = 0; },
+
+  selectOffer(offer) {
+    if (!this.activeLine) return;
+    this.activeLine.selected_offer_id = offer.id;
+    if (!this.activeLine.sell_price_manual) {
+      this.activeLine.sell_price = offer.unit_price;
+    }
+  },
+
+  confirmDecision() {
+    if (!this.activeLine?.selected_offer_id || !this.activeLine?.sell_price) return;
+    this.activeLine.status = 'decided';
+    // Flash the left-panel row
+    this.$nextTick(() => {
+      const rows = this.$el.querySelectorAll('.qb-list button');
+      if (rows[this.activeIdx]) {
+        rows[this.activeIdx].classList.add('qb-decision-flash');
+        setTimeout(() => rows[this.activeIdx]?.classList.remove('qb-decision-flash'), 800);
+      }
+    });
+    // Auto-advance to next undecided
+    this.advanceToNext();
+  },
+
+  skipLine() {
+    if (!this.activeLine) return;
+    this.activeLine.status = 'skipped';
+    this.advanceToNext();
+  },
+
+  undoDecision() {
+    if (!this.activeLine) return;
+    this.activeLine.status = this.activeLine.offer_count > 0 ? 'needs_review' : 'no_offers';
+    this.activeLine.selected_offer_id = null;
+    this.activeLine.sell_price = null;
+    this.activeLine.sell_price_manual = false;
+  },
+
+  advanceToNext() {
+    const nextIdx = this.filteredLines.findIndex((l, i) => i > this.activeIdx && l.status === 'needs_review');
+    if (nextIdx >= 0) {
+      this.activeIdx = nextIdx;
+    } else {
+      // Wrap around or stay
+      const wrapIdx = this.filteredLines.findIndex(l => l.status === 'needs_review');
+      if (wrapIdx >= 0) this.activeIdx = wrapIdx;
+    }
+  },
+
+  applyBulkMarkup() {
+    const pct = this.bulkMarkupPct;
+    if (!pct || pct <= 0) return;
+    this.lines.forEach(l => {
+      if (l.status === 'decided' && !l.sell_price_manual) {
+        const offer = l.offers.find(o => o.id === l.selected_offer_id);
+        if (offer) {
+          l.sell_price = parseFloat((offer.unit_price * (1 + pct / 100)).toFixed(4));
+        }
+      }
+    });
+  },
+
+  closeBuilder() {
+    const hasChanges = this.lines.some(l => l.status === 'decided' || l.status === 'skipped');
+    if (hasChanges && !this.saved) {
+      if (!confirm('You have unsaved line decisions. Close anyway?')) return;
+    }
+    window.dispatchEvent(new CustomEvent('close-quote-builder'));
+  },
+
+  async saveQuote() {
+    this.saving = true;
+    this.saveError = null;
+    const decided = this.lines.filter(l => l.status === 'decided');
+    const linePayload = decided.map(l => {
+      const offer = l.offers.find(o => o.id === l.selected_offer_id);
+      const cost = offer?.unit_price || 0;
+      const sell = l.sell_price || 0;
+      const margin = sell > 0 ? parseFloat(((sell - cost) / sell * 100).toFixed(2)) : 0;
+      return {
+        requirement_id: l.requirement_id,
+        offer_id: l.selected_offer_id,
+        mpn: l.mpn,
+        manufacturer: l.manufacturer,
+        qty: l.target_qty,
+        cost_price: cost,
+        sell_price: sell,
+        margin_pct: margin,
+        lead_time: offer?.lead_time || null,
+        date_code: offer?.date_code || null,
+        condition: offer?.condition || null,
+        packaging: offer?.packaging || null,
+        moq: offer?.moq || null,
+        material_card_id: offer?.material_card_id || null,
+        notes: l.buyer_notes || null,
+      };
+    });
+    try {
+      const resp = await fetch(`/v2/partials/quote-builder/${this.reqId}/save`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lines: linePayload,
+          quote_id: this.quoteId,
+        }),
+      });
+      const data = await resp.json();
+      if (resp.ok && data.ok) {
+        this.quoteId = data.quote_id;
+        this.quoteNumber = data.quote_number;
+        this.saved = true;
+        Alpine.store('toast').message = `Quote ${data.quote_number} saved`;
+        Alpine.store('toast').type = 'success';
+        Alpine.store('toast').show = true;
+      } else {
+        this.saveError = data.error || 'Save failed';
+      }
+    } catch (e) {
+      this.saveError = 'Network error';
+    }
+    this.saving = false;
+  },
+
+  exportExcel() {
+    if (!this.quoteId) return;
+    window.location.href = `/v2/partials/quote-builder/${this.reqId}/export/excel?quote_id=${this.quoteId}`;
+  },
+  exportPdf() {
+    if (!this.quoteId) return;
+    window.location.href = `/v2/partials/quote-builder/${this.reqId}/export/pdf?quote_id=${this.quoteId}`;
+  },
+
+  handleKeydown(e) {
+    if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) {
+      if (e.key === 'Enter' && e.target.matches('[x-ref=sellPriceInput]')) {
+        e.preventDefault();
+        this.confirmDecision();
+      }
+      return;
+    }
+    if (e.key === 'j' || e.key === 'ArrowDown') { e.preventDefault(); this.activeIdx = Math.min(this.activeIdx + 1, this.filteredLines.length - 1); }
+    if (e.key === 'k' || e.key === 'ArrowUp') { e.preventDefault(); this.activeIdx = Math.max(this.activeIdx - 1, 0); }
+    if (e.key === 'Tab' && !e.shiftKey) { e.preventDefault(); this.$refs.sellPriceInput?.focus(); }
+    if (e.key >= '1' && e.key <= '9') {
+      const idx = parseInt(e.key) - 1;
+      if (this.activeLine?.offers[idx]) this.selectOffer(this.activeLine.offers[idx]);
+    }
+    if (e.key === 's') this.skipLine();
+    if (e.key === 'f') {
+      const keys = this.filterOptions.map(f => f.key);
+      const cur = keys.indexOf(this.activeFilter);
+      this.setFilter(keys[(cur + 1) % keys.length]);
+    }
+  },
+}));
+
 Alpine.start();
