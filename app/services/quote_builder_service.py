@@ -188,3 +188,105 @@ def build_excel_export(
     buf = BytesIO()
     wb.save(buf)
     return buf.getvalue()
+
+
+def save_quote_from_builder(
+    db: Session,
+    req_id: int,
+    payload,
+    user,
+) -> dict:
+    """Create or revise a Quote from the builder's save payload.
+
+    If payload.quote_id is set, marks the old quote as 'revised' and creates a new
+    revision with the updated line items. Otherwise creates a fresh quote.
+    """
+    from app.models import Quote, QuoteLine, Requisition
+    from app.services.crm_service import next_quote_number
+
+    req = db.get(Requisition, req_id)
+    if not req:
+        raise ValueError("Requisition not found")
+
+    # Build line_items dicts (matching the format create_quote uses internally)
+    line_items = []
+    for li in payload.lines:
+        line_items.append(
+            {
+                "mpn": li.mpn,
+                "manufacturer": li.manufacturer,
+                "qty": li.qty,
+                "cost_price": li.cost_price,
+                "sell_price": li.sell_price,
+                "margin_pct": li.margin_pct,
+                "lead_time": li.lead_time,
+                "date_code": li.date_code,
+                "condition": li.condition,
+                "packaging": li.packaging,
+                "moq": li.moq,
+                "offer_id": li.offer_id,
+                "material_card_id": li.material_card_id,
+                "notes": li.notes,
+            }
+        )
+
+    total_sell = sum(li["qty"] * li["sell_price"] for li in line_items)
+    total_cost = sum(li["qty"] * li["cost_price"] for li in line_items)
+    margin_pct = round((total_sell - total_cost) / total_sell * 100, 2) if total_sell > 0 else 0
+
+    # Handle revision
+    revision = 1
+    quote_number = next_quote_number(db)
+    if payload.quote_id:
+        old_quote = db.get(Quote, payload.quote_id)
+        if old_quote:
+            old_revision = old_quote.revision or 1
+            quote_number = old_quote.quote_number
+            revision = old_revision + 1
+            # Rename old quote to include revision suffix, then mark revised
+            old_quote.quote_number = f"{quote_number}-R{old_revision}"
+            old_quote.status = "revised"
+
+    quote = Quote(
+        requisition_id=req_id,
+        customer_site_id=req.customer_site_id,
+        quote_number=quote_number,
+        revision=revision,
+        line_items=line_items,
+        subtotal=total_sell,
+        total_cost=total_cost,
+        total_margin_pct=margin_pct,
+        payment_terms=payload.payment_terms,
+        shipping_terms=payload.shipping_terms,
+        validity_days=payload.validity_days,
+        notes=payload.notes,
+        created_by_id=user.id,
+    )
+    db.add(quote)
+    db.flush()  # Get quote.id
+
+    # Write structured QuoteLine rows
+    for li in line_items:
+        db.add(
+            QuoteLine(
+                quote_id=quote.id,
+                material_card_id=li.get("material_card_id"),
+                offer_id=li.get("offer_id"),
+                mpn=li.get("mpn", ""),
+                manufacturer=li.get("manufacturer"),
+                qty=li.get("qty"),
+                cost_price=li.get("cost_price"),
+                sell_price=li.get("sell_price"),
+                margin_pct=li.get("margin_pct"),
+                currency="USD",
+            )
+        )
+
+    db.commit()
+
+    return {
+        "ok": True,
+        "quote_id": quote.id,
+        "quote_number": quote.quote_number,
+        "revision": quote.revision,
+    }
