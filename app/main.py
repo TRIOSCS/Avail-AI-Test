@@ -620,6 +620,7 @@ from .routers.outreach import router as outreach_router
 from .routers.proactive import router as proactive_router
 from .routers.prospect_pool import router as prospect_pool_router
 from .routers.prospect_suggested import router as prospect_suggested_router
+from .routers.quote_builder import router as quote_builder_router
 from .routers.requisitions import router as reqs_router
 from .routers.rfq import router as rfq_router
 from .routers.sources import router as sources_router
@@ -669,4 +670,5 @@ app.include_router(vendor_analytics_router)
 app.include_router(vendor_contacts_router)
 app.include_router(vendor_inquiry_router)
 app.include_router(vendors_crud_router)
+app.include_router(quote_builder_router)
 app.include_router(htmx_views_router)

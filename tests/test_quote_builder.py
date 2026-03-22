@@ -311,3 +311,39 @@ def test_save_quote_revision(db_session, test_user):
     # Old quote should be "revised"
     old_quote = db_session.get(Quote, quote_id_1)
     assert old_quote.status == "revised"
+
+
+def test_builder_modal_endpoint_404_bad_req(client):
+    resp = client.get("/v2/partials/quote-builder/99999")
+    assert resp.status_code == 404
+
+
+def test_builder_modal_opens_successfully(client, db_session, test_user):
+    """Verify the modal endpoint returns 200 with valid data."""
+    company = Company(name="Test Co")
+    db_session.add(company)
+    db_session.flush()
+    site = CustomerSite(company_id=company.id, site_name="HQ")
+    db_session.add(site)
+    db_session.flush()
+    req = Requisition(name="Test Req", customer_site_id=site.id, created_by=test_user.id, status="active")
+    db_session.add(req)
+    db_session.commit()
+    resp = client.get(f"/v2/partials/quote-builder/{req.id}")
+    assert resp.status_code == 200
+    assert "Quote Builder" in resp.text
+
+
+def test_builder_save_endpoint_rejects_empty_lines(client):
+    resp = client.post("/v2/partials/quote-builder/1/save", json={"lines": []})
+    assert resp.status_code == 422
+
+
+def test_builder_excel_export_404_bad_quote(client):
+    resp = client.get("/v2/partials/quote-builder/1/export/excel?quote_id=99999")
+    assert resp.status_code == 404
+
+
+def test_builder_pdf_export_404_bad_quote(client):
+    resp = client.get("/v2/partials/quote-builder/1/export/pdf?quote_id=99999")
+    assert resp.status_code == 404
