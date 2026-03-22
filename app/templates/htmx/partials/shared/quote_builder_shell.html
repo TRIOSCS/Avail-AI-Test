@@ -7,7 +7,7 @@
 <div x-data="{ qbOpen: false }"
      @open-quote-builder.window="qbOpen = true"
      @close-quote-builder.window="qbOpen = false"
-     @keydown.escape.window.stop="if(qbOpen) { const qb = document.querySelector('[x-data*=quoteBuilder]'); if(qb && qb.__x) { qb.__x.$data.closeBuilder(); } else { qbOpen = false; } }"
+     @keydown.escape.window.stop="if(qbOpen) { const el = document.querySelector('[x-data*=quoteBuilder]'); if(el) { Alpine.$data(el).closeBuilder(); } else { qbOpen = false; } }"
      x-show="qbOpen"
      x-cloak
      class="fixed inset-0 z-[60] flex items-stretch justify-stretch">

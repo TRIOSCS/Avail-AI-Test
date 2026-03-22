@@ -270,6 +270,11 @@ def save_quote_from_builder(
         except ValueError:
             pass  # already in quoting or later state
 
+    # Load customer site for default payment/shipping terms
+    from app.models import CustomerSite
+
+    site = db.get(CustomerSite, req.customer_site_id) if req.customer_site_id else None
+
     quote = Quote(
         requisition_id=req_id,
         customer_site_id=req.customer_site_id,
@@ -279,8 +284,8 @@ def save_quote_from_builder(
         subtotal=total_sell,
         total_cost=total_cost,
         total_margin_pct=margin_pct,
-        payment_terms=payload.payment_terms,
-        shipping_terms=payload.shipping_terms,
+        payment_terms=payload.payment_terms or (site.payment_terms if site else None),
+        shipping_terms=payload.shipping_terms or (site.shipping_terms if site else None),
         validity_days=payload.validity_days,
         notes=payload.notes,
         created_by_id=user.id,
