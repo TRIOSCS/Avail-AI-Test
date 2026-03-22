@@ -678,11 +678,12 @@ Alpine.data('unifiedReqModal', () => ({
     },
 }));
 
-Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementIds) => ({
+Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementIds, multiReqIds) => ({
   lines: initialLines,
   reqId: reqId,
   hasCustomerSite: hasCustomerSite,
   requirementIds: requirementIds || '',
+  multiReqIds: multiReqIds || '',
   activeIdx: 0,
   activeFilter: 'has_offers',
   saving: false,
@@ -707,7 +708,12 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementId
 
   async loadData() {
     try {
-      const dataUrl = `/v2/partials/quote-builder/${this.reqId}/data` + (this.requirementIds ? `?requirement_ids=${this.requirementIds}` : '');
+      let dataUrl;
+      if (this.multiReqIds) {
+        dataUrl = `/v2/partials/quote-builder/multi/data?requisition_ids=${this.multiReqIds}`;
+      } else {
+        dataUrl = `/v2/partials/quote-builder/${this.reqId}/data` + (this.requirementIds ? `?requirement_ids=${this.requirementIds}` : '');
+      }
       const resp = await fetch(dataUrl);
       if (!resp.ok) {
         this.loadError = `Failed to load quote data (HTTP ${resp.status}). Please close and try again.`;

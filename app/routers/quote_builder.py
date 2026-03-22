@@ -63,6 +63,84 @@ async def quote_builder_modal(
     )
 
 
+@router.get("/v2/partials/quote-builder/multi")
+async def quote_builder_modal_multi(
+    request: Request,
+    requisition_ids: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Open quote builder for multiple requisitions selected from the list page.
+
+    Picks the first requisition as the primary (for customer site/quote record), loads
+    requirements from all selected requisitions.
+    """
+    from ..dependencies import get_req_for_user
+
+    try:
+        req_id_list = [int(x.strip()) for x in requisition_ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(400, "Invalid requisition IDs")
+    if not req_id_list:
+        raise HTTPException(400, "No requisitions selected")
+
+    # Use the first requisition as primary
+    primary_req = get_req_for_user(db, user, req_id_list[0])
+    if not primary_req:
+        raise HTTPException(404, "Requisition not found")
+
+    customer_name = ""
+    has_customer_site = bool(primary_req.customer_site_id)
+    if has_customer_site:
+        from ..models import CustomerSite
+
+        site = db.get(CustomerSite, primary_req.customer_site_id)
+        if site and site.company:
+            customer_name = site.company.name or ""
+
+    from ..main import templates
+
+    return templates.TemplateResponse(
+        "htmx/partials/quote_builder/modal.html",
+        {
+            "request": request,
+            "req": primary_req,
+            "customer_name": customer_name,
+            "has_customer_site": has_customer_site,
+            "requirement_ids": "",
+            "multi_req_ids": requisition_ids,
+        },
+    )
+
+
+@router.get("/v2/partials/quote-builder/multi/data")
+async def quote_builder_data_multi(
+    requisition_ids: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return line data from multiple requisitions for the quote builder."""
+    from ..dependencies import get_req_for_user
+    from ..services.quote_builder_service import apply_smart_defaults, get_builder_data
+
+    try:
+        req_id_list = [int(x.strip()) for x in requisition_ids.split(",") if x.strip()]
+    except ValueError:
+        raise HTTPException(400, "Invalid requisition IDs")
+    if not req_id_list:
+        raise HTTPException(400, "No requisitions selected")
+
+    all_lines = []
+    for rid in req_id_list:
+        req = get_req_for_user(db, user, rid)
+        if req:
+            lines = get_builder_data(rid, db)
+            all_lines.extend(lines)
+
+    apply_smart_defaults(all_lines)
+    return {"lines": all_lines}
+
+
 @router.get("/v2/partials/quote-builder/{req_id}/data")
 async def quote_builder_data(
     req_id: int,
