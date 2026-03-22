@@ -176,6 +176,7 @@
             </th>
             <th>MPN</th>
             <th>Brand</th>
+            <th>Mfr</th>
             <th>Status</th>
             <th>Qty</th>
             <th>Tgt $</th>
@@ -199,6 +200,7 @@
             </td>
             <td class="font-semibold">{{ part.primary_mpn or '—' }}</td>
             <td class="max-w-[100px] truncate" title="{{ part.brand or '' }}">{{ part.brand or '—' }}</td>
+            <td class="max-w-[100px] truncate" title="{{ part.manufacturer or '' }}">{{ part.manufacturer or '—' }}</td>
             <td>{{ status_badge(part.sourcing_status or 'open') }}</td>
             <td>{{ part.target_qty or '—' }}</td>
             <td>{{ '$%.2f'|format(part.target_price) if part.target_price else '—' }}</td>

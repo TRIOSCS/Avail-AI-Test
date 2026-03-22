@@ -8811,7 +8811,9 @@ async def parts_list_partial(
     all_sub_mpns = []
     for r in requirements:
         if r.substitutes:
-            all_sub_mpns.extend(r.substitutes)
+            for sub in r.substitutes:
+                mpn = sub["mpn"] if isinstance(sub, dict) else sub
+                all_sub_mpns.append(mpn)
 
     sub_card_map = {}
     if all_sub_mpns:

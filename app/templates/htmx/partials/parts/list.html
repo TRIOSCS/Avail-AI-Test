@@ -215,16 +215,19 @@
             <td colspan="{{ col_defs|length }}" class="!py-0.5 !pl-5">
               <div class="flex items-center gap-1 flex-wrap">
                 <span class="text-[9px] text-gray-400 uppercase tracking-wide">subs:</span>
-                {% for sub_mpn in req.substitutes %}
+                {% for sub in req.substitutes %}
+                {% set sub_mpn = sub.mpn if sub is mapping else sub %}
+                {% set sub_mfr = sub.manufacturer if sub is mapping else '' %}
                 {% if sub_card_map.get(sub_mpn) %}
                 <a hx-get="/v2/partials/materials/{{ sub_card_map[sub_mpn] }}"
                    hx-target="#main-content"
                    hx-push-url="/v2/materials/{{ sub_card_map[sub_mpn] }}"
                    @click.stop
                    class="px-1 py-0 text-[10px] font-mono text-gray-600 bg-gray-50 border border-gray-200 rounded hover:bg-gray-100 hover:text-gray-800 transition-colors cursor-pointer"
-                   title="View material card for {{ sub_mpn }}">{{ sub_mpn }}</a>
+                   title="{{ sub_mpn }}{% if sub_mfr %} — {{ sub_mfr }}{% endif %}">{{ sub_mpn }}</a>
                 {% else %}
-                <span class="px-1 py-0 text-[10px] font-mono text-gray-500 bg-gray-50 border border-gray-200 rounded">{{ sub_mpn }}</span>
+                <span class="px-1 py-0 text-[10px] font-mono text-gray-500 bg-gray-50 border border-gray-200 rounded"
+                      title="{{ sub_mpn }}{% if sub_mfr %} — {{ sub_mfr }}{% endif %}">{{ sub_mpn }}</span>
                 {% endif %}
                 {% endfor %}
               </div>

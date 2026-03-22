@@ -20,6 +20,16 @@
     <div class="min-w-0">
       <div class="flex items-baseline gap-2">
         <span class="text-lg font-bold text-gray-900 truncate">{{ requirement.primary_mpn or '—' }}</span>
+        {% if requirement.manufacturer %}
+        <span class="text-sm text-gray-400">·</span>
+        <span id="hdr-manufacturer"
+              hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/manufacturer"
+              hx-target="#hdr-manufacturer" hx-swap="outerHTML"
+              class="text-sm text-gray-500 cursor-pointer hover:text-brand-500 truncate"
+              title="Click to edit manufacturer">
+          {{ requirement.manufacturer }}
+        </span>
+        {% endif %}
         {# Brand — inline editable #}
         <span id="hdr-brand"
               hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/brand"
@@ -37,7 +47,10 @@
         {% if requirement.substitutes %}
           <span class="text-[10px] text-gray-400 uppercase tracking-wide mr-0.5">Subs:</span>
           {% for sub in requirement.substitutes %}
-            <span class="inline-flex px-1 py-0 text-[10px] font-mono font-medium rounded bg-gray-50 text-gray-600 border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors">{{ sub }}</span>
+            {% set sub_mpn = sub.mpn if sub is mapping else sub %}
+            {% set sub_mfr = sub.manufacturer if sub is mapping else '' %}
+            <span class="inline-flex px-1 py-0 text-[10px] font-mono font-medium rounded bg-gray-50 text-gray-600 border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors"
+                  title="{{ sub_mfr }}">{{ sub_mpn }}{% if sub_mfr %} ({{ sub_mfr[:15] }}){% endif %}</span>
           {% endfor %}
         {% else %}
           <span class="text-[10px] text-gray-400 cursor-pointer hover:text-brand-500 transition-colors">+ Add substitutes</span>
