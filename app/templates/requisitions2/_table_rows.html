@@ -4,15 +4,7 @@
   Called by: _table.html (include), GET /requisitions2/table/rows
   Depends on: requisitions list, user object, HTMX, Alpine.js
 #}
-{% set status_styles = {
-  'active': 'bg-brand-100 text-brand-600',
-  'draft': 'bg-gray-100 text-gray-600',
-  'sourcing': 'bg-amber-50 text-amber-700',
-  'archived': 'bg-gray-100 text-gray-600',
-  'won': 'bg-emerald-50 text-emerald-700',
-  'lost': 'bg-rose-50 text-rose-700',
-  'closed': 'bg-gray-100 text-gray-600',
-} %}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
 
 {% for req in requisitions %}
 <tr id="rq2-row-{{ req.id }}"
@@ -40,9 +32,7 @@
     </div>
   </td>
   <td class="px-3 py-2">
-    <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_styles.get(req.status, 'bg-gray-100 text-gray-600') }}">
-      {{ req.status }}
-    </span>
+    {{ status_badge(req.status) }}
   </td>
   <td class="px-3 py-2 text-sm text-gray-600 truncate max-w-[140px]">{{ req.customer_display or '—' }}</td>
   <td class="px-3 py-2 text-sm text-right text-gray-800">{{ req.requirement_count }}</td>

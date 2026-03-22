@@ -1,17 +1,13 @@
 {# requisitions2/_modal.html — Detail modal for a single requisition.
    Called by: GET /requisitions2/{id}/modal
    Receives: req (dict with id/name/status/etc), requirements (list), user
-   Depends on: Alpine.js, HTMX, brand palette
+   Depends on: Alpine.js, HTMX, brand palette, shared _macros.html
 #}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
 <div class="p-6 space-y-4">
   <div class="flex items-center justify-between">
     <h2 class="text-lg font-semibold text-gray-900">{{ req.name }}</h2>
-    <span class="px-2 py-0.5 text-xs font-medium rounded-full
-      {% if req.status == 'open' %}bg-green-100 text-green-700
-      {% elif req.status == 'closed' %}bg-gray-100 text-gray-500
-      {% else %}bg-yellow-100 text-yellow-700{% endif %}">
-      {{ req.status|title }}
-    </span>
+    {{ status_badge(req.status) }}
   </div>
 
   <dl class="grid grid-cols-2 gap-x-4 gap-y-2 text-sm">

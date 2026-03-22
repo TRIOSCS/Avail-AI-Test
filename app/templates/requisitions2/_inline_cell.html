@@ -19,7 +19,7 @@
   <select name="value"
           class="w-full px-2 py-1 text-sm border border-brand-300 rounded focus:ring-2 focus:ring-brand-500"
           @change="this.form.requestSubmit()">
-    {% for s in ['draft', 'active', 'sourcing', 'won', 'lost', 'closed', 'archived'] %}
+    {% for s in ['draft', 'active', 'sourcing', 'offers', 'quoting', 'quoted', 'reopened', 'won', 'lost', 'archived'] %}
     <option value="{{ s }}" {{ 'selected' if req.status == s }}>{{ s|title }}</option>
     {% endfor %}
   </select>
