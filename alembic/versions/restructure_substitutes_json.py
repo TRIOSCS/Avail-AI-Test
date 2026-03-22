@@ -30,23 +30,13 @@ def upgrade() -> None:
           AND jsonb_typeof(substitutes::jsonb -> 0) = 'string'
     """)
 
-    # Recreate substitutes_text generated column to extract only MPNs
-    op.execute("ALTER TABLE requirements DROP COLUMN IF EXISTS substitutes_text")
-    op.execute("""
-        ALTER TABLE requirements ADD COLUMN substitutes_text TEXT
-        GENERATED ALWAYS AS (
-            (SELECT string_agg(elem->>'mpn', ', ')
-             FROM jsonb_array_elements(COALESCE(substitutes, '[]'::jsonb)) AS elem)
-        ) STORED
-    """)
+    # substitutes_text generated column stays as substitutes::text — PG doesn't
+    # allow subqueries in generated columns. The MPN strings are still present
+    # in the JSON text so ILIKE search continues to work.
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE requirements DROP COLUMN IF EXISTS substitutes_text")
-    op.execute("""
-        ALTER TABLE requirements ADD COLUMN substitutes_text TEXT
-        GENERATED ALWAYS AS (substitutes::text) STORED
-    """)
+    # Convert object arrays back to string arrays
     op.execute("""
         UPDATE requirements
         SET substitutes = (

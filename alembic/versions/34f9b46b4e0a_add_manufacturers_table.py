@@ -1,7 +1,7 @@
 """Add manufacturers table.
 
 Revision ID: 34f9b46b4e0a
-Revises: fb863358a701
+Revises: 9c7e1ed1db3e
 Create Date: 2026-03-22 00:00:00.000000
 """
 
@@ -13,7 +13,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "34f9b46b4e0a"
-down_revision: Union[str, None] = "fb863358a701"
+down_revision: Union[str, None] = "9c7e1ed1db3e"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
