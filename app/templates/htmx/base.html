@@ -4,17 +4,11 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}AvailAI{% endblock %}</title>
-  <link rel="icon" type="image/svg+xml" href="/static/trio_honeycomb.svg?v=3">
-  <link rel="preconnect" href="https://fonts.googleapis.com">
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300..800;1,9..40,300..800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   {% for css_file in vite_css|default([]) %}
   <link rel="stylesheet" href="/static/{{ css_file }}">
   {% endfor %}
   <script type="module" src="/static/{{ vite_js|default('assets/htmx_app.js') }}"></script>
   <style>
-    *, *::before, *::after { font-family: 'DM Sans', system-ui, -apple-system, sans-serif; }
-    body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
     [x-cloak] { display: none !important; }
     .htmx-indicator { display: none; }
     .htmx-request .htmx-indicator { display: inline-block; }
@@ -23,162 +17,239 @@
     .htmx-settling { opacity: 1; transition: opacity 0.15s ease-in; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner { animation: spin 0.6s linear infinite; }
+    /* loading-states extension: show/hide/disable elements during HTMX requests */
     [data-loading] { display: none; }
     [data-loading].htmx-request { display: inline-block; }
+    [data-loading-class] { /* classes added/removed automatically by extension */ }
     [data-loading-disable].htmx-request { pointer-events: none; opacity: 0.5; }
+    /* Safety: never let swapping state persist more than 2s */
     .htmx-swapping { transition: opacity 0.15s ease-out !important; }
   </style>
 </head>
 <body class="h-full"
       hx-ext="alpine-morph, preload, response-targets, loading-states, head-support, class-tools, multi-swap, remove-me, restored"
-      x-data="{ currentView: '{{ current_view|default("requisitions") }}' }"
+      x-data="{ sidebarOpen: false, currentView: '{{ current_view|default("requisitions") }}' }">
   {% block body %}
+  <div class="min-h-full flex">
 
-  {# ── Topbar: logo + centered search ──────────────────────────── #}
-  <header class="sticky top-0 z-30 border-b-2 border-brand-200 bg-white" style="height:52px;">
-    <div class="h-full grid items-center px-4" style="grid-template-columns: 140px 1fr 140px;">
-      {# Left: Logo #}
-      <a href="/v2" hx-get="/v2/partials/parts/workspace" hx-target="#main-content" hx-push-url="/v2/requisitions"
-         @click="currentView = 'requisitions'"
-         class="flex items-center">
-        <img src="/static/avail_logo_cropped.png" alt="AVAIL" style="height:47px">
-      </a>
-
-      {# Center: Global omni search #}
-      <div class="relative mx-auto w-full max-w-xl px-4" x-data="{ searchOpen: false, aiSearching: false }">
-        <div class="relative">
-          <svg xmlns="http://www.w3.org/2000/svg" x-show="!aiSearching"
-               class="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-brand-400"
-               fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
-          </svg>
-          {# AI search spinner — shown while waiting for AI response #}
-          <svg x-show="aiSearching" x-cloak
-               class="pointer-events-none absolute left-3 top-1/2 h-5 w-5 -translate-y-1/2 text-brand-500 animate-spin"
-               xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-            <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-            <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
-          </svg>
-          <input type="search" name="q" placeholder="Search MPN, company, vendor... (Enter for AI)"
-                 autocomplete="off"
-                 class="w-full rounded-xl border-2 border-brand-200 bg-white py-2 pl-10 pr-4 text-sm text-gray-900 placeholder-gray-400 outline-none transition-all shadow-sm focus:border-brand-500 focus:shadow-md focus:shadow-brand-100"
-                 hx-get="/v2/partials/search/global"
-                 hx-trigger="keyup changed delay:300ms"
-                 hx-target="#global-search-results"
-                 @focus="searchOpen = true"
-                 @blur="if (!aiSearching) setTimeout(() => searchOpen = false, 200)"
-                 @keydown.escape="$el.blur(); searchOpen = false; aiSearching = false"
-                 @keydown.enter.prevent="if (!aiSearching && $el.value.trim().length >= 2) { aiSearching = true; searchOpen = true; htmx.ajax('POST', '/v2/partials/search/ai', {target:'#global-search-results', values:{q: $el.value}}) }">
+    {# ── Desktop Sidebar ──────────────────────────────────────── #}
+    <aside class="hidden lg:flex lg:flex-col lg:fixed lg:inset-y-0 bg-brand-700 transition-all duration-200"
+           :class="$store.sidebar.collapsed ? 'lg:w-16' : 'lg:w-64'">
+      {# Logo #}
+      <div class="flex items-center h-16 px-4 border-b border-brand-800">
+        <div class="flex flex-col" x-show="!$store.sidebar.collapsed" x-cloak>
+          <img src="/static/avail_logo.png" alt="AVAIL" class="h-9 w-auto">
+          <span class="text-[10px] text-brand-300 tracking-wider mt-0.5">Opportunity Management</span>
         </div>
-        <div id="global-search-results" x-show="searchOpen" x-cloak
-             x-transition
-             @htmx:after-swap.camel="aiSearching = false"
-             class="absolute left-4 right-4 top-full mt-2 max-h-96 overflow-y-auto rounded-xl border-2 border-brand-200 bg-white shadow-xl z-50">
-        </div>
-      </div>
-
-      {# Right: Trouble Ticket button #}
-      <div class="flex items-center justify-end">
-        <button
-          @click="
-            window._ttScreenshot = null;
-            htmx.ajax('GET', '/api/trouble-tickets/form', {target:'#modal-content'});
-            $dispatch('open-modal');
-            if (window.html2canvas) {
-              html2canvas(document.body, {scale:0.5, logging:false, useCORS:true})
-                .then(function(c){ window._ttScreenshot = c.toDataURL('image/png'); })
-                .catch(function(){});
-            } else if (!window._html2canvasLoaded) {
-              var s = document.createElement('script');
-              s.src = 'https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js';
-              s.onload = function(){
-                window._html2canvasLoaded = true;
-                html2canvas(document.body, {scale:0.5, logging:false, useCORS:true})
-                  .then(function(c){ window._ttScreenshot = c.toDataURL('image/png'); })
-                  .catch(function(){});
-              };
-              document.head.appendChild(s);
-            }
-          "
-          class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-rose-500 text-white hover:bg-rose-600 transition-colors">
-          <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="1.5" stroke="currentColor">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 12.75c1.148 0 2.278.08 3.383.237 1.037.146 1.866.966 1.866 2.013 0 3.728-2.35 6.75-5.25 6.75S6.75 18.728 6.75 15c0-1.046.83-1.867 1.866-2.013A24.204 24.204 0 0112 12.75zm0 0c2.883 0 5.647.508 8.207 1.44a23.91 23.91 0 01-1.152-6.135c-.117-1.09-.564-2.055-1.24-2.647-.676-.593-1.548-.858-2.44-.658C14.26 5.053 13.16 5.25 12 5.25s-2.26-.197-3.375-.5c-.892-.2-1.764.065-2.44.658-.676.592-1.123 1.558-1.24 2.647a23.907 23.907 0 01-1.152 6.135C6.354 13.258 9.118 12.75 12 12.75z"/>
-          </svg>
-          Trouble Ticket
+        <span class="text-xl font-bold text-white" x-show="$store.sidebar.collapsed" x-cloak>A</span>
+        <button @click="$store.sidebar.collapsed = !$store.sidebar.collapsed"
+                class="ml-auto text-brand-300 hover:text-white" aria-label="Toggle sidebar">
+          <svg x-show="!$store.sidebar.collapsed" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 19l-7-7 7-7"/></svg>
+          <svg x-show="$store.sidebar.collapsed" class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
         </button>
       </div>
+
+      {# Navigation #}
+      <nav class="flex-1 px-2 py-4 space-y-1 overflow-y-auto">
+        <p class="px-3 pb-2 text-xs font-semibold text-brand-300 uppercase tracking-wider"
+           x-show="!$store.sidebar.collapsed">Opportunity</p>
+        <div x-show="$store.sidebar.collapsed" class="border-t border-brand-800 my-2 mx-2"></div>
+
+        {# Requisitions — split-panel parts workspace #}
+        <a href="/v2/requisitions"
+           hx-get="/v2/partials/parts/workspace"
+           hx-target="#main-content"
+           hx-push-url="/v2/requisitions"
+           preload="mouseover"
+           @click="currentView = 'requisitions'"
+           :class="currentView === 'requisitions' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
+           class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
+          <svg class="h-5 w-5 flex-shrink-0" :class="$store.sidebar.collapsed ? '' : 'mr-3'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+          <span x-show="!$store.sidebar.collapsed">Requisitions</span>
+        </a>
+
+        {% set nav_items = [
+          ('search', 'Part Search', '/v2/search', '/v2/partials/search', 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
+          ('proactive', 'Proactive', '/v2/proactive', '/v2/partials/proactive', 'M11 8a1 1 0 012 0v3h3a1 1 0 010 2h-3v3a1 1 0 01-2 0v-3H8a1 1 0 010-2h3V8zM12 2C6.48 2 2 6.48 2 12s4.48 10 10 10 10-4.48 10-10S17.52 2 12 2z'),
+          ('buy-plans', 'Buy Plans', '/v2/buy-plans', '/v2/partials/buy-plans', 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
+        ] %}
+        {% for id, label, href, partial, icon in nav_items %}
+        <a href="{{ href }}"
+           hx-get="{{ partial }}"
+           hx-target="#main-content"
+           hx-push-url="{{ href }}"
+           preload="mouseover"
+           @click="currentView = '{{ id }}'"
+           :class="currentView === '{{ id }}' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
+           class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
+          <svg class="h-5 w-5 flex-shrink-0" :class="$store.sidebar.collapsed ? '' : 'mr-3'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ icon }}"/></svg>
+          <span x-show="!$store.sidebar.collapsed">{{ label }}</span>
+        </a>
+        {% endfor %}
+
+        <p class="px-3 pt-4 text-xs font-semibold text-brand-300 uppercase tracking-wider mb-2"
+           x-show="!$store.sidebar.collapsed">Relationships</p>
+        <div x-show="$store.sidebar.collapsed" class="border-t border-brand-800 my-2 mx-2"></div>
+
+        {% set rel_items = [
+          ('vendors', 'Vendors', '/v2/vendors', '/v2/partials/vendors', 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4'),
+          ('strategic', 'My Vendors', '/v2/strategic', '/v2/partials/strategic', 'M11.049 2.927c.3-.921 1.603-.921 1.902 0l1.519 4.674a1 1 0 00.95.69h4.915c.969 0 1.371 1.24.588 1.81l-3.976 2.888a1 1 0 00-.363 1.118l1.518 4.674c.3.922-.755 1.688-1.538 1.118l-3.976-2.888a1 1 0 00-1.176 0l-3.976 2.888c-.783.57-1.838-.197-1.538-1.118l1.518-4.674a1 1 0 00-.363-1.118l-3.976-2.888c-.784-.57-.38-1.81.588-1.81h4.914a1 1 0 00.951-.69l1.519-4.674z'),
+          ('customers', 'Customers', '/v2/customers', '/v2/partials/customers', 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z'),
+          ('quotes', 'Quotes', '/v2/quotes', '/v2/partials/quotes', 'M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z'),
+          ('prospecting', 'Prospecting', '/v2/prospecting', '/v2/partials/prospecting', 'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7'),
+        ] %}
+        {% for id, label, href, partial, icon in rel_items %}
+        <a href="{{ href }}"
+           hx-get="{{ partial }}"
+           hx-target="#main-content"
+           hx-push-url="{{ href }}"
+           preload="mouseover"
+           @click="currentView = '{{ id }}'"
+           :class="currentView === '{{ id }}' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
+           class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
+          <svg class="h-5 w-5 flex-shrink-0" :class="$store.sidebar.collapsed ? '' : 'mr-3'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ icon }}"/></svg>
+          <span x-show="!$store.sidebar.collapsed">{{ label }}</span>
+        </a>
+        {% endfor %}
+
+        {# Settings at bottom of nav #}
+        <div class="pt-4">
+          <a href="/v2/settings"
+             hx-get="/v2/partials/settings"
+             hx-target="#main-content"
+             hx-push-url="/v2/settings"
+             preload="mouseover"
+             @click="currentView = 'settings'"
+             :class="currentView === 'settings' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
+             class="group flex items-center px-3 py-2 text-sm font-medium rounded-md transition-colors">
+            <svg class="h-5 w-5 flex-shrink-0" :class="$store.sidebar.collapsed ? '' : 'mr-3'" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
+            <span x-show="!$store.sidebar.collapsed">Settings</span>
+          </a>
+        </div>
+      </nav>
+
+      {# User info #}
+      <div class="flex items-center px-4 py-3 border-t border-brand-800">
+        <div class="flex-shrink-0">
+          <div class="h-8 w-8 rounded-full bg-brand-500 flex items-center justify-center text-white text-sm font-medium">
+            {{ user_name[0]|upper if user_name else "?" }}
+          </div>
+        </div>
+        <div class="ml-3 min-w-0 flex-1" x-show="!$store.sidebar.collapsed">
+          <p class="text-sm font-medium text-white truncate">{{ user_name }}</p>
+          <p class="text-xs text-brand-300 truncate">{{ user_email }}</p>
+        </div>
+        <a href="/auth/logout" class="ml-2 text-brand-300 hover:text-white" x-show="!$store.sidebar.collapsed">
+          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M17 16l4-4m0 0l-4-4m4 4H7m6 4v1a3 3 0 01-3 3H6a3 3 0 01-3-3V7a3 3 0 013-3h4a3 3 0 013 3v1"/></svg>
+        </a>
+      </div>
+    </aside>
+
+    {# ── Mobile header ───────────────────────────────────────── #}
+    <div class="lg:hidden fixed top-0 inset-x-0 z-40 bg-brand-700 border-b border-brand-800 h-14 flex items-center px-4">
+      <button @click="sidebarOpen = !sidebarOpen" class="text-brand-200 hover:text-white">
+        <svg class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+      </button>
+      <img src="/static/avail_logo.png" alt="AVAIL" class="ml-3 h-6 w-auto">
     </div>
-  </header>
-  {# ── Page-level loading bar ──────────────────────────────────── #}
-  <div id="page-loading-bar" class="fixed top-0 left-0 right-0 h-0.5 z-50 bg-brand-500 origin-left scale-x-0 transition-transform duration-300"
-       style="display: none;"></div>
 
-  {# ── Main content (full width, bottom padding for nav) ───────── #}
-  <main>
-    <div id="main-content" class="pb-16">
-      {% block content %}{% endblock %}
+    {# Mobile sidebar overlay #}
+    <div x-show="sidebarOpen" x-cloak class="lg:hidden fixed inset-0 z-50" @click.self="sidebarOpen = false">
+      <div class="fixed inset-0 bg-black/50"></div>
+      <aside class="fixed inset-y-0 left-0 w-64 bg-brand-700 shadow-xl z-50 overflow-y-auto">
+        <div class="flex items-center justify-between h-14 px-4 border-b border-brand-800">
+          <img src="/static/avail_logo.png" alt="AVAIL" class="h-6 w-auto">
+          <button @click="sidebarOpen = false" class="text-brand-300 hover:text-white">
+            <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+          </button>
+        </div>
+        <nav class="px-3 py-4 space-y-1">
+          {# Requisitions — HTMX partial swap inside v2 shell #}
+          <a href="/v2/requisitions"
+             hx-get="/v2/partials/parts/workspace"
+             hx-target="#main-content"
+             hx-push-url="/v2/requisitions"
+             @click="currentView = 'requisitions'; sidebarOpen = false"
+             :class="currentView === 'requisitions' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
+             class="flex items-center px-3 py-2 text-sm font-medium rounded-md">Requisitions</a>
+          {% set mobile_items = [
+            ('search', 'Part Search', '/v2/search', '/v2/partials/search'),
+            ('proactive', 'Proactive', '/v2/proactive', '/v2/partials/proactive'),
+            ('buy-plans', 'Buy Plans', '/v2/buy-plans', '/v2/partials/buy-plans'),
+            ('vendors', 'Vendors', '/v2/vendors', '/v2/partials/vendors'),
+            ('strategic', 'My Vendors', '/v2/strategic', '/v2/partials/strategic'),
+            ('customers', 'Customers', '/v2/customers', '/v2/partials/customers'),
+            ('quotes', 'Quotes', '/v2/quotes', '/v2/partials/quotes'),
+            ('prospecting', 'Prospecting', '/v2/prospecting', '/v2/partials/prospecting'),
+            ('settings', 'Settings', '/v2/settings', '/v2/partials/settings'),
+          ] %}
+          {% for id, label, href, partial in mobile_items %}
+          <a href="{{ href }}" hx-get="{{ partial }}" hx-target="#main-content" hx-push-url="{{ href }}"
+             preload="mouseover"
+             @click="currentView = '{{ id }}'; sidebarOpen = false"
+             :class="currentView === '{{ id }}' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
+             class="flex items-center px-3 py-2 text-sm font-medium rounded-md">{{ label }}</a>
+          {% endfor %}
+        </nav>
+      </aside>
     </div>
-  </main>
 
-  {# ── Bottom navigation bar (all screen sizes) ───────────────── #}
-  <nav class="fixed bottom-0 inset-x-0 bg-white border-t-2 border-brand-200 z-40"
-       style="padding-bottom: env(safe-area-inset-bottom, 0px);">
-    <div class="mx-auto flex items-stretch justify-center gap-0">
-      {# Requisitions #}
-      <a href="/v2/requisitions"
-         hx-get="/v2/partials/parts/workspace"
-         hx-target="#main-content"
-         hx-push-url="/v2/requisitions"
-         @click="currentView = 'requisitions'"
-         :class="currentView === 'requisitions' ? 'text-brand-500 border-t-2 border-brand-500 -mt-[2px]' : 'text-brand-800 hover:text-brand-600'"
-         class="flex flex-col items-center justify-center py-1.5 px-3 min-h-[48px] text-center transition-colors">
-        <svg class="h-[21px] w-[21px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
-        <span class="text-[10px] font-semibold leading-tight mt-0.5 uppercase tracking-wider">Reqs</span>
-      </a>
+    {# ── Main content area ────────────────────────────────────── #}
+    <div class="flex-1 min-w-0 min-h-screen transition-all duration-200"
+         :class="$store.sidebar.collapsed ? 'lg:pl-16' : 'lg:pl-64'">
 
-      {% set bottom_items = [
-        ('search', 'Search', '/v2/search', '/v2/partials/search', 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
-        ('quotes', 'Quotes', '/v2/quotes', '/v2/partials/quotes', 'M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z'),
-        ('buy-plans', 'Buys', '/v2/buy-plans', '/v2/partials/buy-plans', 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
-        ('companies', 'CRM', '/v2/companies', '/v2/partials/companies', 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z'),
-        ('prospecting', 'Prospect', '/v2/prospecting', '/v2/partials/prospecting', 'M9 20l-5.447-2.724A1 1 0 013 16.382V5.618a1 1 0 011.447-.894L9 7m0 13l6-3m-6 3V7m6 10l4.553 2.276A1 1 0 0021 18.382V7.618a1 1 0 00-.553-.894L15 4m0 13V4m0 0L9 7'),
-        ('proactive', 'Proactive', '/v2/proactive', '/v2/partials/proactive', 'M13 10V3L4 14h7v7l9-11h-7z'),
-        ('excess', 'Excess', '/v2/excess', '/v2/partials/excess', 'M20 7l-8-4-8 4m16 0l-8 4m8-4v10l-8 4m0-10L4 7m8 4v10M4 7v10l8 4'),
-        ('vendors', 'Vendors', '/v2/vendors', '/v2/partials/vendors', 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4'),
-        ('materials', 'Materials', '/v2/materials', '/v2/partials/materials/workspace', 'M9 3v2m6-2v2M9 19v2m6-2v2M3 9h2m-2 6h2m14-6h2m-2 6h2M7 19h10a2 2 0 002-2V7a2 2 0 00-2-2H7a2 2 0 00-2 2v10a2 2 0 002 2zM9 9h6v6H9V9z'),
-        ('follow-ups', 'Tasks', '/v2/follow-ups', '/v2/partials/follow-ups', 'M3 8l7.89 5.26a2 2 0 002.22 0L21 8M5 19h14a2 2 0 002-2V7a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z'),
-        ('settings', 'Config', '/v2/settings', '/v2/partials/settings', 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z'),
-      ] %}
-      {% for id, label, href, partial, icon in bottom_items %}
-      <a href="{{ href }}" hx-get="{{ partial }}" hx-target="#main-content" hx-push-url="{{ href }}"
-         @click="currentView = '{{ id }}'"
-         :class="currentView === '{{ id }}' ? 'text-brand-500 border-t-2 border-brand-500 -mt-[2px]' : 'text-brand-800 hover:text-brand-600'"
-         class="flex flex-col items-center justify-center py-1.5 px-3 min-h-[48px] text-center transition-colors">
-        <svg class="h-[21px] w-[21px]" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="{{ icon }}"/></svg>
-        <span class="text-[10px] font-semibold leading-tight mt-0.5 uppercase tracking-wider">{{ label }}</span>
-      </a>
-      {% endfor %}
+      {# ── Topbar ───────────────────────────────────────────── #}
+      <header class="sticky top-0 z-30 bg-white border-b border-brand-200 px-4 lg:px-8 h-14 flex items-center justify-between hidden lg:flex">
+        <div id="breadcrumb" class="text-sm text-gray-500">
+          <span>Dashboard</span>
+        </div>
+        <div class="flex items-center gap-4">
+          <div class="relative" x-data="{ searchOpen: false }">
+            <input type="search" name="q" placeholder="Search..."
+                   class="w-64 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
+                   autocomplete="off"
+                   hx-get="/v2/partials/search/global"
+                   hx-trigger="keyup changed delay:300ms"
+                   hx-target="#global-search-results"
+                   @focus="searchOpen = true"
+                   @blur="setTimeout(() => searchOpen = false, 200)">
+            <div id="global-search-results" x-show="searchOpen" x-cloak
+                 class="absolute top-full mt-1 right-0 w-80 bg-white rounded-lg shadow-lg border border-gray-200 max-h-96 overflow-y-auto">
+            </div>
+          </div>
+          <span class="text-sm text-gray-500">{{ user_name }}</span>
+        </div>
+      </header>
+
+      {# ── Page-level loading bar ────────────────────────────── #}
+      <div id="page-loading-bar" class="fixed top-0 left-0 right-0 h-0.5 z-50 bg-brand-500 origin-left scale-x-0 transition-transform duration-300"
+           style="display: none;"></div>
+
+      {# ── Page content ─────────────────────────────────────── #}
+      <main class="pt-14 lg:pt-0 pb-16 lg:pb-0">
+        <div id="main-content" class="p-4 lg:p-8">
+          {% block content %}{% endblock %}
+        </div>
+      </main>
     </div>
-  </nav>
 
+  </div>
   {% endblock %}
 
-  {# ── Modal (global) ──────────────────────────────────────────── #}
+  {# ── Modal (global) ──────────────────────────────────────── #}
   <div x-data="{ open: false }" x-show="open" x-cloak x-transition
        @open-modal.window="open = true" @close-modal.window="open = false"
        @keydown.escape.window="open = false"
        class="fixed inset-0 z-50" style="display: none;">
     <div class="fixed inset-0 bg-black/50" @click="open = false"></div>
     <div class="fixed inset-0 flex items-center justify-center p-4">
-      <div class="bg-white rounded-lg shadow-xl max-w-6xl w-full max-h-[90vh] overflow-y-auto" x-trap.noscroll="open">
+      <div class="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" x-trap.noscroll="open">
         <div id="modal-content"></div>
       </div>
     </div>
   </div>
 
-  {% include "htmx/partials/shared/quote_builder_shell.html" %}
-
-  {# ── Toast (global) ──────────────────────────────────────────── #}
+  {# ── Toast (global) ──────────────────────────────────────── #}
   <div x-data x-show="$store.toast.show" x-cloak x-transition
        @click="$store.toast.show = false"
        x-init="$watch('$store.toast.show', v => v && setTimeout(() => $store.toast.show = false, 4000))"
@@ -192,7 +263,38 @@
     <span x-text="$store.toast.message"></span>
   </div>
 
-  {# Icon templates for SSE progress #}
+  {# ── Mobile bottom nav (5 items) ──────────────────────────── #}
+  <nav class="lg:hidden fixed bottom-0 inset-x-0 bg-white border-t border-brand-200 z-40 flex justify-around items-center"
+       style="padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));">
+    {# Requisitions — HTMX partial swap inside v2 shell #}
+    <a href="/v2/requisitions"
+       hx-get="/v2/partials/parts/workspace"
+       hx-target="#main-content"
+       hx-push-url="/v2/requisitions"
+       @click="currentView = 'requisitions'"
+       :class="currentView === 'requisitions' ? 'text-brand-500' : 'text-gray-400'"
+       class="flex flex-col items-center justify-center py-2 px-1 min-h-[44px] min-w-[44px] text-xs font-medium">
+      <svg class="h-5 w-5 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/></svg>
+      <span>Reqs</span>
+    </a>
+    {% set bottom_nav = [
+      ('search', 'Search', '/v2/search', '/v2/partials/search', 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
+      ('buy-plans', 'Buy Plans', '/v2/buy-plans', '/v2/partials/buy-plans', 'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
+      ('vendors', 'Vendors', '/v2/vendors', '/v2/partials/vendors', 'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4'),
+      ('customers', 'Customers', '/v2/customers', '/v2/partials/customers', 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z'),
+    ] %}
+    {% for id, label, href, partial, icon in bottom_nav %}
+    <a href="{{ href }}" hx-get="{{ partial }}" hx-target="#main-content" hx-push-url="{{ href }}"
+       @click="currentView = '{{ id }}'"
+       :class="currentView === '{{ id }}' ? 'text-brand-500' : 'text-gray-400'"
+       class="flex flex-col items-center justify-center py-2 px-1 min-h-[44px] min-w-[44px] text-xs font-medium">
+      <svg class="h-5 w-5 mb-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="{{ icon }}"/></svg>
+      <span>{{ label }}</span>
+    </a>
+    {% endfor %}
+  </nav>
+
+  {# Icon templates for SSE progress (cloned by Alpine sourcingProgress component) #}
   <template id="tpl-icon-check">
     <svg class="w-4 h-4 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
@@ -204,39 +306,6 @@
     </svg>
   </template>
 
-  {# SSE event listener for real-time notifications #}
-  {% if user_name %}
-  <div id="sse-listener"
-       hx-ext="sse"
-       sse-connect="/api/events/stream"
-       sse-swap="none"
-       style="display:none">
-  </div>
-
-  <script>
-    document.addEventListener('DOMContentLoaded', function() {
-      var el = document.getElementById('sse-listener');
-      if (!el) return;
-
-      el.addEventListener('sse:enrichment_complete', function(e) {
-        Alpine.store('toast').message = 'Enrichment complete';
-        Alpine.store('toast').type = 'success';
-        Alpine.store('toast').show = true;
-      });
-
-      el.addEventListener('sse:quote_updated', function(e) {
-        Alpine.store('toast').message = 'Quote updated';
-        Alpine.store('toast').type = 'info';
-        Alpine.store('toast').show = true;
-      });
-
-      el.addEventListener('sse:rfq_response', function(e) {
-        Alpine.store('toast').message = 'New RFQ response received';
-        Alpine.store('toast').type = 'info';
-        Alpine.store('toast').show = true;
-      });
-    });
-  </script>
-  {% endif %}
+  {# 401 handler and HTMX config are in htmx_app.js (Vite bundle) #}
 </body>
 </html>
