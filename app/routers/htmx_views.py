@@ -592,7 +592,7 @@ async def requisition_create_form(
 ):
     """Return the create requisition modal form."""
     ctx = _base_ctx(request, user, "requisitions")
-    return templates.TemplateResponse("htmx/partials/requisitions/create_modal.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/unified_modal.html", ctx)
 
 
 @router.get("/v2/partials/requisitions/import-form", response_class=HTMLResponse)
@@ -602,7 +602,7 @@ async def requisition_import_form(
 ):
     """Return the import requisition modal form."""
     ctx = _base_ctx(request, user, "requisitions")
-    return templates.TemplateResponse("htmx/partials/requisitions/import_modal.html", ctx)
+    return templates.TemplateResponse("htmx/partials/requisitions/unified_modal.html", ctx)
 
 
 @router.post("/v2/partials/requisitions/import-parse", response_class=HTMLResponse)
@@ -650,7 +650,7 @@ async def requisition_import_parse(
             return JSONResponse({"error": "No data provided", "requirements": []})
         ctx = _base_ctx(request, user, "requisitions")
         ctx["error"] = "No data provided. Paste text or upload a file."
-        return templates.TemplateResponse("htmx/partials/requisitions/import_modal.html", ctx)
+        return templates.TemplateResponse("htmx/partials/requisitions/unified_modal.html", ctx)
 
     # AI parse
     result = await parse_freeform_rfq(text)
@@ -735,7 +735,7 @@ async def requisition_import_save(
     if not requirements:
         ctx = _base_ctx(request, user, "requisitions")
         ctx["error"] = "No valid parts to save."
-        return templates.TemplateResponse("htmx/partials/requisitions/import_modal.html", ctx)
+        return templates.TemplateResponse("htmx/partials/requisitions/unified_modal.html", ctx)
 
     # Create requisition
     site_id = int(customer_site_id) if customer_site_id.strip() else None
