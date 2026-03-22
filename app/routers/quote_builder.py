@@ -24,6 +24,7 @@ router = APIRouter(tags=["quote-builder"])
 async def quote_builder_modal(
     req_id: int,
     request: Request,
+    requirement_ids: str | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -57,6 +58,7 @@ async def quote_builder_modal(
             "req": req,
             "customer_name": customer_name,
             "has_customer_site": has_customer_site,
+            "requirement_ids": requirement_ids or "",
         },
     )
 

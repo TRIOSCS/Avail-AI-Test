@@ -5,7 +5,16 @@
 #}
 <tr id="req-row-{{ r.id }}" class="hover:bg-brand-50 group"
     x-data="{ editing: false }"
+    :class="selectedIds?.has({{ r.id }}) && 'bg-emerald-50/50'"
     @dblclick="editing = true">
+
+  {# ── Checkbox ──────────────────────────────────────────── #}
+  <td class="px-3 py-2.5" x-show="!editing" @click.stop>
+    <input type="checkbox"
+           :checked="selectedIds?.has({{ r.id }})"
+           @change="toggle({{ r.id }})"
+           class="w-4 h-4 rounded border-gray-300 text-emerald-500 focus:ring-emerald-500">
+  </td>
 
   {# ── Display mode ────────────────────────────────────────── #}
   <td data-col-key="mpn" class="px-4 py-2.5 text-sm font-mono font-medium text-gray-900" x-show="!editing">
