@@ -405,23 +405,31 @@ def fuzzy_mpn_match(mpn_a: str | None, mpn_b: str | None) -> bool:
 MAX_SUBSTITUTES = 20
 
 
-def parse_substitute_mpns(raw: str, primary_mpn: str, *, limit: int = MAX_SUBSTITUTES) -> list[str]:
-    """Parse comma/newline-separated substitute MPNs, normalize, and deduplicate against
-    primary.
+def parse_substitute_mpns(subs: list[dict], primary_mpn: str, *, limit: int = MAX_SUBSTITUTES) -> list[dict]:
+    """Parse structured substitute list, normalize MPNs, and deduplicate.
+
+    Each sub is a dict with 'mpn' and 'manufacturer' keys.
+    Returns normalized, deduped list capped at limit.
 
     Called by: htmx_views.py (add/update/header-save endpoints)
     Depends on: normalize_mpn, normalize_mpn_key
     """
-    sub_list: list[str] = []
-    if not raw or not raw.strip():
-        return sub_list
+    result: list[dict] = []
+    if not subs:
+        return result
     seen_keys = {normalize_mpn_key(primary_mpn)}
-    for s in raw.replace("\n", ",").split(","):
-        ns = normalize_mpn(s.strip()) or s.strip()
-        if not ns:
+    for sub in subs:
+        raw_mpn = sub.get("mpn", "").strip()
+        if not raw_mpn:
             continue
+        ns = normalize_mpn(raw_mpn) or raw_mpn
         key = normalize_mpn_key(ns)
         if key and key not in seen_keys:
             seen_keys.add(key)
-            sub_list.append(ns)
-    return sub_list[:limit]
+            result.append(
+                {
+                    "mpn": ns,
+                    "manufacturer": sub.get("manufacturer", "").strip(),
+                }
+            )
+    return result[:limit]

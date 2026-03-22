@@ -1420,7 +1420,7 @@ def _audit_card_created(db: Session, card: MaterialCard) -> None:
         pass  # Audit should never break card creation
 
 
-def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
+def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> MaterialCard | None:
     """Find or create a MaterialCard for the given MPN.
 
     Returns the card (flushed, with id set) or None if MPN is too short.
@@ -1436,6 +1436,8 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
     # Fast path — card already exists (no write, cheapest possible check)
     card = db.query(MaterialCard).filter_by(normalized_mpn=norm).filter(MaterialCard.deleted_at.is_(None)).first()
     if card:
+        if manufacturer and not card.manufacturer:
+            card.manufacturer = manufacturer
         logger.debug("MC_METRIC: action=resolved mpn=%s card_id=%d", norm, card.id)
         return card
 
@@ -1451,6 +1453,7 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
                 normalized_mpn=norm,
                 display_mpn=display,
                 search_count=0,
+                manufacturer=manufacturer,
             )
             .on_conflict_do_nothing(
                 index_elements=["normalized_mpn"],
@@ -1479,7 +1482,7 @@ def resolve_material_card(mpn: str, db: Session) -> MaterialCard | None:
         from sqlalchemy.exc import IntegrityError
 
         try:
-            card = MaterialCard(normalized_mpn=norm, display_mpn=display, search_count=0)
+            card = MaterialCard(normalized_mpn=norm, display_mpn=display, search_count=0, manufacturer=manufacturer)
             db.add(card)
             db.flush()
             logger.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
