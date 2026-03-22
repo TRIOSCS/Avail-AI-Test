@@ -1,6 +1,6 @@
 {# quote_builder/modal.html — Two-panel quote builder modal content.
-   Receives: req (Requisition), lines (list of dicts), customer_name (str),
-             has_customer_site (bool).
+   Receives: req (Requisition), customer_name (str), has_customer_site (bool).
+   Line data fetched at runtime via Alpine.js loadData() → /data endpoint.
    Called by: quote_builder.py quote_builder_modal endpoint.
    Depends on: Alpine.js quoteBuilder component, brand palette, compact-table CSS.
 #}

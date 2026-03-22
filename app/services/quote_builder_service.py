@@ -5,7 +5,8 @@ Loads requirement + offer data for the builder modal, applies smart defaults,
 generates Excel exports. Decoupled from HTTP.
 
 Called by: app.routers.quote_builder
-Depends on: app.models (Requirement, Offer, Quote), openpyxl
+Depends on: app.models (Requirement, Offer, Quote), openpyxl,
+    app.routers.crm._helpers (_preload_last_quoted_prices — pricing history lookup)
 """
 
 from __future__ import annotations
@@ -87,7 +88,7 @@ def get_builder_data(
             lq = quoted_prices.get(mpn_key)
             if lq:
                 line["pricing_history"] = {
-                    "avg_price": lq.get("sell_price"),
+                    "avg_price": lq.get("sell_price"),  # Most recent sell price, not a true average
                     "price_range": None,
                     "recent": [
                         {
@@ -244,7 +245,7 @@ def save_quote_from_builder(
     total_cost = sum(li["qty"] * li["cost_price"] for li in line_items)
     margin_pct = round((total_sell - total_cost) / total_sell * 100, 2) if total_sell > 0 else 0
 
-    # Handle revision vs new quote
+    # Rename old quote to Q-XXXX-R{n} so the new revision keeps the canonical number
     revision = 1
     if payload.quote_id:
         old_quote = db.get(Quote, payload.quote_id)
