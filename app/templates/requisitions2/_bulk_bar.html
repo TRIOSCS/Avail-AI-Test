@@ -1,0 +1,9 @@
+{# requisitions2/_bulk_bar.html — Bulk action bar for selected requisitions.
+   Called by: page.html (include)
+   Depends on: Alpine.js rq2 store (selectedIds)
+   TODO: Implement bulk actions (delete, assign, status change)
+#}
+<div x-show="selectedIds && selectedIds.length > 0" x-cloak
+     class="flex items-center gap-2 mt-1 text-sm text-gray-600">
+  <span x-text="(selectedIds ? selectedIds.length : 0) + ' selected'"></span>
+</div>

@@ -7,14 +7,11 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import datetime, timezone
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import Company, CustomerSite, SiteContact, User
-
+from app.models import Company, CustomerSite, SiteContact
 
 # ── Create Company ───────────────────────────────────────────────────
 
@@ -22,7 +19,7 @@ from app.models import Company, CustomerSite, SiteContact, User
 class TestCreateCompany:
     def test_create_form_renders(self, client: TestClient):
         resp = client.get(
-            "/v2/partials/companies/create-form",
+            "/v2/partials/customers/create-form",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -30,7 +27,7 @@ class TestCreateCompany:
 
     def test_create_saves_company(self, client: TestClient, db_session: Session):
         resp = client.post(
-            "/v2/partials/companies/create",
+            "/v2/partials/customers/create",
             data={"name": "NewCo Electronics", "website": "https://newco.com", "industry": "Semiconductors"},
             headers={"HX-Request": "true"},
         )
@@ -41,7 +38,7 @@ class TestCreateCompany:
 
     def test_create_auto_creates_hq_site(self, client: TestClient, db_session: Session):
         client.post(
-            "/v2/partials/companies/create",
+            "/v2/partials/customers/create",
             data={"name": "SiteCo Inc"},
             headers={"HX-Request": "true"},
         )
@@ -53,7 +50,7 @@ class TestCreateCompany:
 
     def test_create_rejects_empty_name(self, client: TestClient):
         resp = client.post(
-            "/v2/partials/companies/create",
+            "/v2/partials/customers/create",
             data={"name": ""},
             headers={"HX-Request": "true"},
         )
@@ -61,7 +58,7 @@ class TestCreateCompany:
 
     def test_create_rejects_duplicate(self, client: TestClient, test_company: Company):
         resp = client.post(
-            "/v2/partials/companies/create",
+            "/v2/partials/customers/create",
             data={"name": test_company.name},
             headers={"HX-Request": "true"},
         )
@@ -74,7 +71,7 @@ class TestCreateCompany:
 class TestEditCompany:
     def test_edit_form_renders(self, client: TestClient, test_company: Company):
         resp = client.get(
-            f"/v2/partials/companies/{test_company.id}/edit-form",
+            f"/v2/partials/customers/{test_company.id}/edit-form",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -83,7 +80,7 @@ class TestEditCompany:
 
     def test_edit_saves_changes(self, client: TestClient, test_company: Company, db_session: Session):
         resp = client.post(
-            f"/v2/partials/companies/{test_company.id}/edit",
+            f"/v2/partials/customers/{test_company.id}/edit",
             data={"name": "Acme Global", "website": "https://acme-global.com"},
             headers={"HX-Request": "true"},
         )
@@ -94,7 +91,7 @@ class TestEditCompany:
 
     def test_edit_nonexistent_404(self, client: TestClient):
         resp = client.post(
-            "/v2/partials/companies/99999/edit",
+            "/v2/partials/customers/99999/edit",
             data={"name": "Ghost"},
             headers={"HX-Request": "true"},
         )
@@ -105,9 +102,11 @@ class TestEditCompany:
 
 
 class TestEditSite:
-    def test_edit_site(self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, db_session: Session):
+    def test_edit_site(
+        self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, db_session: Session
+    ):
         resp = client.post(
-            f"/v2/partials/companies/{test_company.id}/sites/{test_customer_site.id}/edit",
+            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/edit",
             data={"site_name": "Branch Office", "city": "Dallas", "country": "US"},
             headers={"HX-Request": "true"},
         )
@@ -118,7 +117,7 @@ class TestEditSite:
 
     def test_edit_site_nonexistent(self, client: TestClient, test_company: Company):
         resp = client.post(
-            f"/v2/partials/companies/{test_company.id}/sites/99999/edit",
+            f"/v2/partials/customers/{test_company.id}/sites/99999/edit",
             data={"site_name": "Ghost"},
             headers={"HX-Request": "true"},
         )
@@ -131,7 +130,7 @@ class TestEditSite:
 class TestTypeahead:
     def test_typeahead_returns_matches(self, client: TestClient, test_company: Company):
         resp = client.get(
-            f"/v2/partials/companies/typeahead?q={test_company.name[:4]}",
+            f"/v2/partials/customers/typeahead?q={test_company.name[:4]}",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -139,7 +138,7 @@ class TestTypeahead:
 
     def test_typeahead_short_query_empty(self, client: TestClient):
         resp = client.get(
-            "/v2/partials/companies/typeahead?q=A",
+            "/v2/partials/customers/typeahead?q=A",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -152,7 +151,7 @@ class TestTypeahead:
 class TestDuplicateCheck:
     def test_detects_duplicate(self, client: TestClient, test_company: Company):
         resp = client.get(
-            f"/v2/partials/companies/check-duplicate?name={test_company.name}",
+            f"/v2/partials/customers/check-duplicate?name={test_company.name}",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -160,7 +159,7 @@ class TestDuplicateCheck:
 
     def test_no_duplicate(self, client: TestClient):
         resp = client.get(
-            "/v2/partials/companies/check-duplicate?name=Unique Corp XYZ",
+            "/v2/partials/customers/check-duplicate?name=Unique Corp XYZ",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -185,34 +184,42 @@ class TestContactNotes:
         db_session.refresh(c)
         return c
 
-    def test_get_notes_empty(self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, site_contact: SiteContact):
+    def test_get_notes_empty(
+        self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, site_contact: SiteContact
+    ):
         resp = client.get(
-            f"/v2/partials/companies/{test_company.id}/sites/{test_customer_site.id}/contacts/{site_contact.id}/notes",
+            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{site_contact.id}/notes",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
         assert "No notes yet" in resp.text
 
-    def test_add_note(self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, site_contact: SiteContact):
+    def test_add_note(
+        self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, site_contact: SiteContact
+    ):
         resp = client.post(
-            f"/v2/partials/companies/{test_company.id}/sites/{test_customer_site.id}/contacts/{site_contact.id}/notes",
+            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{site_contact.id}/notes",
             data={"notes": "Called about RFQ, very responsive."},
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
         assert "Called about RFQ" in resp.text
 
-    def test_add_empty_note_rejected(self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, site_contact: SiteContact):
+    def test_add_empty_note_rejected(
+        self, client: TestClient, test_company: Company, test_customer_site: CustomerSite, site_contact: SiteContact
+    ):
         resp = client.post(
-            f"/v2/partials/companies/{test_company.id}/sites/{test_customer_site.id}/contacts/{site_contact.id}/notes",
+            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/{site_contact.id}/notes",
             data={"notes": ""},
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 400
 
-    def test_notes_nonexistent_contact(self, client: TestClient, test_company: Company, test_customer_site: CustomerSite):
+    def test_notes_nonexistent_contact(
+        self, client: TestClient, test_company: Company, test_customer_site: CustomerSite
+    ):
         resp = client.get(
-            f"/v2/partials/companies/{test_company.id}/sites/{test_customer_site.id}/contacts/99999/notes",
+            f"/v2/partials/customers/{test_company.id}/sites/{test_customer_site.id}/contacts/99999/notes",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 404

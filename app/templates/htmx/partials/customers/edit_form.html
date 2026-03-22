@@ -7,7 +7,7 @@
   <div class="bg-white rounded-lg shadow border border-gray-200 p-6">
     <h2 class="text-lg font-bold text-gray-900 mb-4">Edit Company</h2>
 
-    <form hx-post="/v2/partials/companies/{{ company.id }}/edit"
+    <form hx-post="/v2/partials/customers/{{ company.id }}/edit"
           hx-target="#main-content"
           class="space-y-4">
 
@@ -52,7 +52,7 @@
           Save Changes
         </button>
         <button type="button"
-                hx-get="/v2/partials/companies/{{ company.id }}"
+                hx-get="/v2/partials/customers/{{ company.id }}"
                 hx-target="#main-content"
                 class="px-4 py-2 text-sm font-medium text-gray-700 bg-gray-100 rounded-md hover:bg-gray-200">
           Cancel

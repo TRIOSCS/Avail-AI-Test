@@ -1,6 +1,6 @@
 {# site_card.html — Expandable site card with inline contacts.
    Receives: s (CustomerSite), company (Company).
-   Called by: sites_tab.html loop, and POST /v2/partials/companies/{id}/sites.
+   Called by: sites_tab.html loop, and POST /v2/partials/customers/{id}/sites.
    Depends on: HTMX, Alpine.js.
 #}
 <div id="site-{{ s.id }}" class="bg-white rounded-lg border border-gray-200" x-data="{ expanded: false, editing: false }">
@@ -45,7 +45,7 @@
     <div class="px-4 py-3">
       <div class="flex items-center justify-between mb-2">
         <h4 class="text-xs font-semibold text-gray-700 uppercase">Contacts</h4>
-        <button hx-get="/v2/partials/companies/{{ company.id }}/sites/{{ s.id }}/contacts"
+        <button hx-get="/v2/partials/customers/{{ company.id }}/sites/{{ s.id }}/contacts"
                 hx-target="#site-{{ s.id }}-contacts"
                 hx-swap="innerHTML"
                 hx-trigger="click once"
@@ -60,7 +60,7 @@
 
     {# Site actions #}
     <div class="px-4 py-2 bg-gray-50 border-t border-gray-100 flex items-center gap-2">
-      <button hx-delete="/v2/partials/companies/{{ company.id }}/sites/{{ s.id }}"
+      <button hx-delete="/v2/partials/customers/{{ company.id }}/sites/{{ s.id }}"
               hx-target="#site-{{ s.id }}"
               hx-swap="outerHTML"
               hx-confirm="Delete site '{{ s.site_name }}'? This cannot be undone."

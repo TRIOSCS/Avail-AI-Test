@@ -302,7 +302,7 @@ class TestCompanyActivityTab:
         db_session.add(contact)
         db_session.commit()
 
-        resp = client.get(f"/v2/partials/companies/{company.id}/tab/activity")
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
         assert resp.status_code == 200
         assert "Activity Vendor" in resp.text
         assert "RFQ History" in resp.text
@@ -316,7 +316,7 @@ class TestCompanyActivityTab:
         db_session.add(company)
         db_session.commit()
 
-        resp = client.get(f"/v2/partials/companies/{company.id}/tab/activity")
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
         assert resp.status_code == 200
         assert "No activity recorded" in resp.text
 
@@ -364,7 +364,7 @@ class TestInsightsPanels:
         db_session.add(company)
         db_session.commit()
 
-        resp = client.get(f"/v2/partials/companies/{company.id}/insights")
+        resp = client.get(f"/v2/partials/customers/{company.id}/insights")
         assert resp.status_code == 200
         assert "AI Insights" in resp.text
 

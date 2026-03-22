@@ -1,6 +1,6 @@
 {# site_contacts.html — Contact list for a site with add/delete.
    Receives: site (CustomerSite), contacts (list[SiteContact]), company (Company).
-   Called by: GET /v2/partials/companies/{id}/sites/{sid}/contacts.
+   Called by: GET /v2/partials/customers/{id}/sites/{sid}/contacts.
    Depends on: HTMX, Alpine.js.
 #}
 <div x-data="{ showAdd: false }">
@@ -13,7 +13,7 @@
   </div>
 
   <form x-show="showAdd" x-cloak
-        hx-post="/v2/partials/companies/{{ company.id }}/sites/{{ site.id }}/contacts"
+        hx-post="/v2/partials/customers/{{ company.id }}/sites/{{ site.id }}/contacts"
         hx-target="#site-{{ site.id }}-contacts"
         hx-swap="innerHTML"
         class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3 p-2 bg-gray-50 rounded border border-gray-200">
@@ -51,14 +51,14 @@
       </div>
       <div class="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
         {% if not c.is_primary %}
-        <button hx-post="/v2/partials/companies/{{ company.id }}/sites/{{ site.id }}/contacts/{{ c.id }}/primary"
+        <button hx-post="/v2/partials/customers/{{ company.id }}/sites/{{ site.id }}/contacts/{{ c.id }}/primary"
                 hx-target="#site-{{ site.id }}-contacts"
                 hx-swap="innerHTML"
                 class="text-[10px] text-brand-500 hover:text-brand-700" title="Set as primary">
           Primary
         </button>
         {% endif %}
-        <button hx-delete="/v2/partials/companies/{{ company.id }}/sites/{{ site.id }}/contacts/{{ c.id }}"
+        <button hx-delete="/v2/partials/customers/{{ company.id }}/sites/{{ site.id }}/contacts/{{ c.id }}"
                 hx-target="#site-contact-{{ c.id }}"
                 hx-swap="outerHTML"
                 hx-confirm="Delete contact {{ c.full_name }}?"

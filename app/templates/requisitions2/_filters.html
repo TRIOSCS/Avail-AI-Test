@@ -1,0 +1,11 @@
+{# requisitions2/_filters.html — Filter bar for requisitions list.
+   Called by: page.html (include)
+   Depends on: Alpine.js rq2 store
+   TODO: Implement full filter controls (status, owner, date range)
+#}
+<div id="rq2-filters" class="flex items-center gap-2">
+  <input id="rq2-search" type="text" name="q" placeholder="Search requisitions..."
+         class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 flex-1"
+         hx-get="/requisitions2/table" hx-target="#rq2-table" hx-trigger="input changed delay:300ms"
+         hx-include="[name='search']">
+</div>

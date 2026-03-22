@@ -107,7 +107,7 @@
   <div id="enrich-results-{{ company.id }}"></div>
 
   {# AI Insights — lazy-loaded #}
-  <div hx-get="/v2/partials/companies/{{ company.id }}/insights"
+  <div hx-get="/v2/partials/customers/{{ company.id }}/insights"
        hx-trigger="load"
        hx-swap="innerHTML"
        class="empty:hidden"></div>
@@ -123,7 +123,7 @@
           ('activity', 'Activity', none)
         ] %}
         <button @click="activeTab = '{{ tab_id }}'"
-                hx-get="/v2/partials/companies/{{ company.id }}/tab/{{ tab_id }}"
+                hx-get="/v2/partials/customers/{{ company.id }}/tab/{{ tab_id }}"
                 hx-target="#company-tab-content"
                 hx-trigger="click"
                 hx-swap="innerHTML"
@@ -154,7 +154,7 @@
           <tbody class="divide-y divide-gray-200">
             {% for s in sites %}
             <tr class="hover:bg-brand-50 cursor-pointer transition-colors"
-                hx-get="/v2/partials/companies/{{ company.id }}/sites/{{ s.id }}"
+                hx-get="/v2/partials/customers/{{ company.id }}/sites/{{ s.id }}"
                 hx-target="#company-tab-content"
                 hx-swap="innerHTML">
               <td class="px-4 py-2.5 text-sm font-medium text-gray-900">{{ s.site_name }}</td>
