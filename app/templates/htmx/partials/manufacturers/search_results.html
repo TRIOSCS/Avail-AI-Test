@@ -1,0 +1,24 @@
+{# Manufacturer typeahead results dropdown.
+   Called by: GET /v2/partials/manufacturers/search?q=...
+   Depends on: results (list of Manufacturer), q (search term)
+#}
+{% if results %}
+  {% for mfr in results %}
+  <div class="px-3 py-1.5 text-xs hover:bg-brand-50 cursor-pointer transition-colors"
+       @click="$el.closest('[x-data]').querySelector('[name=manufacturer]').value = '{{ mfr.canonical_name }}'; $el.closest('.absolute').textContent = ''">
+    <span class="font-medium">{{ mfr.canonical_name }}</span>
+    {% if mfr.aliases %}
+    <span class="text-gray-400 ml-1">({{ mfr.aliases|join(', ') }})</span>
+    {% endif %}
+  </div>
+  {% endfor %}
+{% elif q %}
+  <div class="px-3 py-1.5 text-xs text-gray-400">No match for "{{ q }}"</div>
+  <div class="px-3 py-1.5 text-xs text-brand-600 hover:bg-brand-50 cursor-pointer transition-colors"
+       hx-post="/v2/partials/manufacturers/add"
+       hx-vals='{"name": "{{ q }}"}'
+       hx-swap="outerHTML"
+       @click="setTimeout(function(){ var el = event.target.closest('[x-data]'); if(el) { var inp = el.querySelector('[name=manufacturer]'); if(inp) inp.value = '{{ q }}'; }}, 100)">
+    + Add "{{ q }}" as new manufacturer
+  </div>
+{% endif %}

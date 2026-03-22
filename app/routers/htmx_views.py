@@ -6698,6 +6698,66 @@ async def materials_filters_manufacturers_partial(
     return templates.TemplateResponse("htmx/partials/materials/filters/manufacturers.html", ctx)
 
 
+@router.get("/v2/partials/manufacturers/search", response_class=HTMLResponse)
+async def manufacturer_search(
+    request: Request,
+    q: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Typeahead search for manufacturers by name or alias."""
+    from sqlalchemy import Text, cast
+
+    from ..models.sourcing import Manufacturer
+
+    results = []
+    if q.strip():
+        pattern = f"%{q.strip()}%"
+        by_name = db.query(Manufacturer).filter(Manufacturer.canonical_name.ilike(pattern)).limit(10).all()
+        results = list(by_name)
+        if len(results) < 10:
+            seen_ids = {r.id for r in results}
+            alias_matches = (
+                db.query(Manufacturer)
+                .filter(
+                    Manufacturer.id.notin_(seen_ids),
+                    cast(Manufacturer.aliases, Text).ilike(pattern),
+                )
+                .limit(10 - len(results))
+                .all()
+            )
+            results.extend(alias_matches)
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx.update({"results": results, "q": q.strip()})
+    return templates.TemplateResponse("htmx/partials/manufacturers/search_results.html", ctx)
+
+
+@router.post("/v2/partials/manufacturers/add", response_class=HTMLResponse)
+async def manufacturer_add(
+    request: Request,
+    name: str = Form(...),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Add a new manufacturer on the fly from typeahead."""
+    from ..models.sourcing import Manufacturer
+
+    name = name.strip()
+    if not name:
+        return HTMLResponse('<div class="px-3 py-1.5 text-xs text-red-500">Name required</div>')
+
+    existing = db.query(Manufacturer).filter_by(canonical_name=name).first()
+    if not existing:
+        mfr = Manufacturer(canonical_name=name)
+        db.add(mfr)
+        db.commit()
+
+    return HTMLResponse(
+        f'<div class="px-3 py-1.5 text-xs font-medium text-brand-600" data-mfr-name="{name}">Added: {name}</div>'
+    )
+
+
 @router.get("/v2/partials/materials/filters/tree", response_class=HTMLResponse)
 async def materials_filters_tree_partial(
     request: Request,
