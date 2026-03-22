@@ -703,6 +703,7 @@ async def requisition_import_save(
                     "customer_pn": form.get(f"reqs[{idx}].customer_pn", "").strip() or None,
                     "date_codes": form.get(f"reqs[{idx}].date_codes", "").strip() or None,
                     "packaging": form.get(f"reqs[{idx}].packaging", "").strip() or None,
+                    "manufacturer": form.get(f"reqs[{idx}].manufacturer", "").strip(),
                     "substitutes": [
                         s.strip() for s in form.get(f"reqs[{idx}].substitutes", "").split(",") if s.strip()
                     ],
@@ -749,6 +750,7 @@ async def requisition_import_save(
             target_qty=item["target_qty"],
             target_price=item.get("target_price"),
             brand=item.get("brand"),
+            manufacturer=item.get("manufacturer", ""),
             condition=item.get("condition", ""),
             substitutes=item.get("substitutes", []),
             customer_pn=item.get("customer_pn", ""),
@@ -760,8 +762,10 @@ async def requisition_import_save(
             sale_notes=item.get("sale_notes", ""),
         )
         db.add(r)
-        for sub_mpn in item.get("substitutes", []):
-            resolve_material_card(sub_mpn, db)
+        for sub in item.get("substitutes", []):
+            sub_mpn = sub["mpn"] if isinstance(sub, dict) else sub
+            sub_mfr = sub.get("manufacturer", "") if isinstance(sub, dict) else ""
+            resolve_material_card(sub_mpn, db, manufacturer=sub_mfr)
 
     db.commit()
 
@@ -1069,6 +1073,7 @@ async def add_requirement(
     request: Request,
     req_id: int,
     primary_mpn: str = Form(...),
+    manufacturer: str = Form(""),
     target_qty: int = Form(1),
     brand: str = Form(""),
     substitutes: str = Form(""),
@@ -1089,11 +1094,18 @@ async def add_requirement(
 
     from ..utils.normalization import parse_substitute_mpns
 
+    if not manufacturer.strip():
+        raise HTTPException(422, "Manufacturer is required")
+
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
     if not req:
         raise HTTPException(404, "Requisition not found")
 
-    sub_list = parse_substitute_mpns(substitutes, primary_mpn)
+    form_data = await request.form()
+    sub_mpns = form_data.getlist("sub_mpn")
+    sub_mfrs = form_data.getlist("sub_manufacturer")
+    subs_raw = [{"mpn": m.strip(), "manufacturer": mfr.strip()} for m, mfr in zip(sub_mpns, sub_mfrs) if m.strip()]
+    sub_list = parse_substitute_mpns(subs_raw, primary_mpn)
 
     from ..search_service import resolve_material_card
     from ..utils.normalization import normalize_mpn_key
@@ -1106,6 +1118,7 @@ async def add_requirement(
         material_card_id=card.id if card else None,
         target_qty=target_qty,
         brand=brand or None,
+        manufacturer=manufacturer.strip(),
         substitutes=sub_list,
         target_price=target_price,
         condition=condition or None,
@@ -1119,8 +1132,8 @@ async def add_requirement(
         sourcing_status="open",
     )
     db.add(r)
-    for sub_mpn in sub_list:
-        resolve_material_card(sub_mpn, db)
+    for sub in sub_list:
+        resolve_material_card(sub["mpn"], db, manufacturer=sub.get("manufacturer", ""))
     db.commit()
     db.refresh(r)
 
@@ -2793,6 +2806,7 @@ async def update_requirement(
     req_id: int,
     item_id: int,
     primary_mpn: str = Form(...),
+    manufacturer: str = Form(""),
     target_qty: int = Form(1),
     brand: str = Form(""),
     target_price: float | None = Form(None),
@@ -2816,6 +2830,9 @@ async def update_requirement(
 
     from ..utils.normalization import parse_substitute_mpns
 
+    if not manufacturer.strip():
+        raise HTTPException(422, "Manufacturer is required")
+
     req = db.query(Requisition).filter(Requisition.id == req_id).first()
     if not req:
         raise HTTPException(404, "Requisition not found")
@@ -2826,16 +2843,22 @@ async def update_requirement(
     from ..search_service import resolve_material_card
     from ..utils.normalization import normalize_mpn_key
 
+    form_data = await request.form()
+    sub_mpns = form_data.getlist("sub_mpn")
+    sub_mfrs = form_data.getlist("sub_manufacturer")
+    subs_raw = [{"mpn": m.strip(), "manufacturer": mfr.strip()} for m, mfr in zip(sub_mpns, sub_mfrs) if m.strip()]
+
     item.primary_mpn = primary_mpn.strip()
     item.normalized_mpn = normalize_mpn_key(primary_mpn)
     card = resolve_material_card(primary_mpn, db)
     item.material_card_id = card.id if card else None
     item.target_qty = target_qty
     item.brand = brand.strip() or None
+    item.manufacturer = manufacturer.strip()
     item.target_price = target_price
-    item.substitutes = parse_substitute_mpns(substitutes, primary_mpn)
-    for sub_mpn in item.substitutes:
-        resolve_material_card(sub_mpn, db)
+    item.substitutes = parse_substitute_mpns(subs_raw, primary_mpn)
+    for sub in item.substitutes:
+        resolve_material_card(sub["mpn"], db, manufacturer=sub.get("manufacturer", ""))
     item.customer_pn = customer_pn.strip() or None
     item.condition = condition.strip() or None
     item.date_codes = date_codes.strip() or None
@@ -8979,6 +9002,7 @@ async def part_header(
 
 _PART_HEADER_EDITABLE = {
     "brand",
+    "manufacturer",
     "target_qty",
     "target_price",
     "sourcing_status",
@@ -9107,10 +9131,21 @@ async def part_header_save(
             req.target_price = Decimal(value) if value else None
         except InvalidOperation:
             req.target_price = None
+    elif field == "manufacturer":
+        req.manufacturer = value.strip() if value else ""
     elif field == "substitutes":
+        import json as _json
+
+        from ..search_service import resolve_material_card
         from ..utils.normalization import parse_substitute_mpns
 
-        req.substitutes = parse_substitute_mpns(value, req.primary_mpn)
+        try:
+            subs_data = _json.loads(value) if value else []
+        except (ValueError, TypeError):
+            subs_data = []
+        req.substitutes = parse_substitute_mpns(subs_data, req.primary_mpn)
+        for sub in req.substitutes:
+            resolve_material_card(sub["mpn"], db, manufacturer=sub.get("manufacturer", ""))
     else:
         setattr(req, field, value.strip() if value else None)
 
