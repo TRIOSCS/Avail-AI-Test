@@ -218,7 +218,18 @@
                 <div class="flex items-center gap-1.5">
                   <span class="border-l-2 border-amber-300 h-4 -ml-2"></span>
                   <span class="text-[9px] font-semibold text-amber-500 uppercase tracking-wider">Sub</span>
+                  {% if sub_card_map.get(sub_mpn) %}
+                  <a hx-get="/v2/partials/materials/{{ sub_card_map[sub_mpn] }}"
+                     hx-target="#main-content"
+                     hx-push-url="/v2/materials/{{ sub_card_map[sub_mpn] }}"
+                     @click.stop
+                     class="inline-flex px-1.5 py-0.5 text-[11px] font-mono font-medium rounded bg-amber-50 text-amber-700 border border-amber-200 hover:bg-amber-100 hover:border-amber-300 transition-colors cursor-pointer"
+                     title="View material card for {{ sub_mpn }}">
+                    {{ sub_mpn }}
+                  </a>
+                  {% else %}
                   <span class="inline-flex px-1.5 py-0.5 text-[11px] font-mono font-medium rounded bg-amber-50 text-amber-700 border border-amber-200">{{ sub_mpn }}</span>
+                  {% endif %}
                 </div>
               </td>
             </tr>
