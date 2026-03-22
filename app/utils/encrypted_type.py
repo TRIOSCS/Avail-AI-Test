@@ -21,6 +21,8 @@ def _get_fernet():
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
+        # SECURITY NOTE: Static salt — changing it would break all existing encrypted
+        # data. Future improvement: derive from a deployment-unique env var.
         salt=b"availai-token-encryption-v1",
         iterations=100_000,
     )
@@ -52,8 +54,11 @@ class EncryptedText(TypeDecorator):
             f = _get_fernet()
             return f.decrypt(value.encode()).decode()
         except InvalidToken:
-            # Value may be stored in plaintext (pre-migration data)
-            return value
+            logger.warning(
+                "Fernet decryption failed (possible pre-migration plaintext data) — "
+                "returning None instead of raw ciphertext"
+            )
+            return None
         except Exception:
-            logger.warning("Unexpected decryption error, returning raw value")
-            return value
+            logger.warning("Unexpected decryption error — returning None for safety")
+            return None

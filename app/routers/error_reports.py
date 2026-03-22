@@ -277,7 +277,11 @@ async def get_ticket_screenshot(
     if not ticket:
         raise HTTPException(404, "Ticket not found")
     if ticket.screenshot_path and os.path.isfile(ticket.screenshot_path):
-        return FileResponse(ticket.screenshot_path, media_type="image/png")
+        real_path = os.path.realpath(ticket.screenshot_path)
+        if not real_path.startswith(os.path.realpath(UPLOAD_DIR)):
+            logger.warning(f"Path traversal blocked: {ticket.screenshot_path} resolves outside UPLOAD_DIR")
+            raise HTTPException(403, "Invalid screenshot path")
+        return FileResponse(real_path, media_type="image/png")
     if ticket.screenshot_b64:
         png_bytes = base64.b64decode(ticket.screenshot_b64)
         return Response(content=png_bytes, media_type="image/png")

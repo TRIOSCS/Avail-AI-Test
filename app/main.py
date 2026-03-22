@@ -287,7 +287,8 @@ if not os.environ.get("TESTING"):
         secret=settings.secret_key,
         sensitive_cookies={"session"},  # Only enforce CSRF when session cookie is present
         exempt_urls=[
-            re.compile(r"/auth/.*"),
+            re.compile(r"/auth/callback$"),
+            re.compile(r"/auth/login$"),
             re.compile(r"/health"),
             re.compile(r"/metrics"),
             re.compile(r"/api/buy-plans/token/.*"),  # external approval links
@@ -622,6 +623,7 @@ from .routers.prospect_suggested import router as prospect_suggested_router
 from .routers.requisitions import router as reqs_router
 from .routers.rfq import router as rfq_router
 from .routers.sources import router as sources_router
+from .routers.strategic import router as strategic_router
 from .routers.tagging_admin import router as tagging_admin_router
 from .routers.tags import router as tags_router
 from .routers.task import my_tasks_router
@@ -657,6 +659,7 @@ app.include_router(prospect_suggested_router)
 app.include_router(reqs_router)
 app.include_router(rfq_router)
 app.include_router(sources_router)
+app.include_router(strategic_router)
 app.include_router(tags_router)
 app.include_router(tagging_admin_router)
 app.include_router(task_router)

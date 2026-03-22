@@ -89,7 +89,7 @@ class TestEncryptedText:
 
         et = EncryptedText()
         result = et.process_result_value("plaintext-legacy", MagicMock())
-        assert result == "plaintext-legacy"
+        assert result is None
 
     @patch("app.utils.encrypted_type._get_fernet")
     def test_process_result_value_other_error_returns_raw(self, mock_fernet):
@@ -99,4 +99,4 @@ class TestEncryptedText:
 
         et = EncryptedText()
         result = et.process_result_value("raw-value", MagicMock())
-        assert result == "raw-value"
+        assert result is None

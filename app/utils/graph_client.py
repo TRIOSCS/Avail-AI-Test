@@ -106,8 +106,10 @@ class GraphClient:
         """
         base = f"/users/{user_id}" if user_id else "/me"
         path = f"{base}/mailFolders/SentItems/messages"
+        # Escape single quotes per OData convention to prevent filter injection
+        safe_query = query.replace("'", "''")
         params = {
-            "$filter": f"contains(subject,'{query}') or contains(body/content,'{query}')",
+            "$filter": f"contains(subject,'{safe_query}') or contains(body/content,'{safe_query}')",
             "$select": "id,subject,toRecipients,sentDateTime",
             "$top": str(max_results),
             "$orderby": "sentDateTime desc",

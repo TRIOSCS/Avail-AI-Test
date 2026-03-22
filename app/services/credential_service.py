@@ -31,6 +31,8 @@ def _get_fernet() -> Fernet:
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
+        # SECURITY NOTE: Static salt — changing it would break all existing encrypted
+        # credentials. Future improvement: derive from a deployment-unique env var.
         salt=b"availai-credential-salt-v1",
         iterations=100_000,
     )
