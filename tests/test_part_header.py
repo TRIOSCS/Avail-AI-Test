@@ -33,6 +33,7 @@ def _make_requirement(db, requisition_id, **kwargs):
     defaults = {
         "requisition_id": requisition_id,
         "primary_mpn": "LM317T",
+        "manufacturer": "Texas Instruments",
         "brand": "Texas Instruments",
         "target_qty": 5000,
         "target_price": Decimal("1.2500"),
@@ -191,51 +192,72 @@ def test_edit_substitutes_returns_input(client, db_session, test_user):
 
 
 def test_patch_header_saves_substitutes(client, db_session, test_user):
-    """PATCH substitutes saves normalized, deduplicated list."""
+    """PATCH substitutes saves normalized, deduplicated list (JSON format)."""
+    import json
+
     requisition = _make_requisition(db_session, test_user.id)
     part = _make_requirement(db_session, requisition.id)
     db_session.commit()
 
+    subs_json = json.dumps(
+        [
+            {"mpn": "LM317AHVT", "manufacturer": ""},
+            {"mpn": "lm317ahvt", "manufacturer": ""},  # duplicate — should be deduplicated
+            {"mpn": "LM317MDT", "manufacturer": ""},
+        ]
+    )
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/header",
-        data={"field": "substitutes", "value": "LM317AHVT, lm317ahvt, LM317MDT"},
+        data={"field": "substitutes", "value": subs_json},
     )
     assert resp.status_code == 200
     db_session.refresh(part)
     assert len(part.substitutes) == 2
-    assert "LM317AHVT" in part.substitutes
-    assert "LM317MDT" in part.substitutes
+    mpns = [s["mpn"] for s in part.substitutes]
+    assert "LM317AHVT" in mpns
+    assert "LM317MDT" in mpns
 
 
 def test_patch_header_substitutes_excludes_primary(client, db_session, test_user):
-    """PATCH substitutes excludes the primary MPN from the list."""
+    """PATCH substitutes excludes the primary MPN from the list (JSON format)."""
+    import json
+
     requisition = _make_requisition(db_session, test_user.id)
     part = _make_requirement(db_session, requisition.id, primary_mpn="LM317T")
     db_session.commit()
 
+    subs_json = json.dumps(
+        [
+            {"mpn": "LM317T", "manufacturer": ""},
+            {"mpn": "LM317AHVT", "manufacturer": ""},
+        ]
+    )
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/header",
-        data={"field": "substitutes", "value": "LM317T, LM317AHVT"},
+        data={"field": "substitutes", "value": subs_json},
     )
     assert resp.status_code == 200
     db_session.refresh(part)
-    assert "LM317T" not in part.substitutes
-    assert "LM317AHVT" in part.substitutes
+    mpns = [s["mpn"] for s in part.substitutes]
+    assert "LM317T" not in mpns
+    assert "LM317AHVT" in mpns
 
 
 def test_patch_header_clear_substitutes(client, db_session, test_user):
-    """PATCH with empty value clears substitutes."""
+    """PATCH with empty JSON value clears substitutes."""
+    import json
+
     requisition = _make_requisition(db_session, test_user.id)
     part = _make_requirement(
         db_session,
         requisition.id,
-        substitutes=["LM317AHVT"],
+        substitutes=[{"mpn": "LM317AHVT", "manufacturer": ""}],
     )
     db_session.commit()
 
     resp = client.patch(
         f"/v2/partials/parts/{part.id}/header",
-        data={"field": "substitutes", "value": ""},
+        data={"field": "substitutes", "value": json.dumps([])},
     )
     assert resp.status_code == 200
     db_session.refresh(part)
@@ -246,7 +268,7 @@ def test_patch_header_clear_substitutes(client, db_session, test_user):
 
 
 def test_add_requirement_with_substitutes(client, db_session, test_user):
-    """POST add requirement saves substitutes."""
+    """POST add requirement saves substitutes via sub_mpn/sub_manufacturer fields."""
     requisition = _make_requisition(db_session, test_user.id)
     db_session.commit()
 
@@ -254,9 +276,11 @@ def test_add_requirement_with_substitutes(client, db_session, test_user):
         f"/v2/partials/requisitions/{requisition.id}/requirements",
         data={
             "primary_mpn": "STM32F407VG",
+            "manufacturer": "STMicro",
             "target_qty": "100",
             "brand": "ST",
-            "substitutes": "STM32F407VI, STM32F407ZG",
+            "sub_mpn": ["STM32F407VI", "STM32F407ZG"],
+            "sub_manufacturer": ["STMicro", "STMicro"],
         },
     )
     assert resp.status_code == 200
@@ -276,7 +300,7 @@ def test_add_requirement_without_substitutes(client, db_session, test_user):
 
     resp = client.post(
         f"/v2/partials/requisitions/{requisition.id}/requirements",
-        data={"primary_mpn": "LM317T", "target_qty": "50"},
+        data={"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": "50"},
     )
     assert resp.status_code == 200
     part = db_session.query(Requirement).filter(Requirement.requisition_id == requisition.id).first()
@@ -284,7 +308,7 @@ def test_add_requirement_without_substitutes(client, db_session, test_user):
 
 
 def test_update_requirement_with_substitutes(client, db_session, test_user):
-    """PUT update requirement saves substitutes."""
+    """PUT update requirement saves substitutes via sub_mpn/sub_manufacturer fields."""
     requisition = _make_requisition(db_session, test_user.id)
     part = _make_requirement(db_session, requisition.id, primary_mpn="LM317T")
     db_session.commit()
@@ -293,11 +317,14 @@ def test_update_requirement_with_substitutes(client, db_session, test_user):
         f"/v2/partials/requisitions/{requisition.id}/requirements/{part.id}",
         data={
             "primary_mpn": "LM317T",
+            "manufacturer": "TI",
             "target_qty": "100",
-            "substitutes": "LM317AHVT, LM317MDT",
+            "sub_mpn": ["LM317AHVT", "LM317MDT"],
+            "sub_manufacturer": ["TI", "TI"],
         },
     )
     assert resp.status_code == 200
     db_session.refresh(part)
     assert len(part.substitutes) == 2
-    assert "LM317AHVT" in part.substitutes
+    mpns = [s["mpn"] for s in part.substitutes]
+    assert "LM317AHVT" in mpns

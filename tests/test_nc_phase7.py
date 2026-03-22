@@ -18,7 +18,7 @@ def test_add_requirement_triggers_nc_queue(client, test_requisition, db_session)
     with patch("app.database.SessionLocal", mock_session_local):
         resp = client.post(
             f"/api/requisitions/{test_requisition.id}/requirements",
-            json={"primary_mpn": "AD8232ACPZ", "target_qty": 100},
+            json={"primary_mpn": "AD8232ACPZ", "manufacturer": "ADI", "target_qty": 100},
         )
     assert resp.status_code == 200
     data = resp.json()
@@ -41,7 +41,7 @@ def test_add_requirement_nc_failure_doesnt_break_request(client, test_requisitio
     ):
         resp = client.post(
             f"/api/requisitions/{test_requisition.id}/requirements",
-            json={"primary_mpn": "STM32F103", "target_qty": 50},
+            json={"primary_mpn": "STM32F103", "manufacturer": "STMicro", "target_qty": 50},
         )
     assert resp.status_code == 200
     assert len(resp.json()["created"]) == 1

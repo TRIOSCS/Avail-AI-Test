@@ -1194,8 +1194,8 @@ def test_apply_freeform_rfq_success(ai_client, db_session, ai_test_user):
         "customer_name": "Apply Co",
         "deadline": "2026-03-15",
         "requirements": [
-            {"primary_mpn": "LM317T", "target_qty": 500, "target_price": 0.50},
-            {"primary_mpn": "LM7805", "target_qty": 1000},
+            {"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": 500, "target_price": 0.50},
+            {"primary_mpn": "LM7805", "manufacturer": "TI", "target_qty": 1000},
         ],
     }
     resp = ai_client.post("/api/ai/apply-freeform-rfq", json=payload)

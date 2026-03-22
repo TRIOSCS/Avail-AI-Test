@@ -1,11 +1,14 @@
 {# Manufacturer typeahead results dropdown.
    Called by: GET /v2/partials/manufacturers/search?q=...
    Depends on: results (list of Manufacturer), q (search term)
+   Works for both name="manufacturer" (primary) and name="sub_manufacturer" (sub-rows).
+   Strategy: the dropdown .absolute div is inside a .relative container; the sibling input
+   is the first input in that .relative container.
 #}
 {% if results %}
   {% for mfr in results %}
   <div class="px-3 py-1.5 text-xs hover:bg-brand-50 cursor-pointer transition-colors"
-       @click="$el.closest('[x-data]').querySelector('[name=manufacturer]').value = '{{ mfr.canonical_name }}'; $el.closest('.absolute').textContent = ''">
+       @click="(function(name){ var drop = $el.closest('.absolute'); var cont = drop ? drop.closest('.relative') : null; var inp = cont ? cont.querySelector('input') : null; if(inp){ inp.value = name; inp.dispatchEvent(new Event('input', {bubbles:true})); } if(drop) drop.textContent = ''; })('{{ mfr.canonical_name }}')">
     <span class="font-medium">{{ mfr.canonical_name }}</span>
     {% if mfr.aliases %}
     <span class="text-gray-400 ml-1">({{ mfr.aliases|join(', ') }})</span>
@@ -18,7 +21,7 @@
        hx-post="/v2/partials/manufacturers/add"
        hx-vals='{"name": "{{ q }}"}'
        hx-swap="outerHTML"
-       @click="setTimeout(function(){ var el = event.target.closest('[x-data]'); if(el) { var inp = el.querySelector('[name=manufacturer]'); if(inp) inp.value = '{{ q }}'; }}, 100)">
+       @click="setTimeout(function(){ var drop = event.target.closest('.absolute'); var cont = drop ? drop.closest('.relative') : null; var inp = cont ? cont.querySelector('input') : null; if(inp){ inp.value = '{{ q }}'; inp.dispatchEvent(new Event('input', {bubbles:true})); } }, 100)">
     + Add "{{ q }}" as new manufacturer
   </div>
 {% endif %}

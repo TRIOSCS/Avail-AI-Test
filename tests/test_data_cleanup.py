@@ -269,13 +269,13 @@ class TestSchemaValidators:
     def test_requirement_create_normalizes_mpn(self):
         from app.schemas.requisitions import RequirementCreate
 
-        r = RequirementCreate(primary_mpn="lm317t", target_qty=100)
+        r = RequirementCreate(primary_mpn="lm317t", manufacturer="TI", target_qty=100)
         assert r.primary_mpn == "LM317T"
 
     def test_requirement_create_normalizes_substitutes(self):
         from app.schemas.requisitions import RequirementCreate
 
-        r = RequirementCreate(primary_mpn="LM317T", substitutes=["ne555p", "lm7805"])
+        r = RequirementCreate(primary_mpn="LM317T", manufacturer="TI", substitutes=["ne555p", "lm7805"])
         assert r.substitutes == ["NE555P", "LM7805"]
 
     def test_requirement_update_normalizes_mpn(self):

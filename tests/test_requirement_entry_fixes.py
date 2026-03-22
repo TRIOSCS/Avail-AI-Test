@@ -83,8 +83,8 @@ def test_add_requirement_skipped_items_reported(client, test_requisition):
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/requirements",
         json=[
-            {"primary_mpn": "LM7805", "target_qty": 100},
-            {"primary_mpn": "", "target_qty": 1},  # blank MPN — should be skipped
+            {"primary_mpn": "LM7805", "manufacturer": "TI", "target_qty": 100},
+            {"primary_mpn": "", "manufacturer": "TI", "target_qty": 1},  # blank MPN — should be skipped
         ],
     )
     assert resp.status_code == 200
@@ -208,7 +208,7 @@ def test_add_requirement_normalizes_condition(client, test_requisition):
     """Condition is normalized on create (e.g. 'NEW' -> lowercase)."""
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/requirements",
-        json=[{"primary_mpn": "LM7805", "condition": "NEW"}],
+        json=[{"primary_mpn": "LM7805", "manufacturer": "TI", "condition": "NEW"}],
     )
     assert resp.status_code == 200
     data = resp.json()

@@ -104,7 +104,7 @@ def test_add_single_requirement_links_material_card(client, db_session, test_use
 
     resp = client.post(
         f"/v2/partials/requisitions/{req.id}/requirements",
-        data={"primary_mpn": "MAX17498AATE", "target_qty": "100"},
+        data={"primary_mpn": "MAX17498AATE", "manufacturer": "Maxim", "target_qty": "100"},
     )
     assert resp.status_code == 200
 
@@ -127,7 +127,7 @@ def test_inline_edit_links_material_card(client, db_session, test_user):
 
     resp = client.put(
         f"/v2/partials/requisitions/{req.id}/requirements/{part.id}",
-        data={"primary_mpn": "TPS65381AQPHPRQ1", "target_qty": "200"},
+        data={"primary_mpn": "TPS65381AQPHPRQ1", "manufacturer": "TI", "target_qty": "200"},
     )
     assert resp.status_code == 200
 
@@ -153,7 +153,7 @@ def test_inline_edit_reuses_existing_material_card(client, db_session, test_user
 
     resp = client.put(
         f"/v2/partials/requisitions/{req.id}/requirements/{part.id}",
-        data={"primary_mpn": "LM317T", "target_qty": "50"},
+        data={"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": "50"},
     )
     assert resp.status_code == 200
 

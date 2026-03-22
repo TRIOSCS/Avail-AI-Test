@@ -9066,18 +9066,41 @@ async def part_header_edit_cell(
         )
 
     if field == "substitutes":
-        subs_csv = escape(", ".join(req.substitutes)) if req.substitutes else ""
-        return HTMLResponse(
-            f'<div id="{cell_id}" class="flex items-center gap-2">'
-            f'<input type="text" name="value" value="{subs_csv}" '
-            f'hx-patch="{save_url}" hx-target="#part-header-wrap" hx-swap="innerHTML" '
-            f'hx-vals=\'{{"field": "{field}"}}\' '
-            f"hx-trigger=\"keyup[key=='Enter']\" "
-            f"@keydown.escape=\"htmx.ajax('GET', '{cancel_url}', {{target: '#part-header-wrap', swap: 'innerHTML'}})\" "
-            f'class="text-xs px-2 py-1 rounded border border-brand-300 focus:ring-1 focus:ring-brand-500 w-64 font-mono" '
-            f'placeholder="Comma-separated MPNs" autofocus />'
-            f"</div>",
+        import json as _json_enc
+
+        subs_json = _json_enc.dumps(req.substitutes if req.substitutes else [])
+        subs_json_escaped = subs_json.replace("'", "&#39;").replace('"', "&quot;")
+        html = (
+            f'<div id="{cell_id}"'
+            f' x-data="{{ subs: JSON.parse($el.dataset.subs), saving: false }}"'
+            f' data-subs="{subs_json_escaped}">'
+            # hidden input serialises rows to JSON on submit
+            f'<input type="hidden" name="value" x-bind:value="JSON.stringify(subs)">'
+            f'<input type="hidden" name="field" value="{field}">'
+            # sub rows
+            f'<template x-for="(sub, idx) in subs" :key="idx">'
+            f'<div class="flex gap-1 items-center mb-1">'
+            f'<input :name="\'sub_mpn_\' + idx" x-model="sub.mpn" placeholder="Sub MPN"'
+            f' class="px-2 py-0.5 text-xs font-mono border border-brand-300 rounded focus:ring-1 focus:ring-brand-500 w-32">'
+            f'<input :name="\'sub_mfr_\' + idx" x-model="sub.manufacturer" placeholder="Manufacturer"'
+            f' class="px-2 py-0.5 text-xs border border-brand-300 rounded focus:ring-1 focus:ring-brand-500 w-36">'
+            f'<button type="button" @click="subs.splice(idx, 1)"'
+            f' class="text-gray-400 hover:text-red-500 text-sm leading-none px-1">×</button>'
+            f"</div>"
+            f"</template>"
+            f'<div class="flex items-center gap-2 mt-1">'
+            f"<button type=\"button\" @click=\"subs.push({{mpn: '', manufacturer: ''}})\""
+            f' class="text-[10px] text-brand-500 hover:text-brand-600 font-medium">+ Add</button>'
+            f'<button type="button" :disabled="saving"'
+            f" @click=\"saving=true; htmx.ajax('PATCH', '{save_url}', {{target: '#part-header-wrap', swap: 'innerHTML', values: {{field: '{field}', value: JSON.stringify(subs)}}}})\""
+            f' class="text-[10px] px-2 py-0.5 bg-brand-500 text-white rounded hover:bg-brand-600 font-medium">Save</button>'
+            f'<button type="button"'
+            f" @click=\"htmx.ajax('GET', '{cancel_url}', {{target: '#part-header-wrap', swap: 'innerHTML'}})\""
+            f' class="text-[10px] text-gray-500 hover:text-gray-700">Cancel</button>'
+            f"</div>"
+            f"</div>"
         )
+        return HTMLResponse(html)
 
     input_type = "number" if field in ("target_qty", "target_price") else "text"
     step = ' step="0.0001"' if field == "target_price" else ""

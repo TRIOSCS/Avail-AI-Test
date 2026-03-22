@@ -201,7 +201,7 @@ def test_add_requirement(client, test_requisition):
     """POST /api/requisitions/{id}/requirements adds a new line item."""
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/requirements",
-        json={"primary_mpn": "NE555P", "target_qty": 500},
+        json={"primary_mpn": "NE555P", "manufacturer": "TI", "target_qty": 500},
     )
     assert resp.status_code == 200
     data = resp.json()
@@ -214,8 +214,8 @@ def test_add_requirement_batch(client, test_requisition):
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/requirements",
         json=[
-            {"primary_mpn": "LM7805", "target_qty": 100},
-            {"primary_mpn": "LM7812", "target_qty": 200},
+            {"primary_mpn": "LM7805", "manufacturer": "TI", "target_qty": 100},
+            {"primary_mpn": "LM7812", "manufacturer": "TI", "target_qty": 200},
         ],
     )
     assert resp.status_code == 200
@@ -227,8 +227,8 @@ def test_add_requirement_skips_invalid(client, test_requisition):
     resp = client.post(
         f"/api/requisitions/{test_requisition.id}/requirements",
         json=[
-            {"primary_mpn": "", "target_qty": 1},  # blank MPN — invalid
-            {"primary_mpn": "TL431", "target_qty": 50},
+            {"primary_mpn": "", "manufacturer": "TI", "target_qty": 1},  # blank MPN — invalid
+            {"primary_mpn": "TL431", "manufacturer": "TI", "target_qty": 50},
         ],
     )
     assert resp.status_code == 200

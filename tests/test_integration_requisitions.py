@@ -111,7 +111,7 @@ def test_add_requirement(client):
     resp = client.post(
         f"/api/requisitions/{req_id}/requirements",
         json=[
-            {"primary_mpn": "LM317T", "target_qty": 500},
+            {"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": 500},
         ],
     )
     assert resp.status_code == 200
@@ -124,9 +124,9 @@ def test_add_multiple_requirements(client):
     resp = client.post(
         f"/api/requisitions/{req_id}/requirements",
         json=[
-            {"primary_mpn": "LM317T", "target_qty": 100},
-            {"primary_mpn": "NE555P", "target_qty": 200},
-            {"primary_mpn": "LM7805", "target_qty": 300},
+            {"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": 100},
+            {"primary_mpn": "NE555P", "manufacturer": "TI", "target_qty": 200},
+            {"primary_mpn": "LM7805", "manufacturer": "TI", "target_qty": 300},
         ],
     )
     assert resp.status_code == 200
@@ -139,8 +139,8 @@ def test_add_requirement_skips_blank_mpn(client):
     resp = client.post(
         f"/api/requisitions/{req_id}/requirements",
         json=[
-            {"primary_mpn": "", "target_qty": 10},
-            {"primary_mpn": "VALID-MPN", "target_qty": 20},
+            {"primary_mpn": "", "manufacturer": "TI", "target_qty": 10},
+            {"primary_mpn": "VALID-MPN", "manufacturer": "TI", "target_qty": 20},
         ],
     )
     assert resp.status_code == 200
@@ -154,7 +154,7 @@ def test_list_requirements(client):
     client.post(
         f"/api/requisitions/{req_id}/requirements",
         json=[
-            {"primary_mpn": "AD8045", "target_qty": 50},
+            {"primary_mpn": "AD8045", "manufacturer": "ADI", "target_qty": 50},
         ],
     )
     resp = client.get(f"/api/requisitions/{req_id}/requirements")
@@ -170,7 +170,7 @@ def test_delete_requirement(client):
     items = client.post(
         f"/api/requisitions/{req_id}/requirements",
         json=[
-            {"primary_mpn": "TMP123", "target_qty": 10},
+            {"primary_mpn": "TMP123", "manufacturer": "TI", "target_qty": 10},
         ],
     ).json()
     item_id = items["created"][0]["id"]
@@ -188,7 +188,7 @@ def test_update_requirement(client):
     items = client.post(
         f"/api/requisitions/{req_id}/requirements",
         json=[
-            {"primary_mpn": "OLD-MPN", "target_qty": 10},
+            {"primary_mpn": "OLD-MPN", "manufacturer": "TI", "target_qty": 10},
         ],
     ).json()
     item_id = items["created"][0]["id"]
@@ -197,6 +197,7 @@ def test_update_requirement(client):
         f"/api/requirements/{item_id}",
         json={
             "primary_mpn": "NEW-MPN",
+            "manufacturer": "TI",
             "target_qty": 999,
         },
     )
@@ -243,6 +244,7 @@ def test_get_saved_sightings_returns_data(client, db_session):
         f"/api/requisitions/{req_id}/requirements",
         json={
             "primary_mpn": "LM358N",
+            "manufacturer": "TI",
         },
     )
     # Get the requirement ID from the list endpoint

@@ -78,9 +78,7 @@ def _make_offer_input(**kw) -> SimpleNamespace:
 
 
 class TestPromoteProspectContact:
-    def test_promote_vendor_contact_creates_new(
-        self, db_session: Session, test_user, test_vendor_card
-    ):
+    def test_promote_vendor_contact_creates_new(self, db_session: Session, test_user, test_vendor_card):
         pc = _make_prospect_contact(db_session, vendor_card_id=test_vendor_card.id)
         result = promote_prospect_contact(db_session, pc.id, test_user.id)
         db_session.commit()
@@ -92,9 +90,7 @@ class TestPromoteProspectContact:
         assert vc.email == "prospect@example.com"
         assert vc.vendor_card_id == test_vendor_card.id
 
-    def test_promote_vendor_contact_dedupes_by_email(
-        self, db_session: Session, test_user, test_vendor_card
-    ):
+    def test_promote_vendor_contact_dedupes_by_email(self, db_session: Session, test_user, test_vendor_card):
         existing = VendorContact(
             vendor_card_id=test_vendor_card.id,
             email="prospect@example.com",
@@ -104,9 +100,7 @@ class TestPromoteProspectContact:
         db_session.add(existing)
         db_session.flush()
 
-        pc = _make_prospect_contact(
-            db_session, vendor_card_id=test_vendor_card.id, full_name="New Name"
-        )
+        pc = _make_prospect_contact(db_session, vendor_card_id=test_vendor_card.id, full_name="New Name")
         result = promote_prospect_contact(db_session, pc.id, test_user.id)
         db_session.commit()
 
@@ -114,12 +108,8 @@ class TestPromoteProspectContact:
         db_session.refresh(existing)
         assert existing.full_name == "New Name"
 
-    def test_promote_site_contact_creates_new(
-        self, db_session: Session, test_user, test_customer_site
-    ):
-        pc = _make_prospect_contact(
-            db_session, customer_site_id=test_customer_site.id
-        )
+    def test_promote_site_contact_creates_new(self, db_session: Session, test_user, test_customer_site):
+        pc = _make_prospect_contact(db_session, customer_site_id=test_customer_site.id)
         result = promote_prospect_contact(db_session, pc.id, test_user.id)
         db_session.commit()
 
@@ -128,9 +118,7 @@ class TestPromoteProspectContact:
         assert sc is not None
         assert sc.email == "prospect@example.com"
 
-    def test_promote_site_contact_dedupes_by_email(
-        self, db_session: Session, test_user, test_customer_site
-    ):
+    def test_promote_site_contact_dedupes_by_email(self, db_session: Session, test_user, test_customer_site):
         existing = SiteContact(
             customer_site_id=test_customer_site.id,
             email="prospect@example.com",
@@ -139,9 +127,7 @@ class TestPromoteProspectContact:
         db_session.add(existing)
         db_session.flush()
 
-        pc = _make_prospect_contact(
-            db_session, customer_site_id=test_customer_site.id, title="Director"
-        )
+        pc = _make_prospect_contact(db_session, customer_site_id=test_customer_site.id, title="Director")
         result = promote_prospect_contact(db_session, pc.id, test_user.id)
         db_session.commit()
 
@@ -153,16 +139,12 @@ class TestPromoteProspectContact:
         with pytest.raises(ValueError, match="Prospect contact not found"):
             promote_prospect_contact(db_session, 99999, test_user.id)
 
-    def test_promote_no_linked_entity_raises(
-        self, db_session: Session, test_user
-    ):
+    def test_promote_no_linked_entity_raises(self, db_session: Session, test_user):
         pc = _make_prospect_contact(db_session)  # neither vendor nor site
         with pytest.raises(ValueError, match="no vendor_card_id or customer_site_id"):
             promote_prospect_contact(db_session, pc.id, test_user.id)
 
-    def test_promote_sets_is_saved_and_saved_by(
-        self, db_session: Session, test_user, test_vendor_card
-    ):
+    def test_promote_sets_is_saved_and_saved_by(self, db_session: Session, test_user, test_vendor_card):
         pc = _make_prospect_contact(db_session, vendor_card_id=test_vendor_card.id)
         promote_prospect_contact(db_session, pc.id, test_user.id)
         db_session.commit()
@@ -183,9 +165,7 @@ class TestSaveParsedOffers:
         mock_resolve.return_value = test_material_card
         offer_in = _make_offer_input(mpn="LM317T")
 
-        result = save_parsed_offers(
-            db_session, test_requisition.id, None, [offer_in], test_user.id
-        )
+        result = save_parsed_offers(db_session, test_requisition.id, None, [offer_in], test_user.id)
         db_session.commit()
 
         assert result["created"] == 1
@@ -200,9 +180,7 @@ class TestSaveParsedOffers:
     ):
         """Offer with unrelated MPN gets no requirement match."""
         offer_in = _make_offer_input(mpn="ZZZZUNKNOWN")
-        result = save_parsed_offers(
-            db_session, test_requisition.id, None, [offer_in], test_user.id
-        )
+        result = save_parsed_offers(db_session, test_requisition.id, None, [offer_in], test_user.id)
         db_session.commit()
 
         assert result["created"] == 1
@@ -210,26 +188,18 @@ class TestSaveParsedOffers:
         assert offer.requirement_id is None
 
     @patch("app.search_service.resolve_material_card")
-    def test_returns_count_and_ids(
-        self, mock_resolve, db_session: Session, test_requisition, test_user
-    ):
+    def test_returns_count_and_ids(self, mock_resolve, db_session: Session, test_requisition, test_user):
         mock_resolve.return_value = None
         offers = [_make_offer_input(mpn=f"PART{i}") for i in range(3)]
-        result = save_parsed_offers(
-            db_session, test_requisition.id, None, offers, test_user.id
-        )
+        result = save_parsed_offers(db_session, test_requisition.id, None, offers, test_user.id)
         db_session.commit()
 
         assert result["created"] == 3
         assert len(result["offer_ids"]) == 3
 
     @patch("app.search_service.resolve_material_card")
-    def test_empty_offers_list(
-        self, mock_resolve, db_session: Session, test_requisition, test_user
-    ):
-        result = save_parsed_offers(
-            db_session, test_requisition.id, None, [], test_user.id
-        )
+    def test_empty_offers_list(self, mock_resolve, db_session: Session, test_requisition, test_user):
+        result = save_parsed_offers(db_session, test_requisition.id, None, [], test_user.id)
         assert result["created"] == 0
         assert result["offer_ids"] == []
 
@@ -243,12 +213,10 @@ class TestApplyFreeformRfq:
         self, mock_resolve, db_session: Session, test_user, test_customer_site
     ):
         items = [
-            {"primary_mpn": "LM317T", "target_qty": 500},
-            {"primary_mpn": "NE555P", "target_qty": 200},
+            {"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": 500},
+            {"primary_mpn": "NE555P", "manufacturer": "TI", "target_qty": 200},
         ]
-        result = apply_freeform_rfq(
-            db_session, "Test RFQ", test_customer_site.id, None, None, items, test_user.id
-        )
+        result = apply_freeform_rfq(db_session, "Test RFQ", test_customer_site.id, None, None, items, test_user.id)
         db_session.commit()
 
         assert result["requirements_added"] == 2
@@ -257,28 +225,20 @@ class TestApplyFreeformRfq:
         assert req.name == "Test RFQ"
 
     @patch("app.search_service.resolve_material_card", return_value=None)
-    def test_max_50_requirements(
-        self, mock_resolve, db_session: Session, test_user, test_customer_site
-    ):
-        items = [{"primary_mpn": f"PART{i:03d}", "target_qty": 1} for i in range(60)]
-        result = apply_freeform_rfq(
-            db_session, "Big RFQ", test_customer_site.id, None, None, items, test_user.id
-        )
+    def test_max_50_requirements(self, mock_resolve, db_session: Session, test_user, test_customer_site):
+        items = [{"primary_mpn": f"PART{i:03d}", "manufacturer": "TI", "target_qty": 1} for i in range(60)]
+        result = apply_freeform_rfq(db_session, "Big RFQ", test_customer_site.id, None, None, items, test_user.id)
         db_session.commit()
 
         assert result["requirements_added"] == 50
 
     @patch("app.search_service.resolve_material_card", return_value=None)
-    def test_invalid_requirement_skipped(
-        self, mock_resolve, db_session: Session, test_user, test_customer_site
-    ):
+    def test_invalid_requirement_skipped(self, mock_resolve, db_session: Session, test_user, test_customer_site):
         items = [
-            {"primary_mpn": "", "target_qty": 1},  # blank MPN should fail validation
-            {"primary_mpn": "GOOD-PART", "target_qty": 100},
+            {"primary_mpn": "", "manufacturer": "TI", "target_qty": 1},  # blank MPN should fail validation
+            {"primary_mpn": "GOOD-PART", "manufacturer": "TI", "target_qty": 100},
         ]
-        result = apply_freeform_rfq(
-            db_session, "Mixed RFQ", test_customer_site.id, None, None, items, test_user.id
-        )
+        result = apply_freeform_rfq(db_session, "Mixed RFQ", test_customer_site.id, None, None, items, test_user.id)
         db_session.commit()
 
         assert result["requirements_added"] == 1
@@ -293,13 +253,9 @@ class TestApplyFreeformRfq:
 
 class TestSaveFreeformOffers:
     @patch("app.search_service.resolve_material_card", return_value=None)
-    def test_creates_offers_and_vendor_cards(
-        self, mock_resolve, db_session: Session, test_requisition, test_user
-    ):
+    def test_creates_offers_and_vendor_cards(self, mock_resolve, db_session: Session, test_requisition, test_user):
         offer_in = _make_offer_input(vendor_name="New Vendor Co")
-        result = save_freeform_offers(
-            db_session, test_requisition.id, [offer_in], test_user.id
-        )
+        result = save_freeform_offers(db_session, test_requisition.id, [offer_in], test_user.id)
         db_session.commit()
 
         assert result["created"] == 1
@@ -315,22 +271,16 @@ class TestSaveFreeformOffers:
         self, mock_resolve, db_session: Session, test_requisition, test_user, test_vendor_card
     ):
         offer_in = _make_offer_input(vendor_name="Arrow Electronics")
-        result = save_freeform_offers(
-            db_session, test_requisition.id, [offer_in], test_user.id
-        )
+        result = save_freeform_offers(db_session, test_requisition.id, [offer_in], test_user.id)
         db_session.commit()
 
         offer = db_session.get(Offer, result["offer_ids"][0])
         assert offer.vendor_card_id == test_vendor_card.id
 
     @patch("app.search_service.resolve_material_card", return_value=None)
-    def test_defaults_condition_and_currency(
-        self, mock_resolve, db_session: Session, test_requisition, test_user
-    ):
+    def test_defaults_condition_and_currency(self, mock_resolve, db_session: Session, test_requisition, test_user):
         offer_in = _make_offer_input(condition=None, currency=None)
-        result = save_freeform_offers(
-            db_session, test_requisition.id, [offer_in], test_user.id
-        )
+        result = save_freeform_offers(db_session, test_requisition.id, [offer_in], test_user.id)
         db_session.commit()
 
         offer = db_session.get(Offer, result["offer_ids"][0])

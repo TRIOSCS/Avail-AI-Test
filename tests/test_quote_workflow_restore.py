@@ -27,7 +27,7 @@ def _setup_req_with_offers(client):
     req_id = req["id"]
     items = client.post(
         f"/api/requisitions/{req_id}/requirements",
-        json=[{"primary_mpn": "LM317T", "target_qty": 500, "target_price": 0.50}],
+        json=[{"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": 500, "target_price": 0.50}],
     ).json()["created"]
     offer = client.post(
         f"/api/requisitions/{req_id}/offers",

@@ -110,7 +110,7 @@ def _create_req_with_requirement(client):
     items = client.post(
         f"/api/requisitions/{req['id']}/requirements",
         json=[
-            {"primary_mpn": "LM317T", "target_qty": 100},
+            {"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": 100},
         ],
     ).json()
     return req["id"], items["created"][0]["id"]

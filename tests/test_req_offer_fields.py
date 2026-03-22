@@ -30,6 +30,7 @@ class TestRequirementSchemas:
         """RequirementCreate accepts customer_pn, need_by_date, brand."""
         data = RequirementCreate(
             primary_mpn="LM317T",
+            manufacturer="Texas Instruments",
             target_qty=100,
             brand="Texas Instruments",
             customer_pn="CUST-001",
@@ -44,7 +45,7 @@ class TestRequirementSchemas:
 
     def test_create_defaults_none(self):
         """New fields default to None when not provided."""
-        data = RequirementCreate(primary_mpn="LM317T")
+        data = RequirementCreate(primary_mpn="LM317T", manufacturer="TI")
         assert data.brand is None
         assert data.customer_pn is None
         assert data.need_by_date is None
@@ -84,7 +85,7 @@ class TestRequirementSchemas:
 
     def test_condition_normalization(self):
         """RequirementCreate normalizes condition values."""
-        data = RequirementCreate(primary_mpn="LM317T", condition="Refurbished")
+        data = RequirementCreate(primary_mpn="LM317T", manufacturer="TI", condition="Refurbished")
         assert data.condition == "refurb"
 
 
@@ -234,6 +235,7 @@ class TestAddRequirementWithNewFields:
             f"/v2/partials/requisitions/{test_requisition.id}/requirements",
             data={
                 "primary_mpn": "NEW-PART-001",
+                "manufacturer": "Texas Instruments",
                 "target_qty": "500",
                 "brand": "Texas Instruments",
                 "target_price": "1.2500",
@@ -244,7 +246,6 @@ class TestAddRequirementWithNewFields:
                 "date_codes": "2025+",
                 "firmware": "v2.0",
                 "hardware_codes": "REV-B",
-                "substitutes": "ALT-001, ALT-002",
                 "notes": "Urgent order",
             },
         )
@@ -263,7 +264,7 @@ class TestAddRequirementWithNewFields:
         """POST add requirement with only required fields still works."""
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/requirements",
-            data={"primary_mpn": "MINIMAL-001"},
+            data={"primary_mpn": "MINIMAL-001", "manufacturer": "TI"},
         )
         assert resp.status_code == 200
 
@@ -285,6 +286,7 @@ class TestUpdateRequirementWithNewFields:
             f"/v2/partials/requisitions/{req.id}/requirements/{item.id}",
             data={
                 "primary_mpn": item.primary_mpn,
+                "manufacturer": item.manufacturer or "TI",
                 "target_qty": "1000",
                 "brand": "TI",
                 "customer_pn": "UPD-CUST-001",

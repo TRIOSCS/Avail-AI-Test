@@ -18,10 +18,10 @@
     <form hx-post="/v2/partials/requisitions/{{ req.id }}/requirements"
           hx-target="#parts-tbody"
           hx-swap="afterbegin"
-          @htmx:after-request.camel="if(event.detail.successful) { $el.reset(); Alpine.store('toast').message='Requirement added'; Alpine.store('toast').type='success'; Alpine.store('toast').show=true; }"
+          @htmx:after-request.camel="if(event.detail.successful) { $el.reset(); $dispatch('req-form-reset'); Alpine.store('toast').message='Requirement added'; Alpine.store('toast').type='success'; Alpine.store('toast').show=true; }"
           class="space-y-3">
 
-      {# Row 1: MPN, Qty, Brand, Target Price #}
+      {# Row 1: MPN, Manufacturer typeahead, Qty, Target Price #}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div>
           <label class="block text-xs text-gray-500 mb-1">MPN *</label>
@@ -29,13 +29,26 @@
                  class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500 font-mono">
         </div>
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Qty</label>
-          <input type="number" name="target_qty" min="1" value="1" placeholder="Qty"
-                 class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+          <label class="block text-xs text-gray-500 mb-1">Manufacturer *</label>
+          <div class="relative" x-data="{ mfrOpen: false }">
+            <input type="text" name="manufacturer" required
+                   placeholder="Manufacturer (required)"
+                   x-ref="mfrInput"
+                   @input.debounce.300ms="mfrOpen = $el.value.length > 0"
+                   @click.away="mfrOpen = false"
+                   hx-get="/v2/partials/manufacturers/search"
+                   hx-trigger="input changed delay:300ms"
+                   hx-target="next .mfr-dropdown"
+                   hx-vals="js:{q: event.target.value}"
+                   hx-swap="innerHTML"
+                   class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500 placeholder:text-gray-400">
+            <div class="mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-gray-200 rounded shadow-lg max-h-40 overflow-y-auto"
+                 x-show="mfrOpen" x-cloak></div>
+          </div>
         </div>
         <div>
-          <label class="block text-xs text-gray-500 mb-1">Manufacturer</label>
-          <input type="text" name="brand" placeholder="Brand"
+          <label class="block text-xs text-gray-500 mb-1">Qty</label>
+          <input type="number" name="target_qty" min="1" value="1" placeholder="Qty"
                  class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
         </div>
         <div>
@@ -45,8 +58,13 @@
         </div>
       </div>
 
-      {# Row 2: Customer PN, Need-by Date, Condition, Packaging #}
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {# Row 2: Brand, Customer PN, Need-by Date, Condition, Packaging #}
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div>
+          <label class="block text-xs text-gray-500 mb-1">Brand</label>
+          <input type="text" name="brand" placeholder="Brand (optional)"
+                 class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
+        </div>
         <div>
           <label class="block text-xs text-gray-500 mb-1">Customer PN</label>
           <input type="text" name="customer_pn" placeholder="Customer's part #"
@@ -73,8 +91,8 @@
         </div>
       </div>
 
-      {# Row 3: Date Codes, Firmware, Hardware Codes, Substitutes #}
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+      {# Row 3: Date Codes, Firmware, Hardware Codes #}
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-3">
         <div>
           <label class="block text-xs text-gray-500 mb-1">Date Codes</label>
           <input type="text" name="date_codes" placeholder="2024+"
@@ -90,12 +108,34 @@
           <input type="text" name="hardware_codes" placeholder="HW rev"
                  class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
         </div>
-        <div>
-          <label class="block text-xs text-gray-500 mb-1">Substitutes</label>
-          <input type="text" name="substitutes" placeholder="Alt MPNs, comma-sep"
-                 class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500 font-mono"
-                 title="Approved substitute part numbers, comma-separated">
-        </div>
+      </div>
+
+      {# Structured substitute rows #}
+      <div x-data="{ subs: [] }" @req-form-reset.window="subs = []">
+        <label class="block text-xs text-gray-500 mb-1">Substitutes</label>
+        <template x-for="(sub, idx) in subs" :key="idx">
+          <div class="flex gap-1.5 items-center mb-1.5">
+            <input :name="'sub_mpn'" x-model="sub.mpn" placeholder="Sub MPN"
+                   class="flex-1 px-2 py-1.5 text-sm font-mono border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
+            <div class="relative flex-1" x-data="{ subMfrOpen: false }">
+              <input :name="'sub_manufacturer'" x-model="sub.manufacturer" placeholder="Manufacturer"
+                     @input.debounce.300ms="subMfrOpen = $el.value.length > 0"
+                     @click.away="subMfrOpen = false"
+                     hx-get="/v2/partials/manufacturers/search"
+                     hx-trigger="input changed delay:300ms"
+                     hx-target="next .sub-mfr-dropdown"
+                     hx-vals="js:{q: event.target.value}"
+                     hx-swap="innerHTML"
+                     class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 placeholder:text-gray-400">
+              <div class="sub-mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-gray-200 rounded shadow-lg max-h-32 overflow-y-auto"
+                   x-show="subMfrOpen" x-cloak></div>
+            </div>
+            <button type="button" @click="subs.splice(idx, 1)"
+                    class="flex-none text-gray-400 hover:text-red-500 text-base leading-none px-1" title="Remove">×</button>
+          </div>
+        </template>
+        <button type="button" @click="subs.push({mpn: '', manufacturer: ''})"
+                class="text-[11px] text-brand-500 hover:text-brand-600 font-medium">+ Add substitute</button>
       </div>
 
       {# Full-width: Notes #}

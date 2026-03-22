@@ -101,13 +101,25 @@
     <form hx-put="/v2/partials/requisitions/{{ req.id }}/requirements/{{ r.id }}"
           hx-target="#req-row-{{ r.id }}" hx-swap="outerHTML"
           class="p-3 space-y-2">
+      {# Row 1: MPN, Manufacturer typeahead, Qty, Target Price #}
       <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
         <input type="text" name="primary_mpn" value="{{ r.primary_mpn or '' }}" required
                class="px-2 py-1.5 text-sm font-mono border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
                placeholder="MPN">
-        <input type="text" name="brand" value="{{ r.brand or '' }}"
-               class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
-               placeholder="Brand">
+        <div class="relative" x-data="{ mfrOpen: false }">
+          <input type="text" name="manufacturer" value="{{ r.manufacturer or '' }}" required
+                 placeholder="Manufacturer (required)"
+                 @input.debounce.300ms="mfrOpen = $el.value.length > 0"
+                 @click.away="mfrOpen = false"
+                 hx-get="/v2/partials/manufacturers/search"
+                 hx-trigger="input changed delay:300ms"
+                 hx-target="next .mfr-dropdown"
+                 hx-vals="js:{q: event.target.value}"
+                 hx-swap="innerHTML"
+                 class="w-full px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500 placeholder:text-gray-400">
+          <div class="mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-gray-200 rounded shadow-lg max-h-40 overflow-y-auto"
+               x-show="mfrOpen" x-cloak></div>
+        </div>
         <input type="number" name="target_qty" value="{{ r.target_qty or 1 }}" min="1"
                class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
                placeholder="Qty">
@@ -115,7 +127,11 @@
                class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
                placeholder="Target $">
       </div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+      {# Row 2: Brand, Customer PN, Need-by, Condition, Packaging #}
+      <div class="grid grid-cols-2 md:grid-cols-5 gap-2">
+        <input type="text" name="brand" value="{{ r.brand or '' }}"
+               class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
+               placeholder="Brand">
         <input type="text" name="customer_pn" value="{{ r.customer_pn or '' }}"
                class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
                placeholder="Customer PN">
@@ -131,7 +147,8 @@
                class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
                placeholder="Packaging">
       </div>
-      <div class="grid grid-cols-2 md:grid-cols-4 gap-2">
+      {# Row 3: Date Codes, Firmware, HW Codes #}
+      <div class="grid grid-cols-2 md:grid-cols-3 gap-2">
         <input type="text" name="date_codes" value="{{ r.date_codes or '' }}"
                class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
                placeholder="Date Codes">
@@ -141,9 +158,34 @@
         <input type="text" name="hardware_codes" value="{{ r.hardware_codes or '' }}"
                class="px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
                placeholder="HW Codes">
-        <input type="text" name="substitutes" value="{{ r.substitutes|join(', ') if r.substitutes else '' }}"
-               class="px-2 py-1.5 text-sm font-mono border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
-               placeholder="Subs (comma-sep)">
+      </div>
+      {# Structured substitute rows — initialised from data-subs JSON attribute #}
+      <div x-data="{ subs: JSON.parse($el.dataset.subs || '[]') }"
+           data-subs="{{ r.substitutes | tojson if r.substitutes else '[]' }}">
+        <div class="text-xs text-gray-500 mb-1">Substitutes</div>
+        <template x-for="(sub, idx) in subs" :key="idx">
+          <div class="flex gap-1.5 items-center mb-1">
+            <input :name="'sub_mpn'" x-model="sub.mpn" placeholder="Sub MPN"
+                   class="flex-1 px-2 py-1 text-xs font-mono border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
+            <div class="relative flex-1" x-data="{ subMfrOpen: false }">
+              <input :name="'sub_manufacturer'" x-model="sub.manufacturer" placeholder="Manufacturer"
+                     @input.debounce.300ms="subMfrOpen = $el.value.length > 0"
+                     @click.away="subMfrOpen = false"
+                     hx-get="/v2/partials/manufacturers/search"
+                     hx-trigger="input changed delay:300ms"
+                     hx-target="next .sub-mfr-dropdown"
+                     hx-vals="js:{q: event.target.value}"
+                     hx-swap="innerHTML"
+                     class="w-full px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 placeholder:text-gray-400">
+              <div class="sub-mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-gray-200 rounded shadow-lg max-h-32 overflow-y-auto"
+                   x-show="subMfrOpen" x-cloak></div>
+            </div>
+            <button type="button" @click="subs.splice(idx, 1)"
+                    class="flex-none text-gray-400 hover:text-red-500 text-base leading-none px-1" title="Remove">×</button>
+          </div>
+        </template>
+        <button type="button" @click="subs.push({mpn: '', manufacturer: ''})"
+                class="text-[11px] text-brand-500 hover:text-brand-600 font-medium">+ Add substitute</button>
       </div>
       <textarea name="notes" rows="1" placeholder="Notes"
                 class="w-full px-2 py-1.5 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500">{{ r.notes or '' }}</textarea>
