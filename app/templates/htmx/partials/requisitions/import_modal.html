@@ -83,7 +83,7 @@
                  class="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
           <input type="text" x-model="newLocation" placeholder="City, State (e.g. Dallas, TX)"
                  class="w-full px-2 py-1 text-sm border border-gray-200 rounded focus:ring-1 focus:ring-brand-500">
-          <div id="company-lookup-result"></div>
+          <div data-lookup-result></div>
           <button type="button" :disabled="!newName.trim() || lookingUp"
                   @click="lookupCompany()"
                   class="px-3 py-1 text-xs font-semibold bg-brand-500 text-white rounded hover:bg-brand-600 disabled:opacity-50 inline-flex items-center gap-1">
@@ -157,75 +157,5 @@
     </div>
   </form>
 
-<script>
-function customerPicker() {
-  return {
-    companies: [],
-    query: '',
-    open: false,
-    selectedSiteId: '',
-    selectedName: '',
-    addNew: false,
-    newName: '',
-    newLocation: '',
-    lookingUp: false,
-    init() {
-      fetch('/api/companies/typeahead')
-        .then(r => r.json())
-        .then(data => this.companies = data)
-        .catch(() => {});
-      // Listen for customer-created event from quick-create
-      document.addEventListener('customer-created', (e) => {
-        this.selectById(e.detail.siteId, e.detail.displayName);
-        // Refresh typeahead so new company appears in future searches
-        fetch('/api/companies/typeahead')
-          .then(r => r.json())
-          .then(data => this.companies = data)
-          .catch(() => {});
-      });
-    },
-    get filtered() {
-      if (!this.query.trim()) return this.companies.slice(0, 20);
-      const q = this.query.toLowerCase();
-      return this.companies.filter(c => c.name.toLowerCase().includes(q)).slice(0, 20);
-    },
-    select(company, site) {
-      this.selectedSiteId = site.id;
-      this.selectedName = company.name + ' \u2014 ' + site.site_name;
-      this.open = false;
-      this.query = '';
-      this.addNew = false;
-    },
-    selectById(siteId, displayName) {
-      this.selectedSiteId = siteId;
-      this.selectedName = displayName;
-      this.addNew = false;
-    },
-    clear() {
-      this.selectedSiteId = '';
-      this.selectedName = '';
-      this.query = '';
-    },
-    async lookupCompany() {
-      this.lookingUp = true;
-      try {
-        const formData = new FormData();
-        formData.append('company_name', this.newName);
-        formData.append('location', this.newLocation);
-        const resp = await fetch('/v2/partials/companies/lookup', {method: 'POST', body: formData});
-        const resultEl = document.getElementById('company-lookup-result');
-        // Server HTML is trusted (same-origin, auth-protected endpoint)
-        resultEl.replaceChildren();
-        resultEl.insertAdjacentHTML('afterbegin', await resp.text());
-        htmx.process(resultEl);
-      } catch(e) {
-        const resultEl = document.getElementById('company-lookup-result');
-        resultEl.textContent = 'Lookup failed. Try again.';
-        resultEl.classList.add('text-xs', 'text-rose-500');
-      }
-      this.lookingUp = false;
-    }
-  };
-}
-</script>
+{# customerPicker() Alpine component is defined globally in htmx_app.js #}
 </div>

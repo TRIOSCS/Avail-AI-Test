@@ -484,4 +484,84 @@ Alpine.data('materialsFilter', () => ({
   },
 }));
 
+/**
+ * customerPicker — Alpine.js component for customer/company typeahead selection.
+ * Supports searching existing customers, selecting a site, and quick-creating
+ * a new customer via the company lookup endpoint.
+ *
+ * Usage: x-data="customerPicker()" on a container div.
+ * The container must include a <div data-lookup-result></div> for lookup results.
+ *
+ * Called by: requisitions/import_modal.html, requisitions/create_modal.html
+ * Depends on: /api/companies/typeahead, /v2/partials/companies/lookup
+ */
+Alpine.data('customerPicker', () => ({
+    companies: [],
+    query: '',
+    open: false,
+    selectedSiteId: '',
+    selectedName: '',
+    addNew: false,
+    newName: '',
+    newLocation: '',
+    lookingUp: false,
+    init() {
+        fetch('/api/companies/typeahead')
+            .then(r => r.json())
+            .then(data => { this.companies = data; })
+            .catch(() => {});
+        // Listen for customer-created event from quick-create
+        document.addEventListener('customer-created', (e) => {
+            this.selectById(e.detail.siteId, e.detail.displayName);
+            // Refresh typeahead so new company appears in future searches
+            fetch('/api/companies/typeahead')
+                .then(r => r.json())
+                .then(data => { this.companies = data; })
+                .catch(() => {});
+        });
+    },
+    get filtered() {
+        if (!this.query.trim()) return this.companies.slice(0, 20);
+        const q = this.query.toLowerCase();
+        return this.companies.filter(c => c.name.toLowerCase().includes(q)).slice(0, 20);
+    },
+    select(company, site) {
+        this.selectedSiteId = site.id;
+        this.selectedName = company.name + ' \u2014 ' + site.site_name;
+        this.open = false;
+        this.query = '';
+        this.addNew = false;
+    },
+    selectById(siteId, displayName) {
+        this.selectedSiteId = siteId;
+        this.selectedName = displayName;
+        this.addNew = false;
+    },
+    clear() {
+        this.selectedSiteId = '';
+        this.selectedName = '';
+        this.query = '';
+    },
+    async lookupCompany() {
+        this.lookingUp = true;
+        // Use data-lookup-result within this component's root element to avoid
+        // global ID collisions when multiple pickers exist on the same page.
+        const resultEl = this.$el.querySelector('[data-lookup-result]');
+        try {
+            const formData = new FormData();
+            formData.append('company_name', this.newName);
+            formData.append('location', this.newLocation);
+            const resp = await fetch('/v2/partials/companies/lookup', { method: 'POST', body: formData });
+            // Server HTML is trusted (same-origin, auth-protected endpoint)
+            resultEl.replaceChildren();
+            resultEl.insertAdjacentHTML('afterbegin', await resp.text());
+            htmx.process(resultEl);
+        } catch (e) {
+            resultEl.textContent = 'Lookup failed. Try again.';
+            resultEl.classList.add('text-xs', 'text-rose-500');
+        }
+        this.lookingUp = false;
+    }
+}));
+
 Alpine.start();

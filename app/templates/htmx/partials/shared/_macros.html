@@ -11,6 +11,36 @@ Usage:
 #}
 
 
+{# ── Deadline / ASAP Widget ───────────────────────────────────────── #}
+{#
+  Renders a date input + ASAP toggle button wired to Alpine.js.
+  When ASAP is active, urgency is submitted as "critical" and the date input is disabled.
+
+  Args:
+    deadline_value: Pre-filled date string (YYYY-MM-DD), default ''.
+    urgency_value:  Current urgency ('critical' activates ASAP on load), default 'normal'.
+
+  Usage:
+    {% from "htmx/partials/shared/_macros.html" import deadline_asap_widget %}
+    {{ deadline_asap_widget() }}
+    {{ deadline_asap_widget(deadline_value=req.deadline, urgency_value=req.urgency) }}
+#}
+
+{% macro deadline_asap_widget(deadline_value='', urgency_value='normal') %}
+<div x-data="{ asap: {{ 'true' if urgency_value == 'critical' else 'false' }} }" class="flex items-center gap-2">
+  <input type="date" name="deadline" :disabled="asap"
+         value="{{ deadline_value }}"
+         class="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
+  <input type="hidden" name="urgency" :value="asap ? 'critical' : 'normal'">
+  <button type="button" @click="asap = !asap"
+          :class="asap ? 'bg-amber-500 text-white' : 'bg-gray-100 text-gray-600'"
+          class="px-2 py-1 text-[10px] font-semibold rounded transition-colors whitespace-nowrap">
+    ASAP
+  </button>
+</div>
+{% endmacro %}
+
+
 {# ── Status Badge ─────────────────────────────────────────────────── #}
 
 {% macro status_badge(value, status_map=None) %}
