@@ -7,10 +7,8 @@ Called by: Parts tab "Build Quote" button (HTMX), Alpine.js fetch (save)
 Depends on: app.services.quote_builder_service, app.schemas.quote_builder
 """
 
-from io import BytesIO
-
 from fastapi import APIRouter, Depends, HTTPException, Request
-from fastapi.responses import StreamingResponse
+from fastapi.responses import Response
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -124,8 +122,8 @@ async def quote_builder_export_excel(
     )
 
     filename = f"{quote.quote_number}.xlsx"
-    return StreamingResponse(
-        BytesIO(xlsx_bytes),
+    return Response(
+        content=xlsx_bytes,
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )

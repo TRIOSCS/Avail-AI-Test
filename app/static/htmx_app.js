@@ -738,13 +738,32 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite) => ({
     return Math.round(((price - this.minPrice) / range) * 100);
   },
 
+  // Single-pass stats — avoids 6-8 separate filter scans per render cycle
+  get _stats() {
+    let decided = 0, skipped = 0, hasOffers = 0, needsReview = 0, cost = 0, sell = 0;
+    for (const l of this.lines) {
+      if (l.offer_count > 0) hasOffers++;
+      if (l.status === 'decided') {
+        decided++;
+        const offer = l.offers.find(o => o.id === l.selected_offer_id);
+        cost += (l.target_qty || 0) * (offer?.unit_price || 0);
+        sell += (l.target_qty || 0) * (l.sell_price || 0);
+      } else if (l.status === 'skipped') {
+        skipped++;
+      } else if (l.status === 'needs_review') {
+        needsReview++;
+      }
+    }
+    return { decided, skipped, hasOffers, needsReview, cost, sell };
+  },
   get filterOptions() {
+    const s = this._stats;
     return [
       { key: 'all', label: 'All', count: this.lines.length },
-      { key: 'has_offers', label: 'Has Offers', count: this.lines.filter(l => l.offer_count > 0).length },
-      { key: 'needs_review', label: 'Needs Review', count: this.lines.filter(l => l.status === 'needs_review').length },
-      { key: 'decided', label: 'Decided', count: this.decidedCount },
-      { key: 'skipped', label: 'Skipped', count: this.skippedCount },
+      { key: 'has_offers', label: 'Has Offers', count: s.hasOffers },
+      { key: 'needs_review', label: 'Needs Review', count: s.needsReview },
+      { key: 'decided', label: 'Decided', count: s.decided },
+      { key: 'skipped', label: 'Skipped', count: s.skipped },
     ];
   },
   get filteredLines() {
@@ -752,22 +771,11 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite) => ({
     if (this.activeFilter === 'has_offers') return this.lines.filter(l => l.offer_count > 0);
     return this.lines.filter(l => l.status === this.activeFilter);
   },
-  get decidedCount() { return this.lines.filter(l => l.status === 'decided').length; },
-  get skippedCount() { return this.lines.filter(l => l.status === 'skipped').length; },
-  get totalCount() { return this.lines.length; },
-  get decidedPct() { return this.totalCount ? Math.round(this.decidedCount / this.totalCount * 100) : 0; },
-
-  get totalCost() {
-    return this.lines.filter(l => l.status === 'decided').reduce((s, l) => {
-      const offer = l.offers.find(o => o.id === l.selected_offer_id);
-      return s + (l.target_qty || 0) * (offer?.unit_price || 0);
-    }, 0);
-  },
-  get totalSell() {
-    return this.lines.filter(l => l.status === 'decided').reduce((s, l) => {
-      return s + (l.target_qty || 0) * (l.sell_price || 0);
-    }, 0);
-  },
+  get decidedCount() { return this._stats.decided; },
+  get skippedCount() { return this._stats.skipped; },
+  get decidedPct() { return this.lines.length ? Math.round(this.decidedCount / this.lines.length * 100) : 0; },
+  get totalCost() { return this._stats.cost; },
+  get totalSell() { return this._stats.sell; },
   get blendedMargin() {
     return this.totalSell > 0 ? ((this.totalSell - this.totalCost) / this.totalSell * 100) : 0;
   },
@@ -900,14 +908,12 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite) => ({
     this.saving = false;
   },
 
-  exportExcel() {
+  _doExport(format) {
     if (!this.quoteId) return;
-    window.location.href = `/v2/partials/quote-builder/${this.reqId}/export/excel?quote_id=${this.quoteId}`;
+    window.location.href = `/v2/partials/quote-builder/${this.reqId}/export/${format}?quote_id=${this.quoteId}`;
   },
-  exportPdf() {
-    if (!this.quoteId) return;
-    window.location.href = `/v2/partials/quote-builder/${this.reqId}/export/pdf?quote_id=${this.quoteId}`;
-  },
+  exportExcel() { this._doExport('excel'); },
+  exportPdf() { this._doExport('pdf'); },
 
   handleKeydown(e) {
     if (['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) {
