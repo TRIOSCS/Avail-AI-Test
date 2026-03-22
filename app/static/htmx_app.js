@@ -787,12 +787,14 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite) => ({
   confirmDecision() {
     if (!this.activeLine?.selected_offer_id || !this.activeLine?.sell_price) return;
     this.activeLine.status = 'decided';
-    // Flash the left-panel row
+    // Flash the left-panel row (use data attribute to find correct row regardless of filter)
+    const reqId = this.activeLine.requirement_id;
     this.$nextTick(() => {
-      const rows = this.$el.querySelectorAll('.qb-list button');
-      if (rows[this.activeIdx]) {
-        rows[this.activeIdx].classList.add('qb-decision-flash');
-        setTimeout(() => rows[this.activeIdx]?.classList.remove('qb-decision-flash'), 800);
+      const row = this.$el.querySelector(`.qb-list button[data-req-id="${reqId}"]`) ||
+                  this.$el.querySelectorAll('.qb-list button')[this.activeIdx];
+      if (row) {
+        row.classList.add('qb-decision-flash');
+        setTimeout(() => row?.classList.remove('qb-decision-flash'), 800);
       }
     });
     // Auto-advance to next undecided

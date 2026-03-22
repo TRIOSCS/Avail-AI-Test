@@ -29,7 +29,9 @@ def get_builder_data(
 
     lines = []
     for r in requirements:
-        active_offers = [o for o in r.offers if o.status == "active"]
+        from app.constants import OfferStatus
+
+        active_offers = [o for o in r.offers if o.status == OfferStatus.ACTIVE]
         offers_data = []
         for o in active_offers:
             offers_data.append(
@@ -90,7 +92,7 @@ def get_builder_data(
                         {
                             "quote_number": lq.get("quote_number", ""),
                             "date": lq.get("date", ""),
-                            "cost": lq.get("cost_price"),
+                            "cost": lq.get("cost_price", lq.get("sell_price")),
                             "sell": lq.get("sell_price"),
                             "margin": lq.get("margin_pct"),
                             "result": lq.get("result"),
@@ -200,7 +202,13 @@ def save_quote_from_builder(
 
     If payload.quote_id is set, marks the old quote as 'revised' and creates a new
     revision with the updated line items. Otherwise creates a fresh quote.
+
+    Fires the same hooks as create_quote: requisition state transition,
+    per-requirement sourcing status update, and knowledge ledger capture.
     """
+    from loguru import logger
+
+    from app.constants import QuoteStatus
     from app.models import Quote, QuoteLine, Requisition
     from app.services.crm_service import next_quote_number
 
@@ -208,7 +216,6 @@ def save_quote_from_builder(
     if not req:
         raise ValueError("Requisition not found")
 
-    # Build line_items dicts (matching the format create_quote uses internally)
     line_items = []
     for li in payload.lines:
         line_items.append(
@@ -243,9 +250,17 @@ def save_quote_from_builder(
             old_revision = old_quote.revision or 1
             quote_number = old_quote.quote_number
             revision = old_revision + 1
-            # Rename old quote to include revision suffix, then mark revised
             old_quote.quote_number = f"{quote_number}-R{old_revision}"
-            old_quote.status = "revised"
+            old_quote.status = QuoteStatus.REVISED
+
+    # Advance requisition status to "quoting" if appropriate
+    if req.status in ("active", "sourcing", "offers"):
+        try:
+            from app.services.requisition_state import transition as req_transition
+
+            req_transition(req, "quoting", user, db)
+        except ValueError:
+            pass  # already in quoting or later state
 
     quote = Quote(
         requisition_id=req_id,
@@ -263,9 +278,8 @@ def save_quote_from_builder(
         created_by_id=user.id,
     )
     db.add(quote)
-    db.flush()  # Get quote.id
+    db.flush()
 
-    # Write structured QuoteLine rows
     for li in line_items:
         db.add(
             QuoteLine(
@@ -283,6 +297,30 @@ def save_quote_from_builder(
         )
 
     db.commit()
+
+    # Fire per-requirement sourcing status hook (same as create_quote)
+    try:
+        from app.services.requirement_status import on_quote_built
+
+        offer_ids = [li.get("offer_id") for li in line_items if li.get("offer_id")]
+        if offer_ids:
+            from app.models import Offer as OfferModel
+
+            offers_used = db.query(OfferModel).filter(OfferModel.id.in_(offer_ids)).all()
+            requirement_ids = list({o.requirement_id for o in offers_used if o.requirement_id})
+            if requirement_ids:
+                on_quote_built(requirement_ids, db, actor=user)
+                db.commit()
+    except Exception as e:
+        logger.warning("Requirement status update (on_quote_built) failed: {}", e)
+
+    # Knowledge ledger capture (same as create_quote)
+    try:
+        from app.services.knowledge_service import capture_quote_fact
+
+        capture_quote_fact(db, quote=quote, user_id=user.id)
+    except Exception as e:
+        logger.warning("Knowledge auto-capture (quote) failed: {}", e)
 
     return {
         "ok": True,

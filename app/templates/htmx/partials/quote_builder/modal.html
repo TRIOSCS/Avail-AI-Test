@@ -75,6 +75,7 @@
       <div class="flex-1 overflow-y-auto qb-list">
         <template x-for="(line, idx) in filteredLines" :key="line.requirement_id">
           <button @click="selectLine(idx)"
+                  :data-req-id="line.requirement_id"
                   :class="{
                     'bg-brand-50 shadow-[inset_3px_0_0_#3d6895]': activeIdx === idx,
                     'hover:bg-gray-50': activeIdx !== idx
