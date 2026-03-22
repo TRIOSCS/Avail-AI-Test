@@ -35,7 +35,8 @@ For each item:
 **Problem**: `@click="currentView = '{{ id }}'"` fires immediately on click. If the HTMX request fails, times out, or has a network error, `currentView` stays on the new value — wrong nav item highlighted.
 
 **Fix**: Instead of setting `currentView` on `@click`, set it on successful swap via `htmx:afterSwap`. The `_syncSidebarToUrl()` function already does this for `htmx:pushedIntoHistory`, but that only fires after URL push. The cleanest fix:
-- Remove `@click="currentView = '{{ id }}'"` from nav links
+- Remove `@click="currentView = '{{ id }}'"` from all nav links (both the requisitions link and the loop items)
+- Also remove `@click="currentView = 'requisitions'"` from the logo link
 - Rely on `htmx:pushedIntoHistory` → `_syncSidebarToUrl()` which already runs after every successful navigation
 - This naturally handles errors because `pushedIntoHistory` only fires on success
 
@@ -45,12 +46,12 @@ For each item:
 
 **Problem**: The function is missing regex patterns for: `excess`, `follow-ups`, `materials`, `trouble-tickets`. These nav items will fall through to the default `'requisitions'` on back button or history restore.
 
-**Fix**: Add the 4 missing patterns:
+**Fix**: Add the 4 missing patterns. Insert `trouble-tickets` before generic paths to avoid substring collisions (e.g., `/trouble-tickets` must not match a hypothetical `/tickets` pattern). Place all new entries before the `requisitions` fallback:
 ```javascript
+if (/\/trouble-tickets(\/|$)/.test(path)) return 'trouble-tickets';
 if (/\/excess(\/|$)/.test(path)) return 'excess';
 if (/\/follow-ups(\/|$)/.test(path)) return 'follow-ups';
 if (/\/materials(\/|$)/.test(path)) return 'materials';
-if (/\/trouble-tickets(\/|$)/.test(path)) return 'trouble-tickets';
 ```
 
 ### Bug 3: `_viewFromPath()` has stale routes
@@ -67,7 +68,11 @@ if (/\/trouble-tickets(\/|$)/.test(path)) return 'trouble-tickets';
 
 **Problem**: Server sets `current_view = "tickets"` but the bottom nav item id is `"trouble-tickets"` (from the Jinja loop in base.html line 139-150). On full page load of `/v2/trouble-tickets`, Alpine initializes with `currentView = 'tickets'` which doesn't match any nav item id — no item gets highlighted.
 
-**Fix**: Change `htmx_views.py:315` from `current_view = "tickets"` to `current_view = "trouble-tickets"`. Also update the partial URL mapping at line 331-332 to use `"trouble-tickets"` as the key.
+**Fix**: Change `htmx_views.py:315` from `current_view = "tickets"` to `current_view = "trouble-tickets"`. Also update all references to `"tickets"` in the same function:
+- Line 331: `elif current_view == "tickets":` → `elif current_view == "trouble-tickets":`
+- Line 364: `elif current_view == "tickets" and "/trouble-tickets/" in path:` → `elif current_view == "trouble-tickets" and "/trouble-tickets/" in path:`
+
+**Ordering**: Bug 2 and Bug 4 must land atomically — `_viewFromPath()` returns `'trouble-tickets'` which must match the server's `current_view` value.
 
 ## 3. Dead Code Cleanup
 
@@ -82,28 +87,23 @@ if (/\/trouble-tickets(\/|$)/.test(path)) return 'trouble-tickets';
 
 ### DRY up detail route parsing (htmx_views.py:336-367)
 
-Replace 8 repetitive `elif` blocks with a loop:
+The detail route override block runs **after** the initial `partial_url` assignment (which handles the workspace special cases for `requisitions` and `trouble-tickets`). Replace the 8 repetitive `elif` blocks with a loop that only overrides `partial_url` when the URL contains a detail ID:
 
 ```python
-_DETAIL_ROUTES = {
-    "requisitions": "requisitions",
-    "vendors": "vendors",
-    "companies": "companies",
-    "buy-plans": "buy-plans",
-    "excess": "excess",
-    "quotes": "quotes",
-    "prospecting": "prospecting",
-    "trouble-tickets": "trouble-tickets",
-    "materials": "materials",
-}
+_DETAIL_SEGMENTS = [
+    "requisitions", "vendors", "companies", "buy-plans",
+    "excess", "quotes", "prospecting", "trouble-tickets", "materials",
+]
 
-for url_segment, partial_segment in _DETAIL_ROUTES.items():
-    if f"/{url_segment}/" in path:
-        parts = path.split(f"/{url_segment}/")
-        if len(parts) > 1 and parts[1].split("/")[0].isdigit():
-            partial_url = f"/v2/partials/{partial_segment}/{parts[1].split('/')[0]}"
+for seg in _DETAIL_SEGMENTS:
+    if f"/{seg}/" in path:
+        tail = path.split(f"/{seg}/", 1)[1].split("/")[0]
+        if tail.isdigit():
+            partial_url = f"/v2/partials/{seg}/{tail}"
         break
 ```
+
+This preserves the workspace defaults set earlier — the loop only fires when the URL has a `/{segment}/{id}` pattern.
 
 ### Cross-reference comment
 
@@ -118,7 +118,7 @@ Re-run the full Playwright suite from Section 1. All tests should pass.
 | File | Changes |
 |------|---------|
 | `app/static/htmx_app.js` | Fix `_viewFromPath()`, remove stale routes, remove `@click` nav sync |
-| `app/templates/htmx/base.html` | Remove `@click="currentView = ..."` from nav links |
+| `app/templates/htmx/base.html` | Remove `@click="currentView = ..."` from nav links and logo |
 | `app/routers/htmx_views.py` | Fix `tickets` → `trouble-tickets`, DRY detail routes |
 | `app/templates/base.html` | Delete (dead code) |
 | `app/templates/htmx/partials/shared/mobile_nav.html` | Delete (dead code) |
