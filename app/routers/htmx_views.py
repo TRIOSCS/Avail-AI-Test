@@ -8723,7 +8723,7 @@ async def parts_list_partial(
 
     # Build sub MPN → material card ID mapping for click-through
     from ..models.intelligence import MaterialCard
-    from ..utils.normalization import normalize_mpn_key as _norm_key
+    from ..utils.normalization import normalize_mpn_key
 
     all_sub_mpns = []
     for r in requirements:
@@ -8732,21 +8732,25 @@ async def parts_list_partial(
 
     sub_card_map = {}
     if all_sub_mpns:
-        norm_to_mpn = {}
+        # Map normalized key → list of original MPNs (multiple raw MPNs can
+        # share one normalized key, e.g. "LM-317T" and "LM317T")
+        from collections import defaultdict
+
+        norm_to_mpns = defaultdict(list)
         for mpn in all_sub_mpns:
-            nk = _norm_key(mpn)
+            nk = normalize_mpn_key(mpn)
             if nk:
-                norm_to_mpn[nk] = mpn
-        if norm_to_mpn:
+                norm_to_mpns[nk].append(mpn)
+        if norm_to_mpns:
             cards = (
                 db.query(MaterialCard.normalized_mpn, MaterialCard.id)
-                .filter(MaterialCard.normalized_mpn.in_(list(norm_to_mpn.keys())))
+                .filter(MaterialCard.normalized_mpn.in_(list(norm_to_mpns.keys())))
                 .filter(MaterialCard.deleted_at.is_(None))
                 .all()
             )
             for card_norm, card_id in cards:
-                if card_norm in norm_to_mpn:
-                    sub_card_map[norm_to_mpn[card_norm]] = card_id
+                for raw_mpn in norm_to_mpns.get(card_norm, []):
+                    sub_card_map[raw_mpn] = card_id
 
     # User column prefs
     visible_cols = user.parts_column_prefs or _DEFAULT_PARTS_COLUMNS
