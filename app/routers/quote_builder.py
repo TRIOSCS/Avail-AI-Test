@@ -24,27 +24,20 @@ router = APIRouter(tags=["quote-builder"])
 async def quote_builder_modal(
     req_id: int,
     request: Request,
-    requirement_ids: str | None = None,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Open the quote builder modal with all requirement + offer data."""
+    """Open the quote builder modal shell (lightweight HTML, no line data).
+
+    Line data is fetched separately via the /data endpoint by the Alpine component on
+    init, keeping the initial HTML payload small even for requisitions with 200+
+    requirements.
+    """
     from ..dependencies import get_req_for_user
-    from ..services.quote_builder_service import apply_smart_defaults, get_builder_data
 
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
-
-    req_ids = None
-    if requirement_ids:
-        try:
-            req_ids = [int(x.strip()) for x in requirement_ids.split(",") if x.strip()]
-        except ValueError:
-            req_ids = None
-
-    lines = get_builder_data(req_id, db, requirement_ids=req_ids)
-    apply_smart_defaults(lines)
 
     customer_name = ""
     has_customer_site = bool(req.customer_site_id)
@@ -62,11 +55,43 @@ async def quote_builder_modal(
         {
             "request": request,
             "req": req,
-            "lines": lines,
             "customer_name": customer_name,
             "has_customer_site": has_customer_site,
         },
     )
+
+
+@router.get("/v2/partials/quote-builder/{req_id}/data")
+async def quote_builder_data(
+    req_id: int,
+    requirement_ids: str | None = None,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return line data as JSON for the quote builder Alpine component.
+
+    Called by the Alpine component on init via fetch(). Keeps the modal HTML small and
+    allows the browser to parse the JSON efficiently as a separate network request
+    rather than inline in an HTML attribute.
+    """
+    from ..dependencies import get_req_for_user
+    from ..services.quote_builder_service import apply_smart_defaults, get_builder_data
+
+    req = get_req_for_user(db, user, req_id)
+    if not req:
+        raise HTTPException(404, "Requisition not found")
+
+    req_ids = None
+    if requirement_ids:
+        try:
+            req_ids = [int(x.strip()) for x in requirement_ids.split(",") if x.strip()]
+        except ValueError:
+            req_ids = None
+
+    lines = get_builder_data(req_id, db, requirement_ids=req_ids)
+    apply_smart_defaults(lines)
+
+    return {"lines": lines}
 
 
 @router.post("/v2/partials/quote-builder/{req_id}/save")

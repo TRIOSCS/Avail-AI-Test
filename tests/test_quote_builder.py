@@ -334,6 +334,33 @@ def test_builder_modal_opens_successfully(client, db_session, test_user):
     assert "Quote Builder" in resp.text
 
 
+def test_builder_data_endpoint_returns_json(client, db_session, test_user):
+    """Verify the data endpoint returns lines as JSON."""
+    company = Company(name="Data Co")
+    db_session.add(company)
+    db_session.flush()
+    site = CustomerSite(company_id=company.id, site_name="HQ")
+    db_session.add(site)
+    db_session.flush()
+    req = Requisition(name="Data Req", customer_site_id=site.id, created_by=test_user.id, status="active")
+    db_session.add(req)
+    db_session.flush()
+    r1 = Requirement(requisition_id=req.id, primary_mpn="LM358DR", manufacturer="TI", target_qty=100)
+    db_session.add(r1)
+    db_session.commit()
+    resp = client.get(f"/v2/partials/quote-builder/{req.id}/data")
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "lines" in data
+    assert len(data["lines"]) == 1
+    assert data["lines"][0]["mpn"] == "LM358DR"
+
+
+def test_builder_data_endpoint_404_bad_req(client):
+    resp = client.get("/v2/partials/quote-builder/99999/data")
+    assert resp.status_code == 404
+
+
 def test_builder_save_endpoint_rejects_empty_lines(client):
     resp = client.post("/v2/partials/quote-builder/1/save", json={"lines": []})
     assert resp.status_code == 422

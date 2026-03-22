@@ -686,18 +686,38 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite) => ({
   activeFilter: 'has_offers',
   saving: false,
   saved: false,
+  loading: true,
   quoteId: null,
   quoteNumber: null,
   saveError: null,
   bulkMarkupPct: 25,
 
   init() {
-    // Auto-select first line with offers
-    const idx = this.filteredLines.findIndex(l => l.status === 'needs_review' || l.status === 'decided');
-    if (idx >= 0) this.activeIdx = idx;
     // Keyboard handler
     this._keyHandler = (e) => this.handleKeydown(e);
     window.addEventListener('keydown', this._keyHandler);
+    // If lines were passed inline (tests/fallback), skip fetch
+    if (this.lines.length > 0) {
+      this.loading = false;
+      this._autoSelectFirst();
+    }
+  },
+
+  async loadData() {
+    try {
+      const resp = await fetch(`/v2/partials/quote-builder/${this.reqId}/data`);
+      const data = await resp.json();
+      this.lines = data.lines || [];
+    } catch (e) {
+      this.saveError = 'Failed to load data';
+    }
+    this.loading = false;
+    this._autoSelectFirst();
+  },
+
+  _autoSelectFirst() {
+    const idx = this.filteredLines.findIndex(l => l.status === 'needs_review' || l.status === 'decided');
+    if (idx >= 0) this.activeIdx = idx;
   },
   destroy() {
     window.removeEventListener('keydown', this._keyHandler);
