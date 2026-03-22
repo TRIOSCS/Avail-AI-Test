@@ -151,6 +151,16 @@ htmx.config.historyCacheSize = 10;
 htmx.config.selfRequestsOnly = true;
 htmx.config.timeout = 15000;  // 15s timeout — prevents requests from hanging forever
 
+// ── CSRF token for all HTMX requests ───────────────────────
+// starlette_csrf middleware requires x-csrftoken header on POST/PUT/PATCH/DELETE.
+// The csrftoken cookie is set by the middleware on every response.
+document.body.addEventListener('htmx:configRequest', (evt) => {
+    const csrfCookie = document.cookie.match(/csrftoken=([^;]+)/)?.[1];
+    if (csrfCookie) {
+        evt.detail.headers['x-csrftoken'] = csrfCookie;
+    }
+});
+
 // ── Derive currentView from URL path ────────────────────────
 function _viewFromPath(path) {
     if (/\/buy-plans(\/|$)/.test(path)) return 'buy-plans';
