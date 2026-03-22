@@ -1,0 +1,61 @@
+{#
+  _table_rows.html — Compact requisition rows for the left panel of split-screen workspace.
+  Each row is clickable to load detail in the right panel.
+  Called by: _table.html (include), GET /requisitions2/table/rows
+  Depends on: requisitions list, user object, HTMX, Alpine.js
+#}
+{% set status_styles = {
+  'active': 'bg-brand-100 text-brand-600',
+  'draft': 'bg-gray-100 text-gray-600',
+  'sourcing': 'bg-amber-50 text-amber-700',
+  'archived': 'bg-gray-100 text-gray-600',
+  'won': 'bg-emerald-50 text-emerald-700',
+  'lost': 'bg-rose-50 text-rose-700',
+  'closed': 'bg-gray-100 text-gray-600',
+} %}
+
+{% for req in requisitions %}
+<tr id="rq2-row-{{ req.id }}"
+    hx-get="/requisitions2/{{ req.id }}/detail"
+    hx-target="#rq2-detail"
+    hx-swap="innerHTML"
+    @click="selectReq({{ req.id }})"
+    :class="selectedReqId === {{ req.id }} ? 'bg-brand-50 border-l-2 border-brand-500' : ''"
+    class="rq2-row group hover:bg-gray-50 cursor-pointer transition-colors
+           {{ 'border-l-2 border-rose-400' if req.urgency == 'critical' else '' }}">
+  <td class="px-3 py-2" @click.stop>
+    <input type="checkbox" value="{{ req.id }}"
+           class="rounded border-gray-300 text-brand-500 focus:ring-brand-400"
+           x-on:change="toggleSelection({{ req.id }}, $event.target.checked)"
+           x-bind:checked="selectedIds.has({{ req.id }})">
+  </td>
+  <td class="px-3 py-2">
+    <div class="flex items-center gap-1.5">
+      <span class="text-sm font-medium text-gray-900 truncate max-w-[180px]">{{ req.name }}</span>
+      {% if req.urgency == 'hot' %}
+      <span class="inline-flex h-4 px-1 text-[10px] font-semibold rounded bg-amber-50 text-amber-700">HOT</span>
+      {% elif req.urgency == 'critical' %}
+      <span class="inline-flex h-4 px-1 text-[10px] font-semibold rounded bg-rose-50 text-rose-700">CRIT</span>
+      {% endif %}
+    </div>
+  </td>
+  <td class="px-3 py-2">
+    <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_styles.get(req.status, 'bg-gray-100 text-gray-600') }}">
+      {{ req.status }}
+    </span>
+  </td>
+  <td class="px-3 py-2 text-sm text-gray-600 truncate max-w-[140px]">{{ req.customer_display or '—' }}</td>
+  <td class="px-3 py-2 text-sm text-right text-gray-800">{{ req.requirement_count }}</td>
+</tr>
+{% else %}
+<tr>
+  <td colspan="5" class="px-4 py-12 text-center">
+    <svg class="mx-auto h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+      <path stroke-linecap="round" stroke-linejoin="round"
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>
+    </svg>
+    <p class="mt-2 text-sm text-gray-500">No requisitions found.</p>
+    <p class="text-xs text-gray-400 mt-1">Try adjusting your filters.</p>
+  </td>
+</tr>
+{% endfor %}
