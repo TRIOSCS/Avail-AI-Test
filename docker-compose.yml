@@ -105,11 +105,12 @@ services:
         max-size: "100m"
         max-file: "10"
 
-  # --- Enrichment Worker (runs continuously, auto-restarts) ---
+  # --- Enrichment Worker — DISABLED (AI-only enrichment removed) ---
+  # Rebuild with real connector data (DigiKey, Mouser, Nexar) before re-enabling.
   enrichment-worker:
     build: .
-    restart: always
-    entrypoint: ["tini", "--", "./enrichment-entrypoint.sh"]
+    restart: "no"
+    entrypoint: ["echo", "Enrichment worker disabled — AI-only enrichment removed"]
     command: []
     env_file: .env
     environment:

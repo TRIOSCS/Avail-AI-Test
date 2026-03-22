@@ -109,7 +109,9 @@ class Settings(BaseSettings):
     customer_enrichment_contacts_per_account: int = 5
 
     # --- Material card AI enrichment ---
-    material_enrichment_enabled: bool = True
+    # Disabled: AI-only enrichment produces hallucinated data. Rebuild with
+    # real connector data (DigiKey, Mouser, Nexar) before re-enabling.
+    material_enrichment_enabled: bool = False
     material_enrichment_batch_size: int = 300
 
     # --- Tagging ---

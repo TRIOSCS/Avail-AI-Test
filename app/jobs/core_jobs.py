@@ -24,18 +24,20 @@ def register_core_jobs(scheduler, settings):
         _job_inbox_scan, IntervalTrigger(minutes=settings.inbox_scan_interval_min), id="inbox_scan", name="Inbox scan"
     )
     scheduler.add_job(_job_batch_results, IntervalTrigger(minutes=5), id="batch_results", name="Process batch results")
-    scheduler.add_job(
-        _job_batch_enrich_materials,
-        IntervalTrigger(minutes=30),
-        id="batch_enrich_materials",
-        name="Batch enrich materials",
-    )
-    scheduler.add_job(
-        _job_poll_material_batch,
-        IntervalTrigger(minutes=5),
-        id="poll_material_batch",
-        name="Poll material batch results",
-    )
+    # Material enrichment jobs disabled — AI-only enrichment produces hallucinated
+    # data. Rebuild with real connector data before re-enabling.
+    # scheduler.add_job(
+    #     _job_batch_enrich_materials,
+    #     IntervalTrigger(minutes=30),
+    #     id="batch_enrich_materials",
+    #     name="Batch enrich materials",
+    # )
+    # scheduler.add_job(
+    #     _job_poll_material_batch,
+    #     IntervalTrigger(minutes=5),
+    #     id="poll_material_batch",
+    #     name="Poll material batch results",
+    # )
     scheduler.add_job(
         _job_batch_parse_signatures,
         IntervalTrigger(minutes=10),

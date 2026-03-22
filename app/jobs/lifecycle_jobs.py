@@ -7,7 +7,6 @@ Called by: scheduler via register_lifecycle_jobs()
 Depends on: MaterialCard, material_enrichment_service
 """
 
-from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
@@ -42,14 +41,16 @@ def get_cards_for_lifecycle_check(
 
 def register_lifecycle_jobs(scheduler, settings):
     """Register lifecycle sweep as a weekly job."""
-    scheduler.add_job(
-        _job_lifecycle_sweep,
-        CronTrigger(day_of_week="sun", hour=2, minute=0),
-        id="lifecycle_sweep",
-        name="Weekly lifecycle status sweep",
-        replace_existing=True,
-    )
-    logger.info("Registered lifecycle sweep job (Sundays 2:00 AM)")
+    # Disabled — lifecycle sweep uses AI-only enrichment which produces
+    # hallucinated data. Rebuild with real connector data before re-enabling.
+    # scheduler.add_job(
+    #     _job_lifecycle_sweep,
+    #     CronTrigger(day_of_week="sun", hour=2, minute=0),
+    #     id="lifecycle_sweep",
+    #     name="Weekly lifecycle status sweep",
+    #     replace_existing=True,
+    # )
+    logger.info("Lifecycle sweep job DISABLED (AI-only enrichment removed)")
 
 
 @_traced_job
