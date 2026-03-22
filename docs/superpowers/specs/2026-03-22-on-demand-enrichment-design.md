@@ -41,8 +41,8 @@ Replace all auto-enrichment with an on-demand, user-initiated pipeline that:
 | `app/jobs/prospecting_jobs.py` | `enrich_pool` | monthly |
 | `app/jobs/prospecting_jobs.py` | `find_contacts` | monthly |
 | `app/jobs/email_jobs.py` | `email_reverification` | quarterly |
-| `app/jobs/core_jobs.py` | dead `_job_batch_enrich_materials` | (commented out) |
-| `app/jobs/lifecycle_jobs.py` | dead `_job_lifecycle_sweep` | (commented out) |
+| `app/jobs/core_jobs.py` | dead `_job_batch_enrich_materials` + `_job_poll_material_batch` (lines 237-275) | (commented out — delete dead functions, keep other active jobs in file) |
+| `app/jobs/lifecycle_jobs.py` | dead `_job_lifecycle_sweep` (lines 57-79) | (commented out — delete dead function, keep file if other jobs exist) |
 
 ### Router Auto-Triggers to Remove
 
@@ -86,7 +86,9 @@ conflict_details = Column(JSONB)                     # What each source said whe
 
 New indexes: `ix_eq_session` on `session_id`, `ix_eq_material` on `material_card_id`.
 
-No changes needed to Company, VendorCard, or MaterialCard — they already have `last_enriched_at` and `enrichment_source`.
+Also alter `EnrichmentQueue.proposed_value` to `nullable=True` (currently NOT NULL) — needed because the verification layer sets unverifiable fields to null.
+
+**Note:** MaterialCard uses `enriched_at` (not `last_enriched_at` like Company/VendorCard). The `apply_approved_fields` function must handle this difference — use `enriched_at` for materials, `last_enriched_at` for companies/vendors. No column rename needed.
 
 ---
 
@@ -122,15 +124,20 @@ async def verify_material_fields(
 ```python
 def _calculate_confidence(
     field: str,
-    source_values: list[tuple[str, str]],
+    source_values: list[tuple[str, str]],  # [(source_name, value), ...]
     has_citation: bool,
     contradiction: bool,
 ) -> float:
     if contradiction:
         return 0.0   # triggers "conflict" status — user must resolve
-    agreeing = len({v for _, v in source_values if v})
-    if agreeing >= 2:
-        return min(0.98, 0.90 + (agreeing - 2) * 0.02)
+    # Count how many sources agree on the most common value
+    from collections import Counter
+    values = [v for _, v in source_values if v]
+    if not values:
+        return 0.0
+    most_common_count = Counter(values).most_common(1)[0][1]
+    if most_common_count >= 2:
+        return min(0.98, 0.90 + (most_common_count - 2) * 0.02)
     return 0.85 if has_citation else 0.65
 ```
 
@@ -171,7 +178,7 @@ class StagedField:
     proposed_value: str
     confidence: float
     sources: list[str]
-    source_citations: list[str]
+    source_citations: list[dict]  # [{url: str, title: str}] — matches JSONB model column
     reasoning: str
     status: str               # "proposed" | "conflict" | "no_change"
     agreement_count: int
@@ -207,10 +214,11 @@ class ApplyResult:
 - Partial results are still staged in EnrichmentQueue, still reviewable
 
 **Reused infrastructure:**
-- `enrichment_service.py` — Explorium/AI source functions (`_explorium_find_company`, `_ai_find_company`)
-- `services/enrichment.py` — connector functions for materials
-- `enrichment_orchestrator.py` — `fire_all_sources()` and `claude_merge()` for company/vendor
-- `utils/claude_client.py` — `claude_structured()` with thinking budget support
+- `app/enrichment_service.py` — Explorium/AI source functions (`_explorium_find_company`, `_ai_find_company`), normalization, apply functions
+- `app/utils/claude_client.py` — `claude_structured()` with thinking budget support
+
+**Modified infrastructure:**
+- `app/services/enrichment_orchestrator.py` — existing `fire_all_sources()` uses hardcoded `COMPANY_SOURCES` dict with deprecated providers (Apollo, Clearbit). Must be updated to use current source set (Explorium + Claude AI). Move from "Reused As-Is" to "Modified Files".
 
 ---
 
@@ -285,25 +293,30 @@ Keep `POST /api/enrich/company/{id}` and `POST /api/enrich/vendor/{id}` but depr
 - "Save Approved (N fields)" button — HTMX POST to `/api/enrich/v2/apply`
 - "Discard All" button — clears the panel, no server call needed
 
-**HTMX flow:**
-1. "Enrich Now" click → POST → server returns skeleton partial → swaps into `#enrich-panel-{id}`
-2. Pipeline completes → returns diff panel HTML → replaces skeleton
-3. All approve/edit/remove happens client-side in Alpine.js (no server round-trips)
-4. "Save Approved" → POST with JSON of approvals → success confirmation replaces panel
+**HTMX flow (single long-running request, NOT two-phase):**
+
+The v2 enrichment endpoint is a single async FastAPI request that takes 10-30s. HTMX handles this natively — the button shows a spinner via `hx-indicator` while waiting, then the full diff panel HTML is returned as the response and swapped in. No SSE, no polling, no skeleton-then-replace.
+
+1. "Enrich Now" click → `hx-post` fires, button shows spinner via `hx-indicator`, `hx-request='{"timeout": 45000}'`
+2. Server runs full pipeline (10-30s) → returns complete diff panel HTML
+3. HTMX swaps response into `#enrich-results-{entity_id}` (existing target div on detail pages)
+4. All approve/edit/remove happens client-side in Alpine.js (no server round-trips)
+5. "Save Approved" → POST with JSON of approvals → success confirmation replaces panel
+
+**Note:** If Caddy proxy timeout is an issue (default 30s), add `request_timeout 60s` to the Caddyfile for `/api/enrich/v2/*` routes.
+
+**Dedup guard:** The enrich button is disabled via Alpine.js `x-bind:disabled="enriching"` during the request. Server-side, the endpoint checks for an existing pending `EnrichmentQueue` session for the same entity within the last 5 minutes and returns it instead of re-running.
 
 ### Enrich Button Updates
 
 Update `app/templates/htmx/partials/shared/enrich_button.html`:
 - `hx-post` target: `/api/enrich/v2/{entity_type}/{entity_id}`
-- `hx-target`: `#enrich-panel-{entity_id}`
+- `hx-target`: `#enrich-results-{{ entity_id }}` (matches existing target div ID on detail pages)
 - `hx-request`: `{"timeout": 45000}`
 
 ### Page Integration
 
-Add `<div id="enrich-panel-{id}"></div>` swap target to:
-- Customer/company detail page
-- Vendor detail page
-- Material card detail/modal
+Detail pages already have `<div id="enrich-results-{{ entity_id }}">` swap targets (used by the existing enrich button). The new diff panel will swap into these existing divs — no page template changes needed for the swap target itself.
 
 ---
 
@@ -372,9 +385,16 @@ All tests follow existing `conftest.py` patterns: in-memory SQLite, no real API 
 - `app/config.py` — remove 5 flags, add timeout
 - `app/templates/htmx/partials/shared/enrich_button.html` — update to v2
 - `app/templates/htmx/partials/materials/enrich_result.html` — use diff panel
+- `app/services/enrichment_orchestrator.py` — update `COMPANY_SOURCES` dict to use current providers (Explorium + Claude AI), remove deprecated Apollo/Clearbit refs
 
 ### Reused As-Is
-- `app/enrichment_service.py` — Explorium/AI source functions
-- `app/services/enrichment.py` — connector logic for materials
-- `app/services/enrichment_orchestrator.py` — fire_all_sources + claude_merge
+- `app/enrichment_service.py` — Explorium/AI source functions, normalization, apply functions
 - `app/utils/claude_client.py` — claude_structured with thinking support
+
+### Error Response Format
+
+v2 enrichment endpoints return HTML partials on success (for HTMX swap). On error, they return an HTML error fragment (not JSON) that renders an inline error message in the diff panel area. This follows the existing HTMX error pattern — the error partial includes a "Retry" button. The standard JSON error format (`{"error": "message", "status_code": N}`) is NOT used for these HTMX endpoints.
+
+### Credit Tracking
+
+Each source call in the pipeline should update `EnrichmentCreditUsage` via the existing credit manager. The diff panel footer should show total credits consumed for the enrichment run (informational, not blocking).
