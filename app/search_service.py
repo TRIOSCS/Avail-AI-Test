@@ -910,7 +910,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         # Check obsolete status from MaterialCard if available
         is_obsolete = False
         for pn in pns:
-            card = db.query(MaterialCard).filter_by(mpn=pn).first()
+            card = db.query(MaterialCard).filter_by(normalized_mpn=pn).first()
             if card and getattr(card, "lifecycle_status", None) == "obsolete":
                 is_obsolete = True
                 break
