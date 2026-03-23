@@ -16,6 +16,7 @@ from typing import Any
 from loguru import logger
 
 from app.utils.claude_client import claude_json
+from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
 SYSTEM_PROMPT = """\
 You are a professional sales email writer for Trio Supply Chain Solutions, \
@@ -80,13 +81,20 @@ async def draft_proactive_email(
         prompt += f"Additional notes from salesperson: {notes}\n\n"
     prompt += "Draft a proactive sales email offering these parts."
 
-    result = await claude_json(
-        prompt,
-        system=SYSTEM_PROMPT,
-        model_tier="fast",
-        max_tokens=600,
-        timeout=30,
-    )
+    try:
+        result = await claude_json(
+            prompt,
+            system=SYSTEM_PROMPT,
+            model_tier="fast",
+            max_tokens=600,
+            timeout=30,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — using fallback email draft")
+        return _fallback_draft(company_name, contact_name, parts, salesperson_name, notes)
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for proactive email: %s", e)
+        return _fallback_draft(company_name, contact_name, parts, salesperson_name, notes)
 
     if not result or not isinstance(result, dict):
         logger.warning("Proactive email drafter returned no result")

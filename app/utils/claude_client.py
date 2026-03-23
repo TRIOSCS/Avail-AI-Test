@@ -27,6 +27,13 @@ from loguru import logger
 from app.config import settings
 from app.http_client import http
 from app.services.credential_service import get_credential_cached
+from app.utils.claude_errors import (
+    ClaudeAuthError,
+    ClaudeError,
+    ClaudeRateLimitError,
+    ClaudeServerError,
+    ClaudeUnavailableError,
+)
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_VERSION = "2023-06-01"
@@ -79,9 +86,16 @@ async def claude_structured(
 
     Returns:
         Parsed dict conforming to schema, or None on failure
+
+    Raises:
+        ClaudeUnavailableError: API key not configured
+        ClaudeAuthError: API key invalid (401/403)
+        ClaudeRateLimitError: Rate limited after retries (429)
+        ClaudeServerError: API returned 5xx
+        ClaudeError: Network/timeout or all retries exhausted
     """
     if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
-        return None
+        raise ClaudeUnavailableError("ANTHROPIC_API_KEY not configured")
 
     # Extended thinking requires Sonnet
     if thinking_budget:
@@ -153,7 +167,13 @@ async def claude_structured(
                 if resp.status_code != 200:
                     span.set_data("ai.response.status_code", resp.status_code)
                     logger.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
-                    return None
+                    if resp.status_code in (401, 403):
+                        raise ClaudeAuthError(f"Claude API auth failed: {resp.status_code}")
+                    if resp.status_code == 429:
+                        raise ClaudeRateLimitError("Rate limit exceeded after retries")
+                    if resp.status_code >= 500:
+                        raise ClaudeServerError(f"Claude API error: {resp.status_code}")
+                    raise ClaudeError(f"Claude API error: {resp.status_code}")
 
                 data = resp.json()
                 usage = data.get("usage", {})
@@ -174,6 +194,8 @@ async def claude_structured(
                 logger.warning("Claude structured output: no tool_use block in response")
                 return None
 
+        except (ClaudeError,):
+            raise
         except (httpx.ConnectError, httpx.TimeoutException) as e:
             if attempt < max_attempts:
                 delay = 2**attempt
@@ -182,14 +204,13 @@ async def claude_structured(
                 )
                 await asyncio.sleep(delay)
                 continue
-            logger.warning("Claude structured call failed: {} ({})", type(e).__name__, e)
-            return None
+            raise ClaudeError(f"Claude API unreachable: {e}") from e
         except Exception as e:
             logger.warning("Claude structured call failed: {} ({})", type(e).__name__, e)
             logger.debug("Claude structured call traceback:", exc_info=True)
-            return None
+            raise ClaudeError(f"Claude structured call failed: {e}") from e
 
-    return None
+    raise ClaudeError("All retry attempts failed")
 
 
 async def claude_text(
@@ -217,9 +238,16 @@ async def claude_text(
 
     Returns:
         Text response or None on failure
+
+    Raises:
+        ClaudeUnavailableError: API key not configured
+        ClaudeAuthError: API key invalid (401/403)
+        ClaudeRateLimitError: Rate limited after retries (429)
+        ClaudeServerError: API returned 5xx
+        ClaudeError: Network/timeout or all retries exhausted
     """
     if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
-        return None
+        raise ClaudeUnavailableError("ANTHROPIC_API_KEY not configured")
 
     model = MODELS.get(model_tier, MODELS["fast"])
 
@@ -271,7 +299,13 @@ async def claude_text(
                 if resp.status_code != 200:
                     span.set_data("ai.response.status_code", resp.status_code)
                     logger.warning(f"Claude API {resp.status_code}: {resp.text[:200]}")
-                    return None
+                    if resp.status_code in (401, 403):
+                        raise ClaudeAuthError(f"Claude API auth failed: {resp.status_code}")
+                    if resp.status_code == 429:
+                        raise ClaudeRateLimitError("Rate limit exceeded after retries")
+                    if resp.status_code >= 500:
+                        raise ClaudeServerError(f"Claude API error: {resp.status_code}")
+                    raise ClaudeError(f"Claude API error: {resp.status_code}")
 
                 data = resp.json()
                 usage = data.get("usage", {})
@@ -288,6 +322,8 @@ async def claude_text(
                 texts = [b["text"] for b in data.get("content", []) if b.get("type") == "text"]
                 return "\n".join(texts) if texts else None
 
+        except (ClaudeError,):
+            raise
         except (httpx.ConnectError, httpx.TimeoutException) as e:
             if attempt < max_attempts:
                 delay = 2**attempt
@@ -296,13 +332,12 @@ async def claude_text(
                 )
                 await asyncio.sleep(delay)
                 continue
-            logger.warning(f"Claude text call failed: {e}")
-            return None
+            raise ClaudeError(f"Claude API unreachable: {e}") from e
         except Exception as e:
             logger.warning(f"Claude text call failed: {e}")
-            return None
+            raise ClaudeError(f"Claude text call failed: {e}") from e
 
-    return None
+    raise ClaudeError("All retry attempts failed")
 
 
 async def claude_json(
@@ -419,7 +454,9 @@ async def claude_batch_submit(
         Batch ID string for polling, or None on failure.
         50% cost reduction vs individual calls; up to 24h processing.
     """
-    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY") or not requests:
+    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
+        raise ClaudeUnavailableError("ANTHROPIC_API_KEY not configured")
+    if not requests:
         return None
 
     batch_requests = [
@@ -444,7 +481,13 @@ async def claude_batch_submit(
 
         if resp.status_code != 200:
             logger.warning(f"Batch API submit {resp.status_code}: {resp.text[:300]}")
-            return None
+            if resp.status_code in (401, 403):
+                raise ClaudeAuthError(f"Claude API auth failed: {resp.status_code}")
+            if resp.status_code == 429:
+                raise ClaudeRateLimitError("Rate limit exceeded")
+            if resp.status_code >= 500:
+                raise ClaudeServerError(f"Claude API error: {resp.status_code}")
+            raise ClaudeError(f"Batch API submit error: {resp.status_code}")
 
         data = resp.json()
         batch_id = data.get("id")
@@ -452,9 +495,11 @@ async def claude_batch_submit(
         logger.info(f"Batch submitted: {batch_id} ({count} requests)")
         return batch_id
 
+    except ClaudeError:
+        raise
     except Exception as e:
         logger.warning(f"Batch API submit failed: {e}")
-        return None
+        raise ClaudeError(f"Batch API submit failed: {e}") from e
 
 
 async def claude_batch_results(
@@ -467,7 +512,9 @@ async def claude_batch_results(
         Dict of {custom_id: parsed_dict} when batch is complete.
         Entries with errors will have value None.
     """
-    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY") or not batch_id:
+    if not get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
+        raise ClaudeUnavailableError("ANTHROPIC_API_KEY not configured")
+    if not batch_id:
         return None
 
     try:
@@ -480,7 +527,11 @@ async def claude_batch_results(
 
         if resp.status_code != 200:
             logger.warning(f"Batch status check {resp.status_code}: {resp.text[:200]}")
-            return None
+            if resp.status_code in (401, 403):
+                raise ClaudeAuthError(f"Claude API auth failed: {resp.status_code}")
+            if resp.status_code >= 500:
+                raise ClaudeServerError(f"Claude API error: {resp.status_code}")
+            raise ClaudeError(f"Batch status check error: {resp.status_code}")
 
         data = resp.json()
         status = data.get("processing_status")
@@ -546,6 +597,8 @@ async def claude_batch_results(
         )
         return parsed
 
+    except ClaudeError:
+        raise
     except Exception as e:
         logger.warning(f"Batch results check failed: {e}")
-        return None
+        raise ClaudeError(f"Batch results check failed: {e}") from e

@@ -11,7 +11,7 @@ Depends on: app.models.tags, app.services.prefix_lookup
 from datetime import datetime, timezone
 
 from loguru import logger
-from sqlalchemy import func
+from sqlalchemy import func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -166,19 +166,29 @@ def classify_material_card(normalized_mpn: str, manufacturer: str | None, catego
 
 
 def get_or_create_brand_tag(manufacturer_name: str, db: Session) -> Tag:
-    """Find or create a brand Tag.
+    """Find or create a brand Tag. Race-safe via savepoint retry.
 
-    Case-insensitive dedup via func.lower().
+    Case-insensitive dedup via func.lower(). Uses begin_nested() + IntegrityError catch
+    to handle concurrent inserts without TOCTOU race.
     """
     normalized = manufacturer_name.strip()
-    tag = db.query(Tag).filter(func.lower(Tag.name) == normalized.lower(), Tag.tag_type == "brand").first()
+    tag = db.execute(
+        select(Tag).where(func.lower(Tag.name) == normalized.lower(), Tag.tag_type == "brand")
+    ).scalar_one_or_none()
     if tag:
         return tag
 
-    tag = Tag(name=normalized, tag_type="brand", created_at=datetime.now(timezone.utc))
-    db.add(tag)
-    db.flush()
-    return tag
+    try:
+        with db.begin_nested():
+            tag = Tag(name=normalized, tag_type="brand", created_at=datetime.now(timezone.utc))
+            db.add(tag)
+            db.flush()
+        return tag
+    except IntegrityError:
+        # Concurrent insert won — savepoint rolled back, re-fetch
+        return db.execute(
+            select(Tag).where(func.lower(Tag.name) == normalized.lower(), Tag.tag_type == "brand")
+        ).scalar_one()
 
 
 def get_or_create_commodity_tag(commodity_name: str, db: Session) -> Tag | None:

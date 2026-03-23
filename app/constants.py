@@ -56,6 +56,8 @@ class OfferSource(StrEnum):
     SEARCH = "search"
     HISTORICAL = "historical"
     VENDOR_AFFINITY = "vendor_affinity"
+    AI_PARSED = "ai_parsed"
+    AI_LOOKUP = "ai_lookup"
 
 
 class ResponseClassification(StrEnum):
@@ -73,11 +75,13 @@ class ResponseClassification(StrEnum):
 class OfferStatus(StrEnum):
     """Status lifecycle for Offer records."""
 
+    PENDING_REVIEW = "pending_review"
     ACTIVE = "active"
     APPROVED = "approved"
     REJECTED = "rejected"
     SOLD = "sold"
     WON = "won"
+    EXPIRED = "expired"
 
 
 class AttributionStatus(StrEnum):
@@ -101,6 +105,7 @@ class RequisitionStatus(StrEnum):
     WON = "won"
     LOST = "lost"
     ARCHIVED = "archived"
+    CANCELLED = "cancelled"
 
 
 class SourcingStatus(StrEnum):
@@ -204,3 +209,72 @@ class TicketSource(StrEnum):
 
     REPORT_BUTTON = "report_button"
     TICKET_FORM = "ticket_form"
+
+
+class BuyPlanStatus(StrEnum):
+    """Buy plan header statuses."""
+
+    DRAFT = "draft"
+    PENDING = "pending"
+    ACTIVE = "active"
+    HALTED = "halted"
+    COMPLETED = "completed"
+    CANCELLED = "cancelled"
+
+
+class SOVerificationStatus(StrEnum):
+    """Sales Order verification by ops."""
+
+    PENDING = "pending"
+    APPROVED = "approved"
+    REJECTED = "rejected"
+
+
+class BuyPlanLineStatus(StrEnum):
+    """Per-line statuses tracking buyer execution."""
+
+    AWAITING_PO = "awaiting_po"
+    PENDING_VERIFY = "pending_verify"
+    VERIFIED = "verified"
+    ISSUE = "issue"
+    CANCELLED = "cancelled"
+
+
+class LineIssueType(StrEnum):
+    """Types of issues a buyer can flag on a line."""
+
+    SOLD_OUT = "sold_out"
+    PRICE_CHANGED = "price_changed"
+    LEAD_TIME_CHANGED = "lead_time_changed"
+    OTHER = "other"
+
+
+class AIFlagSeverity(StrEnum):
+    """Severity levels for AI-generated flags."""
+
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"
+
+
+class RiskFlagType(StrEnum):
+    """Types of risk flags that can be raised on a deal."""
+
+    PRICE_INCREASE = "price_increase"
+    LEAD_TIME_RISK = "lead_time_risk"
+    VENDOR_RELIABILITY = "vendor_reliability"
+    QTY_SHORTFALL = "qty_shortfall"
+    GEO_RISK = "geo_risk"
+    STALE_OFFER = "stale_offer"
+    MARGIN_BELOW_THRESHOLD = "margin_below_threshold"
+    SINGLE_SOURCE = "single_source"
+    COUNTERFEIT_RISK = "counterfeit_risk"
+    OTHER = "other"
+
+
+class RiskFlagSeverity(StrEnum):
+    """Severity levels for risk flags."""
+
+    INFO = "info"
+    WARNING = "warning"
+    CRITICAL = "critical"

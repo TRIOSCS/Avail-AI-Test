@@ -11,7 +11,8 @@ Depends on: models/strategic.py, models/vendors.py, models/auth.py
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
-from sqlalchemy import func
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, joinedload
 
 from app.models.strategic import StrategicVendor
@@ -30,41 +31,38 @@ def _ensure_utc(dt: datetime) -> datetime:
 
 def get_my_strategic(db: Session, user_id: int) -> list[StrategicVendor]:
     """Return all active strategic vendors for a buyer."""
-    return (
-        db.query(StrategicVendor)
+    stmt = (
+        select(StrategicVendor)
         .options(joinedload(StrategicVendor.vendor_card))
-        .filter(
+        .where(
             StrategicVendor.user_id == user_id,
             StrategicVendor.released_at.is_(None),
         )
         .order_by(StrategicVendor.expires_at.asc())
-        .all()
     )
+    return list(db.execute(stmt).scalars().all())
 
 
 def active_count(db: Session, user_id: int) -> int:
     """Count active strategic vendors for a buyer."""
-    return (
-        db.query(func.count(StrategicVendor.id))
-        .filter(
-            StrategicVendor.user_id == user_id,
-            StrategicVendor.released_at.is_(None),
-        )
-        .scalar()
+    stmt = select(func.count(StrategicVendor.id)).where(
+        StrategicVendor.user_id == user_id,
+        StrategicVendor.released_at.is_(None),
     )
+    return db.execute(stmt).scalar()
 
 
 def get_vendor_owner(db: Session, vendor_card_id: int) -> StrategicVendor | None:
     """Return the active strategic record for a vendor, or None if open pool."""
-    return (
-        db.query(StrategicVendor)
+    stmt = (
+        select(StrategicVendor)
         .options(joinedload(StrategicVendor.user))
-        .filter(
+        .where(
             StrategicVendor.vendor_card_id == vendor_card_id,
             StrategicVendor.released_at.is_(None),
         )
-        .first()
     )
+    return db.execute(stmt).scalar_one_or_none()
 
 
 def claim_vendor(
@@ -74,21 +72,31 @@ def claim_vendor(
 
     When commit=False, flushes instead of committing — caller is responsible for the
     final commit (used by replace_vendor for atomic swap).
+
+    Uses SELECT FOR UPDATE to prevent concurrent claims on the same vendor.
     """
     # Check cap
     count = active_count(db, user_id)
     if count >= MAX_STRATEGIC_VENDORS:
         return None, f"Already at {MAX_STRATEGIC_VENDORS} strategic vendors. Drop one first."
 
-    # Check if already claimed by someone
-    existing = get_vendor_owner(db, vendor_card_id)
+    # Lock the row to prevent concurrent claims
+    existing = db.execute(
+        select(StrategicVendor)
+        .where(
+            StrategicVendor.vendor_card_id == vendor_card_id,
+            StrategicVendor.released_at.is_(None),
+        )
+        .with_for_update()
+    ).scalar_one_or_none()
+
     if existing:
         if existing.user_id == user_id:
             return None, "You already have this vendor as strategic."
         return None, "This vendor is already claimed by another buyer."
 
     # Verify vendor exists
-    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_card_id).first()
+    vendor = db.get(VendorCard, vendor_card_id)
     if not vendor:
         return None, "Vendor not found."
 
@@ -100,11 +108,16 @@ def claim_vendor(
         expires_at=now + timedelta(days=TTL_DAYS),
     )
     db.add(record)
-    if commit:
-        db.commit()
-        db.refresh(record)
-    else:
-        db.flush()
+    try:
+        if commit:
+            db.commit()
+            db.refresh(record)
+        else:
+            db.flush()
+    except IntegrityError:
+        db.rollback()
+        return None, "This vendor was just claimed by another buyer."
+
     logger.info(
         "Strategic vendor claimed: user={} vendor={} expires={}",
         user_id,
@@ -120,15 +133,12 @@ def drop_vendor(db: Session, user_id: int, vendor_card_id: int, *, commit: bool 
     When commit=False, flushes instead of committing — caller is responsible for the
     final commit (used by replace_vendor for atomic swap).
     """
-    record = (
-        db.query(StrategicVendor)
-        .filter(
-            StrategicVendor.user_id == user_id,
-            StrategicVendor.vendor_card_id == vendor_card_id,
-            StrategicVendor.released_at.is_(None),
-        )
-        .first()
+    stmt = select(StrategicVendor).where(
+        StrategicVendor.user_id == user_id,
+        StrategicVendor.vendor_card_id == vendor_card_id,
+        StrategicVendor.released_at.is_(None),
     )
+    record = db.execute(stmt).scalar_one_or_none()
     if not record:
         return False, "Vendor is not in your strategic list."
 
@@ -181,14 +191,11 @@ def record_offer(db: Session, vendor_card_id: int) -> bool:
     Called from offer creation (manual + AI-parsed). Returns True if a strategic record
     was updated.
     """
-    record = (
-        db.query(StrategicVendor)
-        .filter(
-            StrategicVendor.vendor_card_id == vendor_card_id,
-            StrategicVendor.released_at.is_(None),
-        )
-        .first()
+    stmt = select(StrategicVendor).where(
+        StrategicVendor.vendor_card_id == vendor_card_id,
+        StrategicVendor.released_at.is_(None),
     )
+    record = db.execute(stmt).scalar_one_or_none()
     if not record:
         return False
 
@@ -210,14 +217,11 @@ def expire_stale(db: Session) -> int:
     Returns count expired.
     """
     now = datetime.now(timezone.utc)
-    stale = (
-        db.query(StrategicVendor)
-        .filter(
-            StrategicVendor.expires_at < now,
-            StrategicVendor.released_at.is_(None),
-        )
-        .all()
+    stmt = select(StrategicVendor).where(
+        StrategicVendor.expires_at < now,
+        StrategicVendor.released_at.is_(None),
     )
+    stale = list(db.execute(stmt).scalars().all())
     for record in stale:
         record.released_at = now
         record.release_reason = "expired"
@@ -231,19 +235,19 @@ def expire_stale(db: Session) -> int:
 def get_expiring_soon(db: Session, days: int = 7) -> list[StrategicVendor]:
     """Return strategic vendors expiring within N days."""
     cutoff = datetime.now(timezone.utc) + timedelta(days=days)
-    return (
-        db.query(StrategicVendor)
+    stmt = (
+        select(StrategicVendor)
         .options(
             joinedload(StrategicVendor.user),
             joinedload(StrategicVendor.vendor_card),
         )
-        .filter(
+        .where(
             StrategicVendor.expires_at < cutoff,
             StrategicVendor.released_at.is_(None),
         )
         .order_by(StrategicVendor.expires_at.asc())
-        .all()
     )
+    return list(db.execute(stmt).scalars().all())
 
 
 def get_vendor_status(db: Session, vendor_card_id: int) -> dict | None:
@@ -273,8 +277,8 @@ def get_open_pool(
 
     Returns (vendors, total_count).
     """
-    claimed_ids = db.query(StrategicVendor.vendor_card_id).filter(StrategicVendor.released_at.is_(None)).subquery()
-    q = db.query(VendorCard).filter(VendorCard.id.notin_(claimed_ids))
+    claimed_sub = select(StrategicVendor.vendor_card_id).where(StrategicVendor.released_at.is_(None))
+    q = db.query(VendorCard).filter(VendorCard.id.notin_(claimed_sub))
 
     if search:
         q = q.filter(VendorCard.display_name.ilike(f"%{search}%"))

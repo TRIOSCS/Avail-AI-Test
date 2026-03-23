@@ -55,6 +55,7 @@ async def submit_batch_backfill(db: Session, batch_size: int = 100) -> dict:  # 
     Returns: {batch_id, total_requests, total_mpns} or {error: str}
     """
     from app.utils.claude_client import claude_batch_submit
+    from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
     # Find cards with NO brand tag
     tagged_brand_ids = (
@@ -113,7 +114,12 @@ async def submit_batch_backfill(db: Session, batch_size: int = 100) -> dict:  # 
     chunk_size = 50000  # Stay well under 100K limit
     for chunk_start in range(0, len(requests), chunk_size):
         chunk = requests[chunk_start : chunk_start + chunk_size]
-        batch_id = await claude_batch_submit(chunk)
+        try:
+            batch_id = await claude_batch_submit(chunk)
+        except ClaudeUnavailableError:
+            return {"error": "Claude API key not configured"}
+        except ClaudeError as e:
+            return {"error": f"Batch submit failed at chunk {chunk_start}: {e}"}
         if not batch_id:
             return {"error": f"Batch submit failed at chunk {chunk_start}"}
         batch_ids.append(batch_id)
@@ -148,6 +154,7 @@ async def check_and_apply_batch_results(db: Session, meta_path: str | None = Non
     Returns: {status, ...} where status is 'processing', 'complete', or 'error'
     """
     from app.utils.claude_client import claude_batch_results
+    from app.utils.claude_errors import ClaudeError as _ClaudeErr
 
     if not meta_path:
         candidates = sorted(Path("/tmp").glob("ai_backfill_meta_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
@@ -168,7 +175,11 @@ async def check_and_apply_batch_results(db: Session, meta_path: str | None = Non
     all_complete = True
 
     for batch_id in batch_ids:
-        results = await claude_batch_results(batch_id)
+        try:
+            results = await claude_batch_results(batch_id)
+        except _ClaudeErr as e:
+            logger.warning("Batch results check failed for %s: %s", batch_id, e)
+            results = None
         if results is None:
             all_complete = False
             logger.info(f"Batch {batch_id} still processing")

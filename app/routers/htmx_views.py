@@ -16,7 +16,6 @@ from pathlib import Path
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from loguru import logger
 from sqlalchemy import desc, exists, or_, select
 from sqlalchemy import func as sqlfunc
@@ -59,11 +58,12 @@ from ..services.faceted_search_service import (
     search_materials_faceted,
 )
 from ..services.freeform_parser_service import parse_freeform_rfq
+from ..template_env import templates
 from ..utils.search_builder import SearchBuilder
+from ._lookup_helpers import get_requisition_or_404, get_vendor_card_or_404
 
 router = APIRouter(tags=["htmx-views"])
 _DASH = "\u2014"  # em-dash for template fallbacks
-templates = Jinja2Templates(directory="app/templates")
 
 # Vite manifest for asset fingerprinting — read once at import time.
 _MANIFEST_PATH = Path("app/static/dist/.vite/manifest.json")
@@ -85,139 +85,6 @@ def _vite_assets() -> dict:
     if styles_entry.get("file") and styles_entry["file"] not in css_files:
         css_files = [styles_entry["file"]] + css_files
     return {"js_file": js_file, "css_files": css_files}
-
-
-def _timesince_filter(dt):
-    """Convert datetime to human-readable relative time string."""
-    if not dt:
-        return ""
-    from datetime import datetime, timezone
-
-    now = datetime.now(timezone.utc)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    diff = now - dt
-    seconds = diff.total_seconds()
-    if seconds < 60:
-        return "just now"
-    if seconds < 3600:
-        mins = int(seconds // 60)
-        return f"{mins} min ago"
-    if seconds < 86400:
-        hours = int(seconds // 3600)
-        return f"{hours} hour{'s' if hours != 1 else ''} ago"
-    days = int(seconds // 86400)
-    if days == 1:
-        return "1 day ago"
-    return f"{days} days ago"
-
-
-templates.env.filters["timesince"] = _timesince_filter
-
-
-def _timeago_filter(dt):
-    """Compact relative time: '2h ago', '3d ago', '2w ago'."""
-    if not dt:
-        return "--"
-    from datetime import datetime as _dt
-    from datetime import timezone as _tz
-
-    if isinstance(dt, str):
-        try:
-            dt = _dt.fromisoformat(dt)
-        except (ValueError, TypeError):
-            return "--"
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=_tz.utc)
-    now = _dt.now(_tz.utc)
-    seconds = int((now - dt).total_seconds())
-    if seconds < 60:
-        return "just now"
-    minutes = seconds // 60
-    if minutes < 60:
-        return f"{minutes}m ago"
-    hours = minutes // 60
-    if hours < 24:
-        return f"{hours}h ago"
-    days = hours // 24
-    if days < 7:
-        return f"{days}d ago"
-    weeks = days // 7
-    if weeks < 5:
-        return f"{weeks}w ago"
-    months = days // 30
-    return f"{months}mo ago"
-
-
-templates.env.filters["timeago"] = _timeago_filter
-
-
-def _fmtdate_filter(value, fmt: str = "%b %d, %H:%M", default: str = "—") -> str:
-    """Safe date formatter — handles None, strings, and datetime objects."""
-    if not value:
-        return default
-    if isinstance(value, str):
-        return value
-    try:
-        return value.strftime(fmt)
-    except (AttributeError, TypeError):
-        return default
-
-
-templates.env.filters["fmtdate"] = _fmtdate_filter
-
-
-def _sanitize_html_filter(value: str) -> str:
-    """Sanitize HTML to prevent XSS — allows safe formatting tags only."""
-    if not value:
-        return ""
-    import nh3
-
-    return nh3.clean(
-        value,
-        tags={
-            "p",
-            "br",
-            "div",
-            "span",
-            "table",
-            "tr",
-            "td",
-            "th",
-            "thead",
-            "tbody",
-            "a",
-            "b",
-            "i",
-            "strong",
-            "em",
-            "ul",
-            "ol",
-            "li",
-            "h1",
-            "h2",
-            "h3",
-            "h4",
-            "h5",
-            "h6",
-            "img",
-            "blockquote",
-            "pre",
-            "code",
-            "hr",
-        },
-        attributes={
-            "*": {"class"},
-            "a": {"href", "title", "target"},
-            "img": {"src", "alt", "title", "width", "height"},
-            "td": {"colspan", "rowspan", "width", "height"},
-            "th": {"colspan", "rowspan", "width", "height"},
-        },
-        url_schemes={"http", "https", "mailto"},
-    )
-
-
-templates.env.filters["sanitize_html"] = _sanitize_html_filter
 
 
 def _is_htmx(request: Request) -> bool:
@@ -808,27 +675,31 @@ async def customer_lookup(
 ):
     """AI-powered company lookup using Claude with web search."""
     from app.utils.claude_client import claude_json
+    from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
     search_query = company_name.strip()
     if location.strip():
         search_query += f", {location.strip()}"
 
-    result = await claude_json(
-        prompt=f"Search the web for this company: {search_query}\n\n"
-        f"Find their official website, main phone number, and physical address.\n\n"
-        f"Return ONLY a JSON object with these fields:\n"
-        f'{{"company_name": "...", "website": "...", "phone": "...", '
-        f'"address_line1": "...", "city": "...", "state": "...", "zip": "...", "country": "..."}}\n\n'
-        f"Use empty strings for any field you cannot verify from search results. "
-        f"Do NOT guess or make up information — only include data you found online.",
-        system="You look up company information using web search. "
-        "ONLY return data you can verify from search results. "
-        "If you cannot find a phone number or address, return empty strings — never guess.",
-        model_tier="smart",
-        max_tokens=512,
-        tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
-        timeout=45,
-    )
+    try:
+        result = await claude_json(
+            prompt=f"Search the web for this company: {search_query}\n\n"
+            f"Find their official website, main phone number, and physical address.\n\n"
+            f"Return ONLY a JSON object with these fields:\n"
+            f'{{"company_name": "...", "website": "...", "phone": "...", '
+            f'"address_line1": "...", "city": "...", "state": "...", "zip": "...", "country": "..."}}\n\n'
+            f"Use empty strings for any field you cannot verify from search results. "
+            f"Do NOT guess or make up information — only include data you found online.",
+            system="You look up company information using web search. "
+            "ONLY return data you can verify from search results. "
+            "If you cannot find a phone number or address, return empty strings — never guess.",
+            model_tier="smart",
+            max_tokens=512,
+            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 3}],
+            timeout=45,
+        )
+    except (ClaudeUnavailableError, ClaudeError):
+        result = None
 
     if not result:
         return HTMLResponse(
@@ -1121,9 +992,7 @@ async def add_requirement(
     if not manufacturer.strip():
         raise HTTPException(422, "Manufacturer is required")
 
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    req = get_requisition_or_404(db, req_id)
 
     form_data = await request.form()
     sub_mpns = form_data.getlist("sub_mpn")
@@ -1162,25 +1031,29 @@ async def add_requirement(
     db.refresh(r)
 
     # Auto-search: fire background search for the new requirement
-    def _bg_search(requirement_id: int):
-        import asyncio
+    import os
 
-        from ..database import SessionLocal
-        from ..search_service import search_requirement as do_search
+    if not os.environ.get("TESTING"):
 
-        bg_db = SessionLocal()
-        try:
-            from ..models.sourcing import Requirement
+        def _bg_search(requirement_id: int):
+            import asyncio
 
-            req_obj = bg_db.get(Requirement, requirement_id)
-            if req_obj:
-                asyncio.run(do_search(req_obj, bg_db))
-        except Exception:
-            logger.debug("Auto-search failed for requirement %s", requirement_id, exc_info=True)
-        finally:
-            bg_db.close()
+            from ..database import SessionLocal
+            from ..search_service import search_requirement as do_search
 
-    background_tasks.add_task(_bg_search, r.id)
+            bg_db = SessionLocal()
+            try:
+                from ..models.sourcing import Requirement
+
+                req_obj = bg_db.get(Requirement, requirement_id)
+                if req_obj:
+                    asyncio.run(do_search(req_obj, bg_db))
+            except Exception:
+                logger.debug("Auto-search failed for requirement %s", requirement_id, exc_info=True)
+            finally:
+                bg_db.close()
+
+        background_tasks.add_task(_bg_search, r.id)
 
     # Return the new row via template for HTMX append
     r.sighting_count = 0
@@ -1199,9 +1072,7 @@ async def requisition_tab(
     db: Session = Depends(get_db),
 ):
     """Return a specific tab partial for requisition detail."""
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    req = get_requisition_or_404(db, req_id)
 
     valid_tabs = {"parts", "offers", "quotes", "buy_plans", "tasks", "activity", "responses"}
     if tab not in valid_tabs:
@@ -1354,9 +1225,7 @@ async def parse_email_form(
     db: Session = Depends(get_db),
 ):
     """Return the parse-email paste form."""
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    req = get_requisition_or_404(db, req_id)
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
     return templates.TemplateResponse("htmx/partials/requisitions/tabs/parse_email_form.html", ctx)
@@ -1370,9 +1239,7 @@ async def paste_offer_form(
     db: Session = Depends(get_db),
 ):
     """Return the paste-offer freeform form."""
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    req = get_requisition_or_404(db, req_id)
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
     return templates.TemplateResponse("htmx/partials/requisitions/tabs/paste_offer_form.html", ctx)
@@ -1389,9 +1256,7 @@ async def parse_email_action(
     db: Session = Depends(get_db),
 ):
     """Parse vendor email and return editable offer cards."""
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    req = get_requisition_or_404(db, req_id)
 
     if not email_body.strip():
         return HTMLResponse(
@@ -1440,9 +1305,7 @@ async def parse_offer_action(
     db: Session = Depends(get_db),
 ):
     """Parse freeform vendor text and return editable offer cards."""
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    req = get_requisition_or_404(db, req_id)
 
     if not raw_text.strip():
         return HTMLResponse(
@@ -1483,9 +1346,7 @@ async def save_parsed_offers(
     db: Session = Depends(get_db),
 ):
     """Save user-edited parsed offers to the requisition."""
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    req = get_requisition_or_404(db, req_id)
 
     form = await request.form()
     vendor_name = form.get("vendor_name", "")
@@ -1752,8 +1613,6 @@ async def requisition_inline_save(
             req.created_by = int(value)
             msg = "Owner reassigned"
 
-    from datetime import datetime, timezone
-
     req.updated_at = datetime.now(timezone.utc)
     req.updated_by_id = user.id
     db.commit()
@@ -1910,9 +1769,7 @@ async def create_quote_from_offers(
     if not offer_ids:
         raise HTTPException(400, "No offers selected")
 
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    req = get_requisition_or_404(db, req_id)
 
     offers = db.query(Offer).filter(Offer.id.in_(offer_ids), Offer.requisition_id == req_id).all()
     if not offers:
@@ -1995,7 +1852,6 @@ async def review_offer(
     if action == "approve":
         offer.status = OfferStatus.APPROVED
         offer.approved_by_id = user.id
-        from datetime import datetime, timezone
 
         offer.approved_at = datetime.now(timezone.utc)
     else:
@@ -2016,9 +1872,7 @@ async def add_offer_form(
     db: Session = Depends(get_db),
 ):
     """Return the manual offer entry form."""
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    req = get_requisition_or_404(db, req_id)
     requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
@@ -2034,9 +1888,7 @@ async def add_offer(
     db: Session = Depends(get_db),
 ):
     """Create a manual offer and return refreshed offers tab."""
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    get_requisition_or_404(db, req_id)  # validates existence
 
     form = await request.form()
     vendor_name = (form.get("vendor_name") or "").strip()
@@ -2372,9 +2224,7 @@ async def log_activity(
     """Log a manual activity (note/call/email) for a requisition."""
     from ..models.intelligence import ActivityLog
 
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    get_requisition_or_404(db, req_id)  # validates existence
 
     form = await request.form()
     activity_type = form.get("activity_type", "note")
@@ -2409,9 +2259,7 @@ async def rfq_compose(
     """Render the RFQ compose form for a requisition."""
     from ..models.offers import Contact as RfqContact
 
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    req = get_requisition_or_404(db, req_id)
 
     parts = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
 
@@ -2470,9 +2318,7 @@ async def ai_cleanup_email(
     db: Session = Depends(get_db),
 ):
     """Clean up user-written email — fix grammar, tone, and formatting."""
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    get_requisition_or_404(db, req_id)  # validates existence
 
     user_text = body.strip()
     if not user_text:
@@ -2516,13 +2362,10 @@ async def rfq_send(
 ):
     """Send RFQs via Graph API, falling back to DB-only in test mode."""
     import os
-    from datetime import datetime, timezone
 
     from ..models.offers import Contact as RfqContact
 
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    req = get_requisition_or_404(db, req_id)
 
     form = await request.form()
     vendor_names = form.getlist("vendor_names")
@@ -2814,9 +2657,7 @@ async def poll_inbox_htmx(
 ):
     """Poll inbox for vendor responses (test mode: no-op, returns refreshed responses
     tab)."""
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    get_requisition_or_404(db, req_id)  # validates existence
     logger.info("Inbox poll requested for req {} by {}", req_id, user.email)
     # Return refreshed responses tab
     return await requisition_tab(request=request, req_id=req_id, tab="responses", user=user, db=db)
@@ -2834,9 +2675,7 @@ async def delete_requirement(
 
     Returns empty response for hx-swap='delete'.
     """
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    get_requisition_or_404(db, req_id)  # validates existence
     item = db.query(Requirement).filter(Requirement.id == item_id, Requirement.requisition_id == req_id).first()
     if not item:
         raise HTTPException(404, "Requirement not found")
@@ -2879,9 +2718,7 @@ async def update_requirement(
     if not manufacturer.strip():
         raise HTTPException(422, "Manufacturer is required")
 
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    req = get_requisition_or_404(db, req_id)
     item = db.query(Requirement).filter(Requirement.id == item_id, Requirement.requisition_id == req_id).first()
     if not item:
         raise HTTPException(404, "Requirement not found")
@@ -2924,25 +2761,29 @@ async def update_requirement(
     db.refresh(item)
 
     # Auto-search: re-search after edit
-    def _bg_search(requirement_id: int):
-        import asyncio
+    import os
 
-        from ..database import SessionLocal
-        from ..search_service import search_requirement as do_search
+    if not os.environ.get("TESTING"):
 
-        bg_db = SessionLocal()
-        try:
-            from ..models.sourcing import Requirement
+        def _bg_search(requirement_id: int):
+            import asyncio
 
-            req_obj = bg_db.get(Requirement, requirement_id)
-            if req_obj:
-                asyncio.run(do_search(req_obj, bg_db))
-        except Exception:
-            logger.debug("Auto-search failed for requirement %s", requirement_id, exc_info=True)
-        finally:
-            bg_db.close()
+            from ..database import SessionLocal
+            from ..search_service import search_requirement as do_search
 
-    background_tasks.add_task(_bg_search, item.id)
+            bg_db = SessionLocal()
+            try:
+                from ..models.sourcing import Requirement
+
+                req_obj = bg_db.get(Requirement, requirement_id)
+                if req_obj:
+                    asyncio.run(do_search(req_obj, bg_db))
+            except Exception:
+                logger.debug("Auto-search failed for requirement %s", requirement_id, exc_info=True)
+            finally:
+                bg_db.close()
+
+        background_tasks.add_task(_bg_search, item.id)
 
     # Attach sighting_count for the template
     sighting_count = db.query(Sighting).filter(Sighting.requirement_id == item.id).count()
@@ -3458,9 +3299,7 @@ async def vendor_detail_partial(
     db: Session = Depends(get_db),
 ):
     """Return vendor detail as HTML partial with safety data and tabs."""
-    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
-    if not vendor:
-        raise HTTPException(404, "Vendor not found")
+    vendor = get_vendor_card_or_404(db, vendor_id)
 
     contacts = (
         db.query(VendorContact)
@@ -3482,19 +3321,16 @@ async def vendor_detail_partial(
     safety_band = None
     safety_summary = None
     safety_flags = None
-    try:
-        lead = (
-            db.query(SourcingLead)
-            .filter(SourcingLead.vendor_name_normalized == vendor.normalized_name)
-            .order_by(SourcingLead.created_at.desc())
-            .first()
-        )
-        if lead:
-            safety_band = lead.vendor_safety_band
-            safety_summary = lead.vendor_safety_summary
-            safety_flags = lead.vendor_safety_flags
-    except Exception:
-        pass  # SourcingLead may not have data
+    lead = (
+        db.query(SourcingLead)
+        .filter(SourcingLead.vendor_name_normalized == vendor.normalized_name)
+        .order_by(SourcingLead.created_at.desc())
+        .first()
+    )
+    if lead:
+        safety_band = lead.vendor_safety_band
+        safety_summary = lead.vendor_safety_summary
+        safety_flags = lead.vendor_safety_flags
 
     ctx = _base_ctx(request, user, "vendors")
     ctx.update(
@@ -3521,9 +3357,7 @@ async def vendor_tab(
     db: Session = Depends(get_db),
 ):
     """Return a specific tab partial for vendor detail."""
-    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
-    if not vendor:
-        raise HTTPException(404, "Vendor not found")
+    vendor = get_vendor_card_or_404(db, vendor_id)
 
     valid_tabs = {"overview", "contacts", "find_contacts", "emails", "analytics", "offers", "reviews"}
     if tab not in valid_tabs:
@@ -3546,21 +3380,18 @@ async def vendor_tab(
         safety_flags = None
         safety_score = None
         safety_available = False
-        try:
-            lead = (
-                db.query(SourcingLead)
-                .filter(SourcingLead.vendor_name_normalized == vendor.normalized_name)
-                .order_by(SourcingLead.created_at.desc())
-                .first()
-            )
-            if lead:
-                safety_band = lead.vendor_safety_band
-                safety_summary = lead.vendor_safety_summary
-                safety_flags = lead.vendor_safety_flags
-                safety_score = lead.vendor_safety_score
-                safety_available = True
-        except Exception:
-            pass
+        lead = (
+            db.query(SourcingLead)
+            .filter(SourcingLead.vendor_name_normalized == vendor.normalized_name)
+            .order_by(SourcingLead.created_at.desc())
+            .first()
+        )
+        if lead:
+            safety_band = lead.vendor_safety_band
+            safety_summary = lead.vendor_safety_summary
+            safety_flags = lead.vendor_safety_flags
+            safety_score = lead.vendor_safety_score
+            safety_available = True
         contacts = (
             db.query(VendorContact)
             .filter(VendorContact.vendor_card_id == vendor_id)
@@ -3723,9 +3554,7 @@ async def vendor_edit_form(
     db: Session = Depends(get_db),
 ):
     """Return inline edit form for vendor header fields."""
-    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
-    if not vendor:
-        raise HTTPException(404, "Vendor not found")
+    vendor = get_vendor_card_or_404(db, vendor_id)
     return templates.TemplateResponse(
         "htmx/partials/vendors/edit_vendor_form.html",
         {"request": request, "vendor": vendor},
@@ -3740,9 +3569,7 @@ async def edit_vendor(
     db: Session = Depends(get_db),
 ):
     """Save vendor edits and return refreshed vendor detail."""
-    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
-    if not vendor:
-        raise HTTPException(404, "Vendor not found")
+    vendor = get_vendor_card_or_404(db, vendor_id)
 
     form = await request.form()
     display_name = form.get("display_name", "").strip()
@@ -3778,9 +3605,7 @@ async def toggle_vendor_blacklist(
     db: Session = Depends(get_db),
 ):
     """Toggle blacklist status and return refreshed vendor detail."""
-    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
-    if not vendor:
-        raise HTTPException(404, "Vendor not found")
+    vendor = get_vendor_card_or_404(db, vendor_id)
 
     vendor.is_blacklisted = not vendor.is_blacklisted
     vendor.updated_at = datetime.now(timezone.utc)
@@ -3836,9 +3661,7 @@ async def vendor_contact_nudges(
     db: Session = Depends(get_db),
 ):
     """Return nudge suggestions for dormant vendor contacts."""
-    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
-    if not vendor:
-        raise HTTPException(404, "Vendor not found")
+    vendor = get_vendor_card_or_404(db, vendor_id)
 
     contacts = db.query(VendorContact).filter(VendorContact.vendor_card_id == vendor_id).all()
     # Contacts with no interaction in 30+ days are nudge candidates
@@ -3870,9 +3693,7 @@ async def vendor_reviews(
     """Return reviews section for a vendor."""
     from ..models import VendorReview
 
-    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
-    if not vendor:
-        raise HTTPException(404, "Vendor not found")
+    vendor = get_vendor_card_or_404(db, vendor_id)
 
     reviews = (
         db.query(VendorReview)
@@ -3898,9 +3719,7 @@ async def add_vendor_review(
     """Add a review to a vendor and return refreshed reviews."""
     from ..models import VendorReview
 
-    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
-    if not vendor:
-        raise HTTPException(404, "Vendor not found")
+    get_vendor_card_or_404(db, vendor_id)  # validates existence
 
     form = await request.form()
     try:
@@ -3959,9 +3778,7 @@ async def vendor_find_contacts(
     db: Session = Depends(get_db),
 ):
     """Trigger AI web search for contacts at this vendor, return HTML results."""
-    vendor = db.query(VendorCard).filter(VendorCard.id == vendor_id).first()
-    if not vendor:
-        raise HTTPException(404, "Vendor not found")
+    vendor = get_vendor_card_or_404(db, vendor_id)
 
     from ..config import settings as app_settings
 
@@ -5151,9 +4968,7 @@ async def rfq_prepare_panel(
     """Return RFQ preparation panel — vendor data + exhaustion check."""
     from ..models.offers import Contact as RfqContact
 
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    req = get_requisition_or_404(db, req_id)
 
     # Get requirements for this req
     requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
@@ -5216,9 +5031,7 @@ async def log_phone_call(
     db: Session = Depends(get_db),
 ):
     """Log a phone call to a vendor and return updated activity tab."""
-    req = db.query(Requisition).filter(Requisition.id == req_id).first()
-    if not req:
-        raise HTTPException(404, "Requisition not found")
+    get_requisition_or_404(db, req_id)  # validates existence
 
     form = await request.form()
     vendor_name = form.get("vendor_name", "").strip()
@@ -5983,7 +5796,6 @@ async def buy_plan_cancel_partial(
     db: Session = Depends(get_db),
 ):
     """Cancel a buy plan — returns refreshed detail."""
-    from datetime import datetime, timezone
 
     bp = db.get(BuyPlan, plan_id)
     if not bp:
@@ -5992,7 +5804,7 @@ async def buy_plan_cancel_partial(
         raise HTTPException(400, f"Cannot cancel plan in '{bp.status}' status")
 
     form = await request.form()
-    bp.status = BuyPlanStatus.cancelled.value
+    bp.status = BuyPlanStatus.CANCELLED.value
     bp.cancelled_at = datetime.now(timezone.utc)
     bp.cancelled_by_id = user.id
     bp.cancellation_reason = form.get("reason")
@@ -6181,8 +5993,6 @@ async def sourcing_results_partial(
         bands = [b.strip() for b in safety.split(",")]
         query = query.filter(SourcingLead.vendor_safety_band.in_(bands))
     if freshness and freshness != "all":
-        from datetime import datetime, timedelta, timezone
-
         now = datetime.now(timezone.utc)
         cutoffs = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
         if freshness in cutoffs:
@@ -6497,8 +6307,6 @@ async def sourcing_workspace_partial(
         bands = [b.strip() for b in safety.split(",")]
         query = query.filter(SourcingLead.vendor_safety_band.in_(bands))
     if freshness and freshness != "all":
-        from datetime import datetime, timedelta, timezone
-
         now = datetime.now(timezone.utc)
         cutoffs = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
         if freshness in cutoffs:
@@ -6610,8 +6418,6 @@ async def sourcing_workspace_list_partial(
         bands = [b.strip() for b in safety.split(",")]
         query = query.filter(SourcingLead.vendor_safety_band.in_(bands))
     if freshness and freshness != "all":
-        from datetime import datetime, timedelta, timezone
-
         now = datetime.now(timezone.utc)
         cutoffs = {"24h": timedelta(hours=24), "7d": timedelta(days=7), "30d": timedelta(days=30)}
         if freshness in cutoffs:
@@ -7384,7 +7190,6 @@ async def send_quote_htmx(
     db: Session = Depends(get_db),
 ):
     """Mark quote as sent — returns refreshed detail partial."""
-    from datetime import datetime, timezone
 
     quote = db.get(Quote, quote_id)
     if not quote:
@@ -7404,7 +7209,6 @@ async def quote_result_htmx(
     db: Session = Depends(get_db),
 ):
     """Mark quote result (won/lost) — returns refreshed detail partial."""
-    from datetime import datetime, timezone
 
     quote = db.get(Quote, quote_id)
     if not quote:
@@ -7737,7 +7541,6 @@ async def dismiss_prospect_htmx(
     db: Session = Depends(get_db),
 ):
     """Dismiss a prospect — returns updated card for OOB swap."""
-    from datetime import datetime, timezone
 
     prospect = db.get(ProspectAccount, prospect_id)
     if not prospect:
@@ -9599,7 +9402,6 @@ async def mark_task_done(
     db: Session = Depends(get_db),
 ):
     """Mark a task as done."""
-    from datetime import datetime, timezone
 
     task = db.query(RequisitionTask).get(task_id)
     if not task:

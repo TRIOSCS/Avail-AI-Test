@@ -23,6 +23,7 @@ from __future__ import annotations
 from loguru import logger
 
 from app.utils.claude_client import claude_json
+from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 from app.utils.normalization import normalize_mpn as _normalize_mpn
 
 CONFIDENCE_THRESHOLD = 0.7
@@ -125,13 +126,20 @@ async def _call_normalizer(parts: list[str]) -> list[dict] | None:
     parts_list = "\n".join(f"{i + 1}. {p}" for i, p in enumerate(parts))
     prompt = f"Normalize these {len(parts)} electronic component part numbers:\n\n{parts_list}"
 
-    result = await claude_json(
-        prompt,
-        system=SYSTEM_PROMPT,
-        model_tier="fast",
-        max_tokens=256 * len(parts),
-        timeout=30,
-    )
+    try:
+        result = await claude_json(
+            prompt,
+            system=SYSTEM_PROMPT,
+            model_tier="fast",
+            max_tokens=256 * len(parts),
+            timeout=30,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping part normalization")
+        return None
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for part normalization: %s", e)
+        return None
 
     if not result:
         return None

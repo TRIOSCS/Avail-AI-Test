@@ -95,3 +95,20 @@ JUNK_EMAIL_PREFIXES: set[str] = {
     "test",
     "admin@example",
 }
+
+# ── Junk vendor names ─────────────────────────────────────────────────
+# Vendor names that should be stripped from search results.
+# Moved from search_service.py to avoid duplication.
+
+JUNK_VENDORS: set[str] = {
+    "",
+    "unknown",
+    "(no sellers listed)",
+    "no sellers listed",
+    "n/a",
+    "none",
+    "(none)",
+    "-",
+    "no vendor",
+    "no seller",
+}

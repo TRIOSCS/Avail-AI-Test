@@ -206,14 +206,14 @@ class TestBuyPlanResubmission:
 
     def test_reset_active_plan_returns_410(self, client, db_session, _halted_plan):
         """V1 reset-to-draft endpoint is deprecated — returns 410 Gone."""
-        _halted_plan.status = BuyPlanStatus.active.value
+        _halted_plan.status = BuyPlanStatus.ACTIVE.value
         db_session.commit()
         resp = client.post(f"/api/buy-plans/{_halted_plan.id}/reset-to-draft")
         assert resp.status_code == 410
 
     def test_reset_cancelled_plan_returns_410(self, client, db_session, _halted_plan):
         """V1 reset-to-draft endpoint is deprecated — returns 410 Gone."""
-        _halted_plan.status = BuyPlanStatus.cancelled.value
+        _halted_plan.status = BuyPlanStatus.CANCELLED.value
         db_session.commit()
         resp = client.post(f"/api/buy-plans/{_halted_plan.id}/reset-to-draft")
         assert resp.status_code == 410

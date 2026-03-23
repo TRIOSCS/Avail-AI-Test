@@ -512,7 +512,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
     buy_plan = BuyPlan(
         requisition_id=req.id,
         quote_id=quote.id,
-        status=BuyPlanStatus.pending.value,
+        status=BuyPlanStatus.PENDING.value,
         submitted_by_id=user.id,
         submitted_at=datetime.now(timezone.utc),
         approval_token=secrets.token_urlsafe(32),

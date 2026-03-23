@@ -17,6 +17,7 @@ from ..models import MaterialCard
 from ..services.batch_queue import BatchQueue
 from ..services.specialty_detector import COMMODITY_MAP
 from ..utils.claude_client import claude_batch_results, claude_batch_submit
+from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
 # 45 granular categories from COMMODITY_MAP + "other" fallback.
 # COMMODITY_MAP already includes "other" as a key, so no need to append.
@@ -288,7 +289,14 @@ async def batch_enrich_materials(db: Session) -> str | None:
     if not requests:
         return None
 
-    batch_id = await claude_batch_submit(requests)
+    try:
+        batch_id = await claude_batch_submit(requests)
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping batch material enrichment")
+        return None
+    except ClaudeError as e:
+        logger.warning("batch_enrich_materials: claude_batch_submit failed: %s", e)
+        return None
     if not batch_id:
         logger.warning("batch_enrich_materials: claude_batch_submit returned None")
         return None
@@ -320,7 +328,11 @@ async def process_material_batch_results(db: Session) -> dict | None:
 
     batch_id = raw.decode() if isinstance(raw, bytes) else raw
 
-    results = await claude_batch_results(batch_id)
+    try:
+        results = await claude_batch_results(batch_id)
+    except ClaudeError as e:
+        logger.warning("process_material_batch_results: batch %s check failed: %s", batch_id, e)
+        return None
     if results is None:
         logger.debug("process_material_batch_results: batch %s still processing", batch_id)
         return None

@@ -349,6 +349,7 @@ def cache_signature_extract(db, sender_email: str, extract: dict) -> None:
 from ..cache.intel_cache import _get_redis  # noqa: E402
 from ..services.batch_queue import BatchQueue  # noqa: E402
 from ..utils.claude_client import claude_batch_results, claude_batch_submit  # noqa: E402
+from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError  # noqa: E402
 
 _REDIS_KEY = "batch:signature_parse:current"
 _BATCH_LIMIT = 200
@@ -438,7 +439,14 @@ async def batch_parse_signatures(db) -> str | None:
     if not requests:
         return None
 
-    batch_id = await claude_batch_submit(requests)
+    try:
+        batch_id = await claude_batch_submit(requests)
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping batch signature parse")
+        return None
+    except ClaudeError as e:
+        logger.warning("batch_parse_signatures: claude_batch_submit failed: %s", e)
+        return None
     if not batch_id:
         logger.warning("batch_parse_signatures: claude_batch_submit returned None")
         return None
@@ -475,7 +483,11 @@ async def process_signature_batch_results(db) -> dict | None:
 
     batch_id = raw.decode() if isinstance(raw, bytes) else raw
 
-    results = await claude_batch_results(batch_id)
+    try:
+        results = await claude_batch_results(batch_id)
+    except ClaudeError as e:
+        logger.warning("process_signature_batch_results: batch %s check failed: %s", batch_id, e)
+        return None
     if results is None:
         logger.debug("process_signature_batch_results: batch %s still processing", batch_id)
         return None

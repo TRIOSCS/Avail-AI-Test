@@ -17,6 +17,7 @@ import json
 from loguru import logger
 
 from app.utils.claude_client import claude_structured
+from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 from app.utils.llm_router import routed_structured
 from app.utils.normalization import (
     detect_currency,
@@ -141,13 +142,20 @@ async def parse_vendor_response(
 
     prompt = f"Vendor: {vendor_name}\nSubject: {email_subject}\n{context_str}\n\nVendor reply:\n{body_truncated}"
 
-    result = await routed_structured(
-        prompt=prompt,
-        schema=RESPONSE_PARSE_SCHEMA,
-        system=SYSTEM_PROMPT,
-        model_tier="fast",
-        max_tokens=1024,
-    )
+    try:
+        result = await routed_structured(
+            prompt=prompt,
+            schema=RESPONSE_PARSE_SCHEMA,
+            system=SYSTEM_PROMPT,
+            model_tier="fast",
+            max_tokens=1024,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping response parse")
+        return None
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for response parse: %s", e)
+        return None
 
     if not result:
         return None
@@ -157,15 +165,18 @@ async def parse_vendor_response(
     confidence = result.get("confidence", 0)
     if CONFIDENCE_REVIEW <= confidence < CONFIDENCE_AUTO:
         logger.info(f"Ambiguous confidence {confidence:.2f} — retrying with extended thinking")
-        retry = await claude_structured(
-            prompt=prompt,
-            schema=RESPONSE_PARSE_SCHEMA,
-            system=SYSTEM_PROMPT,
-            model_tier="smart",
-            max_tokens=1024,
-            thinking_budget=2048,
-            timeout=60,
-        )
+        try:
+            retry = await claude_structured(
+                prompt=prompt,
+                schema=RESPONSE_PARSE_SCHEMA,
+                system=SYSTEM_PROMPT,
+                model_tier="smart",
+                max_tokens=1024,
+                thinking_budget=2048,
+                timeout=60,
+            )
+        except ClaudeError:
+            retry = None
         if retry and retry.get("confidence", 0) > confidence:
             logger.info(f"Extended thinking upgraded confidence: {confidence:.2f} → {retry['confidence']:.2f}")
             result = retry

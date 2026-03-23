@@ -104,8 +104,13 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
                         trgm_rows[0].sim,
                     )
                     return card
-        except (ProgrammingError, OperationalError):
+        except ProgrammingError:
             pass  # pg_trgm not available -- fall through to rapidfuzz
+        except OperationalError as e:
+            if "pg_trgm" in str(e).lower():
+                pass  # pg_trgm not available -- fall through to rapidfuzz
+            else:
+                raise
 
     try:
         existing = db.query(VendorCard.id, VendorCard.normalized_name, VendorCard.display_name).limit(500).all()

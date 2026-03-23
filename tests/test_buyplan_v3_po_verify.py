@@ -32,8 +32,8 @@ def _make_plan_with_lines(
     buyer: User,
     po_numbers: list[str | None],
     *,
-    line_status: str = BuyPlanLineStatus.pending_verify.value,
-    plan_status: str = BuyPlanStatus.active.value,
+    line_status: str = BuyPlanLineStatus.PENDING_VERIFY.value,
+    plan_status: str = BuyPlanStatus.ACTIVE.value,
 ) -> BuyPlan:
     """Create a BuyPlan with lines, each having a po_number from the list."""
     # Create required parent objects
@@ -106,7 +106,7 @@ def _make_plan_with_lines(
         quote_id=quote.id,
         requisition_id=requisition.id,
         status=plan_status,
-        so_status=SOVerificationStatus.approved.value,
+        so_status=SOVerificationStatus.APPROVED.value,
         created_at=datetime.now(timezone.utc),
     )
     db.add(plan)
@@ -166,7 +166,7 @@ async def test_verify_po_found_in_sent_folder(db_session: Session, test_user: Us
 
     # Line should be marked verified
     line = plan.lines[0]
-    assert line.status == BuyPlanLineStatus.verified.value
+    assert line.status == BuyPlanLineStatus.VERIFIED.value
     assert line.po_verified_at is not None
 
 
@@ -189,7 +189,7 @@ async def test_verify_po_not_found(db_session: Session, test_user: User):
     assert results["PO-99999"]["reason"] == "not_found_in_sent"
 
     line = plan.lines[0]
-    assert line.status == BuyPlanLineStatus.pending_verify.value
+    assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
 
 @pytest.mark.asyncio
@@ -213,7 +213,7 @@ async def test_verify_po_graph_error(db_session: Session, test_user: User):
 
     # Line should stay unchanged
     line = plan.lines[0]
-    assert line.status == BuyPlanLineStatus.pending_verify.value
+    assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
 
 @pytest.mark.asyncio
@@ -244,7 +244,7 @@ async def test_verify_po_all_verified_auto_completes(db_session: Session, test_u
     assert results["PO-B"]["verified"] is True
 
     # Plan should be auto-completed
-    assert plan.status == BuyPlanStatus.completed.value
+    assert plan.status == BuyPlanStatus.COMPLETED.value
     assert plan.completed_at is not None
 
 

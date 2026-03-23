@@ -109,7 +109,7 @@ def _map_v3_status_to_v1(plan: BuyPlan) -> str:
         lines_with_po = [ln for ln in lines if ln.po_number]
         if lines_with_po:
             all_confirmed = all(
-                ln.status in (BuyPlanLineStatus.pending_verify.value, BuyPlanLineStatus.verified.value)
+                ln.status in (BuyPlanLineStatus.PENDING_VERIFY.value, BuyPlanLineStatus.VERIFIED.value)
                 for ln in lines_with_po
             )
             if all_confirmed:
@@ -391,16 +391,16 @@ async def approve_by_token(token: str, request: Request, body: BuyPlanTokenAppro
         raise HTTPException(404, "Invalid token")
     if plan.token_expires_at and _token_expired(plan.token_expires_at):
         raise HTTPException(410, "Token expired")
-    if plan.status != BuyPlanStatus.pending.value:
+    if plan.status != BuyPlanStatus.PENDING.value:
         raise HTTPException(400, f"Cannot approve plan in '{plan.status}' status")
-    plan.status = BuyPlanStatus.active.value
+    plan.status = BuyPlanStatus.ACTIVE.value
     plan.sales_order_number = body.sales_order_number
     plan.approval_notes = body.notes
     plan.approved_at = datetime.now(timezone.utc)
     plan.approval_token = None  # Invalidate token after use
     # Stock sale fast-track: if is_stock_sale, auto-complete
     if plan.is_stock_sale:
-        plan.status = BuyPlanStatus.completed.value
+        plan.status = BuyPlanStatus.COMPLETED.value
         plan.completed_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(plan)
@@ -419,9 +419,9 @@ async def reject_by_token(token: str, request: Request, body: BuyPlanTokenReject
         raise HTTPException(404, "Invalid token")
     if plan.token_expires_at and _token_expired(plan.token_expires_at):
         raise HTTPException(410, "Token expired")
-    if plan.status != BuyPlanStatus.pending.value:
+    if plan.status != BuyPlanStatus.PENDING.value:
         raise HTTPException(400, f"Cannot reject plan in '{plan.status}' status")
-    plan.status = BuyPlanStatus.draft.value
+    plan.status = BuyPlanStatus.DRAFT.value
     plan.cancellation_reason = body.reason
     plan.approval_token = None  # Invalidate token
     db.commit()
@@ -466,7 +466,7 @@ async def regenerate_case_report(
     )
     if not plan:
         raise HTTPException(404, "Buy plan not found")
-    if plan.status != BuyPlanStatus.completed.value:
+    if plan.status != BuyPlanStatus.COMPLETED.value:
         raise HTTPException(400, "Case report only available for completed plans")
     plan.case_report = generate_case_report(plan, db)
     db.commit()
@@ -716,7 +716,7 @@ async def verify_po(
     db.commit()
     # Check if all lines verified → auto-complete
     updated_plan = check_completion(plan_id, db)
-    if updated_plan and updated_plan.status == BuyPlanStatus.completed.value:
+    if updated_plan and updated_plan.status == BuyPlanStatus.COMPLETED.value:
         db.commit()
         await run_notify_bg(notify_completed, plan_id)
     return {"ok": True, "line_id": line.id, "status": line.status}

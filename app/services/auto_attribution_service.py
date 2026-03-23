@@ -174,6 +174,7 @@ async def _call_claude_for_matching(
 ) -> dict:
     """Call Claude to match activities to entities."""
     from ..utils.claude_client import claude_structured
+    from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
     prompt = "Match these unmatched activities to the correct company or vendor.\n\nACTIVITIES:\n"
     for a in activities:
@@ -212,13 +213,20 @@ async def _call_claude_for_matching(
         "required": ["matches"],
     }
 
-    result = await claude_structured(
-        prompt=prompt,
-        schema=schema,
-        system="You match email/phone activity records to known companies and vendors in a CRM system. Be conservative — only match when confident.",
-        model_tier="fast",
-        max_tokens=2048,
-    )
+    try:
+        result = await claude_structured(
+            prompt=prompt,
+            schema=schema,
+            system="You match email/phone activity records to known companies and vendors in a CRM system. Be conservative — only match when confident.",
+            model_tier="fast",
+            max_tokens=2048,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping auto attribution")
+        return {}
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for auto attribution: %s", e)
+        return {}
 
     if not result:
         return {}

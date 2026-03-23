@@ -238,7 +238,7 @@ class TestBuyPlanFullLifecycle:
         plan = BuyPlan(
             quote_id=quote.id,
             requisition_id=data["requisition"].id,
-            status=BuyPlanStatus.draft.value,
+            status=BuyPlanStatus.DRAFT.value,
             total_cost=total_cost,
             ai_flags=[],
             created_at=datetime.now(timezone.utc),
@@ -255,7 +255,7 @@ class TestBuyPlanFullLifecycle:
             unit_sell=1.50,
             buyer_id=data["buyer"].id,
             assignment_reason="manual",
-            status=BuyPlanLineStatus.awaiting_po.value,
+            status=BuyPlanLineStatus.AWAITING_PO.value,
         )
         db_session.add(line)
         db_session.flush()
@@ -270,30 +270,30 @@ class TestBuyPlanFullLifecycle:
 
         # Submit
         plan = submit_buy_plan(plan.id, "SO-001", ctx["sales"], db_session)
-        assert plan.status in (BuyPlanStatus.active.value, BuyPlanStatus.pending.value)
+        assert plan.status in (BuyPlanStatus.ACTIVE.value, BuyPlanStatus.PENDING.value)
 
         # Auto-approved since total_cost=100 < threshold
-        assert plan.status == BuyPlanStatus.active.value
+        assert plan.status == BuyPlanStatus.ACTIVE.value
         assert plan.auto_approved is True
 
         # Confirm PO
         line = confirm_po(
             plan.id, line.id, "PO-12345", datetime(2026, 4, 1, tzinfo=timezone.utc), ctx["buyer"], db_session
         )
-        assert line.status == BuyPlanLineStatus.pending_verify.value
+        assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
         # Verify PO
         line = verify_po(plan.id, line.id, "approve", ctx["ops"], db_session)
-        assert line.status == BuyPlanLineStatus.verified.value
+        assert line.status == BuyPlanLineStatus.VERIFIED.value
 
         # Verify SO
         plan = verify_so(plan.id, "approve", ctx["ops"], db_session)
-        assert plan.so_status == SOVerificationStatus.approved.value
+        assert plan.so_status == SOVerificationStatus.APPROVED.value
 
         # Check completion
         db_session.refresh(plan)
         plan = check_completion(plan.id, db_session)
-        assert plan.status == BuyPlanStatus.completed.value
+        assert plan.status == BuyPlanStatus.COMPLETED.value
         assert plan.case_report is not None
 
     def test_manager_approval_flow(self, db_session):
@@ -303,11 +303,11 @@ class TestBuyPlanFullLifecycle:
 
         # Submit → pending (high cost)
         plan = submit_buy_plan(plan.id, "SO-002", ctx["sales"], db_session)
-        assert plan.status == BuyPlanStatus.pending.value
+        assert plan.status == BuyPlanStatus.PENDING.value
 
         # Manager approves
         plan = approve_buy_plan(plan.id, "approve", ctx["manager"], db_session)
-        assert plan.status == BuyPlanStatus.active.value
+        assert plan.status == BuyPlanStatus.ACTIVE.value
 
     def test_rejection_resubmit_flow(self, db_session):
         """Submit → reject → resubmit → approve."""
@@ -316,19 +316,19 @@ class TestBuyPlanFullLifecycle:
 
         # Submit
         plan = submit_buy_plan(plan.id, "SO-003", ctx["sales"], db_session)
-        assert plan.status == BuyPlanStatus.pending.value
+        assert plan.status == BuyPlanStatus.PENDING.value
 
         # Reject
         plan = approve_buy_plan(plan.id, "reject", ctx["manager"], db_session, notes="Needs better margin")
-        assert plan.status == BuyPlanStatus.draft.value
+        assert plan.status == BuyPlanStatus.DRAFT.value
 
         # Resubmit
         plan = resubmit_buy_plan(plan.id, "SO-003-R2", ctx["sales"], db_session)
-        assert plan.status == BuyPlanStatus.pending.value
+        assert plan.status == BuyPlanStatus.PENDING.value
 
         # Approve
         plan = approve_buy_plan(plan.id, "approve", ctx["manager"], db_session)
-        assert plan.status == BuyPlanStatus.active.value
+        assert plan.status == BuyPlanStatus.ACTIVE.value
 
     def test_issue_flag_prevents_completion(self, db_session):
         """Flagged line should prevent auto-completion."""
@@ -337,11 +337,11 @@ class TestBuyPlanFullLifecycle:
         line = ctx["line"]
 
         plan = submit_buy_plan(plan.id, "SO-004", ctx["sales"], db_session)
-        assert plan.status == BuyPlanStatus.active.value
+        assert plan.status == BuyPlanStatus.ACTIVE.value
 
         # Flag issue on line
         line = flag_line_issue(plan.id, line.id, "price_changed", ctx["buyer"], db_session, note="Price went up 20%")
-        assert line.status == BuyPlanLineStatus.issue.value
+        assert line.status == BuyPlanLineStatus.ISSUE.value
 
         # SO approved
         plan = verify_so(plan.id, "approve", ctx["ops"], db_session)
@@ -349,7 +349,7 @@ class TestBuyPlanFullLifecycle:
         # Check completion — should NOT complete (line has issue)
         db_session.refresh(plan)
         plan = check_completion(plan.id, db_session)
-        assert plan.status == BuyPlanStatus.active.value  # not completed
+        assert plan.status == BuyPlanStatus.ACTIVE.value  # not completed
 
     def test_buyer_cannot_approve(self, db_session):
         """Non-manager/admin users cannot approve buy plans."""
@@ -357,7 +357,7 @@ class TestBuyPlanFullLifecycle:
         plan = ctx["plan"]
 
         plan = submit_buy_plan(plan.id, "SO-005", ctx["sales"], db_session)
-        assert plan.status == BuyPlanStatus.pending.value
+        assert plan.status == BuyPlanStatus.PENDING.value
 
         with pytest.raises(PermissionError, match="Only managers/admins"):
             approve_buy_plan(plan.id, "approve", ctx["buyer"], db_session)
@@ -372,18 +372,18 @@ class TestBuyPlanFullLifecycle:
         line = confirm_po(
             plan.id, line.id, "PO-BAD", datetime(2026, 4, 1, tzinfo=timezone.utc), ctx["buyer"], db_session
         )
-        assert line.status == BuyPlanLineStatus.pending_verify.value
+        assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
         # Reject PO
         line = verify_po(plan.id, line.id, "reject", ctx["ops"], db_session, rejection_note="Wrong PO number")
-        assert line.status == BuyPlanLineStatus.awaiting_po.value
+        assert line.status == BuyPlanLineStatus.AWAITING_PO.value
         assert line.po_number is None
 
         # Re-confirm with correct PO
         line = confirm_po(
             plan.id, line.id, "PO-GOOD", datetime(2026, 4, 5, tzinfo=timezone.utc), ctx["buyer"], db_session
         )
-        assert line.status == BuyPlanLineStatus.pending_verify.value
+        assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
         assert line.po_number == "PO-GOOD"
 
 
@@ -423,6 +423,6 @@ class TestBuildBuyPlanIntegration:
         db_session.flush()
 
         plan = build_buy_plan(quote.id, db_session)
-        assert plan.status == BuyPlanStatus.draft.value
+        assert plan.status == BuyPlanStatus.DRAFT.value
         assert len(plan.lines) >= 1
         assert plan.total_cost is not None

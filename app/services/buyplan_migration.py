@@ -30,14 +30,14 @@ from app.models.buy_plan import BuyPlanLine, BuyPlanLineStatus, BuyPlanStatus
 # ── Status Mapping ──────────────────────────────────────────────────
 
 V1_TO_V3_STATUS = {
-    "draft": BuyPlanStatus.draft.value,
-    "pending_approval": BuyPlanStatus.pending.value,
-    "approved": BuyPlanStatus.active.value,
-    "po_entered": BuyPlanStatus.active.value,
-    "po_confirmed": BuyPlanStatus.active.value,
-    "complete": BuyPlanStatus.completed.value,
-    "rejected": BuyPlanStatus.draft.value,
-    "cancelled": BuyPlanStatus.cancelled.value,
+    "draft": BuyPlanStatus.DRAFT.value,
+    "pending_approval": BuyPlanStatus.PENDING.value,
+    "approved": BuyPlanStatus.ACTIVE.value,
+    "po_entered": BuyPlanStatus.ACTIVE.value,
+    "po_confirmed": BuyPlanStatus.ACTIVE.value,
+    "complete": BuyPlanStatus.COMPLETED.value,
+    "rejected": BuyPlanStatus.DRAFT.value,
+    "cancelled": BuyPlanStatus.CANCELLED.value,
 }
 
 # SQL to read all V1 buy plans
@@ -99,14 +99,14 @@ def _to_datetime(val):
 def _determine_line_status(v1_status: str, item: dict) -> str:
     """Map a V1 plan status + line item data to a V3 line status."""
     if v1_status == "cancelled":
-        return BuyPlanLineStatus.cancelled.value
+        return BuyPlanLineStatus.CANCELLED.value
     po_number = item.get("po_number")
     po_verified = item.get("po_verified", False)
     if po_verified:
-        return BuyPlanLineStatus.verified.value
+        return BuyPlanLineStatus.VERIFIED.value
     if po_number:
-        return BuyPlanLineStatus.pending_verify.value
-    return BuyPlanLineStatus.awaiting_po.value
+        return BuyPlanLineStatus.PENDING_VERIFY.value
+    return BuyPlanLineStatus.AWAITING_PO.value
 
 
 def migrate_v1_to_v3(db: Session) -> dict:

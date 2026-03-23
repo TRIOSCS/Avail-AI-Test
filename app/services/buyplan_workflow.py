@@ -51,7 +51,7 @@ def submit_buy_plan(
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
-    if plan.status != BuyPlanStatus.draft.value:
+    if plan.status != BuyPlanStatus.DRAFT.value:
         raise ValueError(f"Can only submit draft plans (current: {plan.status})")
 
     plan.sales_order_number = sales_order_number
@@ -67,13 +67,13 @@ def submit_buy_plan(
 
     # Auto-approve decision
     if _should_auto_approve(plan):
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         plan.auto_approved = True
         plan.approved_at = datetime.now(timezone.utc)
         logger.info("Buy plan %d auto-approved (cost=%.2f)", plan_id, float(plan.total_cost or 0))
         _generate_buyer_tasks(plan, db)
     else:
-        plan.status = BuyPlanStatus.pending.value
+        plan.status = BuyPlanStatus.PENDING.value
         plan.approval_token = secrets.token_urlsafe(32)
         plan.token_expires_at = datetime.now(timezone.utc) + timedelta(days=30)
         logger.info("Buy plan %d pending approval (cost=%.2f)", plan_id, float(plan.total_cost or 0))
@@ -102,7 +102,7 @@ def approve_buy_plan(
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
-    if plan.status != BuyPlanStatus.pending.value:
+    if plan.status != BuyPlanStatus.PENDING.value:
         raise ValueError(f"Can only approve/reject pending plans (current: {plan.status})")
 
     allowed_roles = {"manager", "admin"}
@@ -113,14 +113,14 @@ def approve_buy_plan(
     if action == "approve":
         if line_overrides:
             _apply_line_overrides(plan, line_overrides, db)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         plan.approved_by_id = user.id
         plan.approved_at = now
         plan.approval_notes = notes
         logger.info("Buy plan %d approved by %s", plan_id, user.email)
         _generate_buyer_tasks(plan, db)
     elif action == "reject":
-        plan.status = BuyPlanStatus.draft.value
+        plan.status = BuyPlanStatus.DRAFT.value
         plan.approval_notes = notes
         logger.info("Buy plan %d rejected by %s: %s", plan_id, user.email, notes)
     else:
@@ -149,9 +149,9 @@ def verify_so(
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
-    if plan.so_status != SOVerificationStatus.pending.value:
+    if plan.so_status != SOVerificationStatus.PENDING.value:
         raise ValueError(f"SO already verified (status: {plan.so_status})")
-    if plan.status == BuyPlanStatus.halted.value:
+    if plan.status == BuyPlanStatus.HALTED.value:
         raise ValueError("Plan is halted")
 
     member = db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first()
@@ -163,16 +163,16 @@ def verify_so(
     plan.so_verified_at = now
 
     if action == "approve":
-        plan.so_status = SOVerificationStatus.approved.value
+        plan.so_status = SOVerificationStatus.APPROVED.value
         logger.info("SO verified for plan %d by %s", plan_id, user.email)
     elif action == "reject":
-        plan.so_status = SOVerificationStatus.rejected.value
+        plan.so_status = SOVerificationStatus.REJECTED.value
         plan.so_rejection_note = rejection_note
         logger.info("SO rejected for plan %d: %s", plan_id, rejection_note)
     elif action == "halt":
-        plan.so_status = SOVerificationStatus.rejected.value
+        plan.so_status = SOVerificationStatus.REJECTED.value
         plan.so_rejection_note = rejection_note
-        plan.status = BuyPlanStatus.halted.value
+        plan.status = BuyPlanStatus.HALTED.value
         plan.halted_by_id = user.id
         plan.halted_at = now
         logger.info("Plan %d HALTED by %s: %s", plan_id, user.email, rejection_note)
@@ -201,19 +201,19 @@ def confirm_po(
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
-    if plan.status != BuyPlanStatus.active.value:
+    if plan.status != BuyPlanStatus.ACTIVE.value:
         raise ValueError(f"Plan must be active (current: {plan.status})")
 
     line = db.get(BuyPlanLine, line_id)
     if not line or line.buy_plan_id != plan_id:
         raise ValueError(f"Line {line_id} not found in plan {plan_id}")
-    if line.status != BuyPlanLineStatus.awaiting_po.value:
+    if line.status != BuyPlanLineStatus.AWAITING_PO.value:
         raise ValueError(f"Line must be awaiting PO (current: {line.status})")
 
     line.po_number = po_number
     line.estimated_ship_date = estimated_ship_date
     line.po_confirmed_at = datetime.now(timezone.utc)
-    line.status = BuyPlanLineStatus.pending_verify.value
+    line.status = BuyPlanLineStatus.PENDING_VERIFY.value
     logger.info("PO %s confirmed for line %d (plan %d)", po_number, line_id, plan_id)
 
     db.flush()
@@ -241,7 +241,7 @@ def verify_po(
     line = db.get(BuyPlanLine, line_id)
     if not line or line.buy_plan_id != plan_id:
         raise ValueError(f"Line {line_id} not found in plan {plan_id}")
-    if line.status != BuyPlanLineStatus.pending_verify.value:
+    if line.status != BuyPlanLineStatus.PENDING_VERIFY.value:
         raise ValueError(f"Line must be pending verification (current: {line.status})")
 
     member = db.query(VerificationGroupMember).filter_by(user_id=user.id, is_active=True).first()
@@ -250,13 +250,13 @@ def verify_po(
 
     now = datetime.now(timezone.utc)
     if action == "approve":
-        line.status = BuyPlanLineStatus.verified.value
+        line.status = BuyPlanLineStatus.VERIFIED.value
         line.po_verified_by_id = user.id
         line.po_verified_at = now
         logger.info("PO verified for line %d (plan %d)", line_id, plan_id)
         check_completion(plan_id, db)
     elif action == "reject":
-        line.status = BuyPlanLineStatus.awaiting_po.value
+        line.status = BuyPlanLineStatus.AWAITING_PO.value
         line.po_rejection_note = rejection_note
         line.po_number = None
         line.estimated_ship_date = None
@@ -288,18 +288,18 @@ def flag_line_issue(
     plan = db.get(BuyPlan, plan_id)
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
-    if plan.status != BuyPlanStatus.active.value:
+    if plan.status != BuyPlanStatus.ACTIVE.value:
         raise ValueError(f"Plan must be active (current: {plan.status})")
 
     line = db.get(BuyPlanLine, line_id)
     if not line or line.buy_plan_id != plan_id:
         raise ValueError(f"Line {line_id} not found in plan {plan_id}")
 
-    flaggable = {BuyPlanLineStatus.awaiting_po.value, BuyPlanLineStatus.pending_verify.value}
+    flaggable = {BuyPlanLineStatus.AWAITING_PO.value, BuyPlanLineStatus.PENDING_VERIFY.value}
     if line.status not in flaggable:
         raise ValueError(f"Cannot flag issue on line with status: {line.status}")
 
-    line.status = BuyPlanLineStatus.issue.value
+    line.status = BuyPlanLineStatus.ISSUE.value
     line.issue_type = issue_type
     line.issue_note = note
     logger.info("Issue '%s' flagged on line %d (plan %d)", issue_type, line_id, plan_id)
@@ -320,17 +320,17 @@ def check_completion(plan_id: int, db: Session) -> BuyPlan:
     - SO is verified (so_status = approved)
     """
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
-    if not plan or plan.status != BuyPlanStatus.active.value:
+    if not plan or plan.status != BuyPlanStatus.ACTIVE.value:
         return plan
 
     if not plan.lines:
         return plan
 
-    terminal = {BuyPlanLineStatus.verified.value, BuyPlanLineStatus.cancelled.value}
+    terminal = {BuyPlanLineStatus.VERIFIED.value, BuyPlanLineStatus.CANCELLED.value}
     all_terminal = all(line.status in terminal for line in plan.lines)
 
-    if all_terminal and plan.so_status == SOVerificationStatus.approved.value:
-        plan.status = BuyPlanStatus.completed.value
+    if all_terminal and plan.so_status == SOVerificationStatus.APPROVED.value:
+        plan.status = BuyPlanStatus.COMPLETED.value
         plan.completed_at = datetime.now(timezone.utc)
         plan.case_report = generate_case_report(plan, db)
         logger.info("Buy plan %d auto-completed (all lines terminal)", plan_id)
@@ -339,7 +339,7 @@ def check_completion(plan_id: int, db: Session) -> BuyPlan:
     return plan
 
 
-RESUBMITTABLE_STATUSES = {BuyPlanStatus.halted.value, BuyPlanStatus.cancelled.value}
+RESUBMITTABLE_STATUSES = {BuyPlanStatus.HALTED.value, BuyPlanStatus.CANCELLED.value}
 
 
 def reset_buy_plan_to_draft(plan_id: int, user: User, db: Session) -> BuyPlan:
@@ -351,8 +351,8 @@ def reset_buy_plan_to_draft(plan_id: int, user: User, db: Session) -> BuyPlan:
     if plan.status not in RESUBMITTABLE_STATUSES:
         raise ValueError(f"Only halted/cancelled plans can be resubmitted (current: {plan.status})")
 
-    plan.status = BuyPlanStatus.draft.value
-    plan.so_status = SOVerificationStatus.pending.value
+    plan.status = BuyPlanStatus.DRAFT.value
+    plan.so_status = SOVerificationStatus.PENDING.value
     plan.auto_approved = False
     plan.approved_by_id = None
     plan.approved_at = None
@@ -387,11 +387,11 @@ def resubmit_buy_plan(
     plan = db.get(BuyPlan, plan_id, options=[joinedload(BuyPlan.lines)])
     if not plan:
         raise ValueError(f"Buy plan {plan_id} not found")
-    if plan.status != BuyPlanStatus.draft.value:
+    if plan.status != BuyPlanStatus.DRAFT.value:
         raise ValueError(f"Can only resubmit draft plans (current: {plan.status})")
 
     # Reset SO verification
-    plan.so_status = SOVerificationStatus.pending.value
+    plan.so_status = SOVerificationStatus.PENDING.value
     plan.so_verified_by_id = None
     plan.so_verified_at = None
     plan.so_rejection_note = None
@@ -411,11 +411,11 @@ def resubmit_buy_plan(
 
     # Auto-approve decision (same logic as initial submit)
     if _should_auto_approve(plan):
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         plan.auto_approved = True
         plan.approved_at = datetime.now(timezone.utc)
     else:
-        plan.status = BuyPlanStatus.pending.value
+        plan.status = BuyPlanStatus.PENDING.value
         plan.approval_token = secrets.token_urlsafe(32)
         plan.token_expires_at = datetime.now(timezone.utc) + timedelta(days=30)
 
@@ -510,7 +510,7 @@ def _apply_line_edits(plan: BuyPlan, edits: list[dict], db: Session):
                 ai_score=ai_score,
                 buyer_id=buyer.id if buyer else None,
                 assignment_reason=reason,
-                status=BuyPlanLineStatus.awaiting_po.value,
+                status=BuyPlanLineStatus.AWAITING_PO.value,
                 sales_note=edit.get("sales_note"),
             )
             plan.lines.append(new_line)
@@ -597,9 +597,9 @@ def detect_favoritism(salesperson_id: int, db: Session) -> list[dict]:
             BuyPlan.submitted_by_id == salesperson_id,
             BuyPlan.status.in_(
                 [
-                    BuyPlanStatus.active.value,
-                    BuyPlanStatus.completed.value,
-                    BuyPlanStatus.pending.value,
+                    BuyPlanStatus.ACTIVE.value,
+                    BuyPlanStatus.COMPLETED.value,
+                    BuyPlanStatus.PENDING.value,
                 ]
             ),
         )
@@ -845,8 +845,8 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
             )
 
             found = len(messages) > 0
-            if found and line.status == BuyPlanLineStatus.pending_verify.value:
-                line.status = BuyPlanLineStatus.verified.value
+            if found and line.status == BuyPlanLineStatus.PENDING_VERIFY.value:
+                line.status = BuyPlanLineStatus.VERIFIED.value
                 line.po_verified_at = datetime.now(timezone.utc)
 
             results.append(
@@ -894,7 +894,7 @@ async def verify_po_sent_v3(plan: "BuyPlan", db: "Session") -> dict:
     for line in plan.lines:
         if not line.po_number:
             continue
-        if line.status != BuyPlanLineStatus.pending_verify.value:
+        if line.status != BuyPlanLineStatus.PENDING_VERIFY.value:
             continue
 
         # Skip lines without a buyer
@@ -945,7 +945,7 @@ async def verify_po_sent_v3(plan: "BuyPlan", db: "Session") -> dict:
                     addr = recipients[0].get("emailAddress", {})
                     recipient = addr.get("address")
 
-                line.status = BuyPlanLineStatus.verified.value
+                line.status = BuyPlanLineStatus.VERIFIED.value
                 line.po_verified_at = datetime.now(timezone.utc)
                 logger.info("PO %s verified via Graph — line %d (plan %d)", line.po_number, line.id, plan.id)
 

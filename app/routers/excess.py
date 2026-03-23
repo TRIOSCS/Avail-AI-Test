@@ -12,7 +12,6 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
-from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
 
 from ..database import get_db
@@ -56,11 +55,12 @@ from ..services.excess_service import (
     send_bid_solicitation,
     update_excess_list,
 )
+from ..template_env import templates
 from ..utils.claude_client import claude_text
+from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
 from ..utils.normalization import normalize_mpn_key
 
 router = APIRouter(tags=["excess"])
-templates = Jinja2Templates(directory="app/templates")
 
 MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB
 ALLOWED_EXTENSIONS = {".csv", ".tsv", ".xlsx", ".xls"}
@@ -720,12 +720,17 @@ async def api_polish_email(
     user: User = Depends(require_user),
 ):
     """Polish a draft email message using AI."""
-    polished = await claude_text(
-        prompt=f"Polish this business email for grammar and professional tone. Keep it concise. Don't change the meaning. Return ONLY the polished text, nothing else.\n\n{payload.text}",
-        system="You are a professional email editor. Return only the polished email text.",
-        max_tokens=1024,
-    )
-    return PolishEmailResponse(text=polished.strip())
+    try:
+        polished = await claude_text(
+            prompt=f"Polish this business email for grammar and professional tone. Keep it concise. Don't change the meaning. Return ONLY the polished text, nothing else.\n\n{payload.text}",
+            system="You are a professional email editor. Return only the polished email text.",
+            max_tokens=1024,
+        )
+    except ClaudeUnavailableError:
+        return PolishEmailResponse(text=payload.text)
+    except ClaudeError:
+        return PolishEmailResponse(text=payload.text)
+    return PolishEmailResponse(text=polished.strip() if polished else payload.text)
 
 
 # ── Phase 4: Proactive Matching on Archive ────────────────────────────

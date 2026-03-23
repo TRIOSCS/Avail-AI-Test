@@ -204,10 +204,10 @@ async def list_customer_contacts(
         db.query(SiteContact)
         .join(CustomerSite, SiteContact.customer_site_id == CustomerSite.id)
         .join(Company, CustomerSite.company_id == Company.id)
-        .filter(Company.is_active == True)  # noqa: E712
+        .filter(Company.is_active.is_(True))
     )
     if not include_archived:
-        q = q.filter(SiteContact.is_active == True)  # noqa: E712
+        q = q.filter(SiteContact.is_active.is_(True))
     contacts = (
         q.options(
             joinedload(SiteContact.customer_site).joinedload(CustomerSite.company),
@@ -254,7 +254,7 @@ async def list_site_contacts(
         SiteContact.customer_site_id == site_id,
     )
     if not include_archived:
-        q = q.filter(SiteContact.is_active == True)  # noqa: E712
+        q = q.filter(SiteContact.is_active.is_(True))
     contacts = q.order_by(SiteContact.is_primary.desc(), SiteContact.full_name).limit(500).all()
     return [
         {
@@ -297,7 +297,7 @@ async def create_site_contact(
     if payload.is_primary:
         db.query(SiteContact).filter(
             SiteContact.customer_site_id == site_id,
-            SiteContact.is_primary == True,  # noqa: E712
+            SiteContact.is_primary.is_(True),
         ).update({"is_primary": False})
     data = payload.model_dump()
     if data.get("phone"):
@@ -325,7 +325,7 @@ async def update_site_contact(
     if updates.get("is_primary"):
         db.query(SiteContact).filter(
             SiteContact.customer_site_id == site_id,
-            SiteContact.is_primary == True,  # noqa: E712
+            SiteContact.is_primary.is_(True),
             SiteContact.id != contact_id,
         ).update({"is_primary": False})
     for field, value in updates.items():

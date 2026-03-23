@@ -170,9 +170,7 @@ def _find_matches(
     # 2. First active site per company
     sites: dict[int, CustomerSite] = {}
     for s in (
-        db.query(CustomerSite)
-        .filter(CustomerSite.company_id.in_(company_ids), CustomerSite.is_active == True)  # noqa: E712
-        .all()
+        db.query(CustomerSite).filter(CustomerSite.company_id.in_(company_ids), CustomerSite.is_active.is_(True)).all()
     ):
         sites.setdefault(s.company_id, s)
 

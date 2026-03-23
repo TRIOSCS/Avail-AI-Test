@@ -506,6 +506,7 @@ def build_context(db: Session, *, requisition_id: int) -> str:
 async def generate_insights(db: Session, requisition_id: int) -> list[KnowledgeEntry]:
     """Generate AI insights for a requisition using the context engine."""
     from app.utils.claude_client import claude_structured
+    from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
     context = build_context(db, requisition_id=requisition_id)
     if not context:
@@ -525,14 +526,21 @@ async def generate_insights(db: Session, requisition_id: int) -> list[KnowledgeE
         db.delete(old)
     db.flush()
 
-    result = await claude_structured(
-        prompt="Analyze this knowledge base and generate insights:\n\n{}".format(context),
-        schema=INSIGHT_SCHEMA,
-        system=INSIGHT_SYSTEM_PROMPT,
-        model_tier="smart",
-        max_tokens=2048,
-        thinking_budget=5000,
-    )
+    try:
+        result = await claude_structured(
+            prompt="Analyze this knowledge base and generate insights:\n\n{}".format(context),
+            schema=INSIGHT_SCHEMA,
+            system=INSIGHT_SYSTEM_PROMPT,
+            model_tier="smart",
+            max_tokens=2048,
+            thinking_budget=5000,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping insight generation")
+        return []
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for insight generation: %s", e)
+        return []
 
     if not result or "insights" not in result:
         logger.warning("AI insight generation returned no results for req {}", requisition_id)
@@ -918,6 +926,7 @@ def build_company_context(db: Session, *, company_id: int) -> str:
 async def generate_mpn_insights(db: Session, mpn: str) -> list[KnowledgeEntry]:
     """Generate AI insights for an MPN using the context engine."""
     from app.utils.claude_client import claude_structured
+    from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
     context = build_mpn_context(db, mpn=mpn)
     if not context:
@@ -938,14 +947,21 @@ async def generate_mpn_insights(db: Session, mpn: str) -> list[KnowledgeEntry]:
         db.delete(old)
     db.flush()
 
-    result = await claude_structured(
-        prompt="Analyze this knowledge base for MPN {} and generate insights:\n\n{}".format(mpn, context),
-        schema=INSIGHT_SCHEMA,
-        system=MPN_INSIGHT_PROMPT,
-        model_tier="smart",
-        max_tokens=2048,
-        thinking_budget=5000,
-    )
+    try:
+        result = await claude_structured(
+            prompt="Analyze this knowledge base for MPN {} and generate insights:\n\n{}".format(mpn, context),
+            schema=INSIGHT_SCHEMA,
+            system=MPN_INSIGHT_PROMPT,
+            model_tier="smart",
+            max_tokens=2048,
+            thinking_budget=5000,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping MPN insight generation")
+        return []
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for MPN insight generation: %s", e)
+        return []
 
     if not result or "insights" not in result:
         logger.warning("AI insight generation returned no results for MPN {}", mpn)
@@ -973,6 +989,7 @@ async def generate_mpn_insights(db: Session, mpn: str) -> list[KnowledgeEntry]:
 async def generate_vendor_insights(db: Session, vendor_card_id: int) -> list[KnowledgeEntry]:
     """Generate AI insights for a vendor using the context engine."""
     from app.utils.claude_client import claude_structured
+    from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
     context = build_vendor_context(db, vendor_card_id=vendor_card_id)
     if not context:
@@ -992,14 +1009,21 @@ async def generate_vendor_insights(db: Session, vendor_card_id: int) -> list[Kno
         db.delete(old)
     db.flush()
 
-    result = await claude_structured(
-        prompt="Analyze this knowledge base for this vendor and generate insights:\n\n{}".format(context),
-        schema=INSIGHT_SCHEMA,
-        system=VENDOR_INSIGHT_PROMPT,
-        model_tier="smart",
-        max_tokens=2048,
-        thinking_budget=5000,
-    )
+    try:
+        result = await claude_structured(
+            prompt="Analyze this knowledge base for this vendor and generate insights:\n\n{}".format(context),
+            schema=INSIGHT_SCHEMA,
+            system=VENDOR_INSIGHT_PROMPT,
+            model_tier="smart",
+            max_tokens=2048,
+            thinking_budget=5000,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping vendor insight generation")
+        return []
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for vendor insight generation: %s", e)
+        return []
 
     if not result or "insights" not in result:
         logger.warning("AI insight generation returned no results for vendor {}", vendor_card_id)
@@ -1027,6 +1051,7 @@ async def generate_vendor_insights(db: Session, vendor_card_id: int) -> list[Kno
 async def generate_pipeline_insights(db: Session) -> list[KnowledgeEntry]:
     """Generate AI insights for the overall pipeline health."""
     from app.utils.claude_client import claude_structured
+    from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
     context = build_pipeline_context(db)
     if not context:
@@ -1046,14 +1071,21 @@ async def generate_pipeline_insights(db: Session) -> list[KnowledgeEntry]:
         db.delete(old)
     db.flush()
 
-    result = await claude_structured(
-        prompt="Analyze this pipeline summary and generate insights:\n\n{}".format(context),
-        schema=INSIGHT_SCHEMA,
-        system=PIPELINE_INSIGHT_PROMPT,
-        model_tier="smart",
-        max_tokens=2048,
-        thinking_budget=5000,
-    )
+    try:
+        result = await claude_structured(
+            prompt="Analyze this pipeline summary and generate insights:\n\n{}".format(context),
+            schema=INSIGHT_SCHEMA,
+            system=PIPELINE_INSIGHT_PROMPT,
+            model_tier="smart",
+            max_tokens=2048,
+            thinking_budget=5000,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping pipeline insight generation")
+        return []
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for pipeline insight generation: %s", e)
+        return []
 
     if not result or "insights" not in result:
         logger.warning("AI insight generation returned no results for pipeline")
@@ -1081,6 +1113,7 @@ async def generate_pipeline_insights(db: Session) -> list[KnowledgeEntry]:
 async def generate_company_insights(db: Session, company_id: int) -> list[KnowledgeEntry]:
     """Generate AI insights for a company using the context engine."""
     from app.utils.claude_client import claude_structured
+    from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
     context = build_company_context(db, company_id=company_id)
     if not context:
@@ -1100,14 +1133,21 @@ async def generate_company_insights(db: Session, company_id: int) -> list[Knowle
         db.delete(old)
     db.flush()
 
-    result = await claude_structured(
-        prompt="Analyze this knowledge base for this company and generate insights:\n\n{}".format(context),
-        schema=INSIGHT_SCHEMA,
-        system=COMPANY_INSIGHT_PROMPT,
-        model_tier="smart",
-        max_tokens=2048,
-        thinking_budget=5000,
-    )
+    try:
+        result = await claude_structured(
+            prompt="Analyze this knowledge base for this company and generate insights:\n\n{}".format(context),
+            schema=INSIGHT_SCHEMA,
+            system=COMPANY_INSIGHT_PROMPT,
+            model_tier="smart",
+            max_tokens=2048,
+            thinking_budget=5000,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping company insight generation")
+        return []
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for company insight generation: %s", e)
+        return []
 
     if not result or "insights" not in result:
         logger.warning("AI insight generation returned no results for company {}", company_id)

@@ -384,8 +384,11 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
                     db.add(sync)
                 db.flush()
         except Exception as e:
+            err_str = str(e).lower()
+            if "401" in err_str or "403" in err_str or "unauthorized" in err_str:
+                logger.error(f"Inbox auth failure (not falling back): {e}")
+                raise
             logger.warning(f"Delta query failed, falling back to full scan: {e}")
-            # Clear stale delta token so next poll starts fresh
             if sync and sync.delta_token:
                 sync.delta_token = None
                 db.flush()
@@ -406,7 +409,7 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
             messages = data.get("value", []) if data else []
         except Exception as e:
             logger.error(f"Inbox poll failed: {e}")
-            return []
+            raise  # Let caller handle — router returns proper error, job skips watermark
 
     # ── H2: Dedup via processed_messages table (belt-and-suspenders) ──
     incoming_ids = [m.get("id", "") for m in messages if m.get("id")]

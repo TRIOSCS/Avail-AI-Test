@@ -63,16 +63,24 @@ async def classify_email_ai(
     Returns classification dict or None on failure.
     """
     from app.utils.claude_client import claude_json
+    from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
     prompt = f"From: {sender_email}\nSubject: {subject}\n\nBody:\n{body[:3000]}"
 
-    result = await claude_json(
-        prompt,
-        system=CLASSIFICATION_SYSTEM,
-        model_tier="fast",
-        max_tokens=512,
-        timeout=20,
-    )
+    try:
+        result = await claude_json(
+            prompt,
+            system=CLASSIFICATION_SYSTEM,
+            model_tier="fast",
+            max_tokens=512,
+            timeout=20,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping email classification")
+        return None
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for email classification: %s", e)
+        return None
 
     if not result or not isinstance(result, dict):
         return None
@@ -340,12 +348,19 @@ async def detect_specialties_ai(texts: list[str]) -> list[dict | None]:
         List of specialty dicts (one per input), None on individual failures.
     """
     from app.utils.claude_client import claude_json
+    from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
     sem = asyncio.Semaphore(10)
 
     async def _limited(text: str):
         async with sem:
-            return await claude_json(text, system=SPECIALTY_SYSTEM, model_tier="fast", max_tokens=256, timeout=30)
+            try:
+                return await claude_json(text, system=SPECIALTY_SYSTEM, model_tier="fast", max_tokens=256, timeout=30)
+            except ClaudeUnavailableError:
+                return None
+            except ClaudeError as e:
+                logger.warning("Claude AI failed for specialty detection: %s", e)
+                return None
 
     results = list(await asyncio.gather(*[_limited(t) for t in texts]))
 
@@ -401,6 +416,8 @@ async def summarize_thread(token: str, conversation_id: str, db: Session, user_i
     """
     from app.models import EmailIntelligence
     from app.utils.claude_client import claude_json
+    from app.utils.claude_errors import ClaudeError as _ClaudeError
+    from app.utils.claude_errors import ClaudeUnavailableError as _ClaudeUnavailable
     from app.utils.graph_client import GraphClient
 
     # Check cache first
@@ -449,13 +466,20 @@ async def summarize_thread(token: str, conversation_id: str, db: Session, user_i
     # Truncate for token limits
     thread_text = thread_text[:8000]
 
-    result = await claude_json(
-        thread_text,
-        system=THREAD_SUMMARY_SYSTEM,
-        model_tier="smart",
-        max_tokens=1024,
-        timeout=45,
-    )
+    try:
+        result = await claude_json(
+            thread_text,
+            system=THREAD_SUMMARY_SYSTEM,
+            model_tier="smart",
+            max_tokens=1024,
+            timeout=45,
+        )
+    except _ClaudeUnavailable:
+        logger.info("Claude not configured — skipping thread summary")
+        return None
+    except _ClaudeError as e:
+        logger.warning("Claude AI failed for thread summary: %s", e)
+        return None
 
     if not result or not isinstance(result, dict):
         return None

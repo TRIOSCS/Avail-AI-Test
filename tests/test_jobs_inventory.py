@@ -60,7 +60,7 @@ def test_po_verification_verifies_po_entered_plans(
     line = BuyPlanLine(
         buy_plan_id=plan.id,
         quantity=10,
-        status=BuyPlanLineStatus.pending_verify.value,
+        status=BuyPlanLineStatus.PENDING_VERIFY.value,
     )
     scheduler_db.add(line)
     scheduler_db.commit()
@@ -106,7 +106,7 @@ def test_po_verification_handles_per_plan_error(
     line = BuyPlanLine(
         buy_plan_id=plan.id,
         quantity=10,
-        status=BuyPlanLineStatus.pending_verify.value,
+        status=BuyPlanLineStatus.PENDING_VERIFY.value,
     )
     scheduler_db.add(line)
     scheduler_db.commit()

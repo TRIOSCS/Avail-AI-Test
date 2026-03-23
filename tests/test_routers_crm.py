@@ -621,7 +621,7 @@ class TestBuyPlans:
             unit_cost=0.50,
             unit_sell=0.75,
             buyer_id=test_user.id,
-            status=BuyPlanLineStatus.awaiting_po.value,
+            status=BuyPlanLineStatus.AWAITING_PO.value,
         )
         db_session.add(line)
         db_session.commit()
@@ -2124,7 +2124,7 @@ class TestBuyPlansAdditional:
             unit_cost=0.50,
             unit_sell=1.00,
             buyer_id=test_user.id,
-            status=BuyPlanLineStatus.awaiting_po.value,
+            status=BuyPlanLineStatus.AWAITING_PO.value,
         )
         db_session.add(line)
         db_session.commit()

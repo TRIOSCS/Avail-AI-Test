@@ -84,7 +84,7 @@ def build_buy_plan(quote_id: int, db: Session) -> BuyPlan:
     plan = BuyPlan(
         quote_id=quote_id,
         requisition_id=quote.requisition_id,
-        status=BuyPlanStatus.draft.value,
+        status=BuyPlanStatus.DRAFT.value,
     )
 
     total_cost = 0.0
@@ -204,7 +204,7 @@ def _create_line(
         ai_score=ai_score,
         buyer_id=buyer.id if buyer else None,
         assignment_reason=assignment_reason,
-        status=BuyPlanLineStatus.awaiting_po.value,
+        status=BuyPlanLineStatus.AWAITING_PO.value,
     )
 
 

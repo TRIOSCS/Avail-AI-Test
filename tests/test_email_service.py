@@ -1540,19 +1540,18 @@ class TestPollInbox:
         assert sync.delta_token is None
 
     @pytest.mark.asyncio
-    async def test_fallback_fetch_failure(self, db_session, test_user, test_requisition):
-        """When fallback fetch also fails, return empty."""
+    async def test_fallback_fetch_failure_raises(self, db_session, test_user, test_requisition):
+        """When fallback fetch fails, raise so caller can handle the error."""
         mock_gc = AsyncMock()
         mock_gc.get_json.side_effect = Exception("Network error")
 
         with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-            results = await poll_inbox(
-                token="fake-token",
-                db=db_session,
-                requisition_id=test_requisition.id,
-            )
-
-        assert results == []
+            with pytest.raises(Exception, match="Network error"):
+                await poll_inbox(
+                    token="fake-token",
+                    db=db_session,
+                    requisition_id=test_requisition.id,
+                )
 
     @pytest.mark.asyncio
     async def test_dedup_already_processed(self, db_session, test_user, test_requisition):

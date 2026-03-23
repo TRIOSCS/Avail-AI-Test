@@ -13,8 +13,11 @@ Design rules:
   - AVAIL still works if all AI fails
 """
 
+from loguru import logger
+
 from app.cache.intel_cache import get_cached, set_cached
 from app.utils.claude_client import claude_json
+from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 from app.utils.llm_router import routed_text
 
 # Model for intelligence features (needs quality)
@@ -83,16 +86,23 @@ async def enrich_contacts_websearch(
         f"Return up to {limit} contacts."
     )
 
-    result = await claude_json(
-        prompt,
-        system="You find B2B contacts for electronic component sales outreach. "
-        'Return JSON: {"contacts": [{"full_name", "title", "email", "phone", "linkedin_url"}]}. '
-        "Only include contacts with real evidence. Null for unknown fields.",
-        model_tier=SMART,
-        max_tokens=1500,
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
-        timeout=60,
-    )
+    try:
+        result = await claude_json(
+            prompt,
+            system="You find B2B contacts for electronic component sales outreach. "
+            'Return JSON: {"contacts": [{"full_name", "title", "email", "phone", "linkedin_url"}]}. '
+            "Only include contacts with real evidence. Null for unknown fields.",
+            model_tier=SMART,
+            max_tokens=1500,
+            tools=[{"type": "web_search_20250305", "name": "web_search"}],
+            timeout=60,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping contact enrichment")
+        return []
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for contact enrichment: %s", e)
+        return []
 
     contacts = []
     raw_contacts = []
@@ -191,16 +201,23 @@ async def company_intel(company_name: str, domain: str | None = None) -> dict | 
         f"Only include what you actually find. Leave unknown fields empty."
     )
 
-    intel = await claude_json(
-        prompt,
-        system="You provide concise company intelligence for electronic component salespeople. "
-        "Return JSON with: summary, revenue, employees, products, components_they_buy, "
-        "recent_news, opportunity_signals, sources. Null for unknown fields.",
-        model_tier=SMART,
-        max_tokens=1500,
-        tools=[{"type": "web_search_20250305", "name": "web_search"}],
-        timeout=60,
-    )
+    try:
+        intel = await claude_json(
+            prompt,
+            system="You provide concise company intelligence for electronic component salespeople. "
+            "Return JSON with: summary, revenue, employees, products, components_they_buy, "
+            "recent_news, opportunity_signals, sources. Null for unknown fields.",
+            model_tier=SMART,
+            max_tokens=1500,
+            tools=[{"type": "web_search_20250305", "name": "web_search"}],
+            timeout=60,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping company intel")
+        return None
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for company intel: %s", e)
+        return None
 
     if intel and isinstance(intel, dict):
         set_cached(cache_key, intel, ttl_days=7)

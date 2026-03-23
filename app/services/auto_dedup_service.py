@@ -217,6 +217,7 @@ def _ai_confirm_company_merge(name_a: str, name_b: str, domain_a: str | None, do
 async def _ask_claude_merge(prompt: str) -> bool:
     """Generic Claude confirmation for merge — returns True if same entity."""
     from ..utils.claude_client import claude_structured
+    from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
     schema = {
         "type": "object",
@@ -227,13 +228,20 @@ async def _ask_claude_merge(prompt: str) -> bool:
         "required": ["same_entity", "confidence"],
     }
 
-    result = await claude_structured(
-        prompt=prompt,
-        schema=schema,
-        system="You determine if two business names refer to the same entity. Be conservative — only confirm if very confident.",
-        model_tier="fast",
-        max_tokens=256,
-    )
+    try:
+        result = await claude_structured(
+            prompt=prompt,
+            schema=schema,
+            system="You determine if two business names refer to the same entity. Be conservative — only confirm if very confident.",
+            model_tier="fast",
+            max_tokens=256,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping dedup check")
+        return False
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for dedup check: %s", e)
+        return False
 
     if not result:
         return False

@@ -25,6 +25,7 @@ ALLOWED_TRANSITIONS: dict[str, set[str]] = {
     "won": {"active", "archived"},
     "lost": {"active", "archived", "reopened"},
     "archived": {"active"},
+    "cancelled": {"active", "archived"},
 }
 
 

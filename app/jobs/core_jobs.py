@@ -140,8 +140,8 @@ async def _job_token_refresh():
                 if r:
                     try:
                         r.delete(lock_key)
-                    except Exception:
-                        pass
+                    except Exception as e:
+                        logger.warning("Failed to release token refresh lock: %s", e)
                 task_db.close()
 
     if users_to_refresh:

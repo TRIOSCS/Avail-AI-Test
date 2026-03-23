@@ -361,18 +361,7 @@ def test_batch_dismiss(db_session):
 
 def test_timeago_filter():
     """Timeago filter produces compact relative timestamps."""
-    # Import the filter function directly
-    import importlib
-    import sys
-
-    # The filter is registered on the Jinja env, but we can test the function
-    # by importing it from the module
-    if "app.routers.htmx_views" in sys.modules:
-        mod = sys.modules["app.routers.htmx_views"]
-    else:
-        mod = importlib.import_module("app.routers.htmx_views")
-
-    _timeago = mod._timeago_filter
+    from app.template_env import _timeago_filter as _timeago
 
     # None input
     assert _timeago(None) == "--"

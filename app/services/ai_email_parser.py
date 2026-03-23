@@ -22,6 +22,7 @@ import re
 from loguru import logger
 
 from app.utils.claude_client import claude_json
+from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 from app.utils.normalization import (
     detect_currency,
     normalize_condition,
@@ -116,13 +117,20 @@ async def parse_email(
     prompt += f"Subject: {email_subject}\n\n" if email_subject else ""
     prompt += f"Email body:\n{body_truncated}"
 
-    result = await claude_json(
-        prompt,
-        system=SYSTEM_PROMPT,
-        model_tier="smart",
-        max_tokens=2048,
-        timeout=45,
-    )
+    try:
+        result = await claude_json(
+            prompt,
+            system=SYSTEM_PROMPT,
+            model_tier="smart",
+            max_tokens=2048,
+            timeout=45,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping email parse")
+        return None
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for email parse: %s", e)
+        return None
 
     if not result or not isinstance(result, dict):
         logger.warning("Email parser returned no result or invalid format")

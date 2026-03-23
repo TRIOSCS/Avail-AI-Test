@@ -106,7 +106,7 @@ def _make_plan_with_lines(
     db.add(plan)
     db.flush()
 
-    line_statuses = line_statuses or [BuyPlanLineStatus.awaiting_po.value]
+    line_statuses = line_statuses or [BuyPlanLineStatus.AWAITING_PO.value]
     for ls in line_statuses:
         line = BuyPlanLine(
             buy_plan_id=plan.id,
@@ -130,9 +130,9 @@ class TestCheckCompletionIdempotency:
         the case report."""
         plan, _ = _make_plan_with_lines(
             db_session,
-            status=BuyPlanStatus.completed.value,
-            so_status=SOVerificationStatus.approved.value,
-            line_statuses=[BuyPlanLineStatus.verified.value],
+            status=BuyPlanStatus.COMPLETED.value,
+            so_status=SOVerificationStatus.APPROVED.value,
+            line_statuses=[BuyPlanLineStatus.VERIFIED.value],
         )
         plan.case_report = "EXISTING REPORT"
         plan.completed_at = datetime.now(timezone.utc)
@@ -140,21 +140,21 @@ class TestCheckCompletionIdempotency:
 
         result = check_completion(plan.id, db_session)
 
-        assert result.status == BuyPlanStatus.completed.value
+        assert result.status == BuyPlanStatus.COMPLETED.value
         assert result.case_report == "EXISTING REPORT"
 
     def test_completes_when_all_lines_terminal(self, db_session):
         """Plan should auto-complete when all lines verified and SO approved."""
         plan, _ = _make_plan_with_lines(
             db_session,
-            status=BuyPlanStatus.active.value,
-            so_status=SOVerificationStatus.approved.value,
-            line_statuses=[BuyPlanLineStatus.verified.value, BuyPlanLineStatus.cancelled.value],
+            status=BuyPlanStatus.ACTIVE.value,
+            so_status=SOVerificationStatus.APPROVED.value,
+            line_statuses=[BuyPlanLineStatus.VERIFIED.value, BuyPlanLineStatus.CANCELLED.value],
         )
 
         result = check_completion(plan.id, db_session)
 
-        assert result.status == BuyPlanStatus.completed.value
+        assert result.status == BuyPlanStatus.COMPLETED.value
         assert result.completed_at is not None
         assert result.case_report is not None
 
@@ -162,28 +162,28 @@ class TestCheckCompletionIdempotency:
         """Plan should NOT complete if any line is still in progress."""
         plan, _ = _make_plan_with_lines(
             db_session,
-            status=BuyPlanStatus.active.value,
-            so_status=SOVerificationStatus.approved.value,
-            line_statuses=[BuyPlanLineStatus.verified.value, BuyPlanLineStatus.awaiting_po.value],
+            status=BuyPlanStatus.ACTIVE.value,
+            so_status=SOVerificationStatus.APPROVED.value,
+            line_statuses=[BuyPlanLineStatus.VERIFIED.value, BuyPlanLineStatus.AWAITING_PO.value],
         )
 
         result = check_completion(plan.id, db_session)
 
-        assert result.status == BuyPlanStatus.active.value
+        assert result.status == BuyPlanStatus.ACTIVE.value
         assert result.completed_at is None
 
     def test_does_not_complete_without_so_approval(self, db_session):
         """Plan should NOT complete if SO is not yet approved."""
         plan, _ = _make_plan_with_lines(
             db_session,
-            status=BuyPlanStatus.active.value,
-            so_status=SOVerificationStatus.pending.value,
-            line_statuses=[BuyPlanLineStatus.verified.value],
+            status=BuyPlanStatus.ACTIVE.value,
+            so_status=SOVerificationStatus.PENDING.value,
+            line_statuses=[BuyPlanLineStatus.VERIFIED.value],
         )
 
         result = check_completion(plan.id, db_session)
 
-        assert result.status == BuyPlanStatus.active.value
+        assert result.status == BuyPlanStatus.ACTIVE.value
 
 
 # ── approve_buy_plan role check ────────────────────────────────────────
@@ -194,7 +194,7 @@ class TestApproveBuyPlanRoleCheck:
         """Buyer role should be rejected from approving buy plans."""
         plan, user = _make_plan_with_lines(
             db_session,
-            status=BuyPlanStatus.pending.value,
+            status=BuyPlanStatus.PENDING.value,
         )
         # user has role="sales", should fail
         with pytest.raises(PermissionError, match="Only managers/admins"):
@@ -204,41 +204,41 @@ class TestApproveBuyPlanRoleCheck:
         """Manager should be allowed to approve buy plans."""
         plan, user = _make_plan_with_lines(
             db_session,
-            status=BuyPlanStatus.pending.value,
+            status=BuyPlanStatus.PENDING.value,
         )
         user.role = "manager"
         db_session.flush()
 
         result = approve_buy_plan(plan.id, "approve", user, db_session)
 
-        assert result.status == BuyPlanStatus.active.value
+        assert result.status == BuyPlanStatus.ACTIVE.value
         assert result.approved_by_id == user.id
 
     def test_admin_can_approve(self, db_session):
         """Admin should be allowed to approve buy plans."""
         plan, user = _make_plan_with_lines(
             db_session,
-            status=BuyPlanStatus.pending.value,
+            status=BuyPlanStatus.PENDING.value,
         )
         user.role = "admin"
         db_session.flush()
 
         result = approve_buy_plan(plan.id, "approve", user, db_session)
 
-        assert result.status == BuyPlanStatus.active.value
+        assert result.status == BuyPlanStatus.ACTIVE.value
 
     def test_manager_can_reject(self, db_session):
         """Manager should be allowed to reject buy plans back to draft."""
         plan, user = _make_plan_with_lines(
             db_session,
-            status=BuyPlanStatus.pending.value,
+            status=BuyPlanStatus.PENDING.value,
         )
         user.role = "manager"
         db_session.flush()
 
         result = approve_buy_plan(plan.id, "reject", user, db_session, notes="Needs revision")
 
-        assert result.status == BuyPlanStatus.draft.value
+        assert result.status == BuyPlanStatus.DRAFT.value
         assert result.approval_notes == "Needs revision"
 
 
@@ -290,7 +290,7 @@ class TestShouldAutoApprove:
         auto_after_submit = result1.auto_approved
 
         # Reset to draft for resubmit
-        plan.status = BuyPlanStatus.draft.value
+        plan.status = BuyPlanStatus.DRAFT.value
         plan.auto_approved = False
         plan.approved_at = None
         db_session.flush()

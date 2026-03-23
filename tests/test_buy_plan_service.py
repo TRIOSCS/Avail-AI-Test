@@ -319,7 +319,7 @@ class TestBuyerAssignment:
                     buy_plan_id=plan.id,
                     quantity=100,
                     buyer_id=buyer1.id,
-                    status=BuyPlanLineStatus.awaiting_po.value,
+                    status=BuyPlanLineStatus.AWAITING_PO.value,
                 )
             )
         db_session.flush()
@@ -623,7 +623,7 @@ def _make_draft_plan(db, test_quote, test_user, *, total_cost=500.0, margin_pct=
     plan = BuyPlan(
         quote_id=test_quote.id,
         requisition_id=test_quote.requisition_id,
-        status=BuyPlanStatus.draft.value,
+        status=BuyPlanStatus.DRAFT.value,
         total_cost=total_cost,
         total_revenue=750.0,
         total_margin_pct=margin_pct,
@@ -640,7 +640,7 @@ def _make_draft_plan(db, test_quote, test_user, *, total_cost=500.0, margin_pct=
         margin_pct=margin_pct,
         buyer_id=test_user.id,
         assignment_reason="vendor_ownership",
-        status=BuyPlanLineStatus.awaiting_po.value,
+        status=BuyPlanLineStatus.AWAITING_PO.value,
     )
     db.add(line)
     db.flush()
@@ -670,7 +670,7 @@ class TestSubmitBuyPlan:
             test_user,
             db_session,
         )
-        assert result.status == BuyPlanStatus.active.value
+        assert result.status == BuyPlanStatus.ACTIVE.value
         assert result.auto_approved is True
         assert result.sales_order_number == "SO-2026-001"
         assert result.submitted_by_id == test_user.id
@@ -685,7 +685,7 @@ class TestSubmitBuyPlan:
             test_user,
             db_session,
         )
-        assert result.status == BuyPlanStatus.pending.value
+        assert result.status == BuyPlanStatus.PENDING.value
         assert result.auto_approved is False
 
     def test_pending_critical_flags(self, db_session: Session, test_quote: Quote, test_user: User):
@@ -700,12 +700,12 @@ class TestSubmitBuyPlan:
             test_user,
             db_session,
         )
-        assert result.status == BuyPlanStatus.pending.value
+        assert result.status == BuyPlanStatus.PENDING.value
 
     def test_wrong_status_rejected(self, db_session: Session, test_quote: Quote, test_user: User):
         """Cannot submit a plan that's not in draft."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         db_session.flush()
 
         with pytest.raises(ValueError, match="draft"):
@@ -767,7 +767,7 @@ class TestSubmitBuyPlan:
         plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
-            status=BuyPlanStatus.draft.value,
+            status=BuyPlanStatus.DRAFT.value,
             total_cost=500.0,
         )
         db_session.add(plan)
@@ -780,7 +780,7 @@ class TestSubmitBuyPlan:
                 quantity=1000,
                 unit_cost=0.50,
                 unit_sell=0.75,
-                status=BuyPlanLineStatus.awaiting_po.value,
+                status=BuyPlanLineStatus.AWAITING_PO.value,
             )
         )
         db_session.flush()
@@ -807,7 +807,7 @@ class TestApproveBuyPlan:
     ):
         """Manager approve → active."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.pending.value
+        plan.status = BuyPlanStatus.PENDING.value
         db_session.flush()
 
         result = approve_buy_plan(
@@ -817,7 +817,7 @@ class TestApproveBuyPlan:
             db_session,
             notes="Looks good",
         )
-        assert result.status == BuyPlanStatus.active.value
+        assert result.status == BuyPlanStatus.ACTIVE.value
         assert result.approved_by_id == manager_user.id
         assert result.approved_at is not None
         assert result.approval_notes == "Looks good"
@@ -831,7 +831,7 @@ class TestApproveBuyPlan:
     ):
         """Manager reject → back to draft."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.pending.value
+        plan.status = BuyPlanStatus.PENDING.value
         db_session.flush()
 
         result = approve_buy_plan(
@@ -841,7 +841,7 @@ class TestApproveBuyPlan:
             db_session,
             notes="Margin too low",
         )
-        assert result.status == BuyPlanStatus.draft.value
+        assert result.status == BuyPlanStatus.DRAFT.value
         assert result.approval_notes == "Margin too low"
 
     def test_with_line_override(
@@ -853,7 +853,7 @@ class TestApproveBuyPlan:
     ):
         """Manager can swap a vendor on a specific line."""
         plan, line, _, req = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.pending.value
+        plan.status = BuyPlanStatus.PENDING.value
         alt_offer = _make_offer(
             db_session,
             test_quote.requisition_id,
@@ -879,7 +879,7 @@ class TestApproveBuyPlan:
             db_session,
             line_overrides=overrides,
         )
-        assert result.status == BuyPlanStatus.active.value
+        assert result.status == BuyPlanStatus.ACTIVE.value
         updated_line = next(ln for ln in result.lines if ln.id == line.id)
         assert updated_line.offer_id == alt_offer.id
         assert updated_line.manager_note == "Better pricing"
@@ -905,7 +905,7 @@ class TestApproveBuyPlan:
         manager_user: User,
     ):
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.pending.value
+        plan.status = BuyPlanStatus.PENDING.value
         db_session.flush()
 
         with pytest.raises(ValueError, match="Invalid action"):
@@ -925,12 +925,12 @@ class TestVerifySO:
     ):
         """Ops approves SO → so_status=approved."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         _make_ops_member(db_session, admin_user)
         db_session.flush()
 
         result = verify_so(plan.id, "approve", admin_user, db_session)
-        assert result.so_status == SOVerificationStatus.approved.value
+        assert result.so_status == SOVerificationStatus.APPROVED.value
         assert result.so_verified_by_id == admin_user.id
 
     def test_reject(
@@ -942,7 +942,7 @@ class TestVerifySO:
     ):
         """Ops rejects SO → so_status=rejected."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         _make_ops_member(db_session, admin_user)
         db_session.flush()
 
@@ -953,7 +953,7 @@ class TestVerifySO:
             db_session,
             rejection_note="Wrong SO number",
         )
-        assert result.so_status == SOVerificationStatus.rejected.value
+        assert result.so_status == SOVerificationStatus.REJECTED.value
         assert result.so_rejection_note == "Wrong SO number"
 
     def test_halt_stops_plan(
@@ -965,7 +965,7 @@ class TestVerifySO:
     ):
         """Halt → plan.status=halted (everything stops)."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         _make_ops_member(db_session, admin_user)
         db_session.flush()
 
@@ -976,7 +976,7 @@ class TestVerifySO:
             db_session,
             rejection_note="Fraud suspected",
         )
-        assert result.status == BuyPlanStatus.halted.value
+        assert result.status == BuyPlanStatus.HALTED.value
         assert result.halted_by_id == admin_user.id
 
     def test_non_ops_member_rejected(
@@ -988,7 +988,7 @@ class TestVerifySO:
     ):
         """Non-ops user cannot verify SO."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         db_session.flush()
 
         with pytest.raises(PermissionError, match="verification group"):
@@ -1003,8 +1003,8 @@ class TestVerifySO:
     ):
         """Cannot re-verify an already-verified SO."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        plan.so_status = SOVerificationStatus.approved.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        plan.so_status = SOVerificationStatus.APPROVED.value
         _make_ops_member(db_session, admin_user)
         db_session.flush()
 
@@ -1019,7 +1019,7 @@ class TestConfirmPO:
     def test_valid_confirmation(self, db_session: Session, test_quote: Quote, test_user: User):
         """Buyer confirms PO → line goes to pending_verify."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         db_session.flush()
 
         ship_date = datetime(2026, 3, 15, tzinfo=timezone.utc)
@@ -1031,7 +1031,7 @@ class TestConfirmPO:
             test_user,
             db_session,
         )
-        assert result.status == BuyPlanLineStatus.pending_verify.value
+        assert result.status == BuyPlanLineStatus.PENDING_VERIFY.value
         assert result.po_number == "PO-2026-042"
         assert result.estimated_ship_date == ship_date
         assert result.po_confirmed_at is not None
@@ -1053,8 +1053,8 @@ class TestConfirmPO:
     def test_wrong_line_status(self, db_session: Session, test_quote: Quote, test_user: User):
         """Cannot confirm PO on a line not awaiting PO."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        line.status = BuyPlanLineStatus.verified.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        line.status = BuyPlanLineStatus.VERIFIED.value
         db_session.flush()
 
         with pytest.raises(ValueError, match="awaiting PO"):
@@ -1081,14 +1081,14 @@ class TestVerifyPO:
     ):
         """Ops approves PO → line verified."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        line.status = BuyPlanLineStatus.pending_verify.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        line.status = BuyPlanLineStatus.PENDING_VERIFY.value
         line.po_number = "PO-001"
         _make_ops_member(db_session, admin_user)
         db_session.flush()
 
         result = verify_po(plan.id, line.id, "approve", admin_user, db_session)
-        assert result.status == BuyPlanLineStatus.verified.value
+        assert result.status == BuyPlanLineStatus.VERIFIED.value
         assert result.po_verified_by_id == admin_user.id
 
     def test_reject_resets_po(
@@ -1100,8 +1100,8 @@ class TestVerifyPO:
     ):
         """PO rejection clears PO data and sends back to awaiting_po."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        line.status = BuyPlanLineStatus.pending_verify.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        line.status = BuyPlanLineStatus.PENDING_VERIFY.value
         line.po_number = "PO-001"
         line.estimated_ship_date = datetime(2026, 3, 15, tzinfo=timezone.utc)
         line.po_confirmed_at = datetime.now(timezone.utc)
@@ -1116,7 +1116,7 @@ class TestVerifyPO:
             db_session,
             rejection_note="Wrong PO amount",
         )
-        assert result.status == BuyPlanLineStatus.awaiting_po.value
+        assert result.status == BuyPlanLineStatus.AWAITING_PO.value
         assert result.po_number is None
         assert result.estimated_ship_date is None
         assert result.po_rejection_note == "Wrong PO amount"
@@ -1130,8 +1130,8 @@ class TestVerifyPO:
     ):
         """Non-ops user cannot verify PO."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        line.status = BuyPlanLineStatus.pending_verify.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        line.status = BuyPlanLineStatus.PENDING_VERIFY.value
         db_session.flush()
 
         with pytest.raises(PermissionError, match="verification group"):
@@ -1144,7 +1144,7 @@ class TestVerifyPO:
 class TestFlagLineIssue:
     def test_flag_sold_out(self, db_session: Session, test_quote: Quote, test_user: User):
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         db_session.flush()
 
         result = flag_line_issue(
@@ -1154,12 +1154,12 @@ class TestFlagLineIssue:
             test_user,
             db_session,
         )
-        assert result.status == BuyPlanLineStatus.issue.value
+        assert result.status == BuyPlanLineStatus.ISSUE.value
         assert result.issue_type == "sold_out"
 
     def test_flag_with_note(self, db_session: Session, test_quote: Quote, test_user: User):
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         db_session.flush()
 
         result = flag_line_issue(
@@ -1181,8 +1181,8 @@ class TestFlagLineIssue:
 
     def test_cannot_flag_verified_line(self, db_session: Session, test_quote: Quote, test_user: User):
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        line.status = BuyPlanLineStatus.verified.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        line.status = BuyPlanLineStatus.VERIFIED.value
         db_session.flush()
 
         with pytest.raises(ValueError, match="Cannot flag"):
@@ -1196,21 +1196,21 @@ class TestCheckCompletion:
     def test_all_verified_and_so_approved(self, db_session: Session, test_quote: Quote, test_user: User):
         """All lines verified + SO approved → completed."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        plan.so_status = SOVerificationStatus.approved.value
-        line.status = BuyPlanLineStatus.verified.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        plan.so_status = SOVerificationStatus.APPROVED.value
+        line.status = BuyPlanLineStatus.VERIFIED.value
         db_session.flush()
 
         result = check_completion(plan.id, db_session)
-        assert result.status == BuyPlanStatus.completed.value
+        assert result.status == BuyPlanStatus.COMPLETED.value
         assert result.completed_at is not None
 
     def test_partial_lines_not_complete(self, db_session: Session, test_quote: Quote, test_user: User):
         """Some lines still pending → not complete."""
         plan, line, _, req = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        plan.so_status = SOVerificationStatus.approved.value
-        line.status = BuyPlanLineStatus.verified.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        plan.so_status = SOVerificationStatus.APPROVED.value
+        line.status = BuyPlanLineStatus.VERIFIED.value
         # Add a second line still in progress
         offer2 = _make_offer(
             db_session,
@@ -1227,31 +1227,31 @@ class TestCheckCompletion:
                 requirement_id=req.id,
                 offer_id=offer2.id,
                 quantity=500,
-                status=BuyPlanLineStatus.awaiting_po.value,
+                status=BuyPlanLineStatus.AWAITING_PO.value,
             )
         )
         db_session.flush()
 
         result = check_completion(plan.id, db_session)
-        assert result.status == BuyPlanStatus.active.value
+        assert result.status == BuyPlanStatus.ACTIVE.value
 
     def test_so_not_approved_blocks_completion(self, db_session: Session, test_quote: Quote, test_user: User):
         """All lines verified but SO still pending → not complete."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        plan.so_status = SOVerificationStatus.pending.value
-        line.status = BuyPlanLineStatus.verified.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        plan.so_status = SOVerificationStatus.PENDING.value
+        line.status = BuyPlanLineStatus.VERIFIED.value
         db_session.flush()
 
         result = check_completion(plan.id, db_session)
-        assert result.status == BuyPlanStatus.active.value
+        assert result.status == BuyPlanStatus.ACTIVE.value
 
     def test_cancelled_lines_count_as_terminal(self, db_session: Session, test_quote: Quote, test_user: User):
         """Mix of verified + cancelled lines → still completes."""
         plan, line, _, req = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        plan.so_status = SOVerificationStatus.approved.value
-        line.status = BuyPlanLineStatus.verified.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        plan.so_status = SOVerificationStatus.APPROVED.value
+        line.status = BuyPlanLineStatus.VERIFIED.value
         offer2 = _make_offer(
             db_session,
             test_quote.requisition_id,
@@ -1267,13 +1267,13 @@ class TestCheckCompletion:
                 requirement_id=req.id,
                 offer_id=offer2.id,
                 quantity=500,
-                status=BuyPlanLineStatus.cancelled.value,
+                status=BuyPlanLineStatus.CANCELLED.value,
             )
         )
         db_session.flush()
 
         result = check_completion(plan.id, db_session)
-        assert result.status == BuyPlanStatus.completed.value
+        assert result.status == BuyPlanStatus.COMPLETED.value
 
 
 # ── Resubmit Buy Plan ──────────────────────────────────────────────
@@ -1285,7 +1285,7 @@ class TestResubmitBuyPlan:
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user, total_cost=500.0)
         # Simulate prior rejection
         plan.approval_notes = "Fix the SO number"
-        plan.so_status = SOVerificationStatus.rejected.value
+        plan.so_status = SOVerificationStatus.REJECTED.value
         db_session.flush()
 
         result = resubmit_buy_plan(
@@ -1294,11 +1294,11 @@ class TestResubmitBuyPlan:
             test_user,
             db_session,
         )
-        assert result.status == BuyPlanStatus.active.value
+        assert result.status == BuyPlanStatus.ACTIVE.value
         assert result.auto_approved is True
         assert result.sales_order_number == "SO-FIXED"
         # SO verification reset
-        assert result.so_status == SOVerificationStatus.pending.value
+        assert result.so_status == SOVerificationStatus.PENDING.value
         assert result.so_rejection_note is None
 
     def test_resubmit_needs_approval(self, db_session: Session, test_quote: Quote, test_user: User):
@@ -1316,13 +1316,13 @@ class TestResubmitBuyPlan:
             test_user,
             db_session,
         )
-        assert result.status == BuyPlanStatus.pending.value
+        assert result.status == BuyPlanStatus.PENDING.value
         assert result.auto_approved is False
 
     def test_wrong_status(self, db_session: Session, test_quote: Quote, test_user: User):
         """Cannot resubmit an active plan."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         db_session.flush()
 
         with pytest.raises(ValueError, match="draft"):
@@ -1342,9 +1342,9 @@ class TestAutoCompleteViaPOVerify:
     ):
         """Verifying the last PO triggers auto-completion."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        plan.so_status = SOVerificationStatus.approved.value
-        line.status = BuyPlanLineStatus.pending_verify.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        plan.so_status = SOVerificationStatus.APPROVED.value
+        line.status = BuyPlanLineStatus.PENDING_VERIFY.value
         line.po_number = "PO-LAST"
         _make_ops_member(db_session, admin_user)
         db_session.flush()
@@ -1352,7 +1352,7 @@ class TestAutoCompleteViaPOVerify:
         verify_po(plan.id, line.id, "approve", admin_user, db_session)
 
         db_session.refresh(plan)
-        assert plan.status == BuyPlanStatus.completed.value
+        assert plan.status == BuyPlanStatus.COMPLETED.value
 
 
 # ── Coverage Gap Tests ──────────────────────────────────────────────
@@ -1377,8 +1377,8 @@ class TestBuyPlanCoverageGaps:
     def test_verify_so_already_verified(self, db_session, test_quote, test_user):
         """Line 756 (approx): verify_so raises when SO already verified."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        plan.so_status = SOVerificationStatus.approved.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        plan.so_status = SOVerificationStatus.APPROVED.value
         db_session.flush()
 
         with pytest.raises(ValueError, match="already verified"):
@@ -1387,8 +1387,8 @@ class TestBuyPlanCoverageGaps:
     def test_verify_so_plan_halted(self, db_session, test_quote, test_user):
         """Line 756: verify_so raises when plan is halted."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.halted.value
-        plan.so_status = SOVerificationStatus.pending.value
+        plan.status = BuyPlanStatus.HALTED.value
+        plan.so_status = SOVerificationStatus.PENDING.value
         db_session.flush()
 
         with pytest.raises(ValueError, match="halted"):
@@ -1397,8 +1397,8 @@ class TestBuyPlanCoverageGaps:
     def test_verify_so_invalid_action(self, db_session, test_quote, test_user, admin_user):
         """Line 785: invalid SO verification action."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        plan.so_status = SOVerificationStatus.pending.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        plan.so_status = SOVerificationStatus.PENDING.value
         _make_ops_member_v2(db_session, admin_user)
         db_session.flush()
 
@@ -1413,7 +1413,7 @@ class TestBuyPlanCoverageGaps:
     def test_confirm_po_line_not_found(self, db_session, test_quote, test_user):
         """Line 814: confirm_po raises when line not found."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         db_session.flush()
 
         with pytest.raises(ValueError, match="Line.*not found"):
@@ -1427,7 +1427,7 @@ class TestBuyPlanCoverageGaps:
     def test_verify_po_line_not_found(self, db_session, test_quote, test_user):
         """Line 848: verify_po raises when line not found."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         db_session.flush()
 
         with pytest.raises(ValueError, match="Line.*not found"):
@@ -1436,8 +1436,8 @@ class TestBuyPlanCoverageGaps:
     def test_verify_po_wrong_status(self, db_session, test_quote, test_user, admin_user):
         """Line 850: verify_po raises when line not pending_verify."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        line.status = BuyPlanLineStatus.awaiting_po.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        line.status = BuyPlanLineStatus.AWAITING_PO.value
         _make_ops_member_v2(db_session, admin_user)
         db_session.flush()
 
@@ -1447,8 +1447,8 @@ class TestBuyPlanCoverageGaps:
     def test_verify_po_invalid_action(self, db_session, test_quote, test_user, admin_user):
         """Line 877: invalid PO verification action."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        line.status = BuyPlanLineStatus.pending_verify.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        line.status = BuyPlanLineStatus.PENDING_VERIFY.value
         _make_ops_member_v2(db_session, admin_user)
         db_session.flush()
 
@@ -1463,7 +1463,7 @@ class TestBuyPlanCoverageGaps:
     def test_flag_issue_line_not_found(self, db_session, test_quote, test_user):
         """Line 907: flag_line_issue raises when line not found."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         db_session.flush()
 
         with pytest.raises(ValueError, match="Line.*not found"):
@@ -1472,12 +1472,12 @@ class TestBuyPlanCoverageGaps:
     def test_check_completion_no_lines(self, db_session, test_quote, test_user):
         """Line 938: check_completion returns when no lines."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         plan.lines.clear()
         db_session.flush()
 
         result = check_completion(plan.id, db_session)
-        assert result.status == BuyPlanStatus.active.value
+        assert result.status == BuyPlanStatus.ACTIVE.value
 
     def test_resubmit_plan_not_found(self, db_session, test_user):
         """Line 968: resubmit raises when plan not found."""
@@ -1514,7 +1514,7 @@ class TestDetectFavoritism:
                 buy_plan_id=plan.id,
                 buyer_id=buyer.id,
                 quantity=100,
-                status=BuyPlanLineStatus.awaiting_po.value,
+                status=BuyPlanLineStatus.AWAITING_PO.value,
             )
             db_session.add(line)
 
@@ -1554,7 +1554,7 @@ class TestCaseReport:
             requisition_id=test_quote.requisition_id,
             submitted_by_id=test_user.id,
             approved_by_id=test_user.id,
-            status=BuyPlanStatus.completed.value,
+            status=BuyPlanStatus.COMPLETED.value,
             created_at=now - timedelta(days=5),
             submitted_at=now - timedelta(days=4),
             approved_at=now - timedelta(days=3),
@@ -1581,7 +1581,7 @@ class TestCaseReport:
             offer_id=offer.id,
             buyer_id=test_user.id,
             quantity=100,
-            status=BuyPlanLineStatus.verified.value,
+            status=BuyPlanLineStatus.VERIFIED.value,
             po_number="PO-CASE",
             po_confirmed_at=now - timedelta(days=1),
             issue_type="price_change",
@@ -1629,7 +1629,7 @@ class TestIsStockSale:
             buy_plan_id=plan.id,
             offer_id=offer.id,
             quantity=100,
-            status=BuyPlanLineStatus.awaiting_po.value,
+            status=BuyPlanLineStatus.AWAITING_PO.value,
         )
         db_session.add(line)
         db_session.commit()
@@ -1656,7 +1656,7 @@ class TestIsStockSale:
             buy_plan_id=plan.id,
             offer_id=None,
             quantity=100,
-            status=BuyPlanLineStatus.awaiting_po.value,
+            status=BuyPlanLineStatus.AWAITING_PO.value,
         )
         db_session.add(line)
         db_session.commit()
@@ -2143,11 +2143,11 @@ class TestCoverageGaps2:
     def test_check_completion_inactive_plan(self, db_session, test_quote, test_user):
         """Line 935: check_completion returns plan unchanged when not active."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.draft.value
+        plan.status = BuyPlanStatus.DRAFT.value
         db_session.flush()
 
         result = check_completion(plan.id, db_session)
-        assert result.status == BuyPlanStatus.draft.value
+        assert result.status == BuyPlanStatus.DRAFT.value
 
     # ── _apply_line_edits offer not found (line 1028) ──
 
@@ -2225,7 +2225,7 @@ class TestCoverageGaps2:
             buy_plan_id=plan.id,
             offer_id=offer_id,
             quantity=100,
-            status=BuyPlanLineStatus.awaiting_po.value,
+            status=BuyPlanLineStatus.AWAITING_PO.value,
         )
         db_session.add(line)
         db_session.commit()
@@ -2251,7 +2251,7 @@ class TestCoverageGaps2:
         """Line 1157: detect_favoritism returns empty when < 3 plans."""
         # Only 1 plan exists (from _make_draft_plan)
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         plan.submitted_by_id = test_user.id
         db_session.flush()
 
@@ -2345,7 +2345,7 @@ class TestCreateLine:
         assert line.margin_pct == 50.0
         assert line.buyer_id == 42
         assert line.assignment_reason == "workload"
-        assert line.status == BuyPlanLineStatus.awaiting_po.value
+        assert line.status == BuyPlanLineStatus.AWAITING_PO.value
 
     def test_no_buyer(self):
         req = _make_simple_requirement(target_price=1.00)

@@ -35,49 +35,49 @@ from app.models.buy_plan import (
 class TestEnums:
     def test_buy_plan_status_values(self):
         assert set(BuyPlanStatus) == {
-            BuyPlanStatus.draft,
-            BuyPlanStatus.pending,
-            BuyPlanStatus.active,
-            BuyPlanStatus.halted,
-            BuyPlanStatus.completed,
-            BuyPlanStatus.cancelled,
+            BuyPlanStatus.DRAFT,
+            BuyPlanStatus.PENDING,
+            BuyPlanStatus.ACTIVE,
+            BuyPlanStatus.HALTED,
+            BuyPlanStatus.COMPLETED,
+            BuyPlanStatus.CANCELLED,
         }
 
     def test_so_verification_status_values(self):
         assert set(SOVerificationStatus) == {
-            SOVerificationStatus.pending,
-            SOVerificationStatus.approved,
-            SOVerificationStatus.rejected,
+            SOVerificationStatus.PENDING,
+            SOVerificationStatus.APPROVED,
+            SOVerificationStatus.REJECTED,
         }
 
     def test_line_status_values(self):
         assert set(BuyPlanLineStatus) == {
-            BuyPlanLineStatus.awaiting_po,
-            BuyPlanLineStatus.pending_verify,
-            BuyPlanLineStatus.verified,
-            BuyPlanLineStatus.issue,
-            BuyPlanLineStatus.cancelled,
+            BuyPlanLineStatus.AWAITING_PO,
+            BuyPlanLineStatus.PENDING_VERIFY,
+            BuyPlanLineStatus.VERIFIED,
+            BuyPlanLineStatus.ISSUE,
+            BuyPlanLineStatus.CANCELLED,
         }
 
     def test_issue_type_values(self):
         assert set(LineIssueType) == {
-            LineIssueType.sold_out,
-            LineIssueType.price_changed,
-            LineIssueType.lead_time_changed,
-            LineIssueType.other,
+            LineIssueType.SOLD_OUT,
+            LineIssueType.PRICE_CHANGED,
+            LineIssueType.LEAD_TIME_CHANGED,
+            LineIssueType.OTHER,
         }
 
     def test_ai_flag_severity_values(self):
         assert set(AIFlagSeverity) == {
-            AIFlagSeverity.info,
-            AIFlagSeverity.warning,
-            AIFlagSeverity.critical,
+            AIFlagSeverity.INFO,
+            AIFlagSeverity.WARNING,
+            AIFlagSeverity.CRITICAL,
         }
 
     def test_enums_are_str_subclass(self):
         """Ensures enums serialize as strings in JSON/DB."""
-        assert isinstance(BuyPlanStatus.draft, str)
-        assert BuyPlanStatus.draft == "draft"
+        assert isinstance(BuyPlanStatus.DRAFT, str)
+        assert BuyPlanStatus.DRAFT == "draft"
 
 
 # ── BuyPlan Model Tests ───────────────────────────────────────────
@@ -106,8 +106,8 @@ class TestBuyPlanModel:
             requisition_id=test_quote.requisition_id,
             sales_order_number="SO-2026-001",
             customer_po_number="CPO-42",
-            status=BuyPlanStatus.pending.value,
-            so_status=SOVerificationStatus.pending.value,
+            status=BuyPlanStatus.PENDING.value,
+            so_status=SOVerificationStatus.PENDING.value,
             total_cost=500.00,
             total_revenue=1000.00,
             total_margin_pct=50.00,
@@ -261,7 +261,7 @@ class TestBuyPlanLineModel:
             buy_plan_id=plan.id,
             offer_id=test_offer.id,
             quantity=1000,
-            status=BuyPlanLineStatus.pending_verify.value,
+            status=BuyPlanLineStatus.PENDING_VERIFY.value,
             po_number="PO-2026-0042",
             estimated_ship_date=datetime(2026, 3, 15, tzinfo=timezone.utc),
             po_confirmed_at=datetime.now(timezone.utc),
@@ -280,8 +280,8 @@ class TestBuyPlanLineModel:
             buy_plan_id=plan.id,
             offer_id=test_offer.id,
             quantity=1000,
-            status=BuyPlanLineStatus.issue.value,
-            issue_type=LineIssueType.sold_out.value,
+            status=BuyPlanLineStatus.ISSUE.value,
+            issue_type=LineIssueType.SOLD_OUT.value,
             issue_note="Vendor says part is discontinued",
         )
         db_session.add(line)

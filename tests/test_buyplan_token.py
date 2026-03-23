@@ -48,7 +48,7 @@ def pending_plan(db_session: Session, test_user: User, test_quote: Quote) -> Buy
     plan = BuyPlan(
         quote_id=test_quote.id,
         requisition_id=req.id,
-        status=BuyPlanStatus.pending.value,
+        status=BuyPlanStatus.PENDING.value,
         total_cost=1000.00,
         total_revenue=1500.00,
         total_margin_pct=33.33,
@@ -74,7 +74,7 @@ def expired_plan(db_session: Session, test_user: User, test_quote: Quote) -> Buy
     plan = BuyPlan(
         quote_id=test_quote.id,
         requisition_id=req.id,
-        status=BuyPlanStatus.pending.value,
+        status=BuyPlanStatus.PENDING.value,
         total_cost=500.00,
         submitted_by_id=test_user.id,
         submitted_at=datetime.now(timezone.utc),
@@ -94,7 +94,7 @@ def stock_sale_plan(db_session: Session, test_user: User, test_quote: Quote) -> 
     plan = BuyPlan(
         quote_id=test_quote.id,
         requisition_id=req.id,
-        status=BuyPlanStatus.pending.value,
+        status=BuyPlanStatus.PENDING.value,
         is_stock_sale=True,
         total_cost=200.00,
         submitted_by_id=test_user.id,
@@ -212,7 +212,7 @@ class TestApproveByToken:
 
     def test_wrong_status_400(self, noauth_client: TestClient, db_session: Session, pending_plan: BuyPlan):
         # Move plan to active first
-        pending_plan.status = BuyPlanStatus.active.value
+        pending_plan.status = BuyPlanStatus.ACTIVE.value
         db_session.commit()
         resp = noauth_client.put(
             f"/api/buy-plans/token/{pending_plan.approval_token}/approve",
@@ -270,7 +270,7 @@ class TestTokenGeneratedOnSubmit:
         plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=req.id,
-            status=BuyPlanStatus.draft.value,
+            status=BuyPlanStatus.DRAFT.value,
             total_cost=999999.00,
             total_revenue=1500000.00,
         )
@@ -286,7 +286,7 @@ class TestTokenGeneratedOnSubmit:
         )
         db_session.commit()
 
-        assert result.status == BuyPlanStatus.pending.value
+        assert result.status == BuyPlanStatus.PENDING.value
         assert result.approval_token is not None
         assert len(result.approval_token) > 20  # token_urlsafe(32) produces ~43 chars
         assert result.token_expires_at is not None

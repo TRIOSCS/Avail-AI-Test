@@ -8,7 +8,7 @@ Depends on: models, dependencies, services/proactive_service
 """
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from ..cache.decorators import cached_endpoint
 from ..database import get_db
@@ -152,6 +152,7 @@ async def draft_proactive_email(
 
     matches = (
         db.query(ProactiveMatch)
+        .options(joinedload(ProactiveMatch.offer))
         .filter(
             ProactiveMatch.id.in_(match_ids),
             ProactiveMatch.salesperson_id == user.id,

@@ -44,17 +44,25 @@ _SYSTEM = "You are an expert electronic component classifier. Return only valid 
 async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:  # pragma: no cover
     """Batch MPNs via Claude Haiku for manufacturer + commodity classification."""
     from app.utils.claude_client import claude_json
+    from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
     mpn_list = "\n".join(f"- {mpn}" for mpn in part_numbers)
     prompt = _CLASSIFY_PROMPT.format(mpns=mpn_list)
 
-    result = await claude_json(
-        prompt,
-        system=_SYSTEM,
-        model_tier="fast",
-        max_tokens=4096,
-        timeout=60,
-    )
+    try:
+        result = await claude_json(
+            prompt,
+            system=_SYSTEM,
+            model_tier="fast",
+            max_tokens=4096,
+            timeout=60,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping AI classification")
+        return [{"mpn": mpn, "manufacturer": "Unknown", "category": "Miscellaneous"} for mpn in part_numbers]
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for classification: %s", e)
+        return [{"mpn": mpn, "manufacturer": "Unknown", "category": "Miscellaneous"} for mpn in part_numbers]
 
     if not result or not isinstance(result, list):
         logger.warning("AI classification returned invalid response")

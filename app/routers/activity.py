@@ -118,11 +118,11 @@ def call_initiated(
         return {"id": record.id}
 
     except HTTPException:
-        raise  # Let 400/429 propagate
+        raise
     except Exception as e:
-        logger.error(f"call-initiated error (swallowed): {e}")
+        logger.error(f"call-initiated error: {e}")
         db.rollback()
-        return {"id": None}
+        raise HTTPException(500, "Failed to record phone contact")
 
 
 @router.get("/account/{company_id}", response_model=ActivityTimelineResponse)

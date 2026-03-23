@@ -128,7 +128,7 @@ class TestBuildBuyPlanQuoteStatus:
         quote, *_ = _setup_quote_with_offer(db_session, quote_status="won")
         plan = build_buy_plan(quote.id, db_session)
         assert plan is not None
-        assert plan.status == BuyPlanStatus.draft.value
+        assert plan.status == BuyPlanStatus.DRAFT.value
 
     def test_accepts_sent_quote(self, db_session):
         """Should build buy plan from a sent quote."""
@@ -149,7 +149,7 @@ class TestBuildBuyPlanDuplicate:
         existing = BuyPlan(
             quote_id=quote.id,
             requisition_id=req.id,
-            status=BuyPlanStatus.draft.value,
+            status=BuyPlanStatus.DRAFT.value,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(existing)
@@ -165,7 +165,7 @@ class TestBuildBuyPlanDuplicate:
         cancelled = BuyPlan(
             quote_id=quote.id,
             requisition_id=req.id,
-            status=BuyPlanStatus.cancelled.value,
+            status=BuyPlanStatus.CANCELLED.value,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(cancelled)
@@ -186,7 +186,7 @@ class TestNoBuyerFlag:
         plan = BuyPlan(
             quote_id=quote.id,
             requisition_id=req.id,
-            status=BuyPlanStatus.draft.value,
+            status=BuyPlanStatus.DRAFT.value,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(plan)
@@ -203,7 +203,7 @@ class TestNoBuyerFlag:
             unit_sell=1.0,
             buyer_id=None,
             assignment_reason="no_buyers",
-            status=BuyPlanLineStatus.awaiting_po.value,
+            status=BuyPlanLineStatus.AWAITING_PO.value,
         )
         db_session.add(line)
         db_session.flush()

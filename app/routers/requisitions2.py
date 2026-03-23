@@ -17,7 +17,6 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
-from fastapi.templating import Jinja2Templates
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -37,9 +36,9 @@ from ..services.requisition_list_service import (
     list_requisitions,
 )
 from ..services.sse_broker import broker
+from ..template_env import templates
 
 router = APIRouter(prefix="/requisitions2", tags=["requisitions2"])
-templates = Jinja2Templates(directory="app/templates")
 
 
 def _is_htmx(request: Request) -> bool:

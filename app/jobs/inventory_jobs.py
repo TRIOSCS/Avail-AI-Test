@@ -43,10 +43,10 @@ async def _job_po_verification():
         from ..services.buyplan_workflow import verify_po_sent
 
         # Find active plans that have lines in pending_verify status
-        plans = db.query(BuyPlan).filter(BuyPlan.status == BuyPlanStatus.active.value).all()
+        plans = db.query(BuyPlan).filter(BuyPlan.status == BuyPlanStatus.ACTIVE.value).all()
         # Filter to plans with at least one pending_verify line
         plans_to_verify = [
-            p for p in plans if any(line.status == BuyPlanLineStatus.pending_verify.value for line in p.lines)
+            p for p in plans if any(line.status == BuyPlanLineStatus.PENDING_VERIFY.value for line in p.lines)
         ]
 
         async def _safe_verify(plan):
@@ -77,7 +77,7 @@ async def _job_stock_autocomplete():
             db.query(BuyPlan)
             .filter(
                 BuyPlan.is_stock_sale == True,  # noqa: E712
-                BuyPlan.status == BuyPlanStatus.active.value,
+                BuyPlan.status == BuyPlanStatus.ACTIVE.value,
                 BuyPlan.approved_at < cutoff,
             )
             .all()
@@ -85,7 +85,7 @@ async def _job_stock_autocomplete():
 
         completed = 0
         for plan in stuck:
-            plan.status = BuyPlanStatus.completed.value
+            plan.status = BuyPlanStatus.COMPLETED.value
             plan.completed_at = datetime.now(timezone.utc)
             logger.info(f"Auto-completed stuck stock sale plan #{plan.id}")
             completed += 1

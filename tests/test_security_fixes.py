@@ -284,7 +284,7 @@ class TestSanitizeHtmlNoStyle:
     """sanitize_html filter must not allow style attribute."""
 
     def test_style_attribute_stripped(self):
-        from app.routers.htmx_views import _sanitize_html_filter
+        from app.template_env import _sanitize_html_filter
 
         html = '<div style="background:url(javascript:alert(1))">text</div>'
         result = _sanitize_html_filter(html)
@@ -292,14 +292,14 @@ class TestSanitizeHtmlNoStyle:
         assert "text" in result
 
     def test_class_attribute_preserved(self):
-        from app.routers.htmx_views import _sanitize_html_filter
+        from app.template_env import _sanitize_html_filter
 
         html = '<span class="text-red-500">warning</span>'
         result = _sanitize_html_filter(html)
         assert 'class="text-red-500"' in result
 
     def test_empty_input(self):
-        from app.routers.htmx_views import _sanitize_html_filter
+        from app.template_env import _sanitize_html_filter
 
         assert _sanitize_html_filter("") == ""
         assert _sanitize_html_filter(None) == ""

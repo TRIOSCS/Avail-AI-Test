@@ -11,6 +11,7 @@ Depends on: utils/claude_client.py
 from loguru import logger
 
 from app.utils.claude_client import claude_structured
+from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
 FREE_TEXT_PARSE_SCHEMA = {
     "type": "object",
@@ -143,14 +144,21 @@ async def parse_free_text(text: str) -> dict | None:
 
     prompt = f"Parse the following text and extract all electronic component part data:\n\n{truncated}"
 
-    result = await claude_structured(
-        prompt=prompt,
-        schema=FREE_TEXT_PARSE_SCHEMA,
-        system=SYSTEM_PROMPT,
-        model_tier="smart",
-        max_tokens=2048,
-        timeout=45,
-    )
+    try:
+        result = await claude_structured(
+            prompt=prompt,
+            schema=FREE_TEXT_PARSE_SCHEMA,
+            system=SYSTEM_PROMPT,
+            model_tier="smart",
+            max_tokens=2048,
+            timeout=45,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping free-text parse")
+        return None
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for free-text parse: %s", e)
+        return None
 
     if not result:
         logger.warning("Free-text parse returned no result")

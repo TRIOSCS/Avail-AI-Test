@@ -79,7 +79,7 @@ def _make_draft_plan(db, test_quote, test_user, *, total_cost=500.0):
     plan = BuyPlan(
         quote_id=test_quote.id,
         requisition_id=test_quote.requisition_id,
-        status=BuyPlanStatus.draft.value,
+        status=BuyPlanStatus.DRAFT.value,
         total_cost=total_cost,
         total_revenue=750.0,
         total_margin_pct=33.33,
@@ -95,7 +95,7 @@ def _make_draft_plan(db, test_quote, test_user, *, total_cost=500.0):
         unit_sell=0.75,
         margin_pct=33.33,
         buyer_id=test_user.id,
-        status=BuyPlanLineStatus.awaiting_po.value,
+        status=BuyPlanLineStatus.AWAITING_PO.value,
     )
     db.add(line)
     db.commit()
@@ -181,7 +181,7 @@ class TestGetListEndpoints:
     def test_get_plan_pending_maps_to_pending_approval(self, db_session: Session, test_quote: Quote, test_user: User):
         """V3 status 'pending' maps to V1 status 'pending_approval'."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.pending.value
+        plan.status = BuyPlanStatus.PENDING.value
         db_session.commit()
 
         c = _make_client(db_session, test_user)
@@ -192,7 +192,7 @@ class TestGetListEndpoints:
     def test_get_plan_active_maps_to_approved(self, db_session: Session, test_quote: Quote, test_user: User):
         """V3 status 'active' with no POs maps to V1 status 'approved'."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         # No PO on line → maps to 'approved'
         db_session.commit()
 
@@ -204,9 +204,9 @@ class TestGetListEndpoints:
     def test_get_plan_active_with_po_maps_to_po_entered(self, db_session: Session, test_quote: Quote, test_user: User):
         """V3 active with PO but awaiting_po status → V1 'po_entered'."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         line.po_number = "PO-001"
-        line.status = BuyPlanLineStatus.awaiting_po.value
+        line.status = BuyPlanLineStatus.AWAITING_PO.value
         db_session.commit()
 
         c = _make_client(db_session, test_user)
@@ -219,9 +219,9 @@ class TestGetListEndpoints:
     ):
         """V3 active with all PO lines pending_verify/verified → V1 'po_confirmed'."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         line.po_number = "PO-001"
-        line.status = BuyPlanLineStatus.pending_verify.value
+        line.status = BuyPlanLineStatus.PENDING_VERIFY.value
         db_session.commit()
 
         c = _make_client(db_session, test_user)
@@ -232,7 +232,7 @@ class TestGetListEndpoints:
     def test_get_plan_completed_maps_to_complete(self, db_session: Session, test_quote: Quote, test_user: User):
         """V3 status 'completed' maps to V1 status 'complete'."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.completed.value
+        plan.status = BuyPlanStatus.COMPLETED.value
         db_session.commit()
 
         c = _make_client(db_session, test_user)
@@ -245,7 +245,7 @@ class TestGetListEndpoints:
     ):
         """V3 draft with cancellation_reason → V1 'rejected'."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.draft.value
+        plan.status = BuyPlanStatus.DRAFT.value
         plan.cancellation_reason = "Fix margin"
         db_session.commit()
 
@@ -283,7 +283,7 @@ class TestGetListEndpoints:
         """V1 status filter 'pending_approval' translates to V3 'pending' for
         querying."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.pending.value
+        plan.status = BuyPlanStatus.PENDING.value
         db_session.commit()
 
         c = _make_client(db_session, test_user)
@@ -316,7 +316,7 @@ class TestVerifySOEndpoint:
         admin_user: User,
     ):
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         _make_ops_member(db_session, admin_user)
 
         c = _make_client(db_session, admin_user)
@@ -335,7 +335,7 @@ class TestVerifySOEndpoint:
         admin_user: User,
     ):
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         _make_ops_member(db_session, admin_user)
 
         c = _make_client(db_session, admin_user)
@@ -353,7 +353,7 @@ class TestVerifySOEndpoint:
         test_user: User,
     ):
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         db_session.commit()
 
         c = _make_client(db_session, test_user)
@@ -370,7 +370,7 @@ class TestVerifySOEndpoint:
 class TestConfirmPOEndpoint:
     def test_confirm_po(self, db_session: Session, test_quote: Quote, test_user: User):
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         db_session.commit()
 
         c = _make_client(db_session, test_user)
@@ -413,8 +413,8 @@ class TestVerifyPOEndpoint:
         admin_user: User,
     ):
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        line.status = BuyPlanLineStatus.pending_verify.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        line.status = BuyPlanLineStatus.PENDING_VERIFY.value
         line.po_number = "PO-001"
         _make_ops_member(db_session, admin_user)
 
@@ -434,8 +434,8 @@ class TestVerifyPOEndpoint:
         admin_user: User,
     ):
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        line.status = BuyPlanLineStatus.pending_verify.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        line.status = BuyPlanLineStatus.PENDING_VERIFY.value
         _make_ops_member(db_session, admin_user)
 
         c = _make_client(db_session, admin_user)
@@ -453,7 +453,7 @@ class TestVerifyPOEndpoint:
 class TestFlagIssueEndpoint:
     def test_flag_sold_out(self, db_session: Session, test_quote: Quote, test_user: User):
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         db_session.commit()
 
         c = _make_client(db_session, test_user)
@@ -467,7 +467,7 @@ class TestFlagIssueEndpoint:
     def test_other_requires_note(self, db_session: Session, test_quote: Quote, test_user: User):
         """'other' without note rejected by Pydantic — returns 422."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         db_session.commit()
 
         c = _make_client(db_session, test_user)
@@ -563,7 +563,7 @@ class TestEnhancedAIFlags:
         plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
-            status=BuyPlanStatus.draft.value,
+            status=BuyPlanStatus.DRAFT.value,
         )
         db_session.add(plan)
         db_session.flush()
@@ -575,7 +575,7 @@ class TestEnhancedAIFlags:
             unit_cost=0.50,
             unit_sell=0.75,
             margin_pct=33.33,
-            status=BuyPlanLineStatus.awaiting_po.value,
+            status=BuyPlanLineStatus.AWAITING_PO.value,
         )
         db_session.add(line)
         db_session.flush()
@@ -596,7 +596,7 @@ class TestEnhancedAIFlags:
         plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
-            status=BuyPlanStatus.draft.value,
+            status=BuyPlanStatus.DRAFT.value,
         )
         db_session.add(plan)
         db_session.flush()
@@ -608,7 +608,7 @@ class TestEnhancedAIFlags:
             unit_cost=0.95,
             unit_sell=1.00,
             margin_pct=5.0,
-            status=BuyPlanLineStatus.awaiting_po.value,
+            status=BuyPlanLineStatus.AWAITING_PO.value,
         )
         db_session.add(line)
         db_session.flush()
@@ -642,7 +642,7 @@ class TestEnhancedAIFlags:
         plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
-            status=BuyPlanStatus.draft.value,
+            status=BuyPlanStatus.DRAFT.value,
         )
         db_session.add(plan)
         db_session.flush()
@@ -654,7 +654,7 @@ class TestEnhancedAIFlags:
             unit_cost=1.00,
             unit_sell=1.50,
             margin_pct=33.33,
-            status=BuyPlanLineStatus.awaiting_po.value,
+            status=BuyPlanLineStatus.AWAITING_PO.value,
         )
         db_session.add(line)
         db_session.flush()
@@ -678,7 +678,7 @@ class TestEnhancedAIFlags:
         plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
-            status=BuyPlanStatus.draft.value,
+            status=BuyPlanStatus.DRAFT.value,
         )
         db_session.add(plan)
         db_session.flush()
@@ -689,7 +689,7 @@ class TestEnhancedAIFlags:
             quantity=500,  # less than 1000
             unit_cost=0.50,
             unit_sell=0.75,
-            status=BuyPlanLineStatus.awaiting_po.value,
+            status=BuyPlanLineStatus.AWAITING_PO.value,
         )
         db_session.add(line)
         db_session.flush()
@@ -737,7 +737,7 @@ class TestFavoritism:
                 quantity=100,
                 unit_cost=0.50,
                 buyer_id=test_user.id,
-                status=BuyPlanLineStatus.awaiting_po.value,
+                status=BuyPlanLineStatus.AWAITING_PO.value,
             )
             db_session.add(line)
 
@@ -800,8 +800,8 @@ class TestCaseReport:
         plan = BuyPlan(
             quote_id=test_quote.id,
             requisition_id=test_quote.requisition_id,
-            status=BuyPlanStatus.active.value,
-            so_status=SOVerificationStatus.approved.value,
+            status=BuyPlanStatus.ACTIVE.value,
+            so_status=SOVerificationStatus.APPROVED.value,
             submitted_by_id=test_user.id,
             submitted_at=datetime.now(timezone.utc),
             total_cost=500.0,
@@ -818,7 +818,7 @@ class TestCaseReport:
             unit_cost=0.50,
             unit_sell=0.75,
             buyer_id=test_user.id,
-            status=BuyPlanLineStatus.verified.value,
+            status=BuyPlanLineStatus.VERIFIED.value,
         )
         db_session.add(line)
         db_session.commit()
@@ -1017,7 +1017,7 @@ class TestVerifySOEdgeCases:
     ):
         """Verify SO on already-verified SO → ValueError → 400."""
         plan, _, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
+        plan.status = BuyPlanStatus.ACTIVE.value
         plan.so_status = "approved"  # Already verified
         _make_ops_member(db_session, admin_user)
 
@@ -1042,8 +1042,8 @@ class TestVerifyPOEdgeCases:
     ):
         """Verify PO on line not in pending_verify → ValueError → 400."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        line.status = BuyPlanLineStatus.awaiting_po.value  # not pending_verify
+        plan.status = BuyPlanStatus.ACTIVE.value
+        line.status = BuyPlanLineStatus.AWAITING_PO.value  # not pending_verify
         _make_ops_member(db_session, admin_user)
 
         c = _make_client(db_session, admin_user)
@@ -1061,8 +1061,8 @@ class TestVerifyPOEdgeCases:
     ):
         """Verify PO by non-ops user → PermissionError → 403."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        line.status = BuyPlanLineStatus.pending_verify.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        line.status = BuyPlanLineStatus.PENDING_VERIFY.value
         line.po_number = "PO-001"
         db_session.commit()
 
@@ -1082,14 +1082,14 @@ class TestVerifyPOEdgeCases:
     ):
         """Verify last PO → auto-complete plan."""
         plan, line, _, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.active.value
-        plan.so_status = SOVerificationStatus.approved.value
+        plan.status = BuyPlanStatus.ACTIVE.value
+        plan.so_status = SOVerificationStatus.APPROVED.value
         plan.submitted_by_id = test_user.id
         plan.submitted_at = datetime.now(timezone.utc)
         plan.sales_order_number = "SO-COMPLETE"
         plan.total_cost = 500.0
         plan.total_revenue = 750.0
-        line.status = BuyPlanLineStatus.pending_verify.value
+        line.status = BuyPlanLineStatus.PENDING_VERIFY.value
         line.po_number = "PO-DONE"
         _make_ops_member(db_session, admin_user)
 

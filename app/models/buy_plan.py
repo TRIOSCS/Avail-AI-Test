@@ -22,7 +22,6 @@ Called by: services/buyplan_workflow.py, routers/crm/buy_plans.py
 Depends on: models.base, models.quotes, models.sourcing, models.offers, models.auth
 """
 
-import enum
 from datetime import datetime, timezone
 
 from sqlalchemy import (
@@ -40,56 +39,26 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from ..constants import (
+    AIFlagSeverity,
+    BuyPlanLineStatus,
+    BuyPlanStatus,
+    LineIssueType,
+    SOVerificationStatus,
+)
 from .base import Base
 
-# ── Enums ────────────────────────────────────────────────────────────
-
-
-class BuyPlanStatus(str, enum.Enum):
-    """Buy plan header statuses."""
-
-    draft = "draft"
-    pending = "pending"  # awaiting manager approval
-    active = "active"  # approved, buy instructions sent
-    halted = "halted"  # ops halted the deal
-    completed = "completed"
-    cancelled = "cancelled"
-
-
-class SOVerificationStatus(str, enum.Enum):
-    """Sales Order verification by ops."""
-
-    pending = "pending"
-    approved = "approved"
-    rejected = "rejected"
-
-
-class BuyPlanLineStatus(str, enum.Enum):
-    """Per-line statuses tracking buyer execution."""
-
-    awaiting_po = "awaiting_po"  # buyer needs to cut PO
-    pending_verify = "pending_verify"  # PO entered, awaiting ops verify
-    verified = "verified"  # ops confirmed PO
-    issue = "issue"  # buyer flagged a problem
-    cancelled = "cancelled"
-
-
-class LineIssueType(str, enum.Enum):
-    """Types of issues a buyer can flag on a line."""
-
-    sold_out = "sold_out"
-    price_changed = "price_changed"
-    lead_time_changed = "lead_time_changed"
-    other = "other"
-
-
-class AIFlagSeverity(str, enum.Enum):
-    """Severity levels for AI-generated flags."""
-
-    info = "info"
-    warning = "warning"
-    critical = "critical"
-
+# Re-export enums so existing `from app.models.buy_plan import BuyPlanStatus` still works
+__all__ = [
+    "AIFlagSeverity",
+    "BuyPlanLineStatus",
+    "BuyPlanStatus",
+    "LineIssueType",
+    "SOVerificationStatus",
+    "BuyPlan",
+    "BuyPlanLine",
+    "VerificationGroupMember",
+]
 
 # ── Buy Plan (header) ──────────────────────────────────────────────
 
@@ -114,8 +83,8 @@ class BuyPlan(Base):
     customer_po_number = Column(String(100))
 
     # ── Status tracks
-    status = Column(String(30), default=BuyPlanStatus.draft.value, nullable=False)
-    so_status = Column(String(30), default=SOVerificationStatus.pending.value, nullable=False)
+    status = Column(String(30), default=BuyPlanStatus.DRAFT.value, nullable=False)
+    so_status = Column(String(30), default=SOVerificationStatus.PENDING.value, nullable=False)
 
     # ── Financials (computed from lines)
     total_cost = Column(Numeric(12, 2))
@@ -229,7 +198,7 @@ class BuyPlanLine(Base):
     assignment_reason = Column(String(100))  # vendor_ownership, commodity, geo, workload
 
     # ── Status
-    status = Column(String(30), default=BuyPlanLineStatus.awaiting_po.value, nullable=False)
+    status = Column(String(30), default=BuyPlanLineStatus.AWAITING_PO.value, nullable=False)
 
     # ── PO confirmation
     po_number = Column(String(100))

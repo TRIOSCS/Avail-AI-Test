@@ -3,7 +3,7 @@
 Mock HTTP calls and credential lookups to test Claude API wrappers.
 
 Called by: pytest
-Depends on: app/utils/claude_client.py
+Depends on: app/utils/claude_client.py, app/utils/claude_errors.py
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,6 +19,13 @@ from app.utils.claude_client import (
     claude_structured,
     claude_text,
     safe_json_parse,
+)
+from app.utils.claude_errors import (
+    ClaudeAuthError,
+    ClaudeError,
+    ClaudeRateLimitError,
+    ClaudeServerError,
+    ClaudeUnavailableError,
 )
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -109,17 +116,45 @@ class TestClaudeStructured:
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_api_error_returns_none(self, mock_http, mock_cred):
+    async def test_api_500_raises_server_error(self, mock_http, mock_cred):
         mock_http.post = AsyncMock(return_value=_mock_response(500, text="Server Error"))
 
-        result = await claude_structured("test", {"type": "object"})
-        assert result is None
+        with pytest.raises(ClaudeServerError):
+            await claude_structured("test", {"type": "object"})
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_api_401_raises_auth_error(self, mock_http, mock_cred):
+        mock_http.post = AsyncMock(return_value=_mock_response(401, text="Unauthorized"))
+
+        with pytest.raises(ClaudeAuthError):
+            await claude_structured("test", {"type": "object"})
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_api_403_raises_auth_error(self, mock_http, mock_cred):
+        mock_http.post = AsyncMock(return_value=_mock_response(403, text="Forbidden"))
+
+        with pytest.raises(ClaudeAuthError):
+            await claude_structured("test", {"type": "object"})
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_api_429_after_retries_raises_rate_limit(self, mock_http, mock_cred):
+        """429 on last attempt raises ClaudeRateLimitError."""
+        mock_http.post = AsyncMock(return_value=_mock_response(429, text="Rate limited"))
+
+        with pytest.raises(ClaudeRateLimitError):
+            await claude_structured("test", {"type": "object"})
 
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", return_value=None)
-    async def test_no_api_key_returns_none(self, mock_cred):
-        result = await claude_structured("test", {"type": "object"})
-        assert result is None
+    async def test_no_api_key_raises_unavailable(self, mock_cred):
+        with pytest.raises(ClaudeUnavailableError):
+            await claude_structured("test", {"type": "object"})
 
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
@@ -163,11 +198,11 @@ class TestClaudeStructured:
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_connection_error_returns_none(self, mock_http, mock_cred):
+    async def test_connection_error_raises_claude_error(self, mock_http, mock_cred):
         mock_http.post = AsyncMock(side_effect=ConnectionError("Connection refused"))
 
-        result = await claude_structured("test", {"type": "object"})
-        assert result is None
+        with pytest.raises(ClaudeError, match="Connection refused"):
+            await claude_structured("test", {"type": "object"})
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -208,9 +243,36 @@ class TestClaudeText:
 
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", return_value=None)
-    async def test_no_api_key_returns_none(self, mock_cred):
-        result = await claude_text("test")
-        assert result is None
+    async def test_no_api_key_raises_unavailable(self, mock_cred):
+        with pytest.raises(ClaudeUnavailableError):
+            await claude_text("test")
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_api_500_raises_server_error(self, mock_http, mock_cred):
+        mock_http.post = AsyncMock(return_value=_mock_response(500, text="Error"))
+
+        with pytest.raises(ClaudeServerError):
+            await claude_text("test")
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_api_401_raises_auth_error(self, mock_http, mock_cred):
+        mock_http.post = AsyncMock(return_value=_mock_response(401, text="Unauthorized"))
+
+        with pytest.raises(ClaudeAuthError):
+            await claude_text("test")
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_connection_error_raises_claude_error(self, mock_http, mock_cred):
+        mock_http.post = AsyncMock(side_effect=ConnectionError("timeout"))
+
+        with pytest.raises(ClaudeError):
+            await claude_text("test")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -234,6 +296,15 @@ class TestClaudeJson:
 
         result = await claude_json("test")
         assert result is None
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.claude_text", new_callable=AsyncMock)
+    async def test_unavailable_propagates(self, mock_text):
+        """ClaudeUnavailableError from claude_text propagates through claude_json."""
+        mock_text.side_effect = ClaudeUnavailableError("not configured")
+
+        with pytest.raises(ClaudeUnavailableError):
+            await claude_json("test")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -341,13 +412,13 @@ class TestClaudeBatchSubmit:
 
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", return_value=None)
-    async def test_no_api_key_returns_none(self, mock_cred):
-        result = await claude_batch_submit(
-            [
-                {"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}},
-            ]
-        )
-        assert result is None
+    async def test_no_api_key_raises_unavailable(self, mock_cred):
+        with pytest.raises(ClaudeUnavailableError):
+            await claude_batch_submit(
+                [
+                    {"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}},
+                ]
+            )
 
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
@@ -358,28 +429,28 @@ class TestClaudeBatchSubmit:
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_http_500_returns_none(self, mock_http, mock_cred):
+    async def test_http_500_raises_server_error(self, mock_http, mock_cred):
         mock_http.post = AsyncMock(return_value=_mock_response(500, text="Internal Server Error"))
 
-        result = await claude_batch_submit(
-            [
-                {"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}},
-            ]
-        )
-        assert result is None
+        with pytest.raises(ClaudeServerError):
+            await claude_batch_submit(
+                [
+                    {"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}},
+                ]
+            )
 
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_connection_error_returns_none(self, mock_http, mock_cred):
+    async def test_connection_error_raises_claude_error(self, mock_http, mock_cred):
         mock_http.post = AsyncMock(side_effect=ConnectionError("timeout"))
 
-        result = await claude_batch_submit(
-            [
-                {"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}},
-            ]
-        )
-        assert result is None
+        with pytest.raises(ClaudeError):
+            await claude_batch_submit(
+                [
+                    {"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}},
+                ]
+            )
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -506,9 +577,9 @@ class TestClaudeBatchResults:
 
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", return_value=None)
-    async def test_no_api_key_returns_none(self, mock_cred):
-        result = await claude_batch_results("batch_abc123")
-        assert result is None
+    async def test_no_api_key_raises_unavailable(self, mock_cred):
+        with pytest.raises(ClaudeUnavailableError):
+            await claude_batch_results("batch_abc123")
 
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
@@ -519,11 +590,11 @@ class TestClaudeBatchResults:
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_status_check_error_returns_none(self, mock_http, mock_cred):
+    async def test_status_check_500_raises_server_error(self, mock_http, mock_cred):
         mock_http.get = AsyncMock(return_value=_mock_response(500, text="Server Error"))
 
-        result = await claude_batch_results("batch_abc123")
-        assert result is None
+        with pytest.raises(ClaudeServerError):
+            await claude_batch_results("batch_abc123")
 
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
@@ -547,12 +618,12 @@ class TestClaudeBatchResults:
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_connection_error_returns_none(self, mock_http, mock_cred):
-        """Connection error during batch results check is handled."""
+    async def test_connection_error_raises_claude_error(self, mock_http, mock_cred):
+        """Connection error during batch results check raises ClaudeError."""
         mock_http.get = AsyncMock(side_effect=ConnectionError("timeout"))
 
-        result = await claude_batch_results("batch_abc123")
-        assert result is None
+        with pytest.raises(ClaudeError):
+            await claude_batch_results("batch_abc123")
 
     @pytest.mark.asyncio
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
@@ -725,26 +796,6 @@ class TestClaudeTextAdditional:
         body = mock_http.post.call_args.kwargs["json"]
         assert body["tools"] == tools
 
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
-    @patch("app.utils.claude_client.http")
-    async def test_api_error_returns_none(self, mock_http, mock_cred):
-        """API returning non-200 status returns None."""
-        mock_http.post = AsyncMock(return_value=_mock_response(500, text="Error"))
-
-        result = await claude_text("test")
-        assert result is None
-
-    @pytest.mark.asyncio
-    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
-    @patch("app.utils.claude_client.http")
-    async def test_connection_error_returns_none(self, mock_http, mock_cred):
-        """Network error is caught and returns None."""
-        mock_http.post = AsyncMock(side_effect=ConnectionError("timeout"))
-
-        result = await claude_text("test")
-        assert result is None
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  _headers — cache=True adds beta header
@@ -766,3 +817,140 @@ class TestHeaders:
 
         h = _headers(cache=False)
         assert "anthropic-beta" not in h
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Error hierarchy — verify inheritance
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestErrorHierarchy:
+    """Verify that all Claude error types inherit correctly."""
+
+    def test_base_is_exception(self):
+        assert issubclass(ClaudeError, Exception)
+
+    def test_auth_inherits_base(self):
+        assert issubclass(ClaudeAuthError, ClaudeError)
+
+    def test_rate_limit_inherits_base(self):
+        assert issubclass(ClaudeRateLimitError, ClaudeError)
+
+    def test_server_inherits_base(self):
+        assert issubclass(ClaudeServerError, ClaudeError)
+
+    def test_unavailable_inherits_base(self):
+        assert issubclass(ClaudeUnavailableError, ClaudeError)
+
+    def test_catch_base_catches_all(self):
+        """Catching ClaudeError catches all subtypes."""
+        for exc_type in (ClaudeAuthError, ClaudeRateLimitError, ClaudeServerError, ClaudeUnavailableError):
+            try:
+                raise exc_type("test")
+            except ClaudeError:
+                pass  # Expected
+            except Exception:
+                pytest.fail(f"{exc_type.__name__} not caught by ClaudeError")
+
+    def test_error_messages_preserved(self):
+        """Error messages are accessible via str()."""
+        err = ClaudeAuthError("bad key")
+        assert "bad key" in str(err)
+
+    def test_specific_catch_does_not_catch_siblings(self):
+        """ClaudeAuthError catch does NOT catch ClaudeRateLimitError."""
+        with pytest.raises(ClaudeRateLimitError):
+            try:
+                raise ClaudeRateLimitError("rate limited")
+            except ClaudeAuthError:
+                pytest.fail("Should not be caught")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  Error differentiation — different status codes produce different errors
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestErrorDifferentiation:
+    """Verify that different HTTP status codes produce distinguishable exceptions."""
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_structured_401_is_auth_error(self, mock_http, mock_cred):
+        mock_http.post = AsyncMock(return_value=_mock_response(401, text="Unauthorized"))
+        with pytest.raises(ClaudeAuthError):
+            await claude_structured("test", {"type": "object"})
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_structured_429_is_rate_limit(self, mock_http, mock_cred):
+        mock_http.post = AsyncMock(return_value=_mock_response(429, text="Rate limited"))
+        with pytest.raises(ClaudeRateLimitError):
+            await claude_structured("test", {"type": "object"})
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_structured_500_is_server_error(self, mock_http, mock_cred):
+        mock_http.post = AsyncMock(return_value=_mock_response(500, text="Server Error"))
+        with pytest.raises(ClaudeServerError):
+            await claude_structured("test", {"type": "object"})
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_structured_503_is_server_error(self, mock_http, mock_cred):
+        """503 on final attempt raises ClaudeServerError."""
+        mock_http.post = AsyncMock(return_value=_mock_response(503, text="Overloaded"))
+        with pytest.raises(ClaudeServerError):
+            await claude_structured("test", {"type": "object"})
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_text_401_is_auth_error(self, mock_http, mock_cred):
+        mock_http.post = AsyncMock(return_value=_mock_response(401, text="Unauthorized"))
+        with pytest.raises(ClaudeAuthError):
+            await claude_text("test")
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_text_429_is_rate_limit(self, mock_http, mock_cred):
+        mock_http.post = AsyncMock(return_value=_mock_response(429, text="Rate limited"))
+        with pytest.raises(ClaudeRateLimitError):
+            await claude_text("test")
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
+    @patch("app.utils.claude_client.http")
+    async def test_text_500_is_server_error(self, mock_http, mock_cred):
+        mock_http.post = AsyncMock(return_value=_mock_response(500, text="Server Error"))
+        with pytest.raises(ClaudeServerError):
+            await claude_text("test")
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", return_value=None)
+    async def test_structured_no_key_is_unavailable(self, mock_cred):
+        with pytest.raises(ClaudeUnavailableError):
+            await claude_structured("test", {"type": "object"})
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", return_value=None)
+    async def test_text_no_key_is_unavailable(self, mock_cred):
+        with pytest.raises(ClaudeUnavailableError):
+            await claude_text("test")
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", return_value=None)
+    async def test_batch_submit_no_key_is_unavailable(self, mock_cred):
+        with pytest.raises(ClaudeUnavailableError):
+            await claude_batch_submit([{"custom_id": "r1", "prompt": "p1", "schema": {"type": "object"}}])
+
+    @pytest.mark.asyncio
+    @patch("app.utils.claude_client.get_credential_cached", return_value=None)
+    async def test_batch_results_no_key_is_unavailable(self, mock_cred):
+        with pytest.raises(ClaudeUnavailableError):
+            await claude_batch_results("batch_123")

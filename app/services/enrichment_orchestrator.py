@@ -13,6 +13,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.utils.claude_client import claude_json
+from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
 # ---------------------------------------------------------------------------
 # Source registry — maps entity types to their enrichment source functions
@@ -44,7 +45,7 @@ async def _safe_apollo_company(identifier: str) -> dict | None:
 
         return await enrich_company(identifier)
     except Exception as e:
-        logger.debug("Apollo company enrichment failed: {}", e)
+        logger.warning("Apollo company enrichment failed: {}", e)
         return None
 
 
@@ -55,7 +56,7 @@ async def _safe_clearbit(identifier: str) -> dict | None:
 
         return await enrich_company(identifier)
     except Exception as e:
-        logger.debug("Clearbit enrichment failed: {}", e)
+        logger.warning("Clearbit enrichment failed: {}", e)
         return None
 
 
@@ -66,7 +67,7 @@ async def _safe_explorium(identifier: str) -> dict | None:
 
         return await _explorium_find_company(identifier)
     except Exception as e:
-        logger.debug("Explorium enrichment failed: {}", e)
+        logger.warning("Explorium enrichment failed: {}", e)
         return None
 
 
@@ -78,7 +79,7 @@ async def _safe_apollo_contacts(identifier: str) -> dict | None:
         results = await search_contacts(company_name=identifier, limit=1)
         return results[0] if results else None
     except Exception as e:
-        logger.debug("Apollo contact enrichment failed: {}", e)
+        logger.warning("Apollo contact enrichment failed: {}", e)
         return None
 
 
@@ -89,7 +90,7 @@ async def _safe_lusha(identifier: str) -> dict | None:
 
         return await find_person(email=identifier)
     except Exception as e:
-        logger.debug("Lusha contact enrichment failed: {}", e)
+        logger.warning("Lusha contact enrichment failed: {}", e)
         return None
 
 
@@ -101,7 +102,7 @@ async def _safe_hunter(identifier: str) -> dict | None:
         results = await find_domain_emails(identifier, limit=1)
         return results[0] if results else None
     except Exception as e:
-        logger.debug("Hunter contact enrichment failed: {}", e)
+        logger.warning("Hunter contact enrichment failed: {}", e)
         return None
 
 
@@ -113,7 +114,7 @@ async def _safe_rocketreach(identifier: str) -> dict | None:
         results = await search_company_contacts(company=identifier, limit=1)
         return results[0] if results else None
     except Exception as e:
-        logger.debug("RocketReach contact enrichment failed: {}", e)
+        logger.warning("RocketReach contact enrichment failed: {}", e)
         return None
 
 
@@ -253,13 +254,20 @@ async def claude_merge(
 
     logger.info("Calling Claude to merge {} sources for {}", len(valid), entity_type)
 
-    result = await claude_json(
-        prompt,
-        system=MERGE_SYSTEM_PROMPT,
-        model_tier="smart",
-        max_tokens=2048,
-        timeout=30,
-    )
+    try:
+        result = await claude_json(
+            prompt,
+            system=MERGE_SYSTEM_PROMPT,
+            model_tier="smart",
+            max_tokens=2048,
+            timeout=30,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — skipping enrichment merge")
+        result = None
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for enrichment merge: %s", e)
+        result = None
 
     if not result:
         logger.warning("Claude merge returned no data — falling back to first source")

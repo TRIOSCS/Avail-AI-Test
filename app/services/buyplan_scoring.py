@@ -226,7 +226,7 @@ def assign_buyer(
         db.query(BuyPlanLine.buyer_id, sqlfunc.count(BuyPlanLine.id))
         .filter(
             BuyPlanLine.buyer_id.in_(buyer_ids),
-            BuyPlanLine.status == BuyPlanLineStatus.awaiting_po.value,
+            BuyPlanLine.status == BuyPlanLineStatus.AWAITING_PO.value,
         )
         .group_by(BuyPlanLine.buyer_id)
         .all()

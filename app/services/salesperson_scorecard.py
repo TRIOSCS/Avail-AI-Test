@@ -38,7 +38,7 @@ def get_salesperson_scorecard(db: Session, month: date) -> dict:
     month_end_dt = datetime(month_end.year, month_end.month, month_end.day, tzinfo=timezone.utc)
     ytd_start_dt = datetime(ytd_start.year, ytd_start.month, ytd_start.day, tzinfo=timezone.utc)
 
-    users = db.query(User).filter(User.is_active == True).all()  # noqa: E712
+    users = db.query(User).filter(User.is_active.is_(True)).all()
 
     user_ids = [u.id for u in users]
 

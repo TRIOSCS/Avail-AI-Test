@@ -61,7 +61,7 @@ def _make_draft_plan(db, test_quote, test_user, *, total_cost=500.0):
     plan = BuyPlan(
         quote_id=test_quote.id,
         requisition_id=test_quote.requisition_id,
-        status=BuyPlanStatus.draft.value,
+        status=BuyPlanStatus.DRAFT.value,
         total_cost=total_cost,
         total_revenue=750.0,
         total_margin_pct=33.33,
@@ -77,7 +77,7 @@ def _make_draft_plan(db, test_quote, test_user, *, total_cost=500.0):
         unit_sell=0.75,
         margin_pct=33.33,
         buyer_id=test_user.id,
-        status=BuyPlanLineStatus.awaiting_po.value,
+        status=BuyPlanLineStatus.AWAITING_PO.value,
     )
     db.add(line)
     db.commit()
@@ -176,7 +176,7 @@ class TestHTMXReset:
     def test_reset_halted_plan(self, db_session: Session, test_quote: Quote, test_user: User):
         """POST reset returns plan back in draft."""
         plan, _ = _make_draft_plan(db_session, test_quote, test_user)
-        plan.status = BuyPlanStatus.halted.value
+        plan.status = BuyPlanStatus.HALTED.value
         db_session.commit()
 
         c = _make_client(db_session, test_user)

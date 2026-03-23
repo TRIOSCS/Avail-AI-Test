@@ -19,6 +19,7 @@ from app.models.offers import Offer
 from app.models.sourcing import Requirement, Requisition
 from app.models.vendors import VendorCard, VendorContact
 from app.utils.claude_client import claude_structured
+from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 from app.utils.search_builder import SearchBuilder
 
 RESULT_LIMIT = 5
@@ -50,8 +51,8 @@ def _set_ai_cache(query: str, result: dict) -> None:
         from app.cache.intel_cache import set_cached
 
         set_cached(_ai_cache_key(query), result, ttl_days=AI_CACHE_TTL_SECONDS / 86400)
-    except Exception:
-        pass
+    except Exception as e:
+        logger.debug("AI search cache write failed: %s", e)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -426,13 +427,20 @@ async def ai_search(query: str, db: Session) -> dict:
         return cached
 
     # Call Claude for intent parsing
-    intent = await claude_structured(
-        query,
-        SEARCH_INTENT_SCHEMA,
-        system=SEARCH_SYSTEM_PROMPT,
-        model_tier="fast",
-        timeout=10,
-    )
+    try:
+        intent = await claude_structured(
+            query,
+            SEARCH_INTENT_SCHEMA,
+            system=SEARCH_SYSTEM_PROMPT,
+            model_tier="fast",
+            timeout=10,
+        )
+    except ClaudeUnavailableError:
+        logger.info("Claude not configured — falling back to fast_search")
+        return fast_search(query, db)
+    except ClaudeError as e:
+        logger.warning("Claude AI failed for search intent: %s", e)
+        return fast_search(query, db)
 
     if not intent or "searches" not in intent:
         logger.debug("AI search: Claude returned None, falling back to fast_search")

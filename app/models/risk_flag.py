@@ -8,36 +8,16 @@ Called by: services/buyplan_service.py, routers/crm/offers.py, routers/crm/quote
 Depends on: models.base, models.buy_plan, models.offers
 """
 
-import enum
 from datetime import datetime, timezone
 
 from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.orm import relationship
 
+from ..constants import RiskFlagSeverity, RiskFlagType
 from .base import Base
 
-
-class RiskFlagType(str, enum.Enum):
-    """Types of risk flags that can be raised on a deal."""
-
-    price_increase = "price_increase"
-    lead_time_risk = "lead_time_risk"
-    vendor_reliability = "vendor_reliability"
-    qty_shortfall = "qty_shortfall"
-    geo_risk = "geo_risk"
-    stale_offer = "stale_offer"
-    margin_below_threshold = "margin_below_threshold"
-    single_source = "single_source"
-    counterfeit_risk = "counterfeit_risk"
-    other = "other"
-
-
-class RiskFlagSeverity(str, enum.Enum):
-    """Severity levels for risk flags."""
-
-    info = "info"
-    warning = "warning"
-    critical = "critical"
+# Re-export enums so existing `from app.models.risk_flag import RiskFlagType` still works
+__all__ = ["RiskFlagType", "RiskFlagSeverity", "RiskFlag"]
 
 
 class RiskFlag(Base):
@@ -59,7 +39,7 @@ class RiskFlag(Base):
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=True)
 
     type = Column(String(50), nullable=False)
-    severity = Column(String(20), nullable=False, default=RiskFlagSeverity.info.value)
+    severity = Column(String(20), nullable=False, default=RiskFlagSeverity.INFO.value)
     message = Column(Text, nullable=False)
 
     # Who/what raised this flag

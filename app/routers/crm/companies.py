@@ -27,6 +27,7 @@ def _load_company_tags(company_id: int, db: Session) -> list[dict]:
 
     tags = (
         db.query(EntityTag)
+        .options(joinedload(EntityTag.tag))
         .filter(EntityTag.entity_type == "company", EntityTag.entity_id == company_id, EntityTag.is_visible.is_(True))
         .order_by(EntityTag.interaction_count.desc())
         .all()
@@ -62,11 +63,7 @@ async def list_companies(
         prefix="company_list", ttl_hours=0.5, key_params=["search", "owner_id", "unassigned", "tag", "limit", "offset"]
     )
     def _fetch(search, owner_id, unassigned, tag, limit, offset, db):
-        query = (
-            db.query(Company)
-            .filter(Company.is_active == True)  # noqa: E712
-            .options(joinedload(Company.account_owner))
-        )
+        query = db.query(Company).filter(Company.is_active.is_(True)).options(joinedload(Company.account_owner))
         if search.strip():
             sb = SearchBuilder(search.strip())
             query = query.filter(sb.ilike_filter(Company.name))
@@ -77,14 +74,14 @@ async def list_companies(
                 | sqlfunc.lower(sqlfunc.cast(Company.commodity_tags, String)).contains(safe_tag)
             )
         if unassigned:
-            query = query.filter(Company.account_owner_id == None)  # noqa: E711
+            query = query.filter(Company.account_owner_id.is_(None))
         if owner_id and not unassigned:
             # Server-side owner filter: only companies with at least one site owned by this user
             query = query.filter(
                 Company.id.in_(
                     db.query(CustomerSite.company_id).filter(
                         CustomerSite.owner_id == owner_id,
-                        CustomerSite.is_active == True,  # noqa: E712
+                        CustomerSite.is_active.is_(True),
                     )
                 )
             )
@@ -216,7 +213,7 @@ async def companies_typeahead(
     def _fetch(db):
         companies = (
             db.query(Company)
-            .filter(Company.is_active == True)  # noqa: E712
+            .filter(Company.is_active.is_(True))
             .options(selectinload(Company.sites))
             .order_by(Company.name)
             .all()
@@ -435,12 +432,7 @@ async def create_company(
 
         query_clean = _norm(clean_name)
         if query_clean:
-            companies = (
-                db.query(Company.id, Company.name)
-                .filter(Company.is_active == True)  # noqa: E712
-                .limit(2000)
-                .all()
-            )
+            companies = db.query(Company.id, Company.name).filter(Company.is_active.is_(True)).limit(2000).all()
             duplicates = []
             for c in companies:
                 cn = _norm(c.name)

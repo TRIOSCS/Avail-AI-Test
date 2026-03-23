@@ -15,7 +15,6 @@ from typing import Optional
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, HTMLResponse
-from fastapi.templating import Jinja2Templates
 from loguru import logger
 from markupsafe import escape
 from pydantic import BaseModel, Field
@@ -27,9 +26,9 @@ from ..database import get_db
 from ..dependencies import require_user
 from ..models import User
 from ..models.trouble_ticket import TroubleTicket
+from ..template_env import templates
 
 router = APIRouter(tags=["error-reports"])
-templates = Jinja2Templates(directory="app/templates")
 
 MAX_MESSAGE_LEN = 5000
 UPLOAD_DIR = "/app/uploads/tickets"
@@ -370,6 +369,7 @@ async def analyze_tickets(
     """Batch AI analysis — group open tickets by root cause."""
     from ..models.root_cause_group import RootCauseGroup
     from ..utils.claude_client import claude_structured
+    from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
     tickets = (
         db.query(TroubleTicket)
@@ -414,16 +414,20 @@ async def analyze_tickets(
         "required": ["groups"],
     }
 
-    result = await claude_structured(
-        prompt=(
-            "Group these trouble tickets by root cause. For each group, provide a short title "
-            "and a suggested fix. Return JSON with a 'groups' array.\n\n"
-            f"Tickets:\n{json.dumps(ticket_data, indent=2)}"
-        ),
-        system="You are a bug triage assistant. Group related bug reports by their likely root cause.",
-        output_schema=tool_schema,
-        model_tier="fast",
-    )
+    try:
+        result = await claude_structured(
+            prompt=(
+                "Group these trouble tickets by root cause. For each group, provide a short title "
+                "and a suggested fix. Return JSON with a 'groups' array.\n\n"
+                f"Tickets:\n{json.dumps(ticket_data, indent=2)}"
+            ),
+            system="You are a bug triage assistant. Group related bug reports by their likely root cause.",
+            output_schema=tool_schema,
+            model_tier="fast",
+        )
+    except (ClaudeUnavailableError, ClaudeError) as e:
+        logger.warning("AI root cause analysis failed: %s", e)
+        result = None
 
     if not result or "groups" not in result:
         return HTMLResponse(

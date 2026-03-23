@@ -25,7 +25,6 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from fastapi.templating import Jinja2Templates
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -36,7 +35,6 @@ from ..http_client import http
 from ..models import User
 
 router = APIRouter()
-templates = Jinja2Templates(directory="app/templates")
 
 AZURE_AUTH = f"https://login.microsoftonline.com/{settings.azure_tenant_id}/oauth2/v2.0"
 SCOPES = GRAPH_SCOPES

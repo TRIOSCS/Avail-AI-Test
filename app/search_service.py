@@ -14,6 +14,7 @@ import os
 import time
 from datetime import datetime, timezone
 
+import redis
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -68,19 +69,6 @@ _CONNECTOR_SOURCE_MAP = {
 
 # ── Search result cache (Redis, 15-min TTL) ─────────────────────────────
 
-_JUNK_VENDORS = {
-    "",
-    "unknown",
-    "(no sellers listed)",
-    "no sellers listed",
-    "n/a",
-    "none",
-    "(none)",
-    "-",
-    "no vendor",
-    "no seller",
-}
-
 _SEARCH_CACHE_TTL = 900  # 15 minutes
 _SEARCH_CACHE_PREFIX = "search:"
 _search_redis = None
@@ -111,7 +99,8 @@ def _get_search_redis():
             retry_on_timeout=True,
         )
         _search_redis.ping()
-    except Exception:
+    except Exception as e:
+        logger.warning("Search Redis unavailable, caching disabled: %s", e)
         _search_redis = None
     return _search_redis
 
@@ -132,8 +121,10 @@ def _get_search_cache(key: str) -> tuple[list[dict], list[dict]] | None:
         if data:
             parsed = json.loads(data)
             return parsed["results"], parsed["source_stats"]
-    except Exception:
+    except redis.RedisError:
         pass
+    except Exception as e:
+        logger.warning("Search cache read failed: %s", e)
     return None
 
 
@@ -144,8 +135,10 @@ def _set_search_cache(key: str, results: list[dict], source_stats: list[dict]) -
         return
     try:
         r.setex(key, _SEARCH_CACHE_TTL, json.dumps({"results": results, "source_stats": source_stats}))
-    except Exception:
+    except redis.RedisError:
         pass
+    except Exception as e:
+        logger.warning("Search cache write failed: %s", e)
 
 
 def get_all_pns(req: Requirement) -> list[str]:
@@ -878,7 +871,8 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
                 src.last_error_at = datetime.now(timezone.utc)
                 src.error_count_24h = (src.error_count_24h or 0) + 1
         db.commit()
-    except Exception:
+    except Exception as e:
+        logger.warning("API source stats update failed: %s", e)
         db.rollback()
 
     # Flatten and dedupe
@@ -901,7 +895,9 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
             out.append(r)
 
     # Filter out junk vendors — no sellers, blanks, placeholders
-    out = [r for r in out if r.get("vendor_name", "").strip().lower() not in _JUNK_VENDORS]
+    from .shared_constants import JUNK_VENDORS
+
+    out = [r for r in out if r.get("vendor_name", "").strip().lower() not in JUNK_VENDORS]
 
     # ── Smart AI trigger: conditionally fire AI connector ────────────
     if ai_connector is not None:

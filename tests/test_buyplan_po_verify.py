@@ -30,7 +30,7 @@ def _make_plan(db: Session, buyer: User, quote: Quote, requisition: Requisition)
     plan = BuyPlan(
         quote_id=quote.id,
         requisition_id=requisition.id,
-        status=BuyPlanStatus.active.value,
+        status=BuyPlanStatus.ACTIVE.value,
         so_status="approved",
         created_at=datetime.now(timezone.utc),
     )
@@ -44,7 +44,7 @@ def _make_line(
     plan: BuyPlan,
     buyer: User | None = None,
     po_number: str | None = None,
-    status: str = BuyPlanLineStatus.pending_verify.value,
+    status: str = BuyPlanLineStatus.PENDING_VERIFY.value,
 ) -> BuyPlanLine:
     """Create a BuyPlanLine attached to plan."""
     line = BuyPlanLine(
@@ -85,7 +85,7 @@ async def test_po_found(db_session, test_user, test_quote, test_requisition):
     assert results[0]["po_number"] == "PO-12345"
     # Line should now be verified
     db_session.refresh(line)
-    assert line.status == BuyPlanLineStatus.verified.value
+    assert line.status == BuyPlanLineStatus.VERIFIED.value
     assert line.po_verified_at is not None
 
 
@@ -110,7 +110,7 @@ async def test_po_not_found(db_session, test_user, test_quote, test_requisition)
     assert results[0]["found"] is False
     assert results[0]["message_count"] == 0
     db_session.refresh(line)
-    assert line.status == BuyPlanLineStatus.pending_verify.value
+    assert line.status == BuyPlanLineStatus.PENDING_VERIFY.value
 
 
 @pytest.mark.asyncio
@@ -157,7 +157,7 @@ async def test_all_verified_auto_completes(db_session, test_user, test_quote, te
     assert len(results) == 2
     assert all(r["found"] for r in results)
     db_session.refresh(plan)
-    assert plan.status == BuyPlanStatus.completed.value
+    assert plan.status == BuyPlanStatus.COMPLETED.value
     assert plan.completed_at is not None
 
 

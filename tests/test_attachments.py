@@ -302,8 +302,9 @@ def test_upload_requisition_no_token(notoken_client, test_requisition):
 # ── Requisition: attach from OneDrive (lines 1296-1322) ─────────────
 
 
+@patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token")
 @patch("app.utils.graph_client.GraphClient")
-def test_attach_from_onedrive_success(mock_gc_cls, att_client, test_requisition):
+def test_attach_from_onedrive_success(mock_gc_cls, mock_token, att_client, test_requisition):
     """requisitions.py lines 1296-1322: attach existing OneDrive item."""
     mock_gc = MagicMock()
     mock_gc.get_json = AsyncMock(
@@ -355,8 +356,9 @@ def test_attach_from_onedrive_no_token(notoken_client, test_requisition):
     assert resp.status_code == 401
 
 
+@patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token")
 @patch("app.utils.graph_client.GraphClient")
-def test_attach_from_onedrive_item_error(mock_gc_cls, att_client, test_requisition):
+def test_attach_from_onedrive_item_error(mock_gc_cls, mock_token, att_client, test_requisition):
     """requisitions.py line 1309-1310: OneDrive item not found → 404."""
     mock_gc = MagicMock()
     mock_gc.get_json = AsyncMock(return_value={"error": {"code": "itemNotFound"}})
@@ -372,8 +374,9 @@ def test_attach_from_onedrive_item_error(mock_gc_cls, att_client, test_requisiti
 # ── Requisition: delete with OneDrive cleanup (lines 1341-1350) ─────
 
 
+@patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token")
 @patch("app.http_client.http")
-def test_delete_requisition_with_onedrive(mock_http, att_client, db_session, test_requisition, test_user):
+def test_delete_requisition_with_onedrive(mock_http, mock_token, att_client, db_session, test_requisition, test_user):
     """requisitions.py lines 1341-1348: delete attachment + OneDrive item."""
     mock_http.delete = AsyncMock(return_value=MagicMock(status_code=204))
 
@@ -393,8 +396,11 @@ def test_delete_requisition_with_onedrive(mock_http, att_client, db_session, tes
     mock_http.delete.assert_called_once()
 
 
+@patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token")
 @patch("app.http_client.http")
-def test_delete_requisition_onedrive_failure(mock_http, att_client, db_session, test_requisition, test_user):
+def test_delete_requisition_onedrive_failure(
+    mock_http, mock_token, att_client, db_session, test_requisition, test_user
+):
     """requisitions.py lines 1349-1350: OneDrive delete fails → still succeeds."""
     mock_http.delete = AsyncMock(side_effect=ConnectionError("network down"))
 
@@ -461,8 +467,9 @@ def test_upload_requirement_onedrive_error(mock_http, _mock_token, att_client, t
 # ── Requirement: delete with OneDrive cleanup (lines 1443-1452) ─────
 
 
+@patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token")
 @patch("app.http_client.http")
-def test_delete_requirement_with_onedrive(mock_http, att_client, db_session, test_requisition, test_user):
+def test_delete_requirement_with_onedrive(mock_http, mock_token, att_client, db_session, test_requisition, test_user):
     """requisitions.py lines 1443-1450: delete attachment + OneDrive item."""
     mock_http.delete = AsyncMock(return_value=MagicMock(status_code=204))
 
@@ -483,8 +490,11 @@ def test_delete_requirement_with_onedrive(mock_http, att_client, db_session, tes
     mock_http.delete.assert_called_once()
 
 
+@patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="fake-token")
 @patch("app.http_client.http")
-def test_delete_requirement_onedrive_failure(mock_http, att_client, db_session, test_requisition, test_user):
+def test_delete_requirement_onedrive_failure(
+    mock_http, mock_token, att_client, db_session, test_requisition, test_user
+):
     """requisitions.py lines 1451-1452: OneDrive delete fails → still succeeds."""
     mock_http.delete = AsyncMock(side_effect=TimeoutError("timed out"))
 

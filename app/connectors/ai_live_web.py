@@ -19,6 +19,7 @@ from loguru import logger
 
 from ..utils import safe_float, safe_int
 from ..utils.claude_client import claude_json
+from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
 from .sources import BaseConnector
 
 _MAX_LISTING_AGE_DAYS = 30
@@ -107,17 +108,24 @@ class AIWebSearchConnector(BaseConnector):
             "- evidence_note must quote proof of stock and quantity from the page."
         )
 
-        data = await claude_json(
-            prompt,
-            system=(
-                "You are a sourcing extraction assistant for electronic components. "
-                "Use web search, then return only valid JSON."
-            ),
-            model_tier="smart",
-            max_tokens=1800,
-            tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 6}],
-            timeout=60,
-        )
+        try:
+            data = await claude_json(
+                prompt,
+                system=(
+                    "You are a sourcing extraction assistant for electronic components. "
+                    "Use web search, then return only valid JSON."
+                ),
+                model_tier="smart",
+                max_tokens=1800,
+                tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 6}],
+                timeout=60,
+            )
+        except ClaudeUnavailableError:
+            logger.info("Claude not configured — skipping AI live web search")
+            return []
+        except ClaudeError as e:
+            logger.warning("Claude AI failed for live web search: %s", e)
+            return []
 
         offers = data.get("offers", []) if isinstance(data, dict) else []
         if not isinstance(offers, list):

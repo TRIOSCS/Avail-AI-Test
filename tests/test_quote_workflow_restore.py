@@ -118,8 +118,8 @@ class TestRiskFlagModel:
 
         flag = RiskFlag(
             requisition_id=req.id,
-            type=RiskFlagType.stale_offer.value,
-            severity=RiskFlagSeverity.warning.value,
+            type=RiskFlagType.STALE_OFFER.value,
+            severity=RiskFlagSeverity.WARNING.value,
             message="Offer is older than 14 days",
             source="rule",
         )

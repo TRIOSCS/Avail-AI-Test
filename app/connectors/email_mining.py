@@ -708,8 +708,8 @@ class EmailMiner:
                 entry["commodities"].update(commodities)
                 if brands:
                     brands_detected += 1
-            except Exception:
-                pass
+            except Exception as e:
+                logger.debug("Brand/commodity detection failed for domain: %s", e)
 
             contacts_found += 1
 

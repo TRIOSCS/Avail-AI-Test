@@ -81,7 +81,8 @@ class TestCallInitiated:
         )
         assert resp.status_code == 400
 
-    def test_unknown_vendor_id_still_succeeds(self, client):
+    def test_unknown_vendor_id_returns_500(self, client):
+        """Unknown vendor FK causes DB integrity error, now properly surfaced as 500."""
         resp = client.post(
             "/api/activity/call-initiated",
             json={
@@ -89,9 +90,11 @@ class TestCallInitiated:
                 "vendor_card_id": 99999,
             },
         )
-        assert resp.status_code == 201
+        assert resp.status_code == 500
 
     def test_unknown_requirement_id_still_succeeds(self, client):
+        """Unknown requirement_id is gracefully handled (set to None), so call
+        succeeds."""
         resp = client.post(
             "/api/activity/call-initiated",
             json={
@@ -144,6 +147,20 @@ class TestCallInitiated:
         assert resp.status_code == 201
         record = db_session.get(ActivityLog, resp.json()["id"])
         assert record.company_id == test_company.id
+
+    def test_db_error_returns_500(self, client, db_session):
+        """DB commit failure should return HTTP 500, not silently return {id: None}."""
+        original_commit = db_session.commit
+        db_session.commit = lambda: (_ for _ in ()).throw(RuntimeError("DB down"))
+        try:
+            resp = client.post(
+                "/api/activity/call-initiated",
+                json={"phone_number": "4155551234"},
+            )
+        finally:
+            db_session.commit = original_commit
+        assert resp.status_code == 500
+        assert resp.json()["error"] == "Failed to record phone contact"
 
 
 class TestLastCall:

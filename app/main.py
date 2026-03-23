@@ -11,7 +11,6 @@ from contextlib import asynccontextmanager
 
 from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
-from fastapi.templating import Jinja2Templates
 from loguru import logger
 from sqlalchemy.orm import Session
 from starlette.middleware.gzip import GZipMiddleware
@@ -300,7 +299,6 @@ if not os.environ.get("TESTING"):
 
 _static_dir = "app/static/dist" if os.path.isdir("app/static/dist") else "app/static"
 app.mount("/static", StaticFiles(directory=_static_dir), name="static")
-templates = Jinja2Templates(directory="app/templates")
 
 # Prometheus metrics
 from prometheus_fastapi_instrumentator import Instrumentator
