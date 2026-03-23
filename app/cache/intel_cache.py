@@ -9,9 +9,10 @@ unavailable (e.g., during development without Docker).
 
 import os
 from datetime import datetime, timedelta, timezone
+from typing import cast
 
 from loguru import logger
-from sqlalchemy import text
+from sqlalchemy import CursorResult, text
 
 from app.database import SessionLocal
 from app.utils import json_helpers as json
@@ -184,8 +185,11 @@ def flush_enrichment_cache() -> int:
     # PostgreSQL: delete all enrich:* entries
     try:
         with SessionLocal() as db:
-            result = db.execute(
-                text("DELETE FROM intel_cache WHERE cache_key LIKE 'enrich:%'"),
+            result = cast(
+                CursorResult,
+                db.execute(
+                    text("DELETE FROM intel_cache WHERE cache_key LIKE 'enrich:%'"),
+                ),
             )
             db.commit()
             count += result.rowcount
@@ -210,12 +214,15 @@ def cleanup_expired() -> int:
     try:
         with SessionLocal() as db:
             while True:
-                result = db.execute(
-                    text(
-                        "DELETE FROM intel_cache WHERE ctid IN "
-                        "(SELECT ctid FROM intel_cache WHERE expires_at < NOW() LIMIT :batch)"
+                result = cast(
+                    CursorResult,
+                    db.execute(
+                        text(
+                            "DELETE FROM intel_cache WHERE ctid IN "
+                            "(SELECT ctid FROM intel_cache WHERE expires_at < NOW() LIMIT :batch)"
+                        ),
+                        {"batch": BATCH_SIZE},
                     ),
-                    {"batch": BATCH_SIZE},
                 )
                 db.commit()
                 count += result.rowcount

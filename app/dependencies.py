@@ -66,7 +66,7 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
 
 def is_admin(user: User) -> bool:
     """Check if user has admin privileges (by role)."""
-    return user.role == UserRole.ADMIN
+    return bool(user.role == UserRole.ADMIN)
 
 
 def require_admin(request: Request, db: Session = Depends(get_db)) -> User:
