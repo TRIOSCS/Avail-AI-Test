@@ -285,6 +285,7 @@ async def _job_ai_tagging():
         db.close()
 
 
+@_traced_job
 async def _job_material_enrichment():
     """Every 2h — AI-enrich material cards missing descriptions/categories via Claude
     Haiku."""

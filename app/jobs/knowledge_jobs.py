@@ -13,6 +13,8 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
+from ..scheduler import _traced_job
+
 
 def register_knowledge_jobs(scheduler, settings):
     """Register knowledge ledger background jobs."""
@@ -42,6 +44,7 @@ def register_knowledge_jobs(scheduler, settings):
     )
 
 
+@_traced_job
 async def _job_refresh_insights():
     """Re-generate insights for recently active reqs, vendors, companies, MPNs, and
     pipeline."""
@@ -159,16 +162,19 @@ async def _job_refresh_insights():
         db.close()
 
 
+@_traced_job
 async def _job_deliver_question_batches():
     """Deliver batched question cards to buyers (Teams removed — no-op)."""
     logger.debug("Teams question batch delivery skipped (removed)")
 
 
+@_traced_job
 async def _job_send_knowledge_digests():
     """Send daily knowledge digests (Teams removed — no-op)."""
     logger.debug("Teams knowledge digest delivery skipped (removed)")
 
 
+@_traced_job
 async def _job_expire_stale():
     """Log count of expired entries for monitoring.
 
