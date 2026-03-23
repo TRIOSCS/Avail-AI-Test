@@ -9,6 +9,7 @@ Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
             scoring.py, search_service, email_service, template_env
 """
 
+import json
 from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -18,6 +19,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
+from ..constants import OfferStatus, RequisitionStatus
 from ..database import get_db
 from ..dependencies import require_fresh_token, require_user
 from ..models import User
@@ -25,11 +27,28 @@ from ..models.intelligence import ActivityLog
 from ..models.offers import Offer
 from ..models.sourcing import Requirement, Requisition, Sighting
 from ..models.vendor_sighting_summary import VendorSightingSummary
-from ..models.vendors import VendorCard
+from ..models.vendors import VendorCard, VendorContact
 from ..services.sighting_status import compute_vendor_statuses
 from ..template_env import templates
+from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["sightings"])
+
+# Sort key → (column for asc, column for desc)
+_SORT_COLUMNS = {
+    "priority": (Requirement.priority_score.asc().nullslast(), Requirement.priority_score.desc().nullslast()),
+    "mpn": (Requirement.primary_mpn.asc(), Requirement.primary_mpn.desc()),
+    "created": (Requirement.created_at.asc(), Requirement.created_at.desc()),
+    "status": (Requirement.sourcing_status.asc(), Requirement.sourcing_status.desc()),
+}
+
+
+def _oob_toast(msg: str, level: str = "success") -> HTMLResponse:
+    """Return an OOB swap div that triggers a toast notification via Alpine."""
+    safe_msg = msg.replace("'", "\\'").replace('"', "&quot;")
+    return HTMLResponse(
+        f'<div hx-swap-oob="true" id="toast-trigger" x-init="$store.toast.show(\'{safe_msg}\', \'{level}\')"></div>'
+    )
 
 
 @router.get("/v2/partials/sightings/workspace", response_class=HTMLResponse)
@@ -65,11 +84,10 @@ async def sightings_list(
     query = (
         db.query(Requirement)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
-        .filter(Requisition.status == "active")
+        .filter(Requisition.status == RequisitionStatus.ACTIVE)
         .options(joinedload(Requirement.requisition))
     )
 
-    # Filters
     if status:
         query = query.filter(Requirement.sourcing_status == status)
     if sales_person:
@@ -79,40 +97,34 @@ async def sightings_list(
     if q:
         query = query.filter(Requirement.primary_mpn.ilike(f"%{q}%") | Requisition.customer_name.ilike(f"%{q}%"))
 
-    # Count before pagination
     total = query.count()
 
-    # Sorting
-    sort_map = {
-        "priority": Requirement.priority_score.desc().nullslast(),
-        "mpn": Requirement.primary_mpn.asc(),
-        "created": Requirement.created_at.desc(),
-        "status": Requirement.sourcing_status.asc(),
-    }
-    order = sort_map.get(sort, Requirement.priority_score.desc().nullslast())
-    if dir == "asc" and sort in sort_map:
-        attr_map = {"priority": "priority_score", "mpn": "primary_mpn"}
-        order = getattr(Requirement, attr_map.get(sort, sort)).asc()
+    # Sorting — use pre-built column expressions to avoid getattr pitfalls
+    asc_col, desc_col = _SORT_COLUMNS.get(sort, _SORT_COLUMNS["priority"])
+    order = asc_col if dir == "asc" else desc_col
     query = query.order_by(order)
 
-    # Pagination
     offset = (page - 1) * limit
     requirements = query.offset(offset).limit(limit).all()
     total_pages = max(1, (total + limit - 1) // limit)
 
-    # Stat pill counts — lifecycle status counts across ALL active requirements
     stat_counts = dict(
         db.query(Requirement.sourcing_status, sqlfunc.count())
         .join(Requisition, Requirement.requisition_id == Requisition.id)
-        .filter(Requisition.status == "active")
+        .filter(Requisition.status == RequisitionStatus.ACTIVE)
         .group_by(Requirement.sourcing_status)
         .all()
     )
 
-    # Top vendor per requirement (best VendorSightingSummary score)
     top_vendors = {}
+    # Stale threshold uses naive datetime for SQLite compat
+    stale_threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=settings.sighting_stale_days)
+    stale_req_ids: set[int] = set()
+
     if requirements:
         req_ids = [r.id for r in requirements]
+
+        # Top vendor per requirement
         summaries = (
             db.query(
                 VendorSightingSummary.requirement_id,
@@ -120,29 +132,16 @@ async def sightings_list(
                 VendorSightingSummary.score,
             )
             .filter(VendorSightingSummary.requirement_id.in_(req_ids))
-            .order_by(
-                VendorSightingSummary.requirement_id,
-                VendorSightingSummary.score.desc(),
-            )
+            .order_by(VendorSightingSummary.requirement_id, VendorSightingSummary.score.desc())
             .all()
         )
         for s in summaries:
             if s.requirement_id not in top_vendors:
-                top_vendors[s.requirement_id] = {
-                    "vendor_name": s.vendor_name,
-                    "score": s.score,
-                }
+                top_vendors[s.requirement_id] = {"vendor_name": s.vendor_name, "score": s.score}
 
-    # Stale detection — last activity per requirement
-    stale_threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=settings.sighting_stale_days)
-    stale_req_ids: set[int] = set()
-    if requirements:
-        req_ids = [r.id for r in requirements]
+        # Stale detection
         last_activities = (
-            db.query(
-                ActivityLog.requirement_id,
-                sqlfunc.max(ActivityLog.created_at).label("last_at"),
-            )
+            db.query(ActivityLog.requirement_id, sqlfunc.max(ActivityLog.created_at).label("last_at"))
             .filter(ActivityLog.requirement_id.in_(req_ids))
             .group_by(ActivityLog.requirement_id)
             .all()
@@ -155,12 +154,9 @@ async def sightings_list(
             elif last.replace(tzinfo=None) < stale_threshold:
                 stale_req_ids.add(rid)
 
-    # Group-by logic
     groups = None
     if group_by in ("brand", "manufacturer"):
-        from collections import OrderedDict
-
-        groups = OrderedDict()
+        groups: dict[str, list] = {}
         for r in requirements:
             key = getattr(r, group_by, "") or "Unknown"
             groups.setdefault(key, []).append(r)
@@ -188,10 +184,7 @@ async def sightings_list(
     return templates.TemplateResponse("htmx/partials/sightings/table.html", ctx)
 
 
-@router.get(
-    "/v2/partials/sightings/{requirement_id}/detail",
-    response_class=HTMLResponse,
-)
+@router.get("/v2/partials/sightings/{requirement_id}/detail", response_class=HTMLResponse)
 async def sightings_detail(
     request: Request,
     requirement_id: int,
@@ -205,7 +198,6 @@ async def sightings_detail(
 
     requisition = db.get(Requisition, requirement.requisition_id)
 
-    # Vendor summaries for this requirement
     summaries = (
         db.query(VendorSightingSummary)
         .filter(VendorSightingSummary.requirement_id == requirement_id)
@@ -213,30 +205,27 @@ async def sightings_detail(
         .all()
     )
 
-    # Vendor statuses
     vendor_statuses = compute_vendor_statuses(requirement_id, requirement.requisition_id, db)
 
-    # Pending-review offers
     pending_offers = (
-        db.query(Offer)
-        .filter(
-            Offer.requirement_id == requirement_id,
-            Offer.status == "pending_review",
-        )
-        .all()
+        db.query(Offer).filter(Offer.requirement_id == requirement_id, Offer.status == OfferStatus.PENDING_REVIEW).all()
     )
 
-    # Vendor phone lookup
-    vendor_phones = {}
-    for s in summaries:
-        if s.vendor_phone:
-            vendor_phones[s.vendor_name] = s.vendor_phone
-            continue
-        card = db.query(VendorCard).filter(VendorCard.normalized_name == s.vendor_name.strip().lower()).first()
-        if card and card.phones:
-            vendor_phones[s.vendor_name] = card.phones[0] if isinstance(card.phones, list) else card.phones
+    # Batch vendor phone lookup — single query instead of N+1
+    vendor_names_needing_phone = [s.vendor_name for s in summaries if not s.vendor_phone]
+    vendor_phones = {s.vendor_name: s.vendor_phone for s in summaries if s.vendor_phone}
+    if vendor_names_needing_phone:
+        normalized_names = [normalize_vendor_name(vn) for vn in vendor_names_needing_phone]
+        cards = db.query(VendorCard).filter(VendorCard.normalized_name.in_(normalized_names)).all()
+        card_phones = {}
+        for card in cards:
+            if card.phones:
+                card_phones[card.normalized_name] = card.phones[0] if isinstance(card.phones, list) else card.phones
+        for vn in vendor_names_needing_phone:
+            phone = card_phones.get(normalize_vendor_name(vn))
+            if phone:
+                vendor_phones[vn] = phone
 
-    # Activity timeline
     activities = (
         db.query(ActivityLog)
         .filter(ActivityLog.requirement_id == requirement_id)
@@ -245,7 +234,6 @@ async def sightings_detail(
         .all()
     )
 
-    # All users for buyer assignment dropdown
     all_buyers = db.query(User).filter(User.is_active.is_(True)).all()
 
     ctx = {
@@ -263,10 +251,7 @@ async def sightings_detail(
     return templates.TemplateResponse("htmx/partials/sightings/detail.html", ctx)
 
 
-@router.post(
-    "/v2/partials/sightings/{requirement_id}/refresh",
-    response_class=HTMLResponse,
-)
+@router.post("/v2/partials/sightings/{requirement_id}/refresh", response_class=HTMLResponse)
 async def sightings_refresh(
     request: Request,
     requirement_id: int,
@@ -291,32 +276,33 @@ async def sightings_refresh(
     return await sightings_detail(request, requirement_id, db, user)
 
 
-@router.post(
-    "/v2/partials/sightings/batch-refresh",
-    response_class=HTMLResponse,
-)
+@router.post("/v2/partials/sightings/batch-refresh", response_class=HTMLResponse)
 async def sightings_batch_refresh(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
     """Refresh sightings for multiple requirements."""
-    import json
+    from ..search_service import search_requirement
 
     form = await request.form()
     req_ids_raw = form.get("requirement_ids", "[]")
     requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
 
+    # Batch-fetch all requirements in one query
+    reqs_by_id = {}
+    if requirement_ids:
+        reqs = db.query(Requirement).filter(Requirement.id.in_([int(rid) for rid in requirement_ids])).all()
+        reqs_by_id = {r.id: r for r in reqs}
+
     success = 0
     failed = 0
     for rid in requirement_ids:
-        req_obj = db.get(Requirement, int(rid))
+        req_obj = reqs_by_id.get(int(rid))
         if not req_obj:
             failed += 1
             continue
         try:
-            from ..search_service import search_requirement
-
             await search_requirement(req_obj, db)
             success += 1
         except Exception:
@@ -326,17 +312,10 @@ async def sightings_batch_refresh(
     msg = f"Refreshed {success}/{success + failed} requirements."
     if failed:
         msg += f" {failed} failed."
-    return HTMLResponse(
-        f'<div hx-swap-oob="true" id="toast-trigger" '
-        f"x-init=\"$store.toast.show('{msg}', '{'warning' if failed else 'success'}')\">"
-        f"</div>"
-    )
+    return _oob_toast(msg, "warning" if failed else "success")
 
 
-@router.post(
-    "/v2/partials/sightings/{requirement_id}/mark-unavailable",
-    response_class=HTMLResponse,
-)
+@router.post("/v2/partials/sightings/{requirement_id}/mark-unavailable", response_class=HTMLResponse)
 async def sightings_mark_unavailable(
     request: Request,
     requirement_id: int,
@@ -348,8 +327,6 @@ async def sightings_mark_unavailable(
     vendor_name = form.get("vendor_name", "")
     if not vendor_name:
         raise HTTPException(status_code=400, detail="vendor_name required")
-
-    from ..vendor_utils import normalize_vendor_name
 
     normalized = normalize_vendor_name(vendor_name)
     sightings = (
@@ -367,10 +344,7 @@ async def sightings_mark_unavailable(
     return await sightings_detail(request, requirement_id, db, user)
 
 
-@router.patch(
-    "/v2/partials/sightings/{requirement_id}/assign",
-    response_class=HTMLResponse,
-)
+@router.patch("/v2/partials/sightings/{requirement_id}/assign", response_class=HTMLResponse)
 async def sightings_assign_buyer(
     request: Request,
     requirement_id: int,
@@ -392,10 +366,7 @@ async def sightings_assign_buyer(
     return await sightings_detail(request, requirement_id, db, user)
 
 
-@router.get(
-    "/v2/partials/sightings/vendor-modal",
-    response_class=HTMLResponse,
-)
+@router.get("/v2/partials/sightings/vendor-modal", response_class=HTMLResponse)
 async def sightings_vendor_modal(
     request: Request,
     requirement_ids: str = "",
@@ -416,7 +387,6 @@ async def sightings_vendor_modal(
         for r in requirements
     ]
 
-    # Suggest vendors: those with sightings for these requirements, ranked by score
     suggested_vendors = (
         (
             db.query(VendorCard)
@@ -446,10 +416,7 @@ async def sightings_vendor_modal(
     return templates.TemplateResponse("htmx/partials/sightings/vendor_modal.html", ctx)
 
 
-@router.post(
-    "/v2/partials/sightings/send-inquiry",
-    response_class=HTMLResponse,
-)
+@router.post("/v2/partials/sightings/send-inquiry", response_class=HTMLResponse)
 async def sightings_send_inquiry(
     request: Request,
     db: Session = Depends(get_db),
@@ -473,21 +440,24 @@ async def sightings_send_inquiry(
 
     requirements = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all()
 
-    # Get requisition for context
-    req_ids = {r.requisition_id for r in requirements}
-    requisition_id = next(iter(req_ids)) if req_ids else None
+    requisition_ids = {r.requisition_id for r in requirements}
+    requisition_id = next(iter(requisition_ids)) if requisition_ids else None
 
-    # Build vendor_groups in the format send_batch_rfq expects:
-    # [{vendor_name, vendor_email, parts, subject, body}]
+    # Batch-fetch vendor cards + contacts in two queries instead of N+1
+    normalized_names = [normalize_vendor_name(vn) for vn in vendor_names]
+    cards = db.query(VendorCard).filter(VendorCard.normalized_name.in_(normalized_names)).all()
+    card_map = {c.normalized_name: c for c in cards}
+
+    card_ids = [c.id for c in cards]
+    contacts = db.query(VendorContact).filter(VendorContact.vendor_card_id.in_(card_ids)).all() if card_ids else []
+    contact_map = {c.vendor_card_id: c for c in contacts}
+
     vendor_groups = []
     for vn in vendor_names:
-        # Look up vendor email from VendorCard → VendorContact
-        card = db.query(VendorCard).filter(VendorCard.normalized_name == vn.strip().lower()).first()
+        card = card_map.get(normalize_vendor_name(vn))
         vendor_email = ""
         if card:
-            from ..models.vendors import VendorContact
-
-            contact = db.query(VendorContact).filter(VendorContact.vendor_card_id == card.id).first()
+            contact = contact_map.get(card.id)
             if contact and contact.email:
                 vendor_email = contact.email
 
@@ -515,7 +485,6 @@ async def sightings_send_inquiry(
         )
         sent_count = len(results)
 
-        # Log activity per requirement per vendor
         for r in requirements:
             for vn in vendor_names:
                 log = ActivityLog(
@@ -539,8 +508,4 @@ async def sightings_send_inquiry(
     else:
         msg = f"RFQ sent to {sent_count} vendor{'s' if sent_count != 1 else ''}."
 
-    return HTMLResponse(
-        f'<div hx-swap-oob="true" id="toast-trigger" '
-        f"x-init=\"$store.toast.show('{msg}', '{'warning' if failed_vendors else 'success'}')\">"
-        f"</div>"
-    )
+    return _oob_toast(msg, "warning" if failed_vendors else "success")
