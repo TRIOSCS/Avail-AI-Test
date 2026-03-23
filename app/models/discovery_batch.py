@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from .base import Base
@@ -37,5 +37,7 @@ class DiscoveryBatch(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
-        # batch_id unique index is created by unique=True on the column
+        Index("ix_discovery_batches_status", "status"),
+        Index("ix_discovery_batches_source_status", "source", "status"),
+        Index("ix_discovery_batches_started_at", "started_at"),
     )

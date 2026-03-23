@@ -9,7 +9,7 @@ Depends on: app.models.base.Base
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Integer, String, Text
+from sqlalchemy import Column, DateTime, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
 from .base import Base
@@ -30,3 +30,9 @@ class EnrichmentRun(Base):
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (
+        Index("ix_enrichment_runs_phase", "phase"),
+        Index("ix_enrichment_runs_status", "status"),
+        Index("ix_enrichment_runs_created_at", "created_at"),
+    )

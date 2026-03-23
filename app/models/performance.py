@@ -271,8 +271,8 @@ class BuyerVendorStats(Base):
 
     __tablename__ = "buyer_vendor_stats"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False)
 
     rfqs_sent = Column(Integer, default=0)
     responses_received = Column(Integer, default=0)

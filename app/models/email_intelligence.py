@@ -29,7 +29,7 @@ class EmailIntelligence(Base):
 
     id = Column(Integer, primary_key=True)
     message_id = Column(String(255), nullable=False, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     sender_email = Column(String(255), nullable=False)
     sender_domain = Column(String(255), nullable=False, index=True)
 

@@ -74,7 +74,7 @@ class MaterialCard(Base):
 class MaterialVendorHistory(Base):
     __tablename__ = "material_vendor_history"
     id = Column(Integer, primary_key=True)
-    material_card_id = Column(Integer, ForeignKey("material_cards.id"), nullable=False)
+    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="CASCADE"), nullable=False)
     vendor_name = Column(String(255), nullable=False)
     vendor_name_normalized = Column(String(255))
     source_type = Column(String(50))
@@ -163,6 +163,7 @@ class ProactiveMatch(Base):
         Index("ix_pm_material_card", "material_card_id"),
         Index("ix_pm_score", "match_score"),
         Index("ix_pm_status_sales", "status", "salesperson_id"),
+        Index("ix_pm_company", "company_id"),
     )
 
 
@@ -171,8 +172,8 @@ class ProactiveOffer(Base):
 
     __tablename__ = "proactive_offers"
     id = Column(Integer, primary_key=True)
-    customer_site_id = Column(Integer, ForeignKey("customer_sites.id"), nullable=False)
-    salesperson_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"), nullable=True)
+    salesperson_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     line_items = Column(JSON, nullable=False, default=list)
     recipient_contact_ids = Column(JSON, default=list)
     recipient_emails = Column(JSON, default=list)
@@ -207,7 +208,7 @@ class ProactiveThrottle(Base):
     mpn = Column(String(255), nullable=False)
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="CASCADE"), nullable=False)
     last_offered_at = Column(DateTime, nullable=False)
-    proactive_offer_id = Column(Integer, ForeignKey("proactive_offers.id"))
+    proactive_offer_id = Column(Integer, ForeignKey("proactive_offers.id", ondelete="SET NULL"))
 
     __table_args__ = (
         Index("ix_pt_mpn_site", "mpn", "customer_site_id", unique=True),
@@ -263,12 +264,12 @@ class ActivityLog(Base):
     channel = Column(String(20), nullable=False)
 
     # Polymorphic link — at most one set
-    company_id = Column(Integer, ForeignKey("companies.id"))
-    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"))
-    vendor_contact_id = Column(Integer, ForeignKey("vendor_contacts.id"))
-    requisition_id = Column(Integer, ForeignKey("requisitions.id"))
-    quote_id = Column(Integer, ForeignKey("quotes.id"))
-    customer_site_id = Column(Integer, ForeignKey("customer_sites.id"))
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
+    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"))
+    vendor_contact_id = Column(Integer, ForeignKey("vendor_contacts.id", ondelete="SET NULL"))
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"))
+    quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="SET NULL"))
+    customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"))
     site_contact_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="SET NULL"))
 
     buy_plan_id = Column(Integer, ForeignKey("buy_plans_v3.id"), nullable=True)

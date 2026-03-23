@@ -9,7 +9,7 @@ Depends on: ics_search_queue table
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
 
 from .base import Base
 
@@ -25,3 +25,5 @@ class IcsSearchLog(Base):
     sightings_created = Column(Integer)
     page_html_hash = Column(String(64))
     error = Column(Text)
+
+    __table_args__ = (Index("ix_ics_log_queue", "queue_id"),)

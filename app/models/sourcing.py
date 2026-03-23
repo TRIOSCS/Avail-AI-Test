@@ -33,6 +33,7 @@ class Requisition(Base):
         Index("ix_requisitions_customer_name", "customer_name"),
         Index("ix_requisitions_claimed_by", "claimed_by_id"),
         Index("ix_requisitions_urgency", "urgency"),
+        Index("ix_requisitions_company", "company_id"),
     )
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
@@ -158,7 +159,7 @@ class Sighting(Base):
     lead_time = Column(String(100))
 
     # v2.0: Excess list differentiation — links sighting to originating customer company
-    source_company_id = Column(Integer, ForeignKey("companies.id"))
+    source_company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
 
     # NC integration: when the source data was fetched
     source_searched_at = Column(DateTime(timezone=True))

@@ -161,7 +161,7 @@ class VendorContact(Base):
 class VendorReview(Base):
     __tablename__ = "vendor_reviews"
     id = Column(Integer, primary_key=True)
-    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"), nullable=False)
+    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
     rating = Column(Integer, nullable=False)
     comment = Column(String(500))

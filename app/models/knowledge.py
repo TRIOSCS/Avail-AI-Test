@@ -79,6 +79,7 @@ class KnowledgeEntry(Base):
         Index("ix_ke_vendor", "vendor_card_id"),
         Index("ix_ke_parent", "parent_id"),
         Index("ix_ke_expires", "expires_at", postgresql_where="expires_at IS NOT NULL"),
+        Index("ix_ke_created_by", "created_by"),
     )
 
 

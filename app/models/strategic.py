@@ -28,8 +28,8 @@ class StrategicVendor(Base):
     __tablename__ = "strategic_vendors"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False)
     claimed_at = Column(
         DateTime(timezone=True),
         nullable=False,

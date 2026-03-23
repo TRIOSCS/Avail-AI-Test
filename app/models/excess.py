@@ -122,6 +122,7 @@ class BidSolicitation(Base):
         Index("ix_bid_solicitations_line_item", "excess_line_item_id"),
         Index("ix_bid_solicitations_contact", "contact_id"),
         Index("ix_bid_solicitations_graph_msg", "graph_message_id"),
+        Index("ix_bidsol_status", "status"),
     )
 
 

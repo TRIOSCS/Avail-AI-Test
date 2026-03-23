@@ -15,7 +15,7 @@ class MaterialPriceSnapshot(Base):
     __table_args__ = (Index("ix_price_snap_card_time", "material_card_id", "recorded_at"),)
 
     id = Column(Integer, primary_key=True)
-    material_card_id = Column(Integer, ForeignKey("material_cards.id"), index=True, nullable=False)
+    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="CASCADE"), index=True, nullable=False)
     vendor_name = Column(String(200), nullable=False)
     price = Column(Float, nullable=False)
     currency = Column(String(3), default="USD")
