@@ -65,24 +65,7 @@
     {% endif %}
   </td>
   <td class="px-4 py-2.5 text-center" x-show="!editing">
-    <div class="flex items-center justify-center gap-2">
-      <button hx-post="/v2/partials/search/run?requirement_id={{ r.id }}&mpn={{ r.primary_mpn or '' }}"
-              hx-target="#search-results-{{ r.id }} td"
-              hx-swap="innerHTML"
-              hx-on::after-request="document.getElementById('search-results-{{ r.id }}').style.display='table-row'"
-              hx-indicator="#spinner-{{ r.id }}"
-              class="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium text-brand-500 hover:text-brand-700 hover:bg-brand-50 rounded transition-colors"
-              @click.stop>
-        <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
-        </svg>
-        Search
-        <span id="spinner-{{ r.id }}" class="htmx-indicator">
-          <svg class="inline h-3 w-3 animate-spin text-brand-500" viewBox="0 0 24 24" fill="none">
-            <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/>
-          </svg>
-        </span>
-      </button>
+    <div class="flex items-center justify-center">
       <button hx-delete="/v2/partials/requisitions/{{ req.id }}/requirements/{{ r.id }}"
               hx-target="#req-row-{{ r.id }}"
               hx-swap="delete"
@@ -195,8 +178,4 @@
       </div>
     </form>
   </td>
-</tr>
-{# Search results appear here — hidden until populated by hx-target #}
-<tr id="search-results-{{ r.id }}" class="bg-gray-50" style="display:none">
-  <td colspan="16" class="p-0"></td>
 </tr>
