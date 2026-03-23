@@ -1,10 +1,45 @@
 {# requisitions2/_filters.html — Filter bar for requisitions list.
    Called by: page.html (include)
-   Depends on: Alpine.js rq2 store
-   TODO: Implement full filter controls (status, owner, date range)
+   Depends on: Alpine.js rq2 store, users context from page route
 #}
-<div id="rq2-filters" class="flex items-center gap-2">
+<form id="rq2-filters" class="flex items-center gap-2 flex-wrap"
+      hx-get="/requisitions2/table" hx-target="#rq2-table"
+      hx-trigger="change, input changed delay:300ms from:#rq2-search"
+      hx-target-error="#rq2-error">
+
   <input id="rq2-search" type="text" name="q" placeholder="Search requisitions..."
-         class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 flex-1"
-         hx-get="/requisitions2/table" hx-target="#rq2-table" hx-trigger="input changed delay:300ms">
-</div>
+         class="px-3 py-1.5 text-sm border border-gray-300 rounded-lg focus:ring-2 focus:ring-brand-500 flex-1">
+
+  <select name="status" class="px-2 py-1.5 text-sm border border-gray-300 rounded-lg">
+    <option value="all">All statuses</option>
+    <option value="active">Active</option>
+    <option value="draft">Draft</option>
+    <option value="sourcing">Sourcing</option>
+    <option value="archived">Archived</option>
+    <option value="won">Won</option>
+    <option value="lost">Lost</option>
+  </select>
+
+  <select name="urgency" class="px-2 py-1.5 text-sm border border-gray-300 rounded-lg">
+    <option value="">All urgencies</option>
+    <option value="normal">Normal</option>
+    <option value="hot">Hot</option>
+    <option value="critical">Critical</option>
+  </select>
+
+  {% if user.role == 'buyer' %}
+  <select name="owner" class="px-2 py-1.5 text-sm border border-gray-300 rounded-lg">
+    <option value="">All owners</option>
+    {% for u in users %}
+    <option value="{{ u.id }}">{{ u.name or u.email }}</option>
+    {% endfor %}
+  </select>
+  {% endif %}
+
+  <input type="hidden" name="sort" value="">
+  <input type="hidden" name="order" value="">
+  <input type="hidden" name="page" value="1">
+  <input type="hidden" name="per_page" value="25">
+
+  <span class="htmx-indicator text-gray-400 text-xs">Loading...</span>
+</form>

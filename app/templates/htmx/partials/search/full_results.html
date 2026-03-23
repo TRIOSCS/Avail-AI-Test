@@ -96,7 +96,7 @@
     <h2 class="text-xs font-semibold uppercase tracking-wider text-brand-500 mb-2">Best Match</h2>
     {% set bm_url_map = {
       "requisition": "/v2/requisitions/" ~ bm.id,
-      "company": "/v2/companies/" ~ bm.id,
+      "company": "/v2/customers/" ~ bm.id,
       "vendor": "/v2/vendors/" ~ bm.id,
       "vendor_contact": "/v2/vendors/" ~ (bm.vendor_card_id|default(bm.id)),
       "part": "/v2/requisitions/" ~ (bm.requisition_id|default("")),
@@ -171,10 +171,10 @@
 
               {% elif group_key == "companies" %}
               <td class="px-4 py-2.5">
-                <a href="/v2/companies/{{ item.id }}"
+                <a href="/v2/customers/{{ item.id }}"
                    hx-get="/v2/partials/customers/{{ item.id }}"
                    hx-target="#main-content"
-                   hx-push-url="/v2/companies/{{ item.id }}"
+                   hx-push-url="/v2/customers/{{ item.id }}"
                    class="font-medium text-gray-900 hover:text-brand-600">{{ item.name }}</a>
               </td>
               <td class="px-4 py-2.5 text-gray-500">{{ item.domain|default("—") }}</td>
@@ -293,10 +293,10 @@
 
             {% elif group_key == "companies" %}
             <td class="px-4 py-2.5">
-              <a href="/v2/companies/{{ item.id }}"
+              <a href="/v2/customers/{{ item.id }}"
                  hx-get="/v2/partials/customers/{{ item.id }}"
                  hx-target="#main-content"
-                 hx-push-url="/v2/companies/{{ item.id }}"
+                 hx-push-url="/v2/customers/{{ item.id }}"
                  class="font-medium text-gray-900 hover:text-brand-600">{{ item.name }}</a>
             </td>
             <td class="px-4 py-2.5 text-gray-500">{{ item.domain|default("—") }}</td>

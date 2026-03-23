@@ -16,7 +16,7 @@ NAV_ITEMS = [
     ("requisitions", "/v2/requisitions", "/v2/partials/parts/workspace"),
     ("search", "/v2/search", "/v2/partials/search"),
     ("quotes", "/v2/quotes", "/v2/partials/quotes"),
-    ("companies", "/v2/companies", "/v2/partials/companies"),
+    ("customers", "/v2/customers", "/v2/partials/customers"),
     ("vendors", "/v2/vendors", "/v2/partials/vendors"),
     ("prospecting", "/v2/prospecting", "/v2/partials/prospecting"),
     ("materials", "/v2/materials", "/v2/partials/materials/workspace"),

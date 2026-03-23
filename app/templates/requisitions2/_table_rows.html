@@ -13,6 +13,7 @@
     hx-swap="innerHTML"
     @click="selectReq({{ req.id }})"
     :class="selectedReqId === {{ req.id }} ? 'bg-brand-50 border-l-2 border-brand-500' : ''"
+    data-status="{{ req.status }}"
     class="rq2-row group hover:bg-gray-50 cursor-pointer transition-colors
            {{ 'border-l-2 border-rose-400' if req.urgency == 'critical' else '' }}">
   <td class="px-3 py-2" @click.stop>

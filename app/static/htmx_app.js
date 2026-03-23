@@ -172,7 +172,8 @@ function _viewFromPath(path) {
     if (/\/proactive(\/|$)/.test(path)) return 'proactive';
     if (/\/settings(\/|$)/.test(path)) return 'settings';
     if (/\/vendors(\/|$)/.test(path)) return 'vendors';
-    if (/\/companies(\/|$)/.test(path)) return 'companies';
+    if (/\/customers(\/|$)/.test(path)) return 'customers';
+    if (/\/companies(\/|$)/.test(path)) return 'customers';  // legacy URL compat
     if (/\/search(\/|$)/.test(path)) return 'search';
     if (/\/excess(\/|$)/.test(path)) return 'excess';
     if (/\/materials(\/|$)/.test(path)) return 'materials';
@@ -505,7 +506,7 @@ Alpine.data('materialsFilter', () => ({
  * The container must include a <div data-lookup-result></div> for lookup results.
  *
  * Called by: requisitions/unified_modal.html
- * Depends on: /api/companies/typeahead, /v2/partials/companies/lookup
+ * Depends on: /api/companies/typeahead, /v2/partials/customers/lookup
  */
 Alpine.data('customerPicker', () => ({
     companies: [],
@@ -563,7 +564,7 @@ Alpine.data('customerPicker', () => ({
             const formData = new FormData();
             formData.append('company_name', this.newName);
             formData.append('location', this.newLocation);
-            const resp = await fetch('/v2/partials/companies/lookup', { method: 'POST', body: formData });
+            const resp = await fetch('/v2/partials/customers/lookup', { method: 'POST', body: formData });
             // Server HTML is trusted (same-origin, auth-protected endpoint)
             resultEl.replaceChildren();
             resultEl.insertAdjacentHTML('afterbegin', await resp.text());

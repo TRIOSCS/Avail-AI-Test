@@ -799,7 +799,7 @@ async def requisition_import_save(
     """)
 
 
-@router.post("/v2/partials/companies/lookup", response_class=HTMLResponse)
+@router.post("/v2/partials/customers/lookup", response_class=HTMLResponse)
 async def company_lookup(
     request: Request,
     company_name: str = Form(...),
@@ -879,7 +879,7 @@ async def company_lookup(
             fd.append('zip','{zip_val}');
             fd.append('country','{country_val}');
             try{{
-              var r=await fetch('/v2/partials/companies/quick-create',{{method:'POST',body:fd}});
+              var r=await fetch('/v2/partials/customers/quick-create',{{method:'POST',body:fd}});
               var html=await r.text();
               var el=btn.closest('.space-y-1');
               el.replaceChildren();
@@ -899,7 +899,7 @@ async def company_lookup(
     return HTMLResponse(html_out)
 
 
-@router.post("/v2/partials/companies/quick-create", response_class=HTMLResponse)
+@router.post("/v2/partials/customers/quick-create", response_class=HTMLResponse)
 async def company_quick_create(
     request: Request,
     company_name: str = Form(...),

@@ -137,7 +137,7 @@ def test_company_lookup_form_accessible(client):
         return_value=None,
     ):
         resp = client.post(
-            "/v2/partials/companies/lookup",
+            "/v2/partials/customers/lookup",
             data={"company_name": "Test Corp", "location": "Dallas, TX"},
         )
         # Claude returns None in test → fallback message
@@ -147,7 +147,7 @@ def test_company_lookup_form_accessible(client):
 def test_company_quick_create(client, db_session):
     """Quick-create should create a company and site."""
     resp = client.post(
-        "/v2/partials/companies/quick-create",
+        "/v2/partials/customers/quick-create",
         data={
             "company_name": "Test Import Corp",
             "website": "testimportcorp.com",
