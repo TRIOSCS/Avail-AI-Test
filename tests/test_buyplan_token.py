@@ -52,6 +52,10 @@ def pending_plan(db_session: Session, test_user: User, test_quote: Quote) -> Buy
         total_cost=1000.00,
         total_revenue=1500.00,
         total_margin_pct=33.33,
+        ai_summary="Recommend vendor X for best margin",
+        ai_flags=["high_risk", "new_vendor"],
+        salesperson_notes="Customer wants fast delivery",
+        case_report="Full case analysis here",
         submitted_by_id=test_user.id,
         submitted_at=datetime.now(timezone.utc),
         approval_token="test-token-abc123",
@@ -116,6 +120,45 @@ class TestGetPlanByToken:
         data = resp.json()
         assert data["id"] == pending_plan.id
         assert data["status"] == "pending_approval"
+
+    def test_token_response_excludes_sensitive_fields(self, noauth_client: TestClient, pending_plan: BuyPlan):
+        """Sensitive commercial data must NOT be exposed via the public token
+        endpoint."""
+        resp = noauth_client.get(f"/api/buy-plans/token/{pending_plan.approval_token}")
+        assert resp.status_code == 200
+        data = resp.json()
+        # These fields must never appear in the token response
+        sensitive_fields = [
+            "ai_summary",
+            "ai_flags",
+            "total_margin_pct",
+            "case_report",
+            "salesperson_notes",
+            "lines",
+            "line_items",
+        ]
+        for field in sensitive_fields:
+            assert field not in data, f"Sensitive field '{field}' must not be in token response"
+
+    def test_token_response_includes_approval_fields(self, noauth_client: TestClient, pending_plan: BuyPlan):
+        """Token response must include only the fields an approver needs."""
+        resp = noauth_client.get(f"/api/buy-plans/token/{pending_plan.approval_token}")
+        assert resp.status_code == 200
+        data = resp.json()
+        expected_fields = [
+            "id",
+            "status",
+            "total_cost",
+            "total_revenue",
+            "line_count",
+            "vendor_names",
+            "created_at",
+            "requested_by_name",
+        ]
+        for field in expected_fields:
+            assert field in data, f"Expected field '{field}' missing from token response"
+        assert data["total_cost"] == 1000.00
+        assert data["total_revenue"] == 1500.00
 
     def test_invalid_token_404(self, noauth_client: TestClient, pending_plan: BuyPlan):
         resp = noauth_client.get("/api/buy-plans/token/nonexistent-token")

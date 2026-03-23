@@ -331,6 +331,31 @@ async def update_verification_group(
 # ── Token-based Approval (public, no auth) ──────────────────────────
 
 
+def _to_approval_dict(plan: BuyPlan) -> dict:
+    """Return only the minimum fields an approver needs to make a decision.
+
+    Deliberately omits sensitive commercial data (ai_summary, ai_flags,
+    total_margin_pct, case_report, salesperson_notes, full line items) so that a leaked
+    token URL does not expose financial details.
+    """
+    lines = plan.lines or []
+    vendor_names = sorted({ln.offer.vendor_name for ln in lines if ln.offer and ln.offer.vendor_name})
+
+    requested_by_name = plan.submitted_by.name if plan.submitted_by else None
+    v1_status = _map_v3_status_to_v1(plan)
+
+    return {
+        "id": plan.id,
+        "status": v1_status,
+        "total_cost": float(plan.total_cost) if plan.total_cost else None,
+        "total_revenue": float(plan.total_revenue) if plan.total_revenue else None,
+        "line_count": len(lines),
+        "vendor_names": vendor_names,
+        "created_at": str(plan.created_at) if plan.created_at else None,
+        "requested_by_name": requested_by_name,
+    }
+
+
 def _token_expired(expires_at) -> bool:
     """Timezone-safe token expiration check (SQLite returns naive datetimes)."""
     now = datetime.now(timezone.utc)
@@ -351,7 +376,7 @@ async def get_plan_by_token(token: str, request: Request, db: Session = Depends(
         raise HTTPException(404, "Invalid token")
     if plan.token_expires_at and _token_expired(plan.token_expires_at):
         raise HTTPException(410, "Token expired")
-    return _v3_to_v1_dict(plan)
+    return _to_approval_dict(plan)
 
 
 @router.put("/api/buy-plans/token/{token}/approve")
