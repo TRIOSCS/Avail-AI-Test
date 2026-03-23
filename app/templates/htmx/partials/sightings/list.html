@@ -1,0 +1,77 @@
+{# Sightings page — split-panel layout for buyer sourcing command view.
+   Left: requirements table. Right: requirement detail with vendor breakdown.
+   Called by: GET /v2/sightings → v2_page() → base_page.html lazy load
+   Depends on: sightings/table.html, sightings/detail.html, Alpine.js, HTMX
+#}
+
+{% include "htmx/partials/shared/_macros.html" %}
+
+<div class="h-[calc(100vh-90px)] flex"
+     x-data="{
+       splitRatio: parseFloat(localStorage.getItem('sightings-split') || '0.50'),
+       dragging: false,
+       selectedReqId: null,
+       startDrag(e) {
+         this.dragging = true;
+         e.preventDefault();
+       },
+       onDrag(e) {
+         if (!this.dragging) return;
+         const container = this.$refs.container;
+         const rect = container.getBoundingClientRect();
+         const ratio = (e.clientX - rect.left) / rect.width;
+         this.splitRatio = Math.max(0.25, Math.min(0.75, ratio));
+       },
+       stopDrag() {
+         if (this.dragging) {
+           this.dragging = false;
+           localStorage.setItem('sightings-split', this.splitRatio.toFixed(3));
+         }
+       },
+       selectReq(id) {
+         this.selectedReqId = id;
+       }
+     }"
+     x-ref="container"
+     @mousemove.window="onDrag($event)"
+     @mouseup.window="stopDrag()">
+
+  {# ── Left Panel: Requirements Table ──────────────────────── #}
+  <div class="flex flex-col min-w-0 border-r border-gray-200"
+       :style="'width: ' + (splitRatio * 100) + '%'">
+    <div id="sightings-table" class="flex-1 flex flex-col min-h-0"
+         hx-get="/v2/partials/sightings"
+         hx-trigger="load"
+         hx-target="#sightings-table"
+         hx-swap="innerHTML">
+      <div class="p-8 text-center text-gray-400">Loading requirements...</div>
+    </div>
+  </div>
+
+  {# ── Drag Handle ──────────────────────────────────────────── #}
+  <div class="w-[3px] cursor-col-resize bg-gray-200 hover:bg-brand-400 transition-colors flex-shrink-0 relative group"
+       :class="dragging ? 'bg-brand-500' : ''"
+       @mousedown="startDrag($event)">
+    <div class="absolute inset-y-0 -left-2 -right-2"></div>
+    <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div class="w-0.5 h-0.5 rounded-full bg-white"></div>
+      <div class="w-0.5 h-0.5 rounded-full bg-white"></div>
+      <div class="w-0.5 h-0.5 rounded-full bg-white"></div>
+    </div>
+  </div>
+
+  {# ── Right Panel: Requirement Detail ─────────────────────── #}
+  <div class="flex-1 min-w-0 flex flex-col bg-white overflow-y-auto">
+    {# Empty state #}
+    <div x-show="!selectedReqId" class="flex flex-col items-center justify-center h-full text-gray-400">
+      <svg class="h-12 w-12 mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+        <path stroke-linecap="round" stroke-linejoin="round" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+      </svg>
+      <p class="text-sm font-medium text-gray-500">Select a requirement</p>
+      <p class="text-xs text-gray-400 mt-1">Click a row to view vendors, offers & activity</p>
+    </div>
+    {# Detail content — loaded via HTMX when row selected #}
+    <div x-show="selectedReqId" x-cloak id="sightings-detail" class="p-3"></div>
+  </div>
+</div>

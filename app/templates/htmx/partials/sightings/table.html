@@ -1,0 +1,188 @@
+{# Sightings table — requirements list with stat pills, filters, group-by.
+   Called by: GET /v2/partials/sightings (sightings router)
+   Depends on: _macros.html, pagination.html
+   Context: requirements, total, page, total_pages, stat_counts, top_vendors,
+            stale_req_ids, groups, status, q, sort, dir, group_by, assigned
+#}
+
+{% import "htmx/partials/shared/_macros.html" as m %}
+
+{# ── Stat Pills ──────────────────────────────────────────────── #}
+<div class="px-3 pt-3 pb-2 border-b border-gray-100 flex items-center gap-2 flex-wrap">
+  {% set pills = [
+    ('', 'All', total),
+    ('open', 'New', stat_counts.get('open', 0)),
+    ('sourcing', 'Contacted', stat_counts.get('sourcing', 0)),
+    ('offered', 'Responded', stat_counts.get('offered', 0)),
+    ('quoted', 'Offer In', stat_counts.get('quoted', 0) + stat_counts.get('won', 0)),
+  ] %}
+  {% for val, label, count in pills %}
+  <button hx-get="/v2/partials/sightings?status={{ val }}&q={{ q }}&group_by={{ group_by }}&assigned={{ assigned }}"
+          hx-target="#sightings-table"
+          hx-swap="innerHTML"
+          class="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium transition-colors
+                 {{ 'bg-brand-100 text-brand-700' if status == val else 'bg-gray-100 text-gray-600 hover:bg-gray-200' }}">
+    {{ label }}
+    <span class="text-[10px] {{ 'text-brand-500' if status == val else 'text-gray-400' }}">{{ count }}</span>
+  </button>
+  {% endfor %}
+</div>
+
+{# ── Filter Bar ──────────────────────────────────────────────── #}
+<div class="px-3 py-2 border-b border-gray-100 flex items-center gap-2 flex-wrap">
+  <input type="text" name="q" value="{{ q }}"
+         placeholder="Search MPN or customer..."
+         hx-get="/v2/partials/sightings"
+         hx-trigger="keyup changed delay:300ms"
+         hx-target="#sightings-table"
+         hx-include="closest div"
+         class="flex-1 min-w-[150px] rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-200 outline-none">
+  <select name="group_by"
+          hx-get="/v2/partials/sightings"
+          hx-trigger="change"
+          hx-target="#sightings-table"
+          hx-include="closest div"
+          class="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600">
+    <option value="" {{ 'selected' if not group_by }}>Flat</option>
+    <option value="brand" {{ 'selected' if group_by == 'brand' }}>By Brand</option>
+    <option value="manufacturer" {{ 'selected' if group_by == 'manufacturer' }}>By Manufacturer</option>
+  </select>
+  <button hx-get="/v2/partials/sightings?assigned={{ 'mine' if assigned != 'mine' else '' }}&status={{ status }}&q={{ q }}&group_by={{ group_by }}"
+          hx-target="#sightings-table"
+          hx-swap="innerHTML"
+          class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg text-xs font-medium border transition-colors
+                 {{ 'bg-brand-50 border-brand-300 text-brand-700' if assigned == 'mine' else 'border-gray-200 text-gray-600 hover:bg-gray-50' }}">
+    My Items
+  </button>
+  <input type="hidden" name="status" value="{{ status }}">
+  <input type="hidden" name="assigned" value="{{ assigned }}">
+</div>
+
+{# ── Table ───────────────────────────────────────────────────── #}
+<div class="flex-1 overflow-y-auto overflow-x-auto"
+     x-data="{ selectedIds: new Set(), toggleAll: false }">
+
+  {% if not requirements %}
+  <div class="p-8 text-center text-gray-400">
+    <p class="text-sm">No requirements match your filters</p>
+  </div>
+  {% else %}
+
+  <table class="compact-table w-full">
+    <thead>
+      <tr>
+        <th class="px-2 py-2 w-8">
+          <input type="checkbox" x-model="toggleAll"
+                 @change="document.querySelectorAll('.req-checkbox').forEach(cb => { cb.checked = toggleAll; if (toggleAll) selectedIds.add(parseInt(cb.value)); else selectedIds.clear(); })"
+                 class="rounded border-gray-300">
+        </th>
+        <th class="px-3 py-2 text-left">MPN</th>
+        <th class="px-3 py-2 text-left">Qty</th>
+        <th class="px-3 py-2 text-left">Customer</th>
+        <th class="px-3 py-2 text-left">Sales</th>
+        <th class="px-3 py-2 text-left">Top Vendor</th>
+        <th class="px-3 py-2 text-left">Status</th>
+        <th class="px-3 py-2 text-center">Priority</th>
+        <th class="px-3 py-2 text-center">Stale</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% macro render_row(r) %}
+      <tr class="group cursor-pointer"
+          :class="selectedReqId == {{ r.id }} ? 'row-selected' : ''"
+          @click="selectReq({{ r.id }}); htmx.ajax('GET', '/v2/partials/sightings/{{ r.id }}/detail', {target: '#sightings-detail', swap: 'innerHTML'})"
+          data-req-id="{{ r.id }}">
+        <td class="px-2 py-2" @click.stop>
+          <input type="checkbox" class="req-checkbox rounded border-gray-300" value="{{ r.id }}"
+                 @change="$event.target.checked ? selectedIds.add({{ r.id }}) : selectedIds.delete({{ r.id }})">
+        </td>
+        <td class="px-3 py-2 font-mono font-medium text-gray-900">{{ r.primary_mpn }}</td>
+        <td class="px-3 py-2">{{ r.target_qty or '—' }}</td>
+        <td class="px-3 py-2 text-gray-600" style="font-family: 'DM Sans', sans-serif;">
+          {{ r.requisition.customer_name or '—' }}
+        </td>
+        <td class="px-3 py-2 text-gray-500 text-xs" style="font-family: 'DM Sans', sans-serif;">
+          {{ r.requisition.creator.name if r.requisition.creator else '—' }}
+        </td>
+        <td class="px-3 py-2 text-gray-600" style="font-family: 'DM Sans', sans-serif;">
+          {% if top_vendors.get(r.id) %}
+            {{ top_vendors[r.id].vendor_name }}
+            <span class="ml-1 text-[10px] text-gray-400">{{ top_vendors[r.id].score|round|int }}%</span>
+          {% else %}
+            <span class="text-gray-400">—</span>
+          {% endif %}
+        </td>
+        <td class="px-3 py-2">
+          {% set status_styles = {
+            'open': 'bg-gray-100 text-gray-600',
+            'sourcing': 'bg-blue-50 text-blue-700',
+            'offered': 'bg-amber-50 text-amber-700',
+            'quoted': 'bg-emerald-50 text-emerald-700',
+            'won': 'bg-green-50 text-green-700',
+            'lost': 'bg-gray-100 text-gray-500',
+          } %}
+          <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_styles.get(r.sourcing_status, 'bg-gray-100 text-gray-600') }}">
+            {{ r.sourcing_status|capitalize }}
+          </span>
+        </td>
+        <td class="px-3 py-2 text-center">
+          {% if r.priority_score %}
+            {% set pri = r.priority_score %}
+            {% set pri_color = 'text-rose-600' if pri >= 70 else ('text-amber-600' if pri >= 40 else 'text-gray-400') %}
+            {% set pri_label = 'High' if pri >= 70 else ('Med' if pri >= 40 else 'Low') %}
+            <span class="text-[10px] font-medium {{ pri_color }}">{{ pri_label }}</span>
+          {% endif %}
+        </td>
+        <td class="px-3 py-2 text-center">
+          {% if r.id in stale_req_ids %}
+          <span class="inline-block w-2 h-2 rounded-full bg-amber-400" title="No activity in {{ sighting_stale_days|default(3) }}+ days"></span>
+          {% endif %}
+        </td>
+      </tr>
+      {% endmacro %}
+
+      {% if groups %}
+        {% for group_name, group_reqs in groups.items() %}
+        <tr class="bg-gray-50 border-b border-gray-200">
+          <td colspan="9" class="px-3 py-2">
+            <span class="font-medium text-gray-700 text-sm">{{ group_name }}</span>
+            <span class="ml-2 text-xs text-gray-400">{{ group_reqs|length }} part{{ 's' if group_reqs|length != 1 else '' }}</span>
+          </td>
+        </tr>
+        {% for r in group_reqs %}
+          {{ render_row(r) }}
+        {% endfor %}
+        {% endfor %}
+      {% else %}
+        {% for r in requirements %}
+          {{ render_row(r) }}
+        {% endfor %}
+      {% endif %}
+    </tbody>
+  </table>
+
+  {# ── Pagination ──────────────────────────────────────────── #}
+  {% if total_pages > 1 %}
+  <div class="px-3 py-2 border-t border-gray-100">
+    {% set base_url = "/v2/partials/sightings" %}
+    {% include "htmx/partials/shared/pagination.html" %}
+  </div>
+  {% endif %}
+
+  {# ── Action Bar (appears on multi-select) ────────────────── #}
+  <div x-show="selectedIds.size > 0" x-cloak
+       class="sticky bottom-0 bg-white border-t border-brand-200 px-3 py-2 flex items-center gap-3 shadow-lg">
+    <span class="text-xs font-medium text-gray-600" x-text="selectedIds.size + ' selected'"></span>
+    <button @click="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids=' + Array.from(selectedIds).join(',')})"
+            class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-brand-500 text-white text-xs font-medium hover:bg-brand-600 transition-colors">
+      Send to Vendors
+    </button>
+    <button class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
+            hx-post="/v2/partials/sightings/batch-refresh"
+            hx-vals='js:{requirement_ids: JSON.stringify(Array.from(selectedIds))}'
+            hx-target="#sightings-table">
+      Refresh Sightings
+    </button>
+  </div>
+  {% endif %}
+</div>

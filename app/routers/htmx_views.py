@@ -186,6 +186,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         current_view = "customers"
     elif "/search" in path:
         current_view = "search"
+    elif "/sightings" in path:
+        current_view = "sightings"
     elif "/requisitions" in path:
         current_view = "requisitions"
     else:
@@ -197,6 +199,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         partial_url = "/v2/partials/parts/workspace"
     elif current_view == "trouble-tickets":
         partial_url = "/v2/partials/trouble-tickets/workspace"
+    elif current_view == "sightings":
+        partial_url = "/v2/partials/sightings/workspace"
     else:
         partial_url = f"/v2/partials/{current_view}"
     # Pass path params for detail views

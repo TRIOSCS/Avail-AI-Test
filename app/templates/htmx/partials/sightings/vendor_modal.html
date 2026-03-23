@@ -1,0 +1,88 @@
+{# Vendor selection + email compose modal for batch RFQ.
+   Called by: "Send to Vendors" action bar button via @open-modal dispatch
+   Depends on: modal.html pattern, HTMX, Alpine.js
+   Context: suggested_vendors, requirement_ids, parts
+#}
+
+<div class="p-4" x-data="{
+  selectedVendors: new Set({{ suggested_vendors|map(attribute='normalized_name')|list|tojson }}),
+  emailBody: '',
+  cleaning: false,
+  toggleVendor(name) {
+    if (this.selectedVendors.has(name)) this.selectedVendors.delete(name);
+    else this.selectedVendors.add(name);
+  }
+}">
+  <h3 class="text-lg font-semibold text-gray-900 mb-3">Send Inquiry</h3>
+
+  {# Vendor list #}
+  <div class="mb-4">
+    <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-2">
+      Select Vendors ({{ suggested_vendors|length }} suggested)
+    </label>
+    <div class="max-h-40 overflow-y-auto border border-gray-200 rounded-lg divide-y divide-gray-100">
+      {% for v in suggested_vendors %}
+      <label class="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer">
+        <input type="checkbox"
+               :checked="selectedVendors.has('{{ v.normalized_name }}')"
+               @change="toggleVendor('{{ v.normalized_name }}')"
+               class="rounded border-gray-300">
+        <div class="flex-1 min-w-0">
+          <span class="text-sm font-medium text-gray-700">{{ v.display_name }}</span>
+          {% if v.response_rate %}
+          <span class="ml-2 text-[10px] text-gray-400">{{ (v.response_rate * 100)|round|int }}% response</span>
+          {% endif %}
+        </div>
+        {% if v.engagement_score %}
+        <span class="text-[10px] text-gray-400">Score: {{ v.engagement_score|round|int }}</span>
+        {% endif %}
+      </label>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# Parts reference (read-only) #}
+  <div class="mb-4">
+    <label class="block text-xs font-medium text-gray-500 uppercase tracking-wider mb-1">Parts</label>
+    <div class="text-xs text-gray-500 bg-gray-50 rounded-lg p-2 max-h-24 overflow-y-auto font-mono">
+      {% for p in parts %}
+      <div>{{ p.mpn }} — {{ p.qty }} pcs{{ ' @ $%.2f'|format(p.target_price) if p.target_price else '' }}</div>
+      {% endfor %}
+    </div>
+  </div>
+
+  {# Email compose #}
+  <div class="mb-4">
+    <div class="flex items-center justify-between mb-1">
+      <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Message</label>
+      <button @click="cleaning = true; fetch('/api/ai/clean-rfq-draft', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({draft: emailBody, parts: {{ parts|tojson }}})}).then(r => r.json()).then(d => { emailBody = d.cleaned || emailBody; cleaning = false; }).catch(() => cleaning = false)"
+              :disabled="!emailBody || cleaning"
+              class="text-[10px] text-brand-500 hover:text-brand-700 disabled:text-gray-300">
+        <span x-show="!cleaning">Clean Up</span>
+        <span x-show="cleaning">Cleaning...</span>
+      </button>
+    </div>
+    <textarea x-model="emailBody" rows="5" placeholder="Write your inquiry..."
+              class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-200 outline-none"></textarea>
+  </div>
+
+  {# Actions #}
+  <div class="flex justify-end gap-2">
+    <button @click="$dispatch('close-modal')"
+            class="px-4 py-2 text-sm font-medium text-gray-600 hover:bg-gray-50 rounded-lg transition-colors">
+      Cancel
+    </button>
+    <button @click="
+      const form = new FormData();
+      {{ requirement_ids|tojson }}.forEach(id => form.append('requirement_ids', id));
+      selectedVendors.forEach(v => form.append('vendor_names', v));
+      form.append('email_body', emailBody);
+      htmx.ajax('POST', '/v2/partials/sightings/send-inquiry', {values: Object.fromEntries(form), target: '#sightings-table'});
+      $dispatch('close-modal');
+    "
+            :disabled="selectedVendors.size === 0 || !emailBody"
+            class="px-4 py-2 text-sm font-medium text-white bg-brand-500 hover:bg-brand-600 rounded-lg transition-colors disabled:bg-gray-300">
+      Send to <span x-text="selectedVendors.size"></span> Vendor<span x-show="selectedVendors.size !== 1">s</span>
+    </button>
+  </div>
+</div>

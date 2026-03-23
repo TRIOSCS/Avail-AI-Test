@@ -526,6 +526,7 @@ from .routers.quote_builder import router as quote_builder_router
 from .routers.requisitions import router as reqs_router
 from .routers.requisitions2 import router as requisitions2_router
 from .routers.rfq import router as rfq_router
+from .routers.sightings import router as sightings_router
 from .routers.sources import router as sources_router
 from .routers.strategic import router as strategic_router
 from .routers.tagging_admin import router as tagging_admin_router
@@ -563,6 +564,7 @@ app.include_router(prospect_suggested_router)
 app.include_router(reqs_router)
 app.include_router(requisitions2_router)
 app.include_router(rfq_router)
+app.include_router(sightings_router)
 app.include_router(sources_router)
 app.include_router(strategic_router)
 app.include_router(tags_router)

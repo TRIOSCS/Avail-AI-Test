@@ -167,6 +167,7 @@ class Settings(BaseSettings):
     # --- Buy Plan V3 ---
     buyplan_auto_approve_threshold: float = 5000
     buyplan_stale_offer_days: int = 5
+    sighting_stale_days: int = 3  # Days before a requirement is flagged stale
     buyplan_min_margin_pct: float = 10
     buyplan_nudge_buyer_hours: int = 4
     buyplan_escalate_manager_hours: int = 8

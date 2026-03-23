@@ -234,6 +234,7 @@ async def draft_rfq(
     parts: list[dict],
     vendor_history: dict | None = None,
     user_name: str = "",
+    user_draft: str | None = None,
 ) -> str | None:
     """Generate personalized RFQ email body.
 
@@ -242,10 +243,28 @@ async def draft_rfq(
         parts: List of {mpn, qty, target_price} dicts
         vendor_history: From AVAIL DB — past offers, response rate, last interaction
         user_name: Salesperson name
+        user_draft: Optional buyer-written draft to clean up instead of generating from scratch
 
     Returns:
         Email body string, or None on failure
     """
+    # If buyer provided their own draft, clean it up instead of generating from scratch
+    if user_draft:
+        parts_str = "\n".join(
+            f"- {p.get('mpn', '?')}: {p.get('qty', '?')} pcs"
+            + (f" (target: ${p['target_price']})" if p.get("target_price") else "")
+            for p in parts[:20]
+        )
+        cleanup_prompt = (
+            f"Clean up this buyer's RFQ email draft. Fix grammar/formatting, "
+            f"ensure all parts are referenced, preserve the buyer's tone.\n\n"
+            f"Parts:\n{parts_str}\n\n"
+            f"Buyer's draft:\n{user_draft}"
+        )
+        from app.utils.llm_router import routed_text as _routed_text
+
+        return await _routed_text(cleanup_prompt, model_tier="fast")
+
     history_context = ""
     if vendor_history:
         history_context = (
