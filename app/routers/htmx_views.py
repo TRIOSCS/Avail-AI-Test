@@ -836,6 +836,7 @@ async def customer_lookup(
         )
 
     # Render an approval card — escape all AI-provided strings for XSS safety
+    # html_mod.escape() for HTML display context
     name = html_mod.escape(result.get("company_name", company_name))
     website = html_mod.escape(result.get("website", ""))
     phone = html_mod.escape(result.get("phone", ""))
@@ -851,12 +852,17 @@ async def customer_lookup(
     ]
     address_display = html_mod.escape(", ".join(addr_parts))
 
-    # Hidden field values also escaped
-    addr1_val = html_mod.escape(result.get("address_line1", ""))
-    city_val = html_mod.escape(result.get("city", ""))
-    state_val = html_mod.escape(result.get("state", ""))
-    zip_val = html_mod.escape(result.get("zip", ""))
-    country_val = html_mod.escape(result.get("country", "US"))
+    # json.dumps() for values embedded in JavaScript — handles quotes,
+    # backslashes, </script> injection, etc.  Produces a quoted string
+    # like "O\u0027Brien Corp" that is safe inside JS.
+    name_js = json.dumps(result.get("company_name", company_name))
+    website_js = json.dumps(result.get("website", ""))
+    phone_js = json.dumps(result.get("phone", ""))
+    addr1_js = json.dumps(result.get("address_line1", ""))
+    city_js = json.dumps(result.get("city", ""))
+    state_js = json.dumps(result.get("state", ""))
+    zip_js = json.dumps(result.get("zip", ""))
+    country_js = json.dumps(result.get("country", "US"))
 
     html_out = f"""
     <div class="mt-2 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-xs space-y-1">
@@ -870,14 +876,14 @@ async def customer_lookup(
         <button type="button" onclick="(async function(btn){{
             btn.disabled=true; btn.textContent='Saving...';
             var fd=new FormData();
-            fd.append('company_name','{name}');
-            fd.append('website','{website}');
-            fd.append('phone','{phone}');
-            fd.append('address_line1','{addr1_val}');
-            fd.append('city','{city_val}');
-            fd.append('state','{state_val}');
-            fd.append('zip','{zip_val}');
-            fd.append('country','{country_val}');
+            fd.append('company_name',{name_js});
+            fd.append('website',{website_js});
+            fd.append('phone',{phone_js});
+            fd.append('address_line1',{addr1_js});
+            fd.append('city',{city_js});
+            fd.append('state',{state_js});
+            fd.append('zip',{zip_js});
+            fd.append('country',{country_js});
             try{{
               var r=await fetch('/v2/partials/customers/quick-create',{{method:'POST',body:fd}});
               var html=await r.text();
