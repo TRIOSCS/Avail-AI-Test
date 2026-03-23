@@ -126,31 +126,6 @@ async def lifespan(app):
         scheduler.start()
         logger.info("APScheduler started")
 
-        # Warm heavy caches in background so first user request is fast
-        async def _warm_caches():  # pragma: no cover
-            import asyncio
-
-            await asyncio.sleep(2)  # let app finish startup first
-            try:
-                from .database import SessionLocal
-
-                db = SessionLocal()
-                try:
-                    from .models import Company, Requisition, VendorCard
-
-                    db.query(VendorCard).count()
-                    db.query(Company).count()
-                    db.query(Requisition).count()
-                    logger.info("Cache warmup complete")
-                finally:
-                    db.close()
-            except Exception as e:
-                logger.warning(f"Cache warmup failed (non-fatal): {e}")
-
-        from .utils.async_helpers import safe_background_task as _safe_bg
-
-        await _safe_bg(_warm_caches(), task_name="warm_caches")
-
     yield
 
     if not _is_testing:

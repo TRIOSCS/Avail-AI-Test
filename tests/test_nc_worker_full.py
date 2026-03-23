@@ -2716,7 +2716,7 @@ class TestNcResultParserFull:
         assert s.inventory_type == "in_stock"
         assert s.vendor_name == "Arrow Electronics"
         assert len(s.price_breaks) == 1
-        assert s.price_breaks[0].price == 1.5
+        assert float(s.price_breaks[0].price) == 1.5
         assert s.currency == "USD"
         assert s.is_authorized is True
         assert s.supplier_product_url == "https://example.com/part"
@@ -3307,7 +3307,7 @@ class TestNcSightingWriterGaps:
         save_nc_sightings(db_session, queue_item, nc)
 
         s = db_session.query(Sighting).filter(Sighting.source_type == "netcomponents").first()
-        assert s.unit_price == 1.25
+        assert float(s.unit_price) == 1.25
         assert s.currency == "USD"
         assert "price_breaks" in s.raw_data
         assert len(s.raw_data["price_breaks"]) == 2

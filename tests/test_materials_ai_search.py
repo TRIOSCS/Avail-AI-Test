@@ -4,8 +4,7 @@ Covers: app/services/materials_ai_search.py + AI interpret route in htmx_views.p
 Depends on: conftest.py, commodity_registry
 """
 
-import json
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 import pytest
 
@@ -50,33 +49,20 @@ def test_get_parent_for_commodity_unknown():
 # ── Tests for interpret_search_query ─────────────────────────────────
 
 
-def _make_mock_response(response_text: str):
-    """Create a mock Anthropic API response."""
-    mock_response = MagicMock()
-    mock_response.content = [MagicMock(text=response_text)]
-    return mock_response
+def _patch_claude_json(return_value=None, side_effect=None):
+    """Return a context manager that patches claude_json used by interpret_search_query.
 
-
-def _patch_anthropic(response_text: str = None, side_effect: Exception = None):
-    """Return a context manager that patches anthropic module and settings.
-
-    Mocks the lazy import of anthropic inside interpret_search_query.
+    The service now imports claude_json from app.utils.claude_client, so we mock it at
+    the point of use in the service module.
     """
-    mock_client = MagicMock()
     if side_effect:
-        mock_client.messages.create.side_effect = side_effect
-    else:
-        mock_client.messages.create.return_value = _make_mock_response(response_text)
-
-    mock_anthropic_mod = MagicMock()
-    mock_anthropic_mod.Anthropic.return_value = mock_client
-
-    mock_settings = MagicMock()
-    mock_settings.anthropic_api_key = "test-key"
-
-    return (
-        patch.dict("sys.modules", {"anthropic": mock_anthropic_mod}),
-        patch("app.config.settings", mock_settings),
+        return patch(
+            "app.utils.claude_client.claude_json",
+            side_effect=side_effect,
+        )
+    return patch(
+        "app.utils.claude_client.claude_json",
+        return_value=return_value,
     )
 
 
@@ -102,11 +88,8 @@ async def test_interpret_returns_none_for_empty_query():
 
 @pytest.mark.asyncio
 async def test_interpret_returns_none_when_no_api_key():
-    """Should return None gracefully when no API key is configured."""
-    mock_settings = MagicMock()
-    mock_settings.anthropic_api_key = ""
-
-    with patch("app.config.settings", mock_settings):
+    """Should return None gracefully when claude_json raises or returns None."""
+    with _patch_claude_json(return_value=None):
         result = await interpret_search_query("DDR5 32GB ECC server memory")
         assert result is None
 
@@ -114,16 +97,13 @@ async def test_interpret_returns_none_when_no_api_key():
 @pytest.mark.asyncio
 async def test_interpret_success_dram_query():
     """Successful AI interpretation should return commodity + filters."""
-    ai_response = json.dumps(
-        {
-            "commodity": "dram",
-            "filters": {"ddr_type": ["DDR5"], "capacity_gb_min": 32, "ecc": ["true"]},
-            "summary": "DDR5, 32GB+, ECC server memory",
-        }
-    )
+    ai_result = {
+        "commodity": "dram",
+        "filters": {"ddr_type": ["DDR5"], "capacity_gb_min": 32, "ecc": ["true"]},
+        "summary": "DDR5, 32GB+, ECC server memory",
+    }
 
-    p1, p2 = _patch_anthropic(ai_response)
-    with p1, p2:
+    with _patch_claude_json(return_value=ai_result):
         result = await interpret_search_query("DDR5 32GB ECC server memory")
 
     assert result is not None
@@ -136,16 +116,13 @@ async def test_interpret_success_dram_query():
 @pytest.mark.asyncio
 async def test_interpret_success_capacitor_query():
     """Capacitor search should return capacitors commodity with spec filters."""
-    ai_response = json.dumps(
-        {
-            "commodity": "capacitors",
-            "filters": {"dielectric": ["X7R"], "package": ["0805"]},
-            "summary": "X7R 0805 capacitors",
-        }
-    )
+    ai_result = {
+        "commodity": "capacitors",
+        "filters": {"dielectric": ["X7R"], "package": ["0805"]},
+        "summary": "X7R 0805 capacitors",
+    }
 
-    p1, p2 = _patch_anthropic(ai_response)
-    with p1, p2:
+    with _patch_claude_json(return_value=ai_result):
         result = await interpret_search_query("X7R 0805 ceramic capacitor")
 
     assert result is not None
@@ -155,11 +132,10 @@ async def test_interpret_success_capacitor_query():
 
 @pytest.mark.asyncio
 async def test_interpret_handles_markdown_fenced_json():
-    """Should strip markdown code fences from the response."""
-    fenced_json = '```json\n{"commodity": "dram", "filters": {}, "summary": "DRAM search"}\n```'
+    """claude_json handles markdown stripping internally; dict result works."""
+    ai_result = {"commodity": "dram", "filters": {}, "summary": "DRAM search"}
 
-    p1, p2 = _patch_anthropic(fenced_json)
-    with p1, p2:
+    with _patch_claude_json(return_value=ai_result):
         result = await interpret_search_query("DDR5 server memory modules")
 
     assert result is not None
@@ -169,16 +145,13 @@ async def test_interpret_handles_markdown_fenced_json():
 @pytest.mark.asyncio
 async def test_interpret_handles_invalid_commodity():
     """Unknown commodity should be cleared to empty string."""
-    ai_response = json.dumps(
-        {
-            "commodity": "nonexistent_category",
-            "filters": {},
-            "summary": "unknown search",
-        }
-    )
+    ai_result = {
+        "commodity": "nonexistent_category",
+        "filters": {},
+        "summary": "unknown search",
+    }
 
-    p1, p2 = _patch_anthropic(ai_response)
-    with p1, p2:
+    with _patch_claude_json(return_value=ai_result):
         result = await interpret_search_query("some unknown component type search")
 
     assert result is not None
@@ -188,8 +161,7 @@ async def test_interpret_handles_invalid_commodity():
 @pytest.mark.asyncio
 async def test_interpret_handles_api_error():
     """API exceptions should return None gracefully."""
-    p1, p2 = _patch_anthropic(side_effect=Exception("API timeout"))
-    with p1, p2:
+    with _patch_claude_json(side_effect=Exception("API timeout")):
         result = await interpret_search_query("DDR5 ECC server memory module")
 
     assert result is None
@@ -197,9 +169,8 @@ async def test_interpret_handles_api_error():
 
 @pytest.mark.asyncio
 async def test_interpret_handles_invalid_json_response():
-    """Non-JSON responses from AI should return None."""
-    p1, p2 = _patch_anthropic("I think you want DDR5 memory")
-    with p1, p2:
+    """When claude_json returns None (unparseable), interpret returns None."""
+    with _patch_claude_json(return_value=None):
         result = await interpret_search_query("DDR5 ECC server memory module")
 
     assert result is None
@@ -208,15 +179,12 @@ async def test_interpret_handles_invalid_json_response():
 @pytest.mark.asyncio
 async def test_interpret_adds_default_summary():
     """When AI response omits summary, a default should be generated."""
-    ai_response = json.dumps(
-        {
-            "commodity": "dram",
-            "filters": {"ddr_type": ["DDR5"]},
-        }
-    )
+    ai_result = {
+        "commodity": "dram",
+        "filters": {"ddr_type": ["DDR5"]},
+    }
 
-    p1, p2 = _patch_anthropic(ai_response)
-    with p1, p2:
+    with _patch_claude_json(return_value=ai_result):
         result = await interpret_search_query("DDR5 server memory modules")
 
     assert result is not None
@@ -227,16 +195,13 @@ async def test_interpret_adds_default_summary():
 @pytest.mark.asyncio
 async def test_interpret_validates_filters_type():
     """Non-dict filters should be replaced with empty dict."""
-    ai_response = json.dumps(
-        {
-            "commodity": "dram",
-            "filters": "invalid",
-            "summary": "test",
-        }
-    )
+    ai_result = {
+        "commodity": "dram",
+        "filters": "invalid",
+        "summary": "test",
+    }
 
-    p1, p2 = _patch_anthropic(ai_response)
-    with p1, p2:
+    with _patch_claude_json(return_value=ai_result):
         result = await interpret_search_query("DDR5 server memory modules")
 
     assert result is not None

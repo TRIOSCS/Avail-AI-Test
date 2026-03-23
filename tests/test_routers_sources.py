@@ -751,7 +751,7 @@ def test_create_sightings_price_parsing():
     assert created == 1
     # Verify the Sighting was added — check the args passed to db.add
     added_sighting = db.add.call_args[0][0]
-    assert added_sighting.unit_price == 1.50
+    assert float(added_sighting.unit_price) == 1.50
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -1006,50 +1006,35 @@ def test_get_connector_no_db_env_fallback(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_anthropic_test_connector_search_success():
-    """_AnthropicTestConnector succeeds when API returns 200."""
+    """_AnthropicTestConnector succeeds when claude_text returns a response."""
     from app.routers.sources import _AnthropicTestConnector
 
-    mock_resp = MagicMock()
-    mock_resp.status_code = 200
-    mock_resp.json.return_value = {"model": "claude-haiku-4-5-20251001"}
-
-    with (
-        patch("app.routers.sources.get_credential_cached", return_value="sk-test-key"),
-        patch("app.routers.sources._AnthropicTestConnector.__init__", return_value=None),
-    ):
-        connector = _AnthropicTestConnector()
-        with patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp):
-            results = await connector.search("LM358N")
+    connector = _AnthropicTestConnector()
+    with patch("app.utils.claude_client.claude_text", new_callable=AsyncMock, return_value="OK"):
+        results = await connector.search("LM358N")
     assert len(results) == 1
     assert "Connected" in results[0]["mpn_matched"]
 
 
 @pytest.mark.asyncio
 async def test_anthropic_test_connector_no_key():
-    """_AnthropicTestConnector raises if no API key."""
+    """_AnthropicTestConnector raises when claude_text returns None (no API key)."""
     from app.routers.sources import _AnthropicTestConnector
 
     connector = _AnthropicTestConnector()
-    with patch("app.routers.sources.get_credential_cached", return_value=None):
-        with pytest.raises(ValueError, match="ANTHROPIC_API_KEY not configured"):
+    with patch("app.utils.claude_client.claude_text", new_callable=AsyncMock, return_value=None):
+        with pytest.raises(ValueError, match="Anthropic API returned no response"):
             await connector.search("LM358N")
 
 
 @pytest.mark.asyncio
 async def test_anthropic_test_connector_api_error():
-    """_AnthropicTestConnector raises on non-200 response."""
+    """_AnthropicTestConnector raises when claude_text returns None."""
     from app.routers.sources import _AnthropicTestConnector
 
-    mock_resp = MagicMock()
-    mock_resp.status_code = 401
-    mock_resp.text = "Invalid API key"
-
     connector = _AnthropicTestConnector()
-    with (
-        patch("app.routers.sources.get_credential_cached", return_value="sk-test-key"),
-        patch("app.http_client.http.post", new_callable=AsyncMock, return_value=mock_resp),
-    ):
-        with pytest.raises(ValueError, match="Anthropic API returned 401"):
+    with patch("app.utils.claude_client.claude_text", new_callable=AsyncMock, return_value=None):
+        with pytest.raises(ValueError, match="Anthropic API returned no response"):
             await connector.search("LM358N")
 
 

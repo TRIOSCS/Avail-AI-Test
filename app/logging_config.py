@@ -99,7 +99,7 @@ class _InterceptHandler(logging.Handler):
         try:
             level = logger.level(record.levelname).name
         except ValueError:
-            level = record.levelno
+            level = str(record.levelno)
 
         # Find the caller (skip frames from stdlib logging internals)
         frame, depth = logging.currentframe(), 0

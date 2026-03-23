@@ -46,10 +46,10 @@ async def main(limit: int = 500, batch_size: int = 30):
                 if value is not None:
                     record_spec(
                         db,
-                        card.id,
+                        int(card.id),
                         spec_key,
                         value,
-                        source=card.enrichment_source or "reenrich",
+                        source=str(card.enrichment_source or "reenrich"),
                         confidence=0.85,
                     )
                     facet_count += 1

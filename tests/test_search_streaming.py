@@ -513,7 +513,7 @@ def test_add_to_requisition_creates_sightings(client, db_session):
     sighting = db_session.query(Sighting).filter_by(requirement_id=requirement.id).first()
     assert sighting is not None
     assert sighting.vendor_name == "Arrow"
-    assert sighting.unit_price == 0.45
+    assert float(sighting.unit_price) == 0.45
 
 
 def test_add_to_requisition_reuses_existing_requirement(client, db_session):

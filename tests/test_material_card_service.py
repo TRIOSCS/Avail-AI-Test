@@ -1,4 +1,5 @@
-"""test_material_card_service.py — Tests for material card serialization, inference, and merge.
+"""test_material_card_service.py — Tests for material card serialization, inference, and
+merge.
 
 Covers: manufacturer inference, backfill, card serialization, and card merge logic.
 
@@ -31,9 +32,7 @@ from app.services.material_card_service import (
 # -- Factories ----------------------------------------------------------------
 
 
-def _make_material_card(
-    db: Session, normalized_mpn: str, manufacturer=None, **kw
-) -> MaterialCard:
+def _make_material_card(db: Session, normalized_mpn: str, manufacturer=None, **kw) -> MaterialCard:
     mc = MaterialCard(
         normalized_mpn=normalized_mpn,
         display_mpn=kw.get("display_mpn", normalized_mpn.upper()),
@@ -47,9 +46,7 @@ def _make_material_card(
     return mc
 
 
-def _make_vendor_history(
-    db: Session, material_card_id: int, vendor_name: str, **kw
-) -> MaterialVendorHistory:
+def _make_vendor_history(db: Session, material_card_id: int, vendor_name: str, **kw) -> MaterialVendorHistory:
     vh = MaterialVendorHistory(
         material_card_id=material_card_id,
         vendor_name=vendor_name,
@@ -69,9 +66,7 @@ def _make_vendor_history(
     return vh
 
 
-def _make_sighting(
-    db: Session, requirement_id: int, material_card_id: int, vendor_name: str, **kw
-) -> Sighting:
+def _make_sighting(db: Session, requirement_id: int, material_card_id: int, vendor_name: str, **kw) -> Sighting:
     s = Sighting(
         requirement_id=requirement_id,
         material_card_id=material_card_id,
@@ -185,9 +180,7 @@ class TestSerializeMaterialCard:
         assert result["vendor_history"][0]["vendor_name"] == "Arrow Electronics"
         assert result["vendor_count"] == 1
 
-    def test_filters_unavailable_sightings(
-        self, db_session: Session, test_material_card, test_requisition
-    ):
+    def test_filters_unavailable_sightings(self, db_session: Session, test_material_card, test_requisition):
         req_item = test_requisition.requirements[0]
         _make_sighting(db_session, req_item.id, test_material_card.id, "Good Vendor", is_unavailable=False)
         _make_sighting(db_session, req_item.id, test_material_card.id, "Bad Vendor", is_unavailable=True)
@@ -214,22 +207,24 @@ class TestSerializeMaterialCard:
 
 class TestMergeMaterialCards:
     @patch("app.services.audit_service.log_audit")
-    def test_merge_repoints_requirements_sightings_offers(
-        self, mock_audit, db_session: Session, test_user
-    ):
+    def test_merge_repoints_requirements_sightings_offers(self, mock_audit, db_session: Session, test_user):
         source = _make_material_card(db_session, "lm317t-src")
         target = _make_material_card(db_session, "lm317t-tgt")
 
         req = Requisition(
-            name="MergeTest", status="open", created_by=test_user.id,
+            name="MergeTest",
+            status="open",
+            created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
         db_session.flush()
 
         item = Requirement(
-            requisition_id=req.id, primary_mpn="LM317T",
-            material_card_id=source.id, target_qty=100,
+            requisition_id=req.id,
+            primary_mpn="LM317T",
+            material_card_id=source.id,
+            target_qty=100,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(item)
@@ -237,8 +232,11 @@ class TestMergeMaterialCards:
 
         sighting = _make_sighting(db_session, item.id, source.id, "Vendor A")
         offer = Offer(
-            requisition_id=req.id, material_card_id=source.id,
-            vendor_name="Vendor A", mpn="LM317T", status="active",
+            requisition_id=req.id,
+            material_card_id=source.id,
+            vendor_name="Vendor A",
+            mpn="LM317T",
+            status="active",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(offer)
@@ -267,20 +265,26 @@ class TestMergeMaterialCards:
             merge_material_cards(db_session, test_material_card.id, 99999, "x@test.com")
 
     @patch("app.services.audit_service.log_audit")
-    def test_merge_vendor_histories_combined(
-        self, mock_audit, db_session: Session
-    ):
+    def test_merge_vendor_histories_combined(self, mock_audit, db_session: Session):
         source = _make_material_card(db_session, "merge-src")
         target = _make_material_card(db_session, "merge-tgt")
 
         _make_vendor_history(
-            db_session, source.id, "Arrow Electronics",
-            times_seen=3, first_seen=datetime(2024, 1, 1, tzinfo=timezone.utc),
-            last_seen=datetime(2025, 12, 1, tzinfo=timezone.utc), last_qty=500, last_price=1.5,
+            db_session,
+            source.id,
+            "Arrow Electronics",
+            times_seen=3,
+            first_seen=datetime(2024, 1, 1, tzinfo=timezone.utc),
+            last_seen=datetime(2025, 12, 1, tzinfo=timezone.utc),
+            last_qty=500,
+            last_price=1.5,
         )
         tvh = _make_vendor_history(
-            db_session, target.id, "Arrow Electronics",
-            times_seen=2, first_seen=datetime(2025, 3, 1, tzinfo=timezone.utc),
+            db_session,
+            target.id,
+            "Arrow Electronics",
+            times_seen=2,
+            first_seen=datetime(2025, 3, 1, tzinfo=timezone.utc),
             last_seen=datetime(2025, 6, 1, tzinfo=timezone.utc),
         )
         db_session.commit()
@@ -295,12 +299,10 @@ class TestMergeMaterialCards:
         assert tvh.first_seen.year == 2024 and tvh.first_seen.month == 1  # earlier
         assert tvh.last_seen.year == 2025 and tvh.last_seen.month == 12  # later
         assert tvh.last_qty == 500  # from later source
-        assert tvh.last_price == 1.5
+        assert float(tvh.last_price) == 1.5
 
     @patch("app.services.audit_service.log_audit")
-    def test_merge_vendor_history_moved_when_no_match(
-        self, mock_audit, db_session: Session
-    ):
+    def test_merge_vendor_history_moved_when_no_match(self, mock_audit, db_session: Session):
         source = _make_material_card(db_session, "move-src")
         target = _make_material_card(db_session, "move-tgt")
 
@@ -314,12 +316,8 @@ class TestMergeMaterialCards:
         assert result["vendor_histories_merged"] == 0
 
     @patch("app.services.audit_service.log_audit")
-    def test_merge_fills_missing_metadata(
-        self, mock_audit, db_session: Session
-    ):
-        source = _make_material_card(
-            db_session, "meta-src", manufacturer="TI", description="Voltage regulator"
-        )
+    def test_merge_fills_missing_metadata(self, mock_audit, db_session: Session):
+        source = _make_material_card(db_session, "meta-src", manufacturer="TI", description="Voltage regulator")
         target = _make_material_card(db_session, "meta-tgt", manufacturer=None)
         source.search_count = 5
         target.search_count = 3
@@ -334,9 +332,7 @@ class TestMergeMaterialCards:
         assert target.search_count == 8  # 5 + 3
 
     @patch("app.services.audit_service.log_audit")
-    def test_merge_deletes_source_card(
-        self, mock_audit, db_session: Session
-    ):
+    def test_merge_deletes_source_card(self, mock_audit, db_session: Session):
         source = _make_material_card(db_session, "del-src")
         target = _make_material_card(db_session, "del-tgt")
         source_id = source.id

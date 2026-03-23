@@ -685,7 +685,7 @@ def test_download_and_import_stock_list_updates_existing_mvh(scheduler_db, test_
     scheduler_db.refresh(mvh)
     assert mvh.times_seen == 2
     assert mvh.last_qty == 200
-    assert mvh.last_price == 0.30
+    assert float(mvh.last_price) == 0.30
 
 
 def test_download_and_import_stock_list_excess_list(scheduler_db, test_user, test_company):
@@ -914,7 +914,7 @@ def test_download_and_import_stock_list_price_field_fallback(scheduler_db, test_
         )
 
     scheduler_db.refresh(mvh)
-    assert mvh.last_price == 1.25
+    assert float(mvh.last_price) == 1.25
 
 
 def test_download_and_import_stock_list_teams_alert(scheduler_db, test_user, test_requisition):

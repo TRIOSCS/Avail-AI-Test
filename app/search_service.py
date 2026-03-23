@@ -116,7 +116,7 @@ def _get_search_redis():
 def _search_cache_key(pns: list[str], connector_names: list[str]) -> str:
     """Deterministic cache key from sorted PNs + active connectors."""
     payload = json.dumps({"pns": sorted(pns), "connectors": sorted(connector_names)}, sort_keys=True)
-    return _SEARCH_CACHE_PREFIX + hashlib.md5(payload.encode()).hexdigest()
+    return _SEARCH_CACHE_PREFIX + hashlib.md5(payload.encode(), usedforsecurity=False).hexdigest()
 
 
 def _get_search_cache(key: str) -> tuple[list[dict], list[dict]] | None:

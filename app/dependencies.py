@@ -25,6 +25,7 @@ from fastapi import Depends, HTTPException, Request
 from loguru import logger
 from sqlalchemy.orm import Session, selectinload
 
+from .constants import UserRole
 from .database import get_db
 from .models import Quote, Requisition, User
 
@@ -52,11 +53,7 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
         from .config import settings
 
         agent_key = request.headers.get("x-agent-key")
-        if (
-            agent_key
-            and settings.agent_api_key
-            and hmac.compare_digest(agent_key, settings.agent_api_key)
-        ):
+        if agent_key and settings.agent_api_key and hmac.compare_digest(agent_key, settings.agent_api_key):
             logger.info("Agent API access: method={} path={}", request.method, request.url.path)
             user = db.query(User).filter_by(email="agent@availai.local").first()
     if not user:
@@ -69,7 +66,7 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
 
 def is_admin(user: User) -> bool:
     """Check if user has admin privileges (by role)."""
-    return user.role == "admin"
+    return user.role == UserRole.ADMIN
 
 
 def require_admin(request: Request, db: Session = Depends(get_db)) -> User:
@@ -77,7 +74,7 @@ def require_admin(request: Request, db: Session = Depends(get_db)) -> User:
     user = require_user(request, db)
     if user.email == "agent@availai.local":
         raise HTTPException(403, "Agent keys cannot access admin endpoints")
-    if user.role != "admin":
+    if user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin access required")
     return user
 
@@ -87,7 +84,7 @@ def require_settings_access(request: Request, db: Session = Depends(get_db)) -> 
     user = require_user(request, db)
     if user.email == "agent@availai.local":
         raise HTTPException(403, "Agent keys cannot access settings")
-    if user.role != "admin":
+    if user.role != UserRole.ADMIN:
         raise HTTPException(403, "Settings access required")
     return user
 
@@ -95,7 +92,7 @@ def require_settings_access(request: Request, db: Session = Depends(get_db)) -> 
 def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
     """Dependency: requires buyer role for RFQ actions."""
     user = require_user(request, db)
-    if user.role not in ("buyer", "sales", "trader", "manager", "admin"):
+    if user.role not in (UserRole.BUYER, UserRole.SALES, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(403, "Buyer role required for this action")
     return user
 
@@ -103,7 +100,7 @@ def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
 def require_sales(request: Request, db: Session = Depends(get_db)) -> User:
     """Dependency: requires sales role for prospecting/CRM actions."""
     user = require_user(request, db)
-    if user.role not in ("sales", "trader", "manager", "admin"):
+    if user.role not in (UserRole.SALES, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(403, "Sales role required for this action")
     return user
 
@@ -117,7 +114,7 @@ def user_reqs_query(db: Session, user: User):
     Sales sees own reqs only; all other roles see all.
     """
     q = db.query(Requisition)
-    if user.role == "sales":
+    if user.role == UserRole.SALES:
         q = q.filter(Requisition.created_by == user.id)
     return q
 
@@ -131,7 +128,7 @@ def get_req_for_user(db: Session, user: User, req_id: int, options=None) -> Requ
     """
     load_opts = options or [selectinload(Requisition.requirements)]
     q = db.query(Requisition).options(*load_opts).filter_by(id=req_id)
-    if user.role == "sales":
+    if user.role == UserRole.SALES:
         q = q.filter_by(created_by=user.id)
     return q.first()
 
@@ -145,7 +142,7 @@ def get_quote_for_user(db: Session, user: User, quote_id: int, options=None) -> 
         .join(Requisition, Quote.requisition_id == Requisition.id)
         .filter(Quote.id == quote_id)
     )
-    if user.role == "sales":
+    if user.role == UserRole.SALES:
         q = q.filter(Requisition.created_by == user.id)
     return q.first()
 
@@ -189,7 +186,7 @@ async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -
         db.commit()
         raise HTTPException(401, "Session expired — please log in again")
 
-    return token
+    return str(token)
 
 
 # ── HTMX Detection Utilities ────────────────────────────────────────

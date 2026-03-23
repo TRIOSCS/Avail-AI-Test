@@ -884,7 +884,7 @@ class TestUpsertMaterialCard:
         db_session.refresh(vh)
         assert vh.times_seen == 3
         assert vh.last_qty == 500  # unchanged
-        assert vh.last_price == 0.60  # unchanged
+        assert float(vh.last_price) == 0.60  # unchanged
         assert vh.last_currency == "USD"  # unchanged
         assert vh.last_manufacturer == "OldMfg"  # unchanged
         assert vh.is_authorized is False
@@ -1332,7 +1332,7 @@ class TestSaveSightings:
         ]
         with patch("app.search_service.normalize_price", return_value=None):
             result = _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
-        assert result[0].unit_price == 1.25
+        assert float(result[0].unit_price) == 1.25
 
 
 # ── _propagate_vendor_emails ─────────────────────────────────────────────

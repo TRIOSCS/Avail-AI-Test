@@ -26,7 +26,7 @@ def test_price_snapshot_creation(db_session):
     db_session.commit()
 
     saved = db_session.query(MaterialPriceSnapshot).first()
-    assert saved.price == 12.50
+    assert float(saved.price) == 12.50
     assert saved.vendor_name == "Test Vendor"
     assert saved.material_card_id == card.id
 
@@ -52,7 +52,7 @@ def test_record_price_snapshot(db_session):
 
     snaps = db_session.query(MaterialPriceSnapshot).filter_by(material_card_id=card.id).all()
     assert len(snaps) == 1
-    assert snaps[0].price == 5.25
+    assert float(snaps[0].price) == 5.25
     assert snaps[0].vendor_name == "Mouser"
 
 
