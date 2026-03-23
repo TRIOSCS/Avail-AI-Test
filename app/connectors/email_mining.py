@@ -710,7 +710,7 @@ class EmailMiner:
                 if brands:
                     brands_detected += 1
             except Exception as e:
-                logger.debug("Brand/commodity detection failed for domain: %s", e)
+                logger.warning("Brand/commodity detection failed for domain: %s", e)
 
             contacts_found += 1
 

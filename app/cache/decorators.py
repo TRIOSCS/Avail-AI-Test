@@ -104,7 +104,7 @@ def invalidate_prefix(prefix: str) -> None:
                 if cursor == 0:
                     break
         except Exception as e:
-            logger.debug("Redis prefix invalidation error for %s: %s", prefix, e)
+            logger.warning("Redis prefix invalidation error for %s: %s", prefix, e)
 
     # PostgreSQL: delete by LIKE pattern
     try:
@@ -119,4 +119,4 @@ def invalidate_prefix(prefix: str) -> None:
             )
             db.commit()
     except Exception as e:
-        logger.debug("PG prefix invalidation error for %s: %s", prefix, e)
+        logger.warning("PG prefix invalidation error for %s: %s", prefix, e)

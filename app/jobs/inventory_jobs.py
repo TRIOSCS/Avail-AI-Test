@@ -273,7 +273,7 @@ async def _download_and_import_stock_list(
                 db.flush()
                 card_map[norm_key] = card
             except Exception as e:
-                logger.debug(f"MaterialCard flush conflict for '{norm_key}': {e}")
+                logger.warning(f"MaterialCard flush conflict for '{norm_key}': {e}")
                 db.rollback()
                 continue
 

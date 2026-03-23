@@ -573,7 +573,7 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
                 db.flush()
                 card_map[norm] = card
             except Exception as e:
-                logger.debug(f"VendorCard flush conflict for '{norm}': {e}")
+                logger.warning(f"VendorCard flush conflict for '{norm}': {e}")
                 db.rollback()
                 continue
 
@@ -768,7 +768,7 @@ async def _sync_user_contacts(user, db):
                 db.flush()
                 sync_card_map[norm] = card
             except Exception as e:
-                logger.debug(f"VendorCard flush conflict for '{norm}': {e}")
+                logger.warning(f"VendorCard flush conflict for '{norm}': {e}")
                 db.rollback()
                 continue
 

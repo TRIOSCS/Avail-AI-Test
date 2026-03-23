@@ -151,7 +151,7 @@ async def callback(request: Request, code: str = "", state: str = "", db: Sessio
 
         await fetch_and_store_mailbox_settings(access_token, user, db)
     except Exception as e:
-        logger.debug(f"Mailbox settings fetch skipped for {user.email}: {e}")
+        logger.warning(f"Mailbox settings fetch skipped for {user.email}: {e}")
 
     # Trigger first-time backfill if user has never been scanned
     if not user.last_inbox_scan:

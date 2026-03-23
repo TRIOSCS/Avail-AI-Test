@@ -70,7 +70,7 @@ def _make_datetimes_aware(session, instance):
             try:
                 setattr(instance, key, val.replace(tzinfo=timezone.utc))
             except Exception:
-                logger.debug("Failed to set timezone on %s.%s", type(instance).__name__, key, exc_info=True)
+                logger.warning("Failed to set timezone on %s.%s", type(instance).__name__, key, exc_info=True)
 
 
 def get_db():

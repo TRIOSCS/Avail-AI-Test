@@ -608,7 +608,7 @@ async def scan_inbox_for_vendors(request: Request, user: User = Depends(require_
             if body and body.strip():
                 opts = MiningOptions.model_validate_json(body)
     except (ValueError, TypeError):
-        logger.debug("Mining options parse failed, using defaults", exc_info=True)
+        logger.warning("Mining options parse failed, using defaults", exc_info=True)
     lookback_days = opts.lookback_days
 
     from ..connectors.email_mining import EmailMiner
@@ -695,7 +695,7 @@ async def email_mining_scan_outbound(
             if raw and raw.strip():
                 opts = MiningOptions.model_validate_json(raw)
     except (ValueError, TypeError):
-        logger.debug("Mining options parse failed, using defaults", exc_info=True)
+        logger.warning("Mining options parse failed, using defaults", exc_info=True)
     lookback = opts.lookback_days
 
     miner = EmailMiner(token, db=db, user_id=user.id)

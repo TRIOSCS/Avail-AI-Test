@@ -121,7 +121,7 @@ class AIWebSearchConnector(BaseConnector):
                 timeout=60,
             )
         except ClaudeUnavailableError:
-            logger.info("Claude not configured — skipping AI live web search")
+            logger.warning("Claude not configured — skipping AI live web search")
             return []
         except ClaudeError as e:
             logger.warning("Claude AI failed for live web search: %s", e)

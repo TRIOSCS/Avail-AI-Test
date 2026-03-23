@@ -76,7 +76,7 @@ def get_cached(cache_key: str) -> dict | None:
                 return json.loads(data)
             return None
         except Exception as e:
-            logger.debug("Redis read error for %s: %s", cache_key, e)
+            logger.warning("Redis read error for %s: %s", cache_key, e)
 
     # Fall back to PostgreSQL
     try:
@@ -93,7 +93,7 @@ def get_cached(cache_key: str) -> dict | None:
             if row:
                 return row[0]  # JSONB column returns as dict
     except Exception as e:
-        logger.debug("Cache read error for %s: %s", cache_key, e)
+        logger.warning("Cache read error for %s: %s", cache_key, e)
     return None
 
 
@@ -108,7 +108,7 @@ def set_cached(cache_key: str, data: dict, ttl_days: float = 7) -> None:
             r.setex(f"{_REDIS_PREFIX}{cache_key}", ttl_seconds, json.dumps(data))
             return  # Success — skip PG write
         except Exception as e:
-            logger.debug("Redis write error for %s: %s", cache_key, e)
+            logger.warning("Redis write error for %s: %s", cache_key, e)
 
     # Fall back to PostgreSQL
     try:
@@ -144,7 +144,7 @@ def invalidate(cache_key: str) -> None:
         try:
             r.delete(f"{_REDIS_PREFIX}{cache_key}")
         except Exception as e:
-            logger.debug("Redis invalidate error for %s: %s", cache_key, e)
+            logger.warning("Redis invalidate error for %s: %s", cache_key, e)
 
     # Also clean PostgreSQL (may have stale entry)
     try:
@@ -155,7 +155,7 @@ def invalidate(cache_key: str) -> None:
             )
             db.commit()
     except Exception as e:
-        logger.debug("Cache invalidate error for %s: %s", cache_key, e)
+        logger.warning("Cache invalidate error for %s: %s", cache_key, e)
 
 
 def flush_enrichment_cache() -> int:
@@ -179,7 +179,7 @@ def flush_enrichment_cache() -> int:
                 if cursor == 0:
                     break
         except Exception as e:
-            logger.debug("Redis flush enrich error: %s", e)
+            logger.warning("Redis flush enrich error: %s", e)
 
     # PostgreSQL: delete all enrich:* entries
     try:
