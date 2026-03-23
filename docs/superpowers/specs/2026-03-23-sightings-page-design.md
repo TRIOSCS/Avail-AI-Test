@@ -28,27 +28,37 @@ The Sightings page is the buyer's homescreen — a cross-requisition view of all
 
 ## Data Model Changes
 
-### No new model. Two columns added to `Requirement`:
+### No new model. Column additions to existing models:
+
+**On `Requirement` (2 columns):**
 
 | Column | Type | Purpose |
 |--------|------|---------|
 | `priority_score` | Float, nullable | AI-computed priority (0-100) for sort order |
 | `assigned_buyer_id` | FK → User, nullable | Which buyer is working this requirement |
 
+**On `ActivityLog` (1 column):**
+
+| Column | Type | Purpose |
+|--------|------|---------|
+| `requirement_id` | FK → Requirement, nullable, `ondelete="SET NULL"` | Per-requirement activity filtering for timeline and stale detection |
+
+Note: `ActivityLog` currently has `requisition_id` (line 270 of `intelligence.py`) but NOT `requirement_id`. This column is required for per-part activity timelines, stale detection, and cross-page integration. Add relationship: `requirement = relationship("Requirement", foreign_keys=[requirement_id])`.
+
 ### Existing models reused as-is (no changes):
-- `Requirement` — the primary entity displayed on the page
 - `Requisition` — parent, provides customer/sales person context
 - `Sighting` — individual vendor sightings per requirement
 - `VendorSightingSummary` — pre-aggregated vendor-level rollups per requirement
 - `VendorCard` — vendor master with engagement_score, response_rate, brand_tags, commodity_tags, is_blacklisted
 - `Contact` — outbound RFQ email records with Graph message IDs
 - `VendorResponse` — parsed vendor replies with classification
-- `Offer` — with existing `pending_review` status and approve/reject endpoints
-- `ActivityLog` — already has `requirement_id` column and relationship
+- `Offer` — with existing `OfferStatus.PENDING_REVIEW` status (`constants.py:78`) and approve/reject endpoints
 - `SourcingLead` — already has buyer_owner_user_id, buyer_status, buyer_feedback_summary
 
 ### Single Alembic migration:
 - Add `priority_score` and `assigned_buyer_id` to `requirements` table
+- Add `requirement_id` (FK, nullable) to `activity_log` table
+- Add index on `activity_log.requirement_id`
 
 ---
 
@@ -61,7 +71,7 @@ Left panel: requirements table. Right panel: requirement detail with vendor brea
 ### Left Panel — Requirements Table
 
 **Top bar (single row):**
-- Four stat pills matching lifecycle statuses: **Sighting** (new/untouched) | **Contacted** (outreach sent) | **Vendor Responded** (reply received, awaiting buyer action) | **Offer In** (confirmed offers) — counts derived from `sighting_status.py` aggregation across all requirements
+- Four stat pills matching lifecycle statuses: **New** (sighted but no outreach yet) | **Contacted** (outreach sent) | **Responded** (vendor replied, awaiting buyer action) | **Offer In** (confirmed offers) — counts derived from `sighting_status.py` aggregation across all requirements. Note: "New" maps to the `sighting` status in the lifecycle; "Responded" maps to `vendor_responded`. Labels shortened to avoid confusion with the page name.
 - Group-by dropdown: Flat | Brand | Manufacturer | Commodity — grouping fields derived from `Sighting.manufacturer` and `VendorCard.brand_tags`/`commodity_tags` joined through `VendorSightingSummary`
 - Filter controls: status, sales person, staleness, assigned buyer ("My Items" / "All Items" toggle)
 
@@ -84,7 +94,9 @@ Left panel: requirements table. Right panel: requirement detail with vendor brea
 
 **Group-by behavior:** Server-side SQL aggregation. Group-by fields sourced from `Sighting.manufacturer` (for Manufacturer grouping) and `VendorCard.brand_tags`/`commodity_tags` (for Brand/Commodity grouping), joined through `VendorSightingSummary.vendor_name` → `VendorCard.normalized_name`. When grouped, rows collapse under group headers: `"Seagate — 4 parts"` with expand/collapse chevron and summary stats right-aligned.
 
-**Pagination:** Paginated with `limit`/`offset` like existing patterns. Server-side sorting by priority_score (default), MPN, status, staleness.
+**Pagination:** Paginated with `limit`/`offset` like existing patterns. Server-side sorting by priority_score (default), MPN, status, staleness. When grouped, pagination applies to the flat requirement list (not to groups) — groups are computed from the paginated result set. A requirement with multiple matching brand_tags appears under the first matching group only (no duplication).
+
+**Group header summary stats:** Each group header shows: part count, count by furthest-progressed status (e.g., "4 parts · 2 contacted · 1 offer in").
 
 ### Right Panel — Requirement Detail
 
@@ -99,11 +111,12 @@ Appears when a row is selected in the left panel. Three sections:
 
 **2. Vendor Breakdown Table**
 - All vendors with sightings for this requirement
-- Columns: Vendor Name, Status (dot + tooltip), Qty Available, Best Price, Score, Response Rate, Phone (tel: link for click-to-call)
+- Columns: Vendor Name, Status (dot + tooltip), Qty Available, Best Price, Score, Response Rate, Phone (tel: link for click-to-call — sourced from `VendorCard.phones` JSON array or `VendorContact.phone` for the primary contact)
 - Each vendor row has actions:
   - **Mark Unavailable** — calls `POST /v2/partials/sightings/{requirement_id}/mark-unavailable` with `vendor_name` in request body to set `Sighting.is_unavailable = True` for that vendor's sightings on this requirement
   - **Enter Offer** — opens inline form or modal with fields: qty_available, unit_price, currency, lead_time, date_code, condition, packaging. Calls existing `POST /api/offers/` endpoint to create Offer with `status='active'` (buyer-confirmed). Links to requirement_id, vendor_card_id, and requisition_id.
-- Pending-review offers (from AI email parser) shown with Approve/Reject buttons (calls existing `POST /api/offers/{id}/approve` and `POST /api/offers/{id}/reject`)
+- Pending-review offers (from AI email parser) shown with Approve/Reject buttons (calls existing `PUT /api/offers/{offer_id}/approve` and `PUT /api/offers/{offer_id}/reject` in `crm/offers.py`)
+- Note: Manually entered offers are created with `OfferStatus.ACTIVE` (buyer-confirmed at entry time). Only AI-parsed offers use `OfferStatus.PENDING_REVIEW` and need the approve/reject flow.
 
 **3. Activity Timeline**
 - Extracted shared partial: `htmx/partials/shared/activity_timeline.html`
@@ -135,14 +148,14 @@ Triggered when buyer selects requirements and clicks "Send to Vendors."
 ### Step 2: Compose Email
 - Single textarea — buyer writes in their own voice
 - Parts table auto-populated below (MPN, qty, target price — read-only reference)
-- "Clean Up" button calls `cleanup_rfq_email()` — AI polishes grammar, ensures part details referenced, preserves buyer's tone
+- "Clean Up" button calls `draft_rfq(user_draft=buyer_text, ...)` — AI polishes grammar, ensures part details referenced, preserves buyer's tone
 - Buyer reviews cleaned version, can edit further or revert
 - If multiple vendors selected: one compose, system sends personalized copies per vendor
 
 ### Step 3: Send
 - Calls existing `email_service.send_batch_rfq()` via Microsoft Graph
 - Creates `Contact` records per vendor (existing model)
-- Creates `ActivityLog` entries per requirement per vendor (existing model, already has requirement_id)
+- Creates `ActivityLog` entries per requirement per vendor (using new `requirement_id` column)
 - Status auto-updates to "Contacted" for each vendor-requirement pair via `sighting_status.py` derivation
 - Requires `require_fresh_token` for Graph API access
 
@@ -171,6 +184,7 @@ New function `score_requirement_priority()` in existing `app/scoring.py`:
 - Output: 0-100 score stored on `Requirement.priority_score`
 - **Triggers**: (1) Called after `search_service.search_requirement()` completes (piggyback on existing search flow). (2) Periodic job in `app/jobs/` running every 30 minutes to refresh scores for all open requirements.
 - Uses existing `score_unified()` patterns, not a Claude API call — pure SQL/Python scoring
+- **Scoring weights** (initial, tunable): urgency (30% — hot=90, critical=100, normal=30), customer value (20% — based on `Requisition.opportunity_value`), sighting scarcity (20% — fewer sightings = higher priority), age (15% — days since `Requirement.created_at`), contact progress (15% — no vendors contacted = higher priority)
 
 ### 2. Vendor Suggestions — No AI, just smart queries
 When buyer opens "Send to Vendors" modal:
@@ -184,7 +198,7 @@ When buyer opens "Send to Vendors" modal:
 Computed at query time:
 - Check last `ActivityLog` entry for each `requirement_id`
 - If older than configurable threshold, flag as stale
-- Threshold: `SIGHTING_STALE_DAYS` in `app/config.py` (default: 3 days)
+- Threshold: `SIGHTING_STALE_DAYS` in `app/config.py` (default: 3 calendar days — simple date math, no business day logic)
 - Displayed as amber dot in table, invisible otherwise
 - No stored field — derived each time via subquery
 
@@ -205,7 +219,7 @@ When a requirement is stale and buyer clicks "Send to Vendors":
 
 ### RFQ Page Activity Tab
 - Already queries `ActivityLog` by `requisition_id`
-- Per-requirement filtering: add a requirement-level section that filters `ActivityLog` by `requirement_id` (column already exists)
+- Per-requirement filtering: with the new `requirement_id` column on `ActivityLog`, add a requirement-level section that filters by `requirement_id`
 - Uses the same shared `activity_timeline.html` partial
 
 ### Bidirectional Navigation
@@ -232,13 +246,14 @@ When a requirement is stale and buyer clicks "Send to Vendors":
 | Graph token expired | `require_fresh_token` dependency returns 401. Frontend shows "Please re-authenticate" toast. |
 | Requirement has zero sightings | Detail panel shows `empty_state.html` partial: "No sightings yet — sightings will appear after search completes." |
 | Search refresh fails (connector errors) | Show toast: "Search completed with errors — some sources unavailable." Partial results still saved. |
+| Batch refresh: one requirement fails | Continue refreshing remaining requirements. Show toast at end: "Refreshed 6/7 — 1 failed." Failed requirement remains unchanged. |
 | Offer creation fails validation | Inline form shows validation errors below fields. |
 
 ---
 
 ## Router: `app/routers/sightings.py`
 
-Thin view router. Delegates to existing services.
+Thin view router. All endpoints use `require_user` dependency (no role gating for now — all users have full access per design decision). Delegates to existing services.
 
 | Method | Path | Purpose | Delegates To |
 |--------|------|---------|-------------|
@@ -246,13 +261,13 @@ Thin view router. Delegates to existing services.
 | GET | `/v2/partials/sightings/{requirement_id}/detail` | Detail panel | DB queries + `sighting_status.py` + ActivityLog |
 | POST | `/v2/partials/sightings/send-inquiry` | Compose + send batch | `email_service.send_batch_rfq()` |
 | POST | `/v2/partials/sightings/{requirement_id}/refresh` | Re-run search pipeline | `search_service.search_requirement()` |
-| POST | `/v2/partials/sightings/{requirement_id}/mark-unavailable` | Set sighting unavailable for a vendor | `Sighting.is_unavailable = True` (accepts `vendor_name` in request body) |
+| POST | `/v2/partials/sightings/{requirement_id}/mark-unavailable` | Set sighting unavailable for a vendor | Filters `Sighting` by `requirement_id` AND `vendor_name_normalized` (from request body, normalized via existing `normalize_vendor_name()`), sets `is_unavailable = True` |
 | PATCH | `/v2/partials/sightings/{requirement_id}/assign` | Update assigned buyer | Sets `Requirement.assigned_buyer_id` |
 
 **Existing endpoints called directly from templates via hx-post (no duplication):**
-- `POST /api/offers/{id}/approve` — approve pending offer
-- `POST /api/offers/{id}/reject` — reject pending offer
-- `PUT /v2/partials/offer-review/{id}/promote` — HTMX promote handler
+- `PUT /api/offers/{offer_id}/approve` — approve pending offer (`crm/offers.py:589`)
+- `PUT /api/offers/{offer_id}/reject` — reject pending offer (`crm/offers.py:612`)
+- `POST /v2/partials/offers/{offer_id}/promote` — HTMX promote handler (`htmx_views.py:2142`)
 
 **Also required:** Add `"sightings"` to `v2_page()` in `htmx_views.py` for direct URL navigation.
 
@@ -300,7 +315,7 @@ Thin view router. Delegates to existing services.
 | `Contact` model | Outbound RFQ tracking |
 | `VendorResponse` model | Parsed vendor replies |
 | `Offer` model + approve/reject endpoints | Full offer lifecycle |
-| `ActivityLog` model (has `requirement_id` at `intelligence.py:129`) | Activity tracking |
+| `ActivityLog` model (modified: add `requirement_id` column) | Activity tracking — has `requisition_id` today, needs `requirement_id` added |
 | `SourcingLead` model | Buyer status/feedback fields |
 | `split_panel.html` | Resizable split layout |
 | `_macros.html` | Status badges, buttons, stat cards |
@@ -316,11 +331,11 @@ Thin view router. Delegates to existing services.
 
 | What | Where | Size |
 |------|-------|------|
-| 2 columns on Requirement | Migration | ~10 lines |
+| 2 columns on Requirement + 1 column on ActivityLog | Migration | ~15 lines |
 | `SIGHTING_STALE_DAYS` config | `app/config.py` | ~2 lines |
 | `score_requirement_priority()` | `app/scoring.py` | ~30 lines |
 | `user_draft` param on existing `draft_rfq()` | `app/services/ai_service.py` | ~20 lines (modify existing function) |
-| Extract `partsListSelection()` to shared | `app/static/htmx_app.js` | ~30 lines (move, not new) |
+| Extract `partsListSelection()` to shared (refactor) | `app/static/htmx_app.js` | ~30 lines (move from `parts/list.html`, not new code) |
 | Sightings router (6 endpoints) | `app/routers/sightings.py` | ~250 lines |
 | `"sightings"` case in `v2_page()` | `htmx_views.py` | ~5 lines |
 | Nav item addition + CSS adjustment | `mobile_nav.html` | ~10 lines |
