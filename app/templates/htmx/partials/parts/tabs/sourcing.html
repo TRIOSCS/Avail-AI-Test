@@ -4,13 +4,8 @@
 #}
 
 <div>
-  <div class="flex items-center justify-between mb-2">
+  <div class="mb-2">
     <p class="text-xs text-gray-500">{{ summaries|length }} vendor{{ 's' if summaries|length != 1 else '' }}</p>
-    <a hx-post="/v2/partials/sourcing/{{ requirement.id }}/search"
-       hx-target="#part-detail"
-       class="px-3 py-1.5 text-xs font-medium bg-brand-500 text-white rounded-lg hover:bg-brand-600 cursor-pointer">
-      Run Search
-    </a>
   </div>
 
   {% if summaries %}
@@ -19,6 +14,7 @@
       <thead class="bg-gray-50">
         <tr>
           <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Vendor</th>
+          <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Status</th>
           <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Phone</th>
           <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Qty</th>
           <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase">Price</th>
@@ -57,6 +53,26 @@
         {% for s in summaries %}
         <tr class="hover:bg-gray-50">
           <td class="px-3 py-2 font-medium text-gray-900 whitespace-nowrap">{{ s.vendor_name or '—' }}</td>
+          <td class="px-3 py-2 whitespace-nowrap">
+            {% set status = vendor_statuses.get(s.vendor_name, 'sighting') %}
+            {% set status_styles = {
+              'sighting': 'bg-gray-100 text-gray-600',
+              'contacted': 'bg-blue-50 text-blue-700',
+              'offer-in': 'bg-emerald-50 text-emerald-700',
+              'unavailable': 'bg-gray-100 text-gray-500',
+              'blacklisted': 'bg-red-50 text-red-700',
+            } %}
+            {% set status_labels = {
+              'sighting': 'Sighting',
+              'contacted': 'Contacted',
+              'offer-in': 'Offer In',
+              'unavailable': 'Unavailable',
+              'blacklisted': 'Blacklisted',
+            } %}
+            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_styles.get(status, 'bg-gray-100 text-gray-600') }}">
+              {{ status_labels.get(status, status|capitalize) }}
+            </span>
+          </td>
           <td class="px-3 py-2 whitespace-nowrap text-xs">
             {% if s.vendor_phone %}
               <a href="tel:{{ s.vendor_phone }}" class="text-brand-500 hover:underline">{{ s.vendor_phone }}</a>
@@ -127,7 +143,7 @@
   {% else %}
   <div class="p-8 text-center text-gray-400 border border-dashed border-gray-200 rounded-lg">
     <p class="text-sm">No sightings yet</p>
-    <p class="text-xs mt-1">Run a search to find suppliers</p>
+    <p class="text-xs mt-1">Sightings will appear automatically after the requirement is saved</p>
   </div>
   {% endif %}
 </div>

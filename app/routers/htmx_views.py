@@ -8988,12 +8988,18 @@ async def part_tab_sourcing(
         vn = (s.vendor_name or "unknown").strip()
         raw_by_vendor.setdefault(vn, []).append(s)
 
+    # Derive vendor outreach statuses
+    from app.services.sighting_status import compute_vendor_statuses
+
+    vendor_statuses = compute_vendor_statuses(requirement_id, req.requisition_id, db)
+
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(
         {
             "requirement": req,
             "summaries": summaries,
             "raw_sightings_by_vendor": raw_by_vendor,
+            "vendor_statuses": vendor_statuses,
         }
     )
     return templates.TemplateResponse("htmx/partials/parts/tabs/sourcing.html", ctx)
