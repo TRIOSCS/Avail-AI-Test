@@ -83,6 +83,10 @@ async def upload_requisition_attachment(
         },
         timeout=30,
     )
+    if resp.status_code == 401:
+        raise HTTPException(401, "Microsoft token expired — please re-authenticate")
+    if resp.status_code == 403:
+        raise HTTPException(403, "Access denied to OneDrive item")
     if resp.status_code not in (200, 201):
         logger.error(f"OneDrive upload failed: {resp.status_code} {resp.text[:300]}")
         raise HTTPException(502, "Failed to upload to OneDrive")
@@ -121,13 +125,21 @@ async def attach_requisition_from_onedrive(
     item_id = body.get("item_id")
     if not item_id:
         raise HTTPException(400, "item_id is required")
-    if not user.access_token:
-        raise HTTPException(401, "Microsoft account not connected")
+    from ...scheduler import get_valid_token
+
+    token = await get_valid_token(user, db)
+    if not token:
+        raise HTTPException(401, "Microsoft token expired — please re-authenticate")
     from ...utils.graph_client import GraphClient
 
-    gc = GraphClient(user.access_token)
+    gc = GraphClient(token)
     item = await gc.get_json(f"/me/drive/items/{item_id}")
     if "error" in item:
+        error_code = item.get("error", {}).get("code", "") if isinstance(item.get("error"), dict) else ""
+        if error_code in ("InvalidAuthenticationToken", "TokenExpired"):
+            raise HTTPException(401, "Microsoft token expired — please re-authenticate")
+        if error_code in ("accessDenied", "AccessDenied"):
+            raise HTTPException(403, "Access denied to OneDrive item")
         raise HTTPException(404, "OneDrive item not found")
     att = RequisitionAttachment(
         requisition_id=req_id,
@@ -158,15 +170,26 @@ async def delete_requisition_attachment(
     att = db.get(RequisitionAttachment, att_id)
     if not att:
         raise HTTPException(404, "Attachment not found")
-    if att.onedrive_item_id and user.access_token:
+    if att.onedrive_item_id:
+        from ...scheduler import get_valid_token
+
+        token = await get_valid_token(user, db)
+        if not token:
+            raise HTTPException(401, "Microsoft token expired — please re-authenticate")
         try:
             from ...http_client import http
 
-            await http.delete(
+            resp = await http.delete(
                 f"https://graph.microsoft.com/v1.0/me/drive/items/{att.onedrive_item_id}",
-                headers={"Authorization": f"Bearer {user.access_token}"},
+                headers={"Authorization": f"Bearer {token}"},
                 timeout=15,
             )
+            if resp.status_code == 401:
+                raise HTTPException(401, "Microsoft token expired — please re-authenticate")
+            if resp.status_code == 403:
+                raise HTTPException(403, "Access denied to OneDrive item")
+        except HTTPException:
+            raise
         except (ConnectionError, TimeoutError, OSError) as e:
             logger.error(f"Failed to delete OneDrive item {att.onedrive_item_id}: {e}")
             db.delete(att)
@@ -241,6 +264,10 @@ async def upload_requirement_attachment(
         },
         timeout=30,
     )
+    if resp.status_code == 401:
+        raise HTTPException(401, "Microsoft token expired — please re-authenticate")
+    if resp.status_code == 403:
+        raise HTTPException(403, "Access denied to OneDrive item")
     if resp.status_code not in (200, 201):
         logger.error(f"OneDrive upload failed: {resp.status_code} {resp.text[:300]}")
         raise HTTPException(502, "Failed to upload to OneDrive")
@@ -274,15 +301,26 @@ async def delete_requirement_attachment(
     att = db.get(RequirementAttachment, att_id)
     if not att:
         raise HTTPException(404, "Attachment not found")
-    if att.onedrive_item_id and user.access_token:
+    if att.onedrive_item_id:
+        from ...scheduler import get_valid_token
+
+        token = await get_valid_token(user, db)
+        if not token:
+            raise HTTPException(401, "Microsoft token expired — please re-authenticate")
         try:
             from ...http_client import http
 
-            await http.delete(
+            resp = await http.delete(
                 f"https://graph.microsoft.com/v1.0/me/drive/items/{att.onedrive_item_id}",
-                headers={"Authorization": f"Bearer {user.access_token}"},
+                headers={"Authorization": f"Bearer {token}"},
                 timeout=15,
             )
+            if resp.status_code == 401:
+                raise HTTPException(401, "Microsoft token expired — please re-authenticate")
+            if resp.status_code == 403:
+                raise HTTPException(403, "Access denied to OneDrive item")
+        except HTTPException:
+            raise
         except (ConnectionError, TimeoutError, OSError) as e:
             logger.error(f"Failed to delete OneDrive item {att.onedrive_item_id}: {e}")
             db.delete(att)
