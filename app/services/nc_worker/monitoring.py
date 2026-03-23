@@ -54,7 +54,7 @@ def capture_sentry_error(error: Exception, context: dict | None = None):
     try:
         import sentry_sdk
 
-        with sentry_sdk.push_scope() as scope:
+        with sentry_sdk.new_scope() as scope:
             scope.set_tag("component", "nc_worker")
             if context:
                 for key, value in context.items():
@@ -69,7 +69,7 @@ def capture_sentry_message(message: str, level: str = "warning", context: dict |
     try:
         import sentry_sdk
 
-        with sentry_sdk.push_scope() as scope:
+        with sentry_sdk.new_scope() as scope:
             scope.set_tag("component", "nc_worker")
             if context:
                 for key, value in context.items():

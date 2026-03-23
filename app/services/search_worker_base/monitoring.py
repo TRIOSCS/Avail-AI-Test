@@ -63,7 +63,7 @@ def capture_sentry_error(error: Exception, context: dict | None = None, componen
     try:
         import sentry_sdk
 
-        with sentry_sdk.push_scope() as scope:
+        with sentry_sdk.new_scope() as scope:
             scope.set_tag("component", f"{component_name.lower()}_worker")
             if context:
                 for key, value in context.items():
@@ -80,7 +80,7 @@ def capture_sentry_message(
     try:
         import sentry_sdk
 
-        with sentry_sdk.push_scope() as scope:
+        with sentry_sdk.new_scope() as scope:
             scope.set_tag("component", f"{component_name.lower()}_worker")
             if context:
                 for key, value in context.items():

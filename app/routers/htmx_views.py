@@ -800,7 +800,7 @@ async def requisition_import_save(
 
 
 @router.post("/v2/partials/customers/lookup", response_class=HTMLResponse)
-async def company_lookup(
+async def customer_lookup(
     request: Request,
     company_name: str = Form(...),
     location: str = Form(""),
@@ -900,7 +900,7 @@ async def company_lookup(
 
 
 @router.post("/v2/partials/customers/quick-create", response_class=HTMLResponse)
-async def company_quick_create(
+async def customer_quick_create(
     request: Request,
     company_name: str = Form(...),
     website: str = Form(""),
