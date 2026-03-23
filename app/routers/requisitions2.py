@@ -109,10 +109,15 @@ async def requisitions_stream(request: Request, _user: User = Depends(require_us
                     break
                 try:
                     msg = await asyncio.wait_for(queue.get(), timeout=30.0)
-                    yield f"event: {msg['event']}\ndata: {msg.get('data', '')}\n\n"
+                    event = msg.get("event", "message")
+                    data = msg.get("data", "")
+                    yield f"event: {event}\ndata: {data}\n\n"
                 except asyncio.TimeoutError:
                     # Send keepalive comment to prevent connection timeout
                     yield ": keepalive\n\n"
+                except Exception as e:
+                    logger.error(f"SSE stream error: {e}")
+                    yield "event: error\ndata: Internal error\n\n"
         finally:
             broker.unsubscribe("requisitions", queue)
 
@@ -358,8 +363,11 @@ async def row_action(
     elif action_name == RowActionName.unclaim:
         from ..services.requirement_status import unclaim_requisition
 
-        unclaim_requisition(req, db, actor=user)
-        msg = f"Unclaimed '{req.name}'"
+        try:
+            unclaim_requisition(req, db, actor=user)
+            msg = f"Unclaimed '{req.name}'"
+        except ValueError as e:
+            msg = str(e)
 
     elif action_name == RowActionName.won:
         from ..services.requisition_state import transition
@@ -427,6 +435,7 @@ async def bulk_action(
         reqs_q = reqs_q.filter(Requisition.created_by == user.id)
     reqs = reqs_q.all()
     count = 0
+    errors = []
 
     for req in reqs:
         if action_name == BulkActionName.archive:
@@ -435,27 +444,32 @@ async def bulk_action(
             try:
                 transition(req, "archived", user, db)
                 count += 1
-            except ValueError:
-                pass
+            except ValueError as e:
+                errors.append(f"REQ-{req.id}: {e}")
         elif action_name == BulkActionName.activate:
             from ..services.requisition_state import transition
 
             try:
                 transition(req, "active", user, db)
                 count += 1
-            except ValueError:
-                pass
+            except ValueError as e:
+                errors.append(f"REQ-{req.id}: {e}")
         elif action_name == BulkActionName.assign and owner_id:
             req.created_by = owner_id
             count += 1
 
     db.commit()
 
+    if errors:
+        logger.warning(f"Bulk {action_name.value} partial failure: {errors}")
+
     filters = _parse_filters(request)
     ctx = _table_context(request, filters, db, user)
     response = templates.TemplateResponse("requisitions2/_table.html", ctx)
     word = action_name.value + ("d" if action_name.value.endswith("e") else "ed")
     msg = f"{count} requisition{'s' if count != 1 else ''} {word}"
+    if errors:
+        msg += f" ({len(errors)} failed)"
     response.headers["HX-Trigger"] = json.dumps(
         {
             "showToast": {"message": msg},
