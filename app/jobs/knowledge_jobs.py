@@ -154,6 +154,7 @@ async def _job_refresh_insights():
 
     except Exception as e:
         logger.error("refresh_active_insights job failed: {}", e)
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -188,5 +189,6 @@ async def _job_expire_stale():
         logger.info("Knowledge entries: {} total, {} expired", total, expired_count)
     except Exception as e:
         logger.error("expire_stale job failed: {}", e)
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()

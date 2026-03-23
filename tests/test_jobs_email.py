@@ -123,12 +123,12 @@ def test_contacts_sync_syncs_stale_user(scheduler_db, test_user):
 
 
 def test_contacts_sync_error_in_user_gathering(scheduler_db):
-    """Error during user-gathering returns early."""
+    """Error during user-gathering is re-raised for _traced_job/Sentry."""
     with patch.object(scheduler_db, "query", side_effect=Exception("DB error")):
         from app.jobs.email_jobs import _job_contacts_sync
 
-        # Should not raise
-        asyncio.run(_job_contacts_sync())
+        with pytest.raises(Exception, match="DB error"):
+            asyncio.run(_job_contacts_sync())
 
 
 def test_contacts_sync_timeout(scheduler_db, test_user):
@@ -1209,7 +1209,7 @@ def test_ownership_sweep_delegates(scheduler_db):
 
 
 def test_ownership_sweep_error_handling(scheduler_db):
-    """Ownership sweep handles errors gracefully."""
+    """Ownership sweep re-raises errors for _traced_job/Sentry capture."""
     with patch(
         "app.services.ownership_service.run_ownership_sweep",
         new_callable=AsyncMock,
@@ -1217,7 +1217,8 @@ def test_ownership_sweep_error_handling(scheduler_db):
     ):
         from app.jobs.email_jobs import _job_ownership_sweep
 
-        asyncio.run(_job_ownership_sweep())
+        with pytest.raises(Exception, match="Sweep failed"):
+            asyncio.run(_job_ownership_sweep())
 
 
 # ── _job_site_ownership_sweep() ───────────────────────────────────────
@@ -1233,14 +1234,15 @@ def test_site_ownership_sweep_delegates(scheduler_db):
 
 
 def test_site_ownership_sweep_error_handling(scheduler_db):
-    """Site ownership sweep handles errors gracefully."""
+    """Site ownership sweep re-raises errors for _traced_job/Sentry capture."""
     with patch(
         "app.services.ownership_service.run_site_ownership_sweep",
         side_effect=Exception("Sweep failed"),
     ):
         from app.jobs.email_jobs import _job_site_ownership_sweep
 
-        asyncio.run(_job_site_ownership_sweep())
+        with pytest.raises(Exception, match="Sweep failed"):
+            asyncio.run(_job_site_ownership_sweep())
 
 
 # ── _compute_vendor_scores_job() ──────────────────────────────────────
@@ -1285,7 +1287,7 @@ def test_contact_scoring_runs_successfully(scheduler_db):
 
 
 def test_contact_scoring_timeout(scheduler_db):
-    """Contact scoring handles TimeoutError gracefully."""
+    """Contact scoring re-raises TimeoutError for _traced_job/Sentry capture."""
 
     async def _mock_wait_for(coro, timeout=None):
         try:
@@ -1300,18 +1302,20 @@ def test_contact_scoring_timeout(scheduler_db):
     ):
         from app.jobs.email_jobs import _job_contact_scoring
 
-        asyncio.run(_job_contact_scoring())
+        with pytest.raises(asyncio.TimeoutError):
+            asyncio.run(_job_contact_scoring())
 
 
 def test_contact_scoring_general_error(scheduler_db):
-    """Contact scoring handles general exceptions gracefully."""
+    """Contact scoring re-raises general exceptions for _traced_job/Sentry."""
     with patch(
         "app.services.contact_intelligence.compute_all_contact_scores",
         side_effect=Exception("Scoring crashed"),
     ):
         from app.jobs.email_jobs import _job_contact_scoring
 
-        asyncio.run(_job_contact_scoring())
+        with pytest.raises(Exception, match="Scoring crashed"):
+            asyncio.run(_job_contact_scoring())
 
 
 # ── _job_contact_status_compute() ─────────────────────────────────────
@@ -1486,11 +1490,12 @@ def test_contact_status_compute_no_activity_old_created(scheduler_db, test_user,
 
 
 def test_contact_status_compute_error_handler(scheduler_db):
-    """Exception in _job_contact_status_compute is caught and rolled back."""
+    """Exception in _job_contact_status_compute is re-raised for _traced_job/Sentry."""
     with patch.object(scheduler_db, "query", side_effect=Exception("DB crash")):
         from app.jobs.email_jobs import _job_contact_status_compute
 
-        asyncio.run(_job_contact_status_compute())
+        with pytest.raises(Exception, match="DB crash"):
+            asyncio.run(_job_contact_status_compute())
 
 
 # ── _job_email_reverification() ───────────────────────────────────────
@@ -1507,24 +1512,26 @@ def test_email_reverification_success(scheduler_db):
 
 
 def test_email_reverification_error(scheduler_db):
-    """Exception rolls back."""
+    """Exception rolls back and re-raises for _traced_job/Sentry."""
     mock_reverify = AsyncMock(side_effect=Exception("Reverify failed"))
     with patch("app.services.customer_enrichment_batch.run_email_reverification", mock_reverify):
         from app.jobs.email_jobs import _job_email_reverification
 
-        asyncio.run(_job_email_reverification())
+        with pytest.raises(Exception, match="Reverify failed"):
+            asyncio.run(_job_email_reverification())
 
 
 # ── _job_email_health_update() ────────────────────────────────────────
 
 
 def test_email_health_update_timeout(scheduler_db):
-    """asyncio.TimeoutError rolls back."""
+    """asyncio.TimeoutError rolls back and re-raises for _traced_job/Sentry."""
     with patch("app.services.response_analytics.batch_update_email_health", side_effect=Exception("slow")):
         with patch("asyncio.wait_for", new_callable=AsyncMock, side_effect=asyncio.TimeoutError):
             from app.jobs.email_jobs import _job_email_health_update
 
-            asyncio.run(_job_email_health_update())
+            with pytest.raises(asyncio.TimeoutError):
+                asyncio.run(_job_email_health_update())
 
 
 def test_email_health_update_success(scheduler_db):
@@ -1538,23 +1545,25 @@ def test_email_health_update_success(scheduler_db):
 
 
 def test_email_health_update_generic_error(scheduler_db):
-    """Generic exception rolls back."""
+    """Generic exception rolls back and re-raises for _traced_job/Sentry."""
     mock_health = MagicMock(side_effect=RuntimeError("DB error"))
     with patch("app.services.response_analytics.batch_update_email_health", mock_health):
         from app.jobs.email_jobs import _job_email_health_update
 
-        asyncio.run(_job_email_health_update())
+        with pytest.raises(RuntimeError, match="DB error"):
+            asyncio.run(_job_email_health_update())
 
 
 # ── _job_calendar_scan() ──────────────────────────────────────────────
 
 
 def test_calendar_scan_user_query_error(scheduler_db):
-    """Exception in user query causes early return."""
+    """Exception in user query re-raises for _traced_job/Sentry."""
     with patch.object(scheduler_db, "query", side_effect=Exception("DB error")):
         from app.jobs.email_jobs import _job_calendar_scan
 
-        asyncio.run(_job_calendar_scan())
+        with pytest.raises(Exception, match="DB error"):
+            asyncio.run(_job_calendar_scan())
 
 
 def test_calendar_scan_user_not_found(scheduler_db, test_user):

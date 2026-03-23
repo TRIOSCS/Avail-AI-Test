@@ -130,12 +130,12 @@ def test_auto_archive_only_archives_active_status(scheduler_db, test_user):
 
 
 def test_auto_archive_error_handling(scheduler_db):
-    """Auto-archive handles DB errors gracefully when query fails."""
+    """Auto-archive logs and re-raises DB errors for _traced_job/Sentry capture."""
     with patch.object(scheduler_db, "query", side_effect=Exception("DB locked")):
         from app.jobs.core_jobs import _job_auto_archive
 
-        # Should not raise — error is caught internally
-        asyncio.run(_job_auto_archive())
+        with pytest.raises(Exception, match="DB locked"):
+            asyncio.run(_job_auto_archive())
 
 
 # ── _job_token_refresh() ──────────────────────────────────────────────
@@ -201,12 +201,12 @@ def test_token_refresh_handles_error_per_user(scheduler_db, test_user):
 
 
 def test_token_refresh_outer_exception(scheduler_db):
-    """Outer exception in _job_token_refresh is caught."""
+    """Outer exception in _job_token_refresh is re-raised for _traced_job/Sentry."""
     with patch.object(scheduler_db, "query", side_effect=Exception("DB crash")):
         from app.jobs.core_jobs import _job_token_refresh
 
-        # Should not raise
-        asyncio.run(_job_token_refresh())
+        with pytest.raises(Exception, match="DB crash"):
+            asyncio.run(_job_token_refresh())
 
 
 def test_token_refresh_redis_lock_acquired(scheduler_db, test_user):
@@ -472,7 +472,7 @@ def test_batch_results_calls_process(scheduler_db):
 
 
 def test_batch_results_handles_timeout(scheduler_db):
-    """Batch results job handles asyncio.TimeoutError gracefully."""
+    """Batch results job re-raises asyncio.TimeoutError for _traced_job/Sentry."""
     with (
         patch(
             "app.email_service.process_batch_results",
@@ -486,12 +486,12 @@ def test_batch_results_handles_timeout(scheduler_db):
     ):
         from app.jobs.core_jobs import _job_batch_results
 
-        # Should not raise
-        asyncio.run(_job_batch_results())
+        with pytest.raises(asyncio.TimeoutError):
+            asyncio.run(_job_batch_results())
 
 
 def test_batch_results_handles_error(scheduler_db):
-    """Batch results job handles general errors gracefully."""
+    """Batch results job re-raises general errors for _traced_job/Sentry."""
     with patch(
         "app.email_service.process_batch_results",
         new_callable=AsyncMock,
@@ -499,8 +499,8 @@ def test_batch_results_handles_error(scheduler_db):
     ):
         from app.jobs.core_jobs import _job_batch_results
 
-        # Should not raise
-        asyncio.run(_job_batch_results())
+        with pytest.raises(Exception, match="AI service down"):
+            asyncio.run(_job_batch_results())
 
 
 # ── _job_inbox_scan() ──────────────────────────────────────────────────
@@ -626,7 +626,7 @@ def test_inbox_scan_handles_timeout(scheduler_db, test_user):
 
 
 def test_inbox_scan_error_in_user_gathering(scheduler_db):
-    """Error during user-gathering phase returns early."""
+    """Error during user-gathering phase is re-raised for _traced_job/Sentry."""
     with (
         patch.object(scheduler_db, "query", side_effect=Exception("DB error")),
         patch("app.config.settings") as mock_settings,
@@ -634,8 +634,8 @@ def test_inbox_scan_error_in_user_gathering(scheduler_db):
         mock_settings.inbox_scan_interval_min = 30
         from app.jobs.core_jobs import _job_inbox_scan
 
-        # Should not raise
-        asyncio.run(_job_inbox_scan())
+        with pytest.raises(Exception, match="DB error"):
+            asyncio.run(_job_inbox_scan())
 
 
 def test_inbox_scan_safe_scan_timeout(scheduler_db, test_user):
@@ -797,7 +797,7 @@ def test_webhook_subscriptions_delegates(scheduler_db):
 
 
 def test_webhook_subscriptions_error_handling(scheduler_db):
-    """Webhook job handles errors gracefully."""
+    """Webhook job re-raises errors for _traced_job/Sentry capture."""
     with patch(
         "app.services.webhook_service.renew_expiring_subscriptions",
         new_callable=AsyncMock,
@@ -805,8 +805,8 @@ def test_webhook_subscriptions_error_handling(scheduler_db):
     ):
         from app.jobs.core_jobs import _job_webhook_subscriptions
 
-        # Should not raise
-        asyncio.run(_job_webhook_subscriptions())
+        with pytest.raises(Exception, match="Graph API error"):
+            asyncio.run(_job_webhook_subscriptions())
 
 
 # ── _traced_job exception path ────────────────────────────────────────

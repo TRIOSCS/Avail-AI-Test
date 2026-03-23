@@ -243,7 +243,7 @@ class TestJobEmailHealthUpdate:
 
     @pytest.mark.asyncio
     async def test_handles_error(self):
-        """Job catches exceptions without propagating."""
+        """Job logs, rolls back, and re-raises for _traced_job/Sentry capture."""
         mock_db = MagicMock()
 
         with (
@@ -255,8 +255,8 @@ class TestJobEmailHealthUpdate:
         ):
             from app.jobs.email_jobs import _job_email_health_update
 
-            # Should not raise
-            await _job_email_health_update()
+            with pytest.raises(RuntimeError, match="db down"):
+                await _job_email_health_update()
 
             mock_db.rollback.assert_called()
             mock_db.close.assert_called_once()

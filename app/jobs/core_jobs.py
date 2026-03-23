@@ -81,6 +81,7 @@ async def _job_auto_archive():
     except Exception as e:
         logger.error(f"Auto-archive error: {e}")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -109,7 +110,7 @@ async def _job_token_refresh():
                 users_to_refresh.append(user.id)
     except Exception as e:
         logger.error(f"Token refresh job error: {e}")
-        return
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         selector_db.close()
 
@@ -176,7 +177,7 @@ async def _job_inbox_scan():
                 users_to_scan.append(user.id)
     except Exception as e:
         logger.error(f"Inbox scan job error: {e}")
-        return
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -225,8 +226,10 @@ async def _job_batch_results():
             logger.info(f"Batch processing: {batch_applied} results applied")
     except asyncio.TimeoutError:
         logger.error("Batch results processing timed out (120s)")
+        raise  # Re-raise so _traced_job / Sentry can capture
     except Exception as e:
         logger.error(f"Batch results processing error: {e}")
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         # process_batch_results handles its own commit/rollback per batch;
         # rollback here only cleans up any uncommitted leftovers safely
@@ -251,9 +254,11 @@ async def _job_batch_enrich_materials():
     except asyncio.TimeoutError:
         logger.error("Material batch enrich timed out (120s)")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     except Exception as e:
         logger.error(f"Material batch enrich error: {e}")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -272,9 +277,11 @@ async def _job_poll_material_batch():
     except asyncio.TimeoutError:
         logger.error("Material batch poll timed out (120s)")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     except Exception as e:
         logger.error(f"Material batch poll error: {e}")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -294,9 +301,11 @@ async def _job_batch_parse_signatures():
     except asyncio.TimeoutError:
         logger.error("Signature batch parse timed out (120s)")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     except Exception as e:
         logger.error(f"Signature batch parse error: {e}")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -315,9 +324,11 @@ async def _job_poll_signature_batch():
     except asyncio.TimeoutError:
         logger.error("Signature batch poll timed out (120s)")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     except Exception as e:
         logger.error(f"Signature batch poll error: {e}")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -339,5 +350,6 @@ async def _job_webhook_subscriptions():
     except Exception as e:
         logger.error(f"Webhook subscription error: {e}")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()

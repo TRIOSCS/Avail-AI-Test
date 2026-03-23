@@ -106,7 +106,7 @@ async def _job_contacts_sync():
                 user_ids.append(user.id)
     except Exception as e:
         logger.error(f"Contacts sync job error: {e}")
-        return
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -141,6 +141,7 @@ async def _job_ownership_sweep():
     except Exception as e:
         logger.error(f"Ownership sweep error: {e}")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -158,6 +159,7 @@ async def _job_site_ownership_sweep():
     except Exception as e:
         logger.error(f"Site ownership sweep error: {e}")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -180,9 +182,11 @@ async def _job_contact_scoring():
     except asyncio.TimeoutError:
         logger.error("Contact scoring timed out after 300s")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     except Exception as e:
         logger.error(f"Contact scoring error: {e}")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -264,6 +268,7 @@ async def _job_contact_status_compute():
     except Exception as e:
         logger.error(f"Contact status compute error: {e}")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -284,9 +289,11 @@ async def _job_email_health_update():
     except asyncio.TimeoutError:
         logger.error("Email health update timed out after 300s")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     except Exception as e:
         logger.error(f"Email health update error: {e}")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -305,7 +312,7 @@ async def _job_calendar_scan():
         users_to_scan = [u for u in users if u.access_token and u.m365_connected]
     except Exception as e:
         logger.error(f"Calendar scan user query error: {e}")
-        return
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -358,6 +365,7 @@ async def _job_email_reverification():
     except Exception as e:
         logger.error(f"Email re-verification error: {e}")
         db.rollback()
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
@@ -810,7 +818,7 @@ async def _job_scan_sent_folders():
         users_to_scan = [u.id for u in users if u.access_token and u.m365_connected]
     except Exception as e:
         logger.error(f"Sent folder scan user query error: {e}")
-        return
+        raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
 
