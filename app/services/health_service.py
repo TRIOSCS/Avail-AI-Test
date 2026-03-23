@@ -35,5 +35,5 @@ def check_backup_freshness() -> str:
             return "ok"
         return "stale"
     except (ValueError, OSError) as e:
-        logger.debug("Backup freshness check failed: %s", e)
+        logger.warning("Backup freshness check failed: %s", e)
         return "unknown"

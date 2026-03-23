@@ -254,7 +254,7 @@ async def send_batch_rfq(
                                 propagate_tags_to_entity("vendor_card", vc.id, cid, 0.5, db)
                 db.commit()
     except Exception:  # pragma: no cover
-        logger.debug("Tag propagation failed for RFQ batch", exc_info=True)
+        logger.warning("Tag propagation failed for RFQ batch", exc_info=True)
 
     return results
 
@@ -282,7 +282,7 @@ async def _find_sent_message(gc, subject: str) -> dict | None:
                 if m.get("subject", "").strip() == subject.strip():
                     return m
         except Exception as e:
-            logger.debug(f"Sent message lookup attempt failed: {e}")
+            logger.warning(f"Sent message lookup attempt failed: {e}")
     return None
 
 
@@ -1120,7 +1120,7 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
                     offer.id,
                 )
             except Exception:
-                logger.debug("Task auto-gen for email offer failed", exc_info=True)
+                logger.warning("Task auto-gen for email offer failed", exc_info=True)
 
             # Auto-capture offer facts into Knowledge Ledger
             try:
@@ -1139,7 +1139,7 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
                     if vc:  # pragma: no cover
                         propagate_tags_to_entity("vendor_card", vc.id, offer.material_card_id, 1.0, db)
             except Exception:
-                logger.debug("Tag propagation failed for offer %s", offer.id, exc_info=True)
+                logger.warning("Tag propagation failed for offer %s", offer.id, exc_info=True)
 
             # Reset strategic vendor 39-day clock
             if offer.vendor_card_id:

@@ -221,7 +221,7 @@ async def _get_or_detect_mapping(
             db.execute(stmt)
             db.flush()
         except Exception as e:
-            logger.debug(f"Column mapping cache write failed: {e}")
+            logger.warning(f"Column mapping cache write failed: {e}")
 
     return mapping
 

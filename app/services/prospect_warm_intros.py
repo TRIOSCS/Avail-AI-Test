@@ -125,7 +125,7 @@ def detect_warm_intros(prospect: ProspectAccount, db: Session) -> dict:
             result["has_warm_intro"] = True
             result["warmth"] = "warm"
     except Exception as e:
-        logger.debug("Warm intro sighting lookup failed: %s", e)
+        logger.warning("Warm intro sighting lookup failed: %s", e)
 
     return result
 

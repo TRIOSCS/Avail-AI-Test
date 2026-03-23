@@ -588,7 +588,7 @@ async def claude_batch_results(
                     parsed[cid] = None
 
             except json.JSONDecodeError:
-                logger.debug(f"Batch JSONL parse error: {line[:100]}")
+                logger.warning(f"Batch JSONL parse error: {line[:100]}")
                 continue
 
         counts = data.get("request_counts", {})

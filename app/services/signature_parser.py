@@ -286,7 +286,7 @@ async def extract_signature(body: str, sender_name: str = "", sender_email: str 
             ai_result["extraction_method"] = "claude_ai"
             return ai_result
     except Exception as e:
-        logger.debug("Claude signature parse failed: %s", e)
+        logger.warning("Claude signature parse failed: %s", e)
 
     regex_result["extraction_method"] = "regex"
     return regex_result
@@ -340,7 +340,7 @@ def cache_signature_extract(db, sender_email: str, extract: dict) -> None:
     try:
         db.flush()
     except Exception as e:
-        logger.debug("Signature cache flush error: %s", e)
+        logger.warning("Signature cache flush error: %s", e)
         db.rollback()
 
 
@@ -497,7 +497,7 @@ async def process_signature_batch_results(db) -> dict | None:
 
     for custom_id, parsed in results.items():
         if parsed is None:
-            logger.debug("Batch signature result error for %s — skipping", custom_id)
+            logger.warning("Batch signature result error for %s — skipping", custom_id)
             stats["errors"] += 1
             continue
 

@@ -96,4 +96,4 @@ async def send_teams_dm(user, message: str, db=None) -> None:
             await gc.post_json(f"/chats/{chat_id}/messages", {"body": {"content": message}})
             logger.info("Teams DM sent to %s", user.email)
     except Exception as e:
-        logger.debug("Teams DM to %s failed (may not have Chat permissions): %s", user.email, e)
+        logger.warning("Teams DM to %s failed (may not have Chat permissions): %s", user.email, e)

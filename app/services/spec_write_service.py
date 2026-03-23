@@ -93,7 +93,7 @@ def record_spec(
                     if not unit and m.group(2):
                         unit = m.group(2).strip()
                 except ValueError:
-                    logger.debug("record_spec: cannot parse numeric value '{}' for {}.{}", value, category, spec_key)
+                    logger.warning("record_spec: cannot parse numeric value '{}' for {}.{}", value, category, spec_key)
                     return
             else:
                 logger.debug("record_spec: non-numeric string '{}' for numeric spec {}.{}", value, category, spec_key)

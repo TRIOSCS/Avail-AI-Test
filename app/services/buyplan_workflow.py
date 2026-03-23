@@ -450,7 +450,7 @@ def _generate_buyer_tasks(plan: BuyPlan, db: Session) -> None:
                 line_id=line.id,
             )
     except Exception:
-        logger.debug("Task auto-gen for buy plan lines failed", exc_info=True)
+        logger.warning("Task auto-gen for buy plan lines failed", exc_info=True)
 
 
 # ── Helpers: Auto-Approval ───────────────────────────────────────────

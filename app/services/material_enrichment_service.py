@@ -341,7 +341,7 @@ async def process_material_batch_results(db: Session) -> dict | None:
 
     for custom_id, parsed in results.items():
         if parsed is None:
-            logger.debug("Batch result error for %s — skipping", custom_id)
+            logger.warning("Batch result error for %s — skipping", custom_id)
             stats["errors"] += 1
             continue
 

@@ -51,7 +51,7 @@ async def _query_nexar_batch(mpns: list[str]) -> dict[str, dict]:
                 if manufacturer or category:
                     results[mpn] = {"manufacturer": manufacturer, "category": category}
         except Exception:  # pragma: no cover
-            logger.debug(f"Nexar query failed for {mpn}", exc_info=True)
+            logger.warning(f"Nexar query failed for {mpn}", exc_info=True)
 
     return results
 

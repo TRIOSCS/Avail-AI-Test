@@ -143,7 +143,7 @@ async def search_part(page, part_number: str) -> dict:
                     logger.info("ICS search: force-clicked hidden button '{}'", btn_selector)
                     break
             except Exception as e:
-                logger.debug("ICS search: force-click '{}' failed: {}", btn_selector, e)
+                logger.warning("ICS search: force-click '{}' failed: {}", btn_selector, e)
                 continue
 
     # Strategy 3: JS click + showPageAjax() for ASP.NET WebForms

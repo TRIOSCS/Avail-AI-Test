@@ -92,7 +92,7 @@ def detect_encoding(content: bytes) -> str | None:
     except ImportError:
         logger.warning("charset-normalizer not installed — using utf-8-sig fallback")
     except Exception as e:
-        logger.debug(f"Encoding detection error: {e}")
+        logger.warning(f"Encoding detection error: {e}")
 
     # Fallback: try common encodings
     for enc in ("utf-8-sig", "utf-8", "latin-1", "cp1252", "gb2312", "shift_jis"):

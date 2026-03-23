@@ -93,7 +93,7 @@ def parse_price_breaks(element) -> tuple[list[PriceBreak], str | None]:
             )
         return breaks, currency
     except (json.JSONDecodeError, ValueError, TypeError) as e:
-        logger.debug("NC parser: failed to parse price breaks: {}", e)
+        logger.warning("NC parser: failed to parse price breaks: {}", e)
         return [], None
 
 
@@ -195,7 +195,7 @@ def parse_results_html(html: str) -> list[NcSighting]:
                     sightings.append(sighting)
 
                 except (IndexError, AttributeError) as e:
-                    logger.debug("NC parser: skipping malformed row: {}", e)
+                    logger.warning("NC parser: skipping malformed row: {}", e)
                     continue
 
     logger.info("NC parser: extracted {} sightings from HTML ({} regions)", len(sightings), len(containers))
@@ -264,7 +264,7 @@ def _parse_flat(soup) -> list[NcSighting]:
             )
             sightings.append(sighting)
         except (IndexError, AttributeError) as e:
-            logger.debug("NC parser (flat): skipping row: {}", e)
+            logger.warning("NC parser (flat): skipping row: {}", e)
             continue
 
     logger.info("NC parser (flat fallback): extracted {} sightings", len(sightings))

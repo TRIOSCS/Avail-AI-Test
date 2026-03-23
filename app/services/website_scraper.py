@@ -71,7 +71,7 @@ async def _fetch_page(client: httpx.AsyncClient, url: str) -> str | None:
         if r.status_code == 200 and "text" in r.headers.get("content-type", ""):
             return r.text[:500_000]  # Cap at 500KB
     except Exception as e:
-        logger.debug("Website fetch failed for %s: %s", url, e)
+        logger.warning("Website fetch failed for %s: %s", url, e)
     return None
 
 
@@ -164,7 +164,7 @@ async def scrape_vendor_websites(
                 await asyncio.sleep(RATE_LIMIT_DELAY)  # Rate limit between vendors
                 return (card, scrape_results)
             except Exception as e:
-                logger.debug("Scrape failed for %s: %s", card.website, e)
+                logger.warning("Scrape failed for %s: %s", card.website, e)
                 return None
 
     scrape_results_list = await asyncio.gather(*[_scrape_one(c) for c in vendors], return_exceptions=True)

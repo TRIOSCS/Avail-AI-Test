@@ -110,7 +110,7 @@ async def _try_connector_config(config: dict, mpn: str) -> dict | None:
                 }
         return None
     except Exception:
-        logger.debug("Connector %s failed for %s", config["name"], mpn, exc_info=True)
+        logger.warning("Connector %s failed for %s", config["name"], mpn, exc_info=True)
         return None
 
 
@@ -472,7 +472,7 @@ async def nexar_bulk_validate(db: Session, limit: int = 5000) -> dict:
                         )
                         changed += 1
             except Exception:
-                logger.debug("Nexar validate failed for %s", row.normalized_mpn, exc_info=True)
+                logger.warning("Nexar validate failed for %s", row.normalized_mpn, exc_info=True)
                 no_result += 1
 
         db.commit()
@@ -555,7 +555,7 @@ async def nexar_backfill_untagged(db: Session, limit: int = 5000) -> dict:
                 tagged += 1
 
         except Exception:
-            logger.debug("Nexar backfill failed for %s", row.normalized_mpn, exc_info=True)
+            logger.warning("Nexar backfill failed for %s", row.normalized_mpn, exc_info=True)
             no_result += 1
 
         if (i + 1) % 200 == 0:

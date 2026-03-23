@@ -53,7 +53,7 @@ def _set_ai_cache(query: str, result: dict) -> None:
 
         set_cached(_ai_cache_key(query), result, ttl_days=AI_CACHE_TTL_SECONDS / 86400)
     except Exception as e:
-        logger.debug("AI search cache write failed: %s", e)
+        logger.warning("AI search cache write failed: %s", e)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────

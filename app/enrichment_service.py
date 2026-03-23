@@ -187,7 +187,7 @@ async def normalize_company_input(name: str, domain: str = "") -> tuple[str, str
             if fixed and fixed.strip().strip('"'):
                 clean_name = fixed.strip().strip('"')
         except Exception as e:
-            logger.debug("Typo fix skipped: %s", e)
+            logger.warning("Typo fix skipped: %s", e)
 
     return clean_name, clean_domain
 
@@ -540,7 +540,7 @@ async def find_suggested_contacts(domain: str, name: str = "", title_filter: str
     all_contacts = []
     for r in results:
         if isinstance(r, Exception):
-            logger.debug("Contact provider failed: %s", r)
+            logger.warning("Contact provider failed: %s", r)
             continue
         all_contacts.extend(r)
 

@@ -89,7 +89,7 @@ async def enrich_from_sam_gov(prospect: ProspectAccount) -> dict | None:
         }
 
     except Exception as e:
-        logger.debug("SAM.gov enrichment failed for '{}': {}", name, e)
+        logger.warning("SAM.gov enrichment failed for '{}': {}", name, e)
         return None
 
 
@@ -146,7 +146,7 @@ async def enrich_from_google_news(prospect: ProspectAccount, max_items: int = 5)
         return items
 
     except Exception as e:
-        logger.debug("Google News enrichment failed for '{}': {}", name, e)
+        logger.warning("Google News enrichment failed for '{}': {}", name, e)
         return []
 
 

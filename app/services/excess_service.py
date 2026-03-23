@@ -822,7 +822,7 @@ async def _find_sent_message(gc, subject: str) -> dict | None:
                 if m.get("subject", "").strip() == subject.strip():
                     return m
         except Exception as e:
-            logger.debug(f"Sent message lookup attempt failed: {e}")
+            logger.warning(f"Sent message lookup attempt failed: {e}")
     return None
 
 

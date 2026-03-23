@@ -184,4 +184,4 @@ def rebuild_vendor_summaries_from_sightings(
         if vendor_names:
             rebuild_vendor_summaries(db, requirement_id, vendor_names=vendor_names)
     except Exception:
-        logger.debug("Vendor summary rebuild failed for requirement {}", requirement_id, exc_info=True)
+        logger.warning("Vendor summary rebuild failed for requirement {}", requirement_id, exc_info=True)
