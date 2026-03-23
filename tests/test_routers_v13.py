@@ -395,8 +395,8 @@ def test_graph_webhook_no_valid_notifications(client):
 
 
 def test_graph_webhook_processing_error(client):
-    """POST /api/webhooks/graph processing failure still returns 200 (avoids Microsoft
-    infinite retry)."""
+    """POST /api/webhooks/graph processing failure returns 500 so Microsoft Graph
+    retries."""
     from unittest.mock import AsyncMock, patch
 
     with (
@@ -406,7 +406,7 @@ def test_graph_webhook_processing_error(client):
         ),
     ):
         resp = client.post("/api/webhooks/graph", json={"value": [{"resource": "test"}]})
-    assert resp.status_code == 200
+    assert resp.status_code == 500
 
 
 def test_graph_webhook_success(client):
