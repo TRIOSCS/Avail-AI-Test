@@ -98,13 +98,13 @@
         </td>
         <td class="px-3 py-2 font-mono font-medium text-gray-900">{{ r.primary_mpn }}</td>
         <td class="px-3 py-2">{{ r.target_qty or '—' }}</td>
-        <td class="px-3 py-2 text-gray-600" style="font-family: 'DM Sans', sans-serif;">
+        <td class="px-3 py-2 text-gray-600">
           {{ r.requisition.customer_name or '—' }}
         </td>
-        <td class="px-3 py-2 text-gray-500 text-xs" style="font-family: 'DM Sans', sans-serif;">
+        <td class="px-3 py-2 text-gray-500 text-xs">
           {{ r.requisition.creator.name if r.requisition.creator else '—' }}
         </td>
-        <td class="px-3 py-2 text-gray-600" style="font-family: 'DM Sans', sans-serif;">
+        <td class="px-3 py-2 text-gray-600">
           {% if top_vendors.get(r.id) %}
             {{ top_vendors[r.id].vendor_name }}
             <span class="ml-1 text-[10px] text-gray-400">{{ top_vendors[r.id].score|round|int }}%</span>
@@ -113,24 +113,14 @@
           {% endif %}
         </td>
         <td class="px-3 py-2">
-          {% set status_styles = {
-            'open': 'bg-gray-100 text-gray-600',
-            'sourcing': 'bg-blue-50 text-blue-700',
-            'offered': 'bg-amber-50 text-amber-700',
-            'quoted': 'bg-emerald-50 text-emerald-700',
-            'won': 'bg-green-50 text-green-700',
-            'lost': 'bg-gray-100 text-gray-500',
-          } %}
-          <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ status_styles.get(r.sourcing_status, 'bg-gray-100 text-gray-600') }}">
-            {{ r.sourcing_status|capitalize }}
-          </span>
+          {{ m.status_badge(r.sourcing_status) }}
         </td>
         <td class="px-3 py-2 text-center">
           {% if r.priority_score %}
             {% set pri = r.priority_score %}
             {% set pri_color = 'text-rose-600' if pri >= 70 else ('text-amber-600' if pri >= 40 else 'text-gray-400') %}
             {% set pri_label = 'High' if pri >= 70 else ('Med' if pri >= 40 else 'Low') %}
-            <span class="text-[10px] font-medium {{ pri_color }}">{{ pri_label }}</span>
+            <span class="inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded-full {{ 'bg-rose-50 text-rose-700' if pri >= 70 else ('bg-amber-50 text-amber-700' if pri >= 40 else 'bg-gray-100 text-gray-500') }}">{{ pri_label }}</span>
           {% endif %}
         </td>
         <td class="px-3 py-2 text-center">

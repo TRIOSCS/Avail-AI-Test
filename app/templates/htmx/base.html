@@ -13,8 +13,8 @@
     .htmx-indicator { display: none; }
     .htmx-request .htmx-indicator { display: inline-block; }
     .htmx-request.htmx-indicator { display: inline-block; }
-    .htmx-swapping { opacity: 0; transition: opacity 0.15s ease-out; }
-    .htmx-settling { opacity: 1; transition: opacity 0.15s ease-in; }
+    .htmx-swapping { opacity: 0; transition: opacity 0.15s ease-in; }
+    .htmx-settling { opacity: 1; transition: opacity 0.15s ease-out; }
     @keyframes spin { to { transform: rotate(360deg); } }
     .spinner { animation: spin 0.6s linear infinite; }
     /* loading-states extension: show/hide/disable elements during HTMX requests */
@@ -22,8 +22,6 @@
     [data-loading].htmx-request { display: inline-block; }
     [data-loading-class] { /* classes added/removed automatically by extension */ }
     [data-loading-disable].htmx-request { pointer-events: none; opacity: 0.5; }
-    /* Safety: never let swapping state persist more than 2s */
-    .htmx-swapping { transition: opacity 0.15s ease-out !important; }
   </style>
 </head>
 <body class="h-full"
@@ -67,7 +65,7 @@
   <div x-data x-show="$store.toast.show" x-cloak x-transition
        @click="$store.toast.show = false"
        x-init="$watch('$store.toast.show', v => v && setTimeout(() => $store.toast.show = false, 4000))"
-       class="fixed top-4 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium max-w-sm"
+       class="fixed top-16 right-4 z-50 px-4 py-3 rounded-lg shadow-lg text-sm font-medium max-w-sm"
        :class="{
          'bg-emerald-50 text-emerald-700 border border-emerald-200': $store.toast.type === 'success',
          'bg-rose-50 text-rose-700 border border-rose-200': $store.toast.type === 'error',

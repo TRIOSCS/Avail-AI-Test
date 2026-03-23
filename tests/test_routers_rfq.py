@@ -315,7 +315,7 @@ def test_retry_failed_rfq_rejects_non_failed_contact(client, db_session, test_us
     )
     resp = client.post(f"/api/contacts/{c.id}/retry")
     assert resp.status_code == 400
-    msg = resp.json().get("detail") or resp.json().get("error", "")
+    msg = resp.json().get("error", "")
     assert "Only failed contacts can be retried" in msg
 
 

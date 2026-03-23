@@ -11,6 +11,9 @@ RUN npm run build
 # Stage 2: Python application
 FROM python:3.12-slim
 
+ARG BUILD_COMMIT=unknown
+ENV BUILD_COMMIT=${BUILD_COMMIT}
+
 WORKDIR /app
 
 # System deps — rarely change, cached as base layer

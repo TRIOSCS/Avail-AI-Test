@@ -46,5 +46,16 @@
     {% endif %}
   </div>
 
-  <span class="text-sm text-gray-500">Page {{ page }} of {{ total_pages }}</span>
+  <div class="flex items-center gap-2">
+    <span class="text-sm text-gray-500">Page {{ page }} of {{ total_pages }}</span>
+    {% if total_pages > 5 %}
+    <input type="number" min="1" max="{{ total_pages }}" value="{{ page }}"
+           hx-get="{{ base_url }}"
+           hx-trigger="change"
+           hx-target="#main-content"
+           hx-swap="innerHTML"
+           name="page"
+           class="w-14 rounded border border-gray-200 px-1.5 py-0.5 text-xs text-center text-gray-600 focus:border-brand-400 focus:ring-1 focus:ring-brand-200 outline-none">
+    {% endif %}
+  </div>
 </nav>

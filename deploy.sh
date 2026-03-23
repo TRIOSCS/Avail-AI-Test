@@ -21,10 +21,10 @@ if [ "$NO_COMMIT" = false ]; then
     fi
 fi
 
-# Step 2: Force rebuild — no cache for the app service
-# This prevents stale Python/JS code from surviving in cached layers
-echo "==> Rebuilding app container (no cache)..."
-docker compose build --no-cache app
+# Step 2: Rebuild app with build commit arg (Docker caching enabled)
+BUILD_COMMIT=$(git rev-parse --short HEAD)
+echo "==> Rebuilding app container (commit: $BUILD_COMMIT)..."
+docker compose build --build-arg BUILD_COMMIT="$BUILD_COMMIT" app
 
 # Step 3: Recreate only the app container with the new image
 echo "==> Restarting app..."
@@ -35,7 +35,8 @@ echo "==> Waiting for app to become healthy..."
 TRIES=0
 MAX_TRIES=30
 while [ $TRIES -lt $MAX_TRIES ]; do
-    STATUS=$(docker inspect --format='{{.State.Health.Status}}' availai-app-1 2>/dev/null || echo "unknown")
+    CONTAINER=$(docker compose ps -q app)
+    STATUS=$(docker inspect --format='{{.State.Health.Status}}' "$CONTAINER" 2>/dev/null || echo "unknown")
     if [ "$STATUS" = "healthy" ]; then
         echo "==> App is healthy!"
         break
@@ -51,9 +52,20 @@ if [ "$STATUS" != "healthy" ]; then
     exit 1
 fi
 
-# Step 5: Show recent logs to confirm the right code is running
+# Step 5: Verify deployed commit matches local HEAD
+echo ""
+echo "==> Verifying deployed build commit..."
+DEPLOYED_COMMIT=$(docker compose exec app printenv BUILD_COMMIT 2>/dev/null | tr -d '[:space:]' || echo "UNKNOWN")
+
+if [ "$DEPLOYED_COMMIT" != "$BUILD_COMMIT" ]; then
+    echo "==> MISMATCH: deployed commit ($DEPLOYED_COMMIT) does NOT match local HEAD ($BUILD_COMMIT)"
+    exit 1
+fi
+echo "==> MATCH: deployed commit ($DEPLOYED_COMMIT) matches local HEAD ($BUILD_COMMIT)"
+
+# Step 6: Show recent logs to confirm the right code is running
 echo ""
 echo "==> Recent app logs:"
 docker compose logs --tail=20 app
 echo ""
-echo "==> Deploy complete. Verify the version at /health"
+echo "==> Deploy complete."

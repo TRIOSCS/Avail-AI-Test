@@ -4,8 +4,7 @@
   Depends on: Alpine.js, HTMX, /v2/partials/search/global endpoint
   Context vars: user_name (str)
 #}
-<header class="sticky top-0 z-20 flex h-12 items-center gap-4 bg-white px-3 sm:px-5"
-        style="border-bottom: 1px solid #CADDEF;">
+<header class="sticky top-0 z-20 flex h-12 items-center gap-4 bg-white px-3 sm:px-5 border-b border-brand-200">
 
   {# Left: Logo — maximized within 48px bar height #}
   <a href="/v2" hx-get="/v2/partials/parts/workspace" hx-target="#main-content" hx-push-url="/v2/requisitions"
@@ -25,7 +24,7 @@
              name="q"
              placeholder="Search reqs, customers, vendors..."
              autocomplete="off"
-             class="w-full rounded-lg border border-brand-200 bg-brand-50/50 py-1.5 pl-9 pr-3 text-sm text-gray-800 placeholder-brand-300 outline-none transition-all focus:border-brand-400 focus:bg-white focus:shadow-sm"
+             class="w-full rounded-lg border border-brand-300 bg-white py-1.5 pl-9 pr-3 text-sm text-gray-800 placeholder-brand-300 outline-none transition-all focus:border-brand-500 focus:shadow-sm"
              hx-get="/v2/partials/search/global"
              hx-trigger="keyup changed delay:300ms"
              hx-target="#global-search-results"

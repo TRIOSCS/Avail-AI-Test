@@ -41,106 +41,6 @@
     @apply bg-gray-100 text-gray-600 px-2 py-0.5 text-xs font-medium rounded-full;
   }
 
-  /* Source badges — each connector gets a distinct hue */
-  .source-badge-brokerbin {
-    @apply bg-sky-100 text-sky-700 px-2 py-0.5 text-xs font-medium rounded-full;
-  }
-
-  .source-badge-nexar {
-    @apply bg-violet-100 text-violet-700 px-2 py-0.5 text-xs font-medium rounded-full;
-  }
-
-  .source-badge-digikey {
-    @apply bg-orange-100 text-orange-700 px-2 py-0.5 text-xs font-medium rounded-full;
-  }
-
-  .source-badge-mouser {
-    @apply bg-teal-100 text-teal-700 px-2 py-0.5 text-xs font-medium rounded-full;
-  }
-
-  .source-badge-oemsecrets {
-    @apply bg-fuchsia-100 text-fuchsia-700 px-2 py-0.5 text-xs font-medium rounded-full;
-  }
-
-  .source-badge-element14 {
-    @apply bg-lime-100 text-lime-700 px-2 py-0.5 text-xs font-medium rounded-full;
-  }
-
-  .source-badge-ebay {
-    @apply bg-yellow-100 text-yellow-700 px-2 py-0.5 text-xs font-medium rounded-full;
-  }
-
-  /* Cards */
-  .card {
-    @apply bg-white border border-brand-200 rounded-lg;
-  }
-
-  .card-padded {
-    @apply bg-white border border-brand-200 rounded-lg p-6;
-  }
-
-  .stat-card {
-    @apply bg-white border border-brand-200 rounded-lg p-4 text-center;
-  }
-
-  /* Data table — strong dividers, clear hierarchy */
-  .data-table {
-    @apply w-full text-sm text-left;
-  }
-
-  .data-table th {
-    @apply px-4 py-3 font-semibold uppercase bg-brand-50 border-b-2 border-brand-200;
-    font-size: 11px;
-    letter-spacing: 0.1em;
-    color: #5B8FB8;
-  }
-
-  .data-table td {
-    @apply px-4 border-b border-gray-200;
-    padding-top: 0.875rem;
-    padding-bottom: 0.875rem;
-    color: #374151;
-  }
-
-  .data-table tbody tr {
-    @apply transition-colors;
-  }
-
-  .data-table tbody tr:hover td {
-    background: rgba(240, 244, 248, 0.7);
-  }
-
-  /* Filter pills */
-  .filter-pill {
-    @apply px-3 py-1.5 text-sm font-medium rounded-full border transition-colors cursor-pointer;
-  }
-
-  .filter-pill-active {
-    @apply bg-brand-500 text-white border-brand-500;
-  }
-
-  .filter-pill-inactive {
-    @apply bg-white text-gray-600 border-gray-300 hover:border-brand-300 hover:text-brand-600;
-  }
-
-  /* Misc UI */
-  .confidence-bar {
-    @apply h-2 rounded-full bg-gray-200 overflow-hidden;
-  }
-
-  .input-search {
-    @apply w-full px-3 py-2 text-sm border-2 border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500 placeholder-gray-400 transition-all;
-  }
-
-  /* Page headings */
-  .page-title {
-    @apply text-2xl font-bold text-brand-900 tracking-tight;
-  }
-
-  .page-subtitle {
-    @apply text-sm font-medium text-brand-400 mt-0.5;
-  }
-
   /* Refined cards */
   .card {
     @apply bg-white border-2 border-gray-200 rounded-xl shadow-sm;
@@ -242,34 +142,6 @@
   background: #3D6895;
 }
 
-/* ── Global horizontal scroll for all table containers ─────────── */
-/* Any div directly wrapping a table gets horizontal scroll + brand scrollbar */
-div:has(> table) {
-  overflow-x: scroll;
-}
-
-div:has(> table)::-webkit-scrollbar {
-  height: 8px;
-}
-
-div:has(> table)::-webkit-scrollbar-track {
-  background: #F4F8FC;
-  border-radius: 4px;
-}
-
-div:has(> table)::-webkit-scrollbar-thumb {
-  background: #5B8FB8;
-  border-radius: 4px;
-}
-
-div:has(> table)::-webkit-scrollbar-thumb:hover {
-  background: #3D6895;
-}
-
-div:has(> table) {
-  scrollbar-width: thin;
-  scrollbar-color: #5B8FB8 #F4F8FC;
-}
 
 /* Ensure tables don't collapse columns below readable widths */
 table {
@@ -306,11 +178,6 @@ hr { border-color: #c8d5e2; }
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #5B8FB8;
-}
-/* Firefox */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: #8baac5 #edf1f6;
 }
 
 /* ── JetBrains Mono for data cells ─────────────────────────────── */
@@ -378,7 +245,7 @@ hr { border-color: #c8d5e2; }
   font-weight: 600;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #5a7a9a;
+  color: #5B8FB8;
   background: #F4F8FC;
   border-bottom: 2px solid #CADDEF;
   padding: 6px 10px;

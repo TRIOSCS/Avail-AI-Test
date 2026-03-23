@@ -451,10 +451,11 @@ async def health(
     degraded = not db_ok
     status = "degraded" if degraded else "ok"
 
-    # Public response: minimal — just status and db check
+    # Public response: minimal — just status, db check, and build commit
     payload: dict = {
         "status": status,
         "db": "ok" if db_ok else "error",
+        "build_commit": os.environ.get("BUILD_COMMIT", "unknown"),
     }
 
     # Detailed info only for authenticated monitoring (same token as /metrics)

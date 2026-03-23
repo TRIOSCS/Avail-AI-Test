@@ -1,12 +1,18 @@
+# Dev overrides — use with: docker compose -f docker-compose.yml -f docker-compose.local.yml up -d
 services:
-  # Local override: do not bind host port 80 to avoid conflicts with host services.
-  # Maps HTTP/HTTPS to alternate local ports and expose the app for local browsing.
+  # Local dev: alternate ports, hot-reload via source mounts, test mode enabled
   app:
     ports:
       - "8000:8000"
     environment:
       - TESTING=1
       - EXTRA_LOGS=0
+    # Hot-reload: mount source code so changes reflect immediately without rebuild
+    volumes:
+      - ./app:/app/app
+      - /app/app/static/dist    # preserve Vite-built assets from image
+      - ./scripts:/app/scripts
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*", "--reload", "--reload-dir", "/app/app"]
 
   caddy:
     ports:

@@ -6,7 +6,7 @@
 
 <div class="h-[calc(100vh-90px)] flex"
      x-data="{
-       splitRatio: parseFloat(localStorage.getItem('parts-split') || '0.45'),
+       splitRatio: parseFloat(localStorage.getItem('parts-split') || '0.50'),
        dragging: false,
        selectedPartId: null,
        activeTab: 'offers',
@@ -63,9 +63,11 @@
        @mousedown="startDrag($event)">
     <div class="absolute inset-y-0 -left-2 -right-2"></div>
     <div class="absolute top-1/2 left-1/2 -translate-x-1/2 -translate-y-1/2 flex flex-col gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
-      <div class="w-0.5 h-0.5 rounded-full bg-white"></div>
-      <div class="w-0.5 h-0.5 rounded-full bg-white"></div>
-      <div class="w-0.5 h-0.5 rounded-full bg-white"></div>
+      <div class="w-1 h-1 rounded-full bg-white"></div>
+      <div class="w-1 h-1 rounded-full bg-white"></div>
+      <div class="w-1 h-1 rounded-full bg-white"></div>
+      <div class="w-1 h-1 rounded-full bg-white"></div>
+      <div class="w-1 h-1 rounded-full bg-white"></div>
     </div>
   </div>
 
