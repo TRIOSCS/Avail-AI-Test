@@ -25,15 +25,28 @@ from sqlalchemy.orm import Session
 from ..config import settings
 from ..models import ApiSource
 
+_LEGACY_CREDENTIAL_SALT = b"availai-credential-salt-v1"
+
 
 def _get_fernet() -> Fernet:
-    """Derive a Fernet key from the app secret and return a Fernet instance."""
+    """Derive a Fernet key from the app secret and return a Fernet instance.
+
+    Uses settings.encryption_salt if set (defense-in-depth), otherwise falls back to the
+    legacy static salt for backward compatibility.
+    """
+    if settings.encryption_salt:
+        salt = settings.encryption_salt.encode()
+    else:
+        logger.warning(
+            "ENCRYPTION_SALT not set — using legacy static salt for credentials. "
+            "Set ENCRYPTION_SALT for defense-in-depth."
+        )
+        salt = _LEGACY_CREDENTIAL_SALT
+
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
-        # SECURITY NOTE: Static salt — changing it would break all existing encrypted
-        # credentials. Future improvement: derive from a deployment-unique env var.
-        salt=b"availai-credential-salt-v1",
+        salt=salt,
         iterations=100_000,
     )
     key = base64.urlsafe_b64encode(kdf.derive(settings.secret_key.encode()))

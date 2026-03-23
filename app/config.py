@@ -41,6 +41,7 @@ class Settings(BaseSettings):
     # --- Core ---
     app_url: str = "http://localhost:8000"
     secret_key: str = "change-me-in-production"
+    encryption_salt: str = ""
     database_url: str = "postgresql://availai:availai@db:5432/availai"
 
     # --- Sentry ---
@@ -203,6 +204,9 @@ class Settings(BaseSettings):
 
     # --- On-demand enrichment orchestrator ---
     on_demand_enrichment_enabled: bool = True
+
+    # --- Metrics ---
+    metrics_token: str = ""  # Required token for /metrics endpoint (X-Metrics-Token header)
 
     # --- Backup monitoring ---
     backup_max_age_hours: int = 26  # Alert if last backup is older than this

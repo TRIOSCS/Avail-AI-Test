@@ -4,11 +4,12 @@ from .logging_config import setup_logging
 
 setup_logging()  # Must run before any other module logs
 
+import hmac
 import os
 import uuid
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Request
+from fastapi import Depends, FastAPI, Header, HTTPException, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from loguru import logger
@@ -304,8 +305,20 @@ templates = Jinja2Templates(directory="app/templates")
 # Prometheus metrics
 from prometheus_fastapi_instrumentator import Instrumentator
 
+
+async def _metrics_auth(x_metrics_token: str = Header(default="")) -> None:
+    """Require a valid metrics token for /metrics access.
+
+    Uses hmac.compare_digest() for constant-time comparison to prevent timing attacks.
+    Returns 403 if token is missing, empty, or wrong.
+    """
+    token = settings.metrics_token
+    if not token or not hmac.compare_digest(x_metrics_token, token):
+        raise HTTPException(status_code=403, detail="Forbidden")
+
+
 Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrument(app).expose(
-    app, endpoint="/metrics", include_in_schema=False
+    app, endpoint="/metrics", include_in_schema=False, dependencies=[Depends(_metrics_auth)]
 )
 
 # Secret key validation moved to lifespan (fail-fast)

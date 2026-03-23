@@ -11,19 +11,30 @@ from sqlalchemy import Text, TypeDecorator
 _fernet_instance = None
 
 
+_LEGACY_SALT = b"availai-token-encryption-v1"
+
+
 def _get_fernet():
-    """Derive a Fernet key from the app secret key (cached after first call)."""
+    """Derive a Fernet key from the app secret key (cached after first call).
+
+    Uses settings.encryption_salt if set (defense-in-depth), otherwise falls back to the
+    legacy static salt for backward compatibility.
+    """
     global _fernet_instance
     if _fernet_instance is not None:
         return _fernet_instance
     from ..config import settings
 
+    if settings.encryption_salt:
+        salt = settings.encryption_salt.encode()
+    else:
+        logger.warning("ENCRYPTION_SALT not set — using legacy static salt. Set ENCRYPTION_SALT for defense-in-depth.")
+        salt = _LEGACY_SALT
+
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
-        # SECURITY NOTE: Static salt — changing it would break all existing encrypted
-        # data. Future improvement: derive from a deployment-unique env var.
-        salt=b"availai-token-encryption-v1",
+        salt=salt,
         iterations=100_000,
     )
     key = base64.urlsafe_b64encode(kdf.derive(settings.secret_key.encode()))
