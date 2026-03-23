@@ -116,10 +116,7 @@ class EmailSignatureExtract(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    __table_args__ = (
-        Index("ix_ese_email", "sender_email", unique=True),
-        Index("ix_ese_company", "company_name"),
-    )
+    __table_args__ = (Index("ix_ese_company", "company_name"),)
 
 
 class ProspectContact(Base):

@@ -83,7 +83,7 @@ class MaterialVendorHistory(Base):
     last_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     times_seen = Column(Integer, default=1)
     last_qty = Column(Integer)
-    last_price = Column(Float)
+    last_price = Column(Numeric(12, 4))
     last_currency = Column(String(10), default="USD")
     last_manufacturer = Column(String(255))
     vendor_sku = Column(String(255))
@@ -139,9 +139,9 @@ class ProactiveMatch(Base):
     match_score = Column(Integer, default=0)  # 0-100 composite score
     margin_pct = Column(Float)  # Potential margin %
     customer_purchase_count = Column(Integer, default=0)
-    customer_last_price = Column(Float)
+    customer_last_price = Column(Numeric(12, 4))
     customer_last_purchased_at = Column(DateTime)
-    our_cost = Column(Float)
+    our_cost = Column(Numeric(12, 4))
     dismiss_reason = Column(String(255))
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

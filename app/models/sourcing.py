@@ -58,7 +58,7 @@ class Requisition(Base):
 
     # Audit trail
     updated_at = Column(DateTime)
-    updated_by_id = Column(Integer, ForeignKey("users.id"))
+    updated_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
 
     creator = relationship("User", back_populates="requisitions", foreign_keys=[created_by])
     claimed_by = relationship("User", foreign_keys=[claimed_by_id])
@@ -77,7 +77,7 @@ class Requirement(Base):
     id = Column(Integer, primary_key=True)
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
-    primary_mpn = Column(String(255), index=True)
+    primary_mpn = Column(String(255))
     normalized_mpn = Column(String(255), index=True)
     oem_pn = Column(String(255))
     brand = Column(String(255))
@@ -145,7 +145,7 @@ class Sighting(Base):
     normalized_mpn = Column(String(255), index=True)
     manufacturer = Column(String(255), index=True)
     qty_available = Column(Integer)
-    unit_price = Column(Float)
+    unit_price = Column(Numeric(12, 4))
     currency = Column(String(10), default="USD")
     moq = Column(Integer)
     source_type = Column(String(50), index=True)
@@ -201,14 +201,14 @@ class RequisitionAttachment(Base):
 
     __tablename__ = "requisition_attachments"
     id = Column(Integer, primary_key=True)
-    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False, index=True)
     file_name = Column(String(500), nullable=False)
     onedrive_item_id = Column(String(500))
     onedrive_url = Column(Text)
     thumbnail_url = Column(Text)
     content_type = Column(String(100))
     size_bytes = Column(Integer)
-    uploaded_by_id = Column(Integer, ForeignKey("users.id"))
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="attachments")
@@ -220,14 +220,14 @@ class RequirementAttachment(Base):
 
     __tablename__ = "requirement_attachments"
     id = Column(Integer, primary_key=True)
-    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False, index=True)
     file_name = Column(String(500), nullable=False)
     onedrive_item_id = Column(String(500))
     onedrive_url = Column(Text)
     thumbnail_url = Column(Text)
     content_type = Column(String(100))
     size_bytes = Column(Integer)
-    uploaded_by_id = Column(Integer, ForeignKey("users.id"))
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requirement = relationship("Requirement", back_populates="attachments")

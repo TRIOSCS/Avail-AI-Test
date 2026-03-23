@@ -537,14 +537,8 @@ async def ai_intake_parse(
         req = get_req_for_user(db, user, requisition_id, options=[])
         if not req:
             raise HTTPException(404, "Requisition not found")
-        reqs = db.query(Requirement).filter(
-            Requirement.requisition_id == requisition_id
-        ).all()
-        rfq_context = [
-            {"mpn": r.primary_mpn, "qty": r.target_qty or 1}
-            for r in reqs
-            if r.primary_mpn
-        ]
+        reqs = db.query(Requirement).filter(Requirement.requisition_id == requisition_id).all()
+        rfq_context = [{"mpn": r.primary_mpn, "qty": r.target_qty or 1} for r in reqs if r.primary_mpn]
 
     from app.services.ai_intake_parser import parse_freeform_intake
 

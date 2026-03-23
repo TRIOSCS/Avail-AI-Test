@@ -13,6 +13,7 @@ from sqlalchemy import and_, case, exists, literal, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
+from app.constants import UserRole
 from app.models import (
     ActivityLog,
     Contact,
@@ -288,7 +289,7 @@ def list_requisitions(
     )
 
     # ── Role-based filtering ─────────────────────────────────────────
-    if user_role == "sales":
+    if user_role == UserRole.SALES:
         query = query.filter(Requisition.created_by == user_id)
 
     # ── Search ───────────────────────────────────────────────────────
@@ -456,7 +457,7 @@ def get_requisition_detail(
     Returns None if not found or not accessible.
     """
     query = db.query(Requisition).filter(Requisition.id == req_id)
-    if user_role == "sales":
+    if user_role == UserRole.SALES:
         query = query.filter(Requisition.created_by == user_id)
     req = query.first()
     if not req:

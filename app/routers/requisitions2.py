@@ -20,6 +20,7 @@ from fastapi.responses import HTMLResponse, StreamingResponse
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from ..constants import UserRole
 from ..database import get_db
 from ..dependencies import get_req_for_user, require_user
 from ..models import Requisition, User
@@ -432,7 +433,7 @@ async def bulk_action(
         return templates.TemplateResponse("requisitions2/_table.html", ctx)
 
     reqs_q = db.query(Requisition).filter(Requisition.id.in_(id_list))
-    if user.role == "sales":
+    if user.role == UserRole.SALES:
         reqs_q = reqs_q.filter(Requisition.created_by == user.id)
     reqs = reqs_q.all()
     count = 0

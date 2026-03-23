@@ -13,6 +13,7 @@ from pathlib import Path
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
+from ..constants import UserRole
 from ..models import (
     Offer,
     Requirement,
@@ -176,13 +177,13 @@ def assign_buyer(
     # Priority 1: The buyer who entered the offer owns the vendor relationship
     if offer.entered_by_id:
         entered_by = db.get(User, offer.entered_by_id)
-        if entered_by and entered_by.is_active and entered_by.role in ("buyer", "trader"):
+        if entered_by and entered_by.is_active and entered_by.role in (UserRole.BUYER, UserRole.TRADER):
             return entered_by, "vendor_ownership"
 
     # Get all active buyers
     buyers = (
         db.query(User)
-        .filter(User.role.in_(["buyer", "trader"]), User.is_active == True)  # noqa: E712
+        .filter(User.role.in_([UserRole.BUYER, UserRole.TRADER]), User.is_active == True)  # noqa: E712
         .all()
     )
     if not buyers:

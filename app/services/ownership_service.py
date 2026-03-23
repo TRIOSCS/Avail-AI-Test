@@ -26,6 +26,8 @@ from sqlalchemy.orm import Session
 from app.config import settings
 from app.models import ActivityLog, Company, CustomerSite, User
 
+from ..constants import UserRole
+
 # ═══════════════════════════════════════════════════════════════════════
 #  NIGHTLY SWEEP — clear stale ownership, send warnings
 # ═══════════════════════════════════════════════════════════════════════
@@ -119,7 +121,7 @@ def check_and_claim_open_account(company_id: int, user_id: int, db: Session) -> 
 
     # Check the user's role — only sales can own accounts
     user = db.get(User, user_id)
-    if not user or user.role not in ("sales", "trader"):
+    if not user or user.role not in (UserRole.SALES, UserRole.TRADER):
         return False
 
     # Lock the row to prevent concurrent claims
@@ -288,7 +290,7 @@ def get_manager_digest(db: Session) -> dict:
                 ActivityLog.created_at >= week_ago,
             ),
         )
-        .filter(User.role.in_(["sales", "trader"]))
+        .filter(User.role.in_([UserRole.SALES, UserRole.TRADER]))
         .group_by(User.id, User.name)
         .all()
     )
@@ -434,7 +436,7 @@ def claim_site(site_id: int, user_id: int, db: Session) -> bool:
     Sales/trader roles only. Concurrency-safe.
     """
     user = db.get(User, user_id)
-    if not user or user.role not in ("sales", "trader"):
+    if not user or user.role not in (UserRole.SALES, UserRole.TRADER):
         return False
 
     site = (

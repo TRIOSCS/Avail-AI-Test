@@ -54,14 +54,14 @@ class Offer(Base):
 
     source = Column(String(50), default="manual")
     vendor_response_id = Column(Integer, ForeignKey("vendor_responses.id", ondelete="SET NULL"))
-    entered_by_id = Column(Integer, ForeignKey("users.id"))
+    entered_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
 
     # Evidence tier — provenance tag for data trust (T1–T7)
     evidence_tier = Column(String(4))
     # AI parse confidence (0.0–1.0) for email-parsed offers
     parse_confidence = Column(Float)
     # Promotion audit trail — when a human reviews and promotes a T4 offer
-    promoted_by_id = Column(Integer, ForeignKey("users.id"))
+    promoted_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     promoted_at = Column(DateTime)
 
     excess_line_item_id = Column(Integer, ForeignKey("excess_line_items.id", ondelete="SET NULL"))
@@ -75,10 +75,10 @@ class Offer(Base):
 
     # Audit trail
     updated_at = Column(DateTime)
-    updated_by_id = Column(Integer, ForeignKey("users.id"))
+    updated_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
 
     # Approval workflow
-    approved_by_id = Column(Integer, ForeignKey("users.id"))
+    approved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     approved_at = Column(DateTime)
 
     # Quote candidate selection — sales picks offers for quoting
@@ -129,7 +129,7 @@ class OfferAttachment(Base):
     thumbnail_url = Column(Text)
     content_type = Column(String(100))
     size_bytes = Column(Integer)
-    uploaded_by_id = Column(Integer, ForeignKey("users.id"))
+    uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     offer = relationship("Offer", back_populates="attachments")
@@ -142,7 +142,7 @@ class Contact(Base):
     __tablename__ = "contacts"
     id = Column(Integer, primary_key=True)
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     contact_type = Column(String(20), nullable=False)
     vendor_name = Column(String(255), nullable=False)
     vendor_name_normalized = Column(String(255))
@@ -192,7 +192,7 @@ class VendorResponse(Base):
     status = Column(String(50), default="new")
     message_id = Column(String(255), unique=True, index=True, nullable=True)
     graph_conversation_id = Column(String(500))
-    scanned_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    scanned_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     match_method = Column(String(50))  # conversation_id, subject_token, email_exact, domain, unmatched
     teams_alert_sent_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

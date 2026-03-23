@@ -35,7 +35,7 @@ class Company(Base):
     is_strategic = Column(Boolean, default=False)
     ownership_cleared_at = Column(DateTime)
     last_activity_at = Column(UTCDateTime)
-    account_owner_id = Column(Integer, ForeignKey("users.id"))
+    account_owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
 
     # v1.4.0: Account management fields
     account_type = Column(String(50))  # Customer, Prospect, Partner, Competitor
@@ -94,7 +94,7 @@ class CustomerSite(Base):
     id = Column(Integer, primary_key=True)
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     site_name = Column(String(255), nullable=False)
-    owner_id = Column(Integer, ForeignKey("users.id"))
+    owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
 
     # Contact (one per site)
     contact_name = Column(String(255))

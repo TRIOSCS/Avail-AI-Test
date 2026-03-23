@@ -21,6 +21,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
+from ..constants import UserRole
 from ..database import get_db
 from ..dependencies import (
     get_req_for_user,
@@ -47,7 +48,7 @@ router = APIRouter(tags=["rfq"])
 
 def _enforce_req_scope_for_user(db: Session, user: User, req_id: int) -> None:
     """Apply owner-only requisition scope for sales/trader users."""
-    if user.role not in ("sales", "trader"):
+    if user.role not in (UserRole.SALES, UserRole.TRADER):
         return
     allowed = db.query(Requisition.id).filter(Requisition.id == req_id, Requisition.created_by == user.id).first()
     if not allowed:
@@ -202,7 +203,7 @@ async def send_rfq(
     # Phase 1: Auto-claim requisition for the buyer if unclaimed
     try:
         req = db.query(Requisition).filter_by(id=req_id).first()
-        if req and req.claimed_by_id is None and user.role in ("buyer", "trader"):
+        if req and req.claimed_by_id is None and user.role in (UserRole.BUYER, UserRole.TRADER):
             from ..services.requirement_status import claim_requisition
 
             claim_requisition(req, user, db)
@@ -683,7 +684,7 @@ async def get_follow_ups(user: User = Depends(require_user), db: Session = Depen
         Contact.created_at < threshold,
     )
     # Sales/trader sees only their own reqs' follow-ups
-    if user.role in ("sales", "trader"):
+    if user.role in (UserRole.SALES, UserRole.TRADER):
         stale_contacts = stale_contacts.join(Requisition).filter(Requisition.created_by == user.id)
 
     stale = stale_contacts.order_by(Contact.created_at.asc()).limit(500).all()
@@ -740,7 +741,7 @@ async def follow_up_summary(user: User = Depends(require_user), db: Session = De
         .group_by(Requisition.id, Requisition.name)
     )
 
-    if user.role in ("sales", "trader"):
+    if user.role in (UserRole.SALES, UserRole.TRADER):
         query = query.filter(Requisition.created_by == user.id)
 
     rows = query.all()

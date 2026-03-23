@@ -1,4 +1,5 @@
-"""rfq_compose_service.py — RFQ compose/send business logic extracted from routers/htmx_views.py.
+"""rfq_compose_service.py — RFQ compose/send business logic extracted from
+routers/htmx_views.py.
 
 Handles: building vendor lists for RFQ compose, creating RFQ contact records.
 All functions take a db Session and return data — they do NOT commit.
@@ -19,8 +20,8 @@ from ..models.offers import Contact as RfqContact
 def build_rfq_vendor_list(db: Session, req_id: int) -> list[dict]:
     """Build the vendor list for RFQ compose from sighting data.
 
-    Returns list of vendor dicts with contacts and already-asked status.
-    Does NOT commit.
+    Returns list of vendor dicts with contacts and already-asked status. Does NOT
+    commit.
     """
     parts = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
     part_ids = [p.id for p in parts]
@@ -36,9 +37,7 @@ def build_rfq_vendor_list(db: Session, req_id: int) -> list[dict]:
     )
     norm_names = [n[0] for n in vendor_names if n[0]]
     vendor_rows = (
-        db.query(VendorCard).filter(VendorCard.normalized_name.in_(norm_names)).limit(50).all()
-        if norm_names
-        else []
+        db.query(VendorCard).filter(VendorCard.normalized_name.in_(norm_names)).limit(50).all() if norm_names else []
     )
 
     # Check which vendors already have RFQs sent
@@ -51,9 +50,7 @@ def build_rfq_vendor_list(db: Session, req_id: int) -> list[dict]:
     # Batch-load all vendor contacts in one query (avoids N+1)
     vendor_ids = [v.id for v in vendor_rows]
     all_contacts = (
-        db.query(VendorContact).filter(VendorContact.vendor_card_id.in_(vendor_ids)).all()
-        if vendor_ids
-        else []
+        db.query(VendorContact).filter(VendorContact.vendor_card_id.in_(vendor_ids)).all() if vendor_ids else []
     )
     contacts_by_vendor: dict[int, list] = {}
     for c in all_contacts:
@@ -78,14 +75,17 @@ def build_rfq_vendor_list(db: Session, req_id: int) -> list[dict]:
 
 
 def create_rfq_contacts(
-    db: Session, req_id: int, user_id: int,
-    vendor_names: list[str], vendor_emails: list[str],
-    subject: str, parts_text: str,
+    db: Session,
+    req_id: int,
+    user_id: int,
+    vendor_names: list[str],
+    vendor_emails: list[str],
+    subject: str,
+    parts_text: str,
 ) -> list[dict]:
     """Create RFQ Contact records for each selected vendor.
 
-    Does NOT commit — caller must commit.
-    Returns list of sent result dicts.
+    Does NOT commit — caller must commit. Returns list of sent result dicts.
     """
     sent = []
     for name, email in zip(vendor_names, vendor_emails):

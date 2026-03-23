@@ -21,6 +21,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
+from ..constants import UserRole
 from ..models import (
     BuyPlan,
     BuyPlanLine,
@@ -355,9 +356,9 @@ def compute_all_multiplier_scores(db: Session, month: date | None = None) -> dic
 
     _human = [User.is_active.is_(True), ~User.email.like("%@availai.local")]
 
-    buyers = db.query(User).filter(User.role.in_(["buyer", "trader"]), *_human).all()
-    sales = db.query(User).filter(User.role.in_(["sales", "manager"]), *_human).all()
-    multi_role = db.query(User).filter(User.role == "trader", *_human).all()
+    buyers = db.query(User).filter(User.role.in_([UserRole.BUYER, UserRole.TRADER]), *_human).all()
+    sales = db.query(User).filter(User.role.in_([UserRole.SALES, UserRole.MANAGER]), *_human).all()
+    multi_role = db.query(User).filter(User.role == UserRole.TRADER, *_human).all()
 
     # Pre-load offer status lookups once for all buyers
     quoted_ids = _load_quoted_offer_ids(db)

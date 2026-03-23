@@ -14,11 +14,7 @@ from ..models import CustomerSite, Requisition
 
 def get_company_sites(db: Session, company_id: int) -> list:
     """Fetch active customer sites for the sites tab."""
-    return (
-        db.query(CustomerSite)
-        .filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True))
-        .all()
-    )
+    return db.query(CustomerSite).filter(CustomerSite.company_id == company_id, CustomerSite.is_active.is_(True)).all()
 
 
 def get_company_contacts(db: Session, company_id: int) -> list[dict]:
@@ -30,12 +26,14 @@ def get_company_contacts(db: Session, company_id: int) -> list[dict]:
     contacts = []
     for s in sites:
         if s.contact_name or s.contact_email:
-            contacts.append({
-                "contact_name": s.contact_name,
-                "site_name": s.site_name,
-                "contact_email": s.contact_email,
-                "contact_phone": getattr(s, "contact_phone", None),
-            })
+            contacts.append(
+                {
+                    "contact_name": s.contact_name,
+                    "site_name": s.site_name,
+                    "contact_email": s.contact_email,
+                    "contact_phone": getattr(s, "contact_phone", None),
+                }
+            )
     return contacts
 
 

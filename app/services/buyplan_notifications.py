@@ -25,6 +25,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
+from ..constants import UserRole
 from ..models import ActivityLog, User
 from ..models.buy_plan import BuyPlan
 from ..utils.async_helpers import safe_background_task
@@ -220,7 +221,7 @@ async def notify_submitted(plan: BuyPlan, db: Session):
     html_body = _wrap_email("Buy Plan — Approval Required", body)
 
     # Email to managers/admins
-    managers = db.query(User).filter(User.role.in_(["manager", "admin"])).all()
+    managers = db.query(User).filter(User.role.in_([UserRole.MANAGER, UserRole.ADMIN])).all()
     if not managers:
         managers = db.query(User).filter(User.email.in_(settings.admin_emails)).all()
 

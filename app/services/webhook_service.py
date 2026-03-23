@@ -23,6 +23,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.constants import UserRole
 from app.models import GraphSubscription, User
 
 # Graph webhook subscriptions for mail expire after max 3 days (4230 min)
@@ -160,7 +161,7 @@ async def ensure_all_users_subscribed(db: Session):
         db.query(User)
         .filter(
             User.m365_connected.is_(True),
-            User.role.in_(["buyer", "sales", "trader"]),
+            User.role.in_([UserRole.BUYER, UserRole.SALES, UserRole.TRADER]),
         )
         .all()
     )

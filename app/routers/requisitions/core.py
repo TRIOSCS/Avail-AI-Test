@@ -17,7 +17,7 @@ from sqlalchemy import and_, case, exists, literal, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import RequisitionStatus
+from ...constants import RequisitionStatus, UserRole
 from ...database import get_db
 from ...dependencies import get_req_for_user, require_admin, require_user
 from ...models import (
@@ -329,7 +329,7 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
         joinedload(Requisition.customer_site).joinedload(CustomerSite.company),
     )
     # Sales sees own reqs only; all other roles see everything
-    if user.role == "sales":
+    if user.role == UserRole.SALES:
         query = query.filter(Requisition.created_by == user.id)
 
     if q.strip():
@@ -571,7 +571,7 @@ async def batch_archive_by_ids(
         Requisition.status.notin_(["archived", "won", "lost", "closed"]),
     )
     # Sales users can only archive their own requisitions
-    if user.role == "sales":
+    if user.role == UserRole.SALES:
         q = q.filter(Requisition.created_by == user.id)
     count = q.update({"status": "archived"}, synchronize_session="fetch")
     db.commit()
@@ -661,7 +661,7 @@ async def claim_requisition_endpoint(
 
     Any unclaimed req is open to any buyer.
     """
-    if user.role not in ("buyer", "trader", "manager", "admin"):
+    if user.role not in (UserRole.BUYER, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(403, "Only buyers can claim requisitions")
     req = get_req_for_user(db, user, req_id)
     if not req:
@@ -692,7 +692,7 @@ async def unclaim_requisition_endpoint(
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
-    if req.claimed_by_id != user.id and user.role != "admin":
+    if req.claimed_by_id != user.id and user.role != UserRole.ADMIN:
         raise HTTPException(403, "Only the claiming buyer or admin can unclaim")
 
     from ...services.requirement_status import unclaim_requisition

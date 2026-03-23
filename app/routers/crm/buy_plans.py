@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from sqlalchemy.orm import Session, joinedload, selectinload
 
+from ...constants import UserRole
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin
 from ...dependencies import require_buyer, require_user
@@ -439,7 +440,7 @@ async def get_favoritism_report(
     db: Session = Depends(get_db),
 ):
     """Detect buyer favoritism patterns for a salesperson (manager/admin only)."""
-    if user.role not in ("manager", "admin"):
+    if user.role not in (UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(403, "Manager or admin role required")
     target = db.get(User, user_id)
     if not target:
@@ -550,7 +551,7 @@ async def list_buy_plans(
         q = q.filter(BuyPlan.quote_id == quote_id)
 
     # Sales users see only their own plans
-    if user.role == "sales":
+    if user.role == UserRole.SALES:
         q = q.filter(BuyPlan.submitted_by_id == user.id)
 
     plans = q.order_by(BuyPlan.created_at.desc()).limit(500).all()

@@ -52,7 +52,7 @@ class Quote(Base):
     result_at = Column(DateTime)
     won_revenue = Column(Numeric(12, 2))
 
-    created_by_id = Column(Integer, ForeignKey("users.id"))
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
         DateTime,

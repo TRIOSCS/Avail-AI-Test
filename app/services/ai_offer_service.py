@@ -32,9 +32,8 @@ from ..vendor_utils import normalize_vendor_name
 def promote_prospect_contact(db: Session, contact_id: int, user_id: int) -> dict:
     """Promote a prospect contact to a VendorContact or SiteContact.
 
-    Does NOT commit — caller must commit.
-    Returns dict with promoted_to_type and promoted_to_id.
-    Raises ValueError if contact not found or has no linked entity.
+    Does NOT commit — caller must commit. Returns dict with promoted_to_type and
+    promoted_to_id. Raises ValueError if contact not found or has no linked entity.
     """
     pc = db.query(ProspectContact).filter(ProspectContact.id == contact_id).first()
     if not pc:
@@ -68,13 +67,31 @@ def promote_prospect_contact(db: Session, contact_id: int, user_id: int) -> dict
     }
 
 
-def _promote_to_vendor_contact(db: Session, pc: ProspectContact) -> VendorContact:
-    """Promote prospect to VendorContact, deduping by email."""
+def _promote_prospect_to_contact(
+    db: Session,
+    pc: ProspectContact,
+    model_class: type,
+    fk_field: str,
+    fk_value: int,
+    extra_fields: dict | None = None,
+) -> VendorContact | SiteContact:
+    """Generic helper: promote a prospect to VendorContact or SiteContact.
+
+    Deduplicates by email within the FK scope. Backfills empty name/title/phone
+    on existing records. Creates a new record if no duplicate found.
+
+    Args:
+        model_class: VendorContact or SiteContact.
+        fk_field: Foreign key column name (e.g. "vendor_card_id").
+        fk_value: Foreign key value to filter/set.
+        extra_fields: Additional fields for creation (e.g. linkedin_url, source).
+    """
+    extra = extra_fields or {}
+
+    # Dedupe by email within the FK scope
     existing = None
     if pc.email:
-        existing = db.query(VendorContact).filter_by(
-            vendor_card_id=pc.vendor_card_id, email=pc.email
-        ).first()
+        existing = db.query(model_class).filter_by(**{fk_field: fk_value}, email=pc.email).first()
     if existing:
         if pc.full_name and not existing.full_name:
             existing.full_name = pc.full_name
@@ -82,62 +99,55 @@ def _promote_to_vendor_contact(db: Session, pc: ProspectContact) -> VendorContac
             existing.title = pc.title
         if pc.phone and not existing.phone:
             existing.phone = pc.phone
-        if pc.linkedin_url and not existing.linkedin_url:
-            existing.linkedin_url = pc.linkedin_url
+        # Backfill any extra fields (e.g. linkedin_url) if present
+        for attr, val in extra.items():
+            if val and not getattr(existing, attr, None):
+                setattr(existing, attr, val)
         return existing
 
-    vc = VendorContact(
-        vendor_card_id=pc.vendor_card_id,
+    contact = model_class(
+        **{fk_field: fk_value},
         full_name=pc.full_name,
         title=pc.title,
         email=pc.email,
         phone=pc.phone,
-        linkedin_url=pc.linkedin_url,
-        source="prospect_promote",
+        **extra,
     )
-    db.add(vc)
+    db.add(contact)
     db.flush()
-    return vc
+    return contact
+
+
+def _promote_to_vendor_contact(db: Session, pc: ProspectContact) -> VendorContact:
+    """Promote prospect to VendorContact, deduping by email."""
+    return _promote_prospect_to_contact(
+        db,
+        pc,
+        VendorContact,
+        "vendor_card_id",
+        pc.vendor_card_id,
+        extra_fields={"linkedin_url": pc.linkedin_url, "source": "prospect_promote"},
+    )
 
 
 def _promote_to_site_contact(db: Session, pc: ProspectContact) -> SiteContact:
     """Promote prospect to SiteContact, deduping by email."""
-    existing = None
-    if pc.email:
-        existing = db.query(SiteContact).filter_by(
-            customer_site_id=pc.customer_site_id, email=pc.email
-        ).first()
-    if existing:
-        if pc.full_name and not existing.full_name:
-            existing.full_name = pc.full_name
-        if pc.title and not existing.title:
-            existing.title = pc.title
-        if pc.phone and not existing.phone:
-            existing.phone = pc.phone
-        return existing
-
-    sc = SiteContact(
-        customer_site_id=pc.customer_site_id,
-        full_name=pc.full_name,
-        title=pc.title,
-        email=pc.email,
-        phone=pc.phone,
+    return _promote_prospect_to_contact(
+        db,
+        pc,
+        SiteContact,
+        "customer_site_id",
+        pc.customer_site_id,
     )
-    db.add(sc)
-    db.flush()
-    return sc
 
 
 # -- Save AI-Parsed Offers ---------------------------------------------------
 
 
-def save_parsed_offers(
-    db: Session, requisition_id: int, response_id: int | None, offers: list, user_id: int
-) -> dict:
+def save_parsed_offers(db: Session, requisition_id: int, response_id: int | None, offers: list, user_id: int) -> dict:
     """Save AI-parsed draft offers to the Offers table.
 
-    Does NOT commit — caller must commit.
-    Returns dict with created count and offer_ids.
+    Does NOT commit — caller must commit. Returns dict with created count and offer_ids.
     """
     from ..search_service import resolve_material_card
 
@@ -188,14 +198,18 @@ def save_parsed_offers(
 
 
 def apply_freeform_rfq(
-    db: Session, name: str, customer_site_id: int, customer_name: str | None,
-    deadline: str | None, requirements: list, user_id: int,
+    db: Session,
+    name: str,
+    customer_site_id: int,
+    customer_name: str | None,
+    deadline: str | None,
+    requirements: list,
+    user_id: int,
 ) -> dict:
     """Create requisition + requirements from edited freeform RFQ template.
 
-    Does NOT commit — caller must commit.
-    Returns dict with id, name, requirements_added.
-    Raises ValueError if customer_site not found.
+    Does NOT commit — caller must commit. Returns dict with id, name,
+    requirements_added. Raises ValueError if customer_site not found.
     """
     from ..schemas.requisitions import RequirementCreate
     from ..search_service import resolve_material_card
@@ -251,12 +265,14 @@ def apply_freeform_rfq(
 
 
 def save_freeform_offers(
-    db: Session, requisition_id: int, offers: list, user_id: int,
+    db: Session,
+    requisition_id: int,
+    offers: list,
+    user_id: int,
 ) -> dict:
     """Save freeform-parsed offers to a requisition.
 
-    Does NOT commit — caller must commit.
-    Returns dict with created count and offer_ids.
+    Does NOT commit — caller must commit. Returns dict with created count and offer_ids.
     """
     from ..search_service import resolve_material_card
 

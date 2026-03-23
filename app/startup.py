@@ -61,7 +61,7 @@ def run_startup_migrations() -> None:
         _analyze_hot_tables(conn)
 
     _backfill_normalized_mpn()
-    if os.environ.get("TESTING") == "1" or os.environ.get("ENABLE_PASSWORD_LOGIN", "false").lower() == "true":
+    if os.environ.get("ENABLE_PASSWORD_LOGIN", "false").lower() == "true":
         _create_default_user_if_env_set()
     _backfill_sighting_offer_normalized_mpn()
     _backfill_sighting_vendor_normalized()
@@ -403,24 +403,38 @@ def _backfill_normalized_mpn() -> None:
             conn.rollback()
 
         # 2. Backfill material_cards.normalized_mpn where NULL only (skip full re-scan)
-        # Duplicate check must remain per-row; collect safe updates then batch-commit.
+        # Compute all candidates in Python, find collisions via one GROUP BY query, then batch update.
         try:
             cards = conn.execute(
                 sqltext(
                     "SELECT id, display_mpn FROM material_cards WHERE normalized_mpn IS NULL AND display_mpn IS NOT NULL"
                 )
             ).fetchall()
-            batch = []
-            total_updated = 0
+            # Build candidate map: normalized_mpn -> list of (id, norm)
+            candidates = {}
             for c in cards:
                 new_norm = _norm_key(c[1])
                 if new_norm:
-                    existing = conn.execute(
-                        sqltext("SELECT id FROM material_cards WHERE normalized_mpn = :n AND id != :id"),
-                        {"n": new_norm, "id": c[0]},
-                    ).fetchone()
-                    if not existing:
-                        batch.append({"n": new_norm, "id": c[0]})
+                    candidates.setdefault(new_norm, []).append(c[0])
+            # Find normalized_mpn values already in the table
+            existing_norms = set()
+            if candidates:
+                existing_rows = conn.execute(
+                    sqltext(
+                        "SELECT normalized_mpn FROM material_cards"
+                        " WHERE normalized_mpn IS NOT NULL"
+                        " GROUP BY normalized_mpn"
+                    )
+                ).fetchall()
+                existing_norms = {r[0] for r in existing_rows}
+            batch = []
+            total_updated = 0
+            for norm, ids in candidates.items():
+                if norm in existing_norms:
+                    continue  # collision with existing row
+                # Only take the first id if multiple NULL cards map to the same norm
+                batch.append({"n": norm, "id": ids[0]})
+                existing_norms.add(norm)
                 if len(batch) >= _BACKFILL_BATCH_SIZE:
                     conn.execute(
                         sqltext("UPDATE material_cards SET normalized_mpn = :n WHERE id = :id"),
@@ -657,12 +671,22 @@ def _backfill_company_counts(conn) -> None:
             SELECT COUNT(*) FROM customer_sites cs
             WHERE cs.company_id = c.id AND cs.is_active = TRUE
         )
+        WHERE c.site_count != (
+            SELECT COUNT(*) FROM customer_sites cs
+            WHERE cs.company_id = c.id AND cs.is_active = TRUE
+        )
     """,
     )
     _exec(
         conn,
         """
         UPDATE companies c SET open_req_count = (
+            SELECT COUNT(*) FROM requisitions r
+            JOIN customer_sites cs ON r.customer_site_id = cs.id
+            WHERE cs.company_id = c.id
+              AND r.status NOT IN ('archived', 'won', 'lost')
+        )
+        WHERE c.open_req_count != (
             SELECT COUNT(*) FROM requisitions r
             JOIN customer_sites cs ON r.customer_site_id = cs.id
             WHERE cs.company_id = c.id

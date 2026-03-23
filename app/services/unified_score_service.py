@@ -18,6 +18,7 @@ from datetime import date, datetime, timedelta, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from ..constants import UserRole
 from ..models import User
 from ..models.performance import AvailScoreSnapshot, MultiplierScoreSnapshot
 from ..models.unified_score import UnifiedScoreSnapshot
@@ -148,10 +149,10 @@ def compute_all_unified_scores(db: Session, month: date | None = None) -> dict:
         sales_cats = _sales_categories(sales_snap) if sales_snap else None
 
         # Determine primary role and compute categories
-        if user.role == "trader":
+        if user.role == UserRole.TRADER:
             cats = _merge_trader_categories(buyer_cats, sales_cats)
             primary_role = "trader"
-        elif user.role in ("sales", "manager"):
+        elif user.role in (UserRole.SALES, UserRole.MANAGER):
             cats = sales_cats or {k: 0.0 for k in CATEGORY_WEIGHTS}
             primary_role = "sales"
         else:
@@ -393,7 +394,7 @@ def get_unified_leaderboard(db: Session, month: date | None = None) -> dict:
                 entry[f"{role_type}_qualified"] = mult.qualified or False
                 entry[f"{role_type}_mult_bonus"] = mult.bonus_amount or 0
                 # Full tier breakdown for detail view
-                if role_type == "buyer":
+                if role_type == UserRole.BUYER:
                     entry[f"{role_type}_breakdown"] = {
                         "offers_base": mult.offers_base_count or 0,
                         "pts_base": mult.offers_base_pts or 0,
@@ -427,7 +428,7 @@ def get_unified_leaderboard(db: Session, month: date | None = None) -> dict:
         entry["avail_score"] = entry.get(f"{pr}_behavior_total", 0) + entry.get(f"{pr}_outcome_total", 0)
         entry["total_points"] = entry.get(f"{pr}_total_points", 0)
         # For traders, sum both roles' points
-        if pr == "trader":
+        if pr == UserRole.TRADER:
             entry["total_points"] = (entry.get("buyer_total_points", 0) or 0) + (
                 entry.get("sales_total_points", 0) or 0
             )

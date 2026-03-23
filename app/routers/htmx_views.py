@@ -19,9 +19,9 @@ from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy import desc, exists, or_, select
 from sqlalchemy import func as sqlfunc
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ..constants import OfferStatus, QuoteStatus, RequisitionStatus, SourcingStatus, TicketSource
+from ..constants import OfferStatus, QuoteStatus, RequisitionStatus, SourcingStatus, TicketSource, UserRole
 from ..database import get_db
 from ..dependencies import get_user, require_user
 from ..models import (
@@ -123,7 +123,7 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
         "request": request,
         "user_name": user.name if user else "",
         "user_email": user.email if user else "",
-        "is_admin": user.role == "admin" if user else False,
+        "is_admin": user.role == UserRole.ADMIN if user else False,
         "current_view": current_view,
         "vite_js": assets["js_file"],
         "vite_css": assets["css_files"],
@@ -377,7 +377,7 @@ async def requisitions_list_partial(
             pass
 
     # Sales users only see their own
-    if user.role == "sales":
+    if user.role == UserRole.SALES:
         query = query.filter(Requisition.created_by == user.id)
 
     total = query.count()
@@ -431,7 +431,7 @@ async def requisitions_list_partial(
 
     # Fetch team users for owner dropdown (non-sales only)
     users = []
-    if user.role != "sales":
+    if user.role != UserRole.SALES:
         users = db.query(User).order_by(User.name).all()
 
     ctx = _base_ctx(request, user, "requisitions")
@@ -875,7 +875,7 @@ async def requisition_detail_partial(
         db.query(Requisition)
         .options(
             joinedload(Requisition.creator),
-            joinedload(Requisition.requirements),
+            joinedload(Requisition.requirements).selectinload(Requirement.sightings),
             joinedload(Requisition.offers),
         )
         .filter(Requisition.id == req_id)
@@ -1088,7 +1088,12 @@ async def requisition_tab(
     ctx["req"] = req
 
     if tab == "parts":
-        requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
+        requirements = (
+            db.query(Requirement)
+            .options(selectinload(Requirement.sightings))
+            .filter(Requirement.requisition_id == req_id)
+            .all()
+        )
         for r in requirements:
             r.sighting_count = len(r.sightings) if r.sightings else 0
         ctx["requirements"] = requirements
@@ -1668,7 +1673,7 @@ async def requisition_inline_save(
         req.req_count = len(req.requirements) if req.requirements else 0
         req.offer_count = len(req.offers) if req.offers else 0
         ctx = _base_ctx(request, user, "requisitions")
-        ctx.update({"req": req, "user_role": getattr(user, "role", "sales"), "user": user})
+        ctx.update({"req": req, "user_role": getattr(user, "role", UserRole.SALES), "user": user})
         response = templates.TemplateResponse("htmx/partials/requisitions/req_row.html", ctx)
 
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
@@ -2512,7 +2517,7 @@ async def follow_ups_list_partial(
         RfqContact.status.in_(["sent", "opened"]),
         RfqContact.created_at < threshold,
     )
-    if getattr(user, "role", None) in ("sales", "trader"):
+    if getattr(user, "role", None) in (UserRole.SALES, UserRole.TRADER):
         stale_q = stale_q.join(Requisition).filter(Requisition.created_by == user.id)
 
     stale = stale_q.order_by(RfqContact.created_at.asc()).limit(500).all()
@@ -4023,7 +4028,9 @@ async def company_create_form(
     db: Session = Depends(get_db),
 ):
     """Return create company form."""
-    users = db.query(User).filter(User.role.in_(("buyer", "trader", "manager", "admin"))).all()
+    users = (
+        db.query(User).filter(User.role.in_((UserRole.BUYER, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN))).all()
+    )
     return templates.TemplateResponse(
         "htmx/partials/customers/create_form.html",
         {"request": request, "users": users},
@@ -4654,7 +4661,9 @@ async def company_edit_form(
     company = db.query(Company).filter(Company.id == company_id).first()
     if not company:
         raise HTTPException(404, "Company not found")
-    users = db.query(User).filter(User.role.in_(("buyer", "trader", "manager", "admin"))).all()
+    users = (
+        db.query(User).filter(User.role.in_((UserRole.BUYER, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN))).all()
+    )
     return templates.TemplateResponse(
         "htmx/partials/customers/edit_form.html",
         {"request": request, "company": company, "users": users},
@@ -5515,7 +5524,7 @@ async def buy_plans_list_partial(
         query = query.filter(sb.ilike_filter(BuyPlan.sales_order_number, BuyPlan.customer_po_number))
 
     # Sales users only see their own
-    if user.role == "sales":
+    if user.role == UserRole.SALES:
         query = query.filter(BuyPlan.submitted_by_id == user.id)
 
     plans = query.order_by(BuyPlan.created_at.desc()).limit(200).all()
@@ -5655,7 +5664,7 @@ async def buy_plan_approve_partial(
     form = await request.form()
     action = form.get("action", "approve")
 
-    if user.role not in ("manager", "admin"):
+    if user.role not in (UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(403, "Manager or admin role required")
 
     try:
@@ -7618,7 +7627,7 @@ async def settings_partial(
     """Settings page — renders index with active tab."""
     ctx = _base_ctx(request, user, "settings")
     ctx["active_tab"] = tab
-    ctx["is_admin"] = user.role == "admin"
+    ctx["is_admin"] = user.role == UserRole.ADMIN
     return templates.TemplateResponse("htmx/partials/settings/index.html", ctx)
 
 
@@ -7642,7 +7651,7 @@ async def settings_system_tab(
     db: Session = Depends(get_db),
 ):
     """System config tab — admin only."""
-    if user.role != "admin":
+    if user.role != UserRole.ADMIN:
         raise HTTPException(403, "Admin only")
     from ..services.admin_service import get_all_config
 

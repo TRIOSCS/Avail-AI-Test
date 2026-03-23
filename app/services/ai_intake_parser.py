@@ -294,44 +294,48 @@ def _backfill_requisition_name(result: dict[str, Any]) -> None:
 def _coerce_mode(result: dict[str, Any], mode: str) -> None:
     """Force all rows to one type when user explicitly declares mode.
 
-    If mode is 'rfq', move any offer rows into requirements.
-    If mode is 'offer', move any requirement rows into offers.
+    If mode is 'rfq', move any offer rows into requirements. If mode is 'offer', move
+    any requirement rows into offers.
     """
     if mode not in ("rfq", "offer"):
         return
 
     if mode == "rfq":
-        for offer in (result.get("offers") or []):
-            result.setdefault("requirements", []).append({
-                "mpn": offer.get("mpn", ""),
-                "quantity": offer.get("qty_available") or 1,
-                "manufacturer": offer.get("manufacturer"),
-                "target_price": offer.get("unit_price"),
-                "condition": offer.get("condition"),
-                "date_codes": offer.get("date_code"),
-                "packaging": offer.get("packaging"),
-                "notes": offer.get("notes"),
-            })
+        for offer in result.get("offers") or []:
+            result.setdefault("requirements", []).append(
+                {
+                    "mpn": offer.get("mpn", ""),
+                    "quantity": offer.get("qty_available") or 1,
+                    "manufacturer": offer.get("manufacturer"),
+                    "target_price": offer.get("unit_price"),
+                    "condition": offer.get("condition"),
+                    "date_codes": offer.get("date_code"),
+                    "packaging": offer.get("packaging"),
+                    "notes": offer.get("notes"),
+                }
+            )
         result["offers"] = []
         result["document_type"] = "rfq"
 
     elif mode == "offer":
         default_vendor = _clean_scalar(result.get("vendor_name")) or ""
-        for req in (result.get("requirements") or []):
-            result.setdefault("offers", []).append({
-                "vendor_name": default_vendor,
-                "mpn": req.get("mpn", ""),
-                "manufacturer": req.get("manufacturer"),
-                "qty_available": req.get("quantity"),
-                "unit_price": req.get("target_price"),
-                "currency": "USD",
-                "lead_time": None,
-                "date_code": req.get("date_codes"),
-                "condition": req.get("condition"),
-                "packaging": req.get("packaging"),
-                "moq": None,
-                "notes": req.get("notes"),
-            })
+        for req in result.get("requirements") or []:
+            result.setdefault("offers", []).append(
+                {
+                    "vendor_name": default_vendor,
+                    "mpn": req.get("mpn", ""),
+                    "manufacturer": req.get("manufacturer"),
+                    "qty_available": req.get("quantity"),
+                    "unit_price": req.get("target_price"),
+                    "currency": "USD",
+                    "lead_time": None,
+                    "date_code": req.get("date_codes"),
+                    "condition": req.get("condition"),
+                    "packaging": req.get("packaging"),
+                    "moq": None,
+                    "notes": req.get("notes"),
+                }
+            )
         result["requirements"] = []
         result["document_type"] = "offer"
 
@@ -339,14 +343,12 @@ def _coerce_mode(result: dict[str, Any], mode: str) -> None:
 def _heuristic_parse(text: str) -> dict[str, Any] | None:
     """Regex-based fallback for TSV/CSV/delimited text when LLM fails.
 
-    Scans each line for part-number-like tokens followed by optional
-    quantity and price columns. Returns a minimal result dict.
+    Scans each line for part-number-like tokens followed by optional quantity and price
+    columns. Returns a minimal result dict.
     """
     import re
 
-    mpn_pattern = re.compile(
-        r"^[\s\"']*([A-Z0-9][A-Z0-9\-\.\/\+]{2,30}[A-Z0-9])"
-    )
+    mpn_pattern = re.compile(r"^[\s\"']*([A-Z0-9][A-Z0-9\-\.\/\+]{2,30}[A-Z0-9])")
     lines = text.strip().split("\n")
     rows: list[dict[str, Any]] = []
 
@@ -375,16 +377,18 @@ def _heuristic_parse(text: str) -> dict[str, Any] | None:
         if len(cells) > 3:
             manufacturer = _clean_scalar(cells[3].strip())
 
-        rows.append({
-            "mpn": normalize_mpn(mpn) or mpn.upper(),
-            "quantity": qty or 1,
-            "manufacturer": manufacturer,
-            "target_price": price,
-            "condition": None,
-            "date_codes": None,
-            "packaging": None,
-            "notes": None,
-        })
+        rows.append(
+            {
+                "mpn": normalize_mpn(mpn) or mpn.upper(),
+                "quantity": qty or 1,
+                "manufacturer": manufacturer,
+                "target_price": price,
+                "condition": None,
+                "date_codes": None,
+                "packaging": None,
+                "notes": None,
+            }
+        )
 
     if not rows:
         return None

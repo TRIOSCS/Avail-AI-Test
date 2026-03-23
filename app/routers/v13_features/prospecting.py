@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from ...constants import UserRole
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin
 from ...dependencies import require_admin, require_user
@@ -42,7 +43,7 @@ async def prospecting_claim(site_id: int, user: User = Depends(require_user), db
     """
     from sqlalchemy import func
 
-    if user.role not in ("sales", "trader"):
+    if user.role not in (UserRole.SALES, UserRole.TRADER):
         raise HTTPException(403, "Only sales/trader users can claim sites")
 
     # Enforce 200-site cap

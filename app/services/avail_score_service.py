@@ -21,6 +21,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
+from ..constants import UserRole
 from ..models import (
     ActivityLog,
     BuyPlan,
@@ -750,11 +751,11 @@ def compute_all_avail_scores(db: Session, month: date | None = None) -> dict:
     _human = [User.is_active.is_(True), ~User.email.like("%@availai.local")]
 
     # Buyers and traders get buyer scores
-    buyers = db.query(User).filter(User.role.in_(["buyer", "trader"]), *_human).all()
+    buyers = db.query(User).filter(User.role.in_([UserRole.BUYER, UserRole.TRADER]), *_human).all()
     # Sales and managers get sales scores
-    sales = db.query(User).filter(User.role.in_(["sales", "manager"]), *_human).all()
+    sales = db.query(User).filter(User.role.in_([UserRole.SALES, UserRole.MANAGER]), *_human).all()
     # Traders also get sales scores (scored on both reports)
-    multi_role = db.query(User).filter(User.role == "trader", *_human).all()
+    multi_role = db.query(User).filter(User.role == UserRole.TRADER, *_human).all()
 
     buyer_results = []
     for user in buyers:

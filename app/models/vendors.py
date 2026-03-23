@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    Numeric,
     String,
     Text,
 )
@@ -74,7 +75,7 @@ class VendorCard(Base):
     avg_response_hours = Column(Float)
     overall_win_rate = Column(Float)
     total_pos = Column(Integer, default=0)
-    total_revenue = Column(Float, default=0)
+    total_revenue = Column(Numeric(12, 4), default=0)
     last_activity_at = Column(DateTime)
 
     # AI-generated material intelligence
@@ -163,7 +164,7 @@ class VendorReview(Base):
     __tablename__ = "vendor_reviews"
     id = Column(Integer, primary_key=True)
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     rating = Column(Integer, nullable=False)
     comment = Column(String(500))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))

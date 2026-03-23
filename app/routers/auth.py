@@ -29,6 +29,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import GRAPH_SCOPES, settings
+from ..constants import UserRole
 from ..database import get_db
 from ..dependencies import get_user
 from ..http_client import http
@@ -132,7 +133,7 @@ async def callback(request: Request, code: str = "", state: str = "", db: Sessio
         db.commit()
 
     # Bootstrap admin: auto-promote users in admin_emails env var
-    if user.email.lower() in settings.admin_emails and user.role != "admin":
+    if user.email.lower() in settings.admin_emails and user.role != UserRole.ADMIN:
         user.role = "admin"
         logger.info(f"Auto-promoted {user.email} to admin via admin_emails bootstrap")
 
@@ -258,7 +259,7 @@ async def auth_status(request: Request, db: Session = Depends(get_db)):
     if not user:
         return JSONResponse({"connected": False, "users": []})
 
-    is_admin = (user.role or "") == "admin"
+    is_admin = (user.role or "") == UserRole.ADMIN
     all_users = db.query(User).filter(User.refresh_token.isnot(None)).all() if is_admin else [user]
     users_status = []
     for u in all_users:

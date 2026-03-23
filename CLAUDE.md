@@ -3,12 +3,12 @@
 PROJECT: AvailAI — Electronic component sourcing platform and CRM for Trio Supply Chain Solutions
 VERSION: 3.1.0 (single source of truth: `app/config.py` → `APP_VERSION`)
 STACK: FastAPI + SQLAlchemy 2.0 + PostgreSQL 16 + HTMX 2.x + Alpine.js 3.x + Jinja2 + Tailwind CSS
-DEPLOY: Docker Compose (app, db, redis, caddy) on DigitalOcean
+DEPLOY: Docker Compose (app, db, redis, caddy, enrichment-worker [disabled], db-backup) on DigitalOcean
 DEVELOPER LEVEL: Beginner — explain things simply, use examples from this project
 
 ## What This Is
 
-AvailAI is an electronic component sourcing engine. It searches 6 supplier APIs in parallel (BrokerBin, Nexar, DigiKey, Mouser, OEMSecrets, Element14), tracks vendor intelligence via material cards, automates RFQ workflows via Microsoft Graph API, mines email inboxes for vendor offers using Claude AI, and includes full CRM for companies, quotes, buy plans, and proactive matching.
+AvailAI is an electronic component sourcing engine. It searches 10 supplier APIs in parallel (BrokerBin, Nexar, DigiKey, Mouser, OEMSecrets, Element14, Sourcengine, eBay, AI web search, email mining), tracks vendor intelligence via material cards, automates RFQ workflows via Microsoft Graph API, mines email inboxes for vendor offers using Claude AI, and includes full CRM for companies, quotes, buy plans, and proactive matching.
 
 ## CODE RULES
 
@@ -40,7 +40,7 @@ app/
 ├── enrichment_service.py      # Customer/vendor enrichment orchestrator
 ├── rate_limit.py              # Slowapi rate limiting
 │
-├── models/                    # SQLAlchemy models (47 models across domain modules)
+├── models/                    # SQLAlchemy models (73 models across domain modules)
 ├── schemas/                   # Pydantic request/response schemas (26 files)
 ├── routers/                   # API route handlers (34 routers, 200+ endpoints)
 │   ├── auth.py                # /auth/* — OAuth2 login/callback/logout
@@ -64,7 +64,7 @@ app/
 ├── cache/                     # Redis caching: @cached_endpoint(prefix, ttl_hours, key_params)
 ├── utils/                     # Shared utilities (claude_client, graph_client, normalization, etc.)
 │
-├── templates/                 # Jinja2 templates (164 files)
+├── templates/                 # Jinja2 templates (188 files)
 │   ├── base.html              # App shell (topbar, mobile nav, toast, modal)
 │   ├── htmx/base_page.html    # Lazy-loader: spinner → hx-get partial
 │   ├── htmx/partials/         # 158 HTMX partials across 29 subdirectories
@@ -133,6 +133,8 @@ Azure AD OAuth2 via Microsoft Graph API. Session middleware stores `user_id` in 
 - Structured logging via Loguru with request_id context
 - `TESTING=1` env var disables scheduler and real API calls in test mode
 - Pyright LSP plugin is active — stage only intentionally changed files
+- Pre-commit hooks: ruff, ruff-format, mypy, docformatter, detect-private-key
+- Docker entrypoint: validates env vars, copies static to Caddy, runs Alembic, drops to non-root user
 
 ## MVP Mode
 
@@ -148,7 +150,20 @@ docker compose up -d --build        # Rebuild and start
 docker compose logs -f app          # Tail app logs
 ```
 
-### Tests — Tiered Strategy (8,030 tests)
+### Frontend
+```bash
+npm run dev                   # Start Vite dev server
+npm run build                 # Production build
+npm run lint                  # ESLint check
+```
+
+### Linting
+```bash
+ruff check app/               # Lint Python code
+ruff format app/               # Format Python code
+```
+
+### Tests — Tiered Strategy (8,553 tests)
 
 **During development: run only tests for changed files (fast feedback)**
 ```bash
@@ -170,7 +185,7 @@ TESTING=1 PYTHONPATH=/root/availai pytest tests/ --cov=app --cov-report=term-mis
 - Run full suite only before committing
 - Run coverage only when explicitly asked or before PR
 - Never run `--cov` during iterative development — it adds significant overhead
-- Tests run in parallel via pytest-xdist (`-n auto` in pytest.ini)
+- Tests run in parallel via pytest-xdist (`-n auto` in pytest.ini), 30-second timeout per test, `asyncio_mode = auto`
 - Target: 100% coverage — no commit should reduce it
 - Tests use in-memory SQLite (no real DB or M365 tokens needed)
 - `conftest.py` sets `RATE_LIMIT_ENABLED=false`
@@ -183,7 +198,16 @@ alembic upgrade head                              # Apply migrations (runs autom
 alembic revision --autogenerate -m "description"  # Generate new migration
 ```
 
-80+ migration revisions. Schema defined in `app/models/`. Alembic manages all schema evolution.
+109 migration revisions. Schema defined in `app/models/`. Alembic manages all schema evolution.
+
+### E2E Tests
+```bash
+pytest tests/e2e/ --headed    # Run E2E tests (excluded from default test run)
+```
+
+### Backup/Restore
+- Automated: db-backup service runs pg_dump every 6 hours
+- Manual restore: `scripts/restore.sh`
 
 ## Database & Migration Rules
 
@@ -211,7 +235,8 @@ alembic revision --autogenerate -m "description"  # Generate new migration
 When I say "deploy", that means: commit + push + rebuild + verify logs. No questions asked.
 
 ```bash
-cd /root/availai && git pull origin main && docker compose up -d --build && docker compose logs -f app
+./deploy.sh                   # Full deploy with health checks and rollback (preferred)
+cd /root/availai && git pull origin main && docker compose up -d --build && docker compose logs -f app  # Manual fallback
 ```
 
 ## Safety

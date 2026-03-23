@@ -10,6 +10,7 @@ from datetime import date, datetime, timedelta, timezone
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
+from ..constants import UserRole
 from ..models import (
     BuyerLeaderboardSnapshot,
     BuyPlan,
@@ -46,7 +47,7 @@ def compute_buyer_leaderboard(db: Session, month: date) -> dict:
     grace_start_dt = month_start_dt - timedelta(days=GRACE_DAYS)
 
     # Get all buyers
-    buyers = db.query(User).filter(User.role.in_(["buyer", "trader"])).all()
+    buyers = db.query(User).filter(User.role.in_([UserRole.BUYER, UserRole.TRADER])).all()
 
     # Collect all offer_ids that appear in quotes and buy plans (for status checks)
     quoted_offer_ids = set()

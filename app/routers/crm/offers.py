@@ -5,7 +5,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ...constants import OfferStatus
+from ...constants import OfferStatus, UserRole
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin
 from ...dependencies import require_buyer, require_user
@@ -47,7 +47,7 @@ async def list_offers(req_id: int, user: User = Depends(require_user), db: Sessi
         raise HTTPException(404, "Requisition not found")
     query = db.query(Offer).filter(Offer.requisition_id == req_id)
     # Hide draft/pending_review offers from buyers — only sales/admin/manager see them
-    if user.role == "buyer":
+    if user.role == UserRole.BUYER:
         query = query.filter(Offer.status != "pending_review")
     offers = (
         query.options(

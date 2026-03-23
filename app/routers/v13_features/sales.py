@@ -13,6 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from ...config import settings
+from ...constants import UserRole
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin
 from ...dependencies import require_user
@@ -54,7 +55,7 @@ async def open_pool_accounts(user: User = Depends(require_user), db: Session = D
 @router.post("/api/sales/claim/{company_id}")
 async def claim_account(company_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Manually claim an open pool account."""
-    if user.role not in ("sales", "trader"):
+    if user.role not in (UserRole.SALES, UserRole.TRADER):
         raise HTTPException(403, "Only sales users can claim accounts")
 
     company = db.get(Company, company_id)

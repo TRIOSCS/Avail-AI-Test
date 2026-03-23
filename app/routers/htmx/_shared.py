@@ -9,6 +9,7 @@ from pathlib import Path
 
 from fastapi import Request
 
+from ...constants import UserRole
 from ...models import (
     User,
 )
@@ -73,7 +74,7 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
         "request": request,
         "user_name": user.name if user else "",
         "user_email": user.email if user else "",
-        "is_admin": user.role == "admin" if user else False,
+        "is_admin": user.role == UserRole.ADMIN if user else False,
         "current_view": current_view,
         "vite_js": assets["js_file"],
         "vite_css": assets["css_files"],

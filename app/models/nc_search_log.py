@@ -18,7 +18,7 @@ class NcSearchLog(Base):
     __tablename__ = "nc_search_log"
 
     id = Column(Integer, primary_key=True)
-    queue_id = Column(Integer, ForeignKey("nc_search_queue.id", ondelete="CASCADE"), nullable=False)
+    queue_id = Column(Integer, ForeignKey("nc_search_queue.id", ondelete="CASCADE"), nullable=False, index=True)
     searched_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     duration_ms = Column(Integer)
     results_found = Column(Integer)
