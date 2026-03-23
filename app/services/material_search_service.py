@@ -64,32 +64,23 @@ async def interpret_with_haiku(query: str) -> dict:
     Returns dict with keys: keywords, category, description_terms.
     """
     try:
-        import anthropic
+        from app.utils.claude_client import claude_json
 
-        from app.config import settings
-
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+        result = await claude_json(
+            prompt=(
+                "Interpret this as an electronic component search query. "
+                "Extract search terms I can use to find matching parts in a database.\n\n"
+                f'Query: "{query}"\n\n'
+                "Reply with ONLY a JSON object (no markdown, no explanation):\n"
+                '{"keywords": ["term1", "term2"], "category": "category or empty string", '
+                '"description_terms": ["phrase1", "phrase2"]}'
+            ),
+            model_tier="fast",
             max_tokens=200,
-            messages=[
-                {
-                    "role": "user",
-                    "content": (
-                        "Interpret this as an electronic component search query. "
-                        "Extract search terms I can use to find matching parts in a database.\n\n"
-                        f'Query: "{query}"\n\n'
-                        "Reply with ONLY a JSON object (no markdown, no explanation):\n"
-                        '{"keywords": ["term1", "term2"], "category": "category or empty string", '
-                        '"description_terms": ["phrase1", "phrase2"]}'
-                    ),
-                }
-            ],
         )
-        import json
-
-        text = response.content[0].text.strip()
-        return json.loads(text)
+        if not isinstance(result, dict):
+            return {}
+        return result
     except Exception as e:
         logger.warning(f"Haiku interpretation failed: {e}")
         return {}

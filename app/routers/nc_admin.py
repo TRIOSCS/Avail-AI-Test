@@ -12,7 +12,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import require_admin as require_user
+from app.dependencies import require_admin
 from app.models import NcSearchQueue, NcWorkerStatus
 from app.models.auth import User
 from app.services.nc_worker.queue_manager import get_queue_stats, mark_status
@@ -22,7 +22,7 @@ router = APIRouter(tags=["nc-admin"])
 
 @router.get("/api/nc/queue/stats")
 async def nc_queue_stats(
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Return NC search queue statistics by status."""
@@ -33,7 +33,7 @@ async def nc_queue_stats(
 async def nc_queue_items(
     status: str = "queued",
     limit: int = 50,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """List NC queue items filtered by status."""
@@ -66,7 +66,7 @@ async def nc_queue_items(
 @router.post("/api/nc/queue/{item_id}/force-search")
 async def nc_force_search(
     item_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Force a queue item to be searched (re-queue regardless of status)."""
@@ -81,7 +81,7 @@ async def nc_force_search(
 @router.post("/api/nc/queue/{item_id}/skip")
 async def nc_skip(
     item_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Manually skip a queue item (set to gated_out)."""
@@ -97,7 +97,7 @@ async def nc_skip(
 
 @router.get("/api/nc/worker/health")
 async def nc_worker_health(
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Return NC worker health status including queue stats and circuit breaker."""

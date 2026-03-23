@@ -13,7 +13,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import require_admin as require_user
+from app.dependencies import require_admin
 from app.models.intelligence import MaterialCard
 from app.models.tags import EntityTag, MaterialTag, Tag
 from app.utils.async_helpers import safe_background_task
@@ -25,7 +25,7 @@ router = APIRouter(prefix="/api/admin/tagging", tags=["admin"])
 
 
 @router.get("/status")
-async def tagging_status(db: Session = Depends(get_db), _user=Depends(require_user)):
+async def tagging_status(db: Session = Depends(get_db), _user=Depends(require_admin)):
     """Return tagging coverage statistics."""
     total_cards = db.query(func.count(MaterialCard.id)).scalar() or 0
     tagged_count = db.query(func.count(func.distinct(MaterialTag.material_card_id))).scalar() or 0
@@ -111,7 +111,7 @@ async def tagging_status(db: Session = Depends(get_db), _user=Depends(require_us
 
 
 @router.post("/backfill")
-async def trigger_backfill(db: Session = Depends(get_db), _user=Depends(require_user)):
+async def trigger_backfill(db: Session = Depends(get_db), _user=Depends(require_admin)):
     """Trigger tagging backfill in a background thread."""
 
     def _run_backfill():
@@ -133,7 +133,7 @@ async def trigger_backfill(db: Session = Depends(get_db), _user=Depends(require_
 
 
 @router.post("/enrich")
-async def trigger_enrichment(db: Session = Depends(get_db), _user=Depends(require_user)):
+async def trigger_enrichment(db: Session = Depends(get_db), _user=Depends(require_admin)):
     """Trigger connector enrichment for low-confidence and untagged cards."""
     global _enrichment_status
 
@@ -194,7 +194,7 @@ async def trigger_enrichment(db: Session = Depends(get_db), _user=Depends(requir
 
 
 @router.get("/enrich/status")
-async def enrichment_status(_user=Depends(require_user)):
+async def enrichment_status(_user=Depends(require_admin)):
     """Check enrichment progress."""
     return {
         "running": _enrichment_status["running"],
@@ -204,7 +204,7 @@ async def enrichment_status(_user=Depends(require_user)):
 
 
 @router.post("/apply-batch")
-async def apply_batch_results(batch_id: str = "msgbatch_01M2nTyzQ141rLBb6SJte9fi", _user=Depends(require_user)):
+async def apply_batch_results(batch_id: str = "msgbatch_01M2nTyzQ141rLBb6SJte9fi", _user=Depends(require_admin)):
     """Apply pending Batch API results (chunked, memory-safe)."""
 
     async def _run():
@@ -217,7 +217,7 @@ async def apply_batch_results(batch_id: str = "msgbatch_01M2nTyzQ141rLBb6SJte9fi
 
 
 @router.post("/ai-backfill")
-async def trigger_ai_backfill(limit: int = 50000, db: Session = Depends(get_db), _user=Depends(require_user)):
+async def trigger_ai_backfill(limit: int = 50000, db: Session = Depends(get_db), _user=Depends(require_admin)):
     """Submit untagged cards to Anthropic Batch API for AI classification."""
 
     async def _run():
@@ -242,7 +242,7 @@ async def trigger_ai_backfill(limit: int = 50000, db: Session = Depends(get_db),
 async def trigger_cross_validation(
     limit: int = 500,
     db: Session = Depends(get_db),
-    _user=Depends(require_user),
+    _user=Depends(require_admin),
 ):
     """Cross-check low-confidence AI tags against connectors to upgrade confidence."""
 
@@ -265,7 +265,7 @@ async def trigger_cross_validation(
 
 
 @router.post("/repair-visibility")
-async def repair_visibility(_user=Depends(require_user)):
+async def repair_visibility(_user=Depends(require_admin)):
     """Recalculate is_visible for all entity tags using corrected thresholds."""
 
     def _run():
@@ -287,7 +287,7 @@ async def repair_visibility(_user=Depends(require_user)):
 
 
 @router.post("/backfill-sightings")
-async def trigger_sighting_backfill(_user=Depends(require_user)):
+async def trigger_sighting_backfill(_user=Depends(require_admin)):
     """Mine sighting manufacturer data for untagged material cards (no API calls)."""
 
     def _run():
@@ -309,7 +309,7 @@ async def trigger_sighting_backfill(_user=Depends(require_user)):
 
 
 @router.post("/boost-confidence")
-async def boost_confidence(db: Session = Depends(get_db), _user=Depends(require_user)):
+async def boost_confidence(db: Session = Depends(get_db), _user=Depends(require_admin)):
     """Boost confidence for AI tags confirmed by internal data (instant, no API calls).
 
     Upgrades tags where MaterialCard.manufacturer matches the AI-classified brand.
@@ -334,7 +334,7 @@ async def boost_confidence(db: Session = Depends(get_db), _user=Depends(require_
 
 
 @router.post("/nexar-validate")
-async def trigger_nexar_validate(limit: int = 5000, _user=Depends(require_user)):
+async def trigger_nexar_validate(limit: int = 5000, _user=Depends(require_admin)):
     """Bulk validate AI tags via Nexar GraphQL (fast batch queries)."""
 
     async def _run():
@@ -356,7 +356,7 @@ async def trigger_nexar_validate(limit: int = 5000, _user=Depends(require_user))
 
 
 @router.post("/nexar-validate-all")
-async def trigger_nexar_validate_all(batch_limit: int = 5000, _user=Depends(require_user)):
+async def trigger_nexar_validate_all(batch_limit: int = 5000, _user=Depends(require_admin)):
     """Loop Nexar bulk validation until all AI-classified tags are checked.
 
     Runs iteratively with batch_limit per iteration, sleeping between rounds.
@@ -407,7 +407,7 @@ async def trigger_nexar_validate_all(batch_limit: int = 5000, _user=Depends(requ
 
 
 @router.post("/nexar-backfill-untagged")
-async def trigger_nexar_backfill_untagged(limit: int = 5000, _user=Depends(require_user)):
+async def trigger_nexar_backfill_untagged(limit: int = 5000, _user=Depends(require_admin)):
     """Backfill untagged cards via Nexar for cards that survived prefix/sighting
     passes."""
 
@@ -432,7 +432,7 @@ async def trigger_nexar_backfill_untagged(limit: int = 5000, _user=Depends(requi
 @router.post("/cross-validate-all")
 async def trigger_cross_validate_all(
     batch_limit: int = 500,
-    _user=Depends(require_user),
+    _user=Depends(require_admin),
 ):
     """Loop cross-validation until all low-confidence AI tags are checked.
 
@@ -484,7 +484,7 @@ async def trigger_cross_validate_all(
 
 
 @router.post("/purge-unknown")
-async def purge_unknown_tags(_user=Depends(require_user)):
+async def purge_unknown_tags(_user=Depends(require_admin)):
     """Purge 'Unknown' brand junk tags that block reprocessing (instant, no API
     calls)."""
 
@@ -507,7 +507,7 @@ async def purge_unknown_tags(_user=Depends(require_user)):
 
 
 @router.get("/analyze-prefixes")
-async def analyze_prefixes(db: Session = Depends(get_db), _user=Depends(require_user)):
+async def analyze_prefixes(db: Session = Depends(get_db), _user=Depends(require_admin)):
     """Analyze untagged MPNs to discover missing prefix patterns (cached 4h)."""
     from app.cache.decorators import cached_endpoint
     from app.services.tagging_backfill import analyze_untagged_prefixes
@@ -521,7 +521,7 @@ async def analyze_prefixes(db: Session = Depends(get_db), _user=Depends(require_
 
 
 @router.post("/boost-cascade")
-async def trigger_boost_cascade(_user=Depends(require_user)):
+async def trigger_boost_cascade(_user=Depends(require_admin)):
     """Run full internal boost cascade: confidence boost + sighting mining + prefix backfill.
 
     Call this after applying AI batch results or connector enrichment to propagate
@@ -559,7 +559,7 @@ async def trigger_boost_cascade(_user=Depends(require_user)):
 
 
 @router.post("/triage-internal")
-async def trigger_triage(limit: int = 50000, db: Session = Depends(get_db), _user=Depends(require_user)):
+async def trigger_triage(limit: int = 50000, db: Session = Depends(get_db), _user=Depends(require_admin)):
     """Triage untagged cards as real MPNs vs internal part numbers."""
 
     async def _run():
@@ -581,7 +581,7 @@ async def trigger_triage(limit: int = 50000, db: Session = Depends(get_db), _use
 
 
 @router.post("/apply-triage")
-async def apply_triage(batch_id: str, _user=Depends(require_user)):
+async def apply_triage(batch_id: str, _user=Depends(require_admin)):
     """Apply triage batch results to flag internal parts."""
 
     async def _run():

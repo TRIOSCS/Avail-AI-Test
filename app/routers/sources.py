@@ -138,28 +138,17 @@ class _AnthropicTestConnector:
     """Test Anthropic API key with a lightweight messages call."""
 
     async def search(self, mpn: str) -> list[dict]:
-        from ..http_client import http
+        from app.utils.claude_client import MODELS, claude_text
 
-        api_key = get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
-        if not api_key:
-            raise ValueError("ANTHROPIC_API_KEY not configured")
-        resp = await http.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": api_key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-haiku-4-5-20251001",
-                "max_tokens": 32,
-                "messages": [{"role": "user", "content": "Reply with only: OK"}],
-            },
+        result = await claude_text(
+            prompt="Reply with only: OK",
+            model_tier="fast",
+            max_tokens=32,
             timeout=15,
         )
-        if resp.status_code != 200:
-            raise ValueError(f"Anthropic API returned {resp.status_code}: {resp.text[:200]}")
-        model = resp.json().get("model", "unknown")
+        if result is None:
+            raise ValueError("Anthropic API returned no response")
+        model = MODELS["fast"]
         return [{"vendor_name": "Anthropic AI", "mpn_matched": f"Connected — model: {model}", "status": "ok"}]
 
 

@@ -138,6 +138,8 @@ async def submit_triage_batch(db: Session, limit: int = 50000) -> dict:
 
         api_key = get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY")
         if api_key:
+            from app.utils.claude_client import MODELS
+
             # Build batch requests — 100 MPNs per request
             requests = []
             for i in range(0, len(remaining), 100):
@@ -149,7 +151,7 @@ async def submit_triage_batch(db: Session, limit: int = 50000) -> dict:
                     {
                         "custom_id": f"triage_{i}",
                         "params": {
-                            "model": "claude-haiku-4-5-20251001",
+                            "model": MODELS["fast"],
                             "max_tokens": 4096,
                             "system": _TRIAGE_SYSTEM,
                             "messages": [{"role": "user", "content": prompt}],

@@ -105,6 +105,7 @@ class VendorCard(Base):
 
     reviews = relationship("VendorReview", back_populates="vendor_card", cascade="all, delete-orphan")
     vendor_contacts = relationship("VendorContact", back_populates="vendor_card", cascade="all, delete-orphan")
+    strategic_vendors = relationship("StrategicVendor", back_populates="vendor_card")
 
     __table_args__ = (
         Index("ix_vendor_cards_created_at", "created_at"),

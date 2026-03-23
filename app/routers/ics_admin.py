@@ -12,7 +12,7 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.database import get_db
-from app.dependencies import require_admin as require_user
+from app.dependencies import require_admin
 from app.models import IcsSearchQueue, IcsWorkerStatus
 from app.models.auth import User
 from app.services.ics_worker.queue_manager import get_queue_stats, mark_status
@@ -22,7 +22,7 @@ router = APIRouter(tags=["ics-admin"])
 
 @router.get("/api/ics/queue/stats")
 async def ics_queue_stats(
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Return ICS search queue statistics by status."""
@@ -33,7 +33,7 @@ async def ics_queue_stats(
 async def ics_queue_items(
     status: str = "queued",
     limit: int = 50,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """List ICS queue items filtered by status."""
@@ -66,7 +66,7 @@ async def ics_queue_items(
 @router.post("/api/ics/queue/{item_id}/force-search")
 async def ics_force_search(
     item_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Force a queue item to be searched (re-queue regardless of status)."""
@@ -81,7 +81,7 @@ async def ics_force_search(
 @router.post("/api/ics/queue/{item_id}/skip")
 async def ics_skip(
     item_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Manually skip a queue item (set to gated_out)."""
@@ -97,7 +97,7 @@ async def ics_skip(
 
 @router.get("/api/ics/worker/health")
 async def ics_worker_health(
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Return ICS worker health status including queue stats and circuit breaker."""

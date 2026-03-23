@@ -63,6 +63,7 @@ class Quote(Base):
     requisition = relationship("Requisition", back_populates="quotes")
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
+    quote_lines = relationship("QuoteLine", back_populates="quote")
 
     __table_args__ = (
         Index("ix_quotes_req", "requisition_id"),
@@ -88,7 +89,7 @@ class QuoteLine(Base):
     margin_pct = Column(Numeric(5, 2))
     currency = Column(String(10), default="USD")
 
-    quote = relationship("Quote", backref="quote_lines")
+    quote = relationship("Quote", back_populates="quote_lines")
 
     __table_args__ = (
         Index("ix_quote_lines_quote", "quote_id"),

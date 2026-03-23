@@ -3,10 +3,8 @@
 What: Takes a natural language query, calls Claude Haiku to interpret it,
       and returns a suggested commodity category + sub-filter values.
 Called by: htmx_views.py AI search endpoint
-Depends on: anthropic, commodity_registry, config
+Depends on: claude_client, commodity_registry
 """
-
-import json
 
 from loguru import logger
 
@@ -86,13 +84,7 @@ async def interpret_search_query(query: str) -> dict | None:
         return None
 
     try:
-        import anthropic
-
-        from app.config import settings
-
-        if not settings.anthropic_api_key:
-            logger.warning("AI search: no Anthropic API key configured")
-            return None
+        from app.utils.claude_client import claude_json
 
         commodity_summary = _build_commodity_summary()
         enum_reference = _build_enum_reference()
@@ -103,22 +95,20 @@ async def interpret_search_query(query: str) -> dict | None:
         )
         user_prompt = _USER_PROMPT.format(query=query)
 
-        client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
-        response = client.messages.create(
-            model="claude-haiku-4-5-20251001",
-            max_tokens=300,
+        result = await claude_json(
+            prompt=user_prompt,
             system=system_prompt,
-            messages=[{"role": "user", "content": user_prompt}],
+            model_tier="fast",
+            max_tokens=300,
         )
 
-        text = response.content[0].text.strip()
-        # Strip markdown fences if present
-        if text.startswith("```"):
-            text = text.split("\n", 1)[1] if "\n" in text else text[3:]
-            if text.endswith("```"):
-                text = text[:-3].strip()
+        if result is None:
+            logger.warning("AI search: no result from Claude")
+            return None
 
-        result = json.loads(text)
+        if not isinstance(result, dict):
+            logger.warning("AI search: unexpected result type: {}", type(result))
+            return None
 
         # Validate commodity is in our known list
         commodity = result.get("commodity", "")
@@ -149,9 +139,6 @@ async def interpret_search_query(query: str) -> dict | None:
         )
         return result
 
-    except json.JSONDecodeError as e:
-        logger.warning("AI search: JSON parse error: {}", e)
-        return None
     except Exception as e:
         logger.warning("AI search interpretation failed: {}", e)
         return None

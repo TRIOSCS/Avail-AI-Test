@@ -46,4 +46,4 @@ class VendorSightingSummary(Base):
     tier = Column(String(20), nullable=True)
     updated_at = Column(DateTime, nullable=True)
 
-    requirement = relationship("Requirement", backref="vendor_summaries")
+    requirement = relationship("Requirement", back_populates="vendor_summaries")

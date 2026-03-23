@@ -278,3 +278,36 @@ class RiskFlagSeverity(StrEnum):
     INFO = "info"
     WARNING = "warning"
     CRITICAL = "critical"
+
+
+class ProspectAccountStatus(StrEnum):
+    """Status lifecycle for ProspectAccount records in the prospect pool."""
+
+    SUGGESTED = "suggested"
+    CLAIMED = "claimed"
+    DISMISSED = "dismissed"
+    CONVERTED = "converted"
+
+
+class TaskStatus(StrEnum):
+    """Status lifecycle for RequisitionTask records."""
+
+    TODO = "todo"
+    IN_PROGRESS = "in_progress"
+    DONE = "done"
+
+
+class PendingBatchStatus(StrEnum):
+    """Status lifecycle for PendingBatch (Anthropic Batch API) records."""
+
+    PROCESSING = "processing"
+    COMPLETED = "completed"
+    FAILED = "failed"
+
+
+class DiscoveryBatchStatus(StrEnum):
+    """Status lifecycle for DiscoveryBatch (prospect discovery run) records."""
+
+    RUNNING = "running"
+    COMPLETE = "complete"
+    FAILED = "failed"

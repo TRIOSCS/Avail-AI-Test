@@ -1065,13 +1065,10 @@ async def _call_claude_bid_parse(email_body: str) -> str:
 
     Returns raw text response from Claude (expected to be JSON).
     Called by: parse_bid_from_email
-    Depends on: anthropic SDK, app settings
+    Depends on: claude_client
     """
-    import anthropic
+    from app.utils.claude_client import claude_text
 
-    from ..config import settings
-
-    client = anthropic.AsyncAnthropic(api_key=settings.anthropic_api_key)
     prompt = (
         "Extract bid information from this email response to a parts solicitation. "
         'Return ONLY valid JSON: {"unit_price": float|null, "quantity_wanted": int|null, '
@@ -1079,12 +1076,12 @@ async def _call_claude_bid_parse(email_body: str) -> str:
         'If the email declines or is not a bid response, return: {"declined": true}\n\n'
         f"{email_body[:2000]}"
     )
-    response = await client.messages.create(
-        model=settings.anthropic_model,
+    result = await claude_text(
+        prompt=prompt,
+        model_tier="smart",
         max_tokens=256,
-        messages=[{"role": "user", "content": prompt}],
     )
-    return response.content[0].text
+    return result or ""
 
 
 async def parse_bid_from_email(

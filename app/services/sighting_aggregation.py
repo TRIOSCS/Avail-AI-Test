@@ -48,12 +48,13 @@ def _estimate_qty_with_ai(qty_values: list[int | None]) -> int | None:
         return sum(non_null)
 
     try:
+        import anthropic
+
         from app.config import settings
+        from app.utils.claude_client import MODELS
 
         if not settings.ANTHROPIC_API_KEY:
             return sum(non_null)
-
-        import anthropic
 
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         prompt = (
@@ -63,7 +64,7 @@ def _estimate_qty_with_ai(qty_values: list[int | None]) -> int | None:
             f"Reply with ONLY the integer, nothing else."
         )
         resp = client.messages.create(
-            model="claude-haiku-4-5-20251001",
+            model=MODELS["fast"],
             max_tokens=20,
             messages=[{"role": "user", "content": prompt}],
         )

@@ -364,38 +364,54 @@ def _seed_site_contacts(conn) -> None:
 # ── One-time backfills ───────────────────────────────────────────────
 
 
+_BACKFILL_BATCH_SIZE = 500
+
+
 def _backfill_normalized_mpn() -> None:
     """One-time backfill: populate requirements.normalized_mpn and re-normalize material_cards."""
     with engine.connect() as conn:
-        # 1. Backfill requirements.normalized_mpn where NULL
+        # 1. Backfill requirements.normalized_mpn where NULL — chunked batch writes
         try:
-            rows = conn.execute(
-                sqltext(
-                    "SELECT id, primary_mpn FROM requirements WHERE normalized_mpn IS NULL AND primary_mpn IS NOT NULL"
-                )
-            ).fetchall()
-            if rows:
-                for r in rows:
-                    nk = _norm_key(r[1])
-                    if nk:
-                        conn.execute(
-                            sqltext("UPDATE requirements SET normalized_mpn = :nk WHERE id = :id"),
-                            {"nk": nk, "id": r[0]},
-                        )
-                conn.commit()
-                logger.info("Backfilled normalized_mpn on %d requirements", len(rows))
+            offset = 0
+            total_reqs = 0
+            while True:
+                rows = conn.execute(
+                    sqltext(
+                        "SELECT id, primary_mpn FROM requirements"
+                        " WHERE normalized_mpn IS NULL AND primary_mpn IS NOT NULL"
+                        " LIMIT :lim OFFSET :off"
+                    ),
+                    {"lim": _BACKFILL_BATCH_SIZE, "off": offset},
+                ).fetchall()
+                if not rows:
+                    break
+                batch = [{"nk": _norm_key(r[1]), "id": r[0]} for r in rows if _norm_key(r[1])]
+                if batch:
+                    conn.execute(
+                        sqltext("UPDATE requirements SET normalized_mpn = :nk WHERE id = :id"),
+                        batch,
+                    )
+                    conn.commit()
+                    total_reqs += len(batch)
+                offset += len(rows)
+                if len(rows) < _BACKFILL_BATCH_SIZE:
+                    break
+            if total_reqs:
+                logger.info("Backfilled normalized_mpn on %d requirements", total_reqs)
         except Exception as e:
             logger.warning("Backfill requirements.normalized_mpn failed: %s", e)
             conn.rollback()
 
         # 2. Backfill material_cards.normalized_mpn where NULL only (skip full re-scan)
+        # Duplicate check must remain per-row; collect safe updates then batch-commit.
         try:
             cards = conn.execute(
                 sqltext(
                     "SELECT id, display_mpn FROM material_cards WHERE normalized_mpn IS NULL AND display_mpn IS NOT NULL"
                 )
             ).fetchall()
-            updated = 0
+            batch = []
+            total_updated = 0
             for c in cards:
                 new_norm = _norm_key(c[1])
                 if new_norm:
@@ -404,14 +420,24 @@ def _backfill_normalized_mpn() -> None:
                         {"n": new_norm, "id": c[0]},
                     ).fetchone()
                     if not existing:
-                        conn.execute(
-                            sqltext("UPDATE material_cards SET normalized_mpn = :n WHERE id = :id"),
-                            {"n": new_norm, "id": c[0]},
-                        )
-                        updated += 1
-            if updated:
+                        batch.append({"n": new_norm, "id": c[0]})
+                if len(batch) >= _BACKFILL_BATCH_SIZE:
+                    conn.execute(
+                        sqltext("UPDATE material_cards SET normalized_mpn = :n WHERE id = :id"),
+                        batch,
+                    )
+                    conn.commit()
+                    total_updated += len(batch)
+                    batch = []
+            if batch:
+                conn.execute(
+                    sqltext("UPDATE material_cards SET normalized_mpn = :n WHERE id = :id"),
+                    batch,
+                )
                 conn.commit()
-                logger.info("Backfilled normalized_mpn on %d material_cards", updated)
+                total_updated += len(batch)
+            if total_updated:
+                logger.info("Backfilled normalized_mpn on %d material_cards", total_updated)
         except Exception as e:
             logger.warning("Backfill material_cards.normalized_mpn failed: %s", e)
             conn.rollback()
@@ -420,42 +446,66 @@ def _backfill_normalized_mpn() -> None:
 def _backfill_sighting_offer_normalized_mpn() -> None:
     """One-time backfill: populate sightings.normalized_mpn and offers.normalized_mpn."""
     with engine.connect() as conn:
-        # Sightings: compute from mpn_matched
+        # Sightings: compute from mpn_matched — chunked batch writes
         try:
-            rows = conn.execute(
-                sqltext(
-                    "SELECT id, mpn_matched FROM sightings WHERE normalized_mpn IS NULL AND mpn_matched IS NOT NULL"
-                )
-            ).fetchall()
-            if rows:
-                for r in rows:
-                    nk = _norm_key(r[1])
-                    if nk:
-                        conn.execute(
-                            sqltext("UPDATE sightings SET normalized_mpn = :nk WHERE id = :id"),
-                            {"nk": nk, "id": r[0]},
-                        )
-                conn.commit()
-                logger.info("Backfilled normalized_mpn on %d sightings", len(rows))
+            offset = 0
+            total_sightings = 0
+            while True:
+                rows = conn.execute(
+                    sqltext(
+                        "SELECT id, mpn_matched FROM sightings"
+                        " WHERE normalized_mpn IS NULL AND mpn_matched IS NOT NULL"
+                        " LIMIT :lim OFFSET :off"
+                    ),
+                    {"lim": _BACKFILL_BATCH_SIZE, "off": offset},
+                ).fetchall()
+                if not rows:
+                    break
+                batch = [{"nk": _norm_key(r[1]), "id": r[0]} for r in rows if _norm_key(r[1])]
+                if batch:
+                    conn.execute(
+                        sqltext("UPDATE sightings SET normalized_mpn = :nk WHERE id = :id"),
+                        batch,
+                    )
+                    conn.commit()
+                    total_sightings += len(batch)
+                offset += len(rows)
+                if len(rows) < _BACKFILL_BATCH_SIZE:
+                    break
+            if total_sightings:
+                logger.info("Backfilled normalized_mpn on %d sightings", total_sightings)
         except Exception as e:
             logger.warning("Backfill sightings.normalized_mpn failed: %s", e)
             conn.rollback()
 
-        # Offers: compute from mpn
+        # Offers: compute from mpn — chunked batch writes
         try:
-            rows = conn.execute(
-                sqltext("SELECT id, mpn FROM offers WHERE normalized_mpn IS NULL AND mpn IS NOT NULL")
-            ).fetchall()
-            if rows:
-                for r in rows:
-                    nk = _norm_key(r[1])
-                    if nk:
-                        conn.execute(
-                            sqltext("UPDATE offers SET normalized_mpn = :nk WHERE id = :id"),
-                            {"nk": nk, "id": r[0]},
-                        )
-                conn.commit()
-                logger.info("Backfilled normalized_mpn on %d offers", len(rows))
+            offset = 0
+            total_offers = 0
+            while True:
+                rows = conn.execute(
+                    sqltext(
+                        "SELECT id, mpn FROM offers"
+                        " WHERE normalized_mpn IS NULL AND mpn IS NOT NULL"
+                        " LIMIT :lim OFFSET :off"
+                    ),
+                    {"lim": _BACKFILL_BATCH_SIZE, "off": offset},
+                ).fetchall()
+                if not rows:
+                    break
+                batch = [{"nk": _norm_key(r[1]), "id": r[0]} for r in rows if _norm_key(r[1])]
+                if batch:
+                    conn.execute(
+                        sqltext("UPDATE offers SET normalized_mpn = :nk WHERE id = :id"),
+                        batch,
+                    )
+                    conn.commit()
+                    total_offers += len(batch)
+                offset += len(rows)
+                if len(rows) < _BACKFILL_BATCH_SIZE:
+                    break
+            if total_offers:
+                logger.info("Backfilled normalized_mpn on %d offers", total_offers)
         except Exception as e:
             logger.warning("Backfill offers.normalized_mpn failed: %s", e)
             conn.rollback()
@@ -480,8 +530,9 @@ def _backfill_sighting_vendor_normalized() -> None:
                     sqltext(
                         "SELECT id, vendor_name FROM sightings "
                         "WHERE vendor_name_normalized IS NULL AND vendor_name IS NOT NULL "
-                        "LIMIT 10000"
-                    )
+                        "LIMIT :lim"
+                    ),
+                    {"lim": _BACKFILL_BATCH_SIZE},
                 ).fetchall()
                 if not rows:
                     break
@@ -491,11 +542,10 @@ def _backfill_sighting_vendor_normalized() -> None:
                     if nv:
                         batch.append({"nv": nv, "id": r[0]})
                 if batch:
-                    for b in batch:
-                        conn.execute(
-                            sqltext("UPDATE sightings SET vendor_name_normalized = :nv WHERE id = :id"),
-                            b,
-                        )
+                    conn.execute(
+                        sqltext("UPDATE sightings SET vendor_name_normalized = :nv WHERE id = :id"),
+                        batch,
+                    )
                     conn.commit()
                 total += len(batch)
             except Exception as e:

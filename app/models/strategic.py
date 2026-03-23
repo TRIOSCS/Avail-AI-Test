@@ -41,8 +41,8 @@ class StrategicVendor(Base):
     release_reason = Column(String(20), nullable=True)
 
     # Relationships
-    user = relationship("User", backref="strategic_vendors")
-    vendor_card = relationship("VendorCard", backref="strategic_vendors")
+    user = relationship("User", back_populates="strategic_vendors")
+    vendor_card = relationship("VendorCard", back_populates="strategic_vendors")
 
     __table_args__ = (
         Index(

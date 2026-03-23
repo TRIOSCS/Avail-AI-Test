@@ -52,3 +52,4 @@ class User(Base):
 
     requisitions = relationship("Requisition", back_populates="creator", foreign_keys="[Requisition.created_by]")
     contacts = relationship("Contact", back_populates="user")
+    strategic_vendors = relationship("StrategicVendor", back_populates="user")

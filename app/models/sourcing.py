@@ -107,6 +107,7 @@ class Requirement(Base):
     sightings = relationship("Sighting", back_populates="requirement", cascade="all, delete-orphan")
     offers = relationship("Offer", back_populates="requirement", cascade="all, delete-orphan")
     assigned_buyer = relationship("User", foreign_keys=[assigned_buyer_id])
+    vendor_summaries = relationship("VendorSightingSummary", back_populates="requirement")
 
     __table_args__ = (
         Index("ix_req_requisition", "requisition_id"),

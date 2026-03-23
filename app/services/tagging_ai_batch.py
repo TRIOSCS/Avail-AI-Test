@@ -361,6 +361,8 @@ async def submit_targeted_backfill(db: Session, limit: int = 50000) -> dict:
 
     logger.info(f"Targeted backfill: preparing {len(untagged)} cards for Batch API")
 
+    from app.utils.claude_client import MODELS
+
     # Build batch requests — 100 MPNs per request
     requests = []
     for i in range(0, len(untagged), 100):
@@ -372,7 +374,7 @@ async def submit_targeted_backfill(db: Session, limit: int = 50000) -> dict:
             {
                 "custom_id": f"backfill_{i}",
                 "params": {
-                    "model": "claude-haiku-4-5-20251001",
+                    "model": MODELS["fast"],
                     "max_tokens": 8192,
                     "system": _SYSTEM,
                     "messages": [{"role": "user", "content": prompt}],
