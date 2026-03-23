@@ -260,12 +260,7 @@ async def check_company_duplicate(
         return {"matches": []}
 
     # Pull all company names (cached at 500 limit, same as list_companies)
-    companies = (
-        db.query(Company.id, Company.name)
-        .filter(Company.is_active == True)  # noqa: E712
-        .limit(2000)
-        .all()
-    )
+    companies = db.query(Company.id, Company.name).filter(Company.is_active.is_(True)).limit(2000).all()
     matches = []
     for c in companies:
         cn = _normalize(c.name)

@@ -67,6 +67,14 @@ _CONNECTOR_SOURCE_MAP = {
 }
 
 
+def _median(values: list[float]) -> float | None:
+    """Return the median of a list of numbers, or None if empty."""
+    if not values:
+        return None
+    s = sorted(values)
+    return s[len(s) // 2]
+
+
 # ── Search result cache (Redis, 15-min TTL) ─────────────────────────────
 
 _SEARCH_CACHE_TTL = 900  # 15 minutes
@@ -277,7 +285,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     # 7. Flag price outliers — historical results 20x+ above fresh median
     fresh_prices = [r["unit_price"] for r in results if not r.get("is_material_history") and r.get("unit_price")]
     if fresh_prices:
-        median_price = sorted(fresh_prices)[len(fresh_prices) // 2]
+        median_price = _median(fresh_prices)
         if median_price > 0:
             for r in results:
                 p = r.get("unit_price")
@@ -412,7 +420,7 @@ async def quick_search_mpn(mpn: str, db: Session) -> dict:
 
     # 4. v2 scoring with median price context
     prices = [r["unit_price"] for r in results if r.get("unit_price") and r["unit_price"] > 0]
-    median_price = sorted(prices)[len(prices) // 2] if prices else None
+    median_price = _median(prices)
     for r in results:
         norm_name = normalize_vendor_name(r["vendor_name"])
         v2_total, _ = score_sighting_v2(
@@ -1106,7 +1114,7 @@ def _save_sightings(
 
     # PR 3: Compute multi-factor v2 scores with median price context
     prices = [s.unit_price for s in sightings if s.unit_price and s.unit_price > 0]
-    median_price = sorted(prices)[len(prices) // 2] if prices else None
+    median_price = _median(prices)
     target_qty = req.target_qty if req.target_qty else None
     for s in sightings:
         norm_name = s.vendor_name_normalized or ""

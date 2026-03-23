@@ -4,9 +4,31 @@ Called by: all router files that render templates
 Depends on: Jinja2
 """
 
+from datetime import datetime, timezone
+
 from fastapi.templating import Jinja2Templates
 
 templates = Jinja2Templates(directory="app/templates")
+
+
+# ── Shared Helpers ─────────────────────────────────────────────────────
+
+
+def _elapsed_seconds(dt) -> float | None:
+    """Compute seconds elapsed since dt.
+
+    Handles str, naive, and aware datetimes.
+    """
+    if not dt:
+        return None
+    if isinstance(dt, str):
+        try:
+            dt = datetime.fromisoformat(dt)
+        except (ValueError, TypeError):
+            return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=timezone.utc)
+    return (datetime.now(timezone.utc) - dt).total_seconds()
 
 
 # ── Custom Jinja2 Filters ───────────────────────────────────────────
@@ -14,15 +36,9 @@ templates = Jinja2Templates(directory="app/templates")
 
 def _timesince_filter(dt):
     """Convert datetime to human-readable relative time string."""
-    if not dt:
+    seconds = _elapsed_seconds(dt)
+    if seconds is None:
         return ""
-    from datetime import datetime, timezone
-
-    now = datetime.now(timezone.utc)
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=timezone.utc)
-    diff = now - dt
-    seconds = diff.total_seconds()
     if seconds < 60:
         return "just now"
     if seconds < 3600:
@@ -42,20 +58,10 @@ templates.env.filters["timesince"] = _timesince_filter
 
 def _timeago_filter(dt):
     """Compact relative time: '2h ago', '3d ago', '2w ago'."""
-    if not dt:
+    seconds = _elapsed_seconds(dt)
+    if seconds is None:
         return "--"
-    from datetime import datetime as _dt
-    from datetime import timezone as _tz
-
-    if isinstance(dt, str):
-        try:
-            dt = _dt.fromisoformat(dt)
-        except (ValueError, TypeError):
-            return "--"
-    if dt.tzinfo is None:
-        dt = dt.replace(tzinfo=_tz.utc)
-    now = _dt.now(_tz.utc)
-    seconds = int((now - dt).total_seconds())
+    seconds = int(seconds)
     if seconds < 60:
         return "just now"
     minutes = seconds // 60
