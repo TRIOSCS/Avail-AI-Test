@@ -61,8 +61,8 @@ Left panel: requirements table. Right panel: requirement detail with vendor brea
 ### Left Panel — Requirements Table
 
 **Top bar (single row):**
-- Four stat pills: **Open** | **Contacted** | **Awaiting Response** | **Offers In** — counts derived from `sighting_status.py` aggregation
-- Group-by dropdown: Flat | Brand | Manufacturer | Commodity
+- Four stat pills matching lifecycle statuses: **Sighting** (new/untouched) | **Contacted** (outreach sent) | **Vendor Responded** (reply received, awaiting buyer action) | **Offer In** (confirmed offers) — counts derived from `sighting_status.py` aggregation across all requirements
+- Group-by dropdown: Flat | Brand | Manufacturer | Commodity — grouping fields derived from `Sighting.manufacturer` and `VendorCard.brand_tags`/`commodity_tags` joined through `VendorSightingSummary`
 - Filter controls: status, sales person, staleness, assigned buyer ("My Items" / "All Items" toggle)
 
 **Table (compact-table class):**
@@ -73,16 +73,16 @@ Left panel: requirements table. Right panel: requirement detail with vendor brea
 | MPN | `Requirement.mpn` | JetBrains Mono, font-medium |
 | Description | `Requirement.description` | Truncated, text-gray-500 |
 | Qty | `Requirement.target_qty` | JetBrains Mono |
-| Customer | `Requisition.customer_name` | Link to RFQ page |
+| Customer | `Requisition.customer_name` | Link to `/v2/requisitions/{requisition_id}` |
 | Sales | `Requisition.user.name` | — |
-| Top Vendor | Best-scored `VendorSightingSummary.vendor_name` | — |
+| Top Vendor | Highest `VendorSightingSummary.score` vendor for this requirement | — |
 | Vendor Score | `VendorCard.engagement_score` | Inline number |
 | Response Rate | `VendorCard.response_rate` | Inline percentage |
 | Status | `sighting_status.py` derived | `status_badge()` macro |
 | Priority | `Requirement.priority_score` | High/Med/Low indicator |
-| Stale | Computed: last ActivityLog > N days | Amber dot when stale, hidden otherwise |
+| Stale | Computed: last ActivityLog for this requirement_id > N days | Amber dot when stale, hidden otherwise |
 
-**Group-by behavior:** Server-side SQL aggregation. When grouped, rows collapse under group headers: `"Seagate — 4 parts"` with expand/collapse chevron and summary stats right-aligned.
+**Group-by behavior:** Server-side SQL aggregation. Group-by fields sourced from `Sighting.manufacturer` (for Manufacturer grouping) and `VendorCard.brand_tags`/`commodity_tags` (for Brand/Commodity grouping), joined through `VendorSightingSummary.vendor_name` → `VendorCard.normalized_name`. When grouped, rows collapse under group headers: `"Seagate — 4 parts"` with expand/collapse chevron and summary stats right-aligned.
 
 **Pagination:** Paginated with `limit`/`offset` like existing patterns. Server-side sorting by priority_score (default), MPN, status, staleness.
 
@@ -100,8 +100,10 @@ Appears when a row is selected in the left panel. Three sections:
 **2. Vendor Breakdown Table**
 - All vendors with sightings for this requirement
 - Columns: Vendor Name, Status (dot + tooltip), Qty Available, Best Price, Score, Response Rate, Phone (tel: link for click-to-call)
-- Each vendor row has actions: Mark Unavailable, Enter Offer
-- Pending-review offers shown with Approve/Reject buttons (calls existing `POST /api/offers/{id}/approve`)
+- Each vendor row has actions:
+  - **Mark Unavailable** — calls `POST /v2/partials/sightings/{requirement_id}/mark-unavailable` with `vendor_name` in request body to set `Sighting.is_unavailable = True` for that vendor's sightings on this requirement
+  - **Enter Offer** — opens inline form or modal with fields: qty_available, unit_price, currency, lead_time, date_code, condition, packaging. Calls existing `POST /api/offers/` endpoint to create Offer with `status='active'` (buyer-confirmed). Links to requirement_id, vendor_card_id, and requisition_id.
+- Pending-review offers (from AI email parser) shown with Approve/Reject buttons (calls existing `POST /api/offers/{id}/approve` and `POST /api/offers/{id}/reject`)
 
 **3. Activity Timeline**
 - Extracted shared partial: `htmx/partials/shared/activity_timeline.html`
@@ -113,7 +115,8 @@ Appears when a row is selected in the left panel. Three sections:
 
 ### Action Bar (sticky bottom, appears on multi-select)
 - Selected count | **Send to Vendors** | **Refresh Sightings** | **Mark Status** dropdown
-- Uses existing `partsListSelection()` Alpine pattern
+- **Batch Refresh**: Sends sequential `POST /v2/partials/sightings/{requirement_id}/refresh` for each selected requirement. Shows progress indicator ("Refreshing 3 of 7..."). Each triggers `search_service.search_requirement()`.
+- Multi-select pattern: Extract `partsListSelection()` from `parts/list.html` (currently inline in template) to a shared Alpine component in `htmx_app.js`, then reuse on both pages
 
 ---
 
@@ -163,10 +166,10 @@ All statuses derived by existing `sighting_status.py` — no manual updating exc
 ## AI Features
 
 ### 1. Priority Scoring — `scoring.py`
-New function `score_requirement_priority()` in existing `scoring.py`:
+New function `score_requirement_priority()` in existing `app/scoring.py`:
 - Inputs: requisition urgency/due date, customer value, sighting count, time since creation, whether any vendors contacted
 - Output: 0-100 score stored on `Requirement.priority_score`
-- Runs when SourcingWorkItem-equivalent is needed (requirement save, periodic job)
+- **Triggers**: (1) Called after `search_service.search_requirement()` completes (piggyback on existing search flow). (2) Periodic job in `app/jobs/` running every 30 minutes to refresh scores for all open requirements.
 - Uses existing `score_unified()` patterns, not a Claude API call — pure SQL/Python scoring
 
 ### 2. Vendor Suggestions — No AI, just smart queries
@@ -180,21 +183,20 @@ When buyer opens "Send to Vendors" modal:
 ### 3. Stale Detection — Date math, no AI
 Computed at query time:
 - Check last `ActivityLog` entry for each `requirement_id`
-- If older than configurable threshold (e.g., 3 days), flag as stale
+- If older than configurable threshold, flag as stale
+- Threshold: `SIGHTING_STALE_DAYS` in `app/config.py` (default: 3 days)
 - Displayed as amber dot in table, invisible otherwise
-- No stored field — derived each time
+- No stored field — derived each time via subquery
 
-### 4. Email Cleanup — `email_service.py`
-New function `cleanup_rfq_email()` in existing `email_service.py`:
-- Alternatively: add `user_draft` parameter to existing `draft_rfq()` function
-- When `user_draft` provided: AI cleans grammar/formatting, ensures all part details referenced, preserves buyer's tone
-- When `user_draft` is None: existing behavior (AI generates from scratch) — kept as fallback
+### 4. Email Cleanup — `app/services/ai_service.py`
+Add `user_draft: str | None = None` parameter to existing `draft_rfq()` function in `app/services/ai_service.py` (line 232):
+- When `user_draft` provided: AI cleans grammar/formatting, ensures all part details referenced, preserves buyer's tone. Returns cleaned version.
+- When `user_draft` is None: existing behavior (AI generates from scratch) — kept as fallback for auto-follow-up drafts
 - Uses `claude_client` FAST model (Haiku) — lightweight text task
 
 ### 5. Auto-Follow-Up Drafts
 When a requirement is stale and buyer clicks "Send to Vendors":
-- Pre-fill compose textarea with a follow-up template instead of blank
-- Based on existing `draft_rfq()` with vendor history context
+- Pre-fill compose textarea with a follow-up draft generated by existing `draft_rfq()` in `app/services/ai_service.py` (no `user_draft` param — full AI generation with vendor history context)
 - Buyer edits and sends as normal
 
 ---
@@ -222,6 +224,18 @@ When a requirement is stale and buyer clicks "Send to Vendors":
 
 ---
 
+## Error Handling
+
+| Scenario | Behavior |
+|----------|----------|
+| `send_batch_rfq()` fails for some vendors | Show toast with partial success: "Sent to 3/5 vendors. Failed: Vendor X, Vendor Y." Log failures to ActivityLog. |
+| Graph token expired | `require_fresh_token` dependency returns 401. Frontend shows "Please re-authenticate" toast. |
+| Requirement has zero sightings | Detail panel shows `empty_state.html` partial: "No sightings yet — sightings will appear after search completes." |
+| Search refresh fails (connector errors) | Show toast: "Search completed with errors — some sources unavailable." Partial results still saved. |
+| Offer creation fails validation | Inline form shows validation errors below fields. |
+
+---
+
 ## Router: `app/routers/sightings.py`
 
 Thin view router. Delegates to existing services.
@@ -232,7 +246,8 @@ Thin view router. Delegates to existing services.
 | GET | `/v2/partials/sightings/{requirement_id}/detail` | Detail panel | DB queries + `sighting_status.py` + ActivityLog |
 | POST | `/v2/partials/sightings/send-inquiry` | Compose + send batch | `email_service.send_batch_rfq()` |
 | POST | `/v2/partials/sightings/{requirement_id}/refresh` | Re-run search pipeline | `search_service.search_requirement()` |
-| POST | `/v2/partials/sightings/{requirement_id}/mark-unavailable` | Set sighting unavailable | `Sighting.is_unavailable = True` |
+| POST | `/v2/partials/sightings/{requirement_id}/mark-unavailable` | Set sighting unavailable for a vendor | `Sighting.is_unavailable = True` (accepts `vendor_name` in request body) |
+| PATCH | `/v2/partials/sightings/{requirement_id}/assign` | Update assigned buyer | Sets `Requirement.assigned_buyer_id` |
 
 **Existing endpoints called directly from templates via hx-post (no duplication):**
 - `POST /api/offers/{id}/approve` — approve pending offer
@@ -258,7 +273,7 @@ Thin view router. Delegates to existing services.
 - `compact-table` CSS class — JetBrains Mono for data, DM Sans for labels
 - `_macros.html` → `status_badge()`, `btn_primary()`, `stat_card()`
 - `source_badge.html` for sighting source indicators
-- `partsListSelection()` Alpine pattern for multi-select
+- `partsListSelection()` Alpine pattern for multi-select (extract from `parts/list.html` to shared `htmx_app.js` first)
 - `cell_edit.html`/`cell_display.html` for inline editing (assigned buyer, notes)
 - `$store.toast` for notifications
 - `@open-modal` dispatch for vendor modal
@@ -272,8 +287,8 @@ Thin view router. Delegates to existing services.
 
 | Component | Location |
 |-----------|----------|
-| `sighting_status.py` | Vendor status derivation per requirement |
-| `sighting_aggregation.py` | Vendor summary rebuilds |
+| `app/services/sighting_status.py` | Vendor status derivation per requirement |
+| `app/services/sighting_aggregation.py` | Vendor summary rebuilds |
 | `email_service.send_batch_rfq()` | Sending via Microsoft Graph |
 | `search_service.search_requirement()` | Refresh sightings pipeline (9 connectors) |
 | `eight_by_eight_service` | Auto call logging + reverse phone lookup |
@@ -285,7 +300,7 @@ Thin view router. Delegates to existing services.
 | `Contact` model | Outbound RFQ tracking |
 | `VendorResponse` model | Parsed vendor replies |
 | `Offer` model + approve/reject endpoints | Full offer lifecycle |
-| `ActivityLog` model (with `requirement_id`) | Activity tracking |
+| `ActivityLog` model (has `requirement_id` at `intelligence.py:129`) | Activity tracking |
 | `SourcingLead` model | Buyer status/feedback fields |
 | `split_panel.html` | Resizable split layout |
 | `_macros.html` | Status badges, buttons, stat cards |
@@ -302,9 +317,11 @@ Thin view router. Delegates to existing services.
 | What | Where | Size |
 |------|-------|------|
 | 2 columns on Requirement | Migration | ~10 lines |
-| `score_requirement_priority()` | `scoring.py` | ~30 lines |
-| `cleanup_rfq_email()` (or `user_draft` param on `draft_rfq`) | `email_service.py` | ~40 lines |
-| Sightings router (5 endpoints) | `app/routers/sightings.py` | ~200 lines |
+| `SIGHTING_STALE_DAYS` config | `app/config.py` | ~2 lines |
+| `score_requirement_priority()` | `app/scoring.py` | ~30 lines |
+| `user_draft` param on existing `draft_rfq()` | `app/services/ai_service.py` | ~20 lines (modify existing function) |
+| Extract `partsListSelection()` to shared | `app/static/htmx_app.js` | ~30 lines (move, not new) |
+| Sightings router (6 endpoints) | `app/routers/sightings.py` | ~250 lines |
 | `"sightings"` case in `v2_page()` | `htmx_views.py` | ~5 lines |
 | Nav item addition + CSS adjustment | `mobile_nav.html` | ~10 lines |
 | Table partial | `sightings/table.html` | ~150 lines |
