@@ -82,7 +82,7 @@
         {# Tab bar #}
         <div class="border-b-2 border-brand-200 bg-gray-50/80 px-2 flex-shrink-0">
           <nav class="flex -mb-[2px]">
-            {% for tab_key, tab_label in [('offers', 'Offers'), ('sourcing', 'Sourcing'), ('notes', 'Sales Notes'), ('activity', 'Activity'), ('comms', 'Comms'), ('req-details', 'REQ Detail')] %}
+            {% for tab_key, tab_label in [('offers', 'Offers'), ('sourcing', 'Sightings'), ('notes', 'Sales Notes'), ('activity', 'Activity'), ('comms', 'Comms'), ('req-details', 'REQ Detail')] %}
             <button @click="activeTab = '{{ tab_key }}'; htmx.ajax('GET', '/v2/partials/parts/' + selectedPartId + '/tab/{{ tab_key }}', {target: '#part-detail'})"
                     :class="activeTab === '{{ tab_key }}' ? 'ws-tab-active' : ''"
                     class="ws-tab">
