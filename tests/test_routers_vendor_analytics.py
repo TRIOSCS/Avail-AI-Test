@@ -313,6 +313,12 @@ def test_vendor_parts_summary_query_null_dates():
 # ── Analyze materials ────────────────────────────────────────────────────
 
 
+def test_vendor_parts_summary_special_chars_in_mpn(client, db_session):
+    """MPN filter with SQL-special characters should not cause errors."""
+    resp = client.get("/api/vendors/1/parts-summary?mpn_filter=test'%25OR%201%3D1--")
+    assert resp.status_code in (200, 404)
+
+
 def test_analyze_materials_no_api_key(client, db_session, test_vendor_card, monkeypatch):
     """POST /api/vendors/{id}/analyze-materials without API key returns 503."""
     monkeypatch.setattr(

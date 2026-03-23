@@ -195,25 +195,9 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
 
     # PostgreSQL supports array_agg(col ORDER BY ...) for "last" value;
     # SQLite does not, so we fall back to a correlated subquery.
+    # Two fully-parameterized query strings — no f-string interpolation.
     if dialect == "postgresql":
-        last_price_expr = "(array_agg(unit_price ORDER BY created_at DESC))[1]"
-        last_qty_expr = "(array_agg(qty_available ORDER BY created_at DESC))[1]"
-    else:
-        last_price_expr = (
-            "(SELECT s2.unit_price FROM sightings s2"
-            " WHERE s2.vendor_name_normalized = sightings.vendor_name_normalized"
-            " AND COALESCE(s2.mpn_matched, '') = COALESCE(sightings.mpn_matched, '')"
-            " ORDER BY s2.created_at DESC LIMIT 1)"
-        )
-        last_qty_expr = (
-            "(SELECT s2.qty_available FROM sightings s2"
-            " WHERE s2.vendor_name_normalized = sightings.vendor_name_normalized"
-            " AND COALESCE(s2.mpn_matched, '') = COALESCE(sightings.mpn_matched, '')"
-            " ORDER BY s2.created_at DESC LIMIT 1)"
-        )
-
-    rows = db.execute(
-        sqltext(f"""
+        parts_sql = sqltext("""
         SELECT mpn, manufacturer, sighting_count, first_seen, last_seen, last_price, last_qty
         FROM (
             SELECT
@@ -222,8 +206,8 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
                 COUNT(*) as sighting_count,
                 MIN(created_at) as first_seen,
                 MAX(created_at) as last_seen,
-                {last_price_expr} as last_price,
-                {last_qty_expr} as last_qty
+                (array_agg(unit_price ORDER BY created_at DESC))[1] as last_price,
+                (array_agg(qty_available ORDER BY created_at DESC))[1] as last_qty
             FROM sightings
             WHERE vendor_name_normalized = :norm
               AND mpn_matched IS NOT NULL AND mpn_matched != ''
@@ -245,9 +229,49 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
           AND (:has_filter = false OR LOWER(mpn) LIKE :mpn_pattern ESCAPE '\\')
         ORDER BY last_seen DESC NULLS LAST
         OFFSET :off LIMIT :lim
-    """),
-        params,
-    ).fetchall()
+        """)
+    else:
+        parts_sql = sqltext("""
+        SELECT mpn, manufacturer, sighting_count, first_seen, last_seen, last_price, last_qty
+        FROM (
+            SELECT
+                COALESCE(mpn_matched, '') as mpn,
+                MAX(manufacturer) as manufacturer,
+                COUNT(*) as sighting_count,
+                MIN(created_at) as first_seen,
+                MAX(created_at) as last_seen,
+                (SELECT s2.unit_price FROM sightings s2
+                 WHERE s2.vendor_name_normalized = sightings.vendor_name_normalized
+                   AND COALESCE(s2.mpn_matched, '') = COALESCE(sightings.mpn_matched, '')
+                 ORDER BY s2.created_at DESC LIMIT 1) as last_price,
+                (SELECT s2.qty_available FROM sightings s2
+                 WHERE s2.vendor_name_normalized = sightings.vendor_name_normalized
+                   AND COALESCE(s2.mpn_matched, '') = COALESCE(sightings.mpn_matched, '')
+                 ORDER BY s2.created_at DESC LIMIT 1) as last_qty
+            FROM sightings
+            WHERE vendor_name_normalized = :norm
+              AND mpn_matched IS NOT NULL AND mpn_matched != ''
+            GROUP BY COALESCE(mpn_matched, '')
+            UNION ALL
+            SELECT
+                mc.display_mpn as mpn,
+                COALESCE(mvh.last_manufacturer, mc.manufacturer, '') as manufacturer,
+                mvh.times_seen as sighting_count,
+                mvh.first_seen,
+                mvh.last_seen,
+                mvh.last_price,
+                mvh.last_qty
+            FROM material_vendor_history mvh
+            JOIN material_cards mc ON mc.id = mvh.material_card_id
+            WHERE mvh.vendor_name = :norm
+        ) combined
+        WHERE mpn != ''
+          AND (:has_filter = false OR LOWER(mpn) LIKE :mpn_pattern ESCAPE '\\')
+        ORDER BY last_seen DESC NULLS LAST
+        LIMIT :lim OFFSET :off
+        """)
+
+    rows = db.execute(parts_sql, params).fetchall()
 
     # Get total count
     count_params: dict = {"norm": norm, "mpn_pattern": params["mpn_pattern"], "has_filter": params["has_filter"]}
