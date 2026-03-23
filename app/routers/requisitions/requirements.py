@@ -464,9 +464,29 @@ async def add_requirements(
         finally:
             bg_db.close()
 
+    # Auto-search: run full connector search in background
+    def _bg_full_search(requirement_ids: list[int]):
+        import asyncio
+
+        from ...database import SessionLocal
+        from ...search_service import search_requirement as do_search
+
+        bg_db = SessionLocal()
+        try:
+            for rid in requirement_ids:
+                req_obj = bg_db.get(Requirement, rid)
+                if req_obj:
+                    try:
+                        asyncio.run(do_search(req_obj, bg_db))
+                    except Exception:
+                        logger.debug("Auto-search failed for requirement %s", rid, exc_info=True)
+        finally:
+            bg_db.close()
+
     if created:
         background_tasks.add_task(_nc_enqueue_batch, [r.id for r in created])
         background_tasks.add_task(_ics_enqueue_batch, [r.id for r in created])
+        background_tasks.add_task(_bg_full_search, [r.id for r in created])
 
     # Duplicate detection
     duplicates = []

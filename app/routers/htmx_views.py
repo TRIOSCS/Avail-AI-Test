@@ -14,7 +14,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from loguru import logger
@@ -1095,6 +1095,7 @@ async def requisition_create(
 async def add_requirement(
     request: Request,
     req_id: int,
+    background_tasks: BackgroundTasks,
     primary_mpn: str = Form(...),
     manufacturer: str = Form(""),
     target_qty: int = Form(1),
@@ -1159,6 +1160,27 @@ async def add_requirement(
         resolve_material_card(sub["mpn"], db, manufacturer=sub.get("manufacturer", ""))
     db.commit()
     db.refresh(r)
+
+    # Auto-search: fire background search for the new requirement
+    def _bg_search(requirement_id: int):
+        import asyncio
+
+        from ..database import SessionLocal
+        from ..search_service import search_requirement as do_search
+
+        bg_db = SessionLocal()
+        try:
+            from ..models.sourcing import Requirement
+
+            req_obj = bg_db.get(Requirement, requirement_id)
+            if req_obj:
+                asyncio.run(do_search(req_obj, bg_db))
+        except Exception:
+            logger.debug("Auto-search failed for requirement %s", requirement_id, exc_info=True)
+        finally:
+            bg_db.close()
+
+    background_tasks.add_task(_bg_search, r.id)
 
     # Return the new row via template for HTMX append
     r.sighting_count = 0
@@ -2828,6 +2850,7 @@ async def update_requirement(
     request: Request,
     req_id: int,
     item_id: int,
+    background_tasks: BackgroundTasks,
     primary_mpn: str = Form(...),
     manufacturer: str = Form(""),
     target_qty: int = Form(1),
@@ -2899,6 +2922,27 @@ async def update_requirement(
         item.need_by_date = None
     db.commit()
     db.refresh(item)
+
+    # Auto-search: re-search after edit
+    def _bg_search(requirement_id: int):
+        import asyncio
+
+        from ..database import SessionLocal
+        from ..search_service import search_requirement as do_search
+
+        bg_db = SessionLocal()
+        try:
+            from ..models.sourcing import Requirement
+
+            req_obj = bg_db.get(Requirement, requirement_id)
+            if req_obj:
+                asyncio.run(do_search(req_obj, bg_db))
+        except Exception:
+            logger.debug("Auto-search failed for requirement %s", requirement_id, exc_info=True)
+        finally:
+            bg_db.close()
+
+    background_tasks.add_task(_bg_search, item.id)
 
     # Attach sighting_count for the template
     sighting_count = db.query(Sighting).filter(Sighting.requirement_id == item.id).count()
