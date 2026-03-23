@@ -14,7 +14,8 @@
 
 - **File:** `app/search_service.py:177-199`, `app/routers/requisitions/requirements.py:797`
 - **Problem:** `search_all` runs N `search_requirement` tasks concurrently via `asyncio.gather`, all sharing one `db` session. SQLAlchemy sessions are not coroutine-safe for concurrent writes.
-- **Fix:** Each search task creates its own `SessionLocal()`, commits/closes independently. Parent session used only for final reads.
+- **Fix:** Each search task creates its own `SessionLocal()`, commits/closes independently. Parent session used only for final reads. Also release the parent session before `asyncio.gather` of API connectors (see 3.6 — implement together).
+- **Dependency:** Must be implemented alongside Phase 3.6 (same function).
 - **Test:** Add test that runs 3 concurrent searches on same session — verify no `InvalidRequestError`.
 
 ### 1.2 SQL injection pattern in vendor_analytics
@@ -38,42 +39,28 @@
 - **Fix:** `hmac.compare_digest(sub.client_state, client_state or "")`
 - **Test:** Existing webhook validation tests.
 
-### 1.5 Missing admin auth on tagging_admin (18 endpoints)
-
-- **File:** `app/routers/tagging_admin.py`
-- **Problem:** All endpoints use `Depends(require_user)` — any authenticated user can trigger expensive batch operations (Nexar validation, AI tagging, data purges).
-- **Fix:** Change all to `Depends(require_admin)`.
-- **Test:** Add test that non-admin user gets 403 on each endpoint.
-
-### 1.6 Missing admin auth on ICS admin (5 endpoints)
-
-- **File:** `app/routers/ics_admin.py`
-- **Problem:** Same as 1.5 — `require_user` instead of `require_admin`.
-- **Fix:** Change all to `Depends(require_admin)`.
-- **Test:** Add test for 403 on non-admin.
-
-### 1.7 Dead status machine — transitions unvalidated
+### 1.5 Dead status machine — transitions unvalidated
 
 - **File:** `app/services/status_machine.py` (defined but never imported/called)
 - **Problem:** All offer/quote/requisition status transitions are direct assignments with no validation. Terminal states (SOLD, WON) can be bypassed. Any status can be set to any other.
 - **Fix:** Wire `validate_transition()` into the HTMX and API routers that change offer, quote, and requisition status. Raise HTTPException on invalid transitions.
 - **Test:** Add tests for invalid transitions (e.g., rejected→sold should fail).
 
-### 1.8 StrategicVendor.status query on nonexistent column
+### 1.6 StrategicVendor.status query on nonexistent column
 
-- **File:** `app/routers/htmx_views.py:3251`
+- **File:** `app/routers/htmx_views.py:3255`
 - **Problem:** Filters on `StrategicVendor.status == "active"` but model has no `status` column. Always returns empty results.
 - **Fix:** Change to `StrategicVendor.released_at.is_(None)` (active = not released).
 - **Test:** Add test creating a StrategicVendor and verifying it appears in the list.
 
-### 1.9 Credential decrypt failure invisible in prod
+### 1.7 Credential decrypt failure invisible in prod
 
-- **File:** `app/services/credential_service.py:91`
+- **File:** `app/services/credential_service.py:92`
 - **Problem:** Decryption failure logged at DEBUG — never appears in production logs (LOG_LEVEL=INFO). System silently falls back to possibly stale env vars.
 - **Fix:** Change to `logger.error(...)`.
 - **Test:** Existing tests; verify log output in test.
 
-### 1.10 Missing rollback in material enrichment job
+### 1.8 Missing rollback in material enrichment job
 
 - **File:** `app/jobs/tagging_jobs.py:305-307`
 - **Problem:** Exception caught, logged, but no `db.rollback()` and no `raise`. Partial writes persist, connection returns dirty to pool.
@@ -88,7 +75,7 @@
 
 ### 2.1 Silent exception swallowing (3 locations)
 
-- `app/routers/htmx_views.py:2918-2919` — Redis cache `except Exception: pass`
+- `app/routers/htmx_views.py:2922-2923` — Redis cache `except Exception: pass`
 - `app/connectors/email_mining.py:299-300, 329-330` — date parse `except Exception: pass`
 - **Fix:** Add `logger.warning(...)` with context.
 
@@ -117,7 +104,8 @@ Key locations:
 - `app/jobs/inventory_jobs.py:60-63,97-98`
 - `app/jobs/offers_jobs.py:93-95`
 - `app/jobs/task_jobs.py:93-95`
-- **Fix:** Add `raise` after `db.rollback()` in each.
+- `app/connectors/email_mining.py:543-544` — flush failure with rollback but no re-raise
+- **Fix:** Add `raise` after `db.rollback()` in each. Note: jobs wrapped with `@_traced_job` will have the exception logged by the wrapper; jobs without it will have APScheduler's default handler catch it.
 
 ### 2.6 Five functions missing @_traced_job
 
@@ -195,6 +183,8 @@ Alembic migration: `Sighting.unit_price`, `MaterialVendorHistory.last_price`, `P
 
 Alembic migration: `Company.site_count`, `Company.open_req_count`, `User.role`, `User.is_active`, `Requisition.status`, `Requirement.sourcing_status`, `Offer.status`, and count/status columns with defaults.
 
+**Prerequisite:** Migration must include a backfill step (e.g., `UPDATE companies SET site_count = 0 WHERE site_count IS NULL`) before adding the NOT NULL constraint. Without the backfill, the migration will fail on existing NULL rows.
+
 ---
 
 ## Phase 4: MEDIUM — Code Quality & Hardening
@@ -238,6 +228,10 @@ Add `invalidate_prefix()` for: vendor edits (`htmx_views.py:3568`), company crea
 ### 4.10 Missing StrEnum definitions
 
 Create `ProspectAccountStatus`, `TaskStatus`, `PendingBatchStatus`, `DiscoveryBatchStatus` in `constants.py`.
+
+### 4.11 Clean up confusing require_admin alias
+
+`tagging_admin.py`, `ics_admin.py`, and `nc_admin.py` all use `from app.dependencies import require_admin as require_user`. The auth is correct (admin-only) but the alias makes it look like `require_user`, causing confusion during audits. Remove the alias and use `require_admin` directly.
 
 ---
 
