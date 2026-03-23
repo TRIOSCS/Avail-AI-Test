@@ -1,9 +1,8 @@
 """Customer Enrichment Service — contact enrichment for customer accounts.
 
-Enriches customer accounts with verified contacts. Currently a placeholder
-after the removal of Apollo, Hunter, and Lusha connector integrations.
-Utility functions (contact classification, dedup, gap detection) remain
-available for future enrichment providers.
+Enriches customer accounts with verified contacts.
+Utility functions (contact classification, dedup, gap detection) are
+available for enrichment providers.
 
 Priority: Assigned accounts first, then unassigned accounts.
 
