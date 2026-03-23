@@ -13,7 +13,7 @@
 
   {# Search bar #}
   <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
-    <input type="text" name="search" value="{{ search }}" placeholder="Search companies..."
+    <input type="text" name="search" value="{{ search }}" placeholder="Search customers..."
            hx-get="/v2/partials/customers" hx-target="#main-content" hx-push-url="true"
            hx-swap="morph"
            hx-trigger="keyup changed delay:300ms"
@@ -99,7 +99,7 @@
   {% else %}
   <div class="bg-white rounded-lg shadow border border-gray-200 p-12 text-center">
     <svg class="mx-auto h-12 w-12 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1.5" d="M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z"/></svg>
-    <p class="mt-2 text-sm text-gray-500">No companies found</p>
+    <p class="mt-2 text-sm text-gray-500">No customers found</p>
   </div>
   {% endif %}
 </div>

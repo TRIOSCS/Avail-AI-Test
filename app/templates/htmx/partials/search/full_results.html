@@ -64,7 +64,7 @@
   {% set tab_config = [
     ("all", "All", results.total_count),
     ("requisitions", "Requisitions", results.groups.get("requisitions", [])|length),
-    ("companies", "Companies", results.groups.get("companies", [])|length),
+    ("companies", "Customers", results.groups.get("companies", [])|length),
     ("vendors", "Vendors", results.groups.get("vendors", [])|length),
     ("vendor_contacts", "Vendor Contacts", results.groups.get("vendor_contacts", [])|length),
     ("site_contacts", "Customer Contacts", results.groups.get("site_contacts", [])|length),
@@ -139,7 +139,7 @@
   <div x-show="tab === 'all'" class="space-y-6">
     {% set group_config = [
       ("requisitions", "Requisitions"),
-      ("companies", "Companies"),
+      ("companies", "Customers"),
       ("vendors", "Vendors"),
       ("vendor_contacts", "Vendor Contacts"),
       ("site_contacts", "Customer Contacts"),

@@ -163,7 +163,7 @@ def get_system_health(db: Session) -> dict:
         "requisitions": "Requisitions",
         "requirements": "Requirements",
         "sightings": "Sightings",
-        "companies": "Companies",
+        "companies": "Customers",
         "vendor_cards": "Vendor Cards",
         "material_cards": "Material Cards",
         "offers": "Offers",
