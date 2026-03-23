@@ -8,6 +8,7 @@ Called by: main.py lifespan
 Depends on: database.py (engine), models.py (Base)
 """
 
+import os
 import re as _re
 
 from loguru import logger
@@ -763,6 +764,92 @@ def _backfill_ticket_defaults() -> None:
             logger.info("Backfilled %d tickets with default risk_tier/category", len(null_tickets))
     except Exception:
         logger.exception("Failed backfilling null ticket fields")
+        db.rollback()
+    finally:
+        db.close()
+
+
+def seed_api_sources() -> None:
+    """Seed the api_sources table with all known data sources.
+
+    Uses a version hash so it only writes when the source list changes. Source
+    definitions live in app/data/api_sources.json.
+
+    Called by: main.py lifespan (after startup migrations)
+    Depends on: ApiSource model, api_sources.json
+    """
+    import hashlib
+    import json
+    from pathlib import Path
+
+    from .models import ApiSource
+    from .models.config import ApiUsageLog
+
+    sources_path = Path(__file__).parent / "data" / "api_sources.json"
+    SOURCES = json.loads(sources_path.read_text())
+
+    db = SessionLocal()
+    try:
+        # Version hash — skip if source list hasn't changed
+        source_hash = hashlib.md5(
+            str([(s["name"], s["description"]) for s in SOURCES]).encode(),
+            usedforsecurity=False,
+        ).hexdigest()[:12]
+        existing_map = {s.name: s for s in db.query(ApiSource).all()}
+
+        # Quick check: if all sources exist and count matches, skip update
+        if len(existing_map) == len(SOURCES) and all(s["name"] in existing_map for s in SOURCES):
+            logger.debug("API sources up to date (%d sources, hash=%s)", len(SOURCES), source_hash)
+            return
+
+        # Batch fetch all existing sources (1 query instead of 25+)
+        logger.info("Seeding API sources (%d sources, hash=%s)", len(SOURCES), source_hash)
+        for src in SOURCES:
+            existing = existing_map.get(src["name"])
+            if existing:
+                existing.display_name = src["display_name"]
+                existing.category = src["category"]
+                existing.source_type = src["source_type"]
+                existing.description = src["description"]
+                existing.signup_url = src["signup_url"]
+                existing.env_vars = src["env_vars"]
+                existing.setup_notes = src["setup_notes"]
+            else:
+                status = "pending"
+                env_vars = src.get("env_vars", [])
+                if env_vars:
+                    all_set = all(os.getenv(v) for v in env_vars)
+                    if all_set:
+                        status = "live"
+                is_active = status == "live"
+                db.add(ApiSource(status=status, is_active=is_active, **src))
+
+        # Remove legacy "newark" source (renamed to "element14")
+        if "newark" in existing_map and "element14" in existing_map:
+            old_newark = existing_map["newark"]
+            db.query(ApiUsageLog).filter(ApiUsageLog.source_id == old_newark.id).delete()
+            db.delete(old_newark)
+            logger.info("Removed duplicate 'newark' source (merged into 'element14')")
+
+        # Backfill known monthly quotas (only sets if currently NULL)
+        quota_map = {
+            "apollo_enrichment": 10000,
+            "hunter_enrichment": 500,
+            "lusha_enrichment": 6400,
+            "clearbit_enrichment": 1000,
+            "digikey": 1000,
+            "mouser": 1000,
+            "oemsecrets": 5000,
+            "nexar": 1000,
+        }
+        for name, quota in quota_map.items():
+            src = db.query(ApiSource).filter_by(name=name).first()
+            if src and not src.monthly_quota:
+                src.monthly_quota = quota
+
+        db.commit()
+    except Exception as e:
+        logger.warning("API source seed error: %s", e)
         db.rollback()
     finally:
         db.close()

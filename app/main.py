@@ -18,10 +18,6 @@ from starlette.middleware.sessions import SessionMiddleware
 
 from .config import APP_VERSION, settings
 from .database import get_db
-from .models import (
-    ApiSource,
-)
-from .models.config import ApiUsageLog
 
 # Schema managed by Alembic migrations — see alembic/ directory
 # To apply:  alembic upgrade head
@@ -116,7 +112,9 @@ async def lifespan(app):
     _is_testing = os.environ.get("TESTING") == "1"
 
     if not _is_testing:
-        _seed_api_sources()
+        from .startup import seed_api_sources
+
+        seed_api_sources()
         from .connector_status import log_connector_status
 
         _connector_status = log_connector_status()
@@ -414,40 +412,6 @@ async def api_version_middleware(request: Request, call_next):
     return response
 
 
-# ── Health Check ──────────────────────────────────────────────────────
-BACKUP_TIMESTAMP_FILE = "/app/uploads/.last_backup"
-
-
-def _check_backup_freshness() -> str:
-    """Check if the last backup timestamp is recent enough.
-
-    Returns "ok", "stale", or "unknown".
-    """
-    from datetime import datetime, timedelta, timezone
-    from pathlib import Path
-
-    ts_path = Path(BACKUP_TIMESTAMP_FILE)
-    if not ts_path.exists():
-        return "unknown"
-
-    try:
-        raw = ts_path.read_text().strip()
-        # Parse ISO 8601 timestamp written by backup.sh (date -Iseconds)
-        # Handle timezone offset formats: +00:00, +0000, Z
-        if raw.endswith("Z"):
-            raw = raw[:-1] + "+00:00"
-        backup_time = datetime.fromisoformat(raw)
-        # If naive (no timezone), assume UTC
-        if backup_time.tzinfo is None:
-            backup_time = backup_time.replace(tzinfo=timezone.utc)
-        age = datetime.now(timezone.utc) - backup_time
-        if age < timedelta(hours=settings.backup_max_age_hours):
-            return "ok"
-        return "stale"
-    except (ValueError, OSError):
-        return "unknown"
-
-
 @app.get("/sw.js", include_in_schema=False)
 async def root_sw():
     """Serve self-destruct service worker at root scope to kill any old SW."""
@@ -496,7 +460,9 @@ async def health(request: Request, db: Session = Depends(get_db)):
     connectors_enabled = sum(1 for v in connector_status.values() if v)
 
     # Backup freshness (informational — does not affect overall status)
-    backup_status = _check_backup_freshness()
+    from .services.health_service import check_backup_freshness
+
+    backup_status = check_backup_freshness()
 
     # "degraded" only when a required service is actively failing
     degraded = not db_ok or redis_status == "error" or scheduler_status == "error"
@@ -516,95 +482,6 @@ async def health(request: Request, db: Session = Depends(get_db)):
         status_code=200 if status == "ok" else 503,
     )
 
-
-# ── Seed API Sources ─────────────────────────────────────────────────────
-def _seed_api_sources():
-    """Seed the api_sources table with all known data sources.
-
-    Uses a version hash so it only writes when the source list changes. Source
-    definitions live in app/data/api_sources.json.
-    """
-    import hashlib
-    import json
-    from pathlib import Path
-
-    from .database import SessionLocal
-
-    sources_path = Path(__file__).parent / "data" / "api_sources.json"
-    SOURCES = json.loads(sources_path.read_text())
-
-    db = SessionLocal()
-    try:
-        # Version hash — skip if source list hasn't changed
-        source_hash = hashlib.md5(
-            str([(s["name"], s["description"]) for s in SOURCES]).encode(),
-            usedforsecurity=False,
-        ).hexdigest()[:12]
-        existing_map = {s.name: s for s in db.query(ApiSource).all()}
-
-        # Quick check: if all sources exist and count matches, check version
-        if len(existing_map) == len(SOURCES) and all(s["name"] in existing_map for s in SOURCES):
-            # All sources present — skip update (descriptions only change on code update)
-            logger.debug(f"API sources up to date ({len(SOURCES)} sources, hash={source_hash})")
-            return
-
-        # Batch fetch all existing sources (1 query instead of 25+)
-        logger.info(f"Seeding API sources ({len(SOURCES)} sources, hash={source_hash})")
-        for src in SOURCES:
-            existing = existing_map.get(src["name"])
-            if existing:
-                # Update description/notes but preserve status and stats
-                existing.display_name = src["display_name"]
-                existing.category = src["category"]
-                existing.source_type = src["source_type"]
-                existing.description = src["description"]
-                existing.signup_url = src["signup_url"]
-                existing.env_vars = src["env_vars"]
-                existing.setup_notes = src["setup_notes"]
-            else:
-                # Determine initial status based on env vars
-                status = "pending"
-                env_vars = src.get("env_vars", [])
-                if env_vars:
-                    all_set = all(os.getenv(v) for v in env_vars)
-                    if all_set:
-                        status = "live"
-                is_active = status == "live"
-                db.add(ApiSource(status=status, is_active=is_active, **src))
-
-        # TT-961: Remove legacy "newark" source (renamed to "element14" in current seed)
-        if "newark" in existing_map and "element14" in existing_map:
-            old_newark = existing_map["newark"]
-            db.query(ApiUsageLog).filter(ApiUsageLog.source_id == old_newark.id).delete()
-            db.delete(old_newark)
-            del existing_map["newark"]
-            logger.info("Removed duplicate 'newark' source (merged into 'element14')")
-
-        # Backfill known monthly quotas (only sets if currently NULL)
-        quota_map = {
-            "apollo_enrichment": 10000,
-            "hunter_enrichment": 500,
-            "lusha_enrichment": 6400,
-            "clearbit_enrichment": 1000,
-            "digikey": 1000,
-            "mouser": 1000,
-            "oemsecrets": 5000,
-            "nexar": 1000,
-        }
-        for name, quota in quota_map.items():
-            src = db.query(ApiSource).filter_by(name=name).first()
-            if src and not src.monthly_quota:
-                src.monthly_quota = quota
-
-        db.commit()
-    except Exception as e:
-        logger.warning(f"API source seed error: {e}")
-        db.rollback()
-    finally:
-        db.close()
-
-
-# _seed_api_sources() is called from lifespan after startup migrations
 
 # ── Router Registration ──────────────────────────────────────────────────
 # Imports grouped by domain, then registered.
