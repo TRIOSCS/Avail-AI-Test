@@ -9,5 +9,17 @@
       "Bash(rm -rf /root/backups*)",
       "Bash(*TRUNCATE *)"
     ]
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": ".claude/hooks/skill-instructions-hook.sh"
+          }
+        ]
+      }
+    ]
   }
 }

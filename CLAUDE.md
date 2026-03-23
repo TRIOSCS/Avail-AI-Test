@@ -676,3 +676,30 @@ docker compose up -d --build     # Rebuild from scratch
 **Last Updated:** 2026-03-23
 **Maintained by:** Development team
 **Questions?** Check existing tests (`tests/`) or browse `app/services/` for similar patterns.
+
+
+## Skill Usage Guide
+
+When working on tasks involving these technologies, invoke the corresponding skill:
+
+| Skill | Invoke When |
+|-------|-------------|
+| fastapi | Builds FastAPI routes, dependency injection, and middleware |
+| htmx | Implements HTMX attributes for server-driven UI updates |
+| jinja2 | Renders server-side templates with Jinja2 syntax and inheritance |
+| vite | Configures Vite build system, asset bundling, and dev server |
+| frontend-design | Designs UI with HTMX, Alpine.js, and Tailwind CSS styling |
+| pytest | Writes pytest tests with fixtures and async support |
+| redis | Configures Redis caching with decorators and TTL |
+| mypy | Enforces mypy strict type checking on Python code |
+| playwright | Implements end-to-end tests with Playwright |
+| mapping-user-journeys | Maps in-app journeys and identifies friction points in code |
+| clarifying-market-fit | Aligns ICP, positioning, and value narrative for on-page messaging |
+| designing-onboarding-paths | Designs onboarding paths, checklists, and first-run UI |
+| instrumenting-product-metrics | Defines product events, funnels, and activation metrics |
+| crafting-page-messaging | Writes conversion-focused messaging for pages and key CTAs |
+| tuning-landing-journeys | Improves landing page flow, hierarchy, and conversion paths |
+| mapping-conversion-events | Defines funnel events, tracking, and success signals |
+| structuring-offer-ladders | Frames plan tiers, value ladders, and upgrade logic |
+| inspecting-search-coverage | Audits technical and on-page search coverage |
+| adding-structured-signals | Adds structured data for rich results |
