@@ -23,15 +23,22 @@ def compute_vendor_statuses(
     requirement_id: int,
     requisition_id: int,
     db: Session,
+    vendor_names: list[str] | None = None,
 ) -> dict[str, str]:
     """Return {vendor_name: status} for all vendors with sightings on this requirement.
 
     Priority order: blacklisted > offer-in > contacted > unavailable > sighting.
+
+    Args:
+        vendor_names: Pre-fetched list to skip the VendorSightingSummary query.
     """
-    summaries = (
-        db.query(VendorSightingSummary.vendor_name).filter(VendorSightingSummary.requirement_id == requirement_id).all()
-    )
-    vendor_names = [s.vendor_name for s in summaries]
+    if vendor_names is None:
+        summaries = (
+            db.query(VendorSightingSummary.vendor_name)
+            .filter(VendorSightingSummary.requirement_id == requirement_id)
+            .all()
+        )
+        vendor_names = [s.vendor_name for s in summaries]
     if not vendor_names:
         return {}
 

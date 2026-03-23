@@ -12,7 +12,7 @@ Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
 import json
 from datetime import datetime, timedelta, timezone
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy import func as sqlfunc
@@ -28,6 +28,7 @@ from ..models.offers import Offer
 from ..models.sourcing import Requirement, Requisition, Sighting
 from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorCard, VendorContact
+from ..schemas.sightings import SightingsListParams
 from ..services.sighting_status import compute_vendor_statuses
 from ..template_env import templates
 from ..vendor_utils import normalize_vendor_name
@@ -70,15 +71,7 @@ async def sightings_list(
     request: Request,
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
-    status: str = "",
-    sales_person: str = "",
-    assigned: str = "",  # "mine" or "" for all
-    q: str = "",
-    group_by: str = "",  # "" (flat), "brand", "manufacturer"
-    sort: str = "priority",
-    dir: str = "desc",
-    page: int = Query(1, ge=1),
-    limit: int = Query(50, ge=1, le=200),
+    filters: SightingsListParams = Depends(),
 ):
     """Return the sightings table partial with filters and pagination."""
     query = (
@@ -88,25 +81,26 @@ async def sightings_list(
         .options(joinedload(Requirement.requisition))
     )
 
-    if status:
-        query = query.filter(Requirement.sourcing_status == status)
-    if sales_person:
-        query = query.join(User, Requisition.created_by == User.id).filter(User.name.ilike(f"%{sales_person}%"))
-    if assigned == "mine":
+    if filters.status:
+        query = query.filter(Requirement.sourcing_status == filters.status)
+    if filters.sales_person:
+        query = query.join(User, Requisition.created_by == User.id).filter(User.name.ilike(f"%{filters.sales_person}%"))
+    if filters.assigned == "mine":
         query = query.filter(Requirement.assigned_buyer_id == user.id)
-    if q:
-        query = query.filter(Requirement.primary_mpn.ilike(f"%{q}%") | Requisition.customer_name.ilike(f"%{q}%"))
+    if filters.q:
+        query = query.filter(
+            Requirement.primary_mpn.ilike(f"%{filters.q}%") | Requisition.customer_name.ilike(f"%{filters.q}%")
+        )
 
     total = query.count()
 
-    # Sorting — use pre-built column expressions to avoid getattr pitfalls
-    asc_col, desc_col = _SORT_COLUMNS.get(sort, _SORT_COLUMNS["priority"])
-    order = asc_col if dir == "asc" else desc_col
+    asc_col, desc_col = _SORT_COLUMNS.get(filters.sort, _SORT_COLUMNS["priority"])
+    order = asc_col if filters.dir == "asc" else desc_col
     query = query.order_by(order)
 
-    offset = (page - 1) * limit
-    requirements = query.offset(offset).limit(limit).all()
-    total_pages = max(1, (total + limit - 1) // limit)
+    offset = (filters.page - 1) * filters.limit
+    requirements = query.offset(offset).limit(filters.limit).all()
+    total_pages = max(1, (total + filters.limit - 1) // filters.limit)
 
     stat_counts = dict(
         db.query(Requirement.sourcing_status, sqlfunc.count())
@@ -155,26 +149,26 @@ async def sightings_list(
                 stale_req_ids.add(rid)
 
     groups = None
-    if group_by in ("brand", "manufacturer"):
+    if filters.group_by in ("brand", "manufacturer"):
         groups: dict[str, list] = {}
         for r in requirements:
-            key = getattr(r, group_by, "") or "Unknown"
+            key = getattr(r, filters.group_by, "") or "Unknown"
             groups.setdefault(key, []).append(r)
 
     ctx = {
         "request": request,
         "requirements": requirements,
         "total": total,
-        "page": page,
+        "page": filters.page,
         "total_pages": total_pages,
-        "limit": limit,
-        "status": status,
-        "sales_person": sales_person,
-        "assigned": assigned,
-        "q": q,
-        "group_by": group_by,
-        "sort": sort,
-        "dir": dir,
+        "limit": filters.limit,
+        "status": filters.status,
+        "sales_person": filters.sales_person,
+        "assigned": filters.assigned,
+        "q": filters.q,
+        "group_by": filters.group_by,
+        "sort": filters.sort,
+        "dir": filters.dir,
         "stat_counts": stat_counts,
         "top_vendors": top_vendors,
         "stale_req_ids": stale_req_ids,
@@ -205,7 +199,10 @@ async def sightings_detail(
         .all()
     )
 
-    vendor_statuses = compute_vendor_statuses(requirement_id, requirement.requisition_id, db)
+    # Pass pre-fetched vendor names to avoid redundant VendorSightingSummary query
+    vendor_statuses = compute_vendor_statuses(
+        requirement_id, requirement.requisition_id, db, vendor_names=[s.vendor_name for s in summaries]
+    )
 
     pending_offers = (
         db.query(Offer).filter(Offer.requirement_id == requirement_id, Offer.status == OfferStatus.PENDING_REVIEW).all()
@@ -234,7 +231,7 @@ async def sightings_detail(
         .all()
     )
 
-    all_buyers = db.query(User).filter(User.is_active.is_(True)).all()
+    all_buyers = db.query(User.id, User.name).filter(User.is_active.is_(True)).all()
 
     ctx = {
         "request": request,
