@@ -284,6 +284,64 @@ def test_scan_user_inbox_poll_exception(scheduler_db, test_user):
         mock_outbound.assert_called_once()
 
 
+def test_scan_user_inbox_does_not_advance_watermark_on_poll_failure(scheduler_db, test_user):
+    """When poll_inbox raises, last_inbox_scan must NOT advance."""
+    test_user.access_token = "at_scan"
+    original_scan_time = datetime.now(timezone.utc) - timedelta(hours=1)
+    test_user.last_inbox_scan = original_scan_time
+    scheduler_db.commit()
+
+    with (
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.email_service.poll_inbox", new_callable=AsyncMock, side_effect=Exception("Graph API down")),
+        patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock),
+        patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock),
+        patch("app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock),
+        patch("app.jobs.email_jobs._scan_excess_bid_responses", new_callable=AsyncMock),
+        patch("app.config.settings") as mock_settings,
+    ):
+        mock_settings.inbox_backfill_days = 180
+
+        from app.jobs.email_jobs import _scan_user_inbox
+
+        asyncio.run(_scan_user_inbox(test_user, scheduler_db))
+
+        scheduler_db.refresh(test_user)
+        # SQLite strips tzinfo, so compare naive timestamps
+        refreshed = test_user.last_inbox_scan.replace(tzinfo=None)
+        original = original_scan_time.replace(tzinfo=None)
+        assert refreshed == original, "last_inbox_scan must not advance when poll fails"
+
+
+def test_scan_user_inbox_advances_watermark_on_poll_success(scheduler_db, test_user):
+    """When poll_inbox succeeds, last_inbox_scan must advance."""
+    test_user.access_token = "at_scan"
+    original_scan_time = datetime.now(timezone.utc) - timedelta(hours=1)
+    test_user.last_inbox_scan = original_scan_time
+    scheduler_db.commit()
+
+    with (
+        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
+        patch("app.email_service.poll_inbox", new_callable=AsyncMock, return_value=[]),
+        patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock),
+        patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock),
+        patch("app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock),
+        patch("app.jobs.email_jobs._scan_excess_bid_responses", new_callable=AsyncMock),
+        patch("app.config.settings") as mock_settings,
+    ):
+        mock_settings.inbox_backfill_days = 180
+
+        from app.jobs.email_jobs import _scan_user_inbox
+
+        asyncio.run(_scan_user_inbox(test_user, scheduler_db))
+
+        scheduler_db.refresh(test_user)
+        # SQLite strips tzinfo, so compare naive timestamps
+        refreshed = test_user.last_inbox_scan.replace(tzinfo=None)
+        original = original_scan_time.replace(tzinfo=None)
+        assert refreshed > original, "last_inbox_scan must advance after successful poll"
+
+
 def test_scan_user_inbox_sub_operation_exceptions(scheduler_db, test_user):
     """Exceptions in sub-operations are caught individually."""
     test_user.access_token = "at_scan"

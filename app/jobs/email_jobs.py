@@ -377,6 +377,7 @@ async def _scan_user_inbox(user, db):
         logger.info(f"First-time inbox backfill for {user.email} ({settings.inbox_backfill_days} days)")
 
     # Poll inbox for replies (poll_inbox handles dedup via message_id)
+    poll_succeeded = False
     try:
         token = await get_valid_token(user, db)
         if not token:
@@ -389,6 +390,7 @@ async def _scan_user_inbox(user, db):
         )
         if new_responses:
             logger.info(f"Inbox scan [{user.email}]: {len(new_responses)} new responses")
+        poll_succeeded = True
     except Exception as e:
         logger.error(f"Inbox poll failed for {user.email}: {e}")
 
@@ -423,8 +425,9 @@ async def _scan_user_inbox(user, db):
     await _safe_outbound_scan()
     await _safe_excess_bid_scan()
 
-    user.last_inbox_scan = datetime.now(timezone.utc)
-    db.commit()
+    if poll_succeeded:
+        user.last_inbox_scan = datetime.now(timezone.utc)
+        db.commit()
 
 
 # ── Excess Bid Response Scanning ────────────────────────────────────────
