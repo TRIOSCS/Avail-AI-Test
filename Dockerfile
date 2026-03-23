@@ -11,9 +11,6 @@ RUN npm run build
 # Stage 2: Python application
 FROM python:3.12-slim
 
-ARG BUILD_COMMIT=unknown
-ENV BUILD_COMMIT=${BUILD_COMMIT}
-
 WORKDIR /app
 
 # System deps — rarely change, cached as base layer
@@ -41,6 +38,10 @@ RUN pip install --no-cache-dir -r requirements.txt \
 # Install Chromium for Playwright/patchright (self-heal site testing)
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/pw-browsers
 RUN python -m patchright install chromium
+
+# Bake git commit hash — placed here so it only busts cache for cheap layers below
+ARG BUILD_COMMIT=unknown
+ENV BUILD_COMMIT=${BUILD_COMMIT}
 
 # Copy app code, scripts, and Alembic (for migrations at runtime)
 COPY app/ app/
