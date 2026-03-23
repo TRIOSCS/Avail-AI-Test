@@ -229,7 +229,8 @@ async def password_login(
 
 
 @router.get("/auth/login-form", response_class=HTMLResponse)
-async def password_login_form():
+@limiter.limit("5/minute")
+async def password_login_form(request: Request):
     """Simple HTML form for local/test password login."""
     if not _password_login_enabled():
         return RedirectResponse("/auth/login")

@@ -32,6 +32,13 @@ def run_startup_migrations() -> None:
     """
     import os
 
+    # Warn if password login backdoor is active outside test mode
+    if os.getenv("ENABLE_PASSWORD_LOGIN", "false").lower() == "true" and not os.getenv("TESTING"):
+        logger.critical(
+            "ENABLE_PASSWORD_LOGIN is active in non-test mode. "
+            "This creates an authentication bypass. Disable before production use."
+        )
+
     if os.environ.get("TESTING"):
         logger.info("TESTING mode — skipping startup migrations")
         return
