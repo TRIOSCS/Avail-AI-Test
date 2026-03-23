@@ -645,9 +645,9 @@ async def rfq_prepare(
                             if phones:
                                 merge_phones_into_card(card, phones)
                 except asyncio.TimeoutError:
-                    logger.debug("Contact auto-lookup timed out for %s", r["vendor_name"])
+                    logger.warning("Contact auto-lookup timed out for %s", r["vendor_name"])
                 except Exception as e:
-                    logger.debug("Contact auto-lookup failed for %s: %s", r["vendor_name"], e)
+                    logger.warning("Contact auto-lookup failed for %s: %s", r["vendor_name"], e)
 
         try:
             await asyncio.wait_for(

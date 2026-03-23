@@ -377,7 +377,7 @@ async def create_offer(
             if requirement:
                 on_offer_created(requirement, db, actor=user)
         except Exception as e:
-            logger.debug("Requirement status update failed: {}", e)
+            logger.warning("Requirement status update failed: {}", e)
 
     db.commit()
 
@@ -387,7 +387,7 @@ async def create_offer(
 
         on_offer_received(db, offer.requisition_id, offer.vendor_name, offer.mpn, offer.id)
     except Exception:
-        logger.debug("Task auto-gen for offer failed", exc_info=True)
+        logger.warning("Task auto-gen for offer failed", exc_info=True)
 
     # Phase 1: Notify sales creator that a new offer was entered on their req
     if req.created_by and req.created_by != user.id:
@@ -420,7 +420,7 @@ async def create_offer(
                 )
             db.commit()
         except Exception:
-            logger.debug("New offer notification failed", exc_info=True)
+            logger.warning("New offer notification failed", exc_info=True)
 
     # Auto-capture offer facts into Knowledge Ledger
     try:
@@ -437,7 +437,7 @@ async def create_offer(
 
             record_offer(db, offer.vendor_card_id)
         except Exception as e:
-            logger.debug("Strategic vendor clock reset failed: {}", e)
+            logger.warning("Strategic vendor clock reset failed: {}", e)
 
     # Background vendor enrichment — fire after commit so card is persisted
     if _enrich_new_card:
@@ -490,7 +490,7 @@ async def create_offer(
                         )
                     db.commit()
     except Exception:
-        logger.debug("Activity event creation failed", exc_info=True)
+        logger.warning("Activity event creation failed", exc_info=True)
 
     # Notify requisition creator via SSE that a new offer/quote was added
     notify_user_id = req.created_by if req.created_by and req.created_by != user.id else user.id
@@ -503,7 +503,7 @@ async def create_offer(
             '{"offer_id": ' + str(offer.id) + ', "requisition_id": ' + str(req_id) + "}",
         )
     except Exception:
-        logger.debug("SSE quote_updated notification failed", exc_info=True)
+        logger.warning("SSE quote_updated notification failed", exc_info=True)
 
     return {
         "id": offer.id,

@@ -219,11 +219,11 @@ def _enqueue_ics_nc_batch(requirement_ids: list[int]):
             try:
                 enqueue_for_nc_search(rid, bg_db)
             except Exception:
-                logger.debug("NC enqueue failed for requirement %s", rid, exc_info=True)
+                logger.warning("NC enqueue failed for requirement %s", rid, exc_info=True)
             try:
                 enqueue_for_ics_search(rid, bg_db)
             except Exception:
-                logger.debug("ICS enqueue failed for requirement %s", rid, exc_info=True)
+                logger.warning("ICS enqueue failed for requirement %s", rid, exc_info=True)
     finally:
         bg_db.close()
 
@@ -390,7 +390,7 @@ async def add_requirements(
             nested.commit()
         except Exception:
             nested.rollback()
-            logger.debug("resolve_material_card failed for %s", parsed.primary_mpn, exc_info=True)
+            logger.warning("resolve_material_card failed for %s", parsed.primary_mpn, exc_info=True)
 
         r = Requirement(
             requisition_id=req_id,
@@ -425,7 +425,7 @@ async def add_requirements(
         if created:
             db.commit()
     except Exception:  # pragma: no cover
-        logger.debug("Tag propagation failed for requirements", exc_info=True)
+        logger.warning("Tag propagation failed for requirements", exc_info=True)
 
     # Auto-generate sourcing tasks for new requirements
     try:
@@ -434,7 +434,7 @@ async def add_requirements(
         for r in created:
             on_requirement_added(db, req_id, r.primary_mpn, assigned_to_id=req.created_by)
     except Exception:
-        logger.debug("Task auto-gen for requirements failed", exc_info=True)
+        logger.warning("Task auto-gen for requirements failed", exc_info=True)
 
     # NC enqueue
     def _nc_enqueue_batch(requirement_ids: list[int]):
@@ -447,7 +447,7 @@ async def add_requirements(
                 try:
                     enqueue_for_nc_search(rid, bg_db)
                 except Exception:
-                    logger.debug("NC enqueue failed for requirement %s", rid, exc_info=True)
+                    logger.warning("NC enqueue failed for requirement %s", rid, exc_info=True)
         finally:
             bg_db.close()
 
@@ -462,7 +462,7 @@ async def add_requirements(
                 try:
                     enqueue_for_ics_search(rid, bg_db)
                 except Exception:
-                    logger.debug("ICS enqueue failed for requirement %s", rid, exc_info=True)
+                    logger.warning("ICS enqueue failed for requirement %s", rid, exc_info=True)
         finally:
             bg_db.close()
 
@@ -483,7 +483,7 @@ async def add_requirements(
                     if req_obj:
                         asyncio.run(do_search(req_obj, bg_db))
                 except Exception:
-                    logger.debug("Auto-search failed for requirement %s", rid, exc_info=True)
+                    logger.warning("Auto-search failed for requirement %s", rid, exc_info=True)
         finally:
             bg_db.close()
 
@@ -638,7 +638,7 @@ async def upload_requirements(
         if uploaded_reqs:
             db.commit()
     except Exception:  # pragma: no cover
-        logger.debug("Tag propagation failed for uploaded requirements", exc_info=True)
+        logger.warning("Tag propagation failed for uploaded requirements", exc_info=True)
 
     # NC enqueue for uploaded requirements
     def _nc_enqueue_uploaded(requisition_id: int, count: int):
@@ -659,7 +659,7 @@ async def upload_requirements(
                 try:  # pragma: no cover
                     enqueue_for_nc_search(r_item.id, bg_db)
                 except Exception:  # pragma: no cover
-                    logger.debug("NC enqueue failed for requirement %s", r_item.id, exc_info=True)
+                    logger.warning("NC enqueue failed for requirement %s", r_item.id, exc_info=True)
         finally:
             bg_db.close()
 
@@ -724,7 +724,7 @@ async def update_requirement(
         except Exception:
             nested.rollback()
             r.material_card_id = None
-            logger.debug("resolve_material_card failed for %s", data.primary_mpn, exc_info=True)
+            logger.warning("resolve_material_card failed for %s", data.primary_mpn, exc_info=True)
     if data.target_qty is not None:
         r.target_qty = data.target_qty
     if data.substitutes is not None:
