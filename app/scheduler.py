@@ -8,6 +8,7 @@ Job implementations live in app/jobs/ domain modules. This module provides:
 Token management lives in app/utils/token_manager.
 """
 
+import time
 import uuid
 from functools import wraps
 
@@ -23,13 +24,15 @@ def _traced_job(func):
         trace_id = str(uuid.uuid4())[:8]
         with logger.contextualize(trace_id=trace_id, job=func.__name__):
             logger.debug("Job started")
+            start = time.monotonic()
             try:
                 return await func(*args, **kwargs)
             except Exception:
                 logger.exception("Job failed")
                 raise
             finally:
-                logger.debug("Job finished")
+                elapsed = time.monotonic() - start
+                logger.debug(f"Job finished: {func.__name__} [{trace_id}, {elapsed:.1f}s]")
 
     return wrapper
 
