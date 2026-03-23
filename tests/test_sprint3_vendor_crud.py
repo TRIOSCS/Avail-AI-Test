@@ -16,7 +16,6 @@ from sqlalchemy.orm import Session
 from app.models import User, VendorCard
 from app.models.vendors import VendorContact
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
@@ -152,7 +151,9 @@ class TestContactNudges:
         # Contact was last contacted 45 days ago, should be in nudges
         assert vendor_contact.full_name in resp.text
 
-    def test_nudges_empty_when_all_recent(self, client: TestClient, vendor: VendorCard, vendor_contact: VendorContact, db_session: Session):
+    def test_nudges_empty_when_all_recent(
+        self, client: TestClient, vendor: VendorCard, vendor_contact: VendorContact, db_session: Session
+    ):
         vendor_contact.last_interaction_at = datetime.now(timezone.utc)
         db_session.commit()
         resp = client.get(

@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from app.models import Offer, Quote, Requisition, User
 
-
 # ── Fixtures ─────────────────────────────────────────────────────────
 
 

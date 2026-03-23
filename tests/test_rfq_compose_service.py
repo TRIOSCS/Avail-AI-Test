@@ -9,13 +9,11 @@ Depends on: app.services.rfq_compose_service, conftest fixtures
 
 from datetime import datetime, timezone
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Requirement, Sighting, VendorCard, VendorContact
 from app.models.offers import Contact as RfqContact
 from app.services.rfq_compose_service import build_rfq_vendor_list, create_rfq_contacts
-
 
 # -- Factories ----------------------------------------------------------------
 
@@ -52,14 +50,10 @@ def _make_vendor_contact(db: Session, vendor_card_id: int, email: str, **kw) -> 
 
 
 class TestBuildRfqVendorList:
-    def test_returns_vendors_from_sightings(
-        self, db_session: Session, test_requisition, test_vendor_card
-    ):
+    def test_returns_vendors_from_sightings(self, db_session: Session, test_requisition, test_vendor_card):
         """Vendors with sightings for the req's parts appear in the list."""
         req_id = test_requisition.id
-        part = db_session.query(Requirement).filter(
-            Requirement.requisition_id == req_id
-        ).first()
+        part = db_session.query(Requirement).filter(Requirement.requisition_id == req_id).first()
         _make_sighting(db_session, part.id, "arrow electronics")
         _make_vendor_contact(db_session, test_vendor_card.id, "sales@arrow.com")
         db_session.commit()
@@ -76,7 +70,9 @@ class TestBuildRfqVendorList:
         from app.models import Requisition
 
         req = Requisition(
-            name="EMPTY-REQ", customer_name="Test Co", status="open",
+            name="EMPTY-REQ",
+            customer_name="Test Co",
+            status="open",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
@@ -90,14 +86,10 @@ class TestBuildRfqVendorList:
         result = build_rfq_vendor_list(db_session, test_requisition.id)
         assert result == []
 
-    def test_already_asked_flag(
-        self, db_session: Session, test_requisition, test_vendor_card, test_user
-    ):
+    def test_already_asked_flag(self, db_session: Session, test_requisition, test_vendor_card, test_user):
         """Vendors that already have RFQ contacts are flagged."""
         req_id = test_requisition.id
-        part = db_session.query(Requirement).filter(
-            Requirement.requisition_id == req_id
-        ).first()
+        part = db_session.query(Requirement).filter(Requirement.requisition_id == req_id).first()
         _make_sighting(db_session, part.id, "arrow electronics")
 
         # Create an existing RFQ contact for this vendor
@@ -118,22 +110,20 @@ class TestBuildRfqVendorList:
         assert len(result) == 1
         assert result[0]["already_asked"] is True
 
-    def test_multiple_vendors(
-        self, db_session: Session, test_requisition
-    ):
+    def test_multiple_vendors(self, db_session: Session, test_requisition):
         """Multiple distinct vendors from sightings all appear."""
         req_id = test_requisition.id
-        part = db_session.query(Requirement).filter(
-            Requirement.requisition_id == req_id
-        ).first()
+        part = db_session.query(Requirement).filter(Requirement.requisition_id == req_id).first()
 
         # Create two vendor cards
         v1 = VendorCard(
-            normalized_name="digikey", display_name="Digikey",
+            normalized_name="digikey",
+            display_name="Digikey",
             created_at=datetime.now(timezone.utc),
         )
         v2 = VendorCard(
-            normalized_name="mouser electronics", display_name="Mouser Electronics",
+            normalized_name="mouser electronics",
+            display_name="Mouser Electronics",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add_all([v1, v2])
@@ -149,14 +139,10 @@ class TestBuildRfqVendorList:
         assert "digikey" in names
         assert "mouser electronics" in names
 
-    def test_contacts_limited_to_five(
-        self, db_session: Session, test_requisition, test_vendor_card
-    ):
+    def test_contacts_limited_to_five(self, db_session: Session, test_requisition, test_vendor_card):
         """Each vendor's contact list is capped at 5."""
         req_id = test_requisition.id
-        part = db_session.query(Requirement).filter(
-            Requirement.requisition_id == req_id
-        ).first()
+        part = db_session.query(Requirement).filter(Requirement.requisition_id == req_id).first()
         _make_sighting(db_session, part.id, "arrow electronics")
 
         for i in range(8):
@@ -176,7 +162,9 @@ class TestCreateRfqContacts:
     def test_creates_contacts(self, db_session: Session, test_requisition, test_user):
         """Creates RFQ contact records for each vendor/email pair."""
         result = create_rfq_contacts(
-            db_session, test_requisition.id, test_user.id,
+            db_session,
+            test_requisition.id,
+            test_user.id,
             vendor_names=["Arrow Electronics", "Digikey"],
             vendor_emails=["sales@arrow.com", "sales@digikey.com"],
             subject="RFQ for LM317T",
@@ -190,15 +178,15 @@ class TestCreateRfqContacts:
         assert result[0]["status"] == "sent"
 
         # Verify DB records
-        contacts = db_session.query(RfqContact).filter(
-            RfqContact.requisition_id == test_requisition.id
-        ).all()
+        contacts = db_session.query(RfqContact).filter(RfqContact.requisition_id == test_requisition.id).all()
         assert len(contacts) == 2
 
     def test_skips_empty_emails(self, db_session: Session, test_requisition, test_user):
         """Vendors with empty email are skipped."""
         result = create_rfq_contacts(
-            db_session, test_requisition.id, test_user.id,
+            db_session,
+            test_requisition.id,
+            test_user.id,
             vendor_names=["Arrow", "Digikey"],
             vendor_emails=["", "sales@digikey.com"],
             subject="RFQ",
@@ -212,7 +200,9 @@ class TestCreateRfqContacts:
     def test_normalizes_vendor_name(self, db_session: Session, test_requisition, test_user):
         """Vendor name is normalized to lowercase/stripped."""
         create_rfq_contacts(
-            db_session, test_requisition.id, test_user.id,
+            db_session,
+            test_requisition.id,
+            test_user.id,
             vendor_names=["  Arrow Electronics  "],
             vendor_emails=["sales@arrow.com"],
             subject="RFQ",
@@ -220,24 +210,28 @@ class TestCreateRfqContacts:
         )
         db_session.commit()
 
-        contact = db_session.query(RfqContact).filter(
-            RfqContact.requisition_id == test_requisition.id
-        ).first()
+        contact = db_session.query(RfqContact).filter(RfqContact.requisition_id == test_requisition.id).first()
         assert contact.vendor_name_normalized == "arrow electronics"
 
     def test_empty_lists_returns_empty(self, db_session: Session, test_requisition, test_user):
         """No vendors = no contacts created."""
         result = create_rfq_contacts(
-            db_session, test_requisition.id, test_user.id,
-            vendor_names=[], vendor_emails=[],
-            subject="RFQ", parts_text="",
+            db_session,
+            test_requisition.id,
+            test_user.id,
+            vendor_names=[],
+            vendor_emails=[],
+            subject="RFQ",
+            parts_text="",
         )
         assert result == []
 
     def test_sets_correct_fields(self, db_session: Session, test_requisition, test_user):
         """Verify all fields are set correctly on created contact."""
         create_rfq_contacts(
-            db_session, test_requisition.id, test_user.id,
+            db_session,
+            test_requisition.id,
+            test_user.id,
             vendor_names=["TestVendor"],
             vendor_emails=["test@vendor.com"],
             subject="RFQ for parts",
@@ -245,9 +239,7 @@ class TestCreateRfqContacts:
         )
         db_session.commit()
 
-        contact = db_session.query(RfqContact).filter(
-            RfqContact.requisition_id == test_requisition.id
-        ).first()
+        contact = db_session.query(RfqContact).filter(RfqContact.requisition_id == test_requisition.id).first()
         assert contact.user_id == test_user.id
         assert contact.contact_type == "email"
         assert contact.vendor_name == "TestVendor"

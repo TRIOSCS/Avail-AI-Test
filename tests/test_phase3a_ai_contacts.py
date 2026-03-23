@@ -17,7 +17,6 @@ from sqlalchemy.orm import Session
 from app.models import VendorCard, VendorContact
 from app.models.enrichment import ProspectContact
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
@@ -64,21 +63,15 @@ def prospect(db_session: Session, vendor_with_domain: VendorCard) -> ProspectCon
 class TestFindContactsTab:
     """Tests for the Find Contacts tab in vendor detail."""
 
-    def test_vendor_detail_has_find_contacts_tab(
-        self, client: TestClient, vendor_with_domain: VendorCard
-    ):
+    def test_vendor_detail_has_find_contacts_tab(self, client: TestClient, vendor_with_domain: VendorCard):
         """Vendor detail should include the Find Contacts tab button."""
         resp = client.get(f"/v2/partials/vendors/{vendor_with_domain.id}")
         assert resp.status_code == 200
         assert "Find Contacts" in resp.text
 
-    def test_find_contacts_tab_loads(
-        self, client: TestClient, vendor_with_domain: VendorCard
-    ):
+    def test_find_contacts_tab_loads(self, client: TestClient, vendor_with_domain: VendorCard):
         """Find Contacts tab partial should render successfully."""
-        resp = client.get(
-            f"/v2/partials/vendors/{vendor_with_domain.id}/tab/find_contacts"
-        )
+        resp = client.get(f"/v2/partials/vendors/{vendor_with_domain.id}/tab/find_contacts")
         assert resp.status_code == 200
         assert "AI Contact Finder" in resp.text
         assert "Find Contacts" in resp.text
@@ -90,20 +83,14 @@ class TestFindContactsTab:
         prospect: ProspectContact,
     ):
         """Tab should show previously discovered prospect contacts."""
-        resp = client.get(
-            f"/v2/partials/vendors/{vendor_with_domain.id}/tab/find_contacts"
-        )
+        resp = client.get(f"/v2/partials/vendors/{vendor_with_domain.id}/tab/find_contacts")
         assert resp.status_code == 200
         assert "Jane Smith" in resp.text
         assert "Procurement Manager" in resp.text
 
-    def test_find_contacts_tab_empty_state(
-        self, client: TestClient, vendor_with_domain: VendorCard
-    ):
+    def test_find_contacts_tab_empty_state(self, client: TestClient, vendor_with_domain: VendorCard):
         """Tab should show empty state when no prospects exist."""
-        resp = client.get(
-            f"/v2/partials/vendors/{vendor_with_domain.id}/tab/find_contacts"
-        )
+        resp = client.get(f"/v2/partials/vendors/{vendor_with_domain.id}/tab/find_contacts")
         assert resp.status_code == 200
         assert "No AI-discovered contacts yet" in resp.text
 
@@ -115,9 +102,7 @@ class TestFindContactsSearch:
     """Tests for the AI contact search POST endpoint."""
 
     @patch("app.config.settings")
-    def test_search_disabled_when_ai_off(
-        self, mock_settings, client: TestClient, vendor_with_domain: VendorCard
-    ):
+    def test_search_disabled_when_ai_off(self, mock_settings, client: TestClient, vendor_with_domain: VendorCard):
         """Should return disabled message when AI features are off."""
         mock_settings.ai_features_enabled = "off"
         resp = client.post(
@@ -128,9 +113,7 @@ class TestFindContactsSearch:
         assert "AI features are currently disabled" in resp.text
 
     @patch("app.services.ai_service.enrich_contacts_websearch", new_callable=AsyncMock)
-    def test_search_returns_found_contacts(
-        self, mock_search, client: TestClient, vendor_with_domain: VendorCard
-    ):
+    def test_search_returns_found_contacts(self, mock_search, client: TestClient, vendor_with_domain: VendorCard):
         """Successful AI search should return contact cards."""
         mock_search.return_value = [
             {
@@ -166,9 +149,7 @@ class TestFindContactsSearch:
             data={"title_keywords": ""},
         )
         count = (
-            db_session.query(ProspectContact)
-            .filter(ProspectContact.vendor_card_id == vendor_with_domain.id)
-            .count()
+            db_session.query(ProspectContact).filter(ProspectContact.vendor_card_id == vendor_with_domain.id).count()
         )
         assert count >= 1
 
@@ -190,16 +171,12 @@ class TestFindContactsSearch:
             data={},
         )
         count = (
-            db_session.query(ProspectContact)
-            .filter(ProspectContact.vendor_card_id == vendor_with_domain.id)
-            .count()
+            db_session.query(ProspectContact).filter(ProspectContact.vendor_card_id == vendor_with_domain.id).count()
         )
         assert count == 1
 
     @patch("app.services.ai_service.enrich_contacts_websearch", new_callable=AsyncMock)
-    def test_search_handles_error_gracefully(
-        self, mock_search, client: TestClient, vendor_with_domain: VendorCard
-    ):
+    def test_search_handles_error_gracefully(self, mock_search, client: TestClient, vendor_with_domain: VendorCard):
         """AI search error should return error message, not 500."""
         mock_search.side_effect = RuntimeError("API timeout")
         resp = client.post(
@@ -232,20 +209,14 @@ class TestProspectSave:
         prospect: ProspectContact,
     ):
         """Saving a prospect should set is_saved=True."""
-        resp = client.post(
-            f"/v2/partials/vendors/{vendor_with_domain.id}/ai/prospect/{prospect.id}/save"
-        )
+        resp = client.post(f"/v2/partials/vendors/{vendor_with_domain.id}/ai/prospect/{prospect.id}/save")
         assert resp.status_code == 200
         assert "Saved" in resp.text
         db_session.refresh(prospect)
         assert prospect.is_saved is True
 
-    def test_save_404_for_missing_prospect(
-        self, client: TestClient, vendor_with_domain: VendorCard
-    ):
-        resp = client.post(
-            f"/v2/partials/vendors/{vendor_with_domain.id}/ai/prospect/99999/save"
-        )
+    def test_save_404_for_missing_prospect(self, client: TestClient, vendor_with_domain: VendorCard):
+        resp = client.post(f"/v2/partials/vendors/{vendor_with_domain.id}/ai/prospect/99999/save")
         assert resp.status_code == 404
 
 
@@ -260,9 +231,7 @@ class TestProspectPromote:
         prospect: ProspectContact,
     ):
         """Promoting should create a VendorContact record."""
-        resp = client.post(
-            f"/v2/partials/vendors/{vendor_with_domain.id}/ai/prospect/{prospect.id}/promote"
-        )
+        resp = client.post(f"/v2/partials/vendors/{vendor_with_domain.id}/ai/prospect/{prospect.id}/promote")
         assert resp.status_code == 200
         assert "Promoted" in resp.text
 
@@ -294,9 +263,7 @@ class TestProspectPromote:
         db_session.add(existing)
         db_session.commit()
 
-        client.post(
-            f"/v2/partials/vendors/{vendor_with_domain.id}/ai/prospect/{prospect.id}/promote"
-        )
+        client.post(f"/v2/partials/vendors/{vendor_with_domain.id}/ai/prospect/{prospect.id}/promote")
 
         count = (
             db_session.query(VendorContact)
@@ -308,12 +275,8 @@ class TestProspectPromote:
         db_session.refresh(existing)
         assert existing.full_name == "Jane Smith"
 
-    def test_promote_404_for_missing_prospect(
-        self, client: TestClient, vendor_with_domain: VendorCard
-    ):
-        resp = client.post(
-            f"/v2/partials/vendors/{vendor_with_domain.id}/ai/prospect/99999/promote"
-        )
+    def test_promote_404_for_missing_prospect(self, client: TestClient, vendor_with_domain: VendorCard):
+        resp = client.post(f"/v2/partials/vendors/{vendor_with_domain.id}/ai/prospect/99999/promote")
         assert resp.status_code == 404
 
 
@@ -328,19 +291,13 @@ class TestProspectDelete:
         prospect: ProspectContact,
     ):
         """Deleting should remove the ProspectContact from DB."""
-        resp = client.delete(
-            f"/v2/partials/vendors/{vendor_with_domain.id}/ai/prospect/{prospect.id}"
-        )
+        resp = client.delete(f"/v2/partials/vendors/{vendor_with_domain.id}/ai/prospect/{prospect.id}")
         assert resp.status_code == 200
         assert resp.text.strip() == ""
 
         remaining = db_session.query(ProspectContact).filter_by(id=prospect.id).first()
         assert remaining is None
 
-    def test_delete_404_for_missing_prospect(
-        self, client: TestClient, vendor_with_domain: VendorCard
-    ):
-        resp = client.delete(
-            f"/v2/partials/vendors/{vendor_with_domain.id}/ai/prospect/99999"
-        )
+    def test_delete_404_for_missing_prospect(self, client: TestClient, vendor_with_domain: VendorCard):
+        resp = client.delete(f"/v2/partials/vendors/{vendor_with_domain.id}/ai/prospect/99999")
         assert resp.status_code == 404

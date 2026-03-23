@@ -15,7 +15,6 @@ from sqlalchemy.orm import Session
 
 from app.models import User, VendorCard
 
-
 # ── Fixtures ──────────────────────────────────────────────────────────
 
 
@@ -23,7 +22,8 @@ from app.models import User, VendorCard
 def vendor_with_emails(db_session: Session, test_user: User) -> VendorCard:
     """A vendor with RFQ contacts and vendor responses."""
     from app.models import Requisition
-    from app.models.offers import Contact as RfqContact, VendorResponse
+    from app.models.offers import Contact as RfqContact
+    from app.models.offers import VendorResponse
 
     vendor = VendorCard(
         display_name="Email Test Vendor",
@@ -82,50 +82,32 @@ def vendor_with_emails(db_session: Session, test_user: User) -> VendorCard:
 class TestVendorEmailsTab:
     """Tests for the vendor emails tab."""
 
-    def test_emails_tab_loads(
-        self, client: TestClient, vendor_with_emails: VendorCard
-    ):
-        resp = client.get(
-            f"/v2/partials/vendors/{vendor_with_emails.id}/tab/emails"
-        )
+    def test_emails_tab_loads(self, client: TestClient, vendor_with_emails: VendorCard):
+        resp = client.get(f"/v2/partials/vendors/{vendor_with_emails.id}/tab/emails")
         assert resp.status_code == 200
         assert "Outbound RFQs" in resp.text
         assert "Vendor Responses" in resp.text
 
-    def test_emails_tab_shows_contacts(
-        self, client: TestClient, vendor_with_emails: VendorCard
-    ):
-        resp = client.get(
-            f"/v2/partials/vendors/{vendor_with_emails.id}/tab/emails"
-        )
+    def test_emails_tab_shows_contacts(self, client: TestClient, vendor_with_emails: VendorCard):
+        resp = client.get(f"/v2/partials/vendors/{vendor_with_emails.id}/tab/emails")
         assert resp.status_code == 200
         assert "RFQ - LM317T" in resp.text
         assert "sales@emailtest.com" in resp.text
 
-    def test_emails_tab_shows_responses(
-        self, client: TestClient, vendor_with_emails: VendorCard
-    ):
-        resp = client.get(
-            f"/v2/partials/vendors/{vendor_with_emails.id}/tab/emails"
-        )
+    def test_emails_tab_shows_responses(self, client: TestClient, vendor_with_emails: VendorCard):
+        resp = client.get(f"/v2/partials/vendors/{vendor_with_emails.id}/tab/emails")
         assert resp.status_code == 200
         assert "Re: RFQ - LM317T" in resp.text
         assert "Quote" in resp.text
         assert "90%" in resp.text
 
-    def test_emails_tab_shows_stats(
-        self, client: TestClient, vendor_with_emails: VendorCard
-    ):
-        resp = client.get(
-            f"/v2/partials/vendors/{vendor_with_emails.id}/tab/emails"
-        )
+    def test_emails_tab_shows_stats(self, client: TestClient, vendor_with_emails: VendorCard):
+        resp = client.get(f"/v2/partials/vendors/{vendor_with_emails.id}/tab/emails")
         assert resp.status_code == 200
         assert "RFQs Sent" in resp.text
         assert "Response Rate" in resp.text
 
-    def test_emails_tab_empty_state(
-        self, client: TestClient, db_session: Session
-    ):
+    def test_emails_tab_empty_state(self, client: TestClient, db_session: Session):
         """Vendor with no email history shows empty state."""
         vendor = VendorCard(
             display_name="Empty Vendor",
@@ -139,9 +121,7 @@ class TestVendorEmailsTab:
         assert resp.status_code == 200
         assert "No email history" in resp.text
 
-    def test_vendor_detail_has_emails_tab(
-        self, client: TestClient, vendor_with_emails: VendorCard
-    ):
+    def test_vendor_detail_has_emails_tab(self, client: TestClient, vendor_with_emails: VendorCard):
         """The emails tab should appear in the vendor detail tabs."""
         resp = client.get(f"/v2/partials/vendors/{vendor_with_emails.id}")
         assert resp.status_code == 200

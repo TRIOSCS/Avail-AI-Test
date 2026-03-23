@@ -175,13 +175,37 @@ def _recreate_fk(
     ref_column: str,
     ondelete: str | None,
 ) -> None:
-    """Drop and recreate a FK constraint with the specified ondelete behavior."""
-    constraint_name = f"fk_{table}_{column}"
-    # Try dropping with conventional name first; if it doesn't exist,
-    # Alembic/PG will find it by column reference
-    op.drop_constraint(constraint_name, table, type_="foreignkey")
+    """Drop and recreate a FK constraint with the specified ondelete behavior.
+
+    Finds the actual constraint name by querying pg_constraint, since SQLAlchemy auto-
+    generates names that don't follow a predictable pattern.
+    """
+    conn = op.get_bind()
+    # Find the actual FK constraint name from PostgreSQL catalog
+    result = conn.execute(
+        sa.text(
+            """
+            SELECT con.conname
+            FROM pg_constraint con
+            JOIN pg_class rel ON rel.oid = con.conrelid
+            JOIN pg_attribute att ON att.attrelid = con.conrelid
+                AND att.attnum = ANY(con.conkey)
+            WHERE rel.relname = :table
+                AND att.attname = :column
+                AND con.contype = 'f'
+            LIMIT 1
+            """
+        ),
+        {"table": table, "column": column},
+    )
+    row = result.fetchone()
+    if row is None:
+        return  # No FK to recreate
+    old_name = row[0]
+    new_name = f"fk_{table}_{column}"
+    op.drop_constraint(old_name, table, type_="foreignkey")
     op.create_foreign_key(
-        constraint_name,
+        new_name,
         table,
         ref_table,
         [column],

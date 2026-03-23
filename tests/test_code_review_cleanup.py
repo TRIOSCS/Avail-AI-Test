@@ -13,7 +13,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # _ai_enabled: empty admin_emails with mike_only mode
 # ---------------------------------------------------------------------------

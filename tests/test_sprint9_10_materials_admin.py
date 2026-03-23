@@ -7,14 +7,10 @@ Called by: pytest
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
 
-from datetime import datetime, timezone
-
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import MaterialCard, Offer, User, VendorCard
-
+from app.models import MaterialCard, User, VendorCard
 
 # ── Material Enrichment ──────────────────────────────────────────────
 
@@ -137,6 +133,7 @@ class TestAdminDataOps:
 class TestVendorImport:
     def test_import_csv(self, client: TestClient, db_session: Session):
         import io
+
         csv_content = "name,email,phone,website\nNew Vendor Co,sales@newvendor.com,555-1234,https://newvendor.com\n"
         resp = client.post(
             "/v2/partials/admin/import/vendors",

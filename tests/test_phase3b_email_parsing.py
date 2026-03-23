@@ -1,4 +1,5 @@
-"""test_phase3b_email_parsing.py — Tests for Phase 3B: Email & Freeform Parsing in offers tab.
+"""test_phase3b_email_parsing.py — Tests for Phase 3B: Email & Freeform Parsing in
+offers tab.
 
 Verifies: parse form loading, email parsing, freeform offer parsing,
 save-parsed-offers flow, editable cards with confidence badges.
@@ -15,7 +16,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import Offer, Requirement, Requisition, User, VendorCard
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────
 
@@ -96,9 +96,7 @@ class TestParseEmail:
         assert "paste the email body" in resp.text.lower()
 
     @patch("app.services.ai_email_parser.parse_email", new_callable=AsyncMock)
-    def test_parsed_quotes_shown_as_cards(
-        self, mock_parse, client: TestClient, req_with_parts: Requisition
-    ):
+    def test_parsed_quotes_shown_as_cards(self, mock_parse, client: TestClient, req_with_parts: Requisition):
         mock_parse.return_value = {
             "quotes": [
                 {
@@ -123,9 +121,7 @@ class TestParseEmail:
         assert "Save" in resp.text
 
     @patch("app.services.ai_email_parser.parse_email", new_callable=AsyncMock)
-    def test_confidence_badges_color_coded(
-        self, mock_parse, client: TestClient, req_with_parts: Requisition
-    ):
+    def test_confidence_badges_color_coded(self, mock_parse, client: TestClient, req_with_parts: Requisition):
         mock_parse.return_value = {
             "quotes": [
                 {"part_number": "A", "confidence": 0.9},
@@ -146,9 +142,7 @@ class TestParseEmail:
         assert "bg-rose-50" in resp.text
 
     @patch("app.services.ai_email_parser.parse_email", new_callable=AsyncMock)
-    def test_parse_error_handled(
-        self, mock_parse, client: TestClient, req_with_parts: Requisition
-    ):
+    def test_parse_error_handled(self, mock_parse, client: TestClient, req_with_parts: Requisition):
         mock_parse.side_effect = RuntimeError("API timeout")
         resp = client.post(
             f"/v2/partials/requisitions/{req_with_parts.id}/parse-email",
@@ -158,9 +152,7 @@ class TestParseEmail:
         assert "Parse failed" in resp.text
 
     @patch("app.services.ai_email_parser.parse_email", new_callable=AsyncMock)
-    def test_no_quotes_shows_empty_state(
-        self, mock_parse, client: TestClient, req_with_parts: Requisition
-    ):
+    def test_no_quotes_shows_empty_state(self, mock_parse, client: TestClient, req_with_parts: Requisition):
         mock_parse.return_value = {
             "quotes": [],
             "overall_confidence": 0,
@@ -189,9 +181,7 @@ class TestParseOffer:
         assert "paste vendor text" in resp.text.lower()
 
     @patch("app.services.freeform_parser_service.parse_freeform_offer", new_callable=AsyncMock)
-    def test_parsed_offers_shown(
-        self, mock_parse, client: TestClient, req_with_parts: Requisition
-    ):
+    def test_parsed_offers_shown(self, mock_parse, client: TestClient, req_with_parts: Requisition):
         mock_parse.return_value = {
             "offers": [
                 {
@@ -211,9 +201,7 @@ class TestParseOffer:
         assert "Arrow" in resp.text
 
     @patch("app.services.freeform_parser_service.parse_freeform_offer", new_callable=AsyncMock)
-    def test_parse_offer_error_handled(
-        self, mock_parse, client: TestClient, req_with_parts: Requisition
-    ):
+    def test_parse_offer_error_handled(self, mock_parse, client: TestClient, req_with_parts: Requisition):
         mock_parse.side_effect = RuntimeError("Service down")
         resp = client.post(
             f"/v2/partials/requisitions/{req_with_parts.id}/parse-offer",
@@ -229,9 +217,7 @@ class TestParseOffer:
 class TestSaveParsedOffers:
     """Tests for saving edited parsed offers to the requisition."""
 
-    def test_save_creates_offer_records(
-        self, client: TestClient, db_session: Session, req_with_parts: Requisition
-    ):
+    def test_save_creates_offer_records(self, client: TestClient, db_session: Session, req_with_parts: Requisition):
         resp = client.post(
             f"/v2/partials/requisitions/{req_with_parts.id}/save-parsed-offers",
             data={
@@ -254,9 +240,7 @@ class TestSaveParsedOffers:
         assert float(offer.unit_price) == 0.45
         assert offer.vendor_name is not None
 
-    def test_save_multiple_offers(
-        self, client: TestClient, db_session: Session, req_with_parts: Requisition
-    ):
+    def test_save_multiple_offers(self, client: TestClient, db_session: Session, req_with_parts: Requisition):
         resp = client.post(
             f"/v2/partials/requisitions/{req_with_parts.id}/save-parsed-offers",
             data={
@@ -312,9 +296,7 @@ class TestSaveParsedOffers:
         card = db_session.query(VendorCard).filter(VendorCard.normalized_name == norm).first()
         assert card is not None
 
-    def test_save_empty_offers_returns_warning(
-        self, client: TestClient, req_with_parts: Requisition
-    ):
+    def test_save_empty_offers_returns_warning(self, client: TestClient, req_with_parts: Requisition):
         resp = client.post(
             f"/v2/partials/requisitions/{req_with_parts.id}/save-parsed-offers",
             data={"vendor_name": "Arrow"},

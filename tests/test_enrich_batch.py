@@ -14,10 +14,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from scripts.enrich_batch import (
     VALID_CATEGORIES,
-    _build_prompt,
     _build_batch_requests,
+    _build_prompt,
 )
-
 
 # ── VALID_CATEGORIES tests ────────────────────────────────────────────
 
