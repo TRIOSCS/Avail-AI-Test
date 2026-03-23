@@ -284,7 +284,7 @@ async def handle_notification(payload: dict, db: Session, validated: list[dict] 
             if not sub:
                 logger.warning(f"Unknown subscription {sub_id}, ignoring")
                 continue
-            if sub.client_state and sub.client_state != client_state:
+            if sub.client_state and not hmac.compare_digest(sub.client_state, client_state or ""):
                 logger.warning(f"Client state mismatch for {sub_id}, ignoring")
                 continue
 
