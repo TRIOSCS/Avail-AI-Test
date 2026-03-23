@@ -42,6 +42,7 @@ def _get_ai_cache(query: str) -> dict | None:
 
         return get_cached(_ai_cache_key(query))
     except Exception:
+        logger.debug("AI search cache read failed", exc_info=True)
         return None
 
 

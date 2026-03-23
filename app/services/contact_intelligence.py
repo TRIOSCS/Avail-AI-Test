@@ -208,6 +208,7 @@ def _run_sync_or_return_empty(async_fn, *args):
     try:
         return asyncio.run(async_fn(*args))
     except Exception:
+        logger.warning("_run_sync_helper failed", exc_info=True)
         return {}
 
 

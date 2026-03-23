@@ -197,6 +197,7 @@ def _ai_confirm_vendor_merge(name_a: str, name_b: str, score: int) -> bool:
             )
         )
     except Exception:
+        logger.warning("AI confirm vendor merge failed", exc_info=True)
         return False
 
 
@@ -211,6 +212,7 @@ def _ai_confirm_company_merge(name_a: str, name_b: str, domain_a: str | None, do
     try:
         return _run_coro_sync(_ask_claude_merge(prompt))
     except Exception:
+        logger.warning("AI confirm company merge failed", exc_info=True)
         return False
 
 
