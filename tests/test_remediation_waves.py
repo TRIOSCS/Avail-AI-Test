@@ -43,7 +43,7 @@ class TestStatusMachine:
         import pytest
 
         with pytest.raises(ValueError):
-            validate_transition("quote", "won", "draft")
+            validate_transition("quote", "revised", "draft")
 
     def test_buy_plan_valid_transitions(self):
         assert validate_transition("buy_plan", "draft", "pending") is True

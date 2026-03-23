@@ -25,6 +25,7 @@ from ...models import (
 from ...schemas.crm import OfferCreate, OfferUpdate, OneDriveAttach
 from ...schemas.responses import OfferListResponse
 from ...services.credential_service import get_credential_cached
+from ...services.status_machine import require_valid_transition
 from ...utils.async_helpers import safe_background_task
 from ...utils.normalization import normalize_mpn_key
 from ...vendor_utils import normalize_vendor_name
@@ -541,6 +542,8 @@ async def update_offer(
         "status",
     ]
     old_dict = {f: getattr(offer, f) for f in trackable}
+    if "status" in changes and changes["status"] != offer.status:
+        require_valid_transition("offer", offer.status, changes["status"])
     for field, value in changes.items():
         setattr(offer, field, value)
     new_dict = {f: getattr(offer, f) for f in trackable}
@@ -599,6 +602,7 @@ async def approve_offer(
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be approved")
     old_status = offer.status
+    require_valid_transition("offer", offer.status, OfferStatus.ACTIVE)
     offer.status = OfferStatus.ACTIVE
     offer.approved_by_id = user.id
     offer.approved_at = datetime.now(timezone.utc)
@@ -623,6 +627,7 @@ async def reject_offer(
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be rejected")
     old_status = offer.status
+    require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
     offer.status = OfferStatus.REJECTED
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
@@ -651,6 +656,7 @@ async def mark_offer_sold(
     if offer.status == "sold":
         return {"ok": True, "status": "sold", "message": "Already marked sold"}
     old_status = offer.status
+    require_valid_transition("offer", offer.status, OfferStatus.SOLD)
     offer.status = OfferStatus.SOLD
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
@@ -951,6 +957,7 @@ async def promote_offer(
         raise HTTPException(400, "Only T4 offers can be promoted")
 
     offer.evidence_tier = "T5"
+    require_valid_transition("offer", offer.status, OfferStatus.ACTIVE)
     offer.status = OfferStatus.ACTIVE
     offer.promoted_by_id = user.id
     offer.promoted_at = datetime.now(timezone.utc)
@@ -977,6 +984,7 @@ async def reject_offer_t4_review(
     if offer.status not in ("pending_review",):
         raise HTTPException(400, "Only pending_review offers can be rejected")
 
+    require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
     offer.status = OfferStatus.REJECTED
     offer.updated_by_id = user.id
     offer.updated_at = datetime.now(timezone.utc)

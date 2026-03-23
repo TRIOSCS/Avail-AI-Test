@@ -386,3 +386,106 @@ class TestWorkflowIntegration:
         vr.status = "reviewed"
         db_session.flush()
         assert vr.status == "reviewed"
+
+
+class TestStatusMachineValidation:
+    """Status machine prevents invalid offer/quote transitions."""
+
+    def test_offer_sold_cannot_go_active(self, client, db_session):
+        """Once sold, offer cannot go back to active."""
+        from app.models.offers import Offer
+        from app.models.sourcing import Requirement, Requisition
+
+        req = Requisition(name="Test Req", customer_name="Test", status="active")
+        db_session.add(req)
+        db_session.flush()
+        reqmt = Requirement(requisition_id=req.id, primary_mpn="TEST-001")
+        db_session.add(reqmt)
+        db_session.flush()
+        offer = Offer(
+            requirement_id=reqmt.id,
+            requisition_id=req.id,
+            vendor_name="V",
+            mpn="TEST-001",
+            status="sold",
+            unit_price=1.0,
+            source="manual",
+        )
+        db_session.add(offer)
+        db_session.commit()
+
+        # Try to approve (→ active) a sold offer via generic update
+        resp = client.put(
+            f"/api/offers/{offer.id}",
+            json={"status": "active"},
+        )
+        assert resp.status_code == 409 or "cannot transition" in resp.text.lower()
+
+    def test_offer_rejected_is_terminal(self, client, db_session):
+        """Rejected offers cannot transition to any other status."""
+        from app.models.offers import Offer
+        from app.models.sourcing import Requirement, Requisition
+
+        req = Requisition(name="Test Req", customer_name="Test", status="active")
+        db_session.add(req)
+        db_session.flush()
+        reqmt = Requirement(requisition_id=req.id, primary_mpn="TEST-002")
+        db_session.add(reqmt)
+        db_session.flush()
+        offer = Offer(
+            requirement_id=reqmt.id,
+            requisition_id=req.id,
+            vendor_name="V",
+            mpn="TEST-002",
+            status="rejected",
+            unit_price=1.0,
+            source="manual",
+        )
+        db_session.add(offer)
+        db_session.commit()
+
+        resp = client.put(
+            f"/api/offers/{offer.id}",
+            json={"status": "active"},
+        )
+        assert resp.status_code == 409
+
+    def test_valid_offer_transition_succeeds(self, client, db_session):
+        """pending_review → active is a valid transition."""
+        from app.models.offers import Offer
+        from app.models.sourcing import Requirement, Requisition
+
+        req = Requisition(name="Test Req", customer_name="Test", status="active")
+        db_session.add(req)
+        db_session.flush()
+        reqmt = Requirement(requisition_id=req.id, primary_mpn="TEST-003")
+        db_session.add(reqmt)
+        db_session.flush()
+        offer = Offer(
+            requirement_id=reqmt.id,
+            requisition_id=req.id,
+            vendor_name="V",
+            mpn="TEST-003",
+            status="pending_review",
+            unit_price=1.0,
+            source="manual",
+        )
+        db_session.add(offer)
+        db_session.commit()
+
+        resp = client.put(f"/api/offers/{offer.id}/approve")
+        assert resp.status_code == 200
+
+    def test_require_valid_transition_unit(self):
+        """Unit test for require_valid_transition helper."""
+        from app.services.status_machine import require_valid_transition
+
+        # Valid transition should not raise
+        require_valid_transition("offer", "pending_review", "active")
+
+        # Invalid transition should raise HTTPException 409
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            require_valid_transition("offer", "sold", "active")
+        assert exc_info.value.status_code == 409

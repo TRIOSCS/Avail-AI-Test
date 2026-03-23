@@ -16,6 +16,7 @@ from ...dependencies import require_user
 from ...models import ActivityLog, CustomerSite, Offer, Quote, Requisition, User
 from ...schemas.crm import QuoteCreate, QuoteReopen, QuoteResult, QuoteSendOverride, QuoteUpdate
 from ...schemas.responses import QuoteDetailResponse
+from ...services.status_machine import require_valid_transition
 from ._helpers import (
     _PRICED_STATUSES,
     _build_quote_email_html,
@@ -395,6 +396,7 @@ async def send_quote(
     if "error" in result:
         raise HTTPException(502, f"Failed to send quote email: {result.get('detail', '')}")
 
+    require_valid_transition("quote", quote.status, QuoteStatus.SENT)
     quote.status = QuoteStatus.SENT
     quote.sent_at = datetime.now(timezone.utc)
     req = db.get(Requisition, quote.requisition_id)
@@ -428,6 +430,7 @@ async def quote_result(
     quote.result_reason = payload.reason
     quote.result_notes = payload.notes
     quote.result_at = datetime.now(timezone.utc)
+    require_valid_transition("quote", quote.status, payload.result)
     quote.status = payload.result
     if payload.result == "won":
         quote.won_revenue = quote.subtotal
@@ -475,6 +478,7 @@ async def revise_quote(quote_id: int, user: User = Depends(require_user), db: Se
     old = get_quote_for_user(db, user, quote_id)
     if not old:
         raise HTTPException(404, "Quote not found")
+    require_valid_transition("quote", old.status, QuoteStatus.REVISED)
     old.status = "revised"
     old_number = old.quote_number
     old.quote_number = f"{old_number}-R{old.revision}"
@@ -511,6 +515,7 @@ async def reopen_quote(
     if req:
         req.status = "reopened"
     if payload.revise:
+        require_valid_transition("quote", quote.status, QuoteStatus.REVISED)
         quote.status = "revised"
         old_number = quote.quote_number
         quote.quote_number = f"{old_number}-R{quote.revision}"
@@ -530,6 +535,7 @@ async def reopen_quote(
         db.commit()
         return quote_to_dict(new_quote, db)
     else:
+        require_valid_transition("quote", quote.status, QuoteStatus.SENT)
         quote.status = QuoteStatus.SENT
         quote.result = None
         quote.result_reason = None

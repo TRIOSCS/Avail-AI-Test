@@ -8,6 +8,7 @@ Called by: routers/crm/offers.py, routers/crm/quotes.py, routers/crm/buy_plans.p
 Depends on: nothing (pure logic)
 """
 
+from fastapi import HTTPException
 from loguru import logger
 
 from ..constants import (
@@ -20,8 +21,9 @@ from ..constants import (
 # ── Offer Status Transitions ────────────────────────────────────────────
 # Valid transitions: from_status → {allowed to_statuses}
 OFFER_TRANSITIONS: dict[str, set[str]] = {
-    OfferStatus.PENDING_REVIEW: {OfferStatus.ACTIVE, OfferStatus.REJECTED},
+    OfferStatus.PENDING_REVIEW: {OfferStatus.ACTIVE, OfferStatus.APPROVED, OfferStatus.REJECTED, OfferStatus.SOLD},
     OfferStatus.ACTIVE: {OfferStatus.SOLD, OfferStatus.REJECTED, OfferStatus.WON, OfferStatus.EXPIRED},
+    OfferStatus.APPROVED: {OfferStatus.SOLD, OfferStatus.REJECTED, OfferStatus.WON, OfferStatus.EXPIRED},
     OfferStatus.WON: {OfferStatus.SOLD},
     OfferStatus.REJECTED: set(),  # terminal
     OfferStatus.SOLD: set(),  # terminal
@@ -31,10 +33,10 @@ OFFER_TRANSITIONS: dict[str, set[str]] = {
 # ── Quote Status Transitions ────────────────────────────────────────────
 QUOTE_TRANSITIONS: dict[str, set[str]] = {
     QuoteStatus.DRAFT: {QuoteStatus.SENT, QuoteStatus.REVISED, QuoteStatus.WON, QuoteStatus.LOST},
-    QuoteStatus.SENT: {QuoteStatus.REVISED, QuoteStatus.WON, QuoteStatus.LOST},
+    QuoteStatus.SENT: {QuoteStatus.DRAFT, QuoteStatus.REVISED, QuoteStatus.WON, QuoteStatus.LOST},
     QuoteStatus.REVISED: {QuoteStatus.SENT, QuoteStatus.WON, QuoteStatus.LOST},
-    QuoteStatus.WON: set(),  # terminal
-    QuoteStatus.LOST: {QuoteStatus.DRAFT},  # can be re-opened
+    QuoteStatus.WON: {QuoteStatus.DRAFT, QuoteStatus.REVISED, QuoteStatus.SENT},  # can be re-opened
+    QuoteStatus.LOST: {QuoteStatus.DRAFT, QuoteStatus.REVISED, QuoteStatus.SENT},  # can be re-opened
 }
 
 # ── Buy Plan Status Transitions ─────────────────────────────────────────
@@ -96,6 +98,14 @@ REQUISITION_TRANSITIONS: dict[str, set[str]] = {
     RequisitionStatus.ARCHIVED: {RequisitionStatus.ACTIVE, RequisitionStatus.DRAFT},
     RequisitionStatus.CANCELLED: {RequisitionStatus.ACTIVE, RequisitionStatus.DRAFT},
 }
+
+
+def require_valid_transition(entity_type: str, current_status: str, new_status: str) -> None:
+    """Validate a status transition or raise HTTPException 409."""
+    try:
+        validate_transition(entity_type, current_status, new_status)
+    except ValueError as e:
+        raise HTTPException(status_code=409, detail=str(e))
 
 
 def validate_transition(

@@ -58,6 +58,7 @@ from ..services.faceted_search_service import (
     search_materials_faceted,
 )
 from ..services.freeform_parser_service import parse_freeform_rfq
+from ..services.status_machine import require_valid_transition
 from ..template_env import templates
 from ..utils.search_builder import SearchBuilder
 from ._lookup_helpers import get_requisition_or_404, get_vendor_card_or_404
@@ -1855,11 +1856,13 @@ async def review_offer(
         raise HTTPException(404, "Offer not found")
 
     if action == "approve":
+        require_valid_transition("offer", offer.status, OfferStatus.APPROVED)
         offer.status = OfferStatus.APPROVED
         offer.approved_by_id = user.id
 
         offer.approved_at = datetime.now(timezone.utc)
     else:
+        require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
         offer.status = OfferStatus.REJECTED
 
     db.commit()
@@ -2111,6 +2114,7 @@ async def mark_offer_sold_htmx(
         return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
     old_status = offer.status
+    require_valid_transition("offer", offer.status, OfferStatus.SOLD)
     offer.status = OfferStatus.SOLD
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
@@ -2158,6 +2162,7 @@ async def promote_offer_htmx(
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be promoted")
 
+    require_valid_transition("offer", offer.status, OfferStatus.ACTIVE)
     offer.status = OfferStatus.ACTIVE
     offer.approved_by_id = user.id
     offer.approved_at = datetime.now(timezone.utc)
@@ -2183,6 +2188,7 @@ async def reject_offer_htmx(
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be rejected")
 
+    require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
     offer.status = OfferStatus.REJECTED
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
@@ -4863,6 +4869,7 @@ async def reopen_quote(
     if quote.status not in ("sent", "won", "lost"):
         raise HTTPException(400, "Only sent/won/lost quotes can be reopened")
 
+    require_valid_transition("quote", quote.status, QuoteStatus.DRAFT)
     quote.status = QuoteStatus.DRAFT
     quote.updated_at = datetime.now(timezone.utc)
     db.commit()
@@ -7199,6 +7206,7 @@ async def send_quote_htmx(
     quote = db.get(Quote, quote_id)
     if not quote:
         raise HTTPException(404, "Quote not found")
+    require_valid_transition("quote", quote.status, QuoteStatus.SENT)
     quote.status = QuoteStatus.SENT
     quote.sent_at = datetime.now(timezone.utc)
     db.commit()
@@ -7223,6 +7231,7 @@ async def quote_result_htmx(
     if result not in ("won", "lost"):
         raise HTTPException(400, "Result must be 'won' or 'lost'")
     quote.result = result
+    require_valid_transition("quote", quote.status, result)
     quote.status = result
     quote.result_at = datetime.now(timezone.utc)
     quote.result_reason = form.get("result_reason", "")
