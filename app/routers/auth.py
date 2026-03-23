@@ -75,7 +75,7 @@ async def callback(request: Request, code: str = "", state: str = "", db: Sessio
         return RedirectResponse("/")
     # Validate OAuth state (CSRF protection)
     expected_state = request.session.pop("oauth_state", None)
-    if not expected_state or state != expected_state:
+    if not expected_state or not hmac.compare_digest(state, expected_state):
         logger.warning("OAuth callback state mismatch (possible CSRF)")
         return RedirectResponse("/")
     try:
