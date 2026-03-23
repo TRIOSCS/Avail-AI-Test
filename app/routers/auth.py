@@ -182,6 +182,8 @@ def _password_login_enabled() -> bool:
 
 def _verify_password(stored: str, password: str) -> bool:
     """Verify PBKDF2-HMAC-SHA256 password hash stored as 'salt_b64$hash_b64'."""
+    if not stored or "$" not in stored:
+        return False
     try:
         salt_b64, hash_b64 = stored.split("$", 1)
         salt = base64.b64decode(salt_b64)

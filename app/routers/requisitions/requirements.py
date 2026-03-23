@@ -399,11 +399,11 @@ async def add_requirements(
             target_qty=parsed.target_qty,
             target_price=parsed.target_price,
             substitutes=deduped_subs[:20],
-            condition=parsed.condition or "",
+            condition=normalize_condition(parsed.condition) if parsed.condition else None,
             date_codes=parsed.date_codes or "",
             firmware=parsed.firmware or "",
             hardware_codes=parsed.hardware_codes or "",
-            packaging=parsed.packaging or "",
+            packaging=normalize_packaging(parsed.packaging) if parsed.packaging else None,
             notes=parsed.notes or "",
         )
         db.add(r)

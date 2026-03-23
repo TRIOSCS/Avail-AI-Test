@@ -527,6 +527,8 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
                 match_method = "domain"
 
         try:
+            # Use savepoint so a single message failure doesn't poison the session
+            nested = db.begin_nested()
             vr = VendorResponse(
                 requisition_id=matched_req_id,
                 contact_id=matched_contact.id if matched_contact else None,
@@ -562,6 +564,8 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
             if matched_contact:
                 _progress_contact_status(matched_contact, vr, db)
 
+            nested.commit()
+
             results.append(
                 {
                     "id": vr.id,
@@ -583,7 +587,7 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
             )
         except Exception as e:
             logger.error(f"Failed to save inbox message {msg_id[:20]}: {e}")
-            db.rollback()
+            nested.rollback()
             continue
 
     # ── Submit AI batch or fall back to sequential parsing ──
@@ -849,19 +853,31 @@ async def _parse_sequential_fallback(
     pending: list[VendorResponse],
     db: Session,
 ) -> None:
-    """Fallback: parse emails concurrently (with semaphore) when batch API fails."""
+    """Fallback: parse emails sequentially when batch API fails.
+
+    DB writes are serialized to avoid concurrent access to a single session.
+    AI calls are parallelized, but results are applied one at a time.
+    """
     sem = asyncio.Semaphore(5)
 
     async def _parse_one(vr):
         async with sem:
             try:
-                parsed = await parse_response_ai(vr.body, vr.subject)
-                if parsed:
-                    _apply_parsed_result(vr, parsed, db)
+                return vr, await parse_response_ai(vr.body, vr.subject)
             except Exception as e:
                 logger.warning(f"Sequential AI parse failed for VR {vr.id}: {e}")
+                return vr, None
 
-    await asyncio.gather(*[_parse_one(vr) for vr in pending])
+    results = await asyncio.gather(*[_parse_one(vr) for vr in pending])
+
+    # Apply results serially to avoid concurrent session writes
+    for vr, parsed in results:
+        if parsed:
+            try:
+                _apply_parsed_result(vr, parsed, db)
+            except Exception as e:
+                logger.warning(f"Failed to apply parsed result for VR {vr.id}: {e}")
+                db.rollback()
 
 
 def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -> None:

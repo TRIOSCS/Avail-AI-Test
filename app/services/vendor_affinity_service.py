@@ -208,7 +208,7 @@ def _classify_mpn(mpn: str, manufacturer: str | None, api_key: str) -> str | Non
         client = anthropic.Anthropic(api_key=api_key)
         mfr_hint = f" from {manufacturer}" if manufacturer else ""
         message = client.messages.create(
-            model="claude-haiku-4-20250514",
+            model="claude-haiku-4-5-20251001",
             max_tokens=50,
             messages=[
                 {

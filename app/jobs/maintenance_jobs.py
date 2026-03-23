@@ -106,16 +106,21 @@ async def _job_auto_dedup():
 
 @_traced_job
 async def _job_reset_connector_errors():
-    """Reset 24h error counters on all API sources."""
+    """Reset 24h error counters on all API sources (batched to avoid lock timeout)."""
     from ..database import SessionLocal
     from ..models import ApiSource
 
     db = SessionLocal()
     try:
-        db.query(ApiSource).filter(ApiSource.error_count_24h > 0).update(
-            {"error_count_24h": 0}, synchronize_session="fetch"
-        )
-        db.commit()
+        # Fetch IDs first, then update in small batches to avoid lock contention
+        source_ids = [s.id for s in db.query(ApiSource.id).filter(ApiSource.error_count_24h > 0).all()]
+        batch_size = 50
+        for i in range(0, len(source_ids), batch_size):
+            batch = source_ids[i : i + batch_size]
+            db.query(ApiSource).filter(ApiSource.id.in_(batch)).update(
+                {"error_count_24h": 0}, synchronize_session="fetch"
+            )
+            db.commit()
     except Exception:
         logger.exception("Reset connector error counts failed")
         db.rollback()

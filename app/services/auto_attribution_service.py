@@ -11,6 +11,7 @@ Called by: scheduler.py (job_auto_attribute_activities)
 Depends on: activity_service, claude_client, models
 """
 
+import json
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
@@ -219,7 +220,17 @@ async def _call_claude_for_matching(
         max_tokens=2048,
     )
 
-    if not result or "matches" not in result:
+    if not result:
+        return {}
+
+    # API occasionally returns tool input as JSON string instead of dict
+    if isinstance(result, str):
+        try:
+            result = json.loads(result)
+        except (json.JSONDecodeError, TypeError):
+            return {}
+
+    if not isinstance(result, dict) or "matches" not in result:
         return {}
 
     return {

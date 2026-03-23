@@ -225,11 +225,15 @@ async def _job_batch_results():
             logger.info(f"Batch processing: {batch_applied} results applied")
     except asyncio.TimeoutError:
         logger.error("Batch results processing timed out (120s)")
-        db.rollback()
     except Exception as e:
         logger.error(f"Batch results processing error: {e}")
-        db.rollback()
     finally:
+        # process_batch_results handles its own commit/rollback per batch;
+        # rollback here only cleans up any uncommitted leftovers safely
+        try:
+            db.rollback()
+        except Exception:
+            pass
         db.close()
 
 

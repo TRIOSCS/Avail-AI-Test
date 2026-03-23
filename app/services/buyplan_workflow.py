@@ -811,7 +811,20 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
             continue
 
         try:
-            token = await get_valid_token()
+            buyer = db.get(User, line.buyer_id)
+            if not buyer:
+                results.append(
+                    {
+                        "line_id": line.id,
+                        "po_number": line.po_number,
+                        "found": False,
+                        "skipped": True,
+                        "reason": "buyer_not_found",
+                    }
+                )
+                continue
+
+            token = await get_valid_token(buyer, db)
             if not token:
                 results.append(
                     {
@@ -828,7 +841,7 @@ async def verify_po_sent(plan: "BuyPlan", db: "Session") -> list[dict]:
             # Search sent folder for PO number
             messages = await client.search_sent_messages(
                 query=line.po_number,
-                user_id=str(line.buyer.azure_id) if line.buyer else None,
+                user_id=str(buyer.azure_id) if buyer else None,
             )
 
             found = len(messages) > 0
@@ -908,7 +921,7 @@ async def verify_po_sent_v3(plan: "BuyPlan", db: "Session") -> dict:
             continue
 
         try:
-            token = await get_valid_token()
+            token = await get_valid_token(buyer, db)
             if not token:
                 results[line.po_number] = {
                     "verified": False,

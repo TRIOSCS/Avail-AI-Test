@@ -115,6 +115,8 @@ async def requisitions_stream(request: Request, _user: User = Depends(require_us
                 except asyncio.TimeoutError:
                     # Send keepalive comment to prevent connection timeout
                     yield ": keepalive\n\n"
+                except asyncio.CancelledError:
+                    break
                 except Exception as e:
                     logger.error(f"SSE stream error: {e}")
                     yield "event: error\ndata: Internal error\n\n"

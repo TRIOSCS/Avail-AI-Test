@@ -191,8 +191,29 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
         params["mpn_pattern"] = "%"
         params["has_filter"] = False
 
+    dialect = db.bind.dialect.name if db.bind else ""
+
+    # PostgreSQL supports array_agg(col ORDER BY ...) for "last" value;
+    # SQLite does not, so we fall back to a correlated subquery.
+    if dialect == "postgresql":
+        last_price_expr = "(array_agg(unit_price ORDER BY created_at DESC))[1]"
+        last_qty_expr = "(array_agg(qty_available ORDER BY created_at DESC))[1]"
+    else:
+        last_price_expr = (
+            "(SELECT s2.unit_price FROM sightings s2"
+            " WHERE s2.vendor_name_normalized = sightings.vendor_name_normalized"
+            " AND COALESCE(s2.mpn_matched, '') = COALESCE(sightings.mpn_matched, '')"
+            " ORDER BY s2.created_at DESC LIMIT 1)"
+        )
+        last_qty_expr = (
+            "(SELECT s2.qty_available FROM sightings s2"
+            " WHERE s2.vendor_name_normalized = sightings.vendor_name_normalized"
+            " AND COALESCE(s2.mpn_matched, '') = COALESCE(sightings.mpn_matched, '')"
+            " ORDER BY s2.created_at DESC LIMIT 1)"
+        )
+
     rows = db.execute(
-        sqltext("""
+        sqltext(f"""
         SELECT mpn, manufacturer, sighting_count, first_seen, last_seen, last_price, last_qty
         FROM (
             SELECT
@@ -201,8 +222,8 @@ def _vendor_parts_summary_query(db, norm, display_name, q, limit, offset):
                 COUNT(*) as sighting_count,
                 MIN(created_at) as first_seen,
                 MAX(created_at) as last_seen,
-                (array_agg(unit_price ORDER BY created_at DESC))[1] as last_price,
-                (array_agg(qty_available ORDER BY created_at DESC))[1] as last_qty
+                {last_price_expr} as last_price,
+                {last_qty_expr} as last_qty
             FROM sightings
             WHERE vendor_name_normalized = :norm
               AND mpn_matched IS NOT NULL AND mpn_matched != ''
