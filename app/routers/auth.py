@@ -95,7 +95,7 @@ async def callback(request: Request, code: str = "", state: str = "", db: Sessio
         logger.error(f"Azure token exchange failed: {e}")
         return RedirectResponse("/")
     if resp.status_code != 200:
-        logger.error(f"Azure token exchange returned {resp.status_code}: {resp.text[:500]}")
+        logger.error(f"Azure token exchange returned {resp.status_code}")
         return RedirectResponse("/")
     tokens = resp.json()
     access_token = tokens.get("access_token")
