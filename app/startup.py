@@ -66,7 +66,7 @@ def run_startup_migrations() -> None:
     _backfill_sighting_vendor_normalized()
     _backfill_proactive_offer_qty()
     _backfill_ticket_defaults()
-    _seed_vinod_user()
+    _seed_admin_user_if_env_set()
     _seed_commodity_schemas()
     logger.info("Startup migrations complete")
 
@@ -111,28 +111,33 @@ def _create_default_user_if_env_set() -> None:
         db.close()
 
 
-def _seed_vinod_user(db=None) -> None:
-    """Seed Vinod admin user (Azure AD login, no password).
+def _seed_admin_user_if_env_set(db=None) -> None:
+    """Seed admin user from SEED_ADMIN_EMAIL / SEED_ADMIN_NAME env vars.
 
     Called by: run_startup_migrations
     Depends on: User model, SessionLocal
     """
+    import os
+
+    email = os.environ.get("SEED_ADMIN_EMAIL", "vinod@trioscs.com")
+    name = os.environ.get("SEED_ADMIN_NAME", "Vinod")
+
     from .models.auth import User
 
     own_session = db is None
     if own_session:
         db = SessionLocal()
     try:
-        existing = db.query(User).filter_by(email="vinod@trioscs.com").first()
+        existing = db.query(User).filter_by(email=email).first()
         if existing:
-            logger.info("Vinod admin user already exists, skipping")
+            logger.info("Admin user %s already exists, skipping", email)
             return
-        user = User(email="vinod@trioscs.com", name="Vinod", role="admin")
+        user = User(email=email, name=name, role="admin")
         db.add(user)
         db.commit()
-        logger.info("Created Vinod admin user")
+        logger.info("Created admin user %s", email)
     except Exception:
-        logger.exception("Failed creating Vinod admin user")
+        logger.exception("Failed creating admin user %s", email)
         db.rollback()
     finally:
         if own_session:
