@@ -2927,7 +2927,7 @@ def _get_cached_search_results(search_id: str) -> list[dict] | None:
             if data:
                 return json.loads(data)
     except Exception:
-        pass
+        logger.warning("Redis cache lookup failed for search", exc_info=True)
     return None
 
 

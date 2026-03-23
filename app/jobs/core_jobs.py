@@ -202,6 +202,7 @@ async def _job_inbox_scan():
                         scan_db.commit()
                 except Exception:
                     scan_db.rollback()
+                    logger.warning("Inbox scan timeout commit failed", exc_info=True)
             except Exception as e:
                 logger.error(f"Inbox scan error for user {user_id}: {e}")
                 scan_db.rollback()
@@ -236,7 +237,7 @@ async def _job_batch_results():
         try:
             db.rollback()
         except Exception:
-            pass
+            logger.debug("Batch results cleanup rollback", exc_info=True)
         db.close()
 
 

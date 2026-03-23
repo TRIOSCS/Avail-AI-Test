@@ -297,7 +297,7 @@ class EmailMiner:
                     if not c["last_contact"] or dt > c["last_contact"]:
                         c["last_contact"] = dt
                 except Exception:
-                    pass
+                    logger.debug("Failed to parse receivedDateTime", exc_info=True)
 
             # Check if this is an offer email (regex pre-filter)
             regex_matches = self._count_offer_matches(subject, body)
@@ -327,7 +327,7 @@ class EmailMiner:
                         try:
                             received_dt = datetime.fromisoformat(received.replace("Z", "+00:00"))
                         except Exception:
-                            pass
+                            logger.debug("Failed to parse receivedDateTime for classification", exc_info=True)
 
                     import asyncio
 
@@ -347,7 +347,7 @@ class EmailMiner:
                             regex_offer_matches=regex_matches,
                         )
                 except Exception as e:
-                    logger.debug("AI classification skipped for %s: %s", msg["id"], e)
+                    logger.warning("AI classification skipped for %s: %s", msg["id"], e)
 
             # H2: Mark as processed
             self._mark_processed(msg["id"], "mining")
@@ -542,6 +542,7 @@ class EmailMiner:
                 self.db.flush()
             except Exception:
                 self.db.rollback()
+                logger.error("Failed to flush email mining dedup records", exc_info=True)
 
         return {
             "messages_scanned": len(messages),
