@@ -304,6 +304,8 @@ async def _job_material_enrichment():
         )
     except Exception:
         logger.exception("Material enrichment job failed")
+        db.rollback()
+        raise
     finally:
         db.close()
 
