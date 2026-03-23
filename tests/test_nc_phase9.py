@@ -5,6 +5,7 @@ Depends on: conftest.py, nc_worker.monitoring
 """
 
 from app.services.nc_worker.monitoring import (
+    _get_hash_set,
     _known_html_hashes,
     check_html_structure_hash,
     log_daily_report,
@@ -68,7 +69,7 @@ def test_html_structure_hash_detects_change():
     h2 = check_html_structure_hash(html2, "PART2")
 
     # Both hashes should be in the known set now
-    assert len(_known_html_hashes) == 2
+    assert len(_get_hash_set("NC")) == 2
     _known_html_hashes.clear()
 
 

@@ -1,101 +1,41 @@
-"""NC worker monitoring — daily reports, Sentry alerts, HTML hash tracking.
+"""NC worker monitoring — thin wrapper around search_worker_base.monitoring.
 
-Provides daily summary logging, Sentry error capture for circuit breaker
-trips and crashes, and HTML structure hash monitoring to detect layout changes.
+Re-exports all monitoring functions with component_name="NC" pre-applied.
 
-Called by: worker loop
-Depends on: sentry_sdk, loguru, nc_search_log model
+Called by: worker loop, tests
+Depends on: app.services.search_worker_base.monitoring
 """
 
-import hashlib
-import re
-from datetime import datetime
+from functools import partial
 
-from loguru import logger
+from ..search_worker_base.monitoring import (
+    _get_hash_set,
+    _known_html_hashes,
+)
+from ..search_worker_base.monitoring import (
+    capture_sentry_error as _capture_error,
+)
+from ..search_worker_base.monitoring import (
+    capture_sentry_message as _capture_message,
+)
+from ..search_worker_base.monitoring import (
+    check_html_structure_hash as _check_hash,
+)
+from ..search_worker_base.monitoring import (
+    log_daily_report as _log_report,
+)
 
-try:
-    from zoneinfo import ZoneInfo
-except ImportError:  # pragma: no cover
-    from backports.zoneinfo import ZoneInfo  # pragma: no cover
+# Re-export with NC-specific defaults
+log_daily_report = partial(_log_report, component_name="NC")
+capture_sentry_error = partial(_capture_error, component_name="nc")
+capture_sentry_message = partial(_capture_message, component_name="nc")
+check_html_structure_hash = partial(_check_hash, component_name="NC")
 
-EASTERN = ZoneInfo("America/New_York")
-
-# Track known HTML structure hashes
-_known_html_hashes: set[str] = set()
-
-
-def log_daily_report(
-    searches_completed: int,
-    sightings_created: int,
-    parts_gated_out: int,
-    parts_deduped: int,
-    failed_searches: int,
-    queue_remaining: int,
-    circuit_breaker_status: str,
-):
-    """Log the end-of-day summary report."""
-    date_str = datetime.now(EASTERN).strftime("%b %d, %Y")
-    report = f"""
-NC Worker Daily Report — {date_str}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Searches completed:  {searches_completed}
-Sightings created:   {sightings_created}
-Parts gated out:     {parts_gated_out}
-Parts deduped:       {parts_deduped}
-Failed searches:     {failed_searches}
-Queue remaining:     {queue_remaining}
-Circuit breaker:     {circuit_breaker_status}
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"""
-    logger.info(report)
-
-
-def capture_sentry_error(error: Exception, context: dict | None = None):
-    """Send an error to Sentry with NC worker context."""
-    try:
-        import sentry_sdk
-
-        with sentry_sdk.new_scope() as scope:
-            scope.set_tag("component", "nc_worker")
-            if context:
-                for key, value in context.items():
-                    scope.set_extra(key, value)
-            sentry_sdk.capture_exception(error)
-    except ImportError:
-        logger.warning("Sentry SDK not available, logging error only: {}", error)
-
-
-def capture_sentry_message(message: str, level: str = "warning", context: dict | None = None):
-    """Send a message to Sentry with NC worker context."""
-    try:
-        import sentry_sdk
-
-        with sentry_sdk.new_scope() as scope:
-            scope.set_tag("component", "nc_worker")
-            if context:
-                for key, value in context.items():
-                    scope.set_extra(key, value)
-            sentry_sdk.capture_message(message, level=level)
-    except ImportError:
-        logger.warning("Sentry SDK not available: {}", message)
-
-
-def check_html_structure_hash(html: str, queue_item_mpn: str) -> str:
-    """Compute a hash of the HTML tag structure (not content) to detect layout changes.
-
-    Returns the structure hash. Logs a warning if the structure is new.
-    """
-    if not html:
-        return ""
-
-    # Extract just the tag structure: <tag attr>...<tag> pattern
-    tags = re.findall(r"</?[a-zA-Z][^>]*>", html)
-    structure = "".join(tags)
-    struct_hash = hashlib.sha256(structure.encode()).hexdigest()[:16]
-
-    if _known_html_hashes and struct_hash not in _known_html_hashes:
-        msg = f"NC results HTML structure may have changed (hash={struct_hash}, mpn={queue_item_mpn})"
-        logger.warning(msg)
-        capture_sentry_message(msg, level="warning", context={"mpn": queue_item_mpn, "hash": struct_hash})
-
-    _known_html_hashes.add(struct_hash)
-    return struct_hash
+__all__ = [
+    "_get_hash_set",
+    "_known_html_hashes",
+    "capture_sentry_error",
+    "capture_sentry_message",
+    "check_html_structure_hash",
+    "log_daily_report",
+]

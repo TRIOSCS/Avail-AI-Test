@@ -20,6 +20,7 @@ from app.services.nc_worker.circuit_breaker import CircuitBreaker
 from app.services.nc_worker.config import NcConfig
 from app.services.nc_worker.human_behavior import HumanBehavior
 from app.services.nc_worker.monitoring import (
+    _get_hash_set,
     _known_html_hashes,
     capture_sentry_error,
     capture_sentry_message,
@@ -468,7 +469,7 @@ class TestMonitoring:
         html = "<table><tr><td>data</td></tr></table>"
         h = check_html_structure_hash(html, "STM32")
         assert len(h) == 16
-        assert h in _known_html_hashes
+        assert h in _get_hash_set("NC")
 
     def test_check_html_structure_hash_known(self):
         """Same HTML structure returns same hash."""
@@ -484,7 +485,7 @@ class TestMonitoring:
 
         html2 = "<div class='new'><span>different</span></div>"
         h2 = check_html_structure_hash(html2, "LM317")
-        assert h2 in _known_html_hashes
+        assert h2 in _get_hash_set("NC")
 
 
 # ═══════════════════════════════════════════════════════════════════════
