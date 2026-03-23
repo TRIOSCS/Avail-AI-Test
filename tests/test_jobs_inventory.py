@@ -122,11 +122,12 @@ def test_po_verification_handles_per_plan_error(
 
 
 def test_po_verification_outer_exception(scheduler_db):
-    """Outer exception in PO verification is caught."""
+    """Outer exception rolls back and re-raises so _traced_job can capture it."""
     with patch.object(scheduler_db, "query", side_effect=Exception("DB crash")):
         from app.jobs.inventory_jobs import _job_po_verification
 
-        asyncio.run(_job_po_verification())
+        with pytest.raises(Exception, match="DB crash"):
+            asyncio.run(_job_po_verification())
 
 
 # ── _job_stock_autocomplete() ─────────────────────────────────────────
@@ -162,11 +163,12 @@ def test_stock_autocomplete_handles_zero(scheduler_db):
 
 
 def test_stock_autocomplete_error_handling(scheduler_db):
-    """Stock auto-complete handles errors gracefully."""
+    """Stock auto-complete rolls back and re-raises so _traced_job can capture it."""
     with patch.object(scheduler_db, "query", side_effect=Exception("DB error")):
         from app.jobs.inventory_jobs import _job_stock_autocomplete
 
-        asyncio.run(_job_stock_autocomplete())
+        with pytest.raises(Exception, match="DB error"):
+            asyncio.run(_job_stock_autocomplete())
 
 
 def test_stock_autocomplete_skips_recent_plans(

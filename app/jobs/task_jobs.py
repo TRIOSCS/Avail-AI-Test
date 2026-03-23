@@ -93,5 +93,6 @@ async def _job_bid_due_alerts():
     except Exception as e:
         logger.error("Bid-due alert task job failed: {}", str(e))
         db.rollback()
+        raise
     finally:
         db.close()

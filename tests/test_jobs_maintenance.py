@@ -51,14 +51,15 @@ def test_cache_cleanup_calls_cleanup_expired():
 
 
 def test_cache_cleanup_handles_error():
-    """Cache cleanup handles import or execution errors."""
+    """Cache cleanup re-raises exceptions so _traced_job can capture them."""
     with patch(
         "app.cache.intel_cache.cleanup_expired",
         side_effect=Exception("Cache corrupted"),
     ):
         from app.jobs.maintenance_jobs import _job_cache_cleanup
 
-        asyncio.run(_job_cache_cleanup())
+        with pytest.raises(Exception, match="Cache corrupted"):
+            asyncio.run(_job_cache_cleanup())
 
 
 # ── _job_reset_connector_errors() ─────────────────────────────────────
@@ -140,12 +141,13 @@ def test_auto_attribute_activities_no_matches(scheduler_db):
 
 
 def test_auto_attribute_activities_error(scheduler_db):
-    """Exception rolls back."""
+    """Exception rolls back and re-raises so _traced_job can capture it."""
     mock_attribution = MagicMock(side_effect=Exception("Attribution failed"))
     with patch("app.services.auto_attribution_service.run_auto_attribution", mock_attribution):
         from app.jobs.maintenance_jobs import _job_auto_attribute_activities
 
-        asyncio.run(_job_auto_attribute_activities())
+        with pytest.raises(Exception, match="Attribution failed"):
+            asyncio.run(_job_auto_attribute_activities())
 
 
 # ── _job_auto_dedup() ─────────────────────────────────────────────────
@@ -181,12 +183,13 @@ def test_auto_dedup_no_merges(scheduler_db):
 
 
 def test_auto_dedup_error(scheduler_db):
-    """Exception rolls back."""
+    """Exception rolls back and re-raises so _traced_job can capture it."""
     mock_dedup = MagicMock(side_effect=Exception("Dedup failed"))
     with patch("app.services.auto_dedup_service.run_auto_dedup", mock_dedup):
         from app.jobs.maintenance_jobs import _job_auto_dedup
 
-        asyncio.run(_job_auto_dedup())
+        with pytest.raises(Exception, match="Dedup failed"):
+            asyncio.run(_job_auto_dedup())
 
 
 # ── _job_integrity_check() ────────────────────────────────────────────
@@ -208,9 +211,10 @@ def test_integrity_check_success(scheduler_db):
 
 
 def test_integrity_check_error(scheduler_db):
-    """Exception is caught."""
+    """Exception rolls back and re-raises so _traced_job can capture it."""
     mock_check = MagicMock(side_effect=Exception("Integrity failed"))
     with patch("app.services.integrity_service.run_integrity_check", mock_check):
         from app.jobs.maintenance_jobs import _job_integrity_check
 
-        asyncio.run(_job_integrity_check())
+        with pytest.raises(Exception, match="Integrity failed"):
+            asyncio.run(_job_integrity_check())

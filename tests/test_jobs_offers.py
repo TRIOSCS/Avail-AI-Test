@@ -69,18 +69,20 @@ def test_proactive_matching_no_matches(scheduler_db):
 
 
 def test_proactive_matching_error_handling(scheduler_db):
-    """Proactive matching handles errors gracefully."""
+    """Proactive matching rolls back and re-raises so _traced_job can capture it."""
     with patch(
         "app.services.proactive_matching.run_proactive_scan",
         side_effect=Exception("DB connection lost"),
     ):
         from app.jobs.offers_jobs import _job_proactive_matching
 
-        asyncio.run(_job_proactive_matching())
+        with pytest.raises(Exception, match="DB connection lost"):
+            asyncio.run(_job_proactive_matching())
 
 
 def test_proactive_matching_timeout(scheduler_db):
-    """Proactive matching handles timeout gracefully."""
+    """Proactive matching rolls back and re-raises TimeoutError so _traced_job can
+    capture it."""
 
     async def _mock_wait_for(coro, timeout=None):
         try:
@@ -95,7 +97,8 @@ def test_proactive_matching_timeout(scheduler_db):
     ):
         from app.jobs.offers_jobs import _job_proactive_matching
 
-        asyncio.run(_job_proactive_matching())
+        with pytest.raises(asyncio.TimeoutError):
+            asyncio.run(_job_proactive_matching())
 
 
 def test_proactive_matching_logs_summary(scheduler_db):

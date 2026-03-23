@@ -51,12 +51,13 @@ def test_material_enrichment_success(scheduler_db):
 
 
 def test_material_enrichment_error(scheduler_db):
-    """Exception is caught."""
+    """Exception rolls back and re-raises so _traced_job can capture it."""
     mock_enrich = AsyncMock(side_effect=Exception("Enrichment failed"))
     with patch("app.services.material_enrichment_service.enrich_pending_cards", mock_enrich):
         from app.jobs.tagging_jobs import _job_material_enrichment
 
-        asyncio.run(_job_material_enrichment())
+        with pytest.raises(Exception, match="Enrichment failed"):
+            asyncio.run(_job_material_enrichment())
 
 
 # ── _job_nexar_backfill() ─────────────────────────────────────────────

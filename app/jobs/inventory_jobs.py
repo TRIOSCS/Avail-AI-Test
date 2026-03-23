@@ -60,6 +60,7 @@ async def _job_po_verification():
     except Exception as e:
         logger.error(f"PO verification scan error: {e}")
         db.rollback()
+        raise
     finally:
         db.close()
 
@@ -96,6 +97,7 @@ async def _job_stock_autocomplete():
     except Exception as e:
         logger.error(f"Stock sale auto-complete error: {e}")
         db.rollback()
+        raise
     finally:
         db.close()
 

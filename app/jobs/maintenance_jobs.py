@@ -55,6 +55,7 @@ async def _job_cache_cleanup():
         cleanup_expired()
     except Exception as e:
         logger.error(f"Cache cleanup error: {e}")
+        raise
 
 
 @_traced_job
@@ -77,6 +78,7 @@ async def _job_auto_attribute_activities():
     except Exception:
         logger.exception("Auto-attribution job failed")
         db.rollback()
+        raise
     finally:
         db.close()
 
@@ -100,6 +102,7 @@ async def _job_auto_dedup():
     except Exception:
         logger.exception("Auto-dedup job failed")
         db.rollback()
+        raise
     finally:
         db.close()
 
@@ -204,5 +207,7 @@ async def _job_integrity_check():
         )
     except Exception:
         logger.exception("Integrity check failed")
+        db.rollback()
+        raise
     finally:
         db.close()

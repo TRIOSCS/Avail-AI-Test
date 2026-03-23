@@ -90,9 +90,11 @@ async def _job_proactive_matching():
     except asyncio.TimeoutError:
         logger.error("Proactive matching timed out after 300s")
         db.rollback()
+        raise
     except Exception as e:
         logger.error(f"Proactive matching error: {e}")
         db.rollback()
+        raise
     finally:
         db.close()
 
