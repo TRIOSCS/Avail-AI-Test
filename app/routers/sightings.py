@@ -91,7 +91,8 @@ async def sightings_list(
     }
     order = sort_map.get(sort, Requirement.priority_score.desc().nullslast())
     if dir == "asc" and sort in sort_map:
-        order = getattr(Requirement, sort if sort != "priority" else "priority_score").asc()
+        attr_map = {"priority": "priority_score", "mpn": "primary_mpn"}
+        order = getattr(Requirement, attr_map.get(sort, sort)).asc()
     query = query.order_by(order)
 
     # Pagination
@@ -133,7 +134,7 @@ async def sightings_list(
                 }
 
     # Stale detection — last activity per requirement
-    stale_threshold = datetime.now(timezone.utc) - timedelta(days=settings.sighting_stale_days)
+    stale_threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=settings.sighting_stale_days)
     stale_req_ids: set[int] = set()
     if requirements:
         req_ids = [r.id for r in requirements]
@@ -149,7 +150,9 @@ async def sightings_list(
         activity_map = {a.requirement_id: a.last_at for a in last_activities}
         for rid in req_ids:
             last = activity_map.get(rid)
-            if last is None or last < stale_threshold:
+            if last is None:
+                stale_req_ids.add(rid)
+            elif last.replace(tzinfo=None) < stale_threshold:
                 stale_req_ids.add(rid)
 
     # Group-by logic
