@@ -3252,7 +3252,7 @@ async def vendors_list_partial(
     if my_only:
         my_vendor_ids = (
             db.query(StrategicVendor.vendor_card_id)
-            .filter(StrategicVendor.user_id == user.id, StrategicVendor.status == "active")
+            .filter(StrategicVendor.user_id == user.id, StrategicVendor.released_at.is_(None))
             .subquery()
         )
         query = query.filter(VendorCard.id.in_(my_vendor_ids))
