@@ -153,6 +153,7 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/materials", response_class=HTMLResponse)
 @router.get("/v2/materials/{card_id:int}", response_class=HTMLResponse)
 @router.get("/v2/follow-ups", response_class=HTMLResponse)
+@router.get("/v2/sightings", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets/{ticket_id:int}", response_class=HTMLResponse)
 async def v2_page(request: Request, db: Session = Depends(get_db)):
