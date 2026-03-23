@@ -199,27 +199,44 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     (fresh, source_stats), affinity_matches = await asyncio.gather(fresh_task, affinity_task)
 
     # 2. Score + save — only replace sightings from connectors that succeeded
-    succeeded_sources = {stat["source"] for stat in source_stats if stat["status"] == "ok" and not stat.get("error")}
-    sightings = _save_sightings(fresh, req, db, succeeded_sources)
-    logger.info(f"Req {req.id} ({pns[0]}): {len(sightings)} fresh sightings")
+    # Use a dedicated DB session for writes so concurrent search_requirement()
+    # calls (via asyncio.gather) don't share a single non-thread-safe session.
+    from sqlalchemy.orm import sessionmaker
 
-    # 3. Material card upsert (errors won't break search)
-    card_ids = set()
-    for pn in pns:
-        try:
-            card = _upsert_material_card(pn, sightings, db, now)
-            if card:
-                card_ids.add(card.id)
-        except Exception as e:
-            logger.error("MATERIAL_CARD_UPSERT_FAIL: mpn=%s error=%s", pn, e)
-            db.rollback()
+    req_id = req.id
+    _WriteSession = sessionmaker(bind=db.get_bind(), autocommit=False, autoflush=False)
+    write_db = _WriteSession()
+    try:
+        write_req = write_db.get(Requirement, req_id)
+        if not write_req:
+            logger.error("Requirement %s not found in write session", req_id)
+            return {"sightings": [], "source_stats": source_stats}
 
-    # 3b. Fire background enrichment for cards without manufacturer
-    await _schedule_background_enrichment(card_ids, db)
+        succeeded_sources = {
+            stat["source"] for stat in source_stats if stat["status"] == "ok" and not stat.get("error")
+        }
+        sightings = _save_sightings(fresh, write_req, write_db, succeeded_sources)
+        logger.info(f"Req {req_id} ({pns[0]}): {len(sightings)} fresh sightings")
 
-    # 4. Historical vendors from material cards
-    fresh_vendors = {s.vendor_name.lower() for s in sightings}
-    history = _get_material_history(list(card_ids), fresh_vendors, db)
+        # 3. Material card upsert (errors won't break search)
+        card_ids = set()
+        for pn in pns:
+            try:
+                card = _upsert_material_card(pn, sightings, write_db, now)
+                if card:
+                    card_ids.add(card.id)
+            except Exception as e:
+                logger.error("MATERIAL_CARD_UPSERT_FAIL: mpn=%s error=%s", pn, e)
+                write_db.rollback()
+
+        # 3b. Fire background enrichment for cards without manufacturer
+        await _schedule_background_enrichment(card_ids, write_db)
+
+        # 4. Historical vendors from material cards
+        fresh_vendors = {s.vendor_name.lower() for s in sightings}
+        history = _get_material_history(list(card_ids), fresh_vendors, write_db)
+    finally:
+        write_db.close()
 
     # 5. Combine + sort
     results = []
