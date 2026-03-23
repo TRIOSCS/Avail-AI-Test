@@ -73,3 +73,18 @@ class FollowUpEmail(BaseModel):
     """Follow-up email body — defaults handled in router if blank."""
 
     body: str = ""
+
+
+class VendorResponseStatusUpdate(BaseModel):
+    """Update a vendor response status (reviewed/rejected)."""
+
+    status: str = Field(..., description="New status: new, reviewed, or rejected")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        allowed = {"new", "reviewed", "rejected"}
+        v = v.strip().lower()
+        if v not in allowed:
+            raise ValueError(f"Status must be one of: {', '.join(sorted(allowed))}")
+        return v

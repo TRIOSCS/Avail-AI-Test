@@ -400,7 +400,8 @@ class TestDataOpsTab:
             assert "Vendor Duplicates" in resp.text
             assert "Company Duplicates" in resp.text
         finally:
-            app.dependency_overrides.clear()
+            app.dependency_overrides.pop(require_user, None)
+            app.dependency_overrides.pop(get_db, None)
 
 
 # ── Phase 8: Offer actions ──────────────────────────────────────────

@@ -36,6 +36,8 @@ from ...models import (
 from ...rate_limit import limiter
 from ...schemas.requisitions import (
     RequirementCreate,
+    RequirementNoteAdd,
+    RequirementTaskCreate,
     RequirementUpdate,
     SearchOptions,
     SightingUnavailableIn,
@@ -1490,7 +1492,7 @@ async def list_requirement_notes(
 @router.post("/api/requirements/{requirement_id}/notes")
 async def add_requirement_note(
     requirement_id: int,
-    body: dict,
+    body: RequirementNoteAdd,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -1498,12 +1500,9 @@ async def add_requirement_note(
     req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req:
         raise HTTPException(404, "Requirement not found")
-    new_text = (body.get("text") or "").strip()
-    if not new_text:
-        raise HTTPException(422, "Note text is required")
     # Append to existing notes with timestamp
     timestamp = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M")
-    entry = f"[{timestamp} {user.email}] {new_text}"
+    entry = f"[{timestamp} {user.email}] {body.text}"
     req.notes = f"{req.notes}\n{entry}" if req.notes else entry
     db.commit()
     return {"ok": True, "notes": req.notes}
@@ -1576,7 +1575,7 @@ async def list_requirement_tasks(
 @router.post("/api/requirements/{requirement_id}/tasks")
 async def create_requirement_task(
     requirement_id: int,
-    body: dict,
+    body: RequirementTaskCreate,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -1586,30 +1585,17 @@ async def create_requirement_task(
     req = db.query(Requirement).filter(Requirement.id == requirement_id).first()
     if not req:
         raise HTTPException(404, "Requirement not found")
-    title = (body.get("title") or "").strip()
-    if not title:
-        raise HTTPException(422, "Task title is required")
-    from datetime import datetime as _dt
-
-    assigned_to_id = body.get("assigned_to_id")
-    due_at_raw = body.get("due_at")
-    due_at = None
-    if due_at_raw:
-        try:
-            due_at = _dt.fromisoformat(due_at_raw)
-        except (ValueError, TypeError):
-            pass
 
     task = RequisitionTask(
         requisition_id=req.requisition_id,
-        title=title,
+        title=body.title,
         task_type="general",
         status="todo",
         source="manual",
         source_ref=f"requirement:{requirement_id}",
         created_by=user.id,
-        assigned_to_id=assigned_to_id,
-        due_at=due_at,
+        assigned_to_id=body.assigned_to_id,
+        due_at=body.due_at,
     )
     db.add(task)
     db.commit()

@@ -64,9 +64,11 @@ def auth_client(db_session: Session) -> TestClient:
     app.dependency_overrides[get_db] = _override_db
 
     # Use https base_url so Secure session cookies work with TestClient
-    with TestClient(app, base_url="https://testserver") as c:
-        yield c
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app, base_url="https://testserver") as c:
+            yield c
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 # ── Login ────────────────────────────────────────────────────────────

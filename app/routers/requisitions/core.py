@@ -38,6 +38,7 @@ from ...schemas.requisitions import (
     BatchAssign,
     RequisitionCreate,
     RequisitionOut,
+    RequisitionOutcome,
     RequisitionUpdate,
 )
 from ...schemas.responses import RequisitionListResponse
@@ -510,17 +511,16 @@ async def create_requisition(
 
 
 @router.put("/api/requisitions/{req_id}/outcome")
-async def mark_outcome(req_id: int, body: dict, user: User = Depends(require_user), db: Session = Depends(get_db)):
+async def mark_outcome(
+    req_id: int, body: RequisitionOutcome, user: User = Depends(require_user), db: Session = Depends(get_db)
+):
     """Mark a requisition as won or lost."""
     from . import invalidate_prefix
 
-    outcome = (body.get("outcome") or "").lower()
-    if outcome not in ("won", "lost"):
-        raise HTTPException(400, "outcome must be 'won' or 'lost'")
     req = get_req_for_user(db, user, req_id)
     if not req:
         raise HTTPException(404, "Requisition not found")
-    req.status = outcome
+    req.status = body.outcome
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "status": req.status}

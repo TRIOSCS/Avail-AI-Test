@@ -87,9 +87,12 @@ def admin_client(db_session, admin_user):
     app.dependency_overrides[require_buyer] = _override_user
     app.dependency_overrides[require_admin] = _override_user
 
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user, require_buyer, require_admin]:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ── material_card_to_dict tests ──────────────────────────────────────────
@@ -683,12 +686,15 @@ class TestMaterialCardMerge:
         app.dependency_overrides[require_user] = lambda: admin_user
         app.dependency_overrides[require_admin] = lambda: admin_user
 
-        with TestClient(app) as c:
-            resp = c.post(
-                "/api/materials/merge",
-                json={"source_card_id": source.id, "target_card_id": test_material_card.id},
-            )
-        app.dependency_overrides.clear()
+        try:
+            with TestClient(app) as c:
+                resp = c.post(
+                    "/api/materials/merge",
+                    json={"source_card_id": source.id, "target_card_id": test_material_card.id},
+                )
+        finally:
+            for dep in [get_db, require_user, require_admin]:
+                app.dependency_overrides.pop(dep, None)
         assert resp.status_code == 200
         data = resp.json()
         assert data["ok"] is True

@@ -220,5 +220,41 @@ class SightingUnavailableIn(BaseModel):
     unavailable: bool = True
 
 
+class RequisitionOutcome(BaseModel):
+    """Mark a requisition as won or lost."""
+
+    outcome: str = Field(..., description="Must be 'won' or 'lost'")
+
+    @field_validator("outcome")
+    @classmethod
+    def validate_outcome(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in ("won", "lost"):
+            raise ValueError("outcome must be 'won' or 'lost'")
+        return v
+
+
+class RequirementNoteAdd(BaseModel):
+    """Append a note to a requirement."""
+
+    text: str = Field(..., min_length=1, max_length=2000)
+
+    @field_validator("text")
+    @classmethod
+    def strip_text(cls, v: str) -> str:
+        v = v.strip()
+        if not v:
+            raise ValueError("Note text is required")
+        return v
+
+
+class RequirementTaskCreate(BaseModel):
+    """Create a task linked to a requirement."""
+
+    title: str = Field(..., min_length=1, max_length=255)
+    assigned_to_id: int | None = None
+    due_at: datetime | None = None
+
+
 class SearchOptions(BaseModel):
     requirement_ids: list[int] | None = None

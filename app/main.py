@@ -287,8 +287,8 @@ if not os.environ.get("TESTING"):
         exempt_urls=[
             re.compile(r"/auth/callback$"),
             re.compile(r"/auth/login$"),
-            re.compile(r"/health"),
-            re.compile(r"/metrics"),
+            re.compile(r"/health$"),
+            re.compile(r"/metrics$"),
             re.compile(r"/api/buy-plans/token/.*"),  # external approval links
             re.compile(r"/v2/partials/requisitions/import-.*"),  # multipart file upload
             re.compile(r"/v2/partials/customers/(lookup|quick-create)"),  # AI company lookup modal
@@ -432,10 +432,13 @@ async def root_sw():
 
 
 @app.get("/health")
-async def health(request: Request, db: Session = Depends(get_db)):
+async def health(
+    request: Request,
+    db: Session = Depends(get_db),
+    x_metrics_token: str = Header(default=""),
+):
     from sqlalchemy import text
 
-    from . import scheduler as sched_mod
     from .cache.intel_cache import _get_redis
 
     db_ok = True
@@ -444,42 +447,53 @@ async def health(request: Request, db: Session = Depends(get_db)):
     except Exception:
         db_ok = False
 
-    redis_status = "off"
-    try:
-        r = _get_redis()
-        if r is not None:
-            redis_status = "ok" if r.ping() else "error"
-    except Exception:
-        redis_status = "error"
-
-    scheduler_running = getattr(sched_mod.scheduler, "running", False)
-    scheduler_status = "ok" if scheduler_running else "off"
-
-    # Connector status from startup scan
-    connector_status = getattr(request.app.state, "connector_status", {})
-    connectors_enabled = sum(1 for v in connector_status.values() if v)
-
-    # Backup freshness (informational — does not affect overall status)
-    from .services.health_service import check_backup_freshness
-
-    backup_status = check_backup_freshness()
-
     # "degraded" only when a required service is actively failing
-    degraded = not db_ok or redis_status == "error" or scheduler_status == "error"
+    degraded = not db_ok
     status = "degraded" if degraded else "ok"
+
+    # Public response: minimal — just status and db check
+    payload: dict = {
+        "status": status,
+        "db": "ok" if db_ok else "error",
+    }
+
+    # Detailed info only for authenticated monitoring (same token as /metrics)
+    _is_authed = bool(
+        settings.metrics_token and x_metrics_token and hmac.compare_digest(x_metrics_token, settings.metrics_token)
+    )
+    if _is_authed:
+        from . import scheduler as sched_mod
+        from .services.health_service import check_backup_freshness
+
+        redis_status = "off"
+        try:
+            r = _get_redis()
+            if r is not None:
+                redis_status = "ok" if r.ping() else "error"
+        except Exception:
+            redis_status = "error"
+
+        scheduler_running = getattr(sched_mod.scheduler, "running", False)
+        scheduler_status = "ok" if scheduler_running else "off"
+
+        connector_status = getattr(request.app.state, "connector_status", {})
+        connectors_enabled = sum(1 for v in connector_status.values() if v)
+
+        backup_status = check_backup_freshness()
+
+        degraded = not db_ok or redis_status == "error" or scheduler_status == "error"
+        payload["status"] = "degraded" if degraded else "ok"
+        payload["version"] = APP_VERSION
+        payload["redis"] = redis_status
+        payload["scheduler"] = scheduler_status
+        payload["connectors_enabled"] = connectors_enabled
+        payload["backup"] = backup_status
+
     from fastapi.responses import JSONResponse
 
     return JSONResponse(
-        content={
-            "status": status,
-            "version": APP_VERSION,
-            "db": "ok" if db_ok else "error",
-            "redis": redis_status,
-            "scheduler": scheduler_status,
-            "connectors_enabled": connectors_enabled,
-            "backup": backup_status,
-        },
-        status_code=200 if status == "ok" else 503,
+        content=payload,
+        status_code=200 if payload["status"] == "ok" else 503,
     )
 
 

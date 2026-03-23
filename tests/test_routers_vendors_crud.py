@@ -107,9 +107,12 @@ def admin_client(db_session, admin_user):
     app.dependency_overrides[require_buyer] = _override_user
     app.dependency_overrides[require_admin] = _override_user
 
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user, require_buyer, require_admin]:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ── card_to_dict tests ───────────────────────────────────────────────────
@@ -887,9 +890,12 @@ def test_list_vendors_empty(db_session, test_user):
     app.dependency_overrides[require_user] = _override_user
     app.dependency_overrides[require_buyer] = _override_user
 
-    with TestClient(app, raise_server_exceptions=False) as c:
-        resp = c.get("/api/vendors")
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            resp = c.get("/api/vendors")
+    finally:
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
     if resp.status_code == 500:
         pytest.xfail("SQLite test DB cannot execute PostgreSQL-only vendor list path")
@@ -1277,9 +1283,12 @@ def test_list_vendors_special_chars_in_query(db_session, test_user):
     app.dependency_overrides[require_user] = _override_user
     app.dependency_overrides[require_buyer] = _override_user
 
-    with TestClient(app, raise_server_exceptions=False) as c:
-        resp = c.get("/api/vendors", params={"q": "test_underscore"})
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            resp = c.get("/api/vendors", params={"q": "test_underscore"})
+    finally:
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
     if resp.status_code == 500:
         pytest.xfail("SQLite test DB cannot execute PostgreSQL-only search path")

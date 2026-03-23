@@ -679,9 +679,12 @@ def test_unmatched_activities_admin_required(db_session, sales_user):
 
     from fastapi.testclient import TestClient
 
-    with TestClient(app) as c:
-        resp = c.get("/api/activities/unmatched")
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            resp = c.get("/api/activities/unmatched")
+    finally:
+        for dep in [get_db, require_user]:
+            app.dependency_overrides.pop(dep, None)
     assert resp.status_code in (401, 403)
 
 

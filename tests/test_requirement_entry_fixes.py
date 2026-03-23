@@ -128,7 +128,8 @@ def test_sourcing_score_sales_cannot_see_others(db_session, sales_user, test_use
         resp = sales_c.get(f"/api/requisitions/{req.id}/sourcing-score")
         assert resp.status_code == 404
     finally:
-        app.dependency_overrides.clear()
+        for dep in [get_db, require_user, require_buyer, require_admin]:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ── B10: Batch archive respects role ─────────────────────────────────
@@ -168,7 +169,8 @@ def test_batch_archive_sales_only_own(db_session, sales_user, test_user):
         assert own_req.status == "archived"
         assert other_req.status == "open"
     finally:
-        app.dependency_overrides.clear()
+        for dep in [get_db, require_user, require_buyer, require_admin]:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ── B11: Batch assign requires admin ─────────────────────────────────
@@ -184,7 +186,8 @@ def test_batch_assign_non_admin_rejected(db_session, sales_user):
         )
         assert resp.status_code == 403
     finally:
-        app.dependency_overrides.clear()
+        for dep in [get_db, require_user, require_buyer, require_admin]:
+            app.dependency_overrides.pop(dep, None)
 
 
 def test_batch_assign_admin_allowed(db_session, admin_user, test_requisition, test_user):
@@ -198,7 +201,8 @@ def test_batch_assign_admin_allowed(db_session, admin_user, test_requisition, te
         assert resp.status_code == 200
         assert resp.json()["assigned_count"] == 1
     finally:
-        app.dependency_overrides.clear()
+        for dep in [get_db, require_user, require_buyer, require_admin]:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ── B16: Condition/packaging normalized on create ────────────────────

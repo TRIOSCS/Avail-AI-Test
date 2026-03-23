@@ -134,7 +134,7 @@ class TestVendorResponseTerminalStates:
             f"/api/vendor-responses/{_vendor_response.id}/status",
             json={"status": "invalid_state"},
         )
-        assert resp.status_code == 400
+        assert resp.status_code == 422
 
     def test_list_responses_filters_by_status(self, client, db_session, _rfq_requisition):
         from app.models.offers import VendorResponse

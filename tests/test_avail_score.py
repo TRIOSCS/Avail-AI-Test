@@ -622,7 +622,8 @@ class TestAvailScoreAPI:
         assert data["role"] == "buyer"
         assert len(data["entries"]) == 1
 
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_user, None)
 
     def test_get_avail_scores_sales(self, db_session):
         """GET /api/performance/avail-scores?role=sales returns data."""
@@ -647,7 +648,8 @@ class TestAvailScoreAPI:
         assert data["role"] == "sales"
         assert len(data["entries"]) >= 1
 
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_user, None)
 
     def test_invalid_role_rejected(self, db_session):
         """Invalid role returns 422."""
@@ -668,7 +670,8 @@ class TestAvailScoreAPI:
         resp = client.get("/api/performance/avail-scores?role=invalid")
         assert resp.status_code == 422
 
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_user, None)
 
     def test_refresh_requires_admin(self, db_session):
         """POST refresh requires admin role."""
@@ -689,7 +692,8 @@ class TestAvailScoreAPI:
         resp = client.post("/api/performance/avail-scores/refresh")
         assert resp.status_code == 403
 
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_user, None)
 
 
 # ── Edge cases ──────────────────────────────────────────────────────

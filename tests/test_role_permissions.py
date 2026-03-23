@@ -47,9 +47,12 @@ def buyer_only_client(db_session: Session, buyer_user: User) -> TestClient:
     app.dependency_overrides[require_user] = lambda: buyer_user
     app.dependency_overrides[require_buyer] = lambda: buyer_user
 
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
 
 @pytest.fixture()
@@ -66,9 +69,12 @@ def sales_full_client(db_session: Session, sales_user: User) -> TestClient:
     app.dependency_overrides[require_user] = lambda: sales_user
     app.dependency_overrides[require_buyer] = lambda: sales_user
 
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
 
 def _mock_request(user_id: int) -> MagicMock:

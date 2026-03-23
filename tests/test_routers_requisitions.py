@@ -519,9 +519,12 @@ def test_mark_sighting_unavailable_forbidden_for_other_sales_user(db_session, te
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = lambda: sales_user
 
-    with TestClient(app) as c:
-        resp = c.put(f"/api/sightings/{s.id}/unavailable", json={"unavailable": True})
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            resp = c.put(f"/api/sightings/{s.id}/unavailable", json={"unavailable": True})
+    finally:
+        for dep in [get_db, require_user]:
+            app.dependency_overrides.pop(dep, None)
 
     assert resp.status_code == 403
 

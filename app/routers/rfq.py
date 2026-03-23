@@ -39,7 +39,7 @@ from ..models import (
     VendorResponse,
     VendorReview,
 )
-from ..schemas.rfq import BatchRfqSend, FollowUpEmail, PhoneCallLog, RfqPrepare
+from ..schemas.rfq import BatchRfqSend, FollowUpEmail, PhoneCallLog, RfqPrepare, VendorResponseStatusUpdate
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["rfq"])
@@ -196,7 +196,8 @@ async def send_rfq(
                 on_rfq_sent(req_ids, db, actor=user)
                 db.commit()
     except Exception:
-        logger.warning("Requirement status update on RFQ send failed", exc_info=True)
+        logger.error("Requirement status update on RFQ send failed", exc_info=True)
+        db.rollback()
 
     # Phase 1: Auto-claim requisition for the buyer if unclaimed
     try:
@@ -207,7 +208,8 @@ async def send_rfq(
             claim_requisition(req, user, db)
             db.commit()
     except Exception:
-        logger.warning("Auto-claim on RFQ send failed", exc_info=True)
+        logger.error("Auto-claim on RFQ send failed", exc_info=True)
+        db.rollback()
 
     return {"results": results}
 
@@ -229,19 +231,14 @@ async def poll(
 @router.patch("/api/vendor-responses/{vr_id}/status")
 async def update_vendor_response_status(
     vr_id: int,
-    body: dict,
+    body: VendorResponseStatusUpdate,
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
     """Mark a vendor response as reviewed or rejected."""
-    VALID_STATUSES = {"new", "reviewed", "rejected"}
-    new_status = body.get("status")
-    if new_status not in VALID_STATUSES:
-        raise HTTPException(status_code=400, detail=f"Status must be one of: {', '.join(sorted(VALID_STATUSES))}")
-
     vr = _get_vendor_response_for_user(db, user, vr_id)
 
-    vr.status = new_status
+    vr.status = body.status
     db.commit()
     return {"id": vr.id, "status": vr.status}
 
@@ -662,7 +659,11 @@ async def rfq_prepare(
             )
         except asyncio.TimeoutError:
             logger.info("Server-side contact pre-check hit 10s cap, deferring to client")
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            logger.error("Failed to commit contact lookup results during RFQ prepare", exc_info=True)
+            db.rollback()
 
     return {"vendors": results, "all_parts": all_parts, "subs_map": subs_map}
 
@@ -965,7 +966,11 @@ def _enrich_with_vendor_cards(results: dict, db: Session):
             cards_dirty = True
 
     if cards_dirty:
-        db.commit()
+        try:
+            db.commit()
+        except Exception:
+            logger.error("Failed to commit vendor card updates during search enrichment", exc_info=True)
+            db.rollback()
         # Refresh summary cache with updated email counts
         for norm, card in card_by_norm.items():
             if norm in summary_cache:

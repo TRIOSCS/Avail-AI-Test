@@ -34,6 +34,7 @@ from ...models import (
     VendorContact,
 )
 from ...rate_limit import limiter
+from ...schemas.admin import TeamsChannelRouting
 from ...schemas.crm import CompanyMergeRequest, MassTransferRequest
 
 router = APIRouter(tags=["admin"])
@@ -583,7 +584,7 @@ def api_get_teams_notifications(
 @limiter.limit("10/minute")
 def api_set_teams_channel_routing(
     request: Request,
-    body: dict,
+    body: TeamsChannelRouting,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):

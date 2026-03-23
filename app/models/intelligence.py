@@ -268,6 +268,7 @@ class ActivityLog(Base):
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"))
     vendor_contact_id = Column(Integer, ForeignKey("vendor_contacts.id", ondelete="SET NULL"))
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"))
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True)
     quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="SET NULL"))
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"))
     site_contact_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="SET NULL"))
@@ -302,6 +303,7 @@ class ActivityLog(Base):
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
     vendor_contact = relationship("VendorContact", foreign_keys=[vendor_contact_id])
     requisition = relationship("Requisition", foreign_keys=[requisition_id])
+    requirement = relationship("Requirement", foreign_keys=[requirement_id])
     quote = relationship("Quote", foreign_keys=[quote_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
     site_contact = relationship("SiteContact", foreign_keys=[site_contact_id])
@@ -360,6 +362,12 @@ class ActivityLog(Base):
             postgresql_where=Column("requisition_id").isnot(None),
         ),
         Index("ix_activity_created_at", "created_at"),
+        Index(
+            "ix_activity_requirement",
+            "requirement_id",
+            "created_at",
+            postgresql_where=Column("requirement_id").isnot(None),
+        ),
     )
 
 

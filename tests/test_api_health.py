@@ -515,9 +515,12 @@ def admin_client(db_session, admin_user):
     app.dependency_overrides[require_admin] = lambda: admin_user
     app.dependency_overrides[require_settings_access] = lambda: admin_user
 
-    client = TestClient(app)
-    yield client
-    app.dependency_overrides.clear()
+    try:
+        client = TestClient(app)
+        yield client
+    finally:
+        for dep in [get_db, require_user, require_admin, require_settings_access]:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ── Status Accuracy Regression Tests ─────────────────────────────────

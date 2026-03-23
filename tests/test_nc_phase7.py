@@ -150,7 +150,9 @@ def test_nc_admin_requires_admin(db_session, sales_user, monkeypatch):
 
     monkeypatch.setattr(dependencies, "get_user", lambda _req, _db: sales_user)
     app.dependency_overrides[get_db] = _override_db
-    with TestClient(app) as c:
-        resp = c.get("/api/nc/queue/stats")
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            resp = c.get("/api/nc/queue/stats")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
     assert resp.status_code == 403

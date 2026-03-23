@@ -23,9 +23,11 @@ def test_update_knowledge_config_requires_admin(db_session, sales_user, monkeypa
 
     app.dependency_overrides[get_db] = _override_db
     monkeypatch.setattr(dependencies, "get_user", lambda _req, _db: sales_user)
-    with TestClient(app) as c:
-        resp = c.put("/api/knowledge/config", json={"test_key": "value"})
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            resp = c.put("/api/knowledge/config", json={"test_key": "value"})
+    finally:
+        app.dependency_overrides.pop(get_db, None)
     assert resp.status_code == 403
 
 
@@ -40,10 +42,12 @@ def test_update_knowledge_config_admin_ok(db_session, admin_user, monkeypatch):
 
     app.dependency_overrides[get_db] = _override_db
     monkeypatch.setattr(dependencies, "get_user", lambda _req, _db: admin_user)
-    with TestClient(app) as c:
-        put_resp = c.put("/api/knowledge/config", json={"unit_test_key": "123"})
-        get_resp = c.get("/api/knowledge/config")
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            put_resp = c.put("/api/knowledge/config", json={"unit_test_key": "123"})
+            get_resp = c.get("/api/knowledge/config")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
     assert put_resp.status_code == 200
     assert put_resp.json()["ok"] is True

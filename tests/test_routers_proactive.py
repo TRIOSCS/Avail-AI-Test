@@ -36,9 +36,12 @@ def sales_client(db_session: Session, sales_user: User) -> TestClient:
     app.dependency_overrides[require_user] = _override_user
     app.dependency_overrides[require_buyer] = _override_user
 
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ── Matches ──────────────────────────────────────────────────────────

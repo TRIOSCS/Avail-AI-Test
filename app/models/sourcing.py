@@ -97,6 +97,8 @@ class Requirement(Base):
     need_by_date = Column(Date)  # When customer needs the parts
     sale_notes = Column(Text)
     sourcing_status = Column(String(20), default="open")  # open | sourcing | offered | quoted | won | lost
+    priority_score = Column(Float, nullable=True)  # AI-computed 0-100 for sort order
+    assigned_buyer_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="requirements")
@@ -104,6 +106,7 @@ class Requirement(Base):
     attachments = relationship("RequirementAttachment", back_populates="requirement", cascade="all, delete-orphan")
     sightings = relationship("Sighting", back_populates="requirement", cascade="all, delete-orphan")
     offers = relationship("Offer", back_populates="requirement", cascade="all, delete-orphan")
+    assigned_buyer = relationship("User", foreign_keys=[assigned_buyer_id])
 
     __table_args__ = (
         Index("ix_req_requisition", "requisition_id"),

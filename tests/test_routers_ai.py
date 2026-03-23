@@ -176,10 +176,12 @@ def ai_client(db_session, ai_test_user):
     app.dependency_overrides[require_user] = _override_user
     app.dependency_overrides[require_buyer] = _override_user
 
-    with TestClient(app) as c:
-        yield c
-
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ---------------------------------------------------------------------------
@@ -473,9 +475,12 @@ def test_parse_response_scope_enforced_for_sales(db_session, sales_user, test_re
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = _override_user
-    with TestClient(app) as c, patch("app.routers.ai._ai_enabled", return_value=True):
-        resp = c.post(f"/api/ai/parse-response/{vr.id}")
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c, patch("app.routers.ai._ai_enabled", return_value=True):
+            resp = c.post(f"/api/ai/parse-response/{vr.id}")
+    finally:
+        for dep in [get_db, require_user]:
+            app.dependency_overrides.pop(dep, None)
     assert resp.status_code == 404
 
 
@@ -606,9 +611,12 @@ def test_save_parsed_offers_scope_enforced_for_sales(db_session, sales_user, tes
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = _override_user
-    with TestClient(app) as c:
-        resp = c.post("/api/ai/save-parsed-offers", json=payload)
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            resp = c.post("/api/ai/save-parsed-offers", json=payload)
+    finally:
+        for dep in [get_db, require_user]:
+            app.dependency_overrides.pop(dep, None)
     assert resp.status_code == 404
 
 
@@ -1167,12 +1175,15 @@ def test_parse_freeform_offer_scope_enforced_for_sales(db_session, sales_user, t
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = _override_user
-    with TestClient(app) as c, patch("app.routers.ai._ai_enabled", return_value=True):
-        resp = c.post(
-            "/api/ai/parse-freeform-offer",
-            json={"raw_text": "LM317T 500 @ $0.45", "requisition_id": test_requisition.id},
-        )
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c, patch("app.routers.ai._ai_enabled", return_value=True):
+            resp = c.post(
+                "/api/ai/parse-freeform-offer",
+                json={"raw_text": "LM317T 500 @ $0.45", "requisition_id": test_requisition.id},
+            )
+    finally:
+        for dep in [get_db, require_user]:
+            app.dependency_overrides.pop(dep, None)
     assert resp.status_code == 404
 
 

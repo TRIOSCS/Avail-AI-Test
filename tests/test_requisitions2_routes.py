@@ -803,9 +803,11 @@ def test_requisitions_stream_requires_auth(db_session):
         yield db_session
 
     app.dependency_overrides[get_db] = _override_db
-    with TestClient(app) as c:
-        resp = c.get("/requisitions2/stream")
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            resp = c.get("/requisitions2/stream")
+    finally:
+        app.dependency_overrides.pop(get_db, None)
     assert resp.status_code == 401
 
 
@@ -825,9 +827,12 @@ def test_inline_edit_scope_enforced_for_sales(db_session, sales_user, test_requi
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = _override_user
-    with TestClient(app) as c:
-        resp = c.get(f"/requisitions2/{test_requisition.id}/edit/name")
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            resp = c.get(f"/requisitions2/{test_requisition.id}/edit/name")
+    finally:
+        for dep in [get_db, require_user]:
+            app.dependency_overrides.pop(dep, None)
     assert resp.status_code == 404
 
 
@@ -850,9 +855,12 @@ def test_bulk_scope_enforced_for_sales(db_session, sales_user, test_requisition)
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = _override_user
-    with TestClient(app) as c:
-        resp = c.post("/requisitions2/bulk/archive", data={"ids": str(test_requisition.id)})
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            resp = c.post("/requisitions2/bulk/archive", data={"ids": str(test_requisition.id)})
+    finally:
+        for dep in [get_db, require_user]:
+            app.dependency_overrides.pop(dep, None)
     assert resp.status_code == 200
     db_session.refresh(test_requisition)
     assert test_requisition.status == "active"

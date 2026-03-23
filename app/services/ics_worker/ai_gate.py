@@ -8,6 +8,7 @@ Called by: worker loop (process_ai_gate)
 Depends on: claude_client, ics_search_queue model
 """
 
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -73,6 +74,7 @@ _GATE_SCHEMA = {
 
 # In-memory classification cache: (normalized_mpn, manufacturer) -> (commodity, decision, reason)
 _classification_cache: dict[tuple[str, str], tuple[str, str, str]] = {}
+_cache_lock = threading.Lock()
 
 
 async def classify_parts_batch(parts: list[dict]) -> list[dict] | None:
@@ -143,7 +145,8 @@ async def process_ai_gate(db: Session):
     uncached = []
     for item in pending:
         cache_key = (item.normalized_mpn, (item.manufacturer or "").lower())
-        cached = _classification_cache.get(cache_key)
+        with _cache_lock:
+            cached = _classification_cache.get(cache_key)
         if cached:
             commodity, decision, reason = cached
             item.commodity_class = commodity
@@ -201,7 +204,8 @@ async def process_ai_gate(db: Session):
 
                 # Cache the classification
                 cache_key = (item.normalized_mpn, (item.manufacturer or "").lower())
-                _classification_cache[cache_key] = (commodity, decision, reason)
+                with _cache_lock:
+                    _classification_cache[cache_key] = (commodity, decision, reason)
 
                 logger.info("AI gate: {} ({}) -> {} ({})", item.mpn, commodity, decision, reason)
 
@@ -216,4 +220,5 @@ async def process_ai_gate(db: Session):
 
 def clear_classification_cache():
     """Clear the in-memory classification cache (for testing)."""
-    _classification_cache.clear()
+    with _cache_lock:
+        _classification_cache.clear()

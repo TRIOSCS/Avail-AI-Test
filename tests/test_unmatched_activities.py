@@ -54,9 +54,12 @@ def _make_client(db_session, user):
     app.dependency_overrides[require_buyer] = _override_buyer
     app.dependency_overrides[require_admin] = _override_admin
 
-    client = TestClient(app)
-    yield client
-    app.dependency_overrides.clear()
+    try:
+        client = TestClient(app)
+        yield client
+    finally:
+        for dep in [get_db, require_user, require_buyer, require_admin]:
+            app.dependency_overrides.pop(dep, None)
 
 
 @pytest.fixture()

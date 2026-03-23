@@ -6,7 +6,6 @@ Called by: pytest
 Depends on: app.dependencies, conftest fixtures
 """
 
-
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
@@ -40,16 +39,15 @@ def raw_client(db_session: Session) -> TestClient:
 
     app.dependency_overrides[get_db] = _override_db
 
-    with TestClient(app) as c:
-        yield c
-
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        app.dependency_overrides.pop(get_db, None)
 
 
 class TestAgentAuth:
-    def test_valid_agent_key_authenticates(
-        self, raw_client: TestClient, agent_user: User
-    ):
+    def test_valid_agent_key_authenticates(self, raw_client: TestClient, agent_user: User):
         resp = raw_client.get(
             "/api/health",
             headers={"x-agent-key": "test-agent-key-secret"},
@@ -57,9 +55,7 @@ class TestAgentAuth:
         # Should not get 401 (may get 404 or 200 depending on route)
         assert resp.status_code != 401
 
-    def test_wrong_agent_key_does_not_authenticate(
-        self, raw_client: TestClient, agent_user: User
-    ):
+    def test_wrong_agent_key_does_not_authenticate(self, raw_client: TestClient, agent_user: User):
         """Wrong agent key should not grant access to protected API endpoints."""
         resp = raw_client.get(
             "/api/requisitions",
@@ -73,5 +69,6 @@ class TestAgentAuth:
         import inspect
 
         from app.dependencies import require_user
+
         source = inspect.getsource(require_user)
         assert "hmac.compare_digest" in source

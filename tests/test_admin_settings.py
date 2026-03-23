@@ -52,9 +52,12 @@ def _make_client(db_session, user):
     app.dependency_overrides[require_admin] = _override_admin
     app.dependency_overrides[require_settings_access] = _override_settings
 
-    client = TestClient(app)
-    yield client
-    app.dependency_overrides.clear()
+    try:
+        client = TestClient(app)
+        yield client
+    finally:
+        for dep in [get_db, require_user, require_buyer, require_admin, require_settings_access]:
+            app.dependency_overrides.pop(dep, None)
 
 
 @pytest.fixture()
@@ -149,11 +152,13 @@ def test_sales_cannot_access_credentials(db_session, sales_user):
     app.dependency_overrides[require_user] = lambda: sales_user
     app.dependency_overrides[require_settings_access] = _deny_settings
 
-    with TestClient(app) as c:
-        resp = c.get(f"/api/admin/sources/{src.id}/credentials")
-        assert resp.status_code == 403
-
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            resp = c.get(f"/api/admin/sources/{src.id}/credentials")
+            assert resp.status_code == 403
+    finally:
+        for dep in [get_db, require_user, require_settings_access]:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ── User Management Tests ────────────────────────────────────────────

@@ -42,4 +42,4 @@ def test_event_stream_requires_auth(db_session):
             resp = raw_client.get("/api/events/stream")
             assert resp.status_code == 401
     finally:
-        app.dependency_overrides.clear()
+        app.dependency_overrides.pop(get_db, None)

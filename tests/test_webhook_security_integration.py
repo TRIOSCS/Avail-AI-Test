@@ -41,9 +41,12 @@ def admin_client(db_session: Session, admin_user: User) -> TestClient:
     app.dependency_overrides[require_settings_access] = _override_admin
 
     limiter.reset()
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user, require_admin, require_buyer, require_settings_access]:
+            app.dependency_overrides.pop(dep, None)
 
 
 @pytest.fixture(autouse=True)

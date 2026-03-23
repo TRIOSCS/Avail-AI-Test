@@ -34,9 +34,12 @@ def _make_admin_client(db_session, user):
     app.dependency_overrides[require_settings_access] = lambda: user
     app.dependency_overrides[require_admin] = lambda: user
 
-    client = TestClient(app)
-    yield client
-    app.dependency_overrides.clear()
+    try:
+        client = TestClient(app)
+        yield client
+    finally:
+        for dep in [get_db, require_user, require_settings_access, require_admin]:
+            app.dependency_overrides.pop(dep, None)
 
 
 @pytest.fixture()

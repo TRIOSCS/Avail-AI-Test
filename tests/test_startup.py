@@ -2,7 +2,7 @@
 test_startup.py -- Tests for app/startup.py
 
 Covers: TESTING guard, _exec error handling, _create_default_user_if_env_set,
-_seed_vinod_user, _create_count_triggers, _create_fts_triggers, _backfill_fts,
+_seed_admin_user_if_env_set, _create_count_triggers, _create_fts_triggers, _backfill_fts,
 _seed_system_config, _seed_site_contacts, _backfill_normalized_mpn,
 _backfill_sighting_offer_normalized_mpn, _backfill_sighting_vendor_normalized,
 _backfill_company_counts, _analyze_hot_tables, _backfill_proactive_offer_qty,
@@ -136,15 +136,15 @@ class TestCreateDefaultUser:
 
 
 class TestSeedVinodUser:
-    """Lines 102, 112-114, 117: _seed_vinod_user logic."""
+    """Lines 102, 112-114, 117: _seed_admin_user_if_env_set logic."""
 
     @patch("app.startup.SessionLocal")
     def test_creates_vinod_user(self, mock_sl, db_session):
         """Creates Vinod admin user when not present."""
-        from app.startup import _seed_vinod_user
+        from app.startup import _seed_admin_user_if_env_set
 
         mock_sl.return_value = db_session
-        _seed_vinod_user()
+        _seed_admin_user_if_env_set()
 
         from app.models.auth import User
 
@@ -156,22 +156,22 @@ class TestSeedVinodUser:
     def test_skips_existing_vinod(self, mock_sl, db_session):
         """Does not duplicate Vinod user."""
         from app.models.auth import User
-        from app.startup import _seed_vinod_user
+        from app.startup import _seed_admin_user_if_env_set
 
         mock_sl.return_value = db_session
         existing = User(email="vinod@trioscs.com", name="Vinod", role="admin")
         db_session.add(existing)
         db_session.commit()
 
-        _seed_vinod_user()
+        _seed_admin_user_if_env_set()
         count = db_session.query(User).filter_by(email="vinod@trioscs.com").count()
         assert count == 1
 
     def test_seed_vinod_with_passed_db(self, db_session):
         """When db is passed directly, does not create/close own session."""
-        from app.startup import _seed_vinod_user
+        from app.startup import _seed_admin_user_if_env_set
 
-        _seed_vinod_user(db=db_session)
+        _seed_admin_user_if_env_set(db=db_session)
 
         from app.models.auth import User
 
@@ -181,7 +181,7 @@ class TestSeedVinodUser:
     @patch("app.startup.SessionLocal")
     def test_seed_vinod_handles_error(self, mock_sl):
         """Handles DB error gracefully (lines 112-114)."""
-        from app.startup import _seed_vinod_user
+        from app.startup import _seed_admin_user_if_env_set
 
         mock_db = MagicMock()
         mock_db.query.return_value.filter_by.return_value.first.return_value = None
@@ -190,7 +190,7 @@ class TestSeedVinodUser:
         mock_db.close = MagicMock()
         mock_sl.return_value = mock_db
 
-        _seed_vinod_user()
+        _seed_admin_user_if_env_set()
         mock_db.rollback.assert_called_once()
         mock_db.close.assert_called_once()
 
@@ -724,7 +724,7 @@ class TestRunStartupMigrationsNonTesting:
                 patch("app.startup._backfill_sighting_vendor_normalized") as m_sv,
                 patch("app.startup._backfill_proactive_offer_qty") as m_pq,
                 patch("app.startup._exec") as m_exec,
-                patch("app.startup._seed_vinod_user") as m_vinod,
+                patch("app.startup._seed_admin_user_if_env_set") as m_vinod,
             ):
                 run_startup_migrations()
                 m_fts.assert_called_once()

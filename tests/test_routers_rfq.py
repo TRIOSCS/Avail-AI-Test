@@ -202,7 +202,8 @@ def _client_as_user(db_session: Session, user: User):
         with TestClient(app) as c:
             yield c
     finally:
-        app.dependency_overrides.clear()
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ── GET /api/follow-ups ──────────────────────────────────────────────
@@ -370,9 +371,7 @@ def test_update_vendor_response_status_rejects_invalid_status(client, db_session
         f"/api/vendor-responses/{vr.id}/status",
         json={"status": "invalid"},
     )
-    assert resp.status_code == 400
-    msg = resp.json().get("detail") or resp.json().get("error", "")
-    assert "Status must be one of" in msg
+    assert resp.status_code == 422
 
 
 # ── POST /api/requisitions/{id}/rfq-prepare ──────────────────────────
@@ -503,9 +502,12 @@ def rfq_client(db_session: Session, test_user: User) -> TestClient:
     app.dependency_overrides[require_settings_access] = _override_user
 
     limiter.reset()
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user, require_buyer, require_settings_access]:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -1640,7 +1642,8 @@ def test_follow_ups_sales_role_filtering(
         assert data["count"] == 1
         assert data["follow_ups"][0]["vendor_name"] == "My Vendor"
     finally:
-        app.dependency_overrides.clear()
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
 
 def test_follow_ups_summary_sales_role_filtering(
@@ -1699,7 +1702,8 @@ def test_follow_ups_summary_sales_role_filtering(
         data = resp.json()
         assert data["total"] == 1
     finally:
-        app.dependency_overrides.clear()
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ── NEW TESTS — Owner-scoped RFQ access controls ─────────────────────

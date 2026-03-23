@@ -32,9 +32,12 @@ def sales_client(db_session, sales_user):
     app.dependency_overrides[require_user] = lambda: sales_user
     app.dependency_overrides[require_buyer] = lambda: sales_user
 
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
 
 @pytest.fixture()
@@ -51,9 +54,12 @@ def admin_client(db_session, admin_user):
     app.dependency_overrides[require_user] = lambda: admin_user
     app.dependency_overrides[require_buyer] = lambda: admin_user
 
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ═══════════════════════════════════════════════════════════════════════

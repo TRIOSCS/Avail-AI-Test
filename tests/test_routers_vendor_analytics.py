@@ -204,9 +204,12 @@ def test_parts_summary(db_session, test_user, test_vendor_card):
     app.dependency_overrides[require_user] = _override_user
     app.dependency_overrides[require_buyer] = _override_user
 
-    with TestClient(app, raise_server_exceptions=False) as c:
-        resp = c.get(f"/api/vendors/{test_vendor_card.id}/parts-summary")
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            resp = c.get(f"/api/vendors/{test_vendor_card.id}/parts-summary")
+    finally:
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
     if resp.status_code == 500:
         pytest.xfail("SQLite test DB cannot execute PostgreSQL-only aggregate path")
@@ -229,9 +232,12 @@ def test_parts_summary_not_found(db_session, test_user):
     app.dependency_overrides[require_user] = _override_user
     app.dependency_overrides[require_buyer] = _override_user
 
-    with TestClient(app, raise_server_exceptions=False) as c:
-        resp = c.get("/api/vendors/99999/parts-summary")
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app, raise_server_exceptions=False) as c:
+            resp = c.get("/api/vendors/99999/parts-summary")
+    finally:
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
     assert resp.status_code == 404
 

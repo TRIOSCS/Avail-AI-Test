@@ -62,7 +62,7 @@ class TestLifespanMissingEnvVars:
             with (
                 patch("app.main.settings") as mock_settings,
                 patch("app.startup.run_startup_migrations"),
-                patch("app.main._seed_api_sources"),
+                patch("app.startup.seed_api_sources"),
                 patch("app.connector_status.log_connector_status", return_value={}),
                 patch("app.scheduler.configure_scheduler"),
                 patch("app.scheduler.scheduler") as mock_sched,
@@ -103,7 +103,7 @@ class TestLifespanMissingEnvVars:
             with (
                 patch("app.main.settings") as mock_settings,
                 patch("app.startup.run_startup_migrations"),
-                patch("app.main._seed_api_sources"),
+                patch("app.startup.seed_api_sources"),
                 patch("app.connector_status.log_connector_status", return_value={}),
                 patch("app.scheduler.configure_scheduler"),
                 patch("app.scheduler.scheduler") as mock_sched,
@@ -152,7 +152,7 @@ class TestLifespanSentry:
             with (
                 patch("app.main.settings") as mock_settings,
                 patch("app.startup.run_startup_migrations"),
-                patch("app.main._seed_api_sources"),
+                patch("app.startup.seed_api_sources"),
                 patch("app.connector_status.log_connector_status", return_value={}),
                 patch("app.scheduler.configure_scheduler"),
                 patch("app.scheduler.scheduler") as mock_sched,
@@ -201,7 +201,7 @@ class TestLifespanSentry:
             with (
                 patch("app.main.settings") as mock_settings,
                 patch("app.startup.run_startup_migrations"),
-                patch("app.main._seed_api_sources"),
+                patch("app.startup.seed_api_sources"),
                 patch("app.connector_status.log_connector_status", return_value={}),
                 patch("app.scheduler.configure_scheduler"),
                 patch("app.scheduler.scheduler") as mock_sched,
@@ -267,7 +267,7 @@ class TestLifespanSentry:
             with (
                 patch("app.main.settings") as mock_settings,
                 patch("app.startup.run_startup_migrations"),
-                patch("app.main._seed_api_sources"),
+                patch("app.startup.seed_api_sources"),
                 patch("app.connector_status.log_connector_status", return_value={}),
                 patch("app.scheduler.configure_scheduler"),
                 patch("app.scheduler.scheduler") as mock_sched,
@@ -350,16 +350,18 @@ class TestGlobalExceptionHandler:
         async def crash_route():
             raise ValueError("deliberate crash for testing")
 
-        with TestClient(app, raise_server_exceptions=False) as c:
-            resp = c.get("/api/_test_global_exc_handler_cov")
-            assert resp.status_code == 500
-            data = resp.json()
-            assert data["error"] == "Internal server error"
-            assert data["status_code"] == 500
-            assert data["type"] == "ValueError"
-            assert "request_id" in data
-
-        app.dependency_overrides.clear()
+        try:
+            with TestClient(app, raise_server_exceptions=False) as c:
+                resp = c.get("/api/_test_global_exc_handler_cov")
+                assert resp.status_code == 500
+                data = resp.json()
+                assert data["error"] == "Internal server error"
+                assert data["status_code"] == 500
+                assert data["type"] == "ValueError"
+                assert "request_id" in data
+        finally:
+            for dep in [get_db, require_user, require_buyer]:
+                app.dependency_overrides.pop(dep, None)
 
 
 # ── CSRF middleware (lines 191-195) ───────────────────────────────────
@@ -420,11 +422,13 @@ class TestMiddlewareExceptionPath:
         async def middleware_crash():
             raise RuntimeError("crash in middleware test")
 
-        with TestClient(app, raise_server_exceptions=False) as c:
-            resp = c.get("/api/_test_mw_exc_cov")
-            assert resp.status_code == 500
-
-        app.dependency_overrides.clear()
+        try:
+            with TestClient(app, raise_server_exceptions=False) as c:
+                resp = c.get("/api/_test_mw_exc_cov")
+                assert resp.status_code == 500
+        finally:
+            for dep in [get_db, require_user, require_buyer]:
+                app.dependency_overrides.pop(dep, None)
 
 
 # ── Health endpoint: DB failure (lines 326-327) ──────────────────────
@@ -449,13 +453,15 @@ class TestHealthDbFailure:
         app.dependency_overrides[require_user] = lambda: test_user
         app.dependency_overrides[require_buyer] = lambda: test_user
 
-        with TestClient(app, raise_server_exceptions=False) as c:
-            resp = c.get("/health")
-            data = resp.json()
-            assert data["db"] == "error"
-            assert data["status"] == "degraded"
-
-        app.dependency_overrides.clear()
+        try:
+            with TestClient(app, raise_server_exceptions=False) as c:
+                resp = c.get("/health")
+                data = resp.json()
+                assert data["db"] == "error"
+                assert data["status"] == "degraded"
+        finally:
+            for dep in [get_db, require_user, require_buyer]:
+                app.dependency_overrides.pop(dep, None)
 
 
 # ── Health endpoint: Redis failure (lines 333-335) ───────────────────
@@ -465,22 +471,69 @@ class TestHealthRedisFailure:
     """Cover lines 333-335: Redis exception sets redis_status = 'error'."""
 
     def test_health_redis_error(self, client):
-        """When Redis raises, redis_status is 'error'."""
-        with patch("app.cache.intel_cache._get_redis") as mock_redis_fn:
+        """When Redis raises, redis_status is 'error' (requires metrics token)."""
+        with (
+            patch("app.cache.intel_cache._get_redis") as mock_redis_fn,
+            patch("app.main.settings.metrics_token", "test-token"),
+        ):
             mock_redis_fn.side_effect = Exception("Redis connection refused")
-            resp = client.get("/health")
+            resp = client.get("/health", headers={"x-metrics-token": "test-token"})
             data = resp.json()
             assert data["redis"] == "error"
 
     def test_health_redis_ping_false(self, client):
-        """When Redis ping returns False, redis_status is 'error'."""
-        with patch("app.cache.intel_cache._get_redis") as mock_redis_fn:
+        """When Redis ping returns False, redis_status is 'error' (requires metrics
+        token)."""
+        with (
+            patch("app.cache.intel_cache._get_redis") as mock_redis_fn,
+            patch("app.main.settings.metrics_token", "test-token"),
+        ):
             mock_r = MagicMock()
             mock_r.ping.return_value = False
             mock_redis_fn.return_value = mock_r
-            resp = client.get("/health")
+            resp = client.get("/health", headers={"x-metrics-token": "test-token"})
             data = resp.json()
             assert data["redis"] == "error"
+
+
+# ── Health endpoint: public vs authenticated response ────────────────
+
+
+class TestHealthPublicVsAuth:
+    """Verify /health gates detailed info behind metrics token."""
+
+    def test_health_public_minimal(self, client):
+        """Without token, /health returns only status and db."""
+        resp = client.get("/health")
+        data = resp.json()
+        assert "status" in data
+        assert "db" in data
+        assert "version" not in data
+        assert "redis" not in data
+        assert "scheduler" not in data
+        assert "connectors_enabled" not in data
+        assert "backup" not in data
+
+    def test_health_authenticated_full(self, client):
+        """With valid metrics token, /health returns full details."""
+        with patch("app.main.settings.metrics_token", "test-token"):
+            resp = client.get("/health", headers={"x-metrics-token": "test-token"})
+            data = resp.json()
+            assert "status" in data
+            assert "db" in data
+            assert "version" in data
+            assert "redis" in data
+            assert "scheduler" in data
+            assert "connectors_enabled" in data
+            assert "backup" in data
+
+    def test_health_wrong_token_returns_minimal(self, client):
+        """With wrong token, /health returns only minimal info."""
+        with patch("app.main.settings.metrics_token", "real-token"):
+            resp = client.get("/health", headers={"x-metrics-token": "wrong-token"})
+            data = resp.json()
+            assert "version" not in data
+            assert "redis" not in data
 
 
 # ── _seed_api_sources: existing source update (lines 767-773) ────────
@@ -491,9 +544,9 @@ class TestSeedApiSourcesUpdate:
 
     def test_seed_updates_existing_sources(self):
         """When some sources exist, update their attributes."""
-        from app.main import _seed_api_sources
+        from app.startup import seed_api_sources
 
-        with patch("app.database.SessionLocal") as mock_session_cls:
+        with patch("app.startup.SessionLocal") as mock_session_cls:
             mock_db = MagicMock()
             mock_session_cls.return_value = mock_db
 
@@ -502,7 +555,7 @@ class TestSeedApiSourcesUpdate:
 
             mock_db.query.return_value.all.return_value = [existing_nexar]
 
-            _seed_api_sources()
+            seed_api_sources()
 
             assert existing_nexar.display_name is not None or mock_db.add.called
             mock_db.commit.assert_called_once()
@@ -510,9 +563,9 @@ class TestSeedApiSourcesUpdate:
 
     def test_seed_updates_all_fields_on_existing(self):
         """Verify all update fields are set on an existing source."""
-        from app.main import _seed_api_sources
+        from app.startup import seed_api_sources
 
-        with patch("app.database.SessionLocal") as mock_session_cls:
+        with patch("app.startup.SessionLocal") as mock_session_cls:
             mock_db = MagicMock()
             mock_session_cls.return_value = mock_db
 
@@ -521,7 +574,7 @@ class TestSeedApiSourcesUpdate:
 
             mock_db.query.return_value.all.return_value = [existing_nexar]
 
-            _seed_api_sources()
+            seed_api_sources()
 
             assert hasattr(existing_nexar, "display_name")
 
@@ -534,9 +587,9 @@ class TestSeedApiSourcesLiveStatus:
 
     def test_seed_new_source_with_env_vars_set(self):
         """When a new source has env_vars and all are set, status is 'live'."""
-        from app.main import _seed_api_sources
+        from app.startup import seed_api_sources
 
-        with patch("app.database.SessionLocal") as mock_session_cls:
+        with patch("app.startup.SessionLocal") as mock_session_cls:
             mock_db = MagicMock()
             mock_session_cls.return_value = mock_db
             mock_db.query.return_value.all.return_value = []
@@ -565,21 +618,21 @@ class TestSeedApiSourcesLiveStatus:
                 return original_getenv(key, default)
 
             with patch("os.getenv", side_effect=mock_getenv):
-                _seed_api_sources()
+                seed_api_sources()
 
             assert mock_db.add.called
             mock_db.commit.assert_called_once()
 
     def test_seed_new_source_pending_status(self):
         """When env_vars are not set, status remains 'pending'."""
-        from app.main import _seed_api_sources
+        from app.startup import seed_api_sources
 
-        with patch("app.database.SessionLocal") as mock_session_cls:
+        with patch("app.startup.SessionLocal") as mock_session_cls:
             mock_db = MagicMock()
             mock_session_cls.return_value = mock_db
             mock_db.query.return_value.all.return_value = []
 
-            _seed_api_sources()
+            seed_api_sources()
 
             mock_db.add.assert_called()
             mock_db.commit.assert_called_once()

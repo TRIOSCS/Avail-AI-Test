@@ -81,9 +81,12 @@ def test_rfq_pdf_scope_enforced_for_sales(mock_gen, db_session, sales_user, test
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = _override_user
-    with TestClient(app) as c:
-        resp = c.get(f"/api/requisitions/{test_requisition.id}/pdf")
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            resp = c.get(f"/api/requisitions/{test_requisition.id}/pdf")
+    finally:
+        for dep in [get_db, require_user]:
+            app.dependency_overrides.pop(dep, None)
     assert resp.status_code == 404
 
 
@@ -102,7 +105,10 @@ def test_quote_pdf_scope_enforced_for_sales(mock_gen, db_session, sales_user, te
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = _override_user
-    with TestClient(app) as c:
-        resp = c.get(f"/api/quotes/{test_quote.id}/pdf")
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            resp = c.get(f"/api/quotes/{test_quote.id}/pdf")
+    finally:
+        for dep in [get_db, require_user]:
+            app.dependency_overrides.pop(dep, None)
     assert resp.status_code == 404

@@ -76,6 +76,20 @@ class TaskResponse(BaseModel):
     updated_at: datetime
 
 
+class TaskStatusUpdate(BaseModel):
+    """Quick status change from the task manager."""
+
+    status: str = Field(..., description="New status: todo, in_progress, or done")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, v: str) -> str:
+        v = v.strip().lower()
+        if v not in ("todo", "in_progress", "done"):
+            raise ValueError(f"Invalid status: {v}. Must be todo, in_progress, or done")
+        return v
+
+
 class TaskSummary(BaseModel):
     assigned_to_me: int = 0
     waiting_on: int = 0

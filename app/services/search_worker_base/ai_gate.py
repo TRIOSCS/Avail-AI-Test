@@ -9,6 +9,7 @@ Called by: worker loop (process_ai_gate)
 Depends on: llm_router, queue model
 """
 
+import threading
 import time
 from datetime import datetime, timezone
 
@@ -103,6 +104,7 @@ class AIGate:
         self._last_api_failure: float = 0.0
         # In-memory classification cache: (normalized_mpn, manufacturer) -> (commodity, decision, reason)
         self._classification_cache: dict[tuple[str, str], tuple[str, str, str]] = {}
+        self._cache_lock = threading.Lock()
 
     async def classify_parts_batch(self, parts: list[dict]) -> list[dict] | None:
         """Classify up to 30 parts using Claude Haiku.
@@ -165,7 +167,8 @@ class AIGate:
         uncached = []
         for item in pending:
             cache_key = (item.normalized_mpn, (item.manufacturer or "").lower())
-            cached = self._classification_cache.get(cache_key)
+            with self._cache_lock:
+                cached = self._classification_cache.get(cache_key)
             if cached:
                 commodity, decision, reason = cached
                 item.commodity_class = commodity
@@ -225,7 +228,8 @@ class AIGate:
 
                     # Cache the classification
                     cache_key = (item.normalized_mpn, (item.manufacturer or "").lower())
-                    self._classification_cache[cache_key] = (commodity, decision, reason)
+                    with self._cache_lock:
+                        self._classification_cache[cache_key] = (commodity, decision, reason)
 
                     logger.info("AI gate: {} ({}) -> {} ({})", item.mpn, commodity, decision, reason)
 
@@ -239,4 +243,5 @@ class AIGate:
 
     def clear_classification_cache(self):
         """Clear the in-memory classification cache (for testing)."""
-        self._classification_cache.clear()
+        with self._cache_lock:
+            self._classification_cache.clear()

@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.database import get_db
 from app.dependencies import require_user
-from app.schemas.task import TaskComplete, TaskCreate, TaskUpdate
+from app.schemas.task import TaskComplete, TaskCreate, TaskStatusUpdate, TaskUpdate
 from app.services import task_service
 
 router = APIRouter(prefix="/api/requisitions", tags=["tasks"])
@@ -141,18 +141,15 @@ def get_waiting_on_tasks(
 @my_tasks_router.patch("/{task_id}/status")
 def update_task_status(
     task_id: int,
-    body: dict,
+    body: TaskStatusUpdate,
     db: Session = Depends(get_db),
     user: dict = Depends(require_user),
 ):
     """Quick status change from the cross-requisition task manager."""
-    status = (body.get("status") or "").strip().lower()
-    if status not in ("todo", "in_progress", "done"):
-        raise HTTPException(400, f"Invalid status: {status}")
     task = task_service.get_task(db, task_id)
     if not task:
         raise HTTPException(404, "Task not found")
-    updated = task_service.update_task_status(db, task_id, status)
+    updated = task_service.update_task_status(db, task_id, body.status)
     return task_service.task_to_response(updated)
 
 

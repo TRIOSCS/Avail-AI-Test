@@ -24,6 +24,7 @@ from ...dependencies import require_admin, require_settings_access
 from ...models import ApiSource, User
 from ...models.config import ApiUsageLog
 from ...rate_limit import limiter
+from ...schemas.admin import SourceCredentialsUpdate
 from ...services.admin_service import get_all_config, get_system_health, set_config_value
 
 router = APIRouter(tags=["admin"])
@@ -227,7 +228,7 @@ def api_get_credentials(
 def api_set_credentials(
     source_id: int,
     request: Request,
-    body: dict,
+    body: SourceCredentialsUpdate,
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
@@ -243,7 +244,7 @@ def api_set_credentials(
     valid_vars = set(src.env_vars or [])
     creds = dict(src.credentials or {})
     updated = []
-    for var_name, value in body.items():
+    for var_name, value in body.model_dump(exclude_unset=True).items():
         if var_name not in valid_vars:
             continue
         value = (value or "").strip()

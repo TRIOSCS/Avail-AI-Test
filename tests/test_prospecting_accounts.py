@@ -36,9 +36,12 @@ def sales_client(db_session, sales_user):
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = lambda: sales_user
 
-    with TestClient(app) as c:
-        yield c
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        app.dependency_overrides.pop(get_db, None)
+        app.dependency_overrides.pop(require_user, None)
 
 
 def _make_company(db: Session, name: str = "Acme Corp", **kw) -> Company:

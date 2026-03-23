@@ -693,10 +693,12 @@ def admin_client(db_session, admin_user):
     app.dependency_overrides[require_buyer] = _override_user
     app.dependency_overrides[require_admin] = _override_user
 
-    with TestClient(app) as c:
-        yield c
-
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user, require_buyer, require_admin]:
+            app.dependency_overrides.pop(dep, None)
 
 
 @pytest.fixture()
@@ -716,10 +718,12 @@ def manager_client(db_session, manager_user):
     app.dependency_overrides[require_user] = _override_user
     app.dependency_overrides[require_buyer] = _override_user
 
-    with TestClient(app) as c:
-        yield c
-
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
 
 @pytest.fixture()
@@ -739,10 +743,12 @@ def sales_client(db_session, sales_user):
     app.dependency_overrides[require_user] = _override_user
     app.dependency_overrides[require_buyer] = _override_user
 
-    with TestClient(app) as c:
-        yield c
-
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            yield c
+    finally:
+        for dep in [get_db, require_user, require_buyer]:
+            app.dependency_overrides.pop(dep, None)
 
 
 # ── _preload_last_quoted_prices ───────────────────────────────────────
@@ -1159,12 +1165,15 @@ class TestSiteOwnershipGuard:
         app.dependency_overrides[require_user] = lambda: admin_user
         app.dependency_overrides[require_buyer] = lambda: admin_user
 
-        with TestClient(app) as c:
-            resp = c.put(
-                f"/api/sites/{test_customer_site.id}",
-                json={"owner_id": admin_user.id},
-            )
-        app.dependency_overrides.clear()
+        try:
+            with TestClient(app) as c:
+                resp = c.put(
+                    f"/api/sites/{test_customer_site.id}",
+                    json={"owner_id": admin_user.id},
+                )
+        finally:
+            for dep in [get_db, require_user, require_buyer]:
+                app.dependency_overrides.pop(dep, None)
         assert resp.status_code == 200
 
     def test_update_site_reassign_owner_non_admin_rejected(self, client, db_session, test_user, test_customer_site):
@@ -3742,9 +3751,12 @@ def test_quote_mutation_scope_enforced_for_sales(db_session, sales_user, test_qu
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = _override_user
-    with TestClient(app) as c:
-        resp = c.put(f"/api/quotes/{test_quote.id}", json={"notes": "should fail"})
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            resp = c.put(f"/api/quotes/{test_quote.id}", json={"notes": "should fail"})
+    finally:
+        for dep in [get_db, require_user]:
+            app.dependency_overrides.pop(dep, None)
     assert resp.status_code == 404
 
 
@@ -3767,8 +3779,11 @@ def test_pricing_history_scope_for_sales(db_session, sales_user, test_quote):
 
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = _override_user
-    with TestClient(app) as c:
-        resp = c.get("/api/pricing-history/LM317T")
-    app.dependency_overrides.clear()
+    try:
+        with TestClient(app) as c:
+            resp = c.get("/api/pricing-history/LM317T")
+    finally:
+        for dep in [get_db, require_user]:
+            app.dependency_overrides.pop(dep, None)
     assert resp.status_code == 200
     assert resp.json()["history"] == []

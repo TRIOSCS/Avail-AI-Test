@@ -69,7 +69,11 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
             if vendor_name not in alts and vendor_name != card.display_name:
                 alts.append(vendor_name)
                 card.alternate_names = alts
-                db.commit()
+                try:
+                    db.commit()
+                except Exception:
+                    logger.exception("Failed to commit domain-matched vendor alt name for '%s'", vendor_name)
+                    db.rollback()
             logger.info(
                 "Domain-matched vendor '%s' to '%s' (domain=%s)",
                 vendor_name,
@@ -96,7 +100,11 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
                     if vendor_name not in alts and vendor_name != card.display_name:
                         alts.append(vendor_name)
                         card.alternate_names = alts
-                        db.commit()
+                        try:
+                            db.commit()
+                        except Exception:
+                            logger.exception("Failed to commit pg_trgm matched vendor alt name for '%s'", vendor_name)
+                            db.rollback()
                     logger.info(
                         "pg_trgm matched vendor '%s' to '%s' (sim=%.2f)",
                         vendor_name,
@@ -127,7 +135,11 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
                 if vendor_name not in alts and vendor_name != card.display_name:
                     alts.append(vendor_name)
                     card.alternate_names = alts
-                    db.commit()
+                    try:
+                        db.commit()
+                    except Exception:
+                        logger.exception("Failed to commit fuzzy-matched vendor alt name for '%s'", vendor_name)
+                        db.rollback()
                 logger.info(
                     "Fuzzy-matched vendor '%s' to '%s' (score=%d)",
                     vendor_name,
@@ -140,7 +152,12 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
 
     card = VendorCard(normalized_name=norm, display_name=vendor_name, emails=[], phones=[])
     db.add(card)
-    db.commit()
+    try:
+        db.commit()
+    except Exception:
+        logger.exception("Failed to commit new VendorCard for '%s'", vendor_name)
+        db.rollback()
+        raise
     return card
 
 
@@ -161,7 +178,12 @@ async def _background_enrich_vendor(card_id: int, domain: str, vendor_name: str)
             card = db.get(VendorCard, card_id)
             if card:
                 apply_enrichment_to_vendor(card, enrichment)
-                db.commit()
+                try:
+                    db.commit()
+                except Exception:
+                    logger.exception("Background enrichment commit failed for vendor card %d", card_id)
+                    db.rollback()
+                    return
                 logger.info(
                     "Background enrichment completed for vendor %s (card %d): %s",
                     vendor_name,
