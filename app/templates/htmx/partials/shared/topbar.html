@@ -4,19 +4,19 @@
   Depends on: Alpine.js, HTMX, /v2/partials/search/global endpoint
   Context vars: user_name (str)
 #}
-<header class="sticky top-0 z-20 flex h-12 items-center justify-between gap-4 bg-white/95 backdrop-blur-sm px-4 sm:px-6"
-        style="box-shadow: 0 1px 0 rgba(202,221,239,0.4);">
+<header class="sticky top-0 z-20 flex h-12 items-center gap-4 bg-white px-3 sm:px-5"
+        style="border-bottom: 1px solid #CADDEF;">
 
-  {# Left: Logo #}
+  {# Left: Logo — maximized within 48px bar height #}
   <a href="/v2" hx-get="/v2/partials/parts/workspace" hx-target="#main-content" hx-push-url="/v2/requisitions"
-     class="flex-shrink-0">
-    <img src="/static/avail_logo_white_bg.png" alt="AVAIL" style="height:36px">
+     class="flex-shrink-0 flex items-center">
+    <img src="/static/avail_logo_white_bg.png" alt="AVAIL" class="h-10 w-auto">
   </a>
 
   {# Center: Global search #}
-  <div class="relative mx-auto w-full max-w-md" x-data="{ searchOpen: false }">
+  <div class="relative mx-auto w-full max-w-lg" x-data="{ searchOpen: false }">
     <div class="relative">
-      <svg xmlns="http://www.w3.org/2000/svg" class="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-gray-400"
+      <svg xmlns="http://www.w3.org/2000/svg" class="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-brand-400"
            fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <circle cx="11" cy="11" r="8"/>
         <path d="M21 21l-4.35-4.35"/>
@@ -25,7 +25,7 @@
              name="q"
              placeholder="Search reqs, customers, vendors..."
              autocomplete="off"
-             class="w-full rounded-md border border-gray-200 bg-gray-50/80 py-1.5 pl-8 pr-3 text-[13px] text-gray-700 placeholder-gray-400 outline-none transition-colors focus:border-brand-400 focus:bg-white focus:ring-1 focus:ring-brand-300"
+             class="w-full rounded-lg border border-brand-200 bg-brand-50/50 py-1.5 pl-9 pr-3 text-sm text-gray-800 placeholder-brand-300 outline-none transition-all focus:border-brand-400 focus:bg-white focus:shadow-sm"
              hx-get="/v2/partials/search/global"
              hx-trigger="keyup changed delay:300ms"
              hx-target="#global-search-results"
@@ -41,7 +41,7 @@
          x-transition:leave="transition ease-in duration-75"
          x-transition:leave-start="opacity-100 translate-y-0"
          x-transition:leave-end="opacity-0 -translate-y-1"
-         class="absolute left-0 right-0 top-full mt-1 max-h-80 overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-lg">
+         class="absolute left-0 right-0 top-full mt-1 max-h-80 overflow-y-auto rounded-lg border border-brand-200 bg-white shadow-lg">
     </div>
   </div>
 
