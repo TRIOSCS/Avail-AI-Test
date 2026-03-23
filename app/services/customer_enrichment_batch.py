@@ -15,6 +15,11 @@ from sqlalchemy.orm import Session
 
 from ..config import settings
 from ..models.enrichment import EnrichmentJob
+
+# NOTE: can_use_credits is used here as a check-only guard (no paired record_credit_usage).
+# This is intentional — the batch loop checks budget to decide whether to continue processing,
+# but actual credit recording happens inside enrich_customer_account(). No migration to
+# check_and_record_credits() is needed for this call site.
 from .credit_manager import can_use_credits
 from .customer_enrichment_service import enrich_customer_account, get_enrichment_gaps
 

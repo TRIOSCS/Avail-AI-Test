@@ -171,16 +171,18 @@ def test_get_or_create_row_handles_integrity_error(db_session, _mock_settings):
 
 
 def test_get_or_create_row_integrity_error_recovery(db_session, _mock_settings):
-    """Simulate IntegrityError on insert, verify fallback SELECT works."""
+    """When first SELECT misses but INSERT hits IntegrityError, retry SELECT
+    succeeds."""
+    from unittest.mock import MagicMock
 
     from app.models.enrichment import EnrichmentCreditUsage
-    from app.services.credit_manager import _current_month
+    from app.services.credit_manager import _current_month, _get_or_create_row
 
     month = _current_month()
 
-    # Pre-insert a row to make the next insert fail
+    # Pre-insert a row so the INSERT will hit a unique constraint violation
     row = EnrichmentCreditUsage(
-        provider="test_provider",
+        provider="test_race",
         month=month,
         credits_used=0,
         credits_limit=100,
@@ -188,11 +190,26 @@ def test_get_or_create_row_integrity_error_recovery(db_session, _mock_settings):
     db_session.add(row)
     db_session.flush()
 
-    # Now _get_or_create_row should find the existing row via SELECT
-    from app.services.credit_manager import _get_or_create_row
+    # Mock the first SELECT to return None, forcing the code into the INSERT path.
+    # The INSERT will hit IntegrityError (row already exists), and the except branch
+    # performs a retry SELECT that should find the pre-inserted row.
+    original_execute = db_session.execute
+    call_count = 0
 
-    result = _get_or_create_row(db_session, "test_provider", month)
-    assert result.id == row.id
+    def mock_execute(stmt, *args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        if call_count == 1:  # First SELECT returns None
+            result = MagicMock()
+            result.scalar_one_or_none.return_value = None
+            return result
+        return original_execute(stmt, *args, **kwargs)
+
+    with patch.object(db_session, "execute", side_effect=mock_execute):
+        result = _get_or_create_row(db_session, "test_race", month)
+
+    assert result.provider == "test_race"
+    assert result.id == row.id  # Same row recovered via retry SELECT
 
 
 def test_get_or_create_row_uses_savepoint(db_session, _mock_settings):
