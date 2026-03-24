@@ -139,13 +139,14 @@ class TestSchedulerSelectivity:
         assert 1 <= _BID_DUE_CAP <= 50
 
     def test_only_active_req_statuses(self):
+        from app.constants import RequisitionStatus
         from app.jobs.task_jobs import _ACTIVE_REQ_STATUSES
 
-        assert "archived" not in _ACTIVE_REQ_STATUSES
-        assert "won" not in _ACTIVE_REQ_STATUSES
-        assert "lost" not in _ACTIVE_REQ_STATUSES
-        assert "open" in _ACTIVE_REQ_STATUSES
-        assert "sourcing" in _ACTIVE_REQ_STATUSES
+        assert RequisitionStatus.ARCHIVED not in _ACTIVE_REQ_STATUSES
+        assert RequisitionStatus.WON not in _ACTIVE_REQ_STATUSES
+        assert RequisitionStatus.LOST not in _ACTIVE_REQ_STATUSES
+        assert RequisitionStatus.ACTIVE in _ACTIVE_REQ_STATUSES
+        assert RequisitionStatus.SOURCING in _ACTIVE_REQ_STATUSES
 
     def test_deadline_within_window_would_fire(self):
         """Deadlines within 2 days should be in scope."""

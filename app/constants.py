@@ -17,6 +17,7 @@ class ProactiveMatchStatus(StrEnum):
 
     NEW = "new"
     SENT = "sent"
+    FAILED = "failed"
     DISMISSED = "dismissed"
     CONVERTED = "converted"
     EXPIRED = "expired"
@@ -174,6 +175,7 @@ class VendorResponseStatus(StrEnum):
     """Vendor response queue status."""
 
     NEW = "new"
+    PARSED = "parsed"
     REVIEWED = "reviewed"
     REJECTED = "rejected"
 

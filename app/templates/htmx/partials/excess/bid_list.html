@@ -71,6 +71,7 @@
                       hx-target="#modal-content"
                       hx-get="/v2/partials/excess/{{ list_id }}/line-items/{{ item_id }}/bids"
                       hx-confirm="Accept this bid? All other pending bids will be rejected."
+                      data-loading-disable
                       class="px-2 py-1 text-xs font-medium text-emerald-700 bg-emerald-50 rounded hover:bg-emerald-100 transition-colors"
                       title="Accept bid">
                 Accept
@@ -78,6 +79,7 @@
               <button hx-patch="/api/excess-lists/{{ list_id }}/line-items/{{ item_id }}/bids/{{ bid.id }}"
                       hx-ext="json-enc"
                       hx-vals='{"status": "rejected"}'
+                      data-loading-disable
                       hx-target="#modal-content"
                       hx-get="/v2/partials/excess/{{ list_id }}/line-items/{{ item_id }}/bids"
                       class="px-2 py-1 text-xs font-medium text-gray-600 bg-gray-100 rounded hover:bg-gray-200 transition-colors"

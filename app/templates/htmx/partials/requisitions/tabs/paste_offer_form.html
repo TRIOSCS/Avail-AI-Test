@@ -14,6 +14,7 @@
   <form hx-post="/v2/partials/requisitions/{{ req.id }}/parse-offer"
         hx-target="#parse-area"
         hx-swap="innerHTML"
+        data-loading-disable
         @htmx:before-request="parsing = true"
         @htmx:after-request="parsing = false">
 

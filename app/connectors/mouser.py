@@ -7,6 +7,8 @@ Called by: search_service via BaseConnector.search()
 Depends on: http_client, utils, sources.BaseConnector
 """
 
+import re
+
 from loguru import logger
 
 from ..http_client import http
@@ -92,8 +94,6 @@ class MouserConnector(BaseConnector):
             # Parse availability string like "In Stock" or "3,500 In Stock"
             qty = None
             if avail:
-                import re
-
                 match = re.search(r"([\d,]+)\s+In Stock", avail, re.IGNORECASE)
                 if match:
                     qty = int(match.group(1).replace(",", ""))

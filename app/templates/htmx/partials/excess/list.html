@@ -55,7 +55,7 @@
         <svg class="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
         </svg>
-        <input type="text" name="q" value="{{ q }}" placeholder="Search lists..."
+        <input aria-label="Search excess lists" type="text" name="q" value="{{ q }}" placeholder="Search lists..."
                hx-get="/v2/partials/excess" hx-target="#main-content" hx-push-url="true"
                hx-swap="morph"
                hx-trigger="keyup changed delay:300ms"

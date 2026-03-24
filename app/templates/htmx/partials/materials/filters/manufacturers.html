@@ -5,16 +5,16 @@
 {% if manufacturer_options %}
 <div class="mb-3" x-data="{mfgSearch: '', mfgExpanded: false}">
   <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Manufacturer</h4>
-  <input type="text" x-model="mfgSearch"
+  <input aria-label="Search manufacturers" type="text" x-model="mfgSearch"
          @focus="mfgExpanded = true"
          placeholder="Search manufacturers..."
          class="w-full px-2 py-1.5 text-xs border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 mb-1">
-  <div class="max-h-40 overflow-y-auto space-y-0.5" x-show="mfgExpanded || (subFilters.manufacturers && subFilters.manufacturers.length > 0)">
+  <div class="max-h-40 overflow-y-auto space-y-0.5" x-show="mfgExpanded || (subFilters.manufacturers && subFilters.manufacturers.length > 0)" x-cloak>
     {% for mfr in manufacturer_options %}
     <label x-data="{name: {{ mfr.name | tojson }}}"
-           x-show="!mfgSearch || name.toLowerCase().includes(mfgSearch.toLowerCase())"
+           x-show="!mfgSearch || name.toLowerCase().includes(mfgSearch.toLowerCase())" x-cloak
            class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-xs">
-      <input type="checkbox"
+      <input aria-label="Filter by manufacturer" type="checkbox"
              :checked="(subFilters.manufacturers || []).includes(name)"
              @change="toggleFilter('manufacturers', name)"
              class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">

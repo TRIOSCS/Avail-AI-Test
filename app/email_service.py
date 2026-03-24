@@ -8,6 +8,7 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from .constants import VendorResponseStatus
 from .models import (
     ActivityLog,
     Contact,
@@ -622,7 +623,7 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
     except Exception as e:
         logger.error(f"Batch commit failed during inbox poll: {e}")
         db.rollback()
-        return []
+        raise  # Let caller handle retry / watermark advancement
 
     return results
 
@@ -895,7 +896,7 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
     """
     vr.parsed_data = parsed
     vr.confidence = parsed.get("confidence", 0)
-    vr.status = "parsed"
+    vr.status = VendorResponseStatus.PARSED
     classification = _classify_response(parsed, vr.body, vr.subject)
     vr.classification = classification["type"]
     vr.needs_action = classification["needs_action"]
@@ -903,7 +904,10 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
 
     # Delegate business-logic side effects when db is provided
     if db is not None:
-        _auto_create_offers_from_parse(vr, parsed, db)
+        try:
+            _auto_create_offers_from_parse(vr, parsed, db)
+        except Exception as e:
+            logger.warning("Auto-create offers failed for VR %s: %s", getattr(vr, "id", "?"), e)
 
 
 async def _handle_excess_bid_reply(msg: dict, solicitation_id: int, db: Session) -> None:
@@ -1038,27 +1042,32 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
         from .services.response_parser import extract_draft_offers
 
         draft_offers = extract_draft_offers(parsed, vr.vendor_name or "Unknown")
-        req = db.get(Requisition, vr.requisition_id)
-        owner_id = vr.scanned_by_user_id
-        if req and req.created_by:
-            owner_id = req.created_by
+    except Exception as e:
+        logger.warning("Failed to extract draft offers: %s", e)
+        return
 
-        # Build maps for linking: MPN -> requirement_id, MPN -> material_card_id
-        from .search_service import resolve_material_card
-        from .utils.normalization import normalize_mpn_key
+    req = db.get(Requisition, vr.requisition_id)
+    owner_id = vr.scanned_by_user_id
+    if req and req.created_by:
+        owner_id = req.created_by
 
-        req_obj = db.get(Requisition, vr.requisition_id)
-        mpn_to_req_id: dict[str, int] = {}
-        mpn_to_card_id: dict[str, int] = {}
-        if req_obj:
-            for r in db.query(Requirement).filter(Requirement.requisition_id == vr.requisition_id).all():
-                if r.primary_mpn:
-                    key = normalize_mpn_key(r.primary_mpn) or r.primary_mpn.upper().strip()
-                    mpn_to_req_id[key] = r.id
-                    if r.material_card_id:
-                        mpn_to_card_id[key] = r.material_card_id
+    # Build maps for linking: MPN -> requirement_id, MPN -> material_card_id
+    from .search_service import resolve_material_card
+    from .utils.normalization import normalize_mpn_key
 
-        for draft in draft_offers:
+    req_obj = db.get(Requisition, vr.requisition_id)
+    mpn_to_req_id: dict[str, int] = {}
+    mpn_to_card_id: dict[str, int] = {}
+    if req_obj:
+        for r in db.query(Requirement).filter(Requirement.requisition_id == vr.requisition_id).all():
+            if r.primary_mpn:
+                key = normalize_mpn_key(r.primary_mpn) or r.primary_mpn.upper().strip()
+                mpn_to_req_id[key] = r.id
+                if r.material_card_id:
+                    mpn_to_card_id[key] = r.material_card_id
+
+    for draft in draft_offers:
+        try:
             raw_mpn = draft.get("mpn") or ""
             mpn_key = normalize_mpn_key(raw_mpn) or raw_mpn.upper().strip()
             # Dedup: check if offer already exists from this vendor response
@@ -1178,8 +1187,8 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
                             subject=f"New vendor offer needs review: {vr.vendor_name or 'Unknown'} \u2014 {draft.get('mpn', '?')}",
                         )
                     )
-    except Exception as e:
-        logger.warning(f"Failed to auto-create draft offers: {e}")
+        except Exception as e:
+            logger.error("Failed to create offer for %s: %s", draft.get("mpn", "?"), e, exc_info=True)
 
 
 async def process_batch_results(db: Session) -> int:
@@ -1231,7 +1240,7 @@ async def process_batch_results(db: Session) -> int:
                 continue
 
             vr = db.get(VendorResponse, vr_id)
-            if not vr or vr.status == "parsed":
+            if not vr or vr.status == VendorResponseStatus.PARSED:
                 continue  # Already parsed (e.g., by sequential fallback)
 
             if parsed_data:

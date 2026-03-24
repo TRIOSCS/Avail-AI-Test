@@ -70,7 +70,7 @@
     <div class="mt-2">
       <span class="text-xs text-gray-400">Attachments:</span>
       {% for att in offer.attachments %}
-      <a href="{{ att.onedrive_url or '#' }}" target="_blank" class="text-xs text-brand-500 hover:text-brand-400 ml-1">{{ att.file_name }}</a>
+      <a href="{{ att.onedrive_url or '#' }}" target="_blank" rel="noopener noreferrer" class="text-xs text-brand-500 hover:text-brand-400 ml-1">{{ att.file_name }}</a>
       {% endfor %}
     </div>
     {% endif %}
@@ -84,14 +84,17 @@
       <button hx-post="/v2/partials/quotes/{{ quote.id }}/add-offer/{{ offer.id }}"
               hx-target="#quote-lines-body"
               hx-swap="beforeend"
+              data-loading-disable
               class="px-2 py-1 text-xs bg-brand-500 text-white rounded hover:bg-brand-600">
         Select for Quote
       </button>
       {% endif %}
       {% if offer.status == 'pending_review' %}
       <button hx-put="/api/offers/{{ offer.id }}/approve" hx-swap="none"
+              data-loading-disable
               class="px-2 py-1 text-xs bg-emerald-500 text-white rounded hover:bg-emerald-600">Approve</button>
       <button hx-put="/api/offers/{{ offer.id }}/reject" hx-swap="none"
+              data-loading-disable
               class="px-2 py-1 text-xs bg-rose-500 text-white rounded hover:bg-rose-600">Reject</button>
       {% endif %}
     </div>

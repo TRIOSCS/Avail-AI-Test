@@ -13,6 +13,7 @@
     <button hx-post="/v2/partials/search/run"
             hx-target="#search-results"
             hx-vals='{"mpn": "{{ mpn }}"}'
+            data-loading-disable
             class="mt-3 text-sm text-brand-500 hover:text-brand-600 font-medium underline">
       Retry search
     </button>
@@ -142,6 +143,7 @@
   <div class="space-y-3">
     {% for s in results %}
     <div class="lead-card bg-white border border-brand-200 rounded-lg shadow-sm hover:shadow-md hover:border-brand-400 transition-all"
+         x-cloak
          x-show="
            (confidenceFilter === 'all'
             || (confidenceFilter === 'high' && '{{ s.confidence_color }}' === 'green')

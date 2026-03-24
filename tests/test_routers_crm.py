@@ -123,7 +123,9 @@ def test_quote_to_dict_sent():
 
 def test_next_quote_number_first():
     db = MagicMock()
-    db.query.return_value.filter.return_value.order_by.return_value.first.return_value = None
+    db.query.return_value.filter.return_value.order_by.return_value.with_for_update.return_value.first.return_value = (
+        None
+    )
     result = next_quote_number(db)
     assert result.startswith("Q-")
     assert result.endswith("-0001")
@@ -133,7 +135,9 @@ def test_next_quote_number_increment():
     last = MagicMock()
     last.quote_number = "Q-2026-0042"
     db = MagicMock()
-    db.query.return_value.filter.return_value.order_by.return_value.first.return_value = last
+    db.query.return_value.filter.return_value.order_by.return_value.with_for_update.return_value.first.return_value = (
+        last
+    )
     result = next_quote_number(db)
     assert result == "Q-2026-0043"
 
@@ -143,7 +147,9 @@ def test_next_quote_number_bad_format():
     last = MagicMock()
     last.quote_number = "Q-2026-XXXX"
     db = MagicMock()
-    db.query.return_value.filter.return_value.order_by.return_value.first.return_value = last
+    db.query.return_value.filter.return_value.order_by.return_value.with_for_update.return_value.first.return_value = (
+        last
+    )
     result = next_quote_number(db)
     assert result.endswith("-0001")
 

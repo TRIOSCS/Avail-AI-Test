@@ -34,7 +34,8 @@
   <div id="ticket-list"
        hx-get="/v2/partials/trouble-tickets/list"
        hx-trigger="load"
-       hx-target="this">
-    <div class="text-center py-8 text-gray-400 text-sm">Loading...</div>
+       hx-target="this"
+       hx-indicator="#ticket-load-spinner">
+    <div id="ticket-load-spinner" class="htmx-indicator text-center py-8 text-gray-400 text-sm">Loading...</div>
   </div>
 </div>

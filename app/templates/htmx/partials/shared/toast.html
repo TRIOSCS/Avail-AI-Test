@@ -6,7 +6,7 @@
   Depends on: Alpine.js ($store.toast with message, type, show properties)
 #}
 <div x-data
-     x-show="$store.toast.show"
+     x-show="$store.toast.show" x-cloak
      x-cloak
      x-init="$watch('$store.toast.show', v => { if (v) setTimeout(() => $store.toast.show = false, 4000) })"
      x-transition:enter="transition ease-out duration-300"
@@ -25,17 +25,17 @@
      role="alert">
 
   {# Icon per type #}
-  <template x-if="$store.toast.type === 'success'">
+  <template x-if="$store.toast.type === 'success'" x-cloak>
     <svg class="h-5 w-5 flex-shrink-0 text-emerald-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
       <path stroke-linecap="round" stroke-linejoin="round" d="M5 13l4 4L19 7"/>
     </svg>
   </template>
-  <template x-if="$store.toast.type === 'error'">
+  <template x-if="$store.toast.type === 'error'" x-cloak>
     <svg class="h-5 w-5 flex-shrink-0 text-rose-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
       <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
     </svg>
   </template>
-  <template x-if="$store.toast.type === 'info'">
+  <template x-if="$store.toast.type === 'info'" x-cloak>
     <svg class="h-5 w-5 flex-shrink-0 text-brand-500" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
       <path stroke-linecap="round" stroke-linejoin="round" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
     </svg>

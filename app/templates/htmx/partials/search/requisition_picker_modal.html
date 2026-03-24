@@ -2,7 +2,7 @@
    Called by: shortlist_bar.html "Add to Requisition" button
    Depends on: htmx_views requisition_picker + add_to_requisition routes
 #}
-<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" @click.self="$el.remove()">
+<div class="fixed inset-0 z-50 flex items-center justify-center bg-black/50" role="dialog" aria-label="Add to requisition" @click.self="$el.remove()" @keydown.escape="$el.remove()">
   <div class="bg-gray-800 rounded-lg border border-gray-700 shadow-2xl w-full max-w-md mx-4 p-6">
     <h3 class="text-lg font-semibold text-white mb-4">Add to Requisition</h3>
 
@@ -14,7 +14,8 @@
               hx-ext="json-enc"
               hx-vals='{"requisition_id": {{ req.id }}, "mpn": "{{ mpn }}", "items": {{ items_json }}}'
               hx-target="#modal-result"
-              hx-swap="innerHTML">
+              hx-swap="innerHTML"
+              data-loading-disable>
         <div class="font-medium">{{ req.name }}</div>
         <div class="text-xs text-gray-400">{{ req.customer_name|default('', true) }} &middot; {{ req.requirements|length }} parts</div>
       </button>

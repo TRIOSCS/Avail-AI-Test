@@ -9,12 +9,13 @@
     @dblclick="editing = true">
   {# MPN cell — in edit mode, expands to show full inline form #}
   <td class="px-4 py-3 text-sm font-mono font-medium text-gray-900" :colspan="editing ? 7 : 1">
-    <template x-if="!editing">
+    <template x-if="!editing" x-cloak>
       <span>{{ line.mpn }}</span>
     </template>
-    <template x-if="editing">
+    <template x-if="editing" x-cloak>
       <form hx-put="/v2/partials/quotes/{{ line.quote_id }}/lines/{{ line.id }}"
             hx-target="#line-{{ line.id }}" hx-swap="outerHTML"
+            data-loading-disable
             class="flex flex-wrap gap-2 items-end">
         <div>
           <label class="block text-xs text-gray-400 mb-0.5">MPN</label>
@@ -50,11 +51,11 @@
       </form>
     </template>
   </td>
-  <td class="px-4 py-3 text-sm text-gray-600" x-show="!editing">{{ line.manufacturer or '-' }}</td>
-  <td class="px-4 py-3 text-sm text-gray-600 text-right" x-show="!editing">{{ '{:,}'.format(line.qty) if line.qty else '-' }}</td>
-  <td class="px-4 py-3 text-sm text-gray-600 text-right" x-show="!editing">${{ '{:,.4f}'.format(line.cost_price|float) if line.cost_price else '-' }}</td>
-  <td class="px-4 py-3 text-sm text-gray-600 text-right" x-show="!editing">${{ '{:,.4f}'.format(line.sell_price|float) if line.sell_price else '-' }}</td>
-  <td class="px-4 py-3 text-sm text-right" x-show="!editing">
+  <td class="px-4 py-3 text-sm text-gray-600" x-show="!editing" x-cloak>{{ line.manufacturer or '-' }}</td>
+  <td class="px-4 py-3 text-sm text-gray-600 text-right" x-show="!editing" x-cloak>{{ '{:,}'.format(line.qty) if line.qty else '-' }}</td>
+  <td class="px-4 py-3 text-sm text-gray-600 text-right" x-show="!editing" x-cloak>${{ '{:,.4f}'.format(line.cost_price|float) if line.cost_price else '-' }}</td>
+  <td class="px-4 py-3 text-sm text-gray-600 text-right" x-show="!editing" x-cloak>${{ '{:,.4f}'.format(line.sell_price|float) if line.sell_price else '-' }}</td>
+  <td class="px-4 py-3 text-sm text-right" x-show="!editing" x-cloak>
     {% set mp = line.margin_pct|float if line.margin_pct else 0 %}
     <span class="inline-flex px-1.5 py-0.5 rounded text-xs font-medium
                  {% if mp >= 30 %}bg-emerald-50 text-emerald-700
@@ -63,11 +64,12 @@
       {{ '{:.1f}'.format(mp) }}%
     </span>
   </td>
-  <td class="px-4 py-3 text-center" x-show="!editing">
+  <td class="px-4 py-3 text-center" x-show="!editing" x-cloak>
     <button hx-delete="/v2/partials/quotes/{{ line.quote_id }}/lines/{{ line.id }}"
             hx-target="#line-{{ line.id }}"
             hx-swap="delete"
             hx-confirm="Remove this line?"
+            data-loading-disable
             class="text-xs text-rose-500 hover:text-rose-700 font-medium opacity-0 group-hover:opacity-100 transition-opacity">
       <svg class="w-4 h-4 inline" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"/></svg>
     </button>

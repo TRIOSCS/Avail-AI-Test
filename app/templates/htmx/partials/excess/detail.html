@@ -30,7 +30,7 @@
     <div class="flex items-start justify-between">
       <div class="flex-1 min-w-0" x-data="{ editing: false, title: {{ list.title|tojson }} }">
         {# Inline-editable title #}
-        <div x-show="!editing" @dblclick="editing = true" class="cursor-pointer group/title">
+        <div x-show="!editing" x-cloak @dblclick="editing = true" class="cursor-pointer group/title">
           <h1 class="text-2xl font-bold text-gray-900 inline">
             <span x-text="title">{{ list.title }}</span>
           </h1>
@@ -43,11 +43,12 @@
               hx-patch="/api/excess-lists/{{ list.id }}"
               hx-ext="json-enc"
               hx-target="#main-content"
+              data-loading-disable
               hx-vals='js:{"title": document.getElementById("edit-title-input").value}'
               hx-get="/v2/partials/excess/{{ list.id }}"
               @htmx:after-request.camel="editing = false"
               class="inline-flex items-center gap-2">
-          <input id="edit-title-input" type="text" x-model="title" @keydown.escape="editing = false"
+          <input aria-label="Edit list title" id="edit-title-input" type="text" x-model="title" @keydown.escape="editing = false"
                  @keydown.enter.prevent="$el.form.requestSubmit()"
                  x-ref="titleInput" x-init="$watch('editing', v => { if(v) $nextTick(() => $refs.titleInput.focus()) })"
                  class="text-2xl font-bold text-gray-900 border-b-2 border-brand-500 bg-transparent outline-none px-0 py-0">
@@ -99,6 +100,7 @@
                 hx-target="#main-content"
                 hx-get="/v2/partials/excess/{{ list.id }}"
                 hx-confirm="Activate this list? It will become visible for bidding."
+                data-loading-disable
                 class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors">
           <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           Activate
@@ -110,6 +112,7 @@
                 hx-target="#main-content"
                 hx-get="/v2/partials/excess/{{ list.id }}"
                 hx-confirm="Start bidding on this list?"
+                data-loading-disable
                 class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-white bg-amber-500 rounded-lg hover:bg-amber-600 transition-colors">
           <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 8c-1.657 0-3 .895-3 2s1.343 2 3 2 3 .895 3 2-1.343 2-3 2m0-8c1.11 0 2.08.402 2.599 1M12 8V7m0 1v8m0 0v1m0-1c-1.11 0-2.08-.402-2.599-1M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/></svg>
           Start Bidding
@@ -121,6 +124,7 @@
                 hx-target="#main-content"
                 hx-get="/v2/partials/excess/{{ list.id }}"
                 hx-confirm="Close bidding on this list? No more bids will be accepted."
+                data-loading-disable
                 class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-white bg-slate-500 rounded-lg hover:bg-slate-600 transition-colors">
           <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 15v2m-6 4h12a2 2 0 002-2v-6a2 2 0 00-2-2H6a2 2 0 00-2 2v6a2 2 0 002 2zm10-10V7a4 4 0 00-8 0v4h8z"/></svg>
           Close
@@ -145,6 +149,7 @@
         <button hx-post="/v2/partials/excess/{{ list.id }}/proactive-matches"
                 hx-target="#main-content"
                 hx-confirm="Create proactive matches for archived requirements?"
+                data-loading-disable
                 class="inline-flex items-center px-3 py-1.5 text-sm font-medium text-brand-600 bg-white border border-brand-200 rounded-lg hover:bg-brand-50 transition-colors">
           <svg class="h-4 w-4 mr-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
             <path stroke-linecap="round" stroke-linejoin="round" d="M13 10V3L4 14h7v7l9-11h-7z"/>
@@ -167,6 +172,7 @@
             hx-encoding="multipart/form-data"
             hx-target="#import-area"
             hx-swap="innerHTML"
+            data-loading-disable
             @htmx:before-request.camel="uploading = true"
             @htmx:after-request.camel="uploading = false">
 
@@ -177,11 +183,11 @@
              class="border-2 border-dashed rounded-lg p-8 text-center transition-colors cursor-pointer"
              @click="$refs.fileInput.click()">
 
-          <input type="file" name="file" x-ref="fileInput" accept=".csv,.tsv,.xlsx,.xls"
+          <input aria-label="Upload excess inventory file" type="file" name="file" x-ref="fileInput" accept=".csv,.tsv,.xlsx,.xls"
                  @change="if ($refs.fileInput.files.length) $el.closest('form').requestSubmit()"
                  class="hidden">
 
-          <template x-if="!uploading">
+          <template x-if="!uploading" x-cloak>
             <div>
               <svg class="mx-auto h-10 w-10 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
                 <path stroke-linecap="round" stroke-linejoin="round" d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12"/>
@@ -192,7 +198,7 @@
               <p class="mt-1 text-xs text-gray-500">CSV, TSV, or Excel files (max 10 MB)</p>
             </div>
           </template>
-          <template x-if="uploading">
+          <template x-if="uploading" x-cloak>
             <div class="flex items-center justify-center gap-2 text-brand-600">
               <svg class="h-5 w-5 spinner" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
               <span class="text-sm font-medium">Processing...</span>

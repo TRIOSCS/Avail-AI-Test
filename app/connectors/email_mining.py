@@ -19,6 +19,7 @@ import re
 from datetime import datetime, timedelta, timezone
 
 from loguru import logger
+from sqlalchemy.exc import IntegrityError
 
 from app.utils.graph_client import GraphSyncStateExpired
 
@@ -116,9 +117,12 @@ class EmailMiner:
             )
             self.db.flush()
             savepoint.commit()
-        except Exception:
+        except IntegrityError:
             # Duplicate key — already processed (race condition safety)
             savepoint.rollback()
+        except Exception:
+            savepoint.rollback()
+            logger.warning("Unexpected error marking message %s as processed", message_id, exc_info=True)
 
     # ── H8: Delta Query helpers ──────────────────────────────────────
 

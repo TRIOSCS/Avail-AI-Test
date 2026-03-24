@@ -23,7 +23,7 @@ from sqlalchemy.orm import Session
 
 from ..constants import TicketSource, TicketStatus
 from ..database import get_db
-from ..dependencies import require_user
+from ..dependencies import require_admin, require_user
 from ..models import User
 from ..models.trouble_ticket import TroubleTicket
 from ..template_env import templates
@@ -308,7 +308,7 @@ async def list_error_reports(
     status: Optional[str] = Query(None),
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """List trouble reports (source='report_button' only)."""
@@ -338,7 +338,7 @@ async def list_error_reports(
 @router.get("/api/trouble-tickets/{report_id}")
 async def get_error_report(
     report_id: int,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Get a single trouble report."""
@@ -363,7 +363,7 @@ async def get_error_report(
 @router.post("/api/trouble-tickets/analyze", response_class=HTMLResponse)
 async def analyze_tickets(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Batch AI analysis — group open tickets by root cause."""
@@ -465,7 +465,7 @@ async def analyze_tickets(
 async def update_ticket(
     report_id: int,
     body: TicketUpdate,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Update a trouble ticket status or resolution notes."""

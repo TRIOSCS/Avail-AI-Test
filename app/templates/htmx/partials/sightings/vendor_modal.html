@@ -58,8 +58,8 @@
       <button @click="cleaning = true; fetch('/api/ai/clean-rfq-draft', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({draft: emailBody, parts: {{ parts|tojson }}})}).then(r => r.json()).then(d => { emailBody = d.cleaned || emailBody; cleaning = false; }).catch(() => cleaning = false)"
               :disabled="!emailBody || cleaning"
               class="text-[10px] text-brand-500 hover:text-brand-700 disabled:text-gray-300">
-        <span x-show="!cleaning">Clean Up</span>
-        <span x-show="cleaning">Cleaning...</span>
+        <span x-show="!cleaning" x-cloak>Clean Up</span>
+        <span x-show="cleaning" x-cloak>Cleaning...</span>
       </button>
     </div>
     <textarea x-model="emailBody" rows="5" placeholder="Write your inquiry..."
@@ -82,7 +82,7 @@
     "
             :disabled="selectedVendors.size === 0 || !emailBody"
             class="px-4 py-2 text-sm font-medium text-white bg-brand-500 hover:bg-brand-600 rounded-lg transition-colors disabled:bg-gray-300">
-      Send to <span x-text="selectedVendors.size"></span> Vendor<span x-show="selectedVendors.size !== 1">s</span>
+      Send to <span x-text="selectedVendors.size"></span> Vendor<span x-show="selectedVendors.size !== 1" x-cloak>s</span>
     </button>
   </div>
 </div>

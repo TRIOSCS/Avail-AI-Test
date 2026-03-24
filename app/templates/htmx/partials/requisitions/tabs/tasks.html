@@ -23,6 +23,7 @@
     <form hx-post="/api/requisitions/{{ req.id }}/tasks"
           hx-target="#task-list"
           hx-swap="afterbegin"
+          data-loading-disable
           @htmx:after-request.camel="if(event.detail.successful) { $el.reset(); Alpine.store('toast').message='Task added'; Alpine.store('toast').type='success'; Alpine.store('toast').show=true; }"
           class="flex flex-wrap items-end gap-3">
       <div class="flex-1 min-w-[180px]">
@@ -75,13 +76,14 @@
       {% for t in tasks %}
       <div id="task-{{ t.id }}"
            class="flex items-center gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-brand-200 hover:shadow-sm transition-all"
-           x-show="taskFilter === 'all' || taskFilter === '{{ t.status }}'">
+           x-show="taskFilter === 'all' || taskFilter === '{{ t.status }}'" x-cloak>
 
         {# Complete checkbox #}
         {% if t.status != 'done' %}
         <button hx-post="/api/requisitions/{{ req.id }}/tasks/{{ t.id }}/complete"
                 hx-target="#task-{{ t.id }}"
                 hx-swap="outerHTML"
+                data-loading-disable
                 class="flex-shrink-0 h-5 w-5 rounded-full border-2 border-gray-300 hover:border-emerald-500 hover:bg-emerald-50 transition-colors"
                 title="Mark complete">
         </button>
@@ -150,6 +152,7 @@
                 hx-target="#task-{{ t.id }}"
                 hx-swap="delete"
                 hx-confirm="Delete this task?"
+                data-loading-disable
                 class="flex-shrink-0 text-gray-300 hover:text-rose-500 transition-colors opacity-0 group-hover:opacity-100"
                 title="Delete task">
           <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">

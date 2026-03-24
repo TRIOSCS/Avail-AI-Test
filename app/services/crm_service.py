@@ -12,10 +12,19 @@ from ..models import Quote
 
 
 def next_quote_number(db: Session) -> str:
-    """Generate next sequential quote number: Q-YYYY-NNNN."""
+    """Generate next sequential quote number: Q-YYYY-NNNN.
+
+    Uses SELECT FOR UPDATE to prevent race conditions.
+    """
     year = datetime.now(timezone.utc).year
     prefix = f"Q-{year}-"
-    last = db.query(Quote).filter(Quote.quote_number.like(f"{prefix}%")).order_by(Quote.id.desc()).first()
+    last = (
+        db.query(Quote)
+        .filter(Quote.quote_number.like(f"{prefix}%"))
+        .order_by(Quote.id.desc())
+        .with_for_update()
+        .first()
+    )
     if last:
         try:
             seq = int(last.quote_number.split("-")[-1]) + 1

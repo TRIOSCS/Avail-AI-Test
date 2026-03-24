@@ -8,20 +8,20 @@
     @dblclick="editing = true">
 
   {# ── Display mode ────────────────────────────────────────── #}
-  <td class="px-4 py-2 text-sm font-medium text-gray-900" x-show="!editing">
+  <td class="px-4 py-2 text-sm font-medium text-gray-900" x-show="!editing" x-cloak>
     {{ c.full_name or "—" }}
   </td>
-  <td class="px-4 py-2 text-sm text-gray-500" x-show="!editing">{{ c.title or "—" }}</td>
-  <td class="px-4 py-2 text-sm text-gray-500" x-show="!editing">{{ c.email or "—" }}</td>
-  <td class="px-4 py-2 text-sm" x-show="!editing">
+  <td class="px-4 py-2 text-sm text-gray-500" x-show="!editing" x-cloak>{{ c.title or "—" }}</td>
+  <td class="px-4 py-2 text-sm text-gray-500" x-show="!editing" x-cloak>{{ c.email or "—" }}</td>
+  <td class="px-4 py-2 text-sm" x-show="!editing" x-cloak>
     {% if c.phone %}
       <a href="tel:{{ c.phone }}" class="text-brand-500 hover:text-brand-600">{{ c.phone }}</a>
     {% else %}
       <span class="text-gray-500">&mdash;</span>
     {% endif %}
   </td>
-  <td class="px-4 py-2 text-sm text-gray-500 text-right" x-show="!editing">{{ c.interaction_count or 0 }}</td>
-  <td class="px-4 py-2 text-center" x-show="!editing">
+  <td class="px-4 py-2 text-sm text-gray-500 text-right" x-show="!editing" x-cloak>{{ c.interaction_count or 0 }}</td>
+  <td class="px-4 py-2 text-center" x-show="!editing" x-cloak>
     <div class="flex items-center justify-center gap-2">
       <button @click.stop="editing = true"
               class="text-xs text-brand-500 hover:text-brand-600 font-medium opacity-0 group-hover:opacity-100">
@@ -29,6 +29,7 @@
       </button>
       <button hx-post="/api/vendors/{{ vendor.id }}/contacts/{{ c.id }}/log-call"
               hx-swap="none"
+              data-loading-disable
               class="text-xs text-emerald-600 hover:text-emerald-700 font-medium opacity-0 group-hover:opacity-100"
               @click.stop>
         Log Call
@@ -37,6 +38,7 @@
               hx-target="#vendor-contact-{{ c.id }}"
               hx-swap="delete"
               hx-confirm="Delete this contact?"
+              data-loading-disable
               class="text-xs text-rose-500 hover:text-rose-700 font-medium opacity-0 group-hover:opacity-100"
               @click.stop>
         Delete
@@ -48,17 +50,18 @@
   <td colspan="6" x-show="editing" x-cloak>
     <form hx-put="/api/vendors/{{ vendor.id }}/contacts/{{ c.id }}"
           hx-target="#vendor-contact-{{ c.id }}" hx-swap="outerHTML"
+          data-loading-disable
           class="flex items-center gap-2 py-1">
-      <input type="text" name="full_name" value="{{ c.full_name or '' }}"
+      <input aria-label="Full Name" type="text" name="full_name" value="{{ c.full_name or '' }}"
              class="w-36 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
              placeholder="Full Name">
-      <input type="text" name="title" value="{{ c.title or '' }}"
+      <input aria-label="Title" type="text" name="title" value="{{ c.title or '' }}"
              class="w-28 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
              placeholder="Title">
-      <input type="email" name="email" value="{{ c.email or '' }}" required
+      <input aria-label="Email" type="email" name="email" value="{{ c.email or '' }}" required
              class="w-44 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
              placeholder="email@vendor.com">
-      <input type="text" name="phone" value="{{ c.phone or '' }}"
+      <input aria-label="Phone" type="text" name="phone" value="{{ c.phone or '' }}"
              class="w-32 px-2 py-1 text-sm border border-brand-200 rounded focus:ring-2 focus:ring-brand-500"
              placeholder="Phone">
       <button type="submit" class="px-3 py-1 text-xs font-medium bg-brand-500 text-white rounded hover:bg-brand-600">Save</button>

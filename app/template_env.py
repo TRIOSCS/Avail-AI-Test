@@ -131,7 +131,6 @@ def _sanitize_html_filter(value: str) -> str:
             "h4",
             "h5",
             "h6",
-            "img",
             "blockquote",
             "pre",
             "code",
@@ -140,11 +139,11 @@ def _sanitize_html_filter(value: str) -> str:
         attributes={
             "*": {"class"},
             "a": {"href", "title", "target"},
-            "img": {"src", "alt", "title", "width", "height"},
             "td": {"colspan", "rowspan", "width", "height"},
             "th": {"colspan", "rowspan", "width", "height"},
         },
         url_schemes={"http", "https", "mailto"},
+        link_rel="noopener noreferrer",
     )
 
 

@@ -30,7 +30,9 @@
               : 'text-gray-500 hover:text-brand-600 hover:bg-brand-50'"
             class="px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
             hx-get="/v2/partials/settings/system"
-            hx-target="#settings-content">
+            hx-target="#settings-content"
+            hx-indicator="#settings-load-spinner"
+            data-loading-disable>
       <span class="flex items-center gap-1.5">
         <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
@@ -91,8 +93,9 @@
   <div id="settings-content"
        hx-get="/v2/partials/settings/{{ active_tab }}"
        hx-trigger="load"
-       hx-target="#settings-content">
-    <div class="flex items-center justify-center py-12">
+       hx-target="#settings-content"
+       hx-indicator="#settings-load-spinner">
+    <div id="settings-load-spinner" class="htmx-indicator flex items-center justify-center py-12">
       <svg class="h-6 w-6 text-brand-400 animate-spin" viewBox="0 0 24 24" fill="none">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>

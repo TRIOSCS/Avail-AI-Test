@@ -53,6 +53,7 @@
           <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/reset"
                   hx-target="#main-content"
                   hx-confirm="Reset this buy plan to draft?"
+                  data-loading-disable
                   class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-xs font-medium rounded-md hover:bg-brand-50 transition-colors">
             Reset to Draft
           </button>
@@ -295,17 +296,18 @@
                     </a>
                     <div x-show="showPo" x-cloak x-collapse class="mt-2 space-y-1.5">
                       <div>
-                        <input x-model="poNum" type="text" placeholder="PO#"
+                        <input aria-label="PO#" x-model="poNum" type="text" placeholder="PO#"
                                class="w-28 px-2 py-1 text-xs border border-brand-200 rounded-md focus:ring-brand-500">
                       </div>
                       <div>
-                        <input x-model="shipDate" type="date"
+                        <input aria-label="Estimated ship date" x-model="shipDate" type="date"
                                class="w-28 px-2 py-1 text-xs border border-brand-200 rounded-md focus:ring-brand-500">
                       </div>
                       <div class="flex gap-1">
                         <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/confirm-po"
                                 hx-target="#main-content"
                                 :hx-vals="JSON.stringify({po_number: poNum, estimated_ship_date: shipDate})"
+                                data-loading-disable
                                 class="px-2 py-1 text-xs bg-brand-500 text-white rounded-md hover:bg-brand-600 transition-colors">
                           Confirm
                         </button>
@@ -321,12 +323,14 @@
                     <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
                             hx-target="#main-content"
                             hx-vals='{"action": "approve"}'
+                            data-loading-disable
                             class="px-2.5 py-1 text-xs bg-emerald-600 text-white rounded-md hover:bg-emerald-700 transition-colors font-medium">
                       Verify
                     </button>
                     <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/lines/{{ line.id }}/verify-po"
                             hx-target="#main-content"
                             hx-vals='{"action": "reject"}'
+                            data-loading-disable
                             hx-confirm="Reject this PO?"
                             class="px-2.5 py-1 text-xs text-rose-600 border border-rose-200 rounded-md hover:bg-rose-50 transition-colors font-medium">
                       Reject
@@ -486,13 +490,13 @@
        x-transition:leave="transition ease-in duration-150"
        x-transition:leave-start="opacity-100"
        x-transition:leave-end="opacity-0">
-    <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6" @click.outside="showModal = false"
+    <div class="bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6" role="document" @click.outside="showModal = false"
          x-transition:enter="transition ease-out duration-200"
          x-transition:enter-start="opacity-0 scale-95"
          x-transition:enter-end="opacity-100 scale-100">
 
       {# Submit modal #}
-      <template x-if="modalType === 'submit'">
+      <template x-if="modalType === 'submit'" x-cloak>
         <div x-data="{ so: '', cpo: '', notes: '' }">
           <h3 class="text-lg font-semibold text-gray-900 mb-4">Submit Buy Plan</h3>
           <div class="space-y-3">
@@ -518,6 +522,7 @@
             <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/submit"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({sales_order_number: so, customer_po_number: cpo, salesperson_notes: notes})"
+                    data-loading-disable
                     @click="showModal = false"
                     class="px-4 py-2 text-sm bg-brand-500 text-white rounded-md hover:bg-brand-600 font-medium transition-colors">
               Submit
@@ -527,7 +532,7 @@
       </template>
 
       {# Approve modal #}
-      <template x-if="modalType === 'approve'">
+      <template x-if="modalType === 'approve'" x-cloak>
         <div x-data="{ notes: '' }">
           <h3 class="text-lg font-semibold text-gray-900 mb-4">Approve Buy Plan</h3>
           <div>
@@ -540,6 +545,7 @@
             <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({action: 'approve', notes: notes})"
+                    data-loading-disable
                     @click="showModal = false"
                     class="px-4 py-2 text-sm bg-emerald-600 text-white rounded-md hover:bg-emerald-700 font-medium transition-colors">
               Approve
@@ -549,7 +555,7 @@
       </template>
 
       {# Reject modal #}
-      <template x-if="modalType === 'reject'">
+      <template x-if="modalType === 'reject'" x-cloak>
         <div x-data="{ notes: '' }">
           <h3 class="text-lg font-semibold text-gray-900 mb-4">Reject Buy Plan</h3>
           <div>
@@ -563,6 +569,7 @@
             <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/approve"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({action: 'reject', notes: notes})"
+                    data-loading-disable
                     @click="showModal = false"
                     class="px-4 py-2 text-sm bg-rose-600 text-white rounded-md hover:bg-rose-700 font-medium transition-colors">
               Reject
@@ -572,7 +579,7 @@
       </template>
 
       {# Verify SO modal #}
-      <template x-if="modalType === 'verify-so'">
+      <template x-if="modalType === 'verify-so'" x-cloak>
         <div x-data="{ action: 'approve', note: '' }">
           <h3 class="text-lg font-semibold text-gray-900 mb-4">Verify Sales Order</h3>
           <div class="space-y-3">
@@ -587,7 +594,7 @@
                 <input type="radio" x-model="action" value="halt" class="text-rose-600 focus:ring-rose-500"> Halt
               </label>
             </div>
-            <div x-show="action !== 'approve'" x-collapse>
+            <div x-show="action !== 'approve'" x-cloak x-collapse>
               <label class="block text-sm font-medium text-gray-700 mb-1">Note <span class="text-rose-500">*</span></label>
               <textarea x-model="note" rows="2"
                         class="w-full px-3 py-2 border border-brand-200 rounded-md text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
@@ -599,6 +606,7 @@
             <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/verify-so"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({action: action, rejection_note: note})"
+                    data-loading-disable
                     @click="showModal = false"
                     class="px-4 py-2 text-sm bg-brand-500 text-white rounded-md hover:bg-brand-600 font-medium transition-colors">
               Confirm
@@ -608,7 +616,7 @@
       </template>
 
       {# Cancel modal #}
-      <template x-if="modalType === 'cancel'">
+      <template x-if="modalType === 'cancel'" x-cloak>
         <div x-data="{ reason: '' }">
           <h3 class="text-lg font-semibold text-gray-900 mb-4">Cancel Buy Plan</h3>
           <div>
@@ -622,6 +630,7 @@
             <button hx-post="/v2/partials/buy-plans/{{ bp.id }}/cancel"
                     hx-target="#main-content"
                     :hx-vals="JSON.stringify({reason: reason})"
+                    data-loading-disable
                     @click="showModal = false"
                     class="px-4 py-2 text-sm bg-rose-500 text-white rounded-md hover:bg-rose-600 font-medium transition-colors">
               Cancel Plan

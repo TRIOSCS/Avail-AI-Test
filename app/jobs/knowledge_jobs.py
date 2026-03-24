@@ -157,6 +157,7 @@ async def _job_refresh_insights():
 
     except Exception as e:
         logger.error("refresh_active_insights job failed: {}", e)
+        db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()

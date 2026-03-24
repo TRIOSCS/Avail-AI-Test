@@ -21,10 +21,11 @@
 <form hx-patch="/v2/partials/requisitions/{{ req.id }}/inline"
       hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
+      data-loading-disable
       class="inline">
   <input type="hidden" name="field" value="name">
   <input type="hidden" name="context" value="{{ context }}">
-  <input type="text" name="value" value="{{ req.name }}"
+  <input aria-label="Requisition name" type="text" name="value" value="{{ req.name }}"
          class="w-full px-2 py-1 border border-brand-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 {{ 'text-2xl font-bold' if context == 'header' else '' }}"
          autofocus
          x-init="$el.focus(); $el.select()"
@@ -37,6 +38,7 @@
 <form hx-patch="/v2/partials/requisitions/{{ req.id }}/inline"
       hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
+      data-loading-disable
       class="inline">
   <input type="hidden" name="field" value="status">
   <input type="hidden" name="context" value="{{ context }}">
@@ -57,6 +59,7 @@
 <form hx-patch="/v2/partials/requisitions/{{ req.id }}/inline"
       hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
+      data-loading-disable
       class="inline">
   <input type="hidden" name="field" value="urgency">
   <input type="hidden" name="context" value="{{ context }}">
@@ -77,10 +80,11 @@
 <form hx-patch="/v2/partials/requisitions/{{ req.id }}/inline"
       hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
+      data-loading-disable
       class="inline">
   <input type="hidden" name="field" value="deadline">
   <input type="hidden" name="context" value="{{ context }}">
-  <input type="date" name="value"
+  <input aria-label="Deadline date" type="date" name="value"
          value="{{ req.deadline if req.deadline and req.deadline != 'ASAP' else '' }}"
          class="px-2 py-1 border border-brand-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
          autofocus
@@ -94,6 +98,7 @@
 <form hx-patch="/v2/partials/requisitions/{{ req.id }}/inline"
       hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
+      data-loading-disable
       class="inline">
   <input type="hidden" name="field" value="owner">
   <input type="hidden" name="context" value="{{ context }}">

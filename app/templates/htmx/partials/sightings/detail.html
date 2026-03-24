@@ -48,6 +48,7 @@
       <select hx-patch="/v2/partials/sightings/{{ requirement.id }}/assign"
               hx-target="#sightings-detail"
               hx-swap="innerHTML"
+              data-loading-disable
               name="assigned_buyer_id"
               class="inline-block border-0 border-b border-dashed border-gray-300 bg-transparent text-xs text-gray-700 p-0 pr-4 focus:ring-0 cursor-pointer hover:border-brand-400">
         <option value="">Unassigned</option>
@@ -134,6 +135,7 @@
                   hx-target="#sightings-detail"
                   hx-swap="innerHTML"
                   hx-confirm="Mark {{ s.vendor_name }} as unavailable for this part?"
+                  data-loading-disable
                   class="text-[10px] text-gray-400 hover:text-rose-500 opacity-0 group-hover:opacity-100 transition-all">
             Unavail
           </button>
@@ -161,12 +163,14 @@
         <button hx-put="/api/offers/{{ o.id }}/approve"
                 hx-target="#sightings-detail"
                 hx-swap="innerHTML"
+                data-loading-disable
                 class="px-2 py-0.5 text-[10px] font-medium rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100">
           Approve
         </button>
         <button hx-put="/api/offers/{{ o.id }}/reject"
                 hx-target="#sightings-detail"
                 hx-swap="innerHTML"
+                data-loading-disable
                 class="px-2 py-0.5 text-[10px] font-medium rounded bg-gray-50 text-gray-500 hover:bg-gray-100">
           Reject
         </button>

@@ -129,8 +129,8 @@ def _get_search_cache(key: str) -> tuple[list[dict], list[dict]] | None:
         if data:
             parsed = json.loads(data)
             return parsed["results"], parsed["source_stats"]
-    except redis.RedisError:
-        pass
+    except redis.RedisError as e:
+        logger.error("Redis error reading search cache key {}: {}", key, e)
     except Exception as e:
         logger.warning("Search cache read failed: %s", e)
     return None
@@ -143,8 +143,8 @@ def _set_search_cache(key: str, results: list[dict], source_stats: list[dict]) -
         return
     try:
         r.setex(key, _SEARCH_CACHE_TTL, json.dumps({"results": results, "source_stats": source_stats}))
-    except redis.RedisError:
-        pass
+    except redis.RedisError as e:
+        logger.error("Redis error writing search cache key {}: {}", key, e)
     except Exception as e:
         logger.warning("Search cache write failed: %s", e)
 
@@ -1221,7 +1221,7 @@ def _save_sightings(
                 propagate_tags_to_entity("vendor_card", vc.id, s.material_card_id, 1.0, db)
         db.commit()
     except Exception:
-        logger.debug("Tag propagation failed for sightings", exc_info=True)
+        logger.warning("Tag propagation failed for sightings", exc_info=True)
 
     # Rebuild vendor-level sighting summaries for aggregated display
     from .services.sighting_aggregation import rebuild_vendor_summaries_from_sightings
@@ -1437,8 +1437,8 @@ def _audit_card_created(db: Session, card: MaterialCard) -> None:
         log_audit(
             db, material_card_id=card.id, action="created", normalized_mpn=card.normalized_mpn, created_by="system"
         )
-    except Exception:  # pragma: no cover
-        pass  # Audit should never break card creation
+    except Exception:
+        logger.warning("Audit log failed for card %s", getattr(card, "normalized_mpn", "unknown"), exc_info=True)
 
 
 def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> MaterialCard | None:
@@ -1653,8 +1653,8 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
             if tags_to_apply:  # pragma: no cover
                 tag_material_card(card.id, tags_to_apply, db)
                 db.commit()
-    except Exception:  # pragma: no cover
-        logger.debug("Tag classification failed for card %s", card.id, exc_info=True)
+    except Exception:
+        logger.warning("Tag classification failed for card %s", card.id, exc_info=True)
 
     return card
 
@@ -1691,7 +1691,7 @@ async def _schedule_background_enrichment(card_ids: set[int], db: Session) -> No
                             _apply_enrichment_to_card(card, result, session)
                             session.commit()
                 except Exception:
-                    logger.debug("Background enrichment failed for %s", mpn, exc_info=True)
+                    logger.warning("Background enrichment failed for %s", mpn, exc_info=True)
                     session.rollback()
         finally:
             session.close()

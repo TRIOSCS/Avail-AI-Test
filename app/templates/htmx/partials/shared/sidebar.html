@@ -14,8 +14,8 @@
   <div class="flex h-16 items-center justify-between px-4">
     <a href="/v2" hx-get="/v2/partials/dashboard" hx-target="#main-content" hx-push-url="/v2"
        class="flex items-center gap-2 overflow-hidden">
-      <img x-show="!$store.sidebar.collapsed" src="/static/avail_logo_white_bg.png" alt="AVAIL"
-           style="border-radius:6px;height:36px">
+      <img x-show="!$store.sidebar.collapsed" x-cloak src="/static/avail_logo_white_bg.png" alt="AVAIL"
+           class="rounded-md h-9">
       <span x-show="$store.sidebar.collapsed" x-cloak
             class="flex h-8 w-8 items-center justify-center rounded-md bg-brand-800 text-sm font-bold text-white">A</span>
     </a>

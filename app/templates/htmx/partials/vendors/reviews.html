@@ -11,6 +11,7 @@
   {# Add review form #}
   <form hx-post="/v2/partials/vendors/{{ vendor.id }}/reviews"
         hx-target="#vendor-reviews"
+        data-loading-disable
         class="bg-gray-50 rounded-lg border border-gray-200 p-3">
     <div class="flex items-center gap-3 mb-2">
       <label class="text-xs text-gray-500">Rating:</label>
@@ -23,7 +24,7 @@
       </select>
     </div>
     <div class="flex gap-2">
-      <input type="text" name="comment" placeholder="Add a comment (optional)"
+      <input aria-label="Review comment" type="text" name="comment" placeholder="Add a comment (optional)"
              class="flex-1 px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500">
       <button type="submit"
               class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
@@ -54,6 +55,7 @@
       <button hx-delete="/v2/partials/vendors/{{ vendor.id }}/reviews/{{ r.id }}"
               hx-target="#vendor-reviews"
               hx-confirm="Delete this review?"
+              data-loading-disable
               class="text-xs text-rose-500 hover:text-rose-700 ml-2">
         Delete
       </button>

@@ -49,7 +49,7 @@
   <div class="flex items-center gap-2">
     <span class="text-sm text-gray-500">Page {{ page }} of {{ total_pages }}</span>
     {% if total_pages > 5 %}
-    <input type="number" min="1" max="{{ total_pages }}" value="{{ page }}"
+    <input aria-label="Go to page" type="number" min="1" max="{{ total_pages }}" value="{{ page }}"
            hx-get="{{ base_url }}"
            hx-trigger="change"
            hx-target="#main-content"

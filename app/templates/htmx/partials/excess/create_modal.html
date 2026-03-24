@@ -17,6 +17,7 @@
         hx-target="#excess-table-body"
         hx-swap="afterbegin"
         hx-ext="json-enc"
+        data-loading-disable
         @htmx:after-request.camel="if(event.detail.successful) { $dispatch('close-modal'); Alpine.store('toast').message='Excess list created'; Alpine.store('toast').type='success'; Alpine.store('toast').show=true; }">
     <div class="grid grid-cols-1 gap-4">
       <div>

@@ -30,6 +30,7 @@
   <form hx-post="/v2/partials/requisitions/{{ req.id }}/save-parsed-offers"
         hx-target="#parse-area"
         hx-swap="innerHTML"
+        data-loading-disable
         x-data="{ saving: false, cards: {{ quotes|length }} }">
 
     <input type="hidden" name="vendor_name" value="{{ vendor_name }}">

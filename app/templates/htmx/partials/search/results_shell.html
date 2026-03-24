@@ -29,5 +29,30 @@
 
   <div id="search-stats" class="hidden text-xs text-gray-500 pt-2"></div>
 
+  {# Empty state — shown after SSE stream completes with no results #}
+  <div id="search-empty-state" class="hidden">
+    <div class="mx-auto max-w-sm rounded-xl bg-white p-12 text-center shadow-sm border border-gray-100">
+      <svg class="mx-auto mb-4 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+        <path stroke-linecap="round" stroke-linejoin="round"
+              d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
+      </svg>
+      <p class="text-base font-medium text-gray-500">No results found.</p>
+      <p class="text-sm text-gray-400 mt-1">Try a different part number or broaden your search.</p>
+    </div>
+  </div>
+
   {% include "htmx/partials/search/shortlist_bar.html" %}
 </div>
+<script>
+  (function() {
+    var wrapper = document.getElementById('search-results-wrapper');
+    if (!wrapper) return;
+    wrapper.addEventListener('htmx:sseClose', function() {
+      var cards = document.getElementById('search-results-cards');
+      var empty = document.getElementById('search-empty-state');
+      if (cards && empty && cards.children.length === 0) {
+        empty.classList.remove('hidden');
+      }
+    });
+  })();
+</script>

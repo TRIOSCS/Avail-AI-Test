@@ -144,7 +144,11 @@ class BaseConnector(ABC):
                     await asyncio.sleep(2**attempt + random.uniform(0, 1))
                 else:
                     logger.warning(f"{self.__class__.__name__} failed for {part_number}: {e}")
-        raise last_err  # propagate so caller can track the error
+        if last_err is not None:
+            raise last_err  # propagate so caller can track the error
+        raise RuntimeError(
+            f"{self.__class__.__name__}: search loop completed without result or error for {part_number}"
+        )
 
     @abstractmethod
     async def _do_search(self, part_number: str) -> list[dict]:

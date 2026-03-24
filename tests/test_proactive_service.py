@@ -308,9 +308,9 @@ class TestSendProactiveOffer:
         assert result["id"] is not None
         po = db_session.get(ProactiveOffer, result["id"])
         assert po is not None
-        # Match status should still be updated
+        # Match status should be "failed" since the email send failed
         db_session.refresh(match)
-        assert match.status == "sent"
+        assert match.status == "failed"
 
 
 # ── convert_proactive_to_win ───────────────────────────────────────────

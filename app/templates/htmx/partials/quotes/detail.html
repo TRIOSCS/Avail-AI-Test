@@ -132,6 +132,7 @@
     <button hx-post="/v2/partials/quotes/{{ quote.id }}/build-buy-plan"
             hx-target="#main-content"
             hx-confirm="Build a buy plan from this quote?"
+            data-loading-disable
             class="px-4 py-2 bg-emerald-600 text-white text-sm font-medium rounded-md hover:bg-emerald-700 flex items-center gap-1.5 transition-colors">
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/></svg>
       Build Buy Plan
@@ -141,6 +142,7 @@
     <button hx-post="/v2/partials/quotes/{{ quote.id }}/revise"
             hx-target="#main-content"
             hx-confirm="Create a new revision of this quote?"
+            data-loading-disable
             class="px-4 py-2 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-md hover:bg-brand-50 flex items-center gap-1.5 transition-colors">
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"/></svg>
       Revise
@@ -170,7 +172,7 @@
       Copy Table
     </button>
 
-    <a href="/api/quotes/{{ quote.id }}/pdf" target="_blank"
+    <a href="/api/quotes/{{ quote.id }}/pdf" target="_blank" rel="noopener noreferrer"
        class="px-4 py-2 text-sm font-medium text-gray-600 border border-gray-300 rounded-md hover:bg-gray-50 flex items-center gap-1.5 transition-colors">
       <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 10v6m0 0l-3-3m3 3l3-3m2 8H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"/></svg>
       Download PDF
@@ -238,6 +240,7 @@
             hx-target-422="#line-form-errors"
             hx-target-5*="#line-form-errors"
             hx-swap="beforeend"
+            data-loading-disable
             class="flex flex-wrap gap-2 items-end">
         <div>
           <label class="block text-xs text-gray-500 mb-1">MPN</label>

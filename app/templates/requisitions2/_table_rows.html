@@ -17,7 +17,7 @@
     class="rq2-row group hover:bg-gray-50 cursor-pointer transition-colors
            {{ 'border-l-2 border-rose-400' if req.urgency == 'critical' else '' }}">
   <td class="px-3 py-2" @click.stop>
-    <input type="checkbox" value="{{ req.id }}"
+    <input aria-label="Select requisition {{ req.name }}" type="checkbox" value="{{ req.id }}"
            class="rounded border-gray-300 text-brand-500 focus:ring-brand-400"
            x-on:change="toggleSelection({{ req.id }}, $event.target.checked)"
            x-bind:checked="selectedIds.has({{ req.id }})">

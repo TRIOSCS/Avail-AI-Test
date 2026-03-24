@@ -1131,8 +1131,8 @@ class TestApplyParsedResult:
         # No offers extracted, so no notification
         assert activity is None
 
-    def test_notification_exception_swallowed(self):
-        """If ActivityLog creation fails, no exception propagates."""
+    def test_notification_exception_logged_and_rolled_back(self):
+        """If ActivityLog creation fails, exception is logged and rolled back."""
         vr = MagicMock(spec=VendorResponse)
         vr.body = "Something? Anything?"
         vr.subject = "RE: RFQ"
@@ -1146,11 +1146,10 @@ class TestApplyParsedResult:
         db = MagicMock()
         db.get.side_effect = Exception("DB error")
 
-        # Monkey-patch the needs_action/confidence so the condition triggers
-        # _apply_parsed_result sets these on vr, so we need the real flow
         parsed = {"parts": [], "confidence": 0.65}
 
-        # Should not raise
+        # _apply_parsed_result itself does field assignment; the exception
+        # from _auto_create_offers is caught by the caller (poll_inbox)
         _apply_parsed_result(vr, parsed, db)
         assert vr.status == "parsed"
 
@@ -1994,8 +1993,8 @@ class TestPollInbox:
         assert isinstance(results, list)
 
     @pytest.mark.asyncio
-    async def test_commit_failure_returns_empty(self, db_session, test_user, test_requisition):
-        """If final commit fails, return empty results."""
+    async def test_commit_failure_raises(self, db_session, test_user, test_requisition):
+        """If final commit fails, exception propagates (with rollback)."""
         mock_gc = AsyncMock()
         mock_gc.get_json.return_value = {"value": [self._make_inbox_message()]}
 
@@ -2003,14 +2002,13 @@ class TestPollInbox:
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
             patch("app.email_service.get_credential_cached", return_value=None),
             patch.object(db_session, "commit", side_effect=Exception("Commit failed")),
+            pytest.raises(Exception, match="Commit failed"),
         ):
-            results = await poll_inbox(
+            await poll_inbox(
                 token="fake-token",
                 db=db_session,
                 requisition_id=test_requisition.id,
             )
-
-        assert results == []
 
     @pytest.mark.asyncio
     async def test_empty_inbox(self, db_session, test_user, test_requisition):

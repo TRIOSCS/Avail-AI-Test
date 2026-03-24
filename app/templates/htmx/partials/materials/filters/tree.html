@@ -13,7 +13,7 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/>
       </svg>
     </button>
-    <div x-show="open" x-collapse class="ml-2">
+    <div x-show="open" x-cloak x-collapse class="ml-2">
       {% for sub in sub_categories %}
       {% set count = commodity_counts.get(sub, 0) %}
       {% if count > 0 %}

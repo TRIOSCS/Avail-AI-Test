@@ -16,6 +16,7 @@ from loguru import logger
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session, joinedload
 
+from ..constants import ProactiveMatchStatus
 from ..models import (
     BuyPlan,
     CustomerSite,
@@ -360,36 +361,40 @@ async def send_proactive_offer(
             },
         )
         logger.info(f"Proactive offer #{po.id} sent to {', '.join(recipient_emails)}")
+        # Update match statuses only on successful send
+        for m in matches:
+            m.status = ProactiveMatchStatus.SENT
+        send_succeeded = True
     except Exception as e:
         logger.error(f"Failed to send proactive offer email: {e}")
+        for m in matches:
+            m.status = ProactiveMatchStatus.FAILED
+        send_succeeded = False
 
-    # Update match statuses
-    for m in matches:
-        m.status = "sent"
-
-    # Upsert throttle entries
-    now = datetime.now(timezone.utc)
-    for m in matches:
-        existing_throttle = (
-            db.query(ProactiveThrottle)
-            .filter(
-                ProactiveThrottle.mpn == m.mpn,
-                ProactiveThrottle.customer_site_id == site_id,
-            )
-            .first()
-        )
-        if existing_throttle:
-            existing_throttle.last_offered_at = now
-            existing_throttle.proactive_offer_id = po.id
-        else:
-            db.add(
-                ProactiveThrottle(
-                    mpn=m.mpn,
-                    customer_site_id=site_id,
-                    last_offered_at=now,
-                    proactive_offer_id=po.id,
+    # Upsert throttle entries only if the email was actually sent
+    if send_succeeded:
+        now = datetime.now(timezone.utc)
+        for m in matches:
+            existing_throttle = (
+                db.query(ProactiveThrottle)
+                .filter(
+                    ProactiveThrottle.mpn == m.mpn,
+                    ProactiveThrottle.customer_site_id == site_id,
                 )
+                .first()
             )
+            if existing_throttle:
+                existing_throttle.last_offered_at = now
+                existing_throttle.proactive_offer_id = po.id
+            else:
+                db.add(
+                    ProactiveThrottle(
+                        mpn=m.mpn,
+                        customer_site_id=site_id,
+                        last_offered_at=now,
+                        proactive_offer_id=po.id,
+                    )
+                )
 
     db.commit()
     return _proactive_offer_to_dict(po)

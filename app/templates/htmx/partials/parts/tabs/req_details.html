@@ -149,7 +149,7 @@
 
   <div x-data="{ selectedSiblings: [] }">
     {# Bulk actions bar #}
-    <div x-show="selectedSiblings.length > 0"
+    <div x-show="selectedSiblings.length > 0" x-cloak
          x-cloak
          class="flex items-center gap-3 mb-2 px-3 py-1.5 bg-brand-50 rounded-lg border border-brand-200 text-xs">
       <span class="text-gray-600" x-text="selectedSiblings.length + ' selected'"></span>
@@ -159,7 +159,8 @@
               :hx-vals="JSON.stringify({requirement_ids: selectedSiblings.join(',')})"
               hx-target="#part-detail"
               hx-swap="innerHTML"
-              hx-confirm="Archive selected parts?">
+              hx-confirm="Archive selected parts?"
+              data-loading-disable>
         Archive
       </button>
     </div>
@@ -170,7 +171,7 @@
         <thead>
           <tr>
             <th class="w-6">
-              <input type="checkbox"
+              <input aria-label="Select all sibling parts" type="checkbox"
                      class="h-3 w-3 rounded border-gray-300 text-brand-500"
                      @change="selectedSiblings = $el.checked ? [{% for p in sibling_parts %}{{ p.id }}{{ ',' if not loop.last }}{% endfor %}] : []">
             </th>
@@ -192,7 +193,7 @@
               @click="selectPart({{ part.id }}); htmx.ajax('GET', '/v2/partials/parts/{{ part.id }}/tab/' + activeTab, {target: '#part-detail'})"
               {% endif %}>
             <td @click.stop>
-              <input type="checkbox"
+              <input aria-label="Select part {{ part.primary_mpn or '' }}" type="checkbox"
                      class="h-3 w-3 rounded border-gray-300 text-brand-500"
                      value="{{ part.id }}"
                      :checked="selectedSiblings.includes({{ part.id }})"

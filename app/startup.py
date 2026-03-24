@@ -68,6 +68,7 @@ def run_startup_migrations() -> None:
     _backfill_proactive_offer_qty()
     _backfill_ticket_defaults()
     _seed_admin_user_if_env_set()
+    _seed_agent_user()
     _seed_commodity_schemas()
     logger.info("Startup migrations complete")
 
@@ -143,6 +144,31 @@ def _seed_admin_user_if_env_set(db=None) -> None:
     finally:
         if own_session:
             db.close()
+
+
+def _seed_agent_user() -> None:
+    """Seed the agent service account if it doesn't exist.
+
+    Called by: run_startup_migrations
+    Depends on: User model, UserRole enum
+    """
+    from .constants import UserRole
+    from .models.auth import User
+
+    db = SessionLocal()
+    try:
+        existing = db.query(User).filter_by(email="agent@availai.local").first()
+        if existing:
+            return
+        user = User(email="agent@availai.local", name="Agent", role=UserRole.ADMIN, is_active=True)
+        db.add(user)
+        db.commit()
+        logger.info("Seeded agent service account")
+    except Exception:
+        logger.exception("Failed seeding agent user")
+        db.rollback()
+    finally:
+        db.close()
 
 
 def _exec(conn, stmt: str, params: dict | None = None) -> None:  # noqa: S603

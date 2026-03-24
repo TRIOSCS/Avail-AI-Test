@@ -25,8 +25,9 @@
   <div x-show="showScorecard" x-cloak x-transition class="mb-6"
        hx-get="/v2/partials/proactive/scorecard"
        hx-trigger="intersect once"
-       hx-swap="innerHTML">
-    <div class="flex items-center justify-center py-6 text-sm text-gray-400">
+       hx-swap="innerHTML"
+       hx-indicator="#proactive-scorecard-spinner">
+    <div id="proactive-scorecard-spinner" class="htmx-indicator flex items-center justify-center py-6 text-sm text-gray-400">
       <svg class="animate-spin h-4 w-4 mr-2 text-brand-400" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
         <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
         <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
@@ -121,7 +122,8 @@
         {# Prepare button #}
         <form method="POST" action="/v2/proactive/prepare/{{ group.customer_site_id }}"
               hx-post="/v2/proactive/prepare/{{ group.customer_site_id }}"
-              hx-target="#main-content">
+              hx-target="#main-content"
+              data-loading-disable>
           <template x-for="id in selectedIds" :key="id">
             <input type="hidden" name="match_ids" :value="id">
           </template>
@@ -134,6 +136,7 @@
 
         {# Dismiss button #}
         <form method="POST" action="/v2/partials/proactive/batch-dismiss"
+              data-loading-disable
               hx-post="/v2/partials/proactive/batch-dismiss"
               hx-target="#main-content"
               hx-confirm="Dismiss selected matches?">
@@ -149,18 +152,18 @@
       </div>
 
       {# Match table #}
-      <div x-show="expanded" x-collapse>
+      <div x-show="expanded" x-cloak x-collapse>
         <div class="overflow-x-auto">
           <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50/50">
               <tr>
                 <th class="w-10 px-3 py-2"></th>
                 <th class="px-3 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider">MPN</th>
-                <th class="px-3 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider" style="width:140px">Vendor</th>
-                <th class="px-3 py-2 text-right text-[10px] font-medium text-gray-500 uppercase tracking-wider" style="width:80px">Qty</th>
-                <th class="px-3 py-2 text-right text-[10px] font-medium text-gray-500 uppercase tracking-wider" style="width:90px">Price</th>
-                <th class="px-3 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider" style="width:70px">Margin</th>
-                <th class="px-3 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider" style="width:60px">Score</th>
+                <th class="px-3 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider w-[140px]">Vendor</th>
+                <th class="px-3 py-2 text-right text-[10px] font-medium text-gray-500 uppercase tracking-wider w-[80px]">Qty</th>
+                <th class="px-3 py-2 text-right text-[10px] font-medium text-gray-500 uppercase tracking-wider w-[90px]">Price</th>
+                <th class="px-3 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider w-[70px]">Margin</th>
+                <th class="px-3 py-2 text-left text-[10px] font-medium text-gray-500 uppercase tracking-wider w-[60px]">Score</th>
               </tr>
             </thead>
             <tbody class="divide-y divide-gray-100">
@@ -226,7 +229,7 @@
                   </svg>
                 </button>
                 {# Expandable line items #}
-                <div x-show="expanded" x-collapse class="mt-2 pl-2 border-l-2 border-brand-100">
+                <div x-show="expanded" x-cloak x-collapse class="mt-2 pl-2 border-l-2 border-brand-100">
                   {% for item in offer.line_items %}
                   <div class="text-xs text-gray-600 py-0.5">
                     <span class="font-mono font-medium">{{ item.mpn }}</span>
@@ -261,6 +264,7 @@
                 {% if status == 'sent' and offer.id %}
                 <button hx-post="/v2/partials/proactive/{{ offer.id }}/convert"
                         hx-target="#main-content"
+                        data-loading-disable
                         class="px-3 py-1 text-xs font-medium text-white bg-emerald-500 rounded-lg hover:bg-emerald-600 transition-colors">
                   Convert
                 </button>

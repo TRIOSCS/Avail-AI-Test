@@ -168,6 +168,7 @@
   <div class="bg-white rounded-lg border border-brand-200 p-3">
     <form hx-post="/v2/partials/sourcing/leads/{{ lead.id }}/status"
           hx-target="#split-right-sourcing"
+          data-loading-disable
           class="flex items-end gap-2">
       <div class="flex-1 min-w-0">
         <label class="text-[10px] text-gray-500">Status</label>
@@ -247,7 +248,7 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
       </svg>
     </button>
-    <div x-show="open" x-collapse class="border-t border-gray-100">
+    <div x-show="open" x-cloak x-collapse class="border-t border-gray-100">
       {% if evidence %}
       <div class="divide-y divide-gray-50">
         {% for ev in evidence %}
@@ -288,7 +289,7 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
       </svg>
     </button>
-    <div x-show="open" x-collapse class="border-t border-gray-100 divide-y divide-gray-50">
+    <div x-show="open" x-cloak x-collapse class="border-t border-gray-100 divide-y divide-gray-50">
       {% for category, items in evidence_by_category.items() %}
       <div class="px-3 py-2">
         <h4 class="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">
@@ -316,7 +317,7 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
       </svg>
     </button>
-    <div x-show="open" x-collapse>
+    <div x-show="open" x-cloak x-collapse>
       {% with safety_band=lead.vendor_safety_band,
               safety_score=lead.vendor_safety_score,
               safety_summary=lead.vendor_safety_summary,
@@ -336,7 +337,7 @@
         <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/>
       </svg>
     </button>
-    <div x-show="open" x-collapse class="border-t border-gray-100 px-3 py-2 space-y-1">
+    <div x-show="open" x-cloak x-collapse class="border-t border-gray-100 px-3 py-2 space-y-1">
       {% for event in lead.feedback_events|sort(attribute='created_at', reverse=True) %}
       <div class="flex items-center gap-2 text-[11px] text-gray-500">
         <span>{{ event.created_at | timesince }}</span>

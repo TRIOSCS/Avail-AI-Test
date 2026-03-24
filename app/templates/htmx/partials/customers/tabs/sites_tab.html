@@ -20,9 +20,10 @@
           hx-post="/v2/partials/customers/{{ company.id }}/sites"
           hx-target="#sites-list"
           hx-swap="beforeend"
+          data-loading-disable
           @htmx:after-request="if(event.detail.successful) { this.reset(); showForm = false }"
           class="grid grid-cols-2 md:grid-cols-4 gap-2 mb-4 p-3 bg-gray-50 rounded-lg border border-gray-200">
-      <input type="text" name="site_name" required placeholder="Site Name"
+      <input aria-label="Site Name" type="text" name="site_name" required placeholder="Site Name"
              class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500">
       <select name="site_type"
               class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500">
@@ -33,9 +34,9 @@
         <option value="manufacturing">Manufacturing</option>
         <option value="other">Other</option>
       </select>
-      <input type="text" name="city" placeholder="City"
+      <input aria-label="City" type="text" name="city" placeholder="City"
              class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500">
-      <input type="text" name="country" placeholder="Country"
+      <input aria-label="Country" type="text" name="country" placeholder="Country"
              class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500">
       <select name="owner_id"
               class="px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-2 focus:ring-brand-500 col-span-2">

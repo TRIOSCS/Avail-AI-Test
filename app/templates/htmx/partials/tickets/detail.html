@@ -63,7 +63,7 @@
     <h3 class="text-sm font-medium text-gray-700 mb-2">Screenshot</h3>
     <div class="border border-gray-200 rounded-lg overflow-hidden">
       <img src="/api/trouble-tickets/{{ ticket.id }}/screenshot"
-           alt="Screenshot" class="w-full cursor-pointer"
+           alt="Trouble ticket screenshot" class="w-full cursor-pointer"
            @click="window.open('/api/trouble-tickets/{{ ticket.id }}/screenshot', '_blank')">
     </div>
   </div>
@@ -81,7 +81,7 @@
       <svg :class="open ? 'rotate-90' : ''" class="w-4 h-4 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path d="M9 5l7 7-7 7"/></svg>
       Captured Context
     </button>
-    <div x-show="open" x-collapse class="space-y-3">
+    <div x-show="open" x-cloak x-collapse class="space-y-3">
       {% if ticket.current_page %}
       <div><span class="text-xs font-medium text-gray-500">Page URL:</span>
         <span class="text-xs text-gray-700 ml-1">{{ ticket.current_page }}</span></div>

@@ -21,7 +21,15 @@ from sqlalchemy import desc, exists, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ..constants import OfferStatus, QuoteStatus, RequisitionStatus, SourcingStatus, TicketSource, UserRole
+from ..constants import (
+    ContactStatus,
+    OfferStatus,
+    QuoteStatus,
+    RequisitionStatus,
+    SourcingStatus,
+    TicketSource,
+    UserRole,
+)
 from ..database import get_db
 from ..dependencies import get_user, require_user
 from ..models import (
@@ -660,16 +668,17 @@ async def requisition_import_save(
     db.commit()
 
     # Return success — close modal + refresh parts list + toast
-    return HTMLResponse(f"""
-    <div hx-trigger="load" hx-get="/v2/partials/parts" hx-target="#parts-list" hx-swap="innerHTML">
-    </div>
-    <script>
-      window.dispatchEvent(new CustomEvent('close-modal'));
-      Alpine.store('toast').message = 'Requisition created with {added} parts';
-      Alpine.store('toast').type = 'success';
-      Alpine.store('toast').show = true;
-    </script>
-    """)
+    safe_added = int(added)  # safe: server-computed int
+    return HTMLResponse(
+        "<div hx-trigger='load' hx-get='/v2/partials/parts' hx-target='#parts-list' hx-swap='innerHTML'>"
+        "</div>"
+        "<script>"
+        "window.dispatchEvent(new CustomEvent('close-modal'));"
+        f"Alpine.store('toast').message = 'Requisition created with {safe_added} parts';"
+        "Alpine.store('toast').type = 'success';"
+        "Alpine.store('toast').show = true;"
+        "</script>"
+    )
 
 
 @router.post("/v2/partials/customers/lookup", response_class=HTMLResponse)
@@ -2292,7 +2301,13 @@ async def rfq_compose(
         )
         norm_names = [n[0] for n in vendor_names if n[0]]
         vendor_rows = (
-            (db.query(VendorCard).filter(VendorCard.normalized_name.in_(norm_names)).limit(50).all())
+            (
+                db.query(VendorCard)
+                .options(selectinload(VendorCard.vendor_contacts))
+                .filter(VendorCard.normalized_name.in_(norm_names))
+                .limit(50)
+                .all()
+            )
             if norm_names
             else []
         )
@@ -2305,7 +2320,7 @@ async def rfq_compose(
 
         for v in vendor_rows:
             # Get contacts for this vendor
-            v_contacts = db.query(VendorContact).filter(VendorContact.vendor_card_id == v.id).limit(5).all()
+            v_contacts = v.vendor_contacts[:5]  # Already eagerly loaded
             vendors.append(
                 {
                     "id": v.id,
@@ -2362,7 +2377,7 @@ async def ai_cleanup_email(
         cleaned = user_text
 
     # Return a script that replaces the textarea content with the cleaned text
-    escaped = cleaned.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$")
+    escaped = cleaned.replace("\\", "\\\\").replace("`", "\\`").replace("$", "\\$").replace("</", "<\\/")
     return HTMLResponse(
         f'<script>document.getElementById("rfq-body-textarea").value = `{escaped}`;</script>'
         '<p class="text-xs text-green-600 mt-1">Email cleaned up. Review and edit as needed.</p>'
@@ -2795,7 +2810,7 @@ async def update_requirement(
                 if req_obj:
                     asyncio.run(do_search(req_obj, bg_db))
             except Exception:
-                logger.debug("Auto-search failed for requirement %s", requirement_id, exc_info=True)
+                logger.warning("Auto-search failed for requirement %s", requirement_id, exc_info=True)
             finally:
                 bg_db.close()
 
@@ -3025,7 +3040,7 @@ async def search_lead_detail(
         results = raw_results if isinstance(raw_results, list) else raw_results.get("sightings", [])
     except Exception as exc:
         logger.error("Lead detail search failed for {}: {}", mpn, exc)
-        return HTMLResponse(f'<p class="p-4 text-sm text-red-600">Search error: {exc}</p>')
+        return HTMLResponse(f'<p class="p-4 text-sm text-red-600">Search error: {html_mod.escape(str(exc))}</p>')
 
     if idx >= len(results):
         return HTMLResponse('<p class="p-4 text-sm text-gray-500">Lead not found.</p>')
@@ -4159,7 +4174,13 @@ async def company_detail_partial(
                 Requisition.company_id == company.id,
                 sqlfunc.lower(sqlfunc.trim(Requisition.customer_name)) == company.name.lower().strip(),
             ),
-            Requisition.status.in_(["open", "active", "sourcing", "draft"]),
+            Requisition.status.in_(
+                [
+                    RequisitionStatus.ACTIVE,
+                    RequisitionStatus.SOURCING,
+                    RequisitionStatus.DRAFT,
+                ]
+            ),
         )
         .scalar()
         or 0
@@ -5121,7 +5142,7 @@ async def send_batch_follow_up(
 
     sent_count = 0
     for contact in stale:
-        contact.status = "followed_up"
+        contact.status = ContactStatus.RESPONDED
         contact.status_updated_at = datetime.now(timezone.utc)
         sent_count += 1
     db.commit()
@@ -5339,7 +5360,15 @@ async def dashboard_partial(
     """Return dashboard stats partial."""
     open_reqs = (
         db.query(sqlfunc.count(Requisition.id))
-        .filter(Requisition.status.in_(["open", "active", "sourcing", "draft"]))
+        .filter(
+            Requisition.status.in_(
+                [
+                    RequisitionStatus.ACTIVE,
+                    RequisitionStatus.SOURCING,
+                    RequisitionStatus.DRAFT,
+                ]
+            )
+        )
         .scalar()
         or 0
     )
@@ -7673,6 +7702,22 @@ async def settings_profile_tab(
     return templates.TemplateResponse("htmx/partials/settings/profile.html", ctx)
 
 
+@router.post("/api/user/toggle-8x8", response_class=HTMLResponse)
+async def toggle_8x8(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Toggle 8x8 click-to-call preference for the current user."""
+    user.eight_by_eight_enabled = not user.eight_by_eight_enabled
+    db.commit()
+    state = "enabled" if user.eight_by_eight_enabled else "disabled"
+    logger.info("8x8 click-to-call toggled", user_id=user.id, enabled=user.eight_by_eight_enabled)
+    return HTMLResponse(
+        status_code=200,
+        headers={"HX-Trigger": '{"showToast": "8x8 click-to-call ' + state + '"}'},
+    )
+
+
 @router.get("/v2/partials/settings/data-ops", response_class=HTMLResponse)
 async def settings_data_ops_tab(
     request: Request,
@@ -7726,11 +7771,11 @@ async def admin_vendor_merge(
         result = _merge(keep_id, remove_id, db)
         db.commit()
         return HTMLResponse(
-            f'<p class="text-sm text-emerald-600 py-2">Merged into {result.get("kept_name", "vendor")}. '
+            f'<p class="text-sm text-emerald-600 py-2">Merged into {html_mod.escape(str(result.get("kept_name", "vendor")))}. '
             f"{result.get('reassigned', 0)} records reassigned.</p>"
         )
     except ValueError as e:
-        return HTMLResponse(f'<p class="text-sm text-rose-600 py-2">Error: {e}</p>')
+        return HTMLResponse(f'<p class="text-sm text-rose-600 py-2">Error: {html_mod.escape(str(e))}</p>')
 
 
 @router.post("/v2/partials/admin/company-merge", response_class=HTMLResponse)
@@ -7753,10 +7798,10 @@ async def admin_company_merge(
         result = merge_companies(keep_id, remove_id, db)
         db.commit()
         return HTMLResponse(
-            f'<p class="text-sm text-emerald-600 py-2">Merged into {result.get("kept_name", "company")}.</p>'
+            f'<p class="text-sm text-emerald-600 py-2">Merged into {html_mod.escape(str(result.get("kept_name", "company")))}.</p>'
         )
     except (ValueError, Exception) as e:
-        return HTMLResponse(f'<p class="text-sm text-rose-600 py-2">Error: {e}</p>')
+        return HTMLResponse(f'<p class="text-sm text-rose-600 py-2">Error: {html_mod.escape(str(e))}</p>')
 
 
 # ── Proactive Part Match ─────────────────────────────────────────────
@@ -7981,12 +8026,15 @@ async def proactive_draft_for_prepare(
         if result:
             subject = result.get("subject", f"Parts Available — {company_name}")
             body = result.get("body", "")
+            safe_subject_attr = html_mod.escape(subject)
+            subject_json = json.dumps(subject, ensure_ascii=True).replace("</", "<\\/")
+            body_json = json.dumps(body, ensure_ascii=True).replace("</", "<\\/")
             return HTMLResponse(f"""
-                <input type="hidden" name="ai_subject" id="ai-subject" value="{subject}">
+                <input type="hidden" name="ai_subject" id="ai-subject" value="{safe_subject_attr}">
                 <input type="hidden" name="ai_body" id="ai-body" value="">
                 <script>
-                    document.getElementById('subject-input').value = {repr(subject)};
-                    document.getElementById('body-input').value = {repr(body)};
+                    document.getElementById('subject-input').value = {subject_json};
+                    document.getElementById('body-input').value = {body_json};
                 </script>
                 <div class="text-sm text-emerald-600 flex items-center gap-1">
                     <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -8656,7 +8704,14 @@ async def parts_list_partial(
     if status == "archived":
         query = query.filter(Requirement.sourcing_status == "archived")
     elif not include_archived:
-        query = query.filter(Requisition.status.in_(["active", "open", "sourcing"]))
+        query = query.filter(
+            Requisition.status.in_(
+                [
+                    RequisitionStatus.ACTIVE,
+                    RequisitionStatus.SOURCING,
+                ]
+            )
+        )
         query = query.filter(Requirement.sourcing_status != "archived")
 
     # Filters
@@ -8819,7 +8874,9 @@ async def part_tab_offers(
     db: Session = Depends(get_db),
 ):
     """Return offers table for a specific part number."""
-    req = db.query(Requirement).options(joinedload(Requirement.requisition)).get(requirement_id)
+    req = db.execute(
+        select(Requirement).options(joinedload(Requirement.requisition)).where(Requirement.id == requirement_id)
+    ).scalar_one_or_none()
     if not req:
         raise HTTPException(404, "Part not found")
 
@@ -9295,7 +9352,7 @@ async def part_tab_activity(
     """Return activity timeline for the parent requisition of this part."""
     from ..models.intelligence import ActivityLog
 
-    req = db.query(Requirement).get(requirement_id)
+    req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
 
@@ -9320,7 +9377,9 @@ async def part_tab_comms(
     db: Session = Depends(get_db),
 ):
     """Return communications tab — notes and tasks for this part."""
-    req = db.query(Requirement).options(joinedload(Requirement.requisition)).get(requirement_id)
+    req = db.execute(
+        select(Requirement).options(joinedload(Requirement.requisition)).where(Requirement.id == requirement_id)
+    ).scalar_one_or_none()
     if not req:
         raise HTTPException(404, "Part not found")
 
@@ -9389,7 +9448,7 @@ async def create_part_task(
     db: Session = Depends(get_db),
 ):
     """Create a task for a specific part number."""
-    req = db.query(Requirement).get(requirement_id)
+    req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
 
@@ -9426,7 +9485,7 @@ async def mark_task_done(
 ):
     """Mark a task as done."""
 
-    task = db.query(RequisitionTask).get(task_id)
+    task = db.get(RequisitionTask, task_id)
     if not task:
         raise HTTPException(404, "Task not found")
 
@@ -9454,7 +9513,7 @@ async def reopen_task(
     db: Session = Depends(get_db),
 ):
     """Reopen a completed task."""
-    task = db.query(RequisitionTask).get(task_id)
+    task = db.get(RequisitionTask, task_id)
     if not task:
         raise HTTPException(404, "Task not found")
 

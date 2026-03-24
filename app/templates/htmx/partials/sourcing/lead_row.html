@@ -70,11 +70,12 @@
     </span>
 
     {# Quick actions (visible on hover) #}
-    <div class="flex gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" @click.stop>
+    <div class="flex gap-0.5 flex-shrink-0 opacity-0 group-hover:opacity-100 transition-opacity" role="group" aria-label="Lead actions" @click.stop>
       <button hx-post="/v2/partials/sourcing/leads/{{ lead.id }}/status"
               hx-vals='{"status": "contacted"}'
               hx-target="#lead-row-{{ lead.id }}"
               hx-swap="outerHTML"
+              data-loading-disable
               class="p-1 text-brand-500 hover:bg-brand-50 rounded" title="Claim">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/>
@@ -84,6 +85,7 @@
               hx-vals='{"status": "bad_lead"}'
               hx-target="#lead-row-{{ lead.id }}"
               hx-swap="outerHTML"
+              data-loading-disable
               class="p-1 text-gray-400 hover:bg-gray-100 rounded" title="Dismiss">
         <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>

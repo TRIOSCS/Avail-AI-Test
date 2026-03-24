@@ -364,7 +364,7 @@ async def _enrich_vendors_batch(
                 emails = list(dict.fromkeys(c["email"] for c in contacts if c.get("email")))
                 phones = list(dict.fromkeys(c["phone"] for c in contacts if c.get("phone")))
                 if emails and card_id:
-                    card = db.query(VendorCard).get(card_id)
+                    card = db.get(VendorCard, card_id)
                     if card:
                         merge_emails_into_card(card, emails)
                         if phones:

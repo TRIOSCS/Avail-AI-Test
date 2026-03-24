@@ -16,11 +16,12 @@
       <button hx-post="/v2/partials/vendors/{{ vendor.id }}/ai/find-contacts"
               hx-target="#prospect-results"
               hx-swap="innerHTML"
+              data-loading-disable
               @htmx:before-request="searching = true"
               @htmx:after-request="searching = false"
               :disabled="searching"
               class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 disabled:opacity-50 disabled:cursor-not-allowed inline-flex items-center gap-2">
-        <svg x-show="!searching" class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <svg x-show="!searching" x-cloak class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
           <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"/>
         </svg>
         <svg x-show="searching" x-cloak class="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">

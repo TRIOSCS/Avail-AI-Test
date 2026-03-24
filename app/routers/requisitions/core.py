@@ -77,7 +77,16 @@ async def requisition_counts(
         )
     )
     archive_cnt = db.scalar(
-        select(sqlfunc.count(Requisition.id)).where(Requisition.status.in_(["archived", "won", "lost", "closed"]))
+        select(sqlfunc.count(Requisition.id)).where(
+            Requisition.status.in_(
+                [
+                    RequisitionStatus.ARCHIVED,
+                    RequisitionStatus.WON,
+                    RequisitionStatus.LOST,
+                    RequisitionStatus.CANCELLED,
+                ]
+            )
+        )
     )
     return {"total": total or 0, "open": open_cnt or 0, "archive": archive_cnt or 0}
 
@@ -355,7 +364,16 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
             )
         )
     elif status == "archive":
-        query = query.filter(Requisition.status.in_(["archived", "won", "lost", "closed"]))
+        query = query.filter(
+            Requisition.status.in_(
+                [
+                    RequisitionStatus.ARCHIVED,
+                    RequisitionStatus.WON,
+                    RequisitionStatus.LOST,
+                    RequisitionStatus.CANCELLED,
+                ]
+            )
+        )
     elif status:
         statuses = [s.strip() for s in status.split(",") if s.strip()]
         if len(statuses) == 1:
@@ -363,7 +381,16 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
         else:
             query = query.filter(Requisition.status.in_(statuses))
     else:
-        query = query.filter(Requisition.status.notin_(["archived", "won", "lost", "closed"]))
+        query = query.filter(
+            Requisition.status.notin_(
+                [
+                    RequisitionStatus.ARCHIVED,
+                    RequisitionStatus.WON,
+                    RequisitionStatus.LOST,
+                    RequisitionStatus.CANCELLED,
+                ]
+            )
+        )
 
     # Resolve sort column — whitelist to prevent SQL injection
     allowed_sorts = {
@@ -549,7 +576,14 @@ async def bulk_archive(user: User = Depends(require_admin), db: Session = Depend
 
     q = db.query(Requisition).filter(
         Requisition.created_by != user.id,
-        Requisition.status.notin_(["archived", "won", "lost", "closed"]),
+        Requisition.status.notin_(
+            [
+                RequisitionStatus.ARCHIVED,
+                RequisitionStatus.WON,
+                RequisitionStatus.LOST,
+                RequisitionStatus.CANCELLED,
+            ]
+        ),
     )
     count = q.update({"status": "archived"}, synchronize_session="fetch")
     db.commit()
@@ -568,7 +602,14 @@ async def batch_archive_by_ids(
 
     q = db.query(Requisition).filter(
         Requisition.id.in_(payload.ids),
-        Requisition.status.notin_(["archived", "won", "lost", "closed"]),
+        Requisition.status.notin_(
+            [
+                RequisitionStatus.ARCHIVED,
+                RequisitionStatus.WON,
+                RequisitionStatus.LOST,
+                RequisitionStatus.CANCELLED,
+            ]
+        ),
     )
     # Sales users can only archive their own requisitions
     if user.role == UserRole.SALES:

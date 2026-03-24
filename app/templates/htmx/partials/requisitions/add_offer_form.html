@@ -13,6 +13,7 @@
 
   <form hx-post="/v2/partials/requisitions/{{ req.id }}/add-offer"
         hx-target="#tab-content"
+        data-loading-disable
         class="space-y-3">
 
     {# Row 1: Vendor Name, MPN, Qty Available, Unit Price #}

@@ -34,7 +34,7 @@
         <a href="tel:{{ p.phone }}" class="text-brand-500 hover:text-brand-600">{{ p.phone }}</a>
         {% endif %}
         {% if p.linkedin_url %}
-        <a href="{{ p.linkedin_url }}" target="_blank" class="text-brand-500 hover:text-brand-600">LinkedIn</a>
+        <a href="{{ p.linkedin_url }}" target="_blank" rel="noopener noreferrer" class="text-brand-500 hover:text-brand-600">LinkedIn</a>
         {% endif %}
       </div>
     </div>
@@ -46,6 +46,7 @@
         <button hx-post="/v2/partials/vendors/{{ vendor.id }}/ai/prospect/{{ p.id }}/save"
                 hx-target="#prospect-{{ p.id }}"
                 hx-swap="outerHTML"
+                data-loading-disable
                 class="px-2 py-1 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded hover:bg-brand-100"
                 title="Save contact">
           Save
@@ -55,6 +56,7 @@
                 hx-target="#prospect-{{ p.id }}"
                 hx-swap="outerHTML"
                 hx-confirm="Promote {{ p.full_name }} to a vendor contact?"
+                data-loading-disable
                 class="px-2 py-1 text-xs font-medium text-emerald-600 bg-emerald-50 border border-emerald-200 rounded hover:bg-emerald-100"
                 title="Promote to vendor contact">
           Promote
@@ -66,6 +68,7 @@
               hx-target="#prospect-{{ p.id }}"
               hx-swap="outerHTML"
               hx-confirm="Delete this prospect contact?"
+              data-loading-disable
               class="px-2 py-1 text-xs font-medium text-rose-600 bg-rose-50 border border-rose-200 rounded hover:bg-rose-100"
               title="Delete">
         Delete

@@ -46,7 +46,7 @@
 
   {# Search #}
   <div class="mb-4">
-    <input type="search" name="bp-search" value="{{ q }}"
+    <input aria-label="Search buy plans" type="search" name="bp-search" value="{{ q }}"
            placeholder="Search by SO#, customer, quote..."
            class="w-full sm:w-80 px-3 py-2 border border-brand-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
            hx-get="/v2/partials/buy-plans"

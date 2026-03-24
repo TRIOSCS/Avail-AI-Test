@@ -14,6 +14,7 @@ Depends on: services/email_threads.py, email_service.py, dependencies.py
 """
 
 from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi.responses import JSONResponse
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -45,20 +46,26 @@ async def list_requirement_emails(
     try:
         token = await require_fresh_token(request, db)
     except HTTPException:
-        return EmailThreadListResponse(
-            threads=[],
-            error="M365 connection needs refresh — please reconnect in Settings",
-        ).model_dump()
+        return JSONResponse(
+            status_code=401,
+            content=EmailThreadListResponse(
+                threads=[],
+                error="M365 connection needs refresh — please reconnect in Settings",
+            ).model_dump(),
+        )
 
     try:
         threads = await fetch_threads_for_requirement(requirement_id, token, db, user_id=user.id)
         return EmailThreadListResponse(threads=threads).model_dump()
     except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
         logger.error(f"Failed to fetch threads for requirement {requirement_id}: {e}")
-        return EmailThreadListResponse(
-            threads=[],
-            error="Could not load emails — please try again",
-        ).model_dump()
+        return JSONResponse(
+            status_code=502,
+            content=EmailThreadListResponse(
+                threads=[],
+                error="Could not load emails — please try again",
+            ).model_dump(),
+        )
 
 
 @router.get("/api/emails/thread/{conversation_id}")
@@ -72,20 +79,26 @@ async def get_thread_messages(
     try:
         token = await require_fresh_token(request, db)
     except HTTPException:
-        return EmailThreadMessagesResponse(
-            messages=[],
-            error="M365 connection needs refresh",
-        ).model_dump()
+        return JSONResponse(
+            status_code=401,
+            content=EmailThreadMessagesResponse(
+                messages=[],
+                error="M365 connection needs refresh",
+            ).model_dump(),
+        )
 
     try:
         messages = await fetch_thread_messages(conversation_id, token)
         return EmailThreadMessagesResponse(messages=messages).model_dump()
     except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
         logger.error(f"Failed to fetch thread messages: {e}")
-        return EmailThreadMessagesResponse(
-            messages=[],
-            error="Could not load thread messages",
-        ).model_dump()
+        return JSONResponse(
+            status_code=502,
+            content=EmailThreadMessagesResponse(
+                messages=[],
+                error="Could not load thread messages",
+            ).model_dump(),
+        )
 
 
 @router.get("/api/vendors/{vendor_card_id}/emails")
@@ -99,20 +112,26 @@ async def list_vendor_emails(
     try:
         token = await require_fresh_token(request, db)
     except HTTPException:
-        return EmailThreadListResponse(
-            threads=[],
-            error="M365 connection needs refresh — please reconnect in Settings",
-        ).model_dump()
+        return JSONResponse(
+            status_code=401,
+            content=EmailThreadListResponse(
+                threads=[],
+                error="M365 connection needs refresh — please reconnect in Settings",
+            ).model_dump(),
+        )
 
     try:
         threads = await fetch_threads_for_vendor(vendor_card_id, token, db, user_id=user.id)
         return EmailThreadListResponse(threads=threads).model_dump()
     except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
         logger.error(f"Failed to fetch threads for vendor {vendor_card_id}: {e}")
-        return EmailThreadListResponse(
-            threads=[],
-            error="Could not load emails — please try again",
-        ).model_dump()
+        return JSONResponse(
+            status_code=502,
+            content=EmailThreadListResponse(
+                threads=[],
+                error="Could not load emails — please try again",
+            ).model_dump(),
+        )
 
 
 @router.post("/api/emails/reply")
@@ -182,7 +201,7 @@ async def get_thread_summary(
 
     summary = await summarize_thread(token, conversation_id, db, user.id)
     if not summary:
-        return {"summary": None, "error": "Could not generate summary"}
+        return JSONResponse(status_code=502, content={"error": "Could not generate summary"})
     return {"summary": summary}
 
 

@@ -75,5 +75,6 @@ async def _job_lifecycle_sweep():
     except Exception:
         logger.exception("lifecycle_sweep failed")
         db.rollback()
+        raise
     finally:
         db.close()

@@ -13,6 +13,7 @@ Depends on: models (VendorCard, Offer, Contact, Sighting, VendorSightingSummary)
 
 from sqlalchemy.orm import Session
 
+from ..constants import ContactStatus
 from ..models.offers import Contact, Offer
 from ..models.sourcing import Sighting
 from ..models.vendor_sighting_summary import VendorSightingSummary
@@ -59,7 +60,13 @@ def compute_vendor_statuses(
         db.query(Contact.vendor_name)
         .filter(
             Contact.requisition_id == requisition_id,
-            Contact.status.in_(["sent", "delivered", "opened"]),
+            Contact.status.in_(
+                [
+                    ContactStatus.SENT,
+                    ContactStatus.OPENED,
+                    ContactStatus.RESPONDED,
+                ]
+            ),
         )
         .all()
     )

@@ -80,11 +80,11 @@
           </td>
           {# Qty cell — click for breakdown popover #}
           <td class="px-3 py-2 whitespace-nowrap relative" x-data="{ showQty: false }">
-            <span @click="showQty = !showQty" class="cursor-pointer hover:text-brand-500">
+            <span role="button" tabindex="0" @click="showQty = !showQty" @keydown.enter="showQty = !showQty" @keydown.space.prevent="showQty = !showQty" class="cursor-pointer hover:text-brand-500" aria-label="Show quantity breakdown">
               {{ '{:,}'.format(s.estimated_qty) if s.estimated_qty else '—' }}
               {% if s.listing_count > 1 %}<span class="text-[10px] text-gray-400 ml-0.5">({{ s.listing_count }})</span>{% endif %}
             </span>
-            <div x-show="showQty" @click.away="showQty = false" x-cloak
+            <div x-show="showQty" role="tooltip" @click.away="showQty = false" x-cloak
                  class="absolute z-50 mt-1 w-64 p-3 bg-white border border-gray-200 rounded-lg shadow-lg text-xs">
               <p class="font-semibold text-gray-900 mb-1">Qty Breakdown ({{ s.listing_count }} listing{{ 's' if s.listing_count != 1 else '' }})</p>
               <table class="w-full text-xs">
@@ -99,10 +99,10 @@
           </td>
           {# Price cell — click for breakdown popover #}
           <td class="px-3 py-2 whitespace-nowrap relative" x-data="{ showPrice: false }">
-            <span @click="showPrice = !showPrice" class="cursor-pointer hover:text-brand-500">
+            <span role="button" tabindex="0" @click="showPrice = !showPrice" @keydown.enter="showPrice = !showPrice" @keydown.space.prevent="showPrice = !showPrice" class="cursor-pointer hover:text-brand-500" aria-label="Show price breakdown">
               {{ '${:,.4f}'.format(s.avg_price) if s.avg_price else '—' }}
             </span>
-            <div x-show="showPrice" @click.away="showPrice = false" x-cloak
+            <div x-show="showPrice" role="tooltip" @click.away="showPrice = false" x-cloak
                  class="absolute z-50 mt-1 w-64 p-3 bg-white border border-gray-200 rounded-lg shadow-lg text-xs">
               <p class="font-semibold text-gray-900 mb-1">Price Breakdown</p>
               <p class="text-gray-500 mb-1">Best: {{ '${:,.4f}'.format(s.best_price) if s.best_price else '—' }} | Avg: {{ '${:,.4f}'.format(s.avg_price) if s.avg_price else '—' }}</p>

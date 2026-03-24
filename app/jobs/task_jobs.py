@@ -18,13 +18,19 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 
+from ..constants import RequisitionStatus
 from ..scheduler import _traced_job
 
 # Maximum tasks created per run to prevent noise
 _BID_DUE_CAP = 20
 
 # Active requisition statuses worth alerting on
-_ACTIVE_REQ_STATUSES = {"open", "sourcing", "quoted", "rfq_sent"}
+_ACTIVE_REQ_STATUSES = {
+    RequisitionStatus.ACTIVE,
+    RequisitionStatus.SOURCING,
+    RequisitionStatus.QUOTED,
+    RequisitionStatus.OFFERS,
+}
 
 
 def register_task_jobs(scheduler, settings):

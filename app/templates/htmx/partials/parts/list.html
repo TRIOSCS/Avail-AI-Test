@@ -31,11 +31,11 @@
         </button>
 
         {# Search input — searches MPN, brand, req name, customer #}
-        <div class="relative flex-shrink-0" style="width: 180px;">
+        <div class="relative flex-shrink-0 w-[180px]">
           <svg class="pointer-events-none absolute left-2 top-1/2 -translate-y-1/2 h-3 w-3 text-gray-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2.5">
             <circle cx="11" cy="11" r="8"/><path d="M21 21l-4.35-4.35"/>
           </svg>
-          <input type="text" name="q" value="{{ q }}" placeholder="MPN, customer, req..."
+          <input aria-label="Search parts" type="text" name="q" value="{{ q }}" placeholder="MPN, customer, req..."
                  hx-get="/v2/partials/parts"
                  hx-target="#parts-list"
                  hx-include="#parts-filters"
@@ -56,7 +56,7 @@
 
         {# ── Top horizontal scrollbar — right of filters ──── #}
         <div class="top-scroll-bar flex-1 min-w-[60px]" id="left-top-scroll" data-sync-target="left-table-content">
-          <div class="scroll-spacer" style="height:1px;"></div>
+          <div class="scroll-spacer h-px"></div>
         </div>
       </div>
     </form>
@@ -89,7 +89,7 @@
         <thead>
           <tr>
             <th class="w-6">
-              <input type="checkbox" class="h-3 w-3 rounded border-gray-300 text-brand-500"
+              <input aria-label="Select all parts" type="checkbox" class="h-3 w-3 rounded border-gray-300 text-brand-500"
                      @change="toggleAll($event)" :checked="allSelected">
             </th>
             {% set col_defs = {
@@ -137,7 +137,7 @@
               :class="selectedPartId === {{ req.id }} ? 'row-selected' : ''"
               @click="selectPart({{ req.id }}); htmx.ajax('GET', '/v2/partials/parts/{{ req.id }}/tab/' + activeTab, {target: '#part-detail'})">
             <td class="w-6" @click.stop>
-              <input type="checkbox" class="h-3 w-3 rounded border-gray-300 text-brand-500"
+              <input aria-label="Select part {{ req.primary_mpn }}" type="checkbox" class="h-3 w-3 rounded border-gray-300 text-brand-500"
                      :checked="selectedIds.includes({{ req.id }})"
                      @change="toggleId({{ req.id }}, $event)">
             </td>

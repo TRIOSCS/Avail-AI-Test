@@ -132,6 +132,7 @@
   <form method="POST" action="/v2/proactive/send"
         hx-post="/v2/proactive/send"
         hx-target="#main-content"
+        data-loading-disable
         class="bg-white rounded-lg border border-gray-200 mb-6">
     <div class="px-4 py-3 bg-gray-50 border-b border-gray-200">
       <h2 class="text-sm font-semibold text-gray-900">Email</h2>
@@ -191,7 +192,7 @@
       <button type="submit"
               :disabled="contactCount === 0"
               class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 transition-colors disabled:opacity-40 disabled:cursor-not-allowed">
-        Send to <span x-text="contactCount">0</span> Contact<span x-show="contactCount !== 1">s</span>
+        Send to <span x-text="contactCount">0</span> Contact<span x-show="contactCount !== 1" x-cloak>s</span>
       </button>
     </div>
   </form>

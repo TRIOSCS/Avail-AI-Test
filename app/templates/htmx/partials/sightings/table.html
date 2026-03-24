@@ -30,7 +30,7 @@
 
 {# ── Filter Bar ──────────────────────────────────────────────── #}
 <div class="px-3 py-2 border-b border-gray-100 flex items-center gap-2 flex-wrap">
-  <input type="text" name="q" value="{{ q }}"
+  <input aria-label="Search sightings" type="text" name="q" value="{{ q }}"
          placeholder="Search MPN or customer..."
          hx-get="/v2/partials/sightings"
          hx-trigger="keyup changed delay:300ms"
@@ -72,7 +72,7 @@
     <thead>
       <tr>
         <th class="px-2 py-2 w-8">
-          <input type="checkbox" x-model="toggleAll"
+          <input aria-label="Select all requirements" type="checkbox" x-model="toggleAll"
                  @change="document.querySelectorAll('.req-checkbox').forEach(cb => { cb.checked = toggleAll; if (toggleAll) selectedIds.add(parseInt(cb.value)); else selectedIds.clear(); })"
                  class="rounded border-gray-300">
         </th>
@@ -93,7 +93,7 @@
           @click="selectReq({{ r.id }}); htmx.ajax('GET', '/v2/partials/sightings/{{ r.id }}/detail', {target: '#sightings-detail', swap: 'innerHTML'})"
           data-req-id="{{ r.id }}">
         <td class="px-2 py-2" @click.stop>
-          <input type="checkbox" class="req-checkbox rounded border-gray-300" value="{{ r.id }}"
+          <input aria-label="Select requirement {{ r.primary_mpn }}" type="checkbox" class="req-checkbox rounded border-gray-300" value="{{ r.id }}"
                  @change="$event.target.checked ? selectedIds.add({{ r.id }}) : selectedIds.delete({{ r.id }})">
         </td>
         <td class="px-3 py-2 font-mono font-medium text-gray-900">{{ r.primary_mpn }}</td>
@@ -170,7 +170,8 @@
     <button class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors"
             hx-post="/v2/partials/sightings/batch-refresh"
             hx-vals='js:{requirement_ids: JSON.stringify(Array.from(selectedIds))}'
-            hx-target="#sightings-table">
+            hx-target="#sightings-table"
+            data-loading-disable>
       Refresh Sightings
     </button>
   </div>

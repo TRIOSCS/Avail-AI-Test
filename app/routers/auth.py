@@ -134,7 +134,7 @@ async def callback(request: Request, code: str = "", state: str = "", db: Sessio
 
     # Bootstrap admin: auto-promote users in admin_emails env var
     if user.email.lower() in settings.admin_emails and user.role != UserRole.ADMIN:
-        user.role = "admin"
+        user.role = UserRole.ADMIN
         logger.info(f"Auto-promoted {user.email} to admin via admin_emails bootstrap")
 
     # Store tokens in DB (not just session) for background jobs

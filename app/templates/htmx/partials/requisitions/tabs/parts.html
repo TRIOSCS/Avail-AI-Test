@@ -18,6 +18,7 @@
     <form hx-post="/v2/partials/requisitions/{{ req.id }}/requirements"
           hx-target="#parts-tbody"
           hx-swap="afterbegin"
+          data-loading-disable
           @htmx:after-request.camel="if(event.detail.successful) { $el.reset(); $dispatch('req-form-reset'); Alpine.store('toast').message='Requirement added'; Alpine.store('toast').type='success'; Alpine.store('toast').show=true; }"
           class="space-y-3">
 
@@ -115,10 +116,10 @@
         <label class="block text-xs text-gray-500 mb-1">Substitutes</label>
         <template x-for="(sub, idx) in subs" :key="idx">
           <div class="flex gap-1.5 items-center mb-1.5">
-            <input :name="'sub_mpn'" x-model="sub.mpn" placeholder="Sub MPN"
+            <input aria-label="Sub MPN" :name="'sub_mpn'" x-model="sub.mpn" placeholder="Sub MPN"
                    class="flex-1 px-2 py-1.5 text-sm font-mono border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
             <div class="relative flex-1" x-data="{ subMfrOpen: false }">
-              <input :name="'sub_manufacturer'" x-model="sub.manufacturer" placeholder="Manufacturer"
+              <input aria-label="Manufacturer" :name="'sub_manufacturer'" x-model="sub.manufacturer" placeholder="Manufacturer"
                      @input.debounce.300ms="subMfrOpen = $el.value.length > 0"
                      @click.away="subMfrOpen = false"
                      hx-get="/v2/partials/manufacturers/search"

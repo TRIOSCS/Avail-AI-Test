@@ -320,7 +320,7 @@ class TestThreadSummaryEndpoint:
         assert data["summary"]["thread_status"] == "active"
 
     def test_get_thread_summary_no_summary(self, client, db_session, test_user):
-        """Returns error when summary cannot be generated."""
+        """Returns 502 when summary cannot be generated (upstream failure)."""
         with (
             patch(
                 "app.routers.emails.require_fresh_token",
@@ -335,9 +335,8 @@ class TestThreadSummaryEndpoint:
         ):
             resp = client.get("/api/email-intelligence/thread-summary/conv-none")
 
-        assert resp.status_code == 200
+        assert resp.status_code == 502
         data = resp.json()
-        assert data["summary"] is None
         assert "error" in data
 
     def test_get_thread_summary_no_token(self, client, db_session, test_user):

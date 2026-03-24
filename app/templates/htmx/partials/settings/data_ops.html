@@ -31,9 +31,10 @@
             &middot; {{ pair.sightings_a or 0 }} vs {{ pair.sightings_b or 0 }} sightings
           </p>
         </div>
-        <template x-if="!merged">
+        <template x-if="!merged" x-cloak>
           <div class="flex gap-2">
-            <button hx-post="/v2/partials/admin/vendor-merge"
+            <button data-loading-disable
+                    hx-post="/v2/partials/admin/vendor-merge"
                     hx-vals='{"keep_id": {{ pair.id_a }}, "remove_id": {{ pair.id_b }}}'
                     hx-target="closest div[x-data]"
                     hx-swap="innerHTML"
@@ -41,7 +42,8 @@
                     class="px-2 py-1 text-xs bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
               Keep "{{ pair.name_a|truncate(20) }}"
             </button>
-            <button hx-post="/v2/partials/admin/vendor-merge"
+            <button data-loading-disable
+                    hx-post="/v2/partials/admin/vendor-merge"
                     hx-vals='{"keep_id": {{ pair.id_b }}, "remove_id": {{ pair.id_a }}}'
                     hx-target="closest div[x-data]"
                     hx-swap="innerHTML"
@@ -80,7 +82,8 @@
           <p class="text-xs text-gray-500 mt-0.5">Score: {{ pair.score }}% match</p>
         </div>
         <div class="flex gap-2">
-          <button hx-post="/v2/partials/admin/company-merge"
+          <button data-loading-disable
+                  hx-post="/v2/partials/admin/company-merge"
                   hx-vals='{"keep_id": {{ pair.id_a }}, "remove_id": {{ pair.id_b }}}'
                   hx-target="closest div.flex.items-center"
                   hx-swap="innerHTML"
@@ -88,7 +91,8 @@
                   class="px-2 py-1 text-xs bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
             Keep "{{ pair.name_a|truncate(20) }}"
           </button>
-          <button hx-post="/v2/partials/admin/company-merge"
+          <button data-loading-disable
+                  hx-post="/v2/partials/admin/company-merge"
                   hx-vals='{"keep_id": {{ pair.id_b }}, "remove_id": {{ pair.id_a }}}'
                   hx-target="closest div.flex.items-center"
                   hx-swap="innerHTML"

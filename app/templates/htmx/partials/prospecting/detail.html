@@ -41,11 +41,13 @@
         {% if prospect.status == 'suggested' %}
         <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/claim"
                 hx-target="#main-content"
+                data-loading-disable
                 class="px-3 py-1.5 bg-brand-500 text-white text-sm font-medium rounded-lg hover:bg-brand-600 transition-colors">
           Claim
         </button>
         <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
                 hx-target="#main-content"
+                data-loading-disable
                 class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors">
           Dismiss
         </button>
@@ -53,6 +55,7 @@
         <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
                 hx-target="#main-content"
                 hx-confirm="Release this prospect back to the pool?"
+                data-loading-disable
                 class="px-3 py-1.5 bg-white border border-brand-200 text-brand-700 text-sm font-medium rounded-lg hover:bg-brand-50 transition-colors">
           Release
         </button>

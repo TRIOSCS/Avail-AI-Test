@@ -34,11 +34,10 @@
 
   {# ── Page-level loading bar ────────────────────────────────── #}
   <div id="page-loading-bar" class="fixed top-0 left-0 right-0 h-0.5 z-50 bg-brand-500 origin-left scale-x-0 transition-transform duration-300"
-       style="display: none;"></div>
+       hidden></div>
 
   {# ── Page content ─────────────────────────────────────────── #}
-  <main id="main-content" class="main-content p-4" hx-target="this" hx-swap="innerHTML"
-        style="padding-bottom: 52px;">
+  <main id="main-content" class="main-content p-4 pb-[52px]" hx-target="this" hx-swap="innerHTML">
     {% block content %}{% endblock %}
   </main>
 
@@ -52,8 +51,8 @@
        @open-modal.window="open = true; if ($event.detail && $event.detail.url) htmx.ajax('GET', $event.detail.url, {target: '#modal-content', swap: 'innerHTML'})"
        @close-modal.window="open = false"
        @keydown.escape.window="open = false"
-       class="fixed inset-0 z-50" style="display: none;">
-    <div class="fixed inset-0 bg-black/50" @click="open = false"></div>
+       class="fixed inset-0 z-50">
+    <div class="fixed inset-0 bg-black/50" role="presentation" @click="open = false" aria-hidden="true"></div>
     <div class="fixed inset-0 flex items-center justify-center p-4">
       <div class="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" x-trap.noscroll="open">
         <div id="modal-content"></div>
@@ -71,8 +70,7 @@
          'bg-rose-50 text-rose-700 border border-rose-200': $store.toast.type === 'error',
          'bg-amber-50 text-amber-700 border border-amber-200': $store.toast.type === 'warning',
          'bg-brand-100 text-brand-600 border border-brand-200': $store.toast.type === 'info'
-       }"
-       style="display: none;">
+       }">
     <span x-text="$store.toast.message"></span>
   </div>
 

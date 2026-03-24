@@ -6,11 +6,12 @@
 <form hx-patch="/requisitions2/{{ req.id }}/inline"
       hx-target="#rq2-row-{{ req.id }}"
       hx-swap="outerHTML"
+      data-loading-disable
       @click.stop>
   <input type="hidden" name="field" value="{{ field }}">
 
   {% if field == 'name' %}
-  <input type="text" name="value" value="{{ req.name }}"
+  <input aria-label="Requisition name" type="text" name="value" value="{{ req.name }}"
          class="w-full px-2 py-1 text-sm border border-brand-300 rounded focus:ring-2 focus:ring-brand-500"
          @keydown.escape="htmx.ajax('GET', '/requisitions2/{{ req.id }}/detail', {target: '#rq2-detail'})"
          autofocus>
@@ -34,7 +35,7 @@
   </select>
 
   {% elif field == 'deadline' %}
-  <input type="date" name="value" value="{{ req.deadline.strftime('%Y-%m-%d') if req.deadline else '' }}"
+  <input aria-label="Deadline date" type="date" name="value" value="{{ req.deadline.strftime('%Y-%m-%d') if req.deadline else '' }}"
          class="w-full px-2 py-1 text-sm border border-brand-300 rounded focus:ring-2 focus:ring-brand-500"
          @change="this.form.requestSubmit()">
 

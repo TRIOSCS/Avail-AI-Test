@@ -20,6 +20,7 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
+from ..constants import RequisitionStatus
 from ..scheduler import _traced_job
 
 
@@ -176,7 +177,13 @@ def _process_cdrs(db, settings) -> dict:
                     .join(CustomerSite, Requisition.customer_site_id == CustomerSite.id)
                     .filter(
                         CustomerSite.company_id == crm_match["company_id"],
-                        Requisition.status.in_(["active", "open", "in_progress"]),
+                        Requisition.status.in_(
+                            [
+                                RequisitionStatus.ACTIVE,
+                                RequisitionStatus.SOURCING,
+                                RequisitionStatus.OFFERS,
+                            ]
+                        ),
                     )
                     .first()
                 )

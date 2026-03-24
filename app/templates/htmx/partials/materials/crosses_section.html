@@ -22,7 +22,8 @@
       {% endif %}
     </div>
     {% if card.cross_references %}
-    <button hx-post="/v2/partials/materials/{{ card.id }}/find-crosses"
+    <button data-loading-disable
+            hx-post="/v2/partials/materials/{{ card.id }}/find-crosses"
             hx-target="#crosses-section"
             hx-swap="outerHTML"
             class="group inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium text-gray-400 hover:text-brand-600 transition-colors">
@@ -49,7 +50,8 @@
         </svg>
         {{ error }}
       </div>
-      <button hx-post="/v2/partials/materials/{{ card.id }}/find-crosses"
+      <button data-loading-disable
+            hx-post="/v2/partials/materials/{{ card.id }}/find-crosses"
               hx-target="#crosses-section"
               hx-swap="outerHTML"
               class="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-md hover:bg-brand-100 transition-colors">
@@ -74,8 +76,7 @@
          hx-push-url="/v2/materials?q={{ mpn_val|urlencode }}"
          class="group flex items-center justify-between gap-2 px-3 py-2 rounded-md border border-transparent hover:border-brand-200 hover:bg-brand-50/50 transition-all duration-150">
         <div class="min-w-0">
-          <span class="block text-sm font-semibold text-gray-800 group-hover:text-brand-700 truncate transition-colors"
-                style="font-family: 'JetBrains Mono', monospace;">
+          <span class="block text-sm font-semibold text-gray-800 group-hover:text-brand-700 truncate transition-colors font-mono">
             {{ mpn_val }}
           </span>
           {% if mfg_val %}
@@ -94,7 +95,8 @@
     {# Empty state #}
     <div class="flex items-center justify-between py-1">
       <p class="text-sm text-gray-400">No alternative parts discovered yet.</p>
-      <button hx-post="/v2/partials/materials/{{ card.id }}/find-crosses"
+      <button data-loading-disable
+            hx-post="/v2/partials/materials/{{ card.id }}/find-crosses"
               hx-target="#crosses-section"
               hx-swap="outerHTML"
               class="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold text-white bg-brand-500 rounded-md hover:bg-brand-600 shadow-sm transition-all duration-150">

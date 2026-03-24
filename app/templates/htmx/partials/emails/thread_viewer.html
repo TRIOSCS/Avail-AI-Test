@@ -66,6 +66,7 @@
     <div class="p-5 bg-gray-50 border-t border-gray-200">
       <form hx-post="/v2/partials/emails/reply"
             hx-target="#reply-result"
+            data-loading-disable
             class="space-y-3">
         <input type="hidden" name="conversation_id" value="{{ conversation_id }}">
         {% if messages %}

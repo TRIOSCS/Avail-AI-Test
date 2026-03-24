@@ -13,9 +13,10 @@
       </p>
     </div>
     {% if follow_ups and follow_ups|length > 1 %}
-    <button hx-post="/v2/partials/follow-ups/batch"
+    <button hx-post="/v2/partials/follow-ups/send-batch"
             hx-target="#main-content"
             hx-confirm="Send follow-up emails to all {{ total }} contacts?"
+            data-loading-disable
             class="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 transition-colors shadow-sm">
       <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
         <path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
@@ -91,7 +92,7 @@
           <button @click="showForm = !showForm"
                   class="inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium rounded-lg transition-colors"
                   :class="showForm ? 'text-gray-600 bg-gray-100 hover:bg-gray-200' : 'text-brand-600 bg-brand-50 border border-brand-200 hover:bg-brand-100'">
-            <svg x-show="!showForm" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+            <svg x-show="!showForm" x-cloak class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
               <path stroke-linecap="round" stroke-linejoin="round" d="M12 19l9 2-9-18-9 18 9-2zm0 0v-8"/>
             </svg>
             <span x-text="showForm ? 'Cancel' : 'Send Follow-Up'"></span>
@@ -104,6 +105,7 @@
             hx-post="/v2/partials/follow-ups/{{ fu.contact_id }}/send"
             hx-target="#follow-up-{{ fu.contact_id }}"
             hx-swap="outerHTML"
+            data-loading-disable
             class="mt-4 space-y-3 p-4 bg-brand-50 rounded-lg border border-brand-100">
         <div>
           <label class="block text-xs font-medium text-gray-600 mb-1">Follow-Up Message <span class="text-gray-400">(optional -- uses default if blank)</span></label>

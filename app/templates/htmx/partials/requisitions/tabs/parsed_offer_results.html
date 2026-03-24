@@ -18,6 +18,7 @@
   <form hx-post="/v2/partials/requisitions/{{ req.id }}/save-parsed-offers"
         hx-target="#parse-area"
         hx-swap="innerHTML"
+        data-loading-disable
         x-data="{ saving: false, cards: {{ offers|length }} }">
 
     <div class="space-y-3" id="parsed-cards">

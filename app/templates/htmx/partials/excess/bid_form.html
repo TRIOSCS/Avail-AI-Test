@@ -12,6 +12,7 @@
   <form hx-post="/api/excess-lists/{{ list_id }}/line-items/{{ item_id }}/bids"
         hx-ext="json-enc"
         hx-target="#modal-content"
+        data-loading-disable
         @htmx:after-request.camel="if(event.detail.successful) { $dispatch('close-modal'); $dispatch('show-toast', {message: 'Bid recorded', type: 'success'}); htmx.ajax('GET', '/v2/partials/excess/{{ list_id }}', {target: '#main-content'}) }"
         class="space-y-4">
 

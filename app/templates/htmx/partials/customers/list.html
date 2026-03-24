@@ -13,7 +13,7 @@
 
   {# Search bar #}
   <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
-    <input type="text" name="search" value="{{ search }}" placeholder="Search customers..."
+    <input aria-label="Search customers" type="text" name="search" value="{{ search }}" placeholder="Search customers..."
            hx-get="/v2/partials/customers" hx-target="#main-content" hx-push-url="true"
            hx-swap="morph"
            hx-trigger="keyup changed delay:300ms"

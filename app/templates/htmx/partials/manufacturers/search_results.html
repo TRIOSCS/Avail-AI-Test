@@ -5,7 +5,7 @@
    Strategy: the dropdown .absolute div is inside a .relative container; the sibling input
    is the first input in that .relative container.
 #}
-{% if results %}
+{% if results is defined and results %}
   {% for mfr in results %}
   <div class="px-3 py-1.5 text-xs hover:bg-brand-50 cursor-pointer transition-colors"
        @click="(function(name){ var drop = $el.closest('.absolute'); var cont = drop ? drop.closest('.relative') : null; var inp = cont ? cont.querySelector('input') : null; if(inp){ inp.value = name; inp.dispatchEvent(new Event('input', {bubbles:true})); } if(drop) drop.textContent = ''; })('{{ mfr.canonical_name }}')">
@@ -21,7 +21,10 @@
        hx-post="/v2/partials/manufacturers/add"
        hx-vals='{"name": "{{ q }}"}'
        hx-swap="outerHTML"
+       data-loading-disable
        @click="setTimeout(function(){ var drop = event.target.closest('.absolute'); var cont = drop ? drop.closest('.relative') : null; var inp = cont ? cont.querySelector('input') : null; if(inp){ inp.value = '{{ q }}'; inp.dispatchEvent(new Event('input', {bubbles:true})); } }, 100)">
     + Add "{{ q }}" as new manufacturer
   </div>
+{% else %}
+  <div class="px-3 py-2 text-xs text-gray-400">Start typing to search manufacturers...</div>
 {% endif %}

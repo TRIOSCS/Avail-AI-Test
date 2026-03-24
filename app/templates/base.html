@@ -16,8 +16,7 @@
 </head>
 <body hx-boost="true" x-data>
     {% include "htmx/partials/shared/topbar.html" %}
-    <main id="main-content" class="main-content" hx-target="this" hx-swap="innerHTML"
-          style="padding-bottom: 52px;">
+    <main id="main-content" class="main-content pb-[52px]" hx-target="this" hx-swap="innerHTML">
         {% block content %}{% endblock %}
     </main>
     {% include "htmx/partials/shared/mobile_nav.html" %}

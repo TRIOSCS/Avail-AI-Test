@@ -65,6 +65,7 @@
             hx-vals='{"status": "reviewed"}'
             hx-target="#response-{{ r.id }}"
             hx-swap="outerHTML"
+            data-loading-disable
             class="px-3 py-1.5 text-xs font-medium text-emerald-600 bg-emerald-50 rounded hover:bg-emerald-100">
       Mark Reviewed
     </button>
@@ -72,6 +73,7 @@
             hx-vals='{"status": "rejected"}'
             hx-target="#response-{{ r.id }}"
             hx-swap="outerHTML"
+            data-loading-disable
             class="px-3 py-1.5 text-xs font-medium text-rose-600 bg-rose-50 rounded hover:bg-rose-100">
       Reject
     </button>

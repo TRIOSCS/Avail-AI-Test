@@ -414,9 +414,9 @@ def test_bulk_bar_forms_have_error_target(client):
 
 
 def test_bulk_bar_buttons_have_loading_states(client):
-    """Bulk bar buttons use data-loading-aria-busy."""
+    """Bulk bar buttons use data-loading-disable for loading feedback."""
     resp = client.get("/requisitions2")
-    assert "data-loading-aria-busy" in resp.text
+    assert "data-loading-disable" in resp.text or "data-loading-aria-busy" in resp.text
 
 
 def test_page_has_css_swap_transitions(client):

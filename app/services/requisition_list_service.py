@@ -13,7 +13,7 @@ from sqlalchemy import and_, case, exists, literal, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
-from app.constants import UserRole
+from app.constants import RequisitionStatus, UserRole
 from app.models import (
     ActivityLog,
     Contact,
@@ -320,7 +320,16 @@ def list_requisitions(
     elif filters.status.value == "all":
         pass  # no status filter
     elif filters.status.value == "archived":
-        query = query.filter(Requisition.status.in_(["archived", "won", "lost", "closed"]))
+        query = query.filter(
+            Requisition.status.in_(
+                [
+                    RequisitionStatus.ARCHIVED,
+                    RequisitionStatus.WON,
+                    RequisitionStatus.LOST,
+                    RequisitionStatus.CANCELLED,
+                ]
+            )
+        )
     else:
         query = query.filter(Requisition.status == filters.status.value)
 

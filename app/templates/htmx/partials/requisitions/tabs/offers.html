@@ -17,7 +17,7 @@
         Add Offer
         <svg class="h-3 w-3 ml-0.5" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </button>
-      <div x-show="addOpen" @click.outside="addOpen = false" x-cloak x-transition
+      <div x-show="addOpen" role="menu" aria-label="Add offer options" @click.outside="addOpen = false" x-cloak x-transition
            class="absolute left-0 top-full mt-1 w-44 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
         <button hx-get="/v2/partials/requisitions/{{ req.id }}/add-offer-form"
                 hx-target="#parse-area" hx-swap="innerHTML"
@@ -54,11 +54,11 @@
       <span class="font-semibold text-gray-900">{{ offers|length }}</span> offer{{ "s" if offers|length != 1 }}
     </p>
     <div class="flex items-center gap-2">
-      <template x-if="selectedOffers.length > 0">
+      <template x-if="selectedOffers.length > 0" x-cloak>
         <span class="text-xs text-gray-500 mr-2" x-text="selectedOffers.length + ' selected'"></span>
       </template>
       {% if draft_quote %}
-      <button x-show="selectedOffers.length > 0"
+      <button x-show="selectedOffers.length > 0" x-cloak
               @click="
                 fetch('/v2/partials/requisitions/{{ req.id }}/add-offers-to-quote', {
                   method: 'POST',
@@ -75,10 +75,11 @@
         Add to Draft Quote
       </button>
       {% endif %}
-      <button x-show="selectedOffers.length > 0"
+      <button x-show="selectedOffers.length > 0" x-cloak
               hx-post="/v2/partials/requisitions/{{ req.id }}/create-quote"
               hx-include="[name='offer_ids']"
               hx-target="#main-content"
+              data-loading-disable
               class="px-3 py-1.5 text-xs font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600"
               x-cloak>
         Create Quote from Selected
@@ -92,7 +93,7 @@
       <thead class="bg-gray-50 sticky top-0">
         <tr>
           <th class="px-3 py-2.5 text-center w-8">
-            <input type="checkbox"
+            <input aria-label="Select all offers" type="checkbox"
                    @change="selectedOffers = $el.checked ? [{% for o in offers %}{{ o.id }}{{ ',' if not loop.last }}{% endfor %}] : []"
                    class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
           </th>
@@ -121,7 +122,7 @@
         {% for o in offers %}
         <tr id="offer-row-{{ o.id }}" class="hover:bg-brand-50 group">
           <td class="px-3 py-2.5 text-center">
-            <input type="checkbox" name="offer_ids" value="{{ o.id }}"
+            <input aria-label="Select offer from {{ o.vendor_name or 'unknown vendor' }}" type="checkbox" name="offer_ids" value="{{ o.id }}"
                    @change="$el.checked ? selectedOffers.push({{ o.id }}) : selectedOffers = selectedOffers.filter(x => x !== {{ o.id }})"
                    class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">
           </td>
@@ -177,6 +178,7 @@
                 {% if o.status == "pending_review" %}
                 <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
                         hx-vals='{"action": "approve"}' hx-target="#tab-content"
+                        data-loading-disable
                         @click.stop="open = false"
                         class="w-full text-left px-3 py-1.5 text-xs text-emerald-600 hover:bg-emerald-50">
                   <span class="inline-flex items-center gap-1">
@@ -186,6 +188,7 @@
                 </button>
                 <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/review"
                         hx-vals='{"action": "reject"}' hx-target="#tab-content"
+                        data-loading-disable
                         @click.stop="open = false"
                         class="w-full text-left px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50">
                   <span class="inline-flex items-center gap-1">
@@ -196,10 +199,12 @@
                 {% elif o.status in ("active", "approved") %}
                 <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/reconfirm"
                         hx-target="#tab-content"
+                        data-loading-disable
                         @click.stop="open = false"
                         class="w-full text-left px-3 py-1.5 text-xs text-brand-600 hover:bg-brand-50">Reconfirm</button>
                 <button hx-post="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}/mark-sold"
                         hx-target="#tab-content" hx-confirm="Mark this offer as sold?"
+                        data-loading-disable
                         @click.stop="open = false"
                         class="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">Mark Sold</button>
                 {% endif %}
@@ -209,6 +214,7 @@
                         class="w-full text-left px-3 py-1.5 text-xs text-gray-700 hover:bg-gray-50">History</button>
                 <button hx-delete="/v2/partials/requisitions/{{ req.id }}/offers/{{ o.id }}"
                         hx-target="#offer-row-{{ o.id }}" hx-swap="delete"
+                        data-loading-disable
                         hx-confirm="Delete this offer? This cannot be undone."
                         @click.stop="open = false"
                         class="w-full text-left px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 border-t border-gray-100">Delete</button>

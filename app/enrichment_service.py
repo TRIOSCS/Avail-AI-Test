@@ -324,6 +324,7 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
             timeout=20,
         )
         if resp.status_code != 200:
+            logger.warning("Explorium contacts returned HTTP %d for %s", resp.status_code, domain)
             return []
         prospects = resp.json().get("prospects") or []
         return [

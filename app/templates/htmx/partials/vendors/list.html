@@ -36,7 +36,7 @@
        x-data="{ view: '{{ view|default('table') }}' }">
     <form id="vendor-filters" class="flex flex-wrap gap-3 items-end" onsubmit="return false">
       <div class="flex-1 min-w-[200px]">
-        <input type="text" name="q" value="{{ q }}" placeholder="Search vendors, brands, commodities..."
+        <input aria-label="Search vendors" type="text" name="q" value="{{ q }}" placeholder="Search vendors, brands, commodities..."
                hx-get="/v2/partials/vendors"
                hx-target="#main-content"
                hx-swap="morph"

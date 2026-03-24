@@ -5,12 +5,13 @@
   Called by: page.html (include), GET /requisitions2/table
   Depends on: _table_rows.html, Tailwind data-table styles
 #}
+{% if requisitions %}
 <div class="overflow-x-auto">
   <table class="min-w-full divide-y divide-gray-200 text-sm">
     <thead class="bg-gray-50">
       <tr>
         <th class="w-8 px-3 py-2">
-          <input type="checkbox"
+          <input aria-label="Select all requisitions" type="checkbox"
                  class="rounded border-gray-300 text-brand-500 focus:ring-brand-400"
                  x-on:change="toggleAll($event.target.checked, {{ requisitions | map(attribute='id') | list | tojson }})">
         </th>
@@ -41,6 +42,12 @@
     </tbody>
   </table>
 </div>
+{% else %}
+<div class="py-4">
+  {% set message = "No requisitions found. Try adjusting your filters." %}
+  {% include "htmx/partials/shared/empty_state.html" %}
+</div>
+{% endif %}
 
 {% if pagination.total_pages > 1 %}
 <nav class="flex items-center justify-between border-t border-gray-200 px-3 py-2 text-xs">

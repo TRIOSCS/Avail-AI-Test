@@ -124,11 +124,12 @@
     {% endif %}
 
     {# Row 8: Quick actions (stop propagation to prevent card click navigation) #}
-    <div class="flex gap-2 pt-2 border-t border-gray-100" @click.stop>
+    <div class="flex gap-2 pt-2 border-t border-gray-100" role="group" aria-label="Lead actions" @click.stop>
       <button hx-post="/v2/partials/sourcing/leads/{{ lead.id }}/status"
               hx-vals='{"status": "contacted"}'
               hx-target="#lead-card-{{ lead.id }}"
               hx-swap="outerHTML"
+              data-loading-disable
               class="flex-1 px-3 py-1.5 text-xs font-medium text-brand-600
                      bg-brand-50 rounded hover:bg-brand-100">
         Claim
@@ -137,6 +138,7 @@
               hx-vals='{"status": "bad_lead"}'
               hx-target="#lead-card-{{ lead.id }}"
               hx-swap="outerHTML"
+              data-loading-disable
               class="flex-1 px-3 py-1.5 text-xs font-medium text-gray-600
                      bg-gray-100 rounded hover:bg-gray-200">
         Dismiss

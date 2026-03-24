@@ -12,6 +12,7 @@ Depends on: app/services/requisition_list_service.py,
 """
 
 import asyncio
+import html
 import json
 from datetime import datetime, timezone
 
@@ -255,7 +256,7 @@ async def inline_save(
     # Validate field against enum
     valid_fields = {e.value for e in InlineEditField}
     if field not in valid_fields:
-        return HTMLResponse(f"Invalid field: {field}", status_code=422)
+        return HTMLResponse(f"Invalid field: {html.escape(field)}", status_code=422)
 
     req = get_req_for_user(db, user, req_id, options=[])
     if not req:
@@ -281,7 +282,7 @@ async def inline_save(
 
     elif field == "urgency":
         if value not in ("normal", "hot", "critical"):
-            return HTMLResponse(f"Invalid urgency: {value}", status_code=422)
+            return HTMLResponse(f"Invalid urgency: {html.escape(value)}", status_code=422)
         req.urgency = value
         msg = f"Urgency set to {value}"
 

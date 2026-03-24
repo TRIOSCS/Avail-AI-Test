@@ -67,13 +67,13 @@
                   :class="activeFilter === f.key ? 'bg-brand-500 text-white' : 'bg-gray-100 text-gray-600 hover:bg-gray-200'"
                   class="text-xs px-2.5 py-1 rounded-full font-medium transition-colors tabular-nums">
             <span x-text="f.label"></span>
-            <span x-show="f.count > 0" class="ml-0.5" x-text="'(' + f.count + ')'"></span>
+            <span x-show="f.count > 0" x-cloak class="ml-0.5" x-text="'(' + f.count + ')'"></span>
           </button>
         </template>
       </div>
 
       {# Loading state #}
-      <div x-show="loading" class="flex-1 flex items-center justify-center">
+      <div x-show="loading" x-cloak class="flex-1 flex items-center justify-center">
         <div class="text-center">
           <svg class="w-6 h-6 animate-spin text-brand-400 mx-auto mb-2" fill="none" viewBox="0 0 24 24">
             <circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/>
@@ -93,7 +93,7 @@
       </div>
 
       {# Scrollable requirement list #}
-      <div x-show="!loading" class="flex-1 overflow-y-auto qb-list">
+      <div x-show="!loading" x-cloak class="flex-1 overflow-y-auto qb-list">
         <template x-for="(line, idx) in filteredLines" :key="line.requirement_id">
           <button @click="selectLine(idx)"
                   :data-req-id="line.requirement_id"
@@ -114,15 +114,15 @@
               <p class="text-sm font-mono font-medium text-gray-900 truncate" x-text="line.mpn"></p>
               <p class="text-xs text-gray-400 truncate">
                 <span x-text="line.target_qty + ' pcs'"></span>
-                <span x-show="line.target_price" class="ml-1">@ $<span x-text="line.target_price?.toFixed(4)" class="tabular-nums"></span></span>
+                <span x-show="line.target_price" x-cloak class="ml-1">@ $<span x-text="line.target_price?.toFixed(4)" class="tabular-nums"></span></span>
               </p>
             </div>
-            <span x-show="line.offer_count > 0"
+            <span x-show="line.offer_count > 0" x-cloak
                   class="flex-shrink-0 px-1.5 py-0.5 text-[10px] font-semibold rounded bg-brand-100 text-brand-600 tabular-nums"
                   x-text="line.offer_count"></span>
           </button>
         </template>
-        <div x-show="filteredLines.length === 0" class="px-4 py-8 text-center text-sm text-gray-400">
+        <div x-show="filteredLines.length === 0" x-cloak class="px-4 py-8 text-center text-sm text-gray-400">
           No lines match this filter.
         </div>
       </div>
@@ -182,7 +182,7 @@
               <p class="text-sm font-mono text-gray-900" x-text="activeLine.customer_pn || '—'"></p>
             </div>
           </div>
-          <template x-if="activeLine.sale_notes">
+          <template x-if="activeLine.sale_notes" x-cloak>
             <div class="mt-2 pt-2 border-t border-brand-100">
               <span class="text-[10px] text-gray-400 uppercase tracking-wide">Notes</span>
               <p class="text-sm text-gray-700 mt-0.5" x-text="activeLine.sale_notes"></p>
@@ -197,7 +197,7 @@
             <span class="inline-flex px-1.5 py-0.5 text-[10px] font-semibold rounded bg-brand-100 text-brand-600"
                   x-text="activeLine.offers.length"></span>
           </h3>
-          <div x-show="activeLine.offers.length > 0" class="rounded-lg border-2 border-brand-200 overflow-hidden">
+          <div x-show="activeLine.offers.length > 0" x-cloak class="rounded-lg border-2 border-brand-200 overflow-hidden">
             <table class="min-w-full divide-y divide-gray-200">
               <thead class="bg-gray-50">
                 <tr>
@@ -223,7 +223,7 @@
                     <td class="px-2 py-2 text-center">
                       <div class="w-4 h-4 rounded-full border-2 flex items-center justify-center mx-auto transition-colors"
                            :class="activeLine.selected_offer_id === offer.id ? 'border-brand-500 bg-brand-500' : 'border-gray-300 bg-white'">
-                        <div x-show="activeLine.selected_offer_id === offer.id"
+                        <div x-show="activeLine.selected_offer_id === offer.id" x-cloak
                              x-transition:enter="transition-transform duration-150"
                              x-transition:enter-start="scale-0"
                              x-transition:enter-end="scale-100"
@@ -234,7 +234,7 @@
                     <td class="px-3 py-2 text-sm text-right font-mono tabular-nums" x-text="'$' + offer.unit_price.toFixed(4)"></td>
                     <td class="px-3 py-2 text-sm text-right tabular-nums">
                       <span x-text="offer.qty_available.toLocaleString()"></span>
-                      <span x-show="offer.qty_available < activeLine.target_qty"
+                      <span x-show="offer.qty_available < activeLine.target_qty" x-cloak
                             class="ml-1 text-[10px] text-amber-600 font-medium">Low</span>
                     </td>
                     <td class="px-3 py-2 text-sm text-gray-600" x-text="offer.lead_time || '—'"></td>
@@ -242,23 +242,23 @@
                     <td class="px-3 py-2 text-sm text-gray-600" x-text="offer.condition || '—'"></td>
                     <td class="px-3 py-2 text-sm text-right tabular-nums" x-text="offer.moq || '—'"></td>
                     <td class="px-3 py-2 text-sm text-right tabular-nums">
-                      <span x-show="offer.confidence != null"
+                      <span x-show="offer.confidence != null" x-cloak
                             :class="offer.confidence >= 0.8 ? 'text-emerald-600' : offer.confidence >= 0.5 ? 'text-amber-600' : 'text-rose-600'"
                             class="font-semibold"
                             x-text="Math.round(offer.confidence * 100) + '%'"></span>
-                      <span x-show="offer.confidence == null" class="text-gray-300">—</span>
+                      <span x-show="offer.confidence == null" x-cloak class="text-gray-300">—</span>
                     </td>
                   </tr>
                 </template>
               </tbody>
             </table>
           </div>
-          <div x-show="activeLine.offers.length === 0" class="py-6 text-center text-sm text-gray-400">
+          <div x-show="activeLine.offers.length === 0" x-cloak class="py-6 text-center text-sm text-gray-400">
             No offers for this part.
           </div>
 
           {# Price spread bar #}
-          <template x-if="activeLine.offers.length > 1">
+          <template x-if="activeLine.offers.length > 1" x-cloak>
             <div class="mt-2 px-1">
               <div class="flex items-center gap-2 text-[10px] text-gray-400">
                 <span class="font-mono tabular-nums" x-text="'$' + minPrice.toFixed(4)"></span>
@@ -278,7 +278,7 @@
         </div>
 
         {# 3. Pricing History (collapsible) #}
-        <template x-if="activeLine.pricing_history && activeLine.pricing_history.recent && activeLine.pricing_history.recent.length > 0">
+        <template x-if="activeLine.pricing_history && activeLine.pricing_history.recent && activeLine.pricing_history.recent.length > 0" x-cloak>
           <div x-data="{ histOpen: false }">
             <button @click="histOpen = !histOpen"
                     class="text-sm text-brand-500 hover:text-brand-600 font-medium flex items-center gap-1">
@@ -328,8 +328,8 @@
              :class="activeLine.status === 'decided' ? 'border-emerald-300 bg-emerald-50/30' : 'border-brand-200 bg-brand-50'">
           <h3 class="text-[10px] font-semibold uppercase tracking-wider mb-1 transition-colors duration-300"
               :class="activeLine.status === 'decided' ? 'text-emerald-600' : 'text-brand-400'">
-            <span x-show="activeLine.status !== 'decided'">Set Price</span>
-            <span x-show="activeLine.status === 'decided'">Decided</span>
+            <span x-show="activeLine.status !== 'decided'" x-cloak>Set Price</span>
+            <span x-show="activeLine.status === 'decided'" x-cloak>Decided</span>
           </h3>
 
           {# Selected offer summary #}
@@ -338,7 +338,7 @@
             <span class="font-medium text-gray-900" x-text="selectedOffer?.vendor_name"></span>
             <span class="text-gray-500">Cost:</span>
             <span class="font-mono font-semibold text-gray-900" x-text="'$' + (selectedOffer?.unit_price || 0).toFixed(4)"></span>
-            <span x-show="selectedOffer && selectedOffer.qty_available < activeLine.target_qty"
+            <span x-show="selectedOffer && selectedOffer.qty_available < activeLine.target_qty" x-cloak
                   class="text-xs text-amber-600 font-medium" x-cloak>
               Offer has <span x-text="selectedOffer?.qty_available?.toLocaleString()"></span> pcs, need <span x-text="activeLine.target_qty?.toLocaleString()"></span>
             </span>
@@ -350,7 +350,7 @@
               <label class="block text-[10px] text-gray-500 uppercase tracking-wide mb-1">Sell Price</label>
               <div class="relative">
                 <span class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 text-sm">$</span>
-                <input type="number" step="0.0001"
+                <input aria-label="Sell price" type="number" step="0.0001"
                        x-ref="sellPriceInput"
                        :value="activeLine.sell_price"
                        @input="activeLine.sell_price = parseFloat($event.target.value) || 0; activeLine.sell_price_manual = true;"
@@ -400,10 +400,10 @@
           {# Actions #}
           <div class="flex items-center justify-between pt-1">
             <div class="flex gap-3">
-              <button x-show="activeLine.status === 'decided' || activeLine.status === 'skipped'" @click="undoDecision()"
+              <button x-show="activeLine.status === 'decided' || activeLine.status === 'skipped'" x-cloak @click="undoDecision()"
                       class="text-xs text-gray-400 hover:text-gray-600 transition-colors" x-cloak>Undo</button>
               <button @click="skipLine()"
-                      x-show="activeLine.status !== 'skipped'"
+                      x-show="activeLine.status !== 'skipped'" x-cloak
                       class="text-xs text-gray-400 hover:text-gray-600 transition-colors">Skip</button>
             </div>
             <button @click="confirmDecision()"
@@ -421,7 +421,7 @@
     </div>
 
     {# Empty state when no line selected #}
-    <div class="flex-1 flex items-center justify-center" x-show="!activeLine">
+    <div class="flex-1 flex items-center justify-center" x-show="!activeLine" x-cloak>
       <p class="text-sm text-gray-400">Select a requirement from the list.</p>
     </div>
   </div>
@@ -479,8 +479,8 @@
       <button @click="saveQuote()"
               :disabled="!hasCustomerSite || decidedCount === 0 || saving"
               class="px-4 py-2 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 flex items-center gap-1.5 transition-colors disabled:opacity-50">
-        <svg x-show="saving" class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
-        <svg x-show="!saving" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
+        <svg x-show="saving" x-cloak class="w-4 h-4 animate-spin" fill="none" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="31.4" stroke-dashoffset="10"/></svg>
+        <svg x-show="!saving" x-cloak class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"/></svg>
         <span x-text="saved ? 'Update Quote' : 'Save Quote'"></span>
       </button>
     </div>

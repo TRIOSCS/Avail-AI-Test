@@ -49,34 +49,40 @@
         <button hx-post="/requisitions2/{{ req.id }}/action/archive"
                 hx-target="#rq2-table" hx-include="#rq2-filters"
                 hx-confirm="Archive this requisition?"
+                data-loading-disable
                 @click="open = false"
                 class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Archive</button>
         {% else %}
         <button hx-post="/requisitions2/{{ req.id }}/action/activate"
                 hx-target="#rq2-table" hx-include="#rq2-filters"
+                data-loading-disable
                 @click="open = false"
                 class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Activate</button>
         {% endif %}
         {% if not req.claimed_by_id and user.role in ('buyer','trader','manager','admin') %}
         <button hx-post="/requisitions2/{{ req.id }}/action/claim"
                 hx-target="#rq2-table" hx-include="#rq2-filters"
+                data-loading-disable
                 @click="open = false"
                 class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Claim</button>
         {% elif req.claimed_by_id == user.id %}
         <button hx-post="/requisitions2/{{ req.id }}/action/unclaim"
                 hx-target="#rq2-table" hx-include="#rq2-filters"
+                data-loading-disable
                 @click="open = false"
                 class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Unclaim</button>
         {% endif %}
         {% if req.status in ('active', 'sourcing', 'offers', 'quoting', 'quoted', 'open', 'reopened') %}
         <button hx-post="/requisitions2/{{ req.id }}/action/won"
                 hx-target="#rq2-table" hx-include="#rq2-filters"
+                data-loading-disable
                 @click="open = false"
                 class="flex w-full items-center gap-2 px-3 py-2 text-sm text-emerald-600 hover:bg-emerald-50">Mark Won</button>
         {% endif %}
         <div class="border-t border-gray-100 my-1"></div>
         <button hx-post="/requisitions2/{{ req.id }}/action/clone"
                 hx-target="#rq2-table" hx-include="#rq2-filters"
+                data-loading-disable
                 @click="open = false"
                 class="flex w-full items-center gap-2 px-3 py-2 text-sm text-gray-700 hover:bg-gray-50">Clone</button>
       </div>

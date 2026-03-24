@@ -91,12 +91,14 @@
     <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/claim"
             hx-target="#prospect-{{ prospect.id }}"
             hx-swap="outerHTML"
+            data-loading-disable
             class="flex-1 px-2 py-1.5 bg-brand-500 text-white text-xs font-medium rounded-md hover:bg-brand-600 transition-colors">
       Claim
     </button>
     <button hx-post="/v2/partials/prospecting/{{ prospect.id }}/dismiss"
             hx-target="#prospect-{{ prospect.id }}"
             hx-swap="outerHTML"
+            data-loading-disable
             class="flex-1 px-2 py-1.5 bg-white border border-brand-200 text-brand-700 text-xs font-medium rounded-md hover:bg-brand-50 transition-colors">
       Dismiss
     </button>

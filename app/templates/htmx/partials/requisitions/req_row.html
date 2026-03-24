@@ -121,28 +121,33 @@
         <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/archive"
                 hx-target="#main-content"
                 hx-confirm="Archive '{{ req.name }}'?"
+                data-loading-disable
                 @click="open = false"
                 class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Archive</button>
         {% else %}
         <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/activate"
                 hx-target="#main-content"
+                data-loading-disable
                 @click="open = false"
                 class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Activate</button>
         {% endif %}
         {% if not req.claimed_by_id and user and user.role in ('buyer','trader','manager','admin') %}
         <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/claim"
                 hx-target="#main-content"
+                data-loading-disable
                 @click="open = false"
                 class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Claim</button>
         {% elif req.claimed_by_id and user and req.claimed_by_id == user.id %}
         <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/unclaim"
                 hx-target="#main-content"
+                data-loading-disable
                 @click="open = false"
                 class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Unclaim</button>
         {% endif %}
         {% if req.status in ('active', 'sourcing', 'offers', 'quoting', 'quoted', 'open', 'reopened') %}
         <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/won"
                 hx-target="#main-content"
+                data-loading-disable
                 @click="open = false"
                 class="w-full text-left px-3 py-1.5 text-sm text-emerald-700 hover:bg-emerald-50">Mark Won</button>
         {% endif %}
@@ -150,12 +155,14 @@
         <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/lost"
                 hx-target="#main-content"
                 hx-confirm="Mark '{{ req.name }}' as lost?"
+                data-loading-disable
                 @click="open = false"
                 class="w-full text-left px-3 py-1.5 text-sm text-rose-700 hover:bg-rose-50">Mark Lost</button>
         {% endif %}
         <hr class="my-1 border-gray-100">
         <button hx-post="/v2/partials/requisitions/{{ req.id }}/action/clone"
                 hx-target="#main-content"
+                data-loading-disable
                 @click="open = false"
                 class="w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-gray-50">Clone</button>
       </div>
@@ -170,7 +177,7 @@
     hx-push-url="/v2/requisitions/{{ req.id }}">
   {# Checkbox (stops row click propagation) #}
   <td class="px-3 py-3 w-10" @click.stop>
-    <input type="checkbox" :value="{{ req.id }}"
+    <input aria-label="Select requisition {{ req.name }}" type="checkbox" :value="{{ req.id }}"
            @change="$event.target.checked ? selectedIds.add({{ req.id }}) : selectedIds.delete({{ req.id }}); selectedIds = new Set(selectedIds)"
            :checked="selectedIds.has({{ req.id }})"
            class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500">

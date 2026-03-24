@@ -12,6 +12,7 @@
     <form hx-patch="/v2/partials/parts/{{ requirement.id }}/notes"
           hx-target="#notes-tab-content"
           hx-swap="outerHTML"
+          data-loading-disable
           x-data="{ saving: false }"
           @htmx:before-request="saving = true"
           @htmx:after-request="saving = false">

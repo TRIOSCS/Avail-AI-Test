@@ -52,13 +52,13 @@
           {# Value — inline editable #}
           <td class="px-5 py-3">
             {# Display mode #}
-            <div x-show="!editing" class="flex items-center gap-2">
+            <div x-show="!editing" x-cloak class="flex items-center gap-2">
               {% if is_sensitive %}
-              <span x-show="!showValue" class="text-sm text-gray-500 font-mono">{{ '*' * 12 }}</span>
+              <span x-show="!showValue" x-cloak class="text-sm text-gray-500 font-mono">{{ '*' * 12 }}</span>
               <span x-show="showValue" class="text-sm text-gray-900 font-mono" x-cloak>{{ val }}</span>
               <button @click="showValue = !showValue"
                       class="text-gray-400 hover:text-gray-600 transition-colors" type="button">
-                <svg x-show="!showValue" class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                <svg x-show="!showValue" x-cloak class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
                   <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
                 </svg>
@@ -83,17 +83,18 @@
                   @close-edit="editing = false"
                   class="flex items-center gap-2">
               {% if is_sensitive %}
-              <input type="password" name="value" value="{{ val }}"
+              <input aria-label="Config value (sensitive)" type="password" name="value" value="{{ val }}"
                      class="flex-1 max-w-sm px-2 py-1 text-sm font-mono border border-brand-300 rounded-md
                             focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                      x-ref="editInput" @keydown.escape="editing = false">
               {% else %}
-              <input type="text" name="value" value="{{ val }}"
+              <input aria-label="Config value" type="text" name="value" value="{{ val }}"
                      class="flex-1 max-w-sm px-2 py-1 text-sm font-mono border border-brand-300 rounded-md
                             focus:ring-2 focus:ring-brand-500 focus:border-brand-500"
                      x-ref="editInput" @keydown.escape="editing = false">
               {% endif %}
               <button type="submit"
+                      data-loading-disable
                       class="px-2.5 py-1 text-xs bg-brand-500 text-white rounded-md hover:bg-brand-600 font-medium transition-colors">
                 Save
               </button>

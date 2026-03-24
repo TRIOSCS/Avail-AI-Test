@@ -5,6 +5,7 @@
 <td id="{{ cell_id }}" @click.stop class="!p-0.5">
   {% if field == 'sourcing_status' %}
     <select name="value"
+            data-loading-disable
             hx-patch="/v2/partials/parts/{{ requirement.id }}/cell"
             hx-target="#{{ cell_id }}" hx-swap="outerHTML"
             hx-vals='{"field": "{{ field }}"}'
@@ -16,8 +17,9 @@
       {% endfor %}
     </select>
   {% elif field == 'target_qty' %}
-    <input type="number" name="value" value="{{ requirement.target_qty or '' }}"
-           hx-patch="/v2/partials/parts/{{ requirement.id }}/cell"
+    <input aria-label="Target quantity" type="number" name="value" value="{{ requirement.target_qty or '' }}"
+           data-loading-disable
+            hx-patch="/v2/partials/parts/{{ requirement.id }}/cell"
            hx-target="#{{ cell_id }}" hx-swap="outerHTML"
            hx-vals='{"field": "{{ field }}"}'
            hx-trigger="keyup[key=='Enter']"
@@ -25,9 +27,10 @@
            class="text-[11px] font-mono px-1 py-0.5 rounded border border-brand-300 focus:ring-1 focus:ring-brand-500 w-16"
            x-init="$el.focus(); $el.select()" autofocus />
   {% elif field == 'target_price' %}
-    <input type="number" name="value" step="0.0001"
+    <input aria-label="Target price" type="number" name="value" step="0.0001"
            value="{{ requirement.target_price if requirement.target_price else '' }}"
-           hx-patch="/v2/partials/parts/{{ requirement.id }}/cell"
+           data-loading-disable
+            hx-patch="/v2/partials/parts/{{ requirement.id }}/cell"
            hx-target="#{{ cell_id }}" hx-swap="outerHTML"
            hx-vals='{"field": "{{ field }}"}'
            hx-trigger="keyup[key=='Enter']"

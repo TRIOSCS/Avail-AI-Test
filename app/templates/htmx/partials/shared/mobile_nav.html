@@ -11,7 +11,7 @@
      @click.outside="moreOpen = false"
      @keydown.escape.window="moreOpen = false"
      aria-label="Main navigation">
-  <div class="flex items-stretch justify-center mx-auto" style="max-width: 720px;">
+  <div class="flex items-stretch justify-center mx-auto max-w-[720px]">
     {% set nav_items = [
       ('requisitions', 'Reqs', '/v2/requisitions', '/v2/partials/parts/workspace',
        'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'),
@@ -39,8 +39,7 @@
        hx-get="{{ partial }}"
        hx-target="#main-content"
        hx-push-url="{{ href }}"
-       style="width: 62px; min-width: 0;"
-       class="relative flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150
+       class="relative flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150 w-[62px] min-w-0
               {{ 'text-brand-700' if current_view == id else 'text-gray-500 hover:text-gray-600' }}">
       {% if current_view == id %}
       <span class="absolute top-0 inset-x-[8px] h-[3px] bg-brand-600 rounded-b-sm"></span>
@@ -58,10 +57,9 @@
     {% endfor %}
 
     {# More button — vertical dots #}
-    <div class="relative flex items-stretch" style="width: 62px; min-width: 0;">
+    <div class="relative flex items-stretch w-[62px] min-w-0">
       <button @click="moreOpen = !moreOpen"
-              style="width: 62px;"
-              class="flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150
+              class="flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150 w-[62px]
                      {{ 'text-brand-700' if current_view == 'settings' else 'text-gray-500 hover:text-gray-600' }}"
               :class="moreOpen && '!text-brand-700'"
               aria-label="More options">

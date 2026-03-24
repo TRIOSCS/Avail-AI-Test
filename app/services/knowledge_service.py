@@ -14,6 +14,7 @@ from loguru import logger
 from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
+from app.constants import RequisitionStatus
 from app.models.knowledge import KnowledgeEntry
 
 # Expiry defaults (days)
@@ -800,7 +801,16 @@ def build_pipeline_context(db: Session) -> str:
     sections.append("## Pipeline status breakdown (last 200 reqs)\n" + "\n".join(lines))
 
     # 2. Active reqs summary
-    active = [r for r in all_reqs if r.status in ("active", "in_progress", "quoting")]
+    active = [
+        r
+        for r in all_reqs
+        if r.status
+        in (
+            RequisitionStatus.ACTIVE,
+            RequisitionStatus.SOURCING,
+            RequisitionStatus.QUOTING,
+        )
+    ]
     if active:
         lines = []
         for r in active[:30]:
@@ -894,7 +904,13 @@ def build_company_context(db: Session, *, company_id: int) -> str:
             db.query(Requisition)
             .filter(
                 Requisition.customer_site_id.in_(site_ids),
-                Requisition.status.in_(["active", "in_progress", "quoting"]),
+                Requisition.status.in_(
+                    [
+                        RequisitionStatus.ACTIVE,
+                        RequisitionStatus.SOURCING,
+                        RequisitionStatus.QUOTING,
+                    ]
+                ),
             )
             .order_by(Requisition.created_at.desc())
             .limit(20)

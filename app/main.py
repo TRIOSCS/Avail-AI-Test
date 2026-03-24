@@ -266,7 +266,7 @@ if not os.environ.get("TESTING"):
             re.compile(r"/metrics$"),
             re.compile(r"/api/buy-plans/token/.*"),  # external approval links
             re.compile(r"/v2/partials/requisitions/import-.*"),  # multipart file upload
-            re.compile(r"/v2/partials/customers/(lookup|quick-create)"),  # AI company lookup modal
+            re.compile(r"/v2/partials/customers/lookup"),  # AI company lookup (read-only)
         ],
     )
 

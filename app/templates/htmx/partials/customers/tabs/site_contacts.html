@@ -16,14 +16,15 @@
         hx-post="/v2/partials/customers/{{ company.id }}/sites/{{ site.id }}/contacts"
         hx-target="#site-{{ site.id }}-contacts"
         hx-swap="innerHTML"
+        data-loading-disable
         class="grid grid-cols-2 md:grid-cols-5 gap-2 mb-3 p-2 bg-gray-50 rounded border border-gray-200">
-    <input type="text" name="full_name" required placeholder="Full Name"
+    <input aria-label="Full Name" type="text" name="full_name" required placeholder="Full Name"
            class="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
-    <input type="email" name="email" placeholder="Email"
+    <input aria-label="Email" type="email" name="email" placeholder="Email"
            class="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
-    <input type="text" name="title" placeholder="Title"
+    <input aria-label="Title" type="text" name="title" placeholder="Title"
            class="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
-    <input type="text" name="phone" placeholder="Phone"
+    <input aria-label="Phone" type="text" name="phone" placeholder="Phone"
            class="px-2 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500">
     <button type="submit"
             class="px-2 py-1 text-xs font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
@@ -54,6 +55,7 @@
         <button hx-post="/v2/partials/customers/{{ company.id }}/sites/{{ site.id }}/contacts/{{ c.id }}/primary"
                 hx-target="#site-{{ site.id }}-contacts"
                 hx-swap="innerHTML"
+                data-loading-disable
                 class="text-[10px] text-brand-500 hover:text-brand-700" title="Set as primary">
           Primary
         </button>
@@ -62,6 +64,7 @@
                 hx-target="#site-contact-{{ c.id }}"
                 hx-swap="outerHTML"
                 hx-confirm="Delete contact {{ c.full_name }}?"
+                data-loading-disable
                 class="text-[10px] text-rose-500 hover:text-rose-700" title="Delete">
           Delete
         </button>

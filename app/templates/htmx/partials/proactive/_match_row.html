@@ -9,7 +9,7 @@
     :class="selected[{{ match.id }}] && 'bg-brand-50'">
   {# Checkbox #}
   <td class="w-10 px-3 py-2.5">
-    <input type="checkbox"
+    <input aria-label="Select match {{ match.mpn | default('') }}" type="checkbox"
            :checked="selected[{{ match.id }}]"
            @change="toggle({{ match.id }})"
            class="rounded border-gray-300 text-brand-500 focus:ring-brand-500">

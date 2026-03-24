@@ -11,7 +11,7 @@
   <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
     <div class="flex items-start justify-between">
       <div>
-        <h1 class="text-3xl font-bold text-gray-900" style="font-family: 'JetBrains Mono', monospace;">{{ card.display_mpn or card.normalized_mpn }}</h1>
+        <h1 class="text-3xl font-bold text-gray-900 font-mono">{{ card.display_mpn or card.normalized_mpn }}</h1>
         <div class="mt-2 flex flex-wrap items-center gap-2">
           {% if card.manufacturer %}
           <span class="text-sm font-medium text-gray-700">{{ card.manufacturer }}</span>
@@ -56,6 +56,7 @@
         <button hx-post="/v2/partials/materials/{{ card.id }}/enrich"
                 hx-target="this"
                 hx-swap="outerHTML"
+                data-loading-disable
                 class="mt-1 inline-flex items-center gap-1 px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 transition-colors">
           <svg class="h-3.5 w-3.5 htmx-indicator animate-spin" fill="none" viewBox="0 0 24 24">
             <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -69,7 +70,7 @@
 
   {# ── Collapsible Specs ───────────────────────────────────── #}
   <div class="bg-white border border-brand-200 rounded-lg mb-6" x-data="{ specsOpen: true }">
-    <div class="px-6 py-4 flex items-center justify-between cursor-pointer" @click="specsOpen = !specsOpen">
+    <div class="px-6 py-4 flex items-center justify-between cursor-pointer" role="button" tabindex="0" @click="specsOpen = !specsOpen" @keydown.enter="specsOpen = !specsOpen" @keydown.space.prevent="specsOpen = !specsOpen" aria-expanded="specsOpen">
       <h2 class="text-base font-semibold text-gray-900">Specifications</h2>
       <div class="flex items-center gap-2">
         <button hx-get="/v2/partials/materials/{{ card.id }}/insights"
@@ -88,7 +89,7 @@
 
     <div x-show="specsOpen" x-transition x-cloak class="px-6 pb-6">
       {# Display mode #}
-      <div x-show="!editing" class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+      <div x-show="!editing" x-cloak class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
         <div><span class="text-gray-400 text-xs font-medium block mb-0.5">Category</span> <span class="font-medium text-gray-900">{{ card.category or "--" }}</span></div>
         <div><span class="text-gray-400 text-xs font-medium block mb-0.5">Package</span> <span class="font-medium text-gray-900">{{ card.package_type or "--" }}</span></div>
         <div><span class="text-gray-400 text-xs font-medium block mb-0.5">Pin Count</span> <span class="font-medium text-gray-900">{{ card.pin_count or "--" }}</span></div>
@@ -114,6 +115,7 @@
       <form x-show="editing" x-cloak
             hx-put="/v2/partials/materials/{{ card.id }}"
             hx-target="#main-content"
+            data-loading-disable
             class="grid grid-cols-2 md:grid-cols-4 gap-3">
         <div>
           <label class="block text-xs font-medium text-gray-500 mb-1">Manufacturer</label>

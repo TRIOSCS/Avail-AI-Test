@@ -174,6 +174,7 @@
             hx-target="#main-content"
             hx-include="#bulk-form"
             hx-confirm="Archive selected requisitions?"
+            data-loading-disable
             class="px-3 py-1 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Archive</button>
     {# Assign with owner dropdown #}
     <div x-data="{ showAssign: false }" class="relative inline-block">
@@ -182,13 +183,14 @@
         Assign
         <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 9l-7 7-7-7"/></svg>
       </button>
-      <div x-show="showAssign" @click.away="showAssign = false" x-cloak
+      <div x-show="showAssign" role="menu" @click.away="showAssign = false" x-cloak
            class="absolute left-0 mt-1 w-48 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1">
         {% for u in users %}
         <button hx-post="/v2/partials/requisitions/bulk/assign"
                 hx-target="#main-content"
                 hx-include="#bulk-form"
                 hx-vals='{"owner_id": "{{ u.id }}"}'
+                data-loading-disable
                 @click="showAssign = false"
                 class="block w-full text-left px-3 py-1.5 text-sm text-gray-700 hover:bg-brand-50">{{ u.name }}</button>
         {% endfor %}
@@ -197,6 +199,7 @@
     <button hx-post="/v2/partials/requisitions/bulk/activate"
             hx-target="#main-content"
             hx-include="#bulk-form"
+            data-loading-disable
             class="px-3 py-1 text-xs font-medium bg-white border border-gray-200 rounded-lg hover:bg-gray-50">Activate</button>
     <button @click="
               const ids = Array.from(selectedIds).join(',');
@@ -214,11 +217,11 @@
   <div class="bg-white rounded-lg shadow border border-gray-200">
     {% if requisitions %}
     <div class="avail-scroll">
-      <table style="min-width:1400px" class="w-full divide-y divide-gray-200">
+      <table class="min-w-[1400px] w-full divide-y divide-gray-200">
         <thead class="bg-gray-50">
           <tr>
             <th class="px-3 py-3 w-10">
-              <input type="checkbox" class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500"
+              <input aria-label="Select all requisitions" type="checkbox" class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500"
                      @change="if($event.target.checked){document.querySelectorAll('#req-table-body input[type=checkbox]').forEach(c=>{c.checked=true;selectedIds.add(parseInt(c.value))})}else{selectedIds=new Set();document.querySelectorAll('#req-table-body input[type=checkbox]').forEach(c=>c.checked=false)}; selectedIds=new Set(selectedIds)">
             </th>
             {# Role-based column order: sales sees quote/offer/deadline first, sourcing sees coverage/RFQs first #}

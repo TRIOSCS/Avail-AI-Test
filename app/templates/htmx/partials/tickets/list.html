@@ -15,7 +15,7 @@
     <span class="ml-auto text-xs text-amber-600 truncate max-w-xs">Fix: {{ group.suggested_fix[:80] }}</span>
     {% endif %}
   </button>
-  <div x-show="open" x-collapse>
+  <div x-show="open" x-cloak x-collapse>
     {% for t in group_tickets %}
     {% include "htmx/partials/tickets/_row.html" %}
     {% endfor %}
@@ -30,5 +30,7 @@
 {% endfor %}
 
 {% if total == 0 %}
-<div class="text-center py-12 text-gray-400 text-sm">No tickets found.</div>
+{% set message = "No tickets found." %}
+{% set action_url = "" %}
+{% include "htmx/partials/shared/empty_state.html" %}
 {% endif %}

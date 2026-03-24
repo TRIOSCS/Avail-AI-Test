@@ -10,7 +10,7 @@
 
   {# Search #}
   <div class="mb-4">
-    <input type="text" name="q" value="{{ q }}" placeholder="Search knowledge base..."
+    <input aria-label="Search knowledge base" type="text" name="q" value="{{ q }}" placeholder="Search knowledge base..."
            hx-get="/v2/partials/knowledge"
            hx-trigger="keyup changed delay:300ms"
            hx-target="#knowledge-list"
@@ -20,6 +20,7 @@
   {# Add entry form #}
   <form hx-post="/v2/partials/knowledge"
         hx-target="#knowledge-list"
+        data-loading-disable
         class="bg-gray-50 rounded-lg border border-gray-200 p-3 mb-4 space-y-2">
     <div class="flex gap-2">
       <select name="entry_type" class="px-2 py-1.5 text-sm border border-gray-300 rounded">

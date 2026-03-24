@@ -9,9 +9,10 @@
     <form hx-post="/v2/partials/parts/{{ requirement.id }}/tasks"
           hx-target="#part-detail"
           hx-swap="innerHTML"
+          data-loading-disable
           class="space-y-2">
       <div class="flex gap-2">
-        <input type="text" name="title" placeholder="New task or note..."
+        <input aria-label="Task or note title" type="text" name="title" placeholder="New task or note..."
                required
                class="flex-1 px-3 py-1.5 text-sm border border-gray-200 rounded-lg focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
         <button type="submit"
@@ -26,9 +27,9 @@
           <option value="{{ u.id }}">{{ u.name or u.email }}</option>
           {% endfor %}
         </select>
-        <input type="date" name="due_date"
+        <input aria-label="Due Date" type="date" name="due_date"
                class="px-2 py-1 text-xs border border-gray-200 rounded-lg">
-        <input type="text" name="notes" placeholder="Notes (optional)"
+        <input aria-label="Notes (optional)" type="text" name="notes" placeholder="Notes (optional)"
                class="flex-1 min-w-[120px] px-2 py-1 text-xs border border-gray-200 rounded-lg">
       </div>
     </form>
@@ -46,6 +47,7 @@
       <div class="flex items-start gap-3 p-3 rounded-lg border border-gray-200 bg-white hover:border-brand-200">
         <button hx-post="/v2/partials/parts/tasks/{{ task.id }}/done"
                 hx-target="#part-detail"
+                data-loading-disable
                 class="mt-0.5 h-5 w-5 rounded border-2 border-gray-300 hover:border-brand-500 flex-shrink-0 transition-colors"
                 title="Mark done">
         </button>
@@ -96,6 +98,7 @@
       <div class="flex items-start gap-3 p-3 rounded-lg border border-gray-100 bg-gray-50 opacity-60">
         <button hx-post="/v2/partials/parts/tasks/{{ task.id }}/reopen"
                 hx-target="#part-detail"
+                data-loading-disable
                 class="mt-0.5 h-5 w-5 rounded border-2 border-green-400 bg-green-100 flex-shrink-0 flex items-center justify-center"
                 title="Reopen">
           <svg class="h-3 w-3 text-green-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3">
@@ -116,9 +119,13 @@
   {% endif %}
 
   {% if not pending_tasks and not done_tasks %}
-  <div class="p-8 text-center text-gray-400 border border-dashed border-gray-200 rounded-lg">
-    <p class="text-sm">No tasks yet</p>
-    <p class="text-xs mt-1">Add a task above to coordinate with your team</p>
+  <div class="mx-auto max-w-sm rounded-xl bg-white p-12 text-center shadow-sm border border-gray-100">
+    <svg class="mx-auto mb-4 h-12 w-12 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
+      <path stroke-linecap="round" stroke-linejoin="round"
+            d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4"/>
+    </svg>
+    <p class="text-base font-medium text-gray-500">No tasks yet.</p>
+    <p class="text-sm text-gray-400 mt-1">Add a task above to coordinate with your team.</p>
   </div>
   {% endif %}
 </div>
