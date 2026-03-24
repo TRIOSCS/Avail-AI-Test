@@ -48,96 +48,10 @@
   <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
   <script src="/static/js/requisitions2.js" defer></script>
 </head>
-<body class="bg-gray-50 text-gray-900"
-      x-data="{ currentView: 'requisitions', sidebarCollapsed: false }">
-
-  {# ── Sidebar ──────────────────────────────────────────────── #}
-  <aside :class="sidebarCollapsed ? 'w-16' : 'w-64'"
-         class="fixed inset-y-0 left-0 z-30 flex flex-col bg-brand-700 transition-all duration-200 ease-in-out">
-    <div class="flex h-16 items-center justify-between px-4">
-      <a href="/v2" class="flex items-center gap-2 overflow-hidden">
-        <img x-show="!sidebarCollapsed" x-cloak src="/static/avail_logo.png" alt="AVAIL" class="h-8">
-        <span x-show="sidebarCollapsed" x-cloak
-              class="flex h-8 w-8 items-center justify-center rounded-md bg-brand-800 text-sm font-bold text-white">A</span>
-      </a>
-      <button @click="sidebarCollapsed = !sidebarCollapsed"
-              class="flex h-7 w-7 items-center justify-center rounded-md text-brand-300 hover:bg-brand-800 hover:text-white">
-        <svg x-show="!sidebarCollapsed" x-cloak class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
-        </svg>
-        <svg x-show="sidebarCollapsed" x-cloak class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-          <path stroke-linecap="round" stroke-linejoin="round" d="M9 5l7 7-7 7"/>
-        </svg>
-      </button>
-    </div>
-    <nav class="flex-1 overflow-y-auto px-2 py-4 space-y-6">
-      <div>
-        <p x-show="!sidebarCollapsed" x-cloak class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-brand-400">Opportunity</p>
-        <ul class="space-y-1">
-          {% set nav_items = [
-            ('requisitions', 'Requisitions', '/requisitions2',
-             'M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2'),
-            ('search', 'Part Search', '/v2/search',
-             'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
-            ('proactive', 'Proactive', '/v2/proactive',
-             'M13 10V3L4 14h7v7l9-11h-7z'),
-          ] %}
-          {% for id, label, href, icon_path in nav_items %}
-          <li>
-            <a href="{{ href }}"
-               class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors
-                      {{ 'bg-brand-900 text-white' if id == 'requisitions' else 'text-brand-200 hover:bg-brand-800 hover:text-white' }}">
-              <svg class="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-                   stroke-linecap="round" stroke-linejoin="round">
-                <path d="{{ icon_path }}"/>
-              </svg>
-              <span x-show="!sidebarCollapsed" x-cloak>{{ label }}</span>
-            </a>
-          </li>
-          {% endfor %}
-        </ul>
-      </div>
-      <div>
-        <p x-show="!sidebarCollapsed" x-cloak class="mb-2 px-3 text-xs font-semibold uppercase tracking-wider text-brand-400">Relationships</p>
-        <ul class="space-y-1">
-          {% set rel_items = [
-            ('vendors', 'Vendors', '/v2/vendors',
-             'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4'),
-            ('customers', 'Customers', '/v2/customers',
-             'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z'),
-            ('quotes', 'Quotes', '/v2/quotes',
-             'M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z'),
-          ] %}
-          {% for id, label, href, icon_path in rel_items %}
-          <li>
-            <a href="{{ href }}"
-               class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors text-brand-200 hover:bg-brand-800 hover:text-white">
-              <svg class="h-5 w-5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
-                   stroke-linecap="round" stroke-linejoin="round">
-                <path d="{{ icon_path }}"/>
-              </svg>
-              <span x-show="!sidebarCollapsed" x-cloak>{{ label }}</span>
-            </a>
-          </li>
-          {% endfor %}
-        </ul>
-      </div>
-    </nav>
-    <div class="border-t border-brand-600 px-2 py-3">
-      <div class="flex items-center gap-3 rounded-lg px-3 py-2">
-        <span class="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-full bg-brand-800 text-sm font-semibold text-white">
-          {{ user.display_name[0]|upper if user.display_name else 'U' }}
-        </span>
-        <div x-show="!sidebarCollapsed" x-cloak class="min-w-0 flex-1">
-          <p class="truncate text-sm font-medium text-white">{{ user.display_name or 'User' }}</p>
-        </div>
-      </div>
-    </div>
-  </aside>
+<body class="bg-gray-50 text-gray-900">
 
   {# ── Main content area ────────────────────────────────────── #}
-  <div :class="sidebarCollapsed ? 'ml-16' : 'ml-64'"
-       class="transition-all duration-200 h-screen flex flex-col">
+  <div class="h-screen flex flex-col">
 
     {# Topbar #}
     <header class="flex h-12 items-center justify-between gap-4 border-b border-brand-200 bg-white px-5 flex-shrink-0">

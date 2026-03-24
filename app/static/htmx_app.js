@@ -3,7 +3,7 @@
  * Loaded when USE_HTMX=true. Replaces app.js + crm.js.
  *
  * What it does: Registers all Alpine.js plugins and HTMX extensions,
- *   sets up global Alpine stores (sidebar, toast, preferences), and
+ *   sets up global Alpine stores (toast, preferences), and
  *   configures HTMX defaults.
  * What calls it: Vite bundles this as the main entry point; loaded by base.html.
  * Depends on: htmx.org, alpinejs, all @alpinejs/* plugins, all htmx-ext-* packages.
@@ -87,11 +87,6 @@ window.htmx = htmx;
 window.Alpine = Alpine;
 
 // ── Global Alpine stores ─────────────────────────────────────
-Alpine.store('sidebar', {
-    open: true,
-    collapsed: Alpine.$persist(false).as('avail_sidebar_collapsed'),
-});
-
 Alpine.store('toast', { message: '', type: 'info', show: false });
 
 Alpine.store('preferences', Alpine.$persist({
@@ -159,48 +154,6 @@ document.body.addEventListener('htmx:configRequest', (evt) => {
     if (csrfCookie) {
         evt.detail.headers['x-csrftoken'] = csrfCookie;
     }
-});
-
-// ── Derive currentView from URL path ────────────────────────
-// SYNC: These must match the nav item IDs in htmx/base.html bottom_items list.
-function _viewFromPath(path) {
-    if (/\/buy-plans(\/|$)/.test(path)) return 'buy-plans';
-    if (/\/trouble-tickets(\/|$)/.test(path)) return 'trouble-tickets';
-    if (/\/follow-ups(\/|$)/.test(path)) return 'follow-ups';
-    if (/\/quotes(\/|$)/.test(path)) return 'quotes';
-    if (/\/prospecting(\/|$)/.test(path)) return 'prospecting';
-    if (/\/proactive(\/|$)/.test(path)) return 'proactive';
-    if (/\/settings(\/|$)/.test(path)) return 'settings';
-    if (/\/vendors(\/|$)/.test(path)) return 'vendors';
-    if (/\/customers(\/|$)/.test(path)) return 'customers';
-    if (/\/companies(\/|$)/.test(path)) return 'customers';  // legacy URL compat
-    if (/\/search(\/|$)/.test(path)) return 'search';
-    if (/\/excess(\/|$)/.test(path)) return 'excess';
-    if (/\/materials(\/|$)/.test(path)) return 'materials';
-    if (/\/requisitions(\/|$)/.test(path)) return 'requisitions';
-    return 'requisitions';
-}
-
-function _syncSidebarToUrl() {
-    var body = document.body;
-    if (body && body._x_dataStack) {
-        body._x_dataStack[0].currentView = _viewFromPath(window.location.pathname);
-    }
-}
-
-// Sync sidebar on browser back/forward
-window.addEventListener('popstate', function () {
-    _syncSidebarToUrl();
-});
-
-// Sync sidebar after HTMX pushes a new URL (covers all HTMX navigations)
-document.body.addEventListener('htmx:pushedIntoHistory', function () {
-    _syncSidebarToUrl();
-});
-
-// After HTMX restores a cached page on back/forward, re-sync sidebar
-document.body.addEventListener('htmx:historyRestore', function () {
-    _syncSidebarToUrl();
 });
 
 // ── HTMX error handler — show toast on failed requests ──────
