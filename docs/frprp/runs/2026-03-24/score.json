@@ -1,0 +1,66 @@
+{
+  "overall": 100,
+  "gate": "PASS",
+  "categories": {
+    "route_integrity": {
+      "score": 100,
+      "weight": 3,
+      "open_findings": 0
+    },
+    "error_handling": {
+      "score": 100,
+      "weight": 3,
+      "open_findings": 0
+    },
+    "empty_states": {
+      "score": 100,
+      "weight": 3,
+      "open_findings": 0
+    },
+    "security": {
+      "score": 100,
+      "weight": 2,
+      "open_findings": 0
+    },
+    "form_feedback": {
+      "score": 100,
+      "weight": 2,
+      "open_findings": 0
+    },
+    "session_handling": {
+      "score": 100,
+      "weight": 2,
+      "open_findings": 0
+    },
+    "template_consistency": {
+      "score": 100,
+      "weight": 1,
+      "open_findings": 0
+    },
+    "accessibility": {
+      "score": 100,
+      "weight": 1,
+      "open_findings": 0
+    },
+    "performance": {
+      "score": 100,
+      "weight": 1,
+      "open_findings": 0
+    },
+    "mobile_parity": {
+      "score": 100,
+      "weight": 1,
+      "open_findings": 0
+    },
+    "loading_states": {
+      "score": 100,
+      "weight": 1,
+      "open_findings": 0
+    },
+    "navigation_integrity": {
+      "score": 100,
+      "weight": 1,
+      "open_findings": 0
+    }
+  }
+}

@@ -1,0 +1,93 @@
+{
+  "scan_date": "2026-03-24",
+  "mode": "full",
+  "coverage": {
+    "templates_analyzed": 188,
+    "routers_analyzed": 57,
+    "pages": [
+      "requisitions",
+      "search",
+      "quotes",
+      "customers",
+      "vendors",
+      "prospecting",
+      "materials",
+      "buy-plans",
+      "follow-ups",
+      "proactive",
+      "excess",
+      "settings",
+      "trouble-tickets"
+    ]
+  },
+  "findings": [
+    {
+      "stream": "loading_states",
+      "severity": "medium",
+      "category": "loading_states",
+      "file": "app/templates/htmx/partials/settings/system.html",
+      "line": 4,
+      "issue": "HTMX mutation/lazy-load without loading indicator",
+      "auto_fixable": false,
+      "id": "F001",
+      "status": "fixed"
+    },
+    {
+      "stream": "loading_states",
+      "severity": "medium",
+      "category": "loading_states",
+      "file": "app/templates/htmx/partials/settings/system.html",
+      "line": 80,
+      "issue": "HTMX mutation/lazy-load without loading indicator",
+      "auto_fixable": false,
+      "id": "F002",
+      "status": "fixed"
+    },
+    {
+      "stream": "loading_states",
+      "severity": "medium",
+      "category": "loading_states",
+      "file": "app/templates/htmx/partials/shared/_macros.html",
+      "line": 8,
+      "issue": "HTMX mutation/lazy-load without loading indicator",
+      "auto_fixable": false,
+      "id": "F003",
+      "status": "fixed"
+    },
+    {
+      "stream": "accessibility",
+      "severity": "medium",
+      "category": "accessibility",
+      "file": "app/templates/htmx/partials/tickets/detail.html",
+      "line": 65,
+      "issue": "Image without alt attribute",
+      "auto_fixable": true,
+      "fix_pattern": "missing_alt",
+      "id": "F004",
+      "status": "fixed"
+    },
+    {
+      "stream": "x_cloak",
+      "severity": "low",
+      "category": "template_consistency",
+      "file": "app/templates/htmx/partials/search/results.html",
+      "line": 147,
+      "issue": "x-show/x-if without x-cloak \u2014 flash of unstyled content",
+      "auto_fixable": true,
+      "fix_pattern": "missing_x_cloak",
+      "id": "F005",
+      "status": "fixed"
+    }
+  ],
+  "summary": {
+    "total": 5,
+    "critical": 0,
+    "high": 0,
+    "medium": 4,
+    "low": 1,
+    "auto_fixable": 2,
+    "subagent": 0,
+    "fixed": 5
+  },
+  "dependency_graph": "template-graph.json"
+}

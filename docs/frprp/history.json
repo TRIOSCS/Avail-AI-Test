@@ -1,0 +1,66 @@
+[
+  {
+    "date": "2026-03-24",
+    "score": 53,
+    "gate": "CONDITIONAL",
+    "findings": 452,
+    "fixed": 0,
+    "remaining": 452
+  },
+  {
+    "date": "2026-03-24",
+    "score": 78,
+    "gate": "PASS",
+    "findings": 217,
+    "fixed": 0,
+    "remaining": 217
+  },
+  {
+    "date": "2026-03-24",
+    "score": 80,
+    "gate": "PASS",
+    "findings": 61,
+    "fixed": 0,
+    "remaining": 61
+  },
+  {
+    "date": "2026-03-24",
+    "score": 80,
+    "gate": "PASS",
+    "findings": 61,
+    "fixed": 0,
+    "remaining": 61
+  },
+  {
+    "date": "2026-03-24",
+    "score": 84,
+    "gate": "PASS",
+    "findings": 28,
+    "fixed": 0,
+    "remaining": 28
+  },
+  {
+    "date": "2026-03-24",
+    "score": 90,
+    "gate": "PASS",
+    "findings": 8,
+    "fixed": 0,
+    "remaining": 8
+  },
+  {
+    "date": "2026-03-24",
+    "score": 99,
+    "gate": "PASS",
+    "findings": 5,
+    "fixed": 0,
+    "remaining": 5
+  },
+  {
+    "date": "2026-03-24",
+    "score": 100,
+    "gate": "PASS",
+    "findings": 0,
+    "fixed": 5,
+    "remaining": 0
+  }
+]

@@ -1,0 +1,3354 @@
+{
+  "fixes_applied": [
+    {
+      "finding_id": "F007",
+      "method": "auto_pattern",
+      "pattern": "unescaped_html_response",
+      "file": "app/routers/requisitions2.py"
+    },
+    {
+      "finding_id": "F009",
+      "method": "auto_pattern",
+      "pattern": "unescaped_html_response",
+      "file": "app/routers/htmx_views.py"
+    },
+    {
+      "finding_id": "F015",
+      "method": "auto_pattern",
+      "pattern": "missing_rel_noopener",
+      "file": "app/templates/htmx/partials/quotes/detail.html"
+    },
+    {
+      "finding_id": "F016",
+      "method": "auto_pattern",
+      "pattern": "missing_rel_noopener",
+      "file": "app/templates/htmx/partials/requisitions/detail_header.html"
+    },
+    {
+      "finding_id": "F017",
+      "method": "auto_pattern",
+      "pattern": "missing_rel_noopener",
+      "file": "app/templates/htmx/partials/customers/detail.html"
+    },
+    {
+      "finding_id": "F018",
+      "method": "auto_pattern",
+      "pattern": "missing_rel_noopener",
+      "file": "app/templates/htmx/partials/shared/offer_card.html"
+    },
+    {
+      "finding_id": "F019",
+      "method": "auto_pattern",
+      "pattern": "missing_rel_noopener",
+      "file": "app/templates/htmx/partials/vendors/prospect_card.html"
+    },
+    {
+      "finding_id": "F020",
+      "method": "auto_pattern",
+      "pattern": "missing_rel_noopener",
+      "file": "app/templates/htmx/partials/vendors/detail.html"
+    },
+    {
+      "finding_id": "F021",
+      "method": "auto_pattern",
+      "pattern": "missing_rel_noopener",
+      "file": "app/templates/htmx/partials/vendors/detail.html"
+    },
+    {
+      "finding_id": "F022",
+      "method": "auto_pattern",
+      "pattern": "missing_rel_noopener",
+      "file": "app/templates/htmx/partials/vendors/overview_tab.html"
+    },
+    {
+      "finding_id": "F490",
+      "method": "auto_pattern",
+      "pattern": "missing_role_button",
+      "file": "app/templates/htmx/base.html"
+    },
+    {
+      "finding_id": "F491",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/requisitions2/_table_rows.html"
+    },
+    {
+      "finding_id": "F492",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/requisitions2/_filters.html"
+    },
+    {
+      "finding_id": "F493",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/requisitions2/_single_row.html"
+    },
+    {
+      "finding_id": "F494",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/requisitions2/_inline_cell.html"
+    },
+    {
+      "finding_id": "F495",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/requisitions2/_inline_cell.html"
+    },
+    {
+      "finding_id": "F496",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/requisitions2/_table.html"
+    },
+    {
+      "finding_id": "F497",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/sightings/table.html"
+    },
+    {
+      "finding_id": "F498",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/sightings/table.html"
+    },
+    {
+      "finding_id": "F499",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/sightings/table.html"
+    },
+    {
+      "finding_id": "F500",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/prospecting/list.html"
+    },
+    {
+      "finding_id": "F501",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/req_row.html"
+    },
+    {
+      "finding_id": "F502",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F503",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F504",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F505",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F506",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F507",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F508",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F509",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F510",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F511",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F512",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F513",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F514",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F515",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F516",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F517",
+      "method": "auto_pattern",
+      "pattern": "missing_role_button",
+      "file": "app/templates/htmx/partials/requisitions/list.html"
+    },
+    {
+      "finding_id": "F518",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/list.html"
+    },
+    {
+      "finding_id": "F519",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/inline_cell.html"
+    },
+    {
+      "finding_id": "F520",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/inline_cell.html"
+    },
+    {
+      "finding_id": "F521",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/rfq_compose.html"
+    },
+    {
+      "finding_id": "F522",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/knowledge/list.html"
+    },
+    {
+      "finding_id": "F523",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/customers/list.html"
+    },
+    {
+      "finding_id": "F524",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/customers/contact_notes.html"
+    },
+    {
+      "finding_id": "F525",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/buy_plans/list.html"
+    },
+    {
+      "finding_id": "F526",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/buy_plans/detail.html"
+    },
+    {
+      "finding_id": "F527",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/buy_plans/detail.html"
+    },
+    {
+      "finding_id": "F528",
+      "method": "auto_pattern",
+      "pattern": "missing_role_button",
+      "file": "app/templates/htmx/partials/buy_plans/detail.html"
+    },
+    {
+      "finding_id": "F529",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F530",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/search/vendor_card.html"
+    },
+    {
+      "finding_id": "F531",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/search/form.html"
+    },
+    {
+      "finding_id": "F532",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/search/full_results.html"
+    },
+    {
+      "finding_id": "F533",
+      "method": "auto_pattern",
+      "pattern": "missing_role_button",
+      "file": "app/templates/htmx/partials/search/requisition_picker_modal.html"
+    },
+    {
+      "finding_id": "F534",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/proactive/_match_row.html"
+    },
+    {
+      "finding_id": "F535",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/settings/system.html"
+    },
+    {
+      "finding_id": "F536",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/settings/system.html"
+    },
+    {
+      "finding_id": "F537",
+      "method": "auto_pattern",
+      "pattern": "missing_alt",
+      "file": "app/templates/htmx/partials/tickets/detail.html"
+    },
+    {
+      "finding_id": "F538",
+      "method": "auto_pattern",
+      "pattern": "missing_role_button",
+      "file": "app/templates/htmx/partials/sourcing/lead_card.html"
+    },
+    {
+      "finding_id": "F539",
+      "method": "auto_pattern",
+      "pattern": "missing_role_button",
+      "file": "app/templates/htmx/partials/sourcing/lead_row.html"
+    },
+    {
+      "finding_id": "F540",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/excess/list.html"
+    },
+    {
+      "finding_id": "F541",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/excess/detail.html"
+    },
+    {
+      "finding_id": "F542",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/excess/detail.html"
+    },
+    {
+      "finding_id": "F543",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/excess/solicit_modal.html"
+    },
+    {
+      "finding_id": "F544",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/materials/workspace.html"
+    },
+    {
+      "finding_id": "F545",
+      "method": "auto_pattern",
+      "pattern": "missing_role_button",
+      "file": "app/templates/htmx/partials/materials/detail.html"
+    },
+    {
+      "finding_id": "F546",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/shared/pagination.html"
+    },
+    {
+      "finding_id": "F547",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/shared/topbar.html"
+    },
+    {
+      "finding_id": "F548",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/shared/_macros.html"
+    },
+    {
+      "finding_id": "F549",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/admin/data_ops.html"
+    },
+    {
+      "finding_id": "F550",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/parts/cell_edit.html"
+    },
+    {
+      "finding_id": "F551",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/parts/cell_edit.html"
+    },
+    {
+      "finding_id": "F552",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/parts/list.html"
+    },
+    {
+      "finding_id": "F553",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/parts/list.html"
+    },
+    {
+      "finding_id": "F554",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/parts/list.html"
+    },
+    {
+      "finding_id": "F555",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/parts/spec_edit.html"
+    },
+    {
+      "finding_id": "F556",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/vendors/list.html"
+    },
+    {
+      "finding_id": "F557",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/vendors/reviews.html"
+    },
+    {
+      "finding_id": "F558",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F559",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F560",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F561",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F562",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F563",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F564",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F565",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F566",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F567",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F568",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F569",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F570",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F571",
+      "method": "auto_pattern",
+      "pattern": "missing_role_button",
+      "file": "app/templates/htmx/partials/requisitions/tabs/offers.html"
+    },
+    {
+      "finding_id": "F572",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/offers.html"
+    },
+    {
+      "finding_id": "F573",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/offers.html"
+    },
+    {
+      "finding_id": "F574",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/parts.html"
+    },
+    {
+      "finding_id": "F575",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/requisitions/tabs/parts.html"
+    },
+    {
+      "finding_id": "F576",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/customers/tabs/site_contacts.html"
+    },
+    {
+      "finding_id": "F577",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/customers/tabs/site_contacts.html"
+    },
+    {
+      "finding_id": "F578",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/customers/tabs/site_contacts.html"
+    },
+    {
+      "finding_id": "F579",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/customers/tabs/site_contacts.html"
+    },
+    {
+      "finding_id": "F580",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/customers/tabs/sites_tab.html"
+    },
+    {
+      "finding_id": "F581",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/customers/tabs/sites_tab.html"
+    },
+    {
+      "finding_id": "F582",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/customers/tabs/sites_tab.html"
+    },
+    {
+      "finding_id": "F583",
+      "method": "auto_pattern",
+      "pattern": "missing_role_button",
+      "file": "app/templates/htmx/partials/customers/tabs/site_card.html"
+    },
+    {
+      "finding_id": "F584",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/materials/filters/manufacturers.html"
+    },
+    {
+      "finding_id": "F585",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/materials/filters/manufacturers.html"
+    },
+    {
+      "finding_id": "F586",
+      "method": "auto_pattern",
+      "pattern": "missing_role_button",
+      "file": "app/templates/htmx/partials/parts/tabs/sourcing.html"
+    },
+    {
+      "finding_id": "F587",
+      "method": "auto_pattern",
+      "pattern": "missing_role_button",
+      "file": "app/templates/htmx/partials/parts/tabs/sourcing.html"
+    },
+    {
+      "finding_id": "F588",
+      "method": "auto_pattern",
+      "pattern": "missing_role_button",
+      "file": "app/templates/htmx/partials/parts/tabs/sourcing.html"
+    },
+    {
+      "finding_id": "F589",
+      "method": "auto_pattern",
+      "pattern": "missing_role_button",
+      "file": "app/templates/htmx/partials/parts/tabs/sourcing.html"
+    },
+    {
+      "finding_id": "F590",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/parts/tabs/comms.html"
+    },
+    {
+      "finding_id": "F591",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/parts/tabs/comms.html"
+    },
+    {
+      "finding_id": "F592",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/parts/tabs/comms.html"
+    },
+    {
+      "finding_id": "F593",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/parts/tabs/req_details.html"
+    },
+    {
+      "finding_id": "F594",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/parts/tabs/req_details.html"
+    },
+    {
+      "finding_id": "F595",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/vendors/tabs/contact_row.html"
+    },
+    {
+      "finding_id": "F596",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/vendors/tabs/contact_row.html"
+    },
+    {
+      "finding_id": "F597",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/vendors/tabs/contact_row.html"
+    },
+    {
+      "finding_id": "F598",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/vendors/tabs/contact_row.html"
+    },
+    {
+      "finding_id": "F599",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/vendors/tabs/contacts.html"
+    },
+    {
+      "finding_id": "F600",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/vendors/tabs/contacts.html"
+    },
+    {
+      "finding_id": "F601",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/vendors/tabs/contacts.html"
+    },
+    {
+      "finding_id": "F602",
+      "method": "auto_pattern",
+      "pattern": "missing_input_label",
+      "file": "app/templates/htmx/partials/vendors/tabs/contacts.html"
+    },
+    {
+      "finding_id": "F603",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/requisitions2/page.html"
+    },
+    {
+      "finding_id": "F604",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quotes/line_row.html"
+    },
+    {
+      "finding_id": "F605",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quotes/line_row.html"
+    },
+    {
+      "finding_id": "F606",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quotes/line_row.html"
+    },
+    {
+      "finding_id": "F607",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quotes/line_row.html"
+    },
+    {
+      "finding_id": "F608",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quotes/line_row.html"
+    },
+    {
+      "finding_id": "F609",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quotes/line_row.html"
+    },
+    {
+      "finding_id": "F610",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quotes/line_row.html"
+    },
+    {
+      "finding_id": "F611",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quotes/line_row.html"
+    },
+    {
+      "finding_id": "F612",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/sightings/vendor_modal.html"
+    },
+    {
+      "finding_id": "F613",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/sightings/vendor_modal.html"
+    },
+    {
+      "finding_id": "F614",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/sightings/vendor_modal.html"
+    },
+    {
+      "finding_id": "F615",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/sightings/list.html"
+    },
+    {
+      "finding_id": "F616",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F617",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F618",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F619",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F620",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F621",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F622",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/unified_modal.html"
+    },
+    {
+      "finding_id": "F623",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/rfq_compose.html"
+    },
+    {
+      "finding_id": "F624",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/rfq_compose.html"
+    },
+    {
+      "finding_id": "F625",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/rfq_compose.html"
+    },
+    {
+      "finding_id": "F626",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/ai/rfq_draft.html"
+    },
+    {
+      "finding_id": "F627",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/buy_plans/detail.html"
+    },
+    {
+      "finding_id": "F628",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/buy_plans/detail.html"
+    },
+    {
+      "finding_id": "F629",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/buy_plans/detail.html"
+    },
+    {
+      "finding_id": "F630",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/buy_plans/detail.html"
+    },
+    {
+      "finding_id": "F631",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/buy_plans/detail.html"
+    },
+    {
+      "finding_id": "F632",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/buy_plans/detail.html"
+    },
+    {
+      "finding_id": "F633",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F634",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F635",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F636",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F637",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F638",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F639",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F640",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F641",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F642",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F643",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F644",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F645",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F646",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F647",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F648",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F649",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F650",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F651",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F652",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F653",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F654",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F655",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/quote_builder/modal.html"
+    },
+    {
+      "finding_id": "F656",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/search/vendor_card.html"
+    },
+    {
+      "finding_id": "F657",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/search/form.html"
+    },
+    {
+      "finding_id": "F658",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/search/form.html"
+    },
+    {
+      "finding_id": "F659",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/search/full_results.html"
+    },
+    {
+      "finding_id": "F660",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/search/full_results.html"
+    },
+    {
+      "finding_id": "F661",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/search/shortlist_bar.html"
+    },
+    {
+      "finding_id": "F662",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/search/shortlist_bar.html"
+    },
+    {
+      "finding_id": "F663",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/search/results.html"
+    },
+    {
+      "finding_id": "F664",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/follow_ups/list.html"
+    },
+    {
+      "finding_id": "F665",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/proactive/list.html"
+    },
+    {
+      "finding_id": "F666",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/proactive/list.html"
+    },
+    {
+      "finding_id": "F667",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/proactive/prepare.html"
+    },
+    {
+      "finding_id": "F668",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/settings/system.html"
+    },
+    {
+      "finding_id": "F669",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/settings/system.html"
+    },
+    {
+      "finding_id": "F670",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/settings/system.html"
+    },
+    {
+      "finding_id": "F671",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/settings/data_ops.html"
+    },
+    {
+      "finding_id": "F672",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/tickets/list.html"
+    },
+    {
+      "finding_id": "F673",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/tickets/detail.html"
+    },
+    {
+      "finding_id": "F674",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/sourcing/filter_bar.html"
+    },
+    {
+      "finding_id": "F675",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/sourcing/lead_panel.html"
+    },
+    {
+      "finding_id": "F676",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/sourcing/lead_panel.html"
+    },
+    {
+      "finding_id": "F677",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/sourcing/lead_panel.html"
+    },
+    {
+      "finding_id": "F678",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/sourcing/lead_panel.html"
+    },
+    {
+      "finding_id": "F679",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/excess/detail.html"
+    },
+    {
+      "finding_id": "F680",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/excess/detail.html"
+    },
+    {
+      "finding_id": "F681",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/excess/detail.html"
+    },
+    {
+      "finding_id": "F682",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/excess/solicit_modal.html"
+    },
+    {
+      "finding_id": "F683",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/excess/solicit_modal.html"
+    },
+    {
+      "finding_id": "F684",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/materials/workspace.html"
+    },
+    {
+      "finding_id": "F685",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/materials/workspace.html"
+    },
+    {
+      "finding_id": "F686",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/materials/workspace.html"
+    },
+    {
+      "finding_id": "F687",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/materials/workspace.html"
+    },
+    {
+      "finding_id": "F688",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/materials/workspace.html"
+    },
+    {
+      "finding_id": "F689",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/materials/workspace.html"
+    },
+    {
+      "finding_id": "F690",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/materials/detail.html"
+    },
+    {
+      "finding_id": "F691",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/quote_builder_shell.html"
+    },
+    {
+      "finding_id": "F692",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/quote_builder_shell.html"
+    },
+    {
+      "finding_id": "F693",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/quote_builder_shell.html"
+    },
+    {
+      "finding_id": "F694",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/sidebar.html"
+    },
+    {
+      "finding_id": "F695",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/toast.html"
+    },
+    {
+      "finding_id": "F696",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/toast.html"
+    },
+    {
+      "finding_id": "F697",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/toast.html"
+    },
+    {
+      "finding_id": "F698",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/toast.html"
+    },
+    {
+      "finding_id": "F699",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/trouble_report_form.html"
+    },
+    {
+      "finding_id": "F700",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/trouble_report_form.html"
+    },
+    {
+      "finding_id": "F701",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/modal.html"
+    },
+    {
+      "finding_id": "F702",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/modal.html"
+    },
+    {
+      "finding_id": "F703",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/modal.html"
+    },
+    {
+      "finding_id": "F704",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/enrich_button.html"
+    },
+    {
+      "finding_id": "F705",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/shared/enrich_button.html"
+    },
+    {
+      "finding_id": "F706",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/parts/workspace.html"
+    },
+    {
+      "finding_id": "F707",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/parts/workspace.html"
+    },
+    {
+      "finding_id": "F708",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/vendors/find_contacts_tab.html"
+    },
+    {
+      "finding_id": "F709",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F710",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F711",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F712",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F713",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F714",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F715",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F716",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F717",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F718",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F719",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F720",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F721",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F722",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F723",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F724",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/req_row.html"
+    },
+    {
+      "finding_id": "F725",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/offers.html"
+    },
+    {
+      "finding_id": "F726",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/offers.html"
+    },
+    {
+      "finding_id": "F727",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/offers.html"
+    },
+    {
+      "finding_id": "F728",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/requisitions/tabs/tasks.html"
+    },
+    {
+      "finding_id": "F729",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/materials/filters/manufacturers.html"
+    },
+    {
+      "finding_id": "F730",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/materials/filters/manufacturers.html"
+    },
+    {
+      "finding_id": "F731",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/materials/filters/subfilters.html"
+    },
+    {
+      "finding_id": "F732",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/materials/filters/tree.html"
+    },
+    {
+      "finding_id": "F733",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/parts/tabs/req_details.html"
+    },
+    {
+      "finding_id": "F734",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/vendors/tabs/contact_row.html"
+    },
+    {
+      "finding_id": "F735",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/vendors/tabs/contact_row.html"
+    },
+    {
+      "finding_id": "F736",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/vendors/tabs/contact_row.html"
+    },
+    {
+      "finding_id": "F737",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/vendors/tabs/contact_row.html"
+    },
+    {
+      "finding_id": "F738",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/vendors/tabs/contact_row.html"
+    },
+    {
+      "finding_id": "F739",
+      "method": "auto_pattern",
+      "pattern": "missing_x_cloak",
+      "file": "app/templates/htmx/partials/vendors/tabs/contact_row.html"
+    },
+    {
+      "finding_id": "F740",
+      "method": "auto_pattern",
+      "pattern": "deprecated_db_query_get",
+      "file": "app/routers/htmx_views.py"
+    },
+    {
+      "finding_id": "F741",
+      "method": "auto_pattern",
+      "pattern": "deprecated_db_query_get",
+      "file": "app/routers/htmx_views.py"
+    },
+    {
+      "finding_id": "F742",
+      "method": "auto_pattern",
+      "pattern": "deprecated_db_query_get",
+      "file": "app/routers/htmx_views.py"
+    },
+    {
+      "finding_id": "F743",
+      "method": "auto_pattern",
+      "pattern": "deprecated_db_query_get",
+      "file": "app/routers/htmx_views.py"
+    },
+    {
+      "finding_id": "F001",
+      "method": "false_positive",
+      "stream": "htmx_contract",
+      "pattern": "route_integrity",
+      "detail": "Route exists: /requisitions2/bulk/archive matches @router.post('/bulk/{action_name}') in requisitions2.py:419 with BulkActionName.archive"
+    },
+    {
+      "finding_id": "F002",
+      "method": "false_positive",
+      "stream": "htmx_contract",
+      "pattern": "route_integrity",
+      "detail": "Route exists: /requisitions2/bulk/activate matches @router.post('/bulk/{action_name}') in requisitions2.py:419 with BulkActionName.activate"
+    },
+    {
+      "finding_id": "F003",
+      "method": "false_positive",
+      "stream": "htmx_contract",
+      "pattern": "route_integrity",
+      "detail": "Route exists: /requisitions2/table matches @router.get('/table') in requisitions2.py:141"
+    },
+    {
+      "finding_id": "F004",
+      "method": "false_positive",
+      "stream": "htmx_contract",
+      "pattern": "route_integrity",
+      "detail": "Route exists: /requisitions2/table matches @router.get('/table') in requisitions2.py:141 (same route, referenced from _filters.html)"
+    },
+    {
+      "finding_id": "F005",
+      "method": "url_fix",
+      "stream": "htmx_contract",
+      "pattern": "route_integrity",
+      "file": "app/templates/htmx/partials/follow_ups/list.html",
+      "detail": "Changed hx-post from /v2/partials/follow-ups/batch to /v2/partials/follow-ups/send-batch (matching route at htmx_views.py:5098)"
+    }
+  ],
+  "fixes_failed": [
+    {
+      "finding_id": "F008",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F010",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F011",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F012",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F013",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F014",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F023",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F024",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F025",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F026",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F027",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F028",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F029",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F030",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F031",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F032",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F033",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F034",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F035",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F036",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F037",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F038",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F039",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F040",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F041",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F042",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F043",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F044",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F045",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F046",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F047",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F048",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F049",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F050",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F051",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F052",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F053",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F054",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F055",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F056",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F057",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F058",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F059",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F060",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F061",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F062",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F063",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F064",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F065",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F066",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F068",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F069",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F074",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F080",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F093",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F094",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F098",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F099",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F100",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F101",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F108",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F111",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F124",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F129",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F141",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F142",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F143",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F144",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F145",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F146",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F147",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F148",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F149",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F150",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F151",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F152",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F153",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F154",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F155",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F156",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F157",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F158",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F159",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F160",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F161",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F162",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F163",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F164",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F165",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F166",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F167",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F168",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F169",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F170",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F171",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F172",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F173",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F174",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F175",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F176",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F177",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F178",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F179",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F180",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F181",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F182",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F183",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F184",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F185",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F186",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F187",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F188",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F189",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F190",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F191",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F192",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F193",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F194",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F195",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F196",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F197",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F198",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F199",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F200",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F201",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F202",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F203",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F204",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F205",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F206",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F207",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F208",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F209",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F210",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F211",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F212",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F213",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F214",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F215",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F216",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F217",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F218",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F219",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F220",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F221",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F222",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F223",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F224",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F225",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F226",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F227",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F228",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F229",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F230",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F231",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F232",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F233",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F234",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F235",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F236",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F237",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F238",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F239",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F240",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F241",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F242",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F243",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F244",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F245",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F246",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F247",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F248",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F249",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F250",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F251",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F252",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F253",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F254",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F255",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F256",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F257",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F258",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F259",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F260",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F261",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F262",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F263",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F264",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F265",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F266",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F267",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F268",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F269",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F270",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F271",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F272",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F273",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F274",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F275",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F276",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F277",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F278",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F279",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F280",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F281",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F282",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F283",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F284",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F285",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F286",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F287",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F288",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F289",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F290",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F291",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F292",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F293",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F294",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F295",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F296",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F297",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F298",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F299",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F300",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F301",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F302",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F303",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F304",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F305",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F306",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F307",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F308",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F309",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F310",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F311",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F312",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F313",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F314",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F315",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F316",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F317",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F318",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F319",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F320",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F321",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F322",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F323",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F324",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F325",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F326",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F327",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F328",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F329",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F330",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F331",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F332",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F333",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F334",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F335",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F336",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F337",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F338",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F339",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F340",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F341",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F342",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F343",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F344",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F345",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F346",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F347",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F348",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F349",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F350",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F351",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F352",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F353",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F354",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F355",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F356",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F357",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F358",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F359",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F360",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F361",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F362",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F363",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F364",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F365",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F366",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F367",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F368",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F369",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F370",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F371",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F372",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F373",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F374",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F375",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F376",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F377",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F378",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F379",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F380",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F381",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F382",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F383",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F384",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F385",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F386",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F387",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F388",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F389",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F390",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F391",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F392",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F393",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F394",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F395",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F396",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F397",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F398",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F399",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F400",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F401",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F402",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F403",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F404",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F405",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F406",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F407",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F408",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F409",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F410",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F411",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F412",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F413",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F414",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F415",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F416",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F417",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F418",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F419",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F420",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F421",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F422",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F423",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F424",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F425",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F426",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F427",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F428",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F429",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F430",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F431",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F432",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F433",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F434",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F435",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F436",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F437",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F438",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F439",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F440",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F441",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F442",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F443",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F444",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F445",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F446",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F447",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F448",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F449",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F450",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F451",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F452",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F453",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F454",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F455",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F456",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F457",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F458",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F459",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F460",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F461",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F462",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F463",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F464",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F465",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F466",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F467",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F468",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F469",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F470",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F471",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F472",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F473",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F474",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F475",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F476",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F477",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F478",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F479",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F480",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F481",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F482",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F483",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F484",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F485",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F486",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F487",
+      "reason": "auto-fix pattern did not match"
+    },
+    {
+      "finding_id": "F488",
+      "reason": "auto-fix pattern did not match"
+    }
+  ],
+  "needs_human": [
+    {
+      "finding_id": "F006",
+      "reason": "No route exists for /api/user/toggle-8x8. Backend endpoint needs to be created to persist 8x8 click-to-call preference. Template: htmx/partials/settings/profile.html:68",
+      "severity": "high",
+      "category": "route_integrity"
+    },
+    {
+      "finding_id": "F130",
+      "reason": "requires subagent \u2014 complex fix",
+      "severity": "high",
+      "category": "empty_states"
+    },
+    {
+      "finding_id": "F131",
+      "reason": "requires subagent \u2014 complex fix",
+      "severity": "high",
+      "category": "empty_states"
+    },
+    {
+      "finding_id": "F132",
+      "reason": "requires subagent \u2014 complex fix",
+      "severity": "high",
+      "category": "empty_states"
+    },
+    {
+      "finding_id": "F133",
+      "reason": "requires subagent \u2014 complex fix",
+      "severity": "high",
+      "category": "empty_states"
+    },
+    {
+      "finding_id": "F134",
+      "reason": "requires subagent \u2014 complex fix",
+      "severity": "high",
+      "category": "empty_states"
+    },
+    {
+      "finding_id": "F135",
+      "reason": "requires subagent \u2014 complex fix",
+      "severity": "high",
+      "category": "empty_states"
+    },
+    {
+      "finding_id": "F136",
+      "reason": "requires subagent \u2014 complex fix",
+      "severity": "high",
+      "category": "empty_states"
+    },
+    {
+      "finding_id": "F137",
+      "reason": "requires subagent \u2014 complex fix",
+      "severity": "high",
+      "category": "empty_states"
+    },
+    {
+      "finding_id": "F138",
+      "reason": "requires subagent \u2014 complex fix",
+      "severity": "high",
+      "category": "empty_states"
+    },
+    {
+      "finding_id": "F139",
+      "reason": "requires subagent \u2014 complex fix",
+      "severity": "high",
+      "category": "empty_states"
+    },
+    {
+      "finding_id": "F140",
+      "reason": "requires subagent \u2014 complex fix",
+      "severity": "high",
+      "category": "empty_states"
+    },
+    {
+      "finding_id": "F489",
+      "reason": "requires subagent \u2014 complex fix",
+      "severity": "high",
+      "category": "error_handling"
+    }
+  ]
+}

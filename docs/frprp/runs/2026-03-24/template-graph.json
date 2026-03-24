@@ -1,0 +1,1694 @@
+{
+  "nodes": {
+    "base.html": {
+      "path": "/root/availai/app/templates/base.html",
+      "depends_on": [
+        "htmx/partials/shared/topbar.html",
+        "htmx/partials/shared/mobile_nav.html",
+        "htmx/partials/shared/toast.html",
+        "htmx/partials/shared/modal.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/login.html": {
+      "path": "/root/availai/app/templates/htmx/login.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/base_page.html": {
+      "path": "/root/availai/app/templates/htmx/base_page.html",
+      "depends_on": [
+        "htmx/base.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/base.html": {
+      "path": "/root/availai/app/templates/htmx/base.html",
+      "depends_on": [
+        "htmx/partials/shared/topbar.html",
+        "htmx/partials/shared/mobile_nav.html"
+      ],
+      "depended_by": [
+        "htmx/base_page.html"
+      ]
+    },
+    "documents/rfq_summary.html": {
+      "path": "/root/availai/app/templates/documents/rfq_summary.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "documents/quote_report.html": {
+      "path": "/root/availai/app/templates/documents/quote_report.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "requisitions2/_table_rows.html": {
+      "path": "/root/availai/app/templates/requisitions2/_table_rows.html",
+      "depends_on": [
+        "htmx/partials/shared/_macros.html"
+      ],
+      "depended_by": [
+        "requisitions2/_table.html"
+      ]
+    },
+    "requisitions2/_bulk_bar.html": {
+      "path": "/root/availai/app/templates/requisitions2/_bulk_bar.html",
+      "depends_on": [],
+      "depended_by": [
+        "requisitions2/page.html"
+      ]
+    },
+    "requisitions2/page.html": {
+      "path": "/root/availai/app/templates/requisitions2/page.html",
+      "depends_on": [
+        "requisitions2/_filters.html",
+        "requisitions2/_bulk_bar.html",
+        "requisitions2/_table.html",
+        "requisitions2/_detail_empty.html"
+      ],
+      "depended_by": []
+    },
+    "requisitions2/_modal.html": {
+      "path": "/root/availai/app/templates/requisitions2/_modal.html",
+      "depends_on": [
+        "htmx/partials/shared/_macros.html"
+      ],
+      "depended_by": []
+    },
+    "requisitions2/_filters.html": {
+      "path": "/root/availai/app/templates/requisitions2/_filters.html",
+      "depends_on": [],
+      "depended_by": [
+        "requisitions2/page.html"
+      ]
+    },
+    "requisitions2/_single_row.html": {
+      "path": "/root/availai/app/templates/requisitions2/_single_row.html",
+      "depends_on": [
+        "htmx/partials/shared/_macros.html"
+      ],
+      "depended_by": []
+    },
+    "requisitions2/_inline_cell.html": {
+      "path": "/root/availai/app/templates/requisitions2/_inline_cell.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "requisitions2/_table.html": {
+      "path": "/root/availai/app/templates/requisitions2/_table.html",
+      "depends_on": [
+        "requisitions2/_table_rows.html",
+        "htmx/partials/shared/empty_state.html"
+      ],
+      "depended_by": [
+        "requisitions2/page.html"
+      ]
+    },
+    "requisitions2/_detail_panel.html": {
+      "path": "/root/availai/app/templates/requisitions2/_detail_panel.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "requisitions2/_detail_empty.html": {
+      "path": "/root/availai/app/templates/requisitions2/_detail_empty.html",
+      "depends_on": [],
+      "depended_by": [
+        "requisitions2/page.html"
+      ]
+    },
+    "htmx/partials/dashboard.html": {
+      "path": "/root/availai/app/templates/htmx/partials/dashboard.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/quotes/pricing_history.html": {
+      "path": "/root/availai/app/templates/htmx/partials/quotes/pricing_history.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/quotes/line_row.html": {
+      "path": "/root/availai/app/templates/htmx/partials/quotes/line_row.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/quotes/detail.html"
+      ]
+    },
+    "htmx/partials/quotes/list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/quotes/list.html",
+      "depends_on": [
+        "htmx/partials/shared/_macros.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/quotes/preview.html": {
+      "path": "/root/availai/app/templates/htmx/partials/quotes/preview.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/quotes/detail.html": {
+      "path": "/root/availai/app/templates/htmx/partials/quotes/detail.html",
+      "depends_on": [
+        "htmx/partials/quotes/line_row.html",
+        "htmx/partials/shared/offer_card.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/sightings/vendor_modal.html": {
+      "path": "/root/availai/app/templates/htmx/partials/sightings/vendor_modal.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/sightings/list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/sightings/list.html",
+      "depends_on": [
+        "htmx/partials/shared/_macros.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/sightings/detail.html": {
+      "path": "/root/availai/app/templates/htmx/partials/sightings/detail.html",
+      "depends_on": [
+        "htmx/partials/shared/activity_timeline.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/sightings/table.html": {
+      "path": "/root/availai/app/templates/htmx/partials/sightings/table.html",
+      "depends_on": [
+        "htmx/partials/shared/pagination.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/prospecting/_card.html": {
+      "path": "/root/availai/app/templates/htmx/partials/prospecting/_card.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/prospecting/list.html"
+      ]
+    },
+    "htmx/partials/prospecting/list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/prospecting/list.html",
+      "depends_on": [
+        "htmx/partials/prospecting/_card.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/prospecting/stats.html": {
+      "path": "/root/availai/app/templates/htmx/partials/prospecting/stats.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/prospecting/detail.html": {
+      "path": "/root/availai/app/templates/htmx/partials/prospecting/detail.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/req_row.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/req_row.html",
+      "depends_on": [
+        "htmx/partials/shared/_macros.html"
+      ],
+      "depended_by": [
+        "htmx/partials/requisitions/list.html"
+      ]
+    },
+    "htmx/partials/requisitions/response_status_badge.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/response_status_badge.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/unified_modal.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/unified_modal.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/phone_log_success.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/phone_log_success.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/list.html",
+      "depends_on": [
+        "htmx/partials/requisitions/req_row.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/inline_cell.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/inline_cell.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/rfq_draft_result.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/rfq_draft_result.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/detail_header.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/detail_header.html",
+      "depends_on": [
+        "htmx/partials/shared/_macros.html"
+      ],
+      "depended_by": [
+        "htmx/partials/requisitions/detail.html"
+      ]
+    },
+    "htmx/partials/requisitions/edit_offer_form.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/edit_offer_form.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/detail.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/detail.html",
+      "depends_on": [
+        "htmx/partials/requisitions/detail_header.html",
+        "htmx/partials/requisitions/tabs/parts.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/rfq_results.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/rfq_results.html",
+      "depends_on": [
+        "htmx/partials/shared/empty_state.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/rfq_prepare.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/rfq_prepare.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/add_offer_form.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/add_offer_form.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/rfq_compose.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/rfq_compose.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/ai/company_intel.html": {
+      "path": "/root/availai/app/templates/htmx/partials/ai/company_intel.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/ai/contact_results.html": {
+      "path": "/root/availai/app/templates/htmx/partials/ai/contact_results.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/ai/parsed_email.html": {
+      "path": "/root/availai/app/templates/htmx/partials/ai/parsed_email.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/ai/rfq_draft.html": {
+      "path": "/root/availai/app/templates/htmx/partials/ai/rfq_draft.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/ai/prospect_contacts_table.html": {
+      "path": "/root/availai/app/templates/htmx/partials/ai/prospect_contacts_table.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/knowledge/list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/knowledge/list.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/customers/edit_form.html": {
+      "path": "/root/availai/app/templates/htmx/partials/customers/edit_form.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/customers/list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/customers/list.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/customers/create_form.html": {
+      "path": "/root/availai/app/templates/htmx/partials/customers/create_form.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/customers/contact_notes.html": {
+      "path": "/root/availai/app/templates/htmx/partials/customers/contact_notes.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/customers/detail.html": {
+      "path": "/root/availai/app/templates/htmx/partials/customers/detail.html",
+      "depends_on": [
+        "htmx/partials/shared/enrich_button.html",
+        "htmx/partials/shared/empty_state.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/offers/changelog.html": {
+      "path": "/root/availai/app/templates/htmx/partials/offers/changelog.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/offers/review_queue.html": {
+      "path": "/root/availai/app/templates/htmx/partials/offers/review_queue.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/buy_plans/list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/buy_plans/list.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/buy_plans/detail.html": {
+      "path": "/root/availai/app/templates/htmx/partials/buy_plans/detail.html",
+      "depends_on": [
+        "htmx/partials/shared/_macros.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/quote_builder/modal.html": {
+      "path": "/root/availai/app/templates/htmx/partials/quote_builder/modal.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/manufacturers/search_results.html": {
+      "path": "/root/availai/app/templates/htmx/partials/manufacturers/search_results.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/search/vendor_card.html": {
+      "path": "/root/availai/app/templates/htmx/partials/search/vendor_card.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/search/form.html": {
+      "path": "/root/availai/app/templates/htmx/partials/search/form.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/search/full_results.html": {
+      "path": "/root/availai/app/templates/htmx/partials/search/full_results.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/search/requisition_picker_modal.html": {
+      "path": "/root/availai/app/templates/htmx/partials/search/requisition_picker_modal.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/search/lead_detail.html": {
+      "path": "/root/availai/app/templates/htmx/partials/search/lead_detail.html",
+      "depends_on": [
+        "htmx/partials/shared/safety_review.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/search/shortlist_bar.html": {
+      "path": "/root/availai/app/templates/htmx/partials/search/shortlist_bar.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/search/results_shell.html"
+      ]
+    },
+    "htmx/partials/search/results_shell.html": {
+      "path": "/root/availai/app/templates/htmx/partials/search/results_shell.html",
+      "depends_on": [
+        "htmx/partials/search/shortlist_bar.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/search/results.html": {
+      "path": "/root/availai/app/templates/htmx/partials/search/results.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/follow_ups/sent_success.html": {
+      "path": "/root/availai/app/templates/htmx/partials/follow_ups/sent_success.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/follow_ups/list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/follow_ups/list.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/proactive/scorecard.html": {
+      "path": "/root/availai/app/templates/htmx/partials/proactive/scorecard.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/proactive/list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/proactive/list.html",
+      "depends_on": [
+        "htmx/partials/proactive/_match_row.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/proactive/prepare.html": {
+      "path": "/root/availai/app/templates/htmx/partials/proactive/prepare.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/proactive/convert_success.html": {
+      "path": "/root/availai/app/templates/htmx/partials/proactive/convert_success.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/proactive/_match_row.html": {
+      "path": "/root/availai/app/templates/htmx/partials/proactive/_match_row.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/proactive/list.html"
+      ]
+    },
+    "htmx/partials/settings/system.html": {
+      "path": "/root/availai/app/templates/htmx/partials/settings/system.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/settings/profile.html": {
+      "path": "/root/availai/app/templates/htmx/partials/settings/profile.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/settings/index.html": {
+      "path": "/root/availai/app/templates/htmx/partials/settings/index.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/settings/data_ops.html": {
+      "path": "/root/availai/app/templates/htmx/partials/settings/data_ops.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/settings/sources.html": {
+      "path": "/root/availai/app/templates/htmx/partials/settings/sources.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/emails/intelligence_dashboard.html": {
+      "path": "/root/availai/app/templates/htmx/partials/emails/intelligence_dashboard.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/emails/thread_summary.html": {
+      "path": "/root/availai/app/templates/htmx/partials/emails/thread_summary.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/emails/thread_viewer.html": {
+      "path": "/root/availai/app/templates/htmx/partials/emails/thread_viewer.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/emails/reply_result.html": {
+      "path": "/root/availai/app/templates/htmx/partials/emails/reply_result.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/tickets/_row.html": {
+      "path": "/root/availai/app/templates/htmx/partials/tickets/_row.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/tickets/list.html",
+        "htmx/partials/tickets/list.html"
+      ]
+    },
+    "htmx/partials/tickets/workspace.html": {
+      "path": "/root/availai/app/templates/htmx/partials/tickets/workspace.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/tickets/list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/tickets/list.html",
+      "depends_on": [
+        "htmx/partials/tickets/_row.html",
+        "htmx/partials/tickets/_row.html",
+        "htmx/partials/shared/empty_state.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/tickets/detail.html": {
+      "path": "/root/availai/app/templates/htmx/partials/tickets/detail.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/sourcing/lead_card.html": {
+      "path": "/root/availai/app/templates/htmx/partials/sourcing/lead_card.html",
+      "depends_on": [
+        "htmx/partials/shared/source_badge.html",
+        "htmx/partials/shared/_macros.html"
+      ],
+      "depended_by": [
+        "htmx/partials/sourcing/results.html"
+      ]
+    },
+    "htmx/partials/sourcing/workspace.html": {
+      "path": "/root/availai/app/templates/htmx/partials/sourcing/workspace.html",
+      "depends_on": [
+        "htmx/partials/sourcing/filter_bar.html",
+        "htmx/partials/sourcing/lead_row.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/sourcing/search_progress.html": {
+      "path": "/root/availai/app/templates/htmx/partials/sourcing/search_progress.html",
+      "depends_on": [
+        "htmx/partials/shared/source_badge.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/sourcing/filter_bar.html": {
+      "path": "/root/availai/app/templates/htmx/partials/sourcing/filter_bar.html",
+      "depends_on": [
+        "htmx/partials/shared/source_badge.html"
+      ],
+      "depended_by": [
+        "htmx/partials/sourcing/workspace.html",
+        "htmx/partials/sourcing/results.html"
+      ]
+    },
+    "htmx/partials/sourcing/lead_detail.html": {
+      "path": "/root/availai/app/templates/htmx/partials/sourcing/lead_detail.html",
+      "depends_on": [
+        "htmx/partials/shared/source_badge.html",
+        "htmx/partials/shared/source_badge.html",
+        "htmx/partials/shared/safety_review.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/sourcing/lead_panel.html": {
+      "path": "/root/availai/app/templates/htmx/partials/sourcing/lead_panel.html",
+      "depends_on": [
+        "htmx/partials/shared/source_badge.html",
+        "htmx/partials/shared/source_badge.html",
+        "htmx/partials/shared/safety_review.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/sourcing/results.html": {
+      "path": "/root/availai/app/templates/htmx/partials/sourcing/results.html",
+      "depends_on": [
+        "htmx/partials/sourcing/filter_bar.html",
+        "htmx/partials/sourcing/lead_card.html",
+        "htmx/partials/shared/pagination.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/sourcing/lead_row.html": {
+      "path": "/root/availai/app/templates/htmx/partials/sourcing/lead_row.html",
+      "depends_on": [
+        "htmx/partials/shared/source_badge.html"
+      ],
+      "depended_by": [
+        "htmx/partials/sourcing/workspace.html"
+      ]
+    },
+    "htmx/partials/excess/bid_list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/excess/bid_list.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/excess/create_modal.html": {
+      "path": "/root/availai/app/templates/htmx/partials/excess/create_modal.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/excess/line_item_row.html": {
+      "path": "/root/availai/app/templates/htmx/partials/excess/line_item_row.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/excess/detail.html"
+      ]
+    },
+    "htmx/partials/excess/list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/excess/list.html",
+      "depends_on": [
+        "htmx/partials/excess/row.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/excess/detail.html": {
+      "path": "/root/availai/app/templates/htmx/partials/excess/detail.html",
+      "depends_on": [
+        "htmx/partials/excess/line_item_row.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/excess/solicit_modal.html": {
+      "path": "/root/availai/app/templates/htmx/partials/excess/solicit_modal.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/excess/add_line_item_modal.html": {
+      "path": "/root/availai/app/templates/htmx/partials/excess/add_line_item_modal.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/excess/bid_form.html": {
+      "path": "/root/availai/app/templates/htmx/partials/excess/bid_form.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/excess/row.html": {
+      "path": "/root/availai/app/templates/htmx/partials/excess/row.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/excess/list.html"
+      ]
+    },
+    "htmx/partials/materials/workspace.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/workspace.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/materials/enrich_result.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/enrich_result.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/materials/list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/list.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/materials/ai_interpret.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/ai_interpret.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/materials/insights.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/insights.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/materials/detail.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/detail.html",
+      "depends_on": [
+        "htmx/partials/materials/crosses_section.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/materials/crosses_section.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/crosses_section.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/materials/detail.html"
+      ]
+    },
+    "htmx/partials/shared/quote_builder_shell.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/quote_builder_shell.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/shared/pagination.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/pagination.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/sightings/table.html",
+        "htmx/partials/sourcing/results.html"
+      ]
+    },
+    "htmx/partials/shared/activity_timeline.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/activity_timeline.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/sightings/detail.html"
+      ]
+    },
+    "htmx/partials/shared/column_picker.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/column_picker.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/shared/sidebar.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/sidebar.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/shared/empty_state.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/empty_state.html",
+      "depends_on": [],
+      "depended_by": [
+        "requisitions2/_table.html",
+        "htmx/partials/requisitions/rfq_results.html",
+        "htmx/partials/customers/detail.html",
+        "htmx/partials/tickets/list.html",
+        "htmx/partials/requisitions/tabs/parts.html"
+      ]
+    },
+    "htmx/partials/shared/search_results.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/search_results.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/shared/toast.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/toast.html",
+      "depends_on": [],
+      "depended_by": [
+        "base.html"
+      ]
+    },
+    "htmx/partials/shared/safety_review.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/safety_review.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/search/lead_detail.html",
+        "htmx/partials/sourcing/lead_detail.html",
+        "htmx/partials/sourcing/lead_panel.html",
+        "htmx/partials/vendors/detail.html",
+        "htmx/partials/vendors/overview_tab.html"
+      ]
+    },
+    "htmx/partials/shared/trouble_report_form.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/trouble_report_form.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/shared/offer_card.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/offer_card.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/quotes/detail.html"
+      ]
+    },
+    "htmx/partials/shared/source_badge.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/source_badge.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/sourcing/lead_card.html",
+        "htmx/partials/sourcing/search_progress.html",
+        "htmx/partials/sourcing/filter_bar.html",
+        "htmx/partials/sourcing/lead_detail.html",
+        "htmx/partials/sourcing/lead_detail.html",
+        "htmx/partials/sourcing/lead_panel.html",
+        "htmx/partials/sourcing/lead_panel.html",
+        "htmx/partials/sourcing/lead_row.html",
+        "htmx/partials/vendors/detail.html",
+        "htmx/partials/vendors/overview_tab.html"
+      ]
+    },
+    "htmx/partials/shared/modal.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/modal.html",
+      "depends_on": [],
+      "depended_by": [
+        "base.html"
+      ]
+    },
+    "htmx/partials/shared/topbar.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/topbar.html",
+      "depends_on": [],
+      "depended_by": [
+        "base.html",
+        "htmx/base.html"
+      ]
+    },
+    "htmx/partials/shared/enrich_button.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/enrich_button.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/customers/detail.html",
+        "htmx/partials/vendors/detail.html"
+      ]
+    },
+    "htmx/partials/shared/split_panel.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/split_panel.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/shared/insights_panel.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/insights_panel.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/shared/_macros.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/_macros.html",
+      "depends_on": [
+        "htmx/partials/shared/_macros.html",
+        "htmx/partials/shared/_macros.html"
+      ],
+      "depended_by": [
+        "requisitions2/_table_rows.html",
+        "requisitions2/_modal.html",
+        "requisitions2/_single_row.html",
+        "htmx/partials/quotes/list.html",
+        "htmx/partials/sightings/list.html",
+        "htmx/partials/requisitions/req_row.html",
+        "htmx/partials/requisitions/detail_header.html",
+        "htmx/partials/buy_plans/detail.html",
+        "htmx/partials/sourcing/lead_card.html",
+        "htmx/partials/shared/_macros.html",
+        "htmx/partials/shared/_macros.html",
+        "htmx/partials/parts/tabs/req_details.html"
+      ]
+    },
+    "htmx/partials/shared/mobile_nav.html": {
+      "path": "/root/availai/app/templates/htmx/partials/shared/mobile_nav.html",
+      "depends_on": [],
+      "depended_by": [
+        "base.html",
+        "htmx/base.html"
+      ]
+    },
+    "htmx/partials/admin/api_health.html": {
+      "path": "/root/availai/app/templates/htmx/partials/admin/api_health.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/admin/data_ops.html": {
+      "path": "/root/availai/app/templates/htmx/partials/admin/data_ops.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/parts/cell_edit.html": {
+      "path": "/root/availai/app/templates/htmx/partials/parts/cell_edit.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/parts/workspace.html": {
+      "path": "/root/availai/app/templates/htmx/partials/parts/workspace.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/parts/header.html": {
+      "path": "/root/availai/app/templates/htmx/partials/parts/header.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/parts/list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/parts/list.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/parts/spec_edit.html": {
+      "path": "/root/availai/app/templates/htmx/partials/parts/spec_edit.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/parts/spec_display.html": {
+      "path": "/root/availai/app/templates/htmx/partials/parts/spec_display.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/parts/cell_display.html": {
+      "path": "/root/availai/app/templates/htmx/partials/parts/cell_display.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/vendors/vendor_card.html": {
+      "path": "/root/availai/app/templates/htmx/partials/vendors/vendor_card.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/vendors/list.html"
+      ]
+    },
+    "htmx/partials/vendors/find_contacts_tab.html": {
+      "path": "/root/availai/app/templates/htmx/partials/vendors/find_contacts_tab.html",
+      "depends_on": [
+        "htmx/partials/vendors/prospect_card.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/vendors/list.html": {
+      "path": "/root/availai/app/templates/htmx/partials/vendors/list.html",
+      "depends_on": [
+        "htmx/partials/vendors/vendor_card.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/vendors/find_contacts_results.html": {
+      "path": "/root/availai/app/templates/htmx/partials/vendors/find_contacts_results.html",
+      "depends_on": [
+        "htmx/partials/vendors/prospect_card.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/vendors/emails_tab.html": {
+      "path": "/root/availai/app/templates/htmx/partials/vendors/emails_tab.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/vendors/prospect_card.html": {
+      "path": "/root/availai/app/templates/htmx/partials/vendors/prospect_card.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/vendors/find_contacts_tab.html",
+        "htmx/partials/vendors/find_contacts_results.html"
+      ]
+    },
+    "htmx/partials/vendors/reviews.html": {
+      "path": "/root/availai/app/templates/htmx/partials/vendors/reviews.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/vendors/detail.html": {
+      "path": "/root/availai/app/templates/htmx/partials/vendors/detail.html",
+      "depends_on": [
+        "htmx/partials/shared/enrich_button.html",
+        "htmx/partials/shared/safety_review.html",
+        "htmx/partials/shared/source_badge.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/vendors/overview_tab.html": {
+      "path": "/root/availai/app/templates/htmx/partials/vendors/overview_tab.html",
+      "depends_on": [
+        "htmx/partials/shared/safety_review.html",
+        "htmx/partials/shared/source_badge.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/vendors/contact_timeline.html": {
+      "path": "/root/availai/app/templates/htmx/partials/vendors/contact_timeline.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/vendors/contact_nudges.html": {
+      "path": "/root/availai/app/templates/htmx/partials/vendors/contact_nudges.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/vendors/edit_vendor_form.html": {
+      "path": "/root/availai/app/templates/htmx/partials/vendors/edit_vendor_form.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/tabs/req_row.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/tabs/req_row.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/requisitions/tabs/parts.html"
+      ]
+    },
+    "htmx/partials/requisitions/tabs/parse_save_success.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/tabs/parse_save_success.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/tabs/buy_plans.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/tabs/buy_plans.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/tabs/responses.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/tabs/responses.html",
+      "depends_on": [
+        "htmx/partials/requisitions/tabs/response_card.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/tabs/offers.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/tabs/offers.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/tabs/quotes.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/tabs/quotes.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/tabs/parse_email_form.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/tabs/parse_email_form.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/tabs/paste_offer_form.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/tabs/paste_offer_form.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/tabs/parts.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/tabs/parts.html",
+      "depends_on": [
+        "htmx/partials/requisitions/tabs/req_row.html",
+        "htmx/partials/shared/empty_state.html"
+      ],
+      "depended_by": [
+        "htmx/partials/requisitions/detail.html"
+      ]
+    },
+    "htmx/partials/requisitions/tabs/tasks.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/tabs/tasks.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/tabs/parsed_email_results.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/tabs/parsed_email_results.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/tabs/activity.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/tabs/activity.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/tabs/parsed_offer_results.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/tabs/parsed_offer_results.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/requisitions/tabs/response_card.html": {
+      "path": "/root/availai/app/templates/htmx/partials/requisitions/tabs/response_card.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/requisitions/tabs/responses.html"
+      ]
+    },
+    "htmx/partials/customers/tabs/site_contacts.html": {
+      "path": "/root/availai/app/templates/htmx/partials/customers/tabs/site_contacts.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/customers/tabs/sites_tab.html": {
+      "path": "/root/availai/app/templates/htmx/partials/customers/tabs/sites_tab.html",
+      "depends_on": [
+        "htmx/partials/customers/tabs/site_card.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/customers/tabs/site_card.html": {
+      "path": "/root/availai/app/templates/htmx/partials/customers/tabs/site_card.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/customers/tabs/sites_tab.html"
+      ]
+    },
+    "htmx/partials/customers/tabs/activity_tab.html": {
+      "path": "/root/availai/app/templates/htmx/partials/customers/tabs/activity_tab.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/follow_ups/follow_ups/batch_result.html": {
+      "path": "/root/availai/app/templates/htmx/partials/follow_ups/follow_ups/batch_result.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/materials/tabs/customers.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/tabs/customers.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/materials/tabs/sourcing.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/tabs/sourcing.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/materials/tabs/vendors.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/tabs/vendors.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/materials/tabs/price_history.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/tabs/price_history.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/materials/filters/manufacturers.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/filters/manufacturers.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/materials/filters/subfilters.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/filters/subfilters.html",
+      "depends_on": [
+        "htmx/partials/materials/filters/_macros.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/materials/filters/tree.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/filters/tree.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/materials/filters/_macros.html": {
+      "path": "/root/availai/app/templates/htmx/partials/materials/filters/_macros.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/materials/filters/subfilters.html"
+      ]
+    },
+    "htmx/partials/parts/tabs/sourcing.html": {
+      "path": "/root/availai/app/templates/htmx/partials/parts/tabs/sourcing.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/parts/tabs/notes.html": {
+      "path": "/root/availai/app/templates/htmx/partials/parts/tabs/notes.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/parts/tabs/offers.html": {
+      "path": "/root/availai/app/templates/htmx/partials/parts/tabs/offers.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/parts/tabs/comms.html": {
+      "path": "/root/availai/app/templates/htmx/partials/parts/tabs/comms.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/parts/tabs/activity.html": {
+      "path": "/root/availai/app/templates/htmx/partials/parts/tabs/activity.html",
+      "depends_on": [],
+      "depended_by": []
+    },
+    "htmx/partials/parts/tabs/req_details.html": {
+      "path": "/root/availai/app/templates/htmx/partials/parts/tabs/req_details.html",
+      "depends_on": [
+        "htmx/partials/shared/_macros.html"
+      ],
+      "depended_by": []
+    },
+    "htmx/partials/vendors/tabs/contact_row.html": {
+      "path": "/root/availai/app/templates/htmx/partials/vendors/tabs/contact_row.html",
+      "depends_on": [],
+      "depended_by": [
+        "htmx/partials/vendors/tabs/contacts.html"
+      ]
+    },
+    "htmx/partials/vendors/tabs/contacts.html": {
+      "path": "/root/availai/app/templates/htmx/partials/vendors/tabs/contacts.html",
+      "depends_on": [
+        "htmx/partials/vendors/tabs/contact_row.html"
+      ],
+      "depended_by": []
+    }
+  },
+  "edges": [
+    {
+      "from": "base.html",
+      "to": "htmx/partials/shared/topbar.html",
+      "type": "include"
+    },
+    {
+      "from": "base.html",
+      "to": "htmx/partials/shared/mobile_nav.html",
+      "type": "include"
+    },
+    {
+      "from": "base.html",
+      "to": "htmx/partials/shared/toast.html",
+      "type": "include"
+    },
+    {
+      "from": "base.html",
+      "to": "htmx/partials/shared/modal.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/base_page.html",
+      "to": "htmx/base.html",
+      "type": "extends"
+    },
+    {
+      "from": "htmx/base.html",
+      "to": "htmx/partials/shared/topbar.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/base.html",
+      "to": "htmx/partials/shared/mobile_nav.html",
+      "type": "include"
+    },
+    {
+      "from": "requisitions2/_table_rows.html",
+      "to": "htmx/partials/shared/_macros.html",
+      "type": "import"
+    },
+    {
+      "from": "requisitions2/page.html",
+      "to": "requisitions2/_filters.html",
+      "type": "include"
+    },
+    {
+      "from": "requisitions2/page.html",
+      "to": "requisitions2/_bulk_bar.html",
+      "type": "include"
+    },
+    {
+      "from": "requisitions2/page.html",
+      "to": "requisitions2/_table.html",
+      "type": "include"
+    },
+    {
+      "from": "requisitions2/page.html",
+      "to": "requisitions2/_detail_empty.html",
+      "type": "include"
+    },
+    {
+      "from": "requisitions2/_modal.html",
+      "to": "htmx/partials/shared/_macros.html",
+      "type": "import"
+    },
+    {
+      "from": "requisitions2/_single_row.html",
+      "to": "htmx/partials/shared/_macros.html",
+      "type": "import"
+    },
+    {
+      "from": "requisitions2/_table.html",
+      "to": "requisitions2/_table_rows.html",
+      "type": "include"
+    },
+    {
+      "from": "requisitions2/_table.html",
+      "to": "htmx/partials/shared/empty_state.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/quotes/list.html",
+      "to": "htmx/partials/shared/_macros.html",
+      "type": "import"
+    },
+    {
+      "from": "htmx/partials/quotes/detail.html",
+      "to": "htmx/partials/quotes/line_row.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/quotes/detail.html",
+      "to": "htmx/partials/shared/offer_card.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sightings/list.html",
+      "to": "htmx/partials/shared/_macros.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sightings/detail.html",
+      "to": "htmx/partials/shared/activity_timeline.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sightings/table.html",
+      "to": "htmx/partials/shared/pagination.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/prospecting/list.html",
+      "to": "htmx/partials/prospecting/_card.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/requisitions/req_row.html",
+      "to": "htmx/partials/shared/_macros.html",
+      "type": "import"
+    },
+    {
+      "from": "htmx/partials/requisitions/list.html",
+      "to": "htmx/partials/requisitions/req_row.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/requisitions/detail_header.html",
+      "to": "htmx/partials/shared/_macros.html",
+      "type": "import"
+    },
+    {
+      "from": "htmx/partials/requisitions/detail.html",
+      "to": "htmx/partials/requisitions/detail_header.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/requisitions/detail.html",
+      "to": "htmx/partials/requisitions/tabs/parts.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/requisitions/rfq_results.html",
+      "to": "htmx/partials/shared/empty_state.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/customers/detail.html",
+      "to": "htmx/partials/shared/enrich_button.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/customers/detail.html",
+      "to": "htmx/partials/shared/empty_state.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/buy_plans/detail.html",
+      "to": "htmx/partials/shared/_macros.html",
+      "type": "import"
+    },
+    {
+      "from": "htmx/partials/search/lead_detail.html",
+      "to": "htmx/partials/shared/safety_review.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/search/results_shell.html",
+      "to": "htmx/partials/search/shortlist_bar.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/proactive/list.html",
+      "to": "htmx/partials/proactive/_match_row.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/tickets/list.html",
+      "to": "htmx/partials/tickets/_row.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/tickets/list.html",
+      "to": "htmx/partials/tickets/_row.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/tickets/list.html",
+      "to": "htmx/partials/shared/empty_state.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/lead_card.html",
+      "to": "htmx/partials/shared/source_badge.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/lead_card.html",
+      "to": "htmx/partials/shared/_macros.html",
+      "type": "import"
+    },
+    {
+      "from": "htmx/partials/sourcing/workspace.html",
+      "to": "htmx/partials/sourcing/filter_bar.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/workspace.html",
+      "to": "htmx/partials/sourcing/lead_row.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/search_progress.html",
+      "to": "htmx/partials/shared/source_badge.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/filter_bar.html",
+      "to": "htmx/partials/shared/source_badge.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/lead_detail.html",
+      "to": "htmx/partials/shared/source_badge.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/lead_detail.html",
+      "to": "htmx/partials/shared/source_badge.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/lead_detail.html",
+      "to": "htmx/partials/shared/safety_review.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/lead_panel.html",
+      "to": "htmx/partials/shared/source_badge.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/lead_panel.html",
+      "to": "htmx/partials/shared/source_badge.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/lead_panel.html",
+      "to": "htmx/partials/shared/safety_review.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/results.html",
+      "to": "htmx/partials/sourcing/filter_bar.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/results.html",
+      "to": "htmx/partials/sourcing/lead_card.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/results.html",
+      "to": "htmx/partials/shared/pagination.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/sourcing/lead_row.html",
+      "to": "htmx/partials/shared/source_badge.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/excess/list.html",
+      "to": "htmx/partials/excess/row.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/excess/detail.html",
+      "to": "htmx/partials/excess/line_item_row.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/materials/detail.html",
+      "to": "htmx/partials/materials/crosses_section.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/shared/_macros.html",
+      "to": "htmx/partials/shared/_macros.html",
+      "type": "import"
+    },
+    {
+      "from": "htmx/partials/shared/_macros.html",
+      "to": "htmx/partials/shared/_macros.html",
+      "type": "import"
+    },
+    {
+      "from": "htmx/partials/vendors/find_contacts_tab.html",
+      "to": "htmx/partials/vendors/prospect_card.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/vendors/list.html",
+      "to": "htmx/partials/vendors/vendor_card.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/vendors/find_contacts_results.html",
+      "to": "htmx/partials/vendors/prospect_card.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/vendors/detail.html",
+      "to": "htmx/partials/shared/enrich_button.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/vendors/detail.html",
+      "to": "htmx/partials/shared/safety_review.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/vendors/detail.html",
+      "to": "htmx/partials/shared/source_badge.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/vendors/overview_tab.html",
+      "to": "htmx/partials/shared/safety_review.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/vendors/overview_tab.html",
+      "to": "htmx/partials/shared/source_badge.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/requisitions/tabs/responses.html",
+      "to": "htmx/partials/requisitions/tabs/response_card.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/requisitions/tabs/parts.html",
+      "to": "htmx/partials/requisitions/tabs/req_row.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/requisitions/tabs/parts.html",
+      "to": "htmx/partials/shared/empty_state.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/customers/tabs/sites_tab.html",
+      "to": "htmx/partials/customers/tabs/site_card.html",
+      "type": "include"
+    },
+    {
+      "from": "htmx/partials/materials/filters/subfilters.html",
+      "to": "htmx/partials/materials/filters/_macros.html",
+      "type": "import"
+    },
+    {
+      "from": "htmx/partials/parts/tabs/req_details.html",
+      "to": "htmx/partials/shared/_macros.html",
+      "type": "import"
+    },
+    {
+      "from": "htmx/partials/vendors/tabs/contacts.html",
+      "to": "htmx/partials/vendors/tabs/contact_row.html",
+      "type": "include"
+    }
+  ],
+  "orphans": [
+    "htmx/login.html",
+    "htmx/base_page.html",
+    "documents/rfq_summary.html",
+    "documents/quote_report.html",
+    "requisitions2/page.html",
+    "requisitions2/_modal.html",
+    "requisitions2/_single_row.html",
+    "requisitions2/_inline_cell.html",
+    "requisitions2/_detail_panel.html",
+    "htmx/partials/dashboard.html",
+    "htmx/partials/quotes/pricing_history.html",
+    "htmx/partials/quotes/list.html",
+    "htmx/partials/quotes/preview.html",
+    "htmx/partials/quotes/detail.html",
+    "htmx/partials/sightings/vendor_modal.html",
+    "htmx/partials/sightings/list.html",
+    "htmx/partials/sightings/detail.html",
+    "htmx/partials/sightings/table.html",
+    "htmx/partials/prospecting/list.html",
+    "htmx/partials/prospecting/stats.html",
+    "htmx/partials/prospecting/detail.html",
+    "htmx/partials/requisitions/response_status_badge.html",
+    "htmx/partials/requisitions/unified_modal.html",
+    "htmx/partials/requisitions/phone_log_success.html",
+    "htmx/partials/requisitions/list.html",
+    "htmx/partials/requisitions/inline_cell.html",
+    "htmx/partials/requisitions/rfq_draft_result.html",
+    "htmx/partials/requisitions/edit_offer_form.html",
+    "htmx/partials/requisitions/detail.html",
+    "htmx/partials/requisitions/rfq_results.html",
+    "htmx/partials/requisitions/rfq_prepare.html",
+    "htmx/partials/requisitions/add_offer_form.html",
+    "htmx/partials/requisitions/rfq_compose.html",
+    "htmx/partials/ai/company_intel.html",
+    "htmx/partials/ai/contact_results.html",
+    "htmx/partials/ai/parsed_email.html",
+    "htmx/partials/ai/rfq_draft.html",
+    "htmx/partials/ai/prospect_contacts_table.html",
+    "htmx/partials/knowledge/list.html",
+    "htmx/partials/customers/edit_form.html",
+    "htmx/partials/customers/list.html",
+    "htmx/partials/customers/create_form.html",
+    "htmx/partials/customers/contact_notes.html",
+    "htmx/partials/customers/detail.html",
+    "htmx/partials/offers/changelog.html",
+    "htmx/partials/offers/review_queue.html",
+    "htmx/partials/buy_plans/list.html",
+    "htmx/partials/buy_plans/detail.html",
+    "htmx/partials/quote_builder/modal.html",
+    "htmx/partials/manufacturers/search_results.html",
+    "htmx/partials/search/vendor_card.html",
+    "htmx/partials/search/form.html",
+    "htmx/partials/search/full_results.html",
+    "htmx/partials/search/requisition_picker_modal.html",
+    "htmx/partials/search/lead_detail.html",
+    "htmx/partials/search/results_shell.html",
+    "htmx/partials/search/results.html",
+    "htmx/partials/follow_ups/sent_success.html",
+    "htmx/partials/follow_ups/list.html",
+    "htmx/partials/proactive/scorecard.html",
+    "htmx/partials/proactive/list.html",
+    "htmx/partials/proactive/prepare.html",
+    "htmx/partials/proactive/convert_success.html",
+    "htmx/partials/settings/system.html",
+    "htmx/partials/settings/profile.html",
+    "htmx/partials/settings/index.html",
+    "htmx/partials/settings/data_ops.html",
+    "htmx/partials/settings/sources.html",
+    "htmx/partials/emails/intelligence_dashboard.html",
+    "htmx/partials/emails/thread_summary.html",
+    "htmx/partials/emails/thread_viewer.html",
+    "htmx/partials/emails/reply_result.html",
+    "htmx/partials/tickets/workspace.html",
+    "htmx/partials/tickets/list.html",
+    "htmx/partials/tickets/detail.html",
+    "htmx/partials/sourcing/workspace.html",
+    "htmx/partials/sourcing/search_progress.html",
+    "htmx/partials/sourcing/lead_detail.html",
+    "htmx/partials/sourcing/lead_panel.html",
+    "htmx/partials/sourcing/results.html",
+    "htmx/partials/excess/bid_list.html",
+    "htmx/partials/excess/create_modal.html",
+    "htmx/partials/excess/list.html",
+    "htmx/partials/excess/detail.html",
+    "htmx/partials/excess/solicit_modal.html",
+    "htmx/partials/excess/add_line_item_modal.html",
+    "htmx/partials/excess/bid_form.html",
+    "htmx/partials/materials/workspace.html",
+    "htmx/partials/materials/enrich_result.html",
+    "htmx/partials/materials/list.html",
+    "htmx/partials/materials/ai_interpret.html",
+    "htmx/partials/materials/insights.html",
+    "htmx/partials/materials/detail.html",
+    "htmx/partials/admin/api_health.html",
+    "htmx/partials/admin/data_ops.html",
+    "htmx/partials/parts/cell_edit.html",
+    "htmx/partials/parts/workspace.html",
+    "htmx/partials/parts/header.html",
+    "htmx/partials/parts/list.html",
+    "htmx/partials/parts/spec_edit.html",
+    "htmx/partials/parts/spec_display.html",
+    "htmx/partials/parts/cell_display.html",
+    "htmx/partials/vendors/find_contacts_tab.html",
+    "htmx/partials/vendors/list.html",
+    "htmx/partials/vendors/find_contacts_results.html",
+    "htmx/partials/vendors/emails_tab.html",
+    "htmx/partials/vendors/reviews.html",
+    "htmx/partials/vendors/detail.html",
+    "htmx/partials/vendors/overview_tab.html",
+    "htmx/partials/vendors/contact_timeline.html",
+    "htmx/partials/vendors/contact_nudges.html",
+    "htmx/partials/vendors/edit_vendor_form.html",
+    "htmx/partials/requisitions/tabs/parse_save_success.html",
+    "htmx/partials/requisitions/tabs/buy_plans.html",
+    "htmx/partials/requisitions/tabs/responses.html",
+    "htmx/partials/requisitions/tabs/offers.html",
+    "htmx/partials/requisitions/tabs/quotes.html",
+    "htmx/partials/requisitions/tabs/parse_email_form.html",
+    "htmx/partials/requisitions/tabs/paste_offer_form.html",
+    "htmx/partials/requisitions/tabs/tasks.html",
+    "htmx/partials/requisitions/tabs/parsed_email_results.html",
+    "htmx/partials/requisitions/tabs/activity.html",
+    "htmx/partials/requisitions/tabs/parsed_offer_results.html",
+    "htmx/partials/customers/tabs/site_contacts.html",
+    "htmx/partials/customers/tabs/sites_tab.html",
+    "htmx/partials/customers/tabs/activity_tab.html",
+    "htmx/partials/follow_ups/follow_ups/batch_result.html",
+    "htmx/partials/materials/tabs/customers.html",
+    "htmx/partials/materials/tabs/sourcing.html",
+    "htmx/partials/materials/tabs/vendors.html",
+    "htmx/partials/materials/tabs/price_history.html",
+    "htmx/partials/materials/filters/manufacturers.html",
+    "htmx/partials/materials/filters/subfilters.html",
+    "htmx/partials/materials/filters/tree.html",
+    "htmx/partials/parts/tabs/sourcing.html",
+    "htmx/partials/parts/tabs/notes.html",
+    "htmx/partials/parts/tabs/offers.html",
+    "htmx/partials/parts/tabs/comms.html",
+    "htmx/partials/parts/tabs/activity.html",
+    "htmx/partials/parts/tabs/req_details.html",
+    "htmx/partials/vendors/tabs/contacts.html"
+  ]
+}

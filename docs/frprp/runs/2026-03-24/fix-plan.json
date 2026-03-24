@@ -1,0 +1,45 @@
+{
+  "actions": [
+    {
+      "finding_id": "F001",
+      "action": "needs_human",
+      "severity": "medium",
+      "category": "loading_states",
+      "fix_pattern": null
+    },
+    {
+      "finding_id": "F002",
+      "action": "needs_human",
+      "severity": "medium",
+      "category": "loading_states",
+      "fix_pattern": null
+    },
+    {
+      "finding_id": "F003",
+      "action": "needs_human",
+      "severity": "medium",
+      "category": "loading_states",
+      "fix_pattern": null
+    },
+    {
+      "finding_id": "F004",
+      "action": "auto_fix",
+      "severity": "medium",
+      "category": "accessibility",
+      "fix_pattern": "missing_alt"
+    },
+    {
+      "finding_id": "F005",
+      "action": "auto_fix",
+      "severity": "low",
+      "category": "template_consistency",
+      "fix_pattern": "missing_x_cloak"
+    }
+  ],
+  "summary": {
+    "auto_fix": 2,
+    "subagent": 0,
+    "log_only": 0,
+    "needs_human": 3
+  }
+}
