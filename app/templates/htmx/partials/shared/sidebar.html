@@ -8,6 +8,15 @@
 #}
 <aside
   :class="$store.sidebar.collapsed ? 'w-16' : 'w-64'"
+  x-data="{
+    activeNav: '{{ current_view }}',
+    urlToNav(url) {
+      const map = {'/v2/requisitions':'requisitions','/v2/sightings':'sightings','/v2/search':'search','/v2/buy-plans':'buy-plans','/v2/vendors':'vendors','/v2/customers':'customers','/v2/proactive':'proactive','/v2/my-vendors':'my-vendors','/v2/quotes':'quotes','/v2/prospecting':'prospecting','/v2/settings':'settings'};
+      for (const [prefix, id] of Object.entries(map)) { if (url.startsWith(prefix)) return id; }
+      return this.activeNav;
+    }
+  }"
+  @htmx:pushed-into-history.window="activeNav = urlToNav($event.detail.path || location.pathname)"
   class="fixed inset-y-0 left-0 z-30 flex flex-col bg-brand-700 transition-all duration-200 ease-in-out">
 
   {# Logo area #}
@@ -45,8 +54,9 @@
         <li>
           <a href="/v2/requisitions"
              hx-boost="false"
-             class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors
-                    {{ 'bg-brand-900 text-white' if current_view == 'requisitions' else 'text-brand-200 hover:bg-brand-800 hover:text-white' }}">
+             @click="activeNav = 'requisitions'"
+             :class="activeNav === 'requisitions' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
+             class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none"
                  viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
                  stroke-linecap="round" stroke-linejoin="round">
@@ -70,8 +80,9 @@
              hx-target="#main-content"
              hx-push-url="{{ href }}"
              preload="mouseover"
-             class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors
-                    {{ 'bg-brand-900 text-white' if current_view == id else 'text-brand-200 hover:bg-brand-800 hover:text-white' }}">
+             @click="activeNav = '{{ id }}'"
+             :class="activeNav === '{{ id }}' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
+             class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none"
                  viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
                  stroke-linecap="round" stroke-linejoin="round">
@@ -108,8 +119,9 @@
              hx-target="#main-content"
              hx-push-url="{{ href }}"
              preload="mouseover"
-             class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors
-                    {{ 'bg-brand-900 text-white' if current_view == id else 'text-brand-200 hover:bg-brand-800 hover:text-white' }}">
+             @click="activeNav = '{{ id }}'"
+             :class="activeNav === '{{ id }}' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
+             class="group flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors">
             <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none"
                  viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
                  stroke-linecap="round" stroke-linejoin="round">
@@ -130,8 +142,9 @@
        hx-target="#main-content"
        hx-push-url="/v2/settings"
        preload="mouseover"
-       class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors
-              {{ 'bg-brand-900 text-white' if current_view == 'settings' else 'text-brand-200 hover:bg-brand-800 hover:text-white' }}">
+       @click="activeNav = 'settings'"
+       :class="activeNav === 'settings' ? 'bg-brand-900 text-white' : 'text-brand-200 hover:bg-brand-800 hover:text-white'"
+       class="flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors">
       <svg xmlns="http://www.w3.org/2000/svg" class="h-5 w-5 flex-shrink-0" fill="none"
            viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"
            stroke-linecap="round" stroke-linejoin="round">

@@ -7,7 +7,16 @@
 #}
 <nav class="fixed bottom-0 left-0 right-0 z-40 bg-white border-t border-brand-200"
      style="padding-bottom: env(safe-area-inset-bottom, 0px);"
-     x-data="{ moreOpen: false }"
+     x-data="{
+       moreOpen: false,
+       activeNav: '{{ current_view }}',
+       urlToNav(url) {
+         const map = {'/v2/requisitions':'requisitions','/v2/sightings':'sightings','/v2/search':'search','/v2/buy-plans':'buy-plans','/v2/vendors':'vendors','/v2/customers':'customers','/v2/proactive':'proactive','/v2/my-vendors':'my-vendors','/v2/quotes':'quotes','/v2/prospecting':'prospecting','/v2/settings':'settings'};
+         for (const [prefix, id] of Object.entries(map)) { if (url.startsWith(prefix)) return id; }
+         return this.activeNav;
+       }
+     }"
+     @htmx:pushed-into-history.window="activeNav = urlToNav($event.detail.path || location.pathname)"
      @click.outside="moreOpen = false"
      @keydown.escape.window="moreOpen = false"
      aria-label="Main navigation">
@@ -39,40 +48,36 @@
        hx-get="{{ partial }}"
        hx-target="#main-content"
        hx-push-url="{{ href }}"
-       class="relative flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150 w-[62px] min-w-0
-              {{ 'text-brand-700' if current_view == id else 'text-gray-500 hover:text-gray-600' }}">
-      {% if current_view == id %}
-      <span class="absolute top-0 inset-x-[8px] h-[3px] bg-brand-600 rounded-b-sm"></span>
-      {% endif %}
+       @click="activeNav = '{{ id }}'"
+       :class="activeNav === '{{ id }}' ? 'text-brand-700' : 'text-gray-500 hover:text-gray-600'"
+       class="relative flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150 w-[62px] min-w-0">
+      <span x-show="activeNav === '{{ id }}'" x-cloak class="absolute top-0 inset-x-[8px] h-[3px] bg-brand-600 rounded-b-sm"></span>
       <svg xmlns="http://www.w3.org/2000/svg"
            class="h-[17px] w-[17px]" fill="none"
            viewBox="0 0 24 24" stroke="currentColor"
-           stroke-width="{{ '2.25' if current_view == id else '1.75' }}"
+           :stroke-width="activeNav === '{{ id }}' ? '2.25' : '1.75'"
            stroke-linecap="round" stroke-linejoin="round">
         <path d="{{ icon_path }}"/>
       </svg>
-      <span class="mt-px leading-none
-                    {{ 'text-[9px] font-semibold text-brand-800 tracking-tight' if current_view == id else 'text-[8px] font-semibold text-gray-500 tracking-normal' }}">{{ label }}</span>
+      <span :class="activeNav === '{{ id }}' ? 'text-[9px] font-semibold text-brand-800 tracking-tight' : 'text-[8px] font-semibold text-gray-500 tracking-normal'"
+            class="mt-px leading-none">{{ label }}</span>
     </a>
     {% endfor %}
 
     {# More button — vertical dots #}
     <div class="relative flex items-stretch w-[62px] min-w-0">
       <button @click="moreOpen = !moreOpen"
-              class="flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150 w-[62px]
-                     {{ 'text-brand-700' if current_view == 'settings' else 'text-gray-500 hover:text-gray-600' }}"
-              :class="moreOpen && '!text-brand-700'"
+              :class="(activeNav === 'settings' || moreOpen) ? 'text-brand-700' : 'text-gray-500 hover:text-gray-600'"
+              class="flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150 w-[62px]"
               aria-label="More options">
-        {% if current_view == 'settings' %}
-        <span class="absolute top-0 inset-x-[8px] h-[3px] bg-brand-600 rounded-b-sm"></span>
-        {% endif %}
+        <span x-show="activeNav === 'settings'" x-cloak class="absolute top-0 inset-x-[8px] h-[3px] bg-brand-600 rounded-b-sm"></span>
         <svg xmlns="http://www.w3.org/2000/svg" class="h-[17px] w-[17px]" viewBox="0 0 24 24" fill="currentColor">
           <circle cx="12" cy="5" r="2"/>
           <circle cx="12" cy="12" r="2"/>
           <circle cx="12" cy="19" r="2"/>
         </svg>
-        <span class="mt-px text-[8px] font-semibold leading-none
-                      {{ 'text-brand-800 tracking-tight' if current_view == 'settings' else 'text-gray-500 tracking-normal' }}">More</span>
+        <span :class="activeNav === 'settings' ? 'text-brand-800 tracking-tight' : 'text-gray-500 tracking-normal'"
+              class="mt-px text-[8px] font-semibold leading-none">More</span>
       </button>
 
       {# More menu #}
@@ -96,9 +101,9 @@
            hx-get="/v2/partials/settings"
            hx-target="#main-content"
            hx-push-url="/v2/settings"
-           @click="moreOpen = false"
-           class="flex items-center gap-2 px-3.5 py-2 text-[13px] font-medium transition-colors
-                  {{ 'text-brand-700 bg-brand-50' if current_view == 'settings' else 'text-gray-700 hover:bg-brand-50/50' }}">
+           @click="moreOpen = false; activeNav = 'settings'"
+           :class="activeNav === 'settings' ? 'text-brand-700 bg-brand-50' : 'text-gray-700 hover:bg-brand-50/50'"
+           class="flex items-center gap-2 px-3.5 py-2 text-[13px] font-medium transition-colors">
           <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 flex-shrink-0 text-brand-400" fill="none"
                viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.75" stroke-linecap="round" stroke-linejoin="round">
             <path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>
