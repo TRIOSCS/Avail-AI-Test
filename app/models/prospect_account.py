@@ -40,7 +40,7 @@ class ProspectAccount(Base):
 
     # Discovery tracking
     discovery_source = Column(String(50), nullable=False)
-    discovery_batch_id = Column(Integer, ForeignKey("discovery_batches.id"))
+    discovery_batch_id = Column(Integer, ForeignKey("discovery_batches.id", ondelete="SET NULL"))
 
     # Status lifecycle
     status = Column(String(20), default="suggested")
@@ -50,14 +50,14 @@ class ProspectAccount(Base):
     historical_context = Column(JSONB, default=dict)
 
     # Claim / dismiss
-    claimed_by = Column(Integer, ForeignKey("users.id"))
+    claimed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     claimed_at = Column(DateTime)
-    dismissed_by = Column(Integer, ForeignKey("users.id"))
+    dismissed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     dismissed_at = Column(DateTime)
     dismiss_reason = Column(String(255))
 
     # Link to Company (set for SF imports, created on claim for discoveries)
-    company_id = Column(Integer, ForeignKey("companies.id"))
+    company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
 
     # Enrichment data
     contacts_preview = Column(JSONB, default=list)

@@ -12,7 +12,7 @@ class ErrorReport(Base):
     __tablename__ = "error_reports"
 
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     title = Column(String(255), nullable=False)
     description = Column(Text)
     screenshot_b64 = Column(Text)
@@ -32,7 +32,7 @@ class ErrorReport(Base):
     status = Column(String(20), default="open", nullable=False)
     admin_notes = Column(Text)
     resolved_at = Column(DateTime)
-    resolved_by_id = Column(Integer, ForeignKey("users.id"))
+    resolved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 

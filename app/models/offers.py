@@ -177,8 +177,8 @@ class Contact(Base):
 class VendorResponse(Base):
     __tablename__ = "vendor_responses"
     id = Column(Integer, primary_key=True)
-    contact_id = Column(Integer, ForeignKey("contacts.id"), nullable=True)
-    requisition_id = Column(Integer, ForeignKey("requisitions.id"), nullable=True)
+    contact_id = Column(Integer, ForeignKey("contacts.id", ondelete="SET NULL"), nullable=True)
+    requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"), nullable=True)
     vendor_name = Column(String(255))
     vendor_email = Column(String(255))
     subject = Column(String(500))

@@ -6,7 +6,7 @@ Depends on: models/base.py
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Index, Integer, String, Text
+from sqlalchemy import Column, DateTime, Index, Integer, String, Text, func
 
 from .base import Base
 
@@ -19,5 +19,5 @@ class RootCauseGroup(Base):
     title = Column(String(200), nullable=False)
     suggested_fix = Column(Text)
     status = Column(String(30), default="open", nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    updated_at = Column(DateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())

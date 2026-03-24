@@ -7,7 +7,6 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
-    Float,
     ForeignKey,
     Index,
     Integer,
@@ -128,8 +127,8 @@ class ProactiveMatch(Base):
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="CASCADE"), nullable=False)
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True)
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"), nullable=True)
-    customer_site_id = Column(Integer, ForeignKey("customer_sites.id"), nullable=False)
-    salesperson_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"), nullable=True)
+    salesperson_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     mpn = Column(String(255), nullable=False)
     status = Column(String(20), default=ProactiveMatchStatus.NEW)  # new | sent | dismissed | converted
 
@@ -137,7 +136,7 @@ class ProactiveMatch(Base):
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
     match_score = Column(Integer, default=0)  # 0-100 composite score
-    margin_pct = Column(Float)  # Potential margin %
+    margin_pct = Column(Numeric(5, 2))  # Potential margin %
     customer_purchase_count = Column(Integer, default=0)
     customer_last_price = Column(Numeric(12, 4))
     customer_last_purchased_at = Column(DateTime)
@@ -182,8 +181,8 @@ class ProactiveOffer(Base):
     graph_message_id = Column(String(500))
     status = Column(String(20), default="sent")
     sent_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    converted_requisition_id = Column(Integer, ForeignKey("requisitions.id"))
-    converted_quote_id = Column(Integer, ForeignKey("quotes.id"))
+    converted_requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"))
+    converted_quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="SET NULL"))
     converted_at = Column(DateTime)
     total_sell = Column(Numeric(12, 2))
     total_cost = Column(Numeric(12, 2))
@@ -223,7 +222,7 @@ class ProactiveDoNotOffer(Base):
     id = Column(Integer, primary_key=True)
     mpn = Column(String(255), nullable=False)
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
-    created_by_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     reason = Column(String(255))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -240,7 +239,7 @@ class ChangeLog(Base):
     id = Column(Integer, primary_key=True)
     entity_type = Column(String(50), nullable=False)  # offer, requirement, requisition
     entity_id = Column(Integer, nullable=False)
-    user_id = Column(Integer, ForeignKey("users.id"))
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     field_name = Column(String(100), nullable=False)
     old_value = Column(Text)
     new_value = Column(Text)
@@ -259,7 +258,7 @@ class ActivityLog(Base):
 
     __tablename__ = "activity_log"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     activity_type = Column(String(20), nullable=False)
     channel = Column(String(20), nullable=False)
 
@@ -273,7 +272,7 @@ class ActivityLog(Base):
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"))
     site_contact_id = Column(Integer, ForeignKey("site_contacts.id", ondelete="SET NULL"))
 
-    buy_plan_id = Column(Integer, ForeignKey("buy_plans_v3.id"), nullable=True)
+    buy_plan_id = Column(Integer, ForeignKey("buy_plans_v3.id", ondelete="SET NULL"), nullable=True)
 
     # Contact snapshot
     contact_email = Column(String(255))

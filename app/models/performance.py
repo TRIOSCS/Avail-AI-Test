@@ -99,9 +99,9 @@ class StockListHash(Base):
 
     __tablename__ = "stock_list_hashes"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     content_hash = Column(String(64), nullable=False)
-    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id"))
+    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"))
     file_name = Column(String(500))
     row_count = Column(Integer)
     first_seen_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))

@@ -41,7 +41,7 @@ class Requisition(Base):
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"))
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
     status = Column(String(50), default="active")
-    cloned_from_id = Column(Integer, ForeignKey("requisitions.id"))
+    cloned_from_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"))
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     deadline = Column(String(50))  # ISO date or "ASAP"

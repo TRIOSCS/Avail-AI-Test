@@ -25,6 +25,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    func,
 )
 from sqlalchemy.orm import relationship
 
@@ -44,8 +45,8 @@ class ExcessList(Base):
     source_filename = Column(String(255), nullable=True)
     notes = Column(Text, nullable=True)
     total_line_items = Column(Integer, default=0)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    updated_at = Column(DateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
 
     company = relationship("Company", foreign_keys=[company_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
@@ -77,8 +78,8 @@ class ExcessLineItem(Base):
     demand_match_count = Column(Integer, default=0)
     status = Column(String(20), default="available")  # available, bidding, awarded, withdrawn
     notes = Column(Text, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    updated_at = Column(DateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
 
     excess_list = relationship("ExcessList", back_populates="line_items")
     bids = relationship("Bid", back_populates="excess_line_item", cascade="all, delete-orphan")
@@ -112,7 +113,7 @@ class BidSolicitation(Base):
     )  # auto-created bid
     status = Column(String(20), default="pending")  # pending, sent, responded, expired, failed
     sent_at = Column(DateTime, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
 
     excess_line_item = relationship("ExcessLineItem", back_populates="solicitations")
     sent_by_user = relationship("User", foreign_keys=[sent_by])
@@ -142,8 +143,8 @@ class Bid(Base):
     source = Column(String(20), default="manual")  # manual, email_parsed, phone
     notes = Column(Text, nullable=True)
     created_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    updated_at = Column(DateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
 
     excess_line_item = relationship("ExcessLineItem", back_populates="bids")
     bidder_company = relationship("Company", foreign_keys=[bidder_company_id])

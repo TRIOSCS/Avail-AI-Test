@@ -97,17 +97,17 @@ class BuyPlan(Base):
 
     # ── Approval
     auto_approved = Column(Boolean, default=False)
-    approved_by_id = Column(Integer, ForeignKey("users.id"))
+    approved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     approved_at = Column(DateTime)
     approval_notes = Column(Text)
 
     # ── SO verification
-    so_verified_by_id = Column(Integer, ForeignKey("users.id"))
+    so_verified_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     so_verified_at = Column(DateTime)
     so_rejection_note = Column(Text)
 
     # ── Submission
-    submitted_by_id = Column(Integer, ForeignKey("users.id"))
+    submitted_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     submitted_at = Column(DateTime)
     salesperson_notes = Column(Text)
 
@@ -117,9 +117,9 @@ class BuyPlan(Base):
 
     # ── Cancellation / halt
     cancelled_at = Column(DateTime)
-    cancelled_by_id = Column(Integer, ForeignKey("users.id"))
+    cancelled_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     cancellation_reason = Column(Text)
-    halted_by_id = Column(Integer, ForeignKey("users.id"))
+    halted_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     halted_at = Column(DateTime)
 
     # ── Stock sale flag
@@ -194,7 +194,7 @@ class BuyPlanLine(Base):
     ai_score = Column(Float)  # 0-100 weighted score for this offer
 
     # ── Buyer assignment
-    buyer_id = Column(Integer, ForeignKey("users.id"))
+    buyer_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     assignment_reason = Column(String(100))  # vendor_ownership, commodity, geo, workload
 
     # ── Status
@@ -206,7 +206,7 @@ class BuyPlanLine(Base):
     po_confirmed_at = Column(DateTime)
 
     # ── PO verification
-    po_verified_by_id = Column(Integer, ForeignKey("users.id"))
+    po_verified_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     po_verified_at = Column(DateTime)
     po_rejection_note = Column(Text)
 

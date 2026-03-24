@@ -32,7 +32,7 @@ class EnrichmentJob(Base):
     enriched_items = Column(Integer, default=0)
     error_count = Column(Integer, default=0)
     scope = Column(JSONB, default=dict)
-    started_by_id = Column(Integer, ForeignKey("users.id"))
+    started_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     started_at = Column(DateTime)
     completed_at = Column(DateTime)
     error_log = Column(JSONB, default=list)
@@ -43,6 +43,7 @@ class EnrichmentJob(Base):
     __table_args__ = (
         Index("ix_ej_status", "status"),
         Index("ix_ej_type_status", "job_type", "status"),
+        Index("ix_ej_started_by", "started_by_id"),
     )
 
 
@@ -68,7 +69,7 @@ class EnrichmentQueue(Base):
     status = Column(String(20), default="pending")
     batch_job_id = Column(Integer, ForeignKey("enrichment_jobs.id", ondelete="SET NULL"))
 
-    reviewed_by_id = Column(Integer, ForeignKey("users.id"))
+    reviewed_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     reviewed_at = Column(DateTime)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -85,6 +86,7 @@ class EnrichmentQueue(Base):
         Index("ix_eq_batch", "batch_job_id"),
         Index("ix_eq_status_created", "status", "created_at"),
         Index("ix_eq_status_source", "status", "source"),
+        Index("ix_eq_reviewed_by", "reviewed_by_id"),
     )
 
 
@@ -140,7 +142,7 @@ class ProspectContact(Base):
     verified_at = Column(DateTime)
 
     is_saved = Column(Boolean, default=False)
-    saved_by_id = Column(Integer, ForeignKey("users.id"))
+    saved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     notes = Column(Text)
     promoted_to_type = Column(String(20))
     promoted_to_id = Column(Integer)
@@ -156,6 +158,7 @@ class ProspectContact(Base):
         Index("ix_prospect_contacts_site", "customer_site_id"),
         Index("ix_prospect_contacts_vendor", "vendor_card_id"),
         Index("ix_prospect_contacts_email", "email"),
+        Index("ix_prospect_contacts_saved_by", "saved_by_id"),
     )
 
 

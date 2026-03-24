@@ -66,7 +66,7 @@ class GraphSubscription(Base):
 
     __tablename__ = "graph_subscriptions"
     id = Column(Integer, primary_key=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
     subscription_id = Column(String(255), nullable=False, unique=True)
     resource = Column(String(255), nullable=False)
     change_type = Column(String(100), nullable=False)

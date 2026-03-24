@@ -20,6 +20,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    func,
 )
 from sqlalchemy.orm import relationship
 
@@ -59,8 +60,8 @@ class TroubleTicket(Base):
     cost_usd = Column(Float)
     resolution_notes = Column(Text)
     parent_ticket_id = Column(Integer, ForeignKey("trouble_tickets.id", ondelete="SET NULL"))
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, onupdate=lambda: datetime.now(timezone.utc))
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    updated_at = Column(DateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
     diagnosed_at = Column(DateTime)
     resolved_at = Column(DateTime)
 
