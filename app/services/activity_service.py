@@ -667,6 +667,7 @@ def log_rfq_activity(
     description: str,
     metadata: dict | None = None,
     user_id: int | None = None,
+    requirement_id: int | None = None,
 ) -> ActivityLog:
     """Log an activity entry on the RFQ activity timeline."""
     record = ActivityLog(
@@ -674,6 +675,7 @@ def log_rfq_activity(
         activity_type=activity_type,
         channel="system",
         requisition_id=rfq_id,
+        requirement_id=requirement_id,
         notes=description,
         details=metadata,
     )
