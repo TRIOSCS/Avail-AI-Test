@@ -9,7 +9,9 @@
 **Tech Stack:** FastAPI, SQLAlchemy 2.0, PostgreSQL 16, Jinja2, Alpine.js, Tailwind CSS, HTMX
 
 **Spec:** `docs/superpowers/specs/2026-03-25-sightings-page-redesign.md`
-**Depends on:** Plan A (Foundation + Performance) must be completed first.
+**Depends on:** Plan A (Foundation + Performance) must be completed first. Specifically, Plan A Task 5 must have registered `$store.sightingSelection` in `htmx_app.js` and Plan A Task 3 must have run the Alembic migrations adding `newest_sighting_at`, `best_lead_time_days`, `min_moq`, `has_contact_info`, and `vendor_card_id` to `VendorSightingSummary`.
+
+**Note on task atomicity:** Some backend tasks (Tasks 1, 3, 7) add context vars that are not rendered until later template tasks (Tasks 2, 5, 8). Tests for rendered HTML should be deferred to the template task commits. Backend task tests should verify context dict computation only (not HTML output).
 
 ---
 
@@ -1145,14 +1147,13 @@ In `app/routers/sightings.py`, in `sightings_detail()`, after the vendor intelli
             )
             .all()
         )
+        # Build id-keyed map for contact→card resolution
+        card_id_map = {c.id: c for c in cards} if cards else {}
         for c in contacts_with_ooo:
             # Map by normalized vendor name for template lookup
-            card = card_map.get(c.vendor_card_id) if hasattr(c, 'vendor_card_id') else None
-            if card is None:
-                # Fetch the card's normalized_name via the relationship
-                vc = db.get(VendorCard, c.vendor_card_id)
-                if vc:
-                    ooo_map[vc.normalized_name] = c
+            vc = card_id_map.get(c.vendor_card_id)
+            if vc:
+                ooo_map[vc.normalized_name] = c
             else:
                 ooo_map[card.normalized_name] = c
 ```
@@ -1647,24 +1648,44 @@ Replace the entire contents of `app/templates/htmx/partials/sightings/detail.htm
     </button>
   </div>
   {% else %}
+  <div x-data="{ showAll: false }">
   <table class="compact-table w-full">
     <tbody>
       {% for s in summaries %}
       {% set vs = vendor_statuses.get(s.vendor_name, 'sighting') %}
+      {# Show first 5 always, rest gated by showAll #}
+      {% if loop.index <= 5 %}
       {% include "htmx/partials/sightings/_vendor_row.html" %}
+      {% endif %}
       {% endfor %}
+      {# Remaining vendors, hidden by default #}
+      {% if summaries|length > 5 %}
+      <template x-if="showAll">
+        <tbody>
+        {% for s in summaries %}
+        {% if loop.index > 5 %}
+        {% set vs = vendor_statuses.get(s.vendor_name, 'sighting') %}
+        {% include "htmx/partials/sightings/_vendor_row.html" %}
+        {% endif %}
+        {% endfor %}
+        </tbody>
+      </template>
+      {% endif %}
     </tbody>
   </table>
 
-  {# Collapse at 5 vendors #}
+  {# Collapse toggle at 5 vendors #}
   {% if summaries|length > 5 %}
-  <div x-data="{ showAll: false }" class="mt-1">
     <button x-show="!showAll" @click="showAll = true"
-            class="text-[11px] text-brand-500 hover:text-brand-700">
+            class="mt-1 text-[11px] text-brand-500 hover:text-brand-700" x-collapse>
       Show all {{ summaries|length }} vendors
     </button>
-  </div>
+    <button x-show="showAll" @click="showAll = false"
+            class="mt-1 text-[11px] text-gray-400 hover:text-gray-600">
+      Show top 5 only
+    </button>
   {% endif %}
+  </div>
   {% endif %}
 
   {# ── Pending Offers (AI-parsed, need approval) ──────────── #}
