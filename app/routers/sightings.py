@@ -143,6 +143,7 @@ async def sightings_list(
     )
 
     top_vendors = {}
+    coverage_map = {}
     # Stale threshold uses naive datetime for SQLite compat
     stale_threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=settings.sighting_stale_days)
     stale_req_ids: set[int] = set()
@@ -180,6 +181,101 @@ async def sightings_list(
             elif last.replace(tzinfo=None) < stale_threshold:
                 stale_req_ids.add(rid)
 
+        # Fulfillment coverage per requirement (Phase 2)
+        coverage_rows = (
+            db.query(
+                VendorSightingSummary.requirement_id,
+                sqlfunc.sum(VendorSightingSummary.estimated_qty).label("total_qty"),
+            )
+            .filter(VendorSightingSummary.requirement_id.in_(req_ids))
+            .group_by(VendorSightingSummary.requirement_id)
+            .all()
+        )
+        coverage_map = {c.requirement_id: c.total_qty or 0 for c in coverage_rows}
+
+    # ── Dashboard Strip Counters (Phase 2) ──────────────────────────
+    from datetime import date
+
+    deadline_48h = date.today() + timedelta(days=2)
+
+    # Active requirement IDs for dashboard (not just current page)
+    active_req_select = (
+        db.query(Requirement.id)
+        .join(Requisition, Requirement.requisition_id == Requisition.id)
+        .filter(Requisition.status == RequisitionStatus.ACTIVE)
+    )
+
+    # Urgent: priority >= 70 OR need_by_date within 48h
+    urgent_count = (
+        db.query(sqlfunc.count(Requirement.id))
+        .filter(
+            Requirement.id.in_(active_req_select.subquery().select()),
+            (Requirement.priority_score >= 70) | (Requirement.need_by_date <= deadline_48h),
+        )
+        .scalar()
+    ) or 0
+
+    # Stale: no ActivityLog within sighting_stale_days
+    stale_select = (
+        db.query(ActivityLog.requirement_id)
+        .filter(ActivityLog.requirement_id.isnot(None))
+        .group_by(ActivityLog.requirement_id)
+        .having(sqlfunc.max(ActivityLog.created_at) >= stale_threshold)
+    )
+    stale_count = (
+        db.query(sqlfunc.count(Requirement.id))
+        .filter(
+            Requirement.id.in_(active_req_select.subquery().select()),
+            ~Requirement.id.in_(stale_select.subquery().select()),
+        )
+        .scalar()
+    ) or 0
+
+    # Pending: has at least one offer with status pending_review
+    pending_count = (
+        db.query(sqlfunc.count(sqlfunc.distinct(Offer.requirement_id)))
+        .filter(
+            Offer.requirement_id.in_(active_req_select.subquery().select()),
+            Offer.status == OfferStatus.PENDING_REVIEW,
+        )
+        .scalar()
+    ) or 0
+
+    # Unassigned: assigned_buyer_id IS NULL
+    unassigned_count = (
+        db.query(sqlfunc.count(Requirement.id))
+        .filter(
+            Requirement.id.in_(active_req_select.subquery().select()),
+            Requirement.assigned_buyer_id.is_(None),
+        )
+        .scalar()
+    ) or 0
+
+    dashboard_counters = {
+        "urgent": urgent_count,
+        "stale": stale_count,
+        "pending": pending_count,
+        "unassigned": unassigned_count,
+    }
+
+    # ── Heatmap Row Set (Phase 2) ─────────────────────────────────
+    # Rose tint for: near deadline (48h), high-priority stale, critical/hot urgency
+    heatmap_req_ids: set[int] = set()
+    if requirements:
+        for r in requirements:
+            # Near deadline
+            if r.need_by_date and r.need_by_date <= deadline_48h:
+                heatmap_req_ids.add(r.id)
+                continue
+            # Stale AND medium+ priority
+            if r.id in stale_req_ids and (r.priority_score or 0) >= 40:
+                heatmap_req_ids.add(r.id)
+                continue
+            # Critical/hot urgency (from requisition)
+            urgency = getattr(r.requisition, "urgency", None) or ""
+            if urgency in ("critical", "hot"):
+                heatmap_req_ids.add(r.id)
+
     groups = None
     if filters.group_by in ("brand", "manufacturer"):
         groups: dict[str, list] = {}
@@ -204,6 +300,9 @@ async def sightings_list(
         "stat_counts": stat_counts,
         "top_vendors": top_vendors,
         "stale_req_ids": stale_req_ids,
+        "coverage_map": coverage_map,
+        "dashboard_counters": dashboard_counters,
+        "heatmap_req_ids": heatmap_req_ids,
         "groups": groups,
         "user": user,
     }
@@ -240,7 +339,132 @@ async def sightings_detail(
         db.query(Offer).filter(Offer.requirement_id == requirement_id, Offer.status == OfferStatus.PENDING_REVIEW).all()
     )
 
+    # ── Vendor Intelligence (Phase 3) ─────────────────────────────
+    from ..scoring import explain_lead
+
+    normalized_names = [normalize_vendor_name(s.vendor_name) for s in summaries]
+
+    # Single batch query for VendorCards — piggybacks phone + intelligence
+    cards = (
+        (db.query(VendorCard).filter(VendorCard.normalized_name.in_(normalized_names)).all())
+        if normalized_names
+        else []
+    )
+    card_map = {c.normalized_name: c for c in cards}
+
+    # Build vendor_phones (backward compat) + vendor_intel map
     vendor_phones = {s.vendor_name: s.vendor_phone for s in summaries if s.vendor_phone}
+    vendor_intel: dict[str, dict] = {}
+
+    for s in summaries:
+        norm = normalize_vendor_name(s.vendor_name)
+        card = card_map.get(norm)
+
+        # Phone fallback from card
+        if s.vendor_name not in vendor_phones and card and card.phones:
+            phone = card.phones[0] if isinstance(card.phones, list) else card.phones
+            if phone:
+                vendor_phones[s.vendor_name] = phone
+
+        # Intelligence fields
+        age_days = None
+        if s.newest_sighting_at:
+            age_days = (datetime.now(timezone.utc).replace(tzinfo=None) - s.newest_sighting_at).days
+
+        lead_explanation = explain_lead(
+            vendor_name=s.vendor_name,
+            is_authorized=False,
+            vendor_score=card.vendor_score if card else None,
+            unit_price=s.best_price,
+            median_price=None,
+            qty_available=s.estimated_qty,
+            target_qty=requirement.target_qty,
+            has_contact=s.has_contact_info or bool(vendor_phones.get(s.vendor_name)),
+            evidence_tier=s.tier,
+            source_type=(s.source_types[0] if s.source_types and isinstance(s.source_types, list) else None),
+            age_days=age_days,
+        )
+
+        vendor_intel[s.vendor_name] = {
+            "response_rate": card.response_rate if card else None,
+            "ghost_rate": card.ghost_rate if card else None,
+            "vendor_score": card.vendor_score if card else None,
+            "engagement_score": card.engagement_score if card else None,
+            "avg_response_hours": card.avg_response_hours if card else None,
+            "explain_lead": lead_explanation,
+            "listing_count": s.listing_count,
+            "source_types": s.source_types or [],
+            "tier": s.tier,
+            "best_lead_time_days": s.best_lead_time_days,
+            "min_moq": s.min_moq,
+            "newest_sighting_at": s.newest_sighting_at,
+            "age_days": age_days,
+        }
+
+    # ── OOO Contact Detection (Phase 3) ──────────────────────────
+    ooo_map: dict[str, VendorContact] = {}
+    if normalized_names:
+        contacts_with_ooo = (
+            db.query(VendorContact)
+            .join(VendorCard, VendorContact.vendor_card_id == VendorCard.id)
+            .filter(
+                VendorCard.normalized_name.in_(normalized_names),
+                VendorContact.is_ooo.is_(True),
+            )
+            .all()
+        )
+        # Build id-keyed map for contact->card resolution
+        card_id_map = {c.id: c for c in cards} if cards else {}
+        for c in contacts_with_ooo:
+            # Map by normalized vendor name for template lookup
+            vc = card_id_map.get(c.vendor_card_id)
+            if vc:
+                ooo_map[vc.normalized_name] = c
+
+    # ── Suggested Next Action (Phase 3) ──────────────────────────
+    status = requirement.sourcing_status or "open"
+    vendor_count = len(summaries)
+    pending_count_detail = len(pending_offers)
+
+    if status == "open" and vendor_count > 0:
+        suggested_action = f"{vendor_count} vendor{'s' if vendor_count != 1 else ''} available — send RFQs"
+    elif status == "open" and vendor_count == 0:
+        suggested_action = "No vendors found — run search"
+    elif status == "sourcing":
+        # Check days since last RFQ activity
+        last_rfq = (
+            db.query(sqlfunc.max(ActivityLog.created_at))
+            .filter(
+                ActivityLog.requirement_id == requirement_id,
+                ActivityLog.activity_type == "rfq_sent",
+            )
+            .scalar()
+        )
+        if last_rfq:
+            days_since = (datetime.now(timezone.utc).replace(tzinfo=None) - last_rfq).days
+            if days_since > 3:
+                suggested_action = f"RFQs pending for {days_since} days — follow up"
+            else:
+                suggested_action = "RFQs sent — awaiting vendor responses"
+        else:
+            suggested_action = "Status is sourcing but no RFQs sent — send RFQs"
+    elif status == "offered" and pending_count_detail > 0:
+        suggested_action = f"{pending_count_detail} offer{'s' if pending_count_detail != 1 else ''} received — review and accept/reject"
+    elif status == "offered":
+        suggested_action = "Offers reviewed — advance to quoted when ready"
+    elif status == "quoted":
+        suggested_action = "Quote sent — awaiting customer response"
+    elif status == "won":
+        suggested_action = "Order won — proceed to fulfillment"
+    else:
+        suggested_action = None
+
+    # ── MaterialCard Enrichment (Phase 3) ─────────────────────────
+    from ..models.intelligence import MaterialCard
+
+    material_card = None
+    if requirement.material_card_id:
+        material_card = db.get(MaterialCard, requirement.material_card_id)
 
     activities = (
         db.query(ActivityLog)
@@ -262,6 +486,10 @@ async def sightings_detail(
         "vendor_statuses": vendor_statuses,
         "pending_offers": pending_offers,
         "vendor_phones": vendor_phones,
+        "vendor_intel": vendor_intel,
+        "ooo_map": ooo_map,
+        "suggested_action": suggested_action,
+        "material_card": material_card,
         "activities": activities,
         "all_buyers": all_buyers,
         "user": user,
