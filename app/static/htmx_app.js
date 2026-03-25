@@ -140,6 +140,19 @@ Alpine.store('shortlist', {
     get count() { return this.items.length; },
 });
 
+// Sightings multi-select store (reactive object, not Set)
+Alpine.store('sightingSelection', {
+    _map: {},
+    toggle(id) {
+        if (this._map[id]) { delete this._map[id]; }
+        else { this._map[id] = true; }
+    },
+    has(id) { return !!this._map[id]; },
+    clear() { this._map = {}; },
+    get count() { return Object.keys(this._map).length; },
+    get array() { return Object.keys(this._map).map(Number); },
+});
+
 // ── HTMX config ─────────────────────────────────────────────
 htmx.config.defaultSwapStyle = 'innerHTML';
 htmx.config.historyCacheSize = 10;
@@ -242,6 +255,79 @@ Alpine.data('sourcingProgress', (requirementId, totalSources) => ({
         setTimeout(function() {
             htmx.ajax('GET', '/v2/partials/sourcing/' + requirementId, '#main-content');
         }, 500);
+    }
+}));
+
+/**
+ * splitPanel — Alpine.js component for resizable split-panel layout.
+ * Left panel is a scrollable list; right panel is a detail view.
+ * User can drag the divider to resize. Position is persisted to localStorage.
+ *
+ * Called by: partials/shared/split_panel.html
+ * Depends on: Alpine.js
+ */
+Alpine.data('splitPanel', (panelId, defaultPct) => ({
+    leftWidth: parseInt(localStorage.getItem('avail_split_' + panelId) || defaultPct),
+    _resizing: false,
+    _startX: 0,
+    _startWidth: 0,
+
+    startResize(e) {
+        this._resizing = true;
+        this._startX = e.clientX;
+        this._startWidth = this.leftWidth;
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
+
+        const onMove = (ev) => {
+            if (!this._resizing) return;
+            const container = document.getElementById('split-' + panelId);
+            if (!container) return;
+            const dx = ev.clientX - this._startX;
+            const containerW = container.offsetWidth;
+            const newPct = this._startWidth + (dx / containerW) * 100;
+            this.leftWidth = Math.max(20, Math.min(70, Math.round(newPct)));
+        };
+
+        const onUp = () => {
+            this._resizing = false;
+            document.body.style.cursor = '';
+            document.body.style.userSelect = '';
+            localStorage.setItem('avail_split_' + panelId, this.leftWidth);
+            document.removeEventListener('mousemove', onMove);
+            document.removeEventListener('mouseup', onUp);
+        };
+
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+    },
+
+    startTouchResize(e) {
+        const touch = e.touches[0];
+        this._resizing = true;
+        this._startX = touch.clientX;
+        this._startWidth = this.leftWidth;
+
+        const onTouchMove = (ev) => {
+            if (!this._resizing) return;
+            const t = ev.touches[0];
+            const container = document.getElementById('split-' + panelId);
+            if (!container) return;
+            const dx = t.clientX - this._startX;
+            const containerW = container.offsetWidth;
+            const newPct = this._startWidth + (dx / containerW) * 100;
+            this.leftWidth = Math.max(20, Math.min(70, Math.round(newPct)));
+        };
+
+        const onTouchEnd = () => {
+            this._resizing = false;
+            localStorage.setItem('avail_split_' + panelId, this.leftWidth);
+            document.removeEventListener('touchmove', onTouchMove);
+            document.removeEventListener('touchend', onTouchEnd);
+        };
+
+        document.addEventListener('touchmove', onTouchMove);
+        document.addEventListener('touchend', onTouchEnd);
     }
 }));
 
