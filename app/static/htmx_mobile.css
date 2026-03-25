@@ -27,7 +27,7 @@
     .responsive-table tr {
         display: block;
         margin-bottom: 0;
-        border: 1px solid #CADDEF;
+        border: 1px solid #D8DBE2;
         border-radius: 8px;
         padding: 12px;
         background: #ffffff;
@@ -39,7 +39,7 @@
     }
 
     .responsive-table tr.clickable-row:active {
-        background: #F4F8FC;
+        background: #F8F9FA;
         transform: scale(0.99);
     }
 
@@ -55,7 +55,7 @@
     .responsive-table td::before {
         content: attr(data-label);
         font-weight: 600;
-        color: #A3C4E0;
+        color: #ADB3BF;
         font-size: 12px;
         flex-shrink: 0;
         margin-right: 8px;
@@ -152,7 +152,7 @@
         left: 0;
         right: 0;
         background: #ffffff;
-        border-top: 1px solid #CADDEF;
+        border-top: 1px solid #D8DBE2;
         z-index: 200;
         padding: 4px 0;
         padding-bottom: calc(4px + env(safe-area-inset-bottom, 0px));
@@ -171,7 +171,7 @@
         min-height: 44px;
         min-width: 44px;
         text-decoration: none;
-        color: #A3C4E0;
+        color: #ADB3BF;
         font-size: 10px;
         position: relative;
         -webkit-tap-highlight-color: transparent;
@@ -179,7 +179,7 @@
     }
 
     .mobile-nav-item.active {
-        color: #5B8FB8;
+        color: #5F6878;
     }
 
     .mobile-nav-item:active {
@@ -217,7 +217,7 @@
         bottom: 100%;
         right: 8px;
         background: #ffffff;
-        border: 1px solid #CADDEF;
+        border: 1px solid #D8DBE2;
         border-radius: 12px;
         box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.1);
         padding: 8px 0;
@@ -239,11 +239,11 @@
     }
 
     .mobile-more-item:active {
-        background: #F4F8FC;
+        background: #F8F9FA;
     }
 
     .mobile-more-item svg {
-        color: #A3C4E0;
+        color: #ADB3BF;
         flex-shrink: 0;
     }
 }
@@ -282,7 +282,7 @@
         display: block;
         width: 36px;
         height: 4px;
-        background: #CADDEF;
+        background: #D8DBE2;
         border-radius: 2px;
         margin: 0 auto 8px;
     }
@@ -301,7 +301,7 @@
         gap: 4px;
         border: none;
         background: none;
-        color: #5B8FB8;
+        color: #5F6878;
         font-size: 13px;
         font-weight: 500;
         cursor: pointer;
