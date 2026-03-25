@@ -31,6 +31,7 @@ from ..models.sourcing import Requirement, Requisition, Sighting
 from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorCard, VendorContact
 from ..schemas.sightings import SightingsListParams
+from ..services.activity_service import log_rfq_activity
 from ..services.sighting_status import compute_vendor_statuses
 from ..template_env import templates
 from ..vendor_utils import normalize_vendor_name
@@ -507,15 +508,14 @@ async def sightings_send_inquiry(
 
         for r in requirements:
             for vn in vendor_names:
-                log = ActivityLog(
-                    user_id=user.id,
+                log_rfq_activity(
+                    db=db,
+                    rfq_id=r.requisition_id,
                     activity_type="rfq_sent",
-                    channel="email",
-                    requisition_id=r.requisition_id,
+                    description=f"RFQ sent to {vn}",
+                    user_id=user.id,
                     requirement_id=r.id,
-                    notes=f"RFQ sent to {vn}",
                 )
-                db.add(log)
     except Exception:
         logger.warning("RFQ send failed", exc_info=True)
         failed_vendors = vendor_names
