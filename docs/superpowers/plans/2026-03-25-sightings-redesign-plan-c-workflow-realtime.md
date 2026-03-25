@@ -9,7 +9,9 @@
 **Tech Stack:** FastAPI, SQLAlchemy 2.0, PostgreSQL 16, Jinja2, Alpine.js, Tailwind CSS, HTMX, SSE
 
 **Spec:** `docs/superpowers/specs/2026-03-25-sightings-page-redesign.md`
-**Depends on:** Plan A (Foundation) and Plan B (Visual Triage) must be completed first.
+**Depends on:** Plan A (Foundation) and Plan B (Visual Triage) must be completed first. **Critical precondition:** Plan A Task 1 must have added `SOURCING_TRANSITIONS` under `"requirement"` in `status_machine.py`. Without it, `require_valid_transition("requirement", ...)` silently allows any transition and Tasks 4, 5, 6, 8 will not enforce valid status transitions.
+
+**Note on mock paths:** This codebase uses lazy imports inside function bodies (e.g., `from ..email_service import send_batch_rfq` inside `sightings_send_inquiry`). Mocks must target the source module (`app.email_service.send_batch_rfq`) not the importing module.
 
 ---
 
@@ -629,7 +631,7 @@ class TestAutoProgressOnRFQSend:
     def test_open_advances_to_sourcing(self, client, db_session):
         _, r, _ = _seed_data(db_session)
         assert r.sourcing_status == "open"
-        with patch("app.routers.sightings.send_batch_rfq", new_callable=AsyncMock) as mock_send:
+        with patch("app.email_service.send_batch_rfq", new_callable=AsyncMock) as mock_send:
             mock_send.return_value = [{"ok": True}]
             client.post(
                 "/v2/partials/sightings/send-inquiry",
@@ -646,7 +648,7 @@ class TestAutoProgressOnRFQSend:
         _, r, _ = _seed_data(db_session)
         r.sourcing_status = "sourcing"
         db_session.commit()
-        with patch("app.routers.sightings.send_batch_rfq", new_callable=AsyncMock) as mock_send:
+        with patch("app.email_service.send_batch_rfq", new_callable=AsyncMock) as mock_send:
             mock_send.return_value = [{"ok": True}]
             client.post(
                 "/v2/partials/sightings/send-inquiry",
@@ -664,7 +666,7 @@ class TestAutoProgressOnRFQSend:
         _, r, _ = _seed_data(db_session)
         r.sourcing_status = "offered"
         db_session.commit()
-        with patch("app.routers.sightings.send_batch_rfq", new_callable=AsyncMock) as mock_send:
+        with patch("app.email_service.send_batch_rfq", new_callable=AsyncMock) as mock_send:
             mock_send.return_value = [{"ok": True}]
             client.post(
                 "/v2/partials/sightings/send-inquiry",
@@ -681,7 +683,7 @@ class TestAutoProgressOnRFQSend:
         """Email failure must not advance status."""
         _, r, _ = _seed_data(db_session)
         assert r.sourcing_status == "open"
-        with patch("app.routers.sightings.send_batch_rfq", new_callable=AsyncMock) as mock_send:
+        with patch("app.email_service.send_batch_rfq", new_callable=AsyncMock) as mock_send:
             mock_send.side_effect = Exception("SMTP error")
             client.post(
                 "/v2/partials/sightings/send-inquiry",
@@ -697,7 +699,7 @@ class TestAutoProgressOnRFQSend:
     def test_logs_auto_progress_activity(self, client, db_session):
         from app.models.intelligence import ActivityLog
         _, r, _ = _seed_data(db_session)
-        with patch("app.routers.sightings.send_batch_rfq", new_callable=AsyncMock) as mock_send:
+        with patch("app.email_service.send_batch_rfq", new_callable=AsyncMock) as mock_send:
             mock_send.return_value = [{"ok": True}]
             client.post(
                 "/v2/partials/sightings/send-inquiry",
@@ -718,7 +720,7 @@ class TestAutoProgressOnRFQSend:
         _, r, _ = _seed_data(db_session)
         r.sourcing_status = "won"
         db_session.commit()
-        with patch("app.routers.sightings.send_batch_rfq", new_callable=AsyncMock) as mock_send:
+        with patch("app.email_service.send_batch_rfq", new_callable=AsyncMock) as mock_send:
             mock_send.return_value = [{"ok": True}]
             client.post(
                 "/v2/partials/sightings/send-inquiry",
@@ -1844,7 +1846,7 @@ class TestParallelBatchRefresh:
     def test_batch_refresh_still_works(self, client, db_session):
         """Basic regression — batch refresh returns success toast."""
         _, r, _ = _seed_data(db_session)
-        with patch("app.routers.sightings.search_requirement", new_callable=AsyncMock) as mock_search:
+        with patch("app.search_service.search_requirement", new_callable=AsyncMock) as mock_search:
             mock_search.return_value = []
             resp = client.post(
                 "/v2/partials/sightings/batch-refresh",
@@ -1869,7 +1871,7 @@ class TestParallelBatchRefresh:
                 raise Exception("Search failed")
             return []
 
-        with patch("app.routers.sightings.search_requirement", side_effect=_mock_search):
+        with patch("app.search_service.search_requirement", side_effect=_mock_search):
             resp = client.post(
                 "/v2/partials/sightings/batch-refresh",
                 data={"requirement_ids": json.dumps([r1.id, r2.id])},
@@ -2467,7 +2469,22 @@ git commit -m "feat(sightings): add responsive breakpoints with column hiding an
 
 ### Task 22: Batch Action Bar Buttons in Table
 
-**Files:** `app/templates/htmx/partials/sightings/table.html`
+**Files:**
+- Modify: `app/templates/htmx/partials/sightings/table.html`
+- Modify: `app/routers/sightings.py` — add `all_buyers` to `sightings_list()` context
+
+- [ ] **Step 0: Add `all_buyers` to the table context**
+
+In `app/routers/sightings.py`, in `sightings_list()`, add `all_buyers` to the context dict (use the cached version from Task 7 of Plan A):
+
+```python
+    all_buyers = _get_cached(
+        "all_buyers", 300,
+        lambda: db.query(User.id, User.name).filter(User.is_active.is_(True)).all()
+    )
+```
+
+Add `"all_buyers": all_buyers` to the `ctx` dict passed to the table template.
 
 - [ ] **Step 1: Add batch action bar with assign/status/notes buttons**
 
@@ -2494,7 +2511,8 @@ In `app/templates/htmx/partials/sightings/table.html`, replace or enhance the ex
          class="absolute bottom-full mb-1 left-0 bg-white border border-gray-200 rounded-lg shadow-lg p-2 min-w-48">
       <select id="batch-buyer-select" class="text-xs rounded border-gray-200 w-full mb-2">
         <option value="">Unassign</option>
-        {% for b in all_buyers %}
+        {# all_buyers loaded via hx-get when popover opens, or passed from sightings_list context #}
+        {% for b in all_buyers|default([]) %}
         <option value="{{ b.id }}">{{ b.name }}</option>
         {% endfor %}
       </select>
