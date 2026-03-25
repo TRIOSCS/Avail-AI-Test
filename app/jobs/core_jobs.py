@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
+from ..constants import RequisitionStatus
 from ..scheduler import _traced_job
 from ..utils.token_manager import _utc
 
@@ -69,11 +70,11 @@ async def _job_auto_archive():
         archived_count = (
             db.query(Requisition)
             .filter(
-                Requisition.status == "active",
+                Requisition.status == RequisitionStatus.ACTIVE,
                 Requisition.last_searched_at.isnot(None),
                 Requisition.last_searched_at < cutoff,
             )
-            .update({"status": "archived"}, synchronize_session="fetch")
+            .update({"status": RequisitionStatus.ARCHIVED}, synchronize_session="fetch")
         )
         if archived_count:
             db.commit()

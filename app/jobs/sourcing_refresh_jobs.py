@@ -9,6 +9,7 @@ from datetime import datetime, timedelta, timezone
 from apscheduler.triggers.cron import CronTrigger
 from loguru import logger
 
+from ..constants import RequisitionStatus
 from ..scheduler import _traced_job
 
 
@@ -45,7 +46,9 @@ async def _job_refresh_stale_requisitions():
             .join(Requisition, Requirement.requisition_id == Requisition.id)
             .outerjoin(Sighting, Sighting.requirement_id == Requirement.id)
             .filter(
-                Requisition.status.in_(["active", "sourcing", "offers"]),
+                Requisition.status.in_(
+                    [RequisitionStatus.ACTIVE, RequisitionStatus.SOURCING, RequisitionStatus.OFFERS]
+                ),
                 Requirement.primary_mpn.isnot(None),
             )
             .group_by(Requirement.id)

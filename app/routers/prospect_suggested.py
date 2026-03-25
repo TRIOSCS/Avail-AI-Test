@@ -332,7 +332,7 @@ async def enrich_prospect_free(
     from ..services.prospect_warm_intros import detect_warm_intros, generate_one_liner
 
     # Run free enrichment
-    result = await run_free_enrichment(prospect_id)
+    result = await run_free_enrichment(prospect_id, db=db)
 
     # Run warm intro detection (needs fresh db read after enrichment)
     db.refresh(prospect)

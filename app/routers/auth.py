@@ -163,9 +163,10 @@ async def callback(request: Request, code: str = "", state: str = "", db: Sessio
 
 
 @router.post("/auth/logout")
+@router.get("/auth/logout")
 async def logout(request: Request):
     request.session.clear()
-    return JSONResponse({"ok": True})
+    return RedirectResponse("/v2/requisitions", status_code=302)
 
 
 def _password_login_enabled() -> bool:

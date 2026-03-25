@@ -8,6 +8,7 @@ import json
 from pathlib import Path
 
 from fastapi import Request
+from loguru import logger
 
 from ...constants import UserRole
 from ...models import (
@@ -52,6 +53,7 @@ def _parse_filter_json(raw: str, *, coerce_numeric: bool = False) -> dict:
     try:
         parsed: dict = json.loads(raw) if raw else {}
     except (ValueError, TypeError):
+        logger.debug("Failed to parse filter JSON: %s", raw[:200] if raw else "(empty)")
         return {}
     if not coerce_numeric:
         return parsed

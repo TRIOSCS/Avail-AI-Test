@@ -863,7 +863,9 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
             return hits
         except Exception as e:
             elapsed_ms = int((time.time() - start) * 1000)
-            logger.warning(f"Search {pn} via {conn.__class__.__name__}: {e}")
+            logger.error(
+                "Search %s via %s failed (%dms): %s", pn, conn.__class__.__name__, elapsed_ms, e, exc_info=True
+            )
             if source_name:
                 stats_updates.append((source_name, 0, elapsed_ms, str(e)[:500]))
             return []

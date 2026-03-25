@@ -1624,6 +1624,7 @@ class TestWorkerMainLoop:
     _SAVE = "app.services.nc_worker.sighting_writer.save_nc_sightings"
     _TIME_SLEEP = "app.services.nc_worker.worker.time.sleep"
     _ASYNCIO_RUN = "app.services.nc_worker.worker.asyncio.run"
+    _RUN_AI_GATE = "app.services.nc_worker.worker.run_ai_gate"
 
     def _make_mock_db(self, db_session):
         """Create a mock SessionLocal that returns a proxy session that won't actually
@@ -1852,8 +1853,9 @@ class TestWorkerMainLoop:
                         with patch(self._BREAKER, return_value=mock_breaker):
                             with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._ASYNCIO_RUN):
-                                        worker_mod.main()
+                                    with patch(self._RUN_AI_GATE):
+                                        with patch(self._ASYNCIO_RUN):
+                                            worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
@@ -1892,9 +1894,10 @@ class TestWorkerMainLoop:
                         with patch(self._BREAKER, return_value=mock_breaker):
                             with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._ASYNCIO_RUN):
-                                        with patch(self._QUEUE_NEXT, return_value=None):
-                                            worker_mod.main()
+                                    with patch(self._RUN_AI_GATE):
+                                        with patch(self._ASYNCIO_RUN):
+                                            with patch(self._QUEUE_NEXT, return_value=None):
+                                                worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
@@ -1961,14 +1964,15 @@ class TestWorkerMainLoop:
                         with patch(self._BREAKER, return_value=mock_breaker):
                             with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._ASYNCIO_RUN):
-                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, return_value=search_result):
-                                                with patch(self._PARSE, return_value=[]):
-                                                    with patch(self._SAVE, return_value=0):
-                                                        with patch(self._QUEUE_MARK):
-                                                            with patch(self._QUEUE_COMPLETE):
-                                                                worker_mod.main()
+                                    with patch(self._RUN_AI_GATE):
+                                        with patch(self._ASYNCIO_RUN):
+                                            with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                                with patch(self._SEARCH, return_value=search_result):
+                                                    with patch(self._PARSE, return_value=[]):
+                                                        with patch(self._SAVE, return_value=0):
+                                                            with patch(self._QUEUE_MARK):
+                                                                with patch(self._QUEUE_COMPLETE):
+                                                                    worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
@@ -2020,10 +2024,11 @@ class TestWorkerMainLoop:
                         with patch(self._BREAKER, return_value=mock_breaker):
                             with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._ASYNCIO_RUN):
-                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._QUEUE_MARK) as mock_mark:
-                                                worker_mod.main()
+                                    with patch(self._RUN_AI_GATE):
+                                        with patch(self._ASYNCIO_RUN):
+                                            with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                                with patch(self._QUEUE_MARK) as mock_mark:
+                                                    worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
@@ -2083,11 +2088,12 @@ class TestWorkerMainLoop:
                         with patch(self._BREAKER, return_value=mock_breaker):
                             with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._ASYNCIO_RUN):
-                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, return_value=search_result):
-                                                with patch(self._QUEUE_MARK):
-                                                    worker_mod.main()
+                                    with patch(self._RUN_AI_GATE):
+                                        with patch(self._ASYNCIO_RUN):
+                                            with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                                with patch(self._SEARCH, return_value=search_result):
+                                                    with patch(self._QUEUE_MARK):
+                                                        worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
@@ -2140,11 +2146,12 @@ class TestWorkerMainLoop:
                         with patch(self._BREAKER, return_value=mock_breaker):
                             with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._ASYNCIO_RUN):
-                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, side_effect=Exception("crash")):
-                                                with patch(self._QUEUE_MARK) as mock_mark:
-                                                    worker_mod.main()
+                                    with patch(self._RUN_AI_GATE):
+                                        with patch(self._ASYNCIO_RUN):
+                                            with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                                with patch(self._SEARCH, side_effect=Exception("crash")):
+                                                    with patch(self._QUEUE_MARK) as mock_mark:
+                                                        worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
@@ -2183,9 +2190,10 @@ class TestWorkerMainLoop:
                         with patch(self._BREAKER, return_value=mock_breaker):
                             with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._ASYNCIO_RUN, side_effect=Exception("AI gate boom")):
-                                        with patch(self._QUEUE_NEXT, return_value=None):
-                                            worker_mod.main()
+                                    with patch(self._RUN_AI_GATE):
+                                        with patch(self._ASYNCIO_RUN, side_effect=Exception("AI gate boom")):
+                                            with patch(self._QUEUE_NEXT, return_value=None):
+                                                worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
@@ -2284,11 +2292,12 @@ class TestWorkerMainLoop:
                         with patch(self._BREAKER, return_value=mock_breaker):
                             with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._ASYNCIO_RUN):
-                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, return_value=search_result):
-                                                with patch(self._QUEUE_MARK) as mock_mark:
-                                                    worker_mod.main()
+                                    with patch(self._RUN_AI_GATE):
+                                        with patch(self._ASYNCIO_RUN):
+                                            with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                                with patch(self._SEARCH, return_value=search_result):
+                                                    with patch(self._QUEUE_MARK) as mock_mark:
+                                                        worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original_shutdown
 
@@ -2661,8 +2670,9 @@ class TestNcSearchEngineFull:
             "status_code": 200,
         }
 
-        with patch("app.services.nc_worker.search_engine.asyncio.run", return_value=browser_result):
-            result = search_part(mock_session_mgr, "XYZ123")
+        with patch("app.services.nc_worker.search_engine._search_browser"):
+            with patch("app.services.nc_worker.search_engine.asyncio.run", return_value=browser_result):
+                result = search_part(mock_session_mgr, "XYZ123")
 
         assert result["mode"] == "browser"
 
@@ -3333,6 +3343,7 @@ class TestNcWorkerGaps:
     _SAVE = "app.services.nc_worker.sighting_writer.save_nc_sightings"
     _TIME_SLEEP = "app.services.nc_worker.worker.time.sleep"
     _ASYNCIO_RUN = "app.services.nc_worker.worker.asyncio.run"
+    _RUN_AI_GATE = "app.services.nc_worker.worker.run_ai_gate"
 
     def _make_mock_db(self, db_session):
         mock_session = MagicMock(wraps=db_session)
@@ -3464,14 +3475,15 @@ class TestNcWorkerGaps:
                         with patch(self._BREAKER, return_value=mock_breaker):
                             with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._ASYNCIO_RUN):
-                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, return_value=search_result):
-                                                with patch(self._PARSE, return_value=[mock_nc_sighting]):
-                                                    with patch(self._SAVE, return_value=1):
-                                                        with patch(self._QUEUE_MARK):
-                                                            with patch(self._QUEUE_COMPLETE):
-                                                                worker_mod.main()
+                                    with patch(self._RUN_AI_GATE):
+                                        with patch(self._ASYNCIO_RUN):
+                                            with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                                with patch(self._SEARCH, return_value=search_result):
+                                                    with patch(self._PARSE, return_value=[mock_nc_sighting]):
+                                                        with patch(self._SAVE, return_value=1):
+                                                            with patch(self._QUEUE_MARK):
+                                                                with patch(self._QUEUE_COMPLETE):
+                                                                    worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original
 
@@ -3525,11 +3537,12 @@ class TestNcWorkerGaps:
                         with patch(self._BREAKER, return_value=mock_breaker):
                             with patch(self._TIME_SLEEP, side_effect=mock_sleep):
                                 with patch(self._QUEUE_RECOVER):
-                                    with patch(self._ASYNCIO_RUN):
-                                        with patch(self._QUEUE_NEXT, return_value=queue_item):
-                                            with patch(self._SEARCH, side_effect=Exception("crash")):
-                                                with patch(self._QUEUE_MARK, side_effect=mark_status_fail):
-                                                    worker_mod.main()
+                                    with patch(self._RUN_AI_GATE):
+                                        with patch(self._ASYNCIO_RUN):
+                                            with patch(self._QUEUE_NEXT, return_value=queue_item):
+                                                with patch(self._SEARCH, side_effect=Exception("crash")):
+                                                    with patch(self._QUEUE_MARK, side_effect=mark_status_fail):
+                                                        worker_mod.main()
         finally:
             worker_mod._shutdown_requested = original
 
@@ -3548,7 +3561,7 @@ class TestNcWorkerGaps:
         mock_session.is_logged_in = True
         mock_session.stop = MagicMock()
         mock_session.has_browser = True
-        mock_session.stop_browser = AsyncMock()
+        mock_session.stop_browser = MagicMock()  # Not AsyncMock — avoids unawaited coroutine
 
         try:
             worker_mod._shutdown_requested = True

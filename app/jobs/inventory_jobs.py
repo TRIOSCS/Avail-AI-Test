@@ -12,6 +12,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
+from ..constants import RequisitionStatus
 from ..scheduler import _traced_job
 from ..services.price_snapshot_service import record_price_snapshot
 
@@ -362,7 +363,9 @@ async def _download_and_import_stock_list(
                 )
                 .join(Requisition, Requirement.requisition_id == Requisition.id)
                 .filter(
-                    Requisition.status.in_(["active", "sourcing", "offers"]),
+                    Requisition.status.in_(
+                        [RequisitionStatus.ACTIVE, RequisitionStatus.SOURCING, RequisitionStatus.OFFERS]
+                    ),
                     sa_func.upper(Requirement.primary_mpn).in_(imported_mpns_upper),
                 )
                 .all()

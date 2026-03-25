@@ -227,10 +227,10 @@ def test_callback_auto_admin_promotion(mock_http, auth_client, db_session, monke
 
 
 def test_logout_clears_session(client):
-    """POST /auth/logout returns ok and clears session."""
-    resp = client.post("/auth/logout")
-    assert resp.status_code == 200
-    assert resp.json()["ok"] is True
+    """POST /auth/logout clears session and redirects to login."""
+    resp = client.post("/auth/logout", follow_redirects=False)
+    assert resp.status_code == 302
+    assert "/v2/requisitions" in resp.headers["location"]
 
 
 # ── Auth Status ──────────────────────────────────────────────────────

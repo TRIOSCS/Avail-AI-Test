@@ -237,7 +237,7 @@ class TestVendorCardHealthColumns:
 
         from app.models import VendorCard
 
-        fetched = db_session.query(VendorCard).get(test_vendor_card.id)
+        fetched = db_session.get(VendorCard, test_vendor_card.id)
         assert fetched.email_health_score == 75.5
         assert fetched.response_rate == 0.65
         assert fetched.quote_quality_rate == 0.80

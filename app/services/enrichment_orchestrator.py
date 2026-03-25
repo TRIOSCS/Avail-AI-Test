@@ -45,7 +45,7 @@ async def _safe_apollo_company(identifier: str) -> dict | None:
 
         return await enrich_company(identifier)
     except Exception as e:
-        logger.warning("Apollo company enrichment failed: {}", e)
+        logger.error("Apollo company enrichment failed: %s", e, exc_info=True)
         return None
 
 
@@ -56,7 +56,7 @@ async def _safe_clearbit(identifier: str) -> dict | None:
 
         return await enrich_company(identifier)
     except Exception as e:
-        logger.warning("Clearbit enrichment failed: {}", e)
+        logger.error("Clearbit enrichment failed: %s", e, exc_info=True)
         return None
 
 
@@ -67,7 +67,7 @@ async def _safe_explorium(identifier: str) -> dict | None:
 
         return await _explorium_find_company(identifier)
     except Exception as e:
-        logger.warning("Explorium enrichment failed: {}", e)
+        logger.error("Explorium enrichment failed: %s", e, exc_info=True)
         return None
 
 
@@ -79,7 +79,7 @@ async def _safe_apollo_contacts(identifier: str) -> dict | None:
         results = await search_contacts(company_name=identifier, limit=1)
         return results[0] if results else None
     except Exception as e:
-        logger.warning("Apollo contact enrichment failed: {}", e)
+        logger.error("Apollo contact enrichment failed: %s", e, exc_info=True)
         return None
 
 
@@ -90,7 +90,7 @@ async def _safe_lusha(identifier: str) -> dict | None:
 
         return await find_person(email=identifier)
     except Exception as e:
-        logger.warning("Lusha contact enrichment failed: {}", e)
+        logger.error("Lusha contact enrichment failed: %s", e, exc_info=True)
         return None
 
 
@@ -102,7 +102,7 @@ async def _safe_hunter(identifier: str) -> dict | None:
         results = await find_domain_emails(identifier, limit=1)
         return results[0] if results else None
     except Exception as e:
-        logger.warning("Hunter contact enrichment failed: {}", e)
+        logger.error("Hunter contact enrichment failed: %s", e, exc_info=True)
         return None
 
 
@@ -114,7 +114,7 @@ async def _safe_rocketreach(identifier: str) -> dict | None:
         results = await search_company_contacts(company=identifier, limit=1)
         return results[0] if results else None
     except Exception as e:
-        logger.warning("RocketReach contact enrichment failed: {}", e)
+        logger.error("RocketReach contact enrichment failed: %s", e, exc_info=True)
         return None
 
 

@@ -56,6 +56,9 @@ def require_user(request: Request, db: Session = Depends(get_db)) -> User:
         if agent_key and settings.agent_api_key and hmac.compare_digest(agent_key, settings.agent_api_key):
             logger.info("Agent API access: method={} path={}", request.method, request.url.path)
             user = db.query(User).filter_by(email="agent@availai.local").first()
+            if not user:
+                logger.error("Agent API key valid but agent@availai.local user not found in DB — seed it first")
+                raise HTTPException(503, "Agent user not provisioned")
     if not user:
         raise HTTPException(401, "Not authenticated")
     if not getattr(user, "is_active", True):

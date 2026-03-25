@@ -278,7 +278,7 @@ async def inline_save(
             transition(req, value, user, db)
             msg = f"Status changed to {value}"
         except ValueError as e:
-            return HTMLResponse(str(e), status_code=422)
+            return HTMLResponse(html.escape(str(e)), status_code=422)
 
     elif field == "urgency":
         if value not in ("normal", "hot", "critical"):

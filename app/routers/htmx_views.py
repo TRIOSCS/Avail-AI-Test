@@ -8187,9 +8187,9 @@ async def proactive_convert(
         raise HTTPException(404, "Proactive offer not found")
 
     try:
-        from ..services.proactive_service import convert_proactive_offer
+        from ..services.proactive_service import convert_proactive_to_win
 
-        result = convert_proactive_offer(db, offer, user)
+        result = convert_proactive_to_win(db, offer.id, user)
         return templates.TemplateResponse(
             "htmx/partials/proactive/convert_success.html",
             {"request": request, "offer": offer, "result": result},
@@ -8755,7 +8755,7 @@ async def parts_list_partial(
         "customer": Requisition.customer_name,
         "created": Requirement.created_at,
     }
-    sort_col = sort_map.get(sort, Requirement.created_at)
+    sort_col = sort_map.get(sort) or Requirement.created_at
     query = query.order_by(sort_col.desc() if dir == "desc" else sort_col.asc())
     query = query.offset(offset).limit(limit)
 
@@ -8769,7 +8769,7 @@ async def parts_list_partial(
             db.query(
                 Offer.requirement_id,
                 sqlfunc.count(Offer.id).label("cnt"),
-                sqlfunc.min(case((Offer.status == "active", Offer.unit_price), else_=None)).label("best"),
+                sqlfunc.min(case((Offer.status == OfferStatus.ACTIVE, Offer.unit_price), else_=None)).label("best"),
             )
             .filter(Offer.requirement_id.in_(req_ids))
             .group_by(Offer.requirement_id)

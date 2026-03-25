@@ -4,13 +4,20 @@
    Receives: requirement, field (str), field_label (str), field_value (str).
    Called by: GET /v2/partials/parts/{id}/edit-spec/{field}?context=tab
    Depends on: HTMX, Alpine.js, brand palette.
+
+   Escape key: restores original cell content client-side (no network request).
 #}
+
+{# Cancel helper: set flag to block @blur submit, restore original content #}
+{% set cancel_edit = "this.form._cancelled = true; this.form.parentElement.replaceChildren(this.form._origFrag.cloneNode(true))" %}
 
 <form hx-patch="/v2/partials/parts/{{ requirement.id }}/save-spec"
       hx-target="#reqd-spec-{{ field }}"
       hx-swap="innerHTML"
       data-loading-disable
-      class="inline">
+      class="inline"
+      x-init="let t = $el.querySelector('template[data-orig]'); $el._origFrag = t.content;">
+  <template data-orig><span class="text-gray-900">{{ field_value or '—' }}</span></template>
   <input type="hidden" name="field" value="{{ field }}">
   {% if field == 'condition' %}
   <select name="value"
@@ -18,8 +25,8 @@
           autofocus
           x-init="$el.focus()"
           @change="$el.form.requestSubmit()"
-          @blur="$el.form.requestSubmit()"
-          @keydown.escape.prevent="document.body.dispatchEvent(new CustomEvent('reqDetailsRefresh'))">
+          @blur="if (!$el.form._cancelled) $el.form.requestSubmit()"
+          @keydown.escape.prevent="{{ cancel_edit }}">
     <option value="">—</option>
     {% for c in condition_choices %}
     <option value="{{ c }}" {{ 'selected' if field_value == c else '' }}>{{ c }}</option>
@@ -31,8 +38,8 @@
          placeholder="{{ field_label }}"
          autofocus
          x-init="$el.focus(); $el.select()"
-         @blur="$el.form.requestSubmit()"
+         @blur="if (!$el.form._cancelled) $el.form.requestSubmit()"
          @keydown.enter.prevent="$el.form.requestSubmit()"
-         @keydown.escape.prevent="document.body.dispatchEvent(new CustomEvent('reqDetailsRefresh'))">
+         @keydown.escape.prevent="{{ cancel_edit }}">
   {% endif %}
 </form>

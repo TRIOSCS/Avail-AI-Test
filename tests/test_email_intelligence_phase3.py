@@ -300,7 +300,7 @@ class TestUserMailboxColumns:
 
         from app.models import User
 
-        fetched = db_session.query(User).get(test_user.id)
+        fetched = db_session.get(User, test_user.id)
         assert fetched.timezone == "Pacific Standard Time"
         assert fetched.working_hours_start == "09:00"
         assert fetched.working_hours_end == "18:00"

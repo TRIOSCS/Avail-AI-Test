@@ -1048,6 +1048,9 @@ class TestSaveSightings:
         )
         db_session.add(old)
         db_session.commit()
+        # Expunge old sighting to avoid identity map conflict when SQLite
+        # reassigns the same PK to the newly inserted sighting.
+        db_session.expunge(old)
 
         fresh = [
             {
@@ -1280,6 +1283,9 @@ class TestSaveSightings:
         )
         db_session.add(old)
         db_session.commit()
+        # Expunge old sighting to avoid identity map conflict when SQLite
+        # reassigns the same PK to the newly inserted sighting.
+        db_session.expunge(old)
 
         fresh = [
             {
@@ -2140,9 +2146,10 @@ class TestFetchFresh:
 # ── search_requirement ───────────────────────────────────────────────────
 
 
+@patch("app.search_service._schedule_background_enrichment", new_callable=AsyncMock)
 class TestSearchRequirement:
     @pytest.mark.asyncio
-    async def test_empty_pns_returns_empty(self, db_session):
+    async def test_empty_pns_returns_empty(self, _mock_enrich, db_session):
         """Requirement with no PNs returns empty results."""
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
@@ -2152,7 +2159,7 @@ class TestSearchRequirement:
         assert result == {"sightings": [], "source_stats": []}
 
     @pytest.mark.asyncio
-    async def test_full_orchestration(self, db_session):
+    async def test_full_orchestration(self, _mock_enrich, db_session):
         """Full search: fetch, save, upsert, history, combine and sort."""
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
@@ -2186,7 +2193,7 @@ class TestSearchRequirement:
         assert result["source_stats"] == mock_stats
 
     @pytest.mark.asyncio
-    async def test_material_card_upsert_error_handled(self, db_session):
+    async def test_material_card_upsert_error_handled(self, _mock_enrich, db_session):
         """Material card upsert failure doesn't break the search."""
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
@@ -2219,7 +2226,7 @@ class TestSearchRequirement:
         assert len(result["sightings"]) >= 1
 
     @pytest.mark.asyncio
-    async def test_results_sorted_by_score(self, db_session):
+    async def test_results_sorted_by_score(self, _mock_enrich, db_session):
         """Results are sorted descending by score."""
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
@@ -2260,7 +2267,7 @@ class TestSearchRequirement:
         assert scores == sorted(scores, reverse=True)
 
     @pytest.mark.asyncio
-    async def test_history_merged_into_results(self, db_session):
+    async def test_history_merged_into_results(self, _mock_enrich, db_session):
         """Material card vendor history is merged into results."""
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
@@ -2313,7 +2320,7 @@ class TestSearchRequirement:
         assert hist_entry["is_material_history"] is True
 
     @pytest.mark.asyncio
-    async def test_source_stats_with_error_not_in_succeeded(self, db_session):
+    async def test_source_stats_with_error_not_in_succeeded(self, _mock_enrich, db_session):
         """Source stats with errors are not in succeeded_sources set."""
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
@@ -2332,7 +2339,7 @@ class TestSearchRequirement:
         assert result is not None
 
     @pytest.mark.asyncio
-    async def test_multiple_pns_all_upserted(self, db_session):
+    async def test_multiple_pns_all_upserted(self, _mock_enrich, db_session):
         """Multiple PNs each get material card upserts."""
         user = _make_user(db_session)
         reqn = _make_requisition(db_session, user)
@@ -2375,7 +2382,7 @@ class TestSearchRequirement:
         assert card2 is not None
 
     @pytest.mark.asyncio
-    async def test_fresh_sightings_not_historical(self, db_session):
+    async def test_fresh_sightings_not_historical(self, _mock_enrich, db_session):
         """Fresh sightings are marked is_historical=False and
         is_material_history=False."""
         user = _make_user(db_session)

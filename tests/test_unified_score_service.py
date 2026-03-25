@@ -319,7 +319,7 @@ class TestComputeAllUnifiedScores:
         with patch("app.services.unified_score_service._refresh_blurbs"):
             result = compute_all_unified_scores(db_session, month)
 
-        updated = db_session.query(UnifiedScoreSnapshot).get(existing_id)
+        updated = db_session.get(UnifiedScoreSnapshot, existing_id)
         assert updated.unified_score == pytest.approx(100.0)
 
 

@@ -11,6 +11,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
+from ..constants import OfferStatus
 from ..scheduler import _traced_job
 
 
@@ -230,7 +231,7 @@ async def _job_flag_stale_offers():
         flagged = (
             db.query(Offer)
             .filter(
-                Offer.status == "active",
+                Offer.status == OfferStatus.ACTIVE,
                 Offer.is_stale.is_(False),
                 Offer.created_at < cutoff,
             )

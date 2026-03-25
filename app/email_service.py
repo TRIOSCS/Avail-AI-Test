@@ -907,7 +907,7 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
         try:
             _auto_create_offers_from_parse(vr, parsed, db)
         except Exception as e:
-            logger.warning("Auto-create offers failed for VR %s: %s", getattr(vr, "id", "?"), e)
+            logger.error("Auto-create offers failed for VR %s: %s", getattr(vr, "id", "?"), e, exc_info=True)
 
 
 async def _handle_excess_bid_reply(msg: dict, solicitation_id: int, db: Session) -> None:

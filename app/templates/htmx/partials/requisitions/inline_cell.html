@@ -5,33 +5,79 @@
    Receives: req, field (str), users (list, for owner), context ('row'|'header'|'tab').
    Called by: GET /v2/partials/requisitions/{id}/edit/{field}
    Depends on: HTMX, Alpine.js, brand palette.
+
+   Escape key: restores original cell content client-side (no network request).
+   Uses _cancelled flag on the form to prevent @blur from submitting after Escape.
 #}
 
 {% if context == "tab" %}
   {% set target_id = "this" %}
   {% set swap_style = "innerHTML" %}
-  {% set escape_action = "document.body.dispatchEvent(new CustomEvent('reqDetailsRefresh'))" %}
 {% else %}
   {% set target_id = "req-row-" ~ req.id if context == "row" else "req-header" %}
   {% set swap_style = "outerHTML" %}
-  {% set escape_action = "htmx.ajax('GET', '/v2/partials/requisitions/" ~ req.id ~ "', {target: '#main-content'})" %}
 {% endif %}
+
+{# --- Original display values for Escape restore (no network round-trip) --- #}
+{% if field == 'name' %}
+  {% set orig_display %}
+    <span class="{{ 'text-2xl font-bold text-gray-900' if context == 'header' else 'font-medium text-gray-900 truncate' if context == 'tab' else '' }}">{{ req.name or '—' }}</span>
+  {% endset %}
+{% elif field == 'status' %}
+  {# Status badge colours matching req_row.html / detail_header.html #}
+  {% set status_colors = {
+    'draft': 'bg-gray-100 text-gray-700',
+    'active': 'bg-blue-100 text-blue-700',
+    'sourcing': 'bg-purple-100 text-purple-700',
+    'offers': 'bg-yellow-100 text-yellow-700',
+    'quoting': 'bg-orange-100 text-orange-700',
+    'quoted': 'bg-amber-100 text-amber-700',
+    'won': 'bg-green-100 text-green-700',
+    'lost': 'bg-red-100 text-red-700',
+    'archived': 'bg-gray-100 text-gray-500'
+  } %}
+  {% set orig_display %}
+    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ status_colors.get(req.status, 'bg-gray-100 text-gray-700') }}">{{ (req.status or 'draft')|capitalize }}</span>
+  {% endset %}
+{% elif field == 'urgency' %}
+  {% set urgency_colors = {
+    'normal': 'bg-gray-100 text-gray-600',
+    'hot': 'bg-orange-100 text-orange-700',
+    'critical': 'bg-red-100 text-red-700'
+  } %}
+  {% set orig_display %}
+    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ urgency_colors.get(req.urgency or 'normal', 'bg-gray-100 text-gray-600') }}">{{ (req.urgency or 'normal')|capitalize }}</span>
+  {% endset %}
+{% elif field == 'deadline' %}
+  {% set orig_display %}
+    <span class="text-gray-900">{{ req.deadline or '—' }}</span>
+  {% endset %}
+{% elif field == 'owner' %}
+  {% set orig_display %}
+    <span class="text-gray-900">{{ req.creator.name if req.creator else '—' }}</span>
+  {% endset %}
+{% endif %}
+
+{# Cancel helper: set flag to block @blur submit, restore original content #}
+{% set cancel_edit = "this.form._cancelled = true; this.form.parentElement.replaceChildren(this.form._origFrag.cloneNode(true))" %}
 
 {% if field == 'name' %}
 <form hx-patch="/v2/partials/requisitions/{{ req.id }}/inline"
       hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
       data-loading-disable
-      class="inline">
+      class="inline"
+      x-init="let t = $el.querySelector('template[data-orig]'); $el._origFrag = t.content;">
+  <template data-orig>{{ orig_display }}</template>
   <input type="hidden" name="field" value="name">
   <input type="hidden" name="context" value="{{ context }}">
   <input aria-label="Requisition name" type="text" name="value" value="{{ req.name }}"
          class="w-full px-2 py-1 border border-brand-300 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500 {{ 'text-2xl font-bold' if context == 'header' else '' }}"
          autofocus
          x-init="$el.focus(); $el.select()"
-         @blur="$el.form.requestSubmit()"
+         @blur="if (!$el.form._cancelled) $el.form.requestSubmit()"
          @keydown.enter.prevent="$el.form.requestSubmit()"
-         @keydown.escape.prevent="{{ escape_action }}">
+         @keydown.escape.prevent="{{ cancel_edit }}">
 </form>
 
 {% elif field == 'status' %}
@@ -39,7 +85,9 @@
       hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
       data-loading-disable
-      class="inline">
+      class="inline"
+      x-init="let t = $el.querySelector('template[data-orig]'); $el._origFrag = t.content;">
+  <template data-orig>{{ orig_display }}</template>
   <input type="hidden" name="field" value="status">
   <input type="hidden" name="context" value="{{ context }}">
   <select name="value"
@@ -47,8 +95,8 @@
           autofocus
           x-init="$el.focus()"
           @change="$el.form.requestSubmit()"
-          @blur="$el.form.requestSubmit()"
-          @keydown.escape.prevent="{{ escape_action }}">
+          @blur="if (!$el.form._cancelled) $el.form.requestSubmit()"
+          @keydown.escape.prevent="{{ cancel_edit }}">
     {% for s in ['draft', 'active', 'sourcing', 'offers', 'quoting', 'quoted', 'won', 'lost', 'archived'] %}
     <option value="{{ s }}" {{ 'selected' if req.status == s else '' }}>{{ s|capitalize }}</option>
     {% endfor %}
@@ -60,7 +108,9 @@
       hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
       data-loading-disable
-      class="inline">
+      class="inline"
+      x-init="let t = $el.querySelector('template[data-orig]'); $el._origFrag = t.content;">
+  <template data-orig>{{ orig_display }}</template>
   <input type="hidden" name="field" value="urgency">
   <input type="hidden" name="context" value="{{ context }}">
   <select name="value"
@@ -68,8 +118,8 @@
           autofocus
           x-init="$el.focus()"
           @change="$el.form.requestSubmit()"
-          @blur="$el.form.requestSubmit()"
-          @keydown.escape.prevent="{{ escape_action }}">
+          @blur="if (!$el.form._cancelled) $el.form.requestSubmit()"
+          @keydown.escape.prevent="{{ cancel_edit }}">
     {% for u in ['normal', 'hot', 'critical'] %}
     <option value="{{ u }}" {{ 'selected' if req.urgency == u else '' }}>{{ u|capitalize }}</option>
     {% endfor %}
@@ -81,7 +131,9 @@
       hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
       data-loading-disable
-      class="inline">
+      class="inline"
+      x-init="let t = $el.querySelector('template[data-orig]'); $el._origFrag = t.content;">
+  <template data-orig>{{ orig_display }}</template>
   <input type="hidden" name="field" value="deadline">
   <input type="hidden" name="context" value="{{ context }}">
   <input aria-label="Deadline date" type="date" name="value"
@@ -90,8 +142,8 @@
          autofocus
          x-init="$el.focus()"
          @change="$el.form.requestSubmit()"
-         @blur="$el.form.requestSubmit()"
-         @keydown.escape.prevent="{{ escape_action }}">
+         @blur="if (!$el.form._cancelled) $el.form.requestSubmit()"
+         @keydown.escape.prevent="{{ cancel_edit }}">
 </form>
 
 {% elif field == 'owner' %}
@@ -99,7 +151,9 @@
       hx-target="{{ '#' ~ target_id if context != 'tab' else 'this' }}"
       hx-swap="{{ swap_style }}"
       data-loading-disable
-      class="inline">
+      class="inline"
+      x-init="let t = $el.querySelector('template[data-orig]'); $el._origFrag = t.content;">
+  <template data-orig>{{ orig_display }}</template>
   <input type="hidden" name="field" value="owner">
   <input type="hidden" name="context" value="{{ context }}">
   <select name="value"
@@ -107,8 +161,8 @@
           autofocus
           x-init="$el.focus()"
           @change="$el.form.requestSubmit()"
-          @blur="$el.form.requestSubmit()"
-          @keydown.escape.prevent="{{ escape_action }}">
+          @blur="if (!$el.form._cancelled) $el.form.requestSubmit()"
+          @keydown.escape.prevent="{{ cancel_edit }}">
     {% for u in users %}
     <option value="{{ u.id }}" {{ 'selected' if req.created_by == u.id else '' }}>{{ u.name or u.email }}</option>
     {% endfor %}

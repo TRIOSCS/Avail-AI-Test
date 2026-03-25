@@ -8,7 +8,7 @@ Depends on: app/services/vendor_analysis_service.py, conftest.py
 """
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -302,8 +302,8 @@ class TestAnalyzeVendorMaterials:
         """When db_session=None, function creates its own session."""
         mock_claude.return_value = {"brands": ["Intel"], "commodities": ["Server"]}
 
-        # Patch SessionLocal to return a mock
-        mock_db = AsyncMock()
+        # Patch SessionLocal to return a mock (MagicMock because rollback/close are sync)
+        mock_db = MagicMock()
         mock_db.get = lambda model, id: None  # No card found -> early return
 
         with patch("app.database.SessionLocal", return_value=mock_db):
@@ -328,7 +328,7 @@ class TestAnalyzeVendorMaterials:
             },
         )()
 
-        mock_db = AsyncMock()
+        mock_db = MagicMock()
         mock_db.get = lambda model, id: mock_card
         mock_db.query = lambda *args: type(
             "Q",

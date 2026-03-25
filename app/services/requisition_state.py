@@ -57,4 +57,4 @@ def transition(req, new_status: str | RequisitionStatus, actor, db: Session) -> 
         )
         db.add(log_entry)
     except Exception as e:
-        logger.warning("Failed to log status transition: %s", e)
+        logger.error("Failed to log status transition: %s", e, exc_info=True)
