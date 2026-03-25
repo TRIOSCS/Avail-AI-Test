@@ -42,7 +42,7 @@
           hx-get="/v2/partials/sightings"
           hx-trigger="change"
           hx-target="#sightings-table"
-          :hx-vals="JSON.stringify({status: sStatus, assigned: sAssigned})"
+          :hx-vals="JSON.stringify({status: sStatus, assigned: sAssigned, q: document.querySelector('#sightings-table input[name=q]')?.value || ''})"
           class="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600">
     <option value="" {{ 'selected' if not group_by }}>Flat</option>
     <option value="brand" {{ 'selected' if group_by == 'brand' }}>By Brand</option>
