@@ -78,7 +78,7 @@ async def sightings_list(
         db.query(Requirement)
         .join(Requisition, Requirement.requisition_id == Requisition.id)
         .filter(Requisition.status == RequisitionStatus.ACTIVE)
-        .options(joinedload(Requirement.requisition))
+        .options(joinedload(Requirement.requisition).joinedload(Requisition.creator))
     )
 
     if filters.status:
