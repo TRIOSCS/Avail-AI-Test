@@ -2,6 +2,7 @@
 
 import asyncio
 import random
+import threading
 import time
 from abc import ABC, abstractmethod
 from urllib.parse import quote_plus
@@ -44,13 +45,15 @@ class CircuitBreaker:
 
 
 _breakers: dict[str, CircuitBreaker] = {}
+_breaker_lock = threading.Lock()
 
 
 def get_breaker(name: str) -> CircuitBreaker:
     """Get or create a circuit breaker for the named connector."""
-    if name not in _breakers:
-        _breakers[name] = CircuitBreaker(name=name)
-    return _breakers[name]
+    with _breaker_lock:
+        if name not in _breakers:
+            _breakers[name] = CircuitBreaker(name=name)
+        return _breakers[name]
 
 
 # ── Per-connector concurrency limits ─────────────────────────────────

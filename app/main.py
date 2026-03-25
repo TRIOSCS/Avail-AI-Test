@@ -5,6 +5,7 @@ from .logging_config import setup_logging
 setup_logging()  # Must run before any other module logs
 
 import hmac
+import logging
 import os
 import uuid
 from contextlib import asynccontextmanager
@@ -100,7 +101,7 @@ async def lifespan(app):
             integrations=[
                 FastApiIntegration(),
                 SqlalchemyIntegration(),
-                LoguruIntegration(level="WARNING", event_level="ERROR"),
+                LoguruIntegration(level=logging.WARNING, event_level=logging.ERROR),
                 HttpxIntegration(),
             ],
             before_send=_sentry_before_send,

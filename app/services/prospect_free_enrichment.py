@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 
 from defusedxml.ElementTree import fromstring as _safe_xml_fromstring
 from loguru import logger
+from sqlalchemy.orm import Session
 from sqlalchemy.orm.attributes import flag_modified
 
 from app.models.prospect_account import ProspectAccount
@@ -181,7 +182,7 @@ def _classify_headline(title: str) -> str:
 # ── Combined Free Enrichment ───────────────────────────────────────
 
 
-async def run_free_enrichment(prospect_id: int) -> dict:
+async def run_free_enrichment(prospect_id: int, db: Session | None = None) -> dict:
     """Run all free enrichment sources for a single prospect.
 
     Stores results in enrichment_data JSONB.
@@ -189,7 +190,9 @@ async def run_free_enrichment(prospect_id: int) -> dict:
     """
     from app.database import SessionLocal
 
-    db = SessionLocal()
+    owns_session = db is None
+    if owns_session:
+        db = SessionLocal()
     try:
         prospect = db.get(ProspectAccount, prospect_id)
         if not prospect:
@@ -265,7 +268,8 @@ async def run_free_enrichment(prospect_id: int) -> dict:
         logger.error("Free enrichment failed for prospect {}: {}", prospect_id, e)
         return {"error": str(e)}
     finally:
-        db.close()
+        if owns_session:
+            db.close()
 
 
 async def run_free_enrichment_batch(min_fit_score: int = 40) -> dict:
@@ -292,7 +296,7 @@ async def run_free_enrichment_batch(min_fit_score: int = 40) -> dict:
 
         for (prospect_id,) in prospects:
             try:
-                result = await run_free_enrichment(prospect_id)
+                result = await run_free_enrichment(prospect_id, db=db)
                 if result.get("error"):
                     summary["errors"] += 1
                 else:

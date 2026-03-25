@@ -861,14 +861,10 @@ class TestGenerateBlurbEventLoop:
             "improvement": "Thread pool improvement.",
         }
 
-        # Create a mock loop that reports as running
-        mock_loop = MagicMock()
-        mock_loop.is_running.return_value = True
-
         cats = {"execution": 60, "followthrough": 40, "closing": 30, "depth": 50}
 
         with (
-            patch("asyncio.get_event_loop", return_value=mock_loop),
+            patch("asyncio.get_running_loop", return_value=MagicMock()),
             patch("concurrent.futures.ThreadPoolExecutor") as mock_executor_cls,
         ):
             # Set up the ThreadPoolExecutor context manager mock

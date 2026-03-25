@@ -333,23 +333,18 @@ class EmailMiner:
                         except Exception:
                             logger.debug("Failed to parse receivedDateTime for classification", exc_info=True)
 
-                    import asyncio
-
-                    loop = asyncio.get_event_loop()
-                    if loop.is_running():
-                        # Already in async context
-                        await process_email_intelligence(
-                            self.db,
-                            message_id=msg["id"],
-                            user_id=self.user_id,
-                            sender_email=sender_email,
-                            sender_name=sender_name,
-                            subject=subject,
-                            body=body[:5000],
-                            received_at=received_dt,
-                            conversation_id=msg.get("conversationId"),
-                            regex_offer_matches=regex_matches,
-                        )
+                    await process_email_intelligence(
+                        self.db,
+                        message_id=msg["id"],
+                        user_id=self.user_id,
+                        sender_email=sender_email,
+                        sender_name=sender_name,
+                        subject=subject,
+                        body=body[:5000],
+                        received_at=received_dt,
+                        conversation_id=msg.get("conversationId"),
+                        regex_offer_matches=regex_matches,
+                    )
                 except Exception as e:
                     logger.warning("AI classification skipped for %s: %s", msg["id"], e)
 

@@ -204,7 +204,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     from sqlalchemy.orm import sessionmaker
 
     req_id = req.id
-    _WriteSession = sessionmaker(bind=db.get_bind(), autocommit=False, autoflush=False)
+    _WriteSession = sessionmaker(bind=db.get_bind(), autocommit=False, autoflush=False, expire_on_commit=False)
     write_db = _WriteSession()
     try:
         write_req = write_db.get(Requirement, req_id)
@@ -235,6 +235,15 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         # 4. Historical vendors from material cards
         fresh_vendors = {s.vendor_name.lower() for s in sightings}
         history = _get_material_history(list(card_ids), fresh_vendors, write_db)
+
+        write_db.commit()
+
+        # Expunge sightings so they remain usable after session close
+        for s in sightings:
+            write_db.expunge(s)
+    except Exception:
+        write_db.rollback()
+        raise
     finally:
         write_db.close()
 

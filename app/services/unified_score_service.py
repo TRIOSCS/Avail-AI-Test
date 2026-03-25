@@ -305,8 +305,9 @@ def _generate_blurb(
     }
 
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
+        try:
+            asyncio.get_running_loop()
+            # Already in async context — run in thread pool
             import concurrent.futures
 
             with concurrent.futures.ThreadPoolExecutor() as pool:
@@ -315,7 +316,7 @@ def _generate_blurb(
                     claude_structured(user_msg, schema, system=system, model_tier="fast", max_tokens=256),
                 )
                 return future.result(timeout=30)
-        else:
+        except RuntimeError:
             return asyncio.run(claude_structured(user_msg, schema, system=system, model_tier="fast", max_tokens=256))
     except Exception as e:
         logger.warning(f"Claude blurb call failed: {e}")

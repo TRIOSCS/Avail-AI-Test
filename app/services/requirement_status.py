@@ -88,8 +88,8 @@ def on_rfq_sent(requirement_ids: list[int], db: Session, actor: User | None = No
             try:
                 if transition_requirement(req, "sourcing", db, actor):
                     changed += 1
-            except ValueError:
-                pass
+            except ValueError as e:
+                logger.debug("Skipping requirement %s transition to sourcing: %s", req.id, e)
     return changed
 
 
@@ -102,7 +102,8 @@ def on_offer_created(requirement: Requirement, db: Session, actor: User | None =
     if current in ("open", "sourcing"):
         try:
             return transition_requirement(requirement, "offered", db, actor)
-        except ValueError:
+        except ValueError as e:
+            logger.debug("Skipping requirement %s transition to offered: %s", requirement.id, e)
             return False
     return False
 
@@ -120,8 +121,8 @@ def on_quote_built(requirement_ids: list[int], db: Session, actor: User | None =
             try:
                 if transition_requirement(req, "quoted", db, actor):
                     changed += 1
-            except ValueError:
-                pass
+            except ValueError as e:
+                logger.debug("Skipping requirement %s transition to quoted: %s", req.id, e)
     return changed
 
 

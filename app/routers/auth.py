@@ -171,12 +171,18 @@ async def logout(request: Request):
 def _password_login_enabled() -> bool:
     """Return True when local/test password login should be allowed.
 
-    Enabled when TESTING=1 or ENABLE_PASSWORD_LOGIN=true in env. Never rely on this for
-    production auth.
+    Only enabled when TESTING=1 or when both ENABLE_PASSWORD_LOGIN=true and the app is
+    running in development mode (no HTTPS in APP_URL).
     """
     if os.getenv("TESTING") == "1":
         return True
-    return os.getenv("ENABLE_PASSWORD_LOGIN", "false").lower() == "true"
+    if os.getenv("ENABLE_PASSWORD_LOGIN", "false").lower() != "true":
+        return False
+    app_url = os.getenv("APP_URL", "")
+    if app_url.startswith("https://"):
+        logger.warning("ENABLE_PASSWORD_LOGIN ignored in production (HTTPS detected)")
+        return False
+    return True
 
 
 def _verify_password(stored: str, password: str) -> bool:

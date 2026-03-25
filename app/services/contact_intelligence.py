@@ -646,14 +646,30 @@ def _enrich_nudges_with_ai(db: Session, nudges: list[dict], vendor_card_id: int)
             f'Return JSON: {{"message": "<1-2 sentence suggestion>"}}'
         )
         try:
-            result = asyncio.get_event_loop().run_until_complete(
-                claude_json(
-                    prompt,
-                    system="You are a B2B relationship advisor. Return ONLY valid JSON.",
-                    model_tier="fast",
-                    timeout=10,
+            try:
+                asyncio.get_running_loop()
+                import concurrent.futures
+
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    future = pool.submit(
+                        asyncio.run,
+                        claude_json(
+                            prompt,
+                            system="You are a B2B relationship advisor. Return ONLY valid JSON.",
+                            model_tier="fast",
+                            timeout=10,
+                        ),
+                    )
+                    result = future.result(timeout=15)
+            except RuntimeError:
+                result = asyncio.run(
+                    claude_json(
+                        prompt,
+                        system="You are a B2B relationship advisor. Return ONLY valid JSON.",
+                        model_tier="fast",
+                        timeout=10,
+                    )
                 )
-            )
             if result and isinstance(result, dict) and result.get("message"):
                 nudge["message"] = result["message"]
         except Exception as e:
@@ -702,9 +718,25 @@ def generate_contact_summary(db: Session, vendor_card_id: int, contact_id: int) 
             f"Write a 2-3 sentence relationship summary for this vendor contact:\n\n{context}\n\n"
             f"Focus on the health of the relationship and any recommended actions."
         )
-        result = asyncio.get_event_loop().run_until_complete(
-            claude_text(prompt, system="You are a B2B relationship analyst. Be concise.", model_tier="fast", timeout=15)
-        )
+        try:
+            asyncio.get_running_loop()
+            # Already in async context — run in thread pool
+            import concurrent.futures
+
+            with concurrent.futures.ThreadPoolExecutor() as pool:
+                future = pool.submit(
+                    asyncio.run,
+                    claude_text(
+                        prompt, system="You are a B2B relationship analyst. Be concise.", model_tier="fast", timeout=15
+                    ),
+                )
+                result = future.result(timeout=20)
+        except RuntimeError:
+            result = asyncio.run(
+                claude_text(
+                    prompt, system="You are a B2B relationship analyst. Be concise.", model_tier="fast", timeout=15
+                )
+            )
         if result:
             return result
     except Exception as e:

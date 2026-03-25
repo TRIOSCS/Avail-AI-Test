@@ -10,6 +10,7 @@ import re
 from datetime import datetime, timezone
 from typing import Optional
 
+import httpx
 from loguru import logger
 
 from .http_client import http
@@ -301,7 +302,7 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
             "naics": firmo.get("naics"),
             "revenue_range": firmo.get("yearly_revenue_range"),
         }
-    except Exception as e:
+    except (httpx.HTTPError, KeyError, ValueError) as e:
         logger.error("Explorium company lookup error: %s", e)
         return None
 
@@ -341,7 +342,7 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
             for p in prospects
             if p.get("full_name")
         ]
-    except Exception as e:
+    except (httpx.HTTPError, KeyError, ValueError) as e:
         logger.error("Explorium contacts lookup error: %s", e)
         return []
 
@@ -402,7 +403,7 @@ async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
             "hq_country": data.get("hq_country") or data.get("country"),
             "website": data.get("website"),
         }
-    except Exception as e:
+    except (httpx.HTTPError, KeyError, ValueError, TypeError) as e:
         logger.error("AI company lookup error: %s", e)
         return None
 
@@ -437,7 +438,7 @@ async def _ai_find_contacts(domain: str, name: str = "", title_filter: str = "")
             for c in raw
             if c.get("full_name")
         ]
-    except Exception as e:
+    except (httpx.HTTPError, KeyError, ValueError, TypeError) as e:
         logger.error("AI contacts lookup error: %s", e)
         return []
 

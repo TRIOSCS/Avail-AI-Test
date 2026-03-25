@@ -142,26 +142,16 @@ def _ai_match_batch(activities: list[ActivityLog], db: Session) -> dict:
         return {}
 
     try:
-        result = asyncio.get_event_loop().run_until_complete(
-            _call_claude_for_matching(activity_items, company_list, vendor_list)
-        )
-        return result or {}
+        asyncio.get_running_loop()
+        # Already in async context — can't run_until_complete, skip this round
+        logger.debug("AI matching deferred — already in async event loop")
+        return {}
     except RuntimeError:
-        # If there's already a running event loop (likely), use it
-        try:
-            loop = asyncio.get_running_loop()
-            import concurrent.futures
+        pass  # No running loop — safe to use asyncio.run()
 
-            with concurrent.futures.ThreadPoolExecutor() as pool:
-                result = loop.run_in_executor(
-                    pool,
-                    lambda: asyncio.run(_call_claude_for_matching(activity_items, company_list, vendor_list)),
-                )
-                # Can't await in sync context; skip AI matching this round
-                logger.debug("AI matching deferred — event loop conflict")
-                return {}
-        except Exception:
-            return {}
+    try:
+        result = asyncio.run(_call_claude_for_matching(activity_items, company_list, vendor_list))
+        return result or {}
     except Exception:
         logger.exception("AI matching failed")
         return {}
