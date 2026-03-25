@@ -10,7 +10,9 @@ Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
 """
 
 import json
+import time
 from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -34,6 +36,31 @@ from ..template_env import templates
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["sightings"])
+
+MAX_BATCH_SIZE = 50
+
+_cache: dict[str, tuple[float, Any]] = {}
+
+
+def _get_cached(key: str, ttl: float, factory):
+    """Simple in-process TTL cache.
+
+    For value tuples/dicts only (not ORM objects). Safe because cached results are
+    detached column tuples, not session-bound objects.
+    """
+    now = time.monotonic()
+    entry = _cache.get(key)
+    if entry and now - entry[0] < ttl:
+        return entry[1]
+    result = factory()
+    _cache[key] = (now, result)
+    return result
+
+
+def _invalidate_cache(key: str):
+    """Remove a cached entry (call after mutations that change the data)."""
+    _cache.pop(key, None)
+
 
 # Sort key → (column for asc, column for desc)
 _SORT_COLUMNS = {
@@ -102,12 +129,16 @@ async def sightings_list(
     requirements = query.offset(offset).limit(filters.limit).all()
     total_pages = max(1, (total + filters.limit - 1) // filters.limit)
 
-    stat_counts = dict(
-        db.query(Requirement.sourcing_status, sqlfunc.count())
-        .join(Requisition, Requirement.requisition_id == Requisition.id)
-        .filter(Requisition.status == RequisitionStatus.ACTIVE)
-        .group_by(Requirement.sourcing_status)
-        .all()
+    stat_counts = _get_cached(
+        "sightings_stat_counts",
+        30,
+        lambda: dict(
+            db.query(Requirement.sourcing_status, sqlfunc.count())
+            .join(Requisition, Requirement.requisition_id == Requisition.id)
+            .filter(Requisition.status == RequisitionStatus.ACTIVE)
+            .group_by(Requirement.sourcing_status)
+            .all()
+        ),
     )
 
     top_vendors = {}
@@ -231,7 +262,9 @@ async def sightings_detail(
         .all()
     )
 
-    all_buyers = db.query(User.id, User.name).filter(User.is_active.is_(True)).all()
+    all_buyers = _get_cached(
+        "all_buyers", 300, lambda: db.query(User.id, User.name).filter(User.is_active.is_(True)).all()
+    )
 
     ctx = {
         "request": request,
@@ -285,6 +318,9 @@ async def sightings_batch_refresh(
     form = await request.form()
     req_ids_raw = form.get("requirement_ids", "[]")
     requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+
+    if len(requirement_ids) > MAX_BATCH_SIZE:
+        raise HTTPException(status_code=400, detail=f"Maximum {MAX_BATCH_SIZE} requirements per batch")
 
     # Batch-fetch all requirements in one query
     reqs_by_id = {}

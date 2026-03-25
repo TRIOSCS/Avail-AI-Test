@@ -257,6 +257,16 @@ class TestSightingsVendorModal:
         assert resp.status_code == 200
 
 
+class TestSightingsBatchLimit:
+    def test_batch_refresh_over_limit_returns_400(self, client, db_session):
+        ids = list(range(1, 52))  # 51 items, over the 50 limit
+        resp = client.post(
+            "/v2/partials/sightings/batch-refresh",
+            data={"requirement_ids": json.dumps(ids)},
+        )
+        assert resp.status_code == 400
+
+
 class TestSightingsSendInquiry:
     def test_400_without_params(self, client, db_session):
         resp = client.post("/v2/partials/sightings/send-inquiry", data={})
