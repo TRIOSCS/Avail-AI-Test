@@ -9,6 +9,7 @@ Depends on: Requirement model
 """
 
 from sqlalchemy import (
+    Boolean,
     Column,
     DateTime,
     Float,
@@ -31,6 +32,8 @@ class VendorSightingSummary(Base):
         Index("ix_vss_requirement", "requirement_id"),
         Index("ix_vss_vendor", "vendor_name"),
         Index("ix_vss_score", "score"),
+        Index("ix_vss_vendor_card", "vendor_card_id"),
+        Index("ix_vss_vendor_req", "vendor_name", "requirement_id"),
     )
 
     id = Column(Integer, primary_key=True)
@@ -46,4 +49,12 @@ class VendorSightingSummary(Base):
     tier = Column(String(20), nullable=True)
     updated_at = Column(DateTime, nullable=True)
 
+    # Pre-aggregated fields (rebuilt by sighting_aggregation service)
+    vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"), nullable=True)
+    newest_sighting_at = Column(DateTime, nullable=True)
+    best_lead_time_days = Column(Integer, nullable=True)
+    min_moq = Column(Integer, nullable=True)
+    has_contact_info = Column(Boolean, default=False, server_default="false")
+
     requirement = relationship("Requirement", back_populates="vendor_summaries")
+    vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
