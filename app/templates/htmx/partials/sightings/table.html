@@ -29,19 +29,20 @@
 </div>
 
 {# ── Filter Bar ──────────────────────────────────────────────── #}
-<div class="px-3 py-2 border-b border-gray-100 flex items-center gap-2 flex-wrap">
+<div class="px-3 py-2 border-b border-gray-100 flex items-center gap-2 flex-wrap"
+     x-data="{ sStatus: '{{ status }}', sAssigned: '{{ assigned }}', sGroupBy: '{{ group_by }}' }">
   <input aria-label="Search sightings" type="text" name="q" value="{{ q }}"
          placeholder="Search MPN or customer..."
          hx-get="/v2/partials/sightings"
          hx-trigger="keyup changed delay:300ms"
          hx-target="#sightings-table"
-         hx-include="closest div"
+         :hx-vals="JSON.stringify({status: sStatus, assigned: sAssigned, group_by: sGroupBy})"
          class="flex-1 min-w-[150px] rounded-lg border border-gray-200 px-3 py-1.5 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-200 outline-none">
-  <select name="group_by"
+  <select name="group_by" x-model="sGroupBy"
           hx-get="/v2/partials/sightings"
           hx-trigger="change"
           hx-target="#sightings-table"
-          hx-include="closest div"
+          :hx-vals="JSON.stringify({status: sStatus, assigned: sAssigned})"
           class="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600">
     <option value="" {{ 'selected' if not group_by }}>Flat</option>
     <option value="brand" {{ 'selected' if group_by == 'brand' }}>By Brand</option>
@@ -54,8 +55,6 @@
                  {{ 'bg-brand-50 border-brand-300 text-brand-700' if assigned == 'mine' else 'border-gray-200 text-gray-600 hover:bg-gray-50' }}">
     My Items
   </button>
-  <input type="hidden" name="status" value="{{ status }}">
-  <input type="hidden" name="assigned" value="{{ assigned }}">
 </div>
 
 {# ── Table ───────────────────────────────────────────────────── #}

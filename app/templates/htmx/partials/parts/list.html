@@ -4,19 +4,15 @@
    Depends on: requirements, offer_stats, filters, pagination context
 #}
 
-<div class="flex flex-col h-full" x-data="partsListSelection()"
+<div class="flex flex-col h-full"
+     x-data="{ ...partsListSelection(), pStatus: '{{ status }}', pSort: '{{ sort }}', pDir: '{{ dir }}', pArchived: {{ 'true' if include_archived else 'false' }} }"
      @part-updated.window="htmx.ajax('GET', '/v2/partials/parts' + window.location.search, {target: '#parts-list', swap: 'innerHTML'})"
      @part-archived.window="htmx.ajax('GET', '/v2/partials/parts' + window.location.search, {target: '#parts-list', swap: 'innerHTML'})">
 
   {# ── Filter bar + top scrollbar ──────────────────────────── #}
   <div class="panel-header flex-wrap gap-y-1">
-    <form id="parts-filters" class="w-full" onsubmit="return false">
+    <div id="parts-filters" class="w-full">
       <div class="flex gap-2 items-center">
-        {# Hidden filter state #}
-        <input type="hidden" name="status" value="{{ status }}">
-        <input type="hidden" name="sort" value="{{ sort }}">
-        <input type="hidden" name="dir" value="{{ dir }}">
-        {% if include_archived %}<input type="hidden" name="include_archived" value="true">{% endif %}
 
         {# Add Req button #}
         <button type="button"
@@ -38,16 +34,17 @@
           <input aria-label="Search parts" type="text" name="q" value="{{ q }}" placeholder="MPN, customer, req..."
                  hx-get="/v2/partials/parts"
                  hx-target="#parts-list"
-                 hx-include="#parts-filters"
                  hx-trigger="input delay:300ms"
+                 :hx-vals="JSON.stringify({status: pStatus, sort: pSort, dir: pDir, include_archived: pArchived || undefined})"
                  class="w-full pl-7 pr-2 py-0.5 text-[10px] border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 placeholder:text-gray-400">
         </div>
 
         {% for s_val, s_label in [('', 'All'), ('open', 'Open'), ('sourcing', 'Src'), ('offered', 'Ofd'), ('quoted', 'Qtd'), ('archived', 'Arc')] %}
         <button type="button"
-                hx-get="/v2/partials/parts?status={{ s_val }}"
+                @click="pStatus = '{{ s_val }}'"
+                hx-get="/v2/partials/parts"
                 hx-target="#parts-list"
-                hx-include="#parts-filters"
+                :hx-vals="JSON.stringify({status: '{{ s_val }}', sort: pSort, dir: pDir, include_archived: pArchived || undefined})"
                 class="px-2 py-0.5 text-[10px] font-semibold rounded transition-colors flex-shrink-0
                        {{ 'bg-brand-500 text-white' if status == s_val else 'bg-white text-gray-500 border border-gray-300 hover:bg-brand-50 hover:text-brand-600' }}">
           {{ s_label }}
@@ -59,7 +56,7 @@
           <div class="scroll-spacer h-px"></div>
         </div>
       </div>
-    </form>
+    </div>
   </div>
 
   {# ── Bulk action bar (visible when items selected) ─────── #}
@@ -111,9 +108,9 @@
               {% set label, sort_key = col_defs.get(col_key, (col_key, None)) %}
               <th>
                 {% if sort_key %}
-                <a hx-get="/v2/partials/parts?sort={{ sort_key }}&dir={{ 'asc' if sort == sort_key and dir == 'desc' else 'desc' }}"
+                <a hx-get="/v2/partials/parts"
                    hx-target="#parts-list"
-                   hx-include="#parts-filters"
+                   :hx-vals="JSON.stringify({status: pStatus, sort: '{{ sort_key }}', dir: '{{ 'asc' if sort == sort_key and dir == 'desc' else 'desc' }}', include_archived: pArchived || undefined})"
                    class="cursor-pointer hover:text-brand-600 inline-flex items-center gap-0.5">
                   {{ label }}
                   {% if sort == sort_key %}
@@ -254,15 +251,15 @@
     <span class="text-[10px] text-gray-400 font-data">{{ offset + 1 }}\u2013{{ [offset + limit, total]|min }} / {{ total }}</span>
     <div class="flex gap-1">
       {% if offset > 0 %}
-      <button hx-get="/v2/partials/parts?offset={{ offset - limit }}"
+      <button hx-get="/v2/partials/parts"
               hx-target="#parts-list"
-              hx-include="#parts-filters"
+              :hx-vals="JSON.stringify({offset: {{ offset - limit }}, status: pStatus, sort: pSort, dir: pDir, include_archived: pArchived || undefined})"
               class="px-2 py-0.5 text-[10px] font-semibold bg-white border border-gray-300 rounded hover:bg-brand-50 text-gray-600">Prev</button>
       {% endif %}
       {% if offset + limit < total %}
-      <button hx-get="/v2/partials/parts?offset={{ offset + limit }}"
+      <button hx-get="/v2/partials/parts"
               hx-target="#parts-list"
-              hx-include="#parts-filters"
+              :hx-vals="JSON.stringify({offset: {{ offset + limit }}, status: pStatus, sort: pSort, dir: pDir, include_archived: pArchived || undefined})"
               class="px-2 py-0.5 text-[10px] font-semibold bg-white border border-gray-300 rounded hover:bg-brand-50 text-gray-600">Next</button>
       {% endif %}
     </div>

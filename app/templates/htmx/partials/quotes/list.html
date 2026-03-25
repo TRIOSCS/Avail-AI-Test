@@ -26,8 +26,7 @@
                hx-trigger="keyup changed delay:300ms"
                hx-target="#main-content"
                hx-push-url="true"
-               hx-include="#quote-filters">
-        <input type="hidden" name="status" :value="currentStatus">
+               :hx-vals="JSON.stringify({status: currentStatus})">
       </div>
     </div>
   </div>

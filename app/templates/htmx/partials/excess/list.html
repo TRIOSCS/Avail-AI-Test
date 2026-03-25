@@ -4,7 +4,7 @@
    Depends on: excess/row.html, brand palette, Alpine.js modal system.
 #}
 
-<div class="max-w-7xl mx-auto">
+<div class="max-w-7xl mx-auto" x-data="{ exStatus: '{{ status_filter }}' }">
 
   {# Header #}
   <div class="flex items-center justify-between mb-4">
@@ -59,12 +59,11 @@
                hx-get="/v2/partials/excess" hx-target="#main-content" hx-push-url="true"
                hx-swap="morph"
                hx-trigger="keyup changed delay:300ms"
-               hx-include="[name='status']"
+               :hx-vals="JSON.stringify({status: exStatus})"
                class="w-full pl-10 pr-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
       </div>
 
       {# Status pills #}
-      <input type="hidden" name="status" value="{{ status_filter }}">
       {% set statuses = ["draft", "active", "bidding", "closed"] %}
       {% set pill_colors = {
         "draft": "bg-gray-100 text-gray-700 hover:bg-gray-200",
@@ -79,7 +78,8 @@
         "closed": "ring-2 ring-slate-400",
       } %}
       {% for s in statuses %}
-      <a hx-get="/v2/partials/excess?status={{ '' if status_filter == s else s }}&q={{ q }}"
+      <a @click="exStatus = exStatus === '{{ s }}' ? '' : '{{ s }}'"
+         hx-get="/v2/partials/excess?status={{ '' if status_filter == s else s }}&q={{ q }}"
          hx-target="#main-content" hx-push-url="true" hx-swap="morph"
          class="inline-flex px-3 py-1 text-xs font-medium rounded-full cursor-pointer transition-all {{ pill_colors[s] }} {{ pill_active[s] if status_filter == s else '' }}">
         {{ s|capitalize }}
