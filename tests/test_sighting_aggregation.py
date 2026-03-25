@@ -350,3 +350,164 @@ class TestSourceTypes:
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert set(results[0].source_types) == {"api", "email"}
+
+
+# ── New pre-aggregated column tests ─────────────────────────────────
+
+
+def _make_sighting_extended(
+    db: Session,
+    requirement_id: int,
+    vendor_name: str = "Arrow Electronics",
+    lead_time_days: int | None = None,
+    moq: int | None = None,
+    vendor_email: str | None = None,
+    vendor_phone: str | None = None,
+    created_at: datetime | None = None,
+) -> Sighting:
+    """Create a sighting with extended fields for new-column tests."""
+    s = Sighting(
+        requirement_id=requirement_id,
+        vendor_name=vendor_name,
+        unit_price=1.0,
+        qty_available=100,
+        score=50.0,
+        source_type="api",
+        is_unavailable=False,
+        lead_time_days=lead_time_days,
+        moq=moq,
+        vendor_email=vendor_email,
+        vendor_phone=vendor_phone,
+        created_at=created_at or datetime.now(timezone.utc),
+    )
+    db.add(s)
+    db.flush()
+    return s
+
+
+class TestVendorSummaryNewColumns:
+    """Verify new pre-aggregated columns are populated."""
+
+    def test_newest_sighting_at_populated(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        older = datetime(2025, 1, 1, tzinfo=timezone.utc)
+        newer = datetime(2025, 6, 15, tzinfo=timezone.utc)
+        _make_sighting_extended(db_session, item.id, created_at=older)
+        _make_sighting_extended(db_session, item.id, created_at=newer)
+        db_session.commit()
+
+        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=200):
+            results = rebuild_vendor_summaries(db_session, item.id)
+
+        assert len(results) == 1
+        # newest_sighting_at should equal the max created_at
+        # SQLite (used in tests) strips tzinfo on round-trip; compare naive values
+        result_ts = results[0].newest_sighting_at
+        if result_ts is not None and result_ts.tzinfo is None:
+            result_ts = result_ts.replace(tzinfo=timezone.utc)
+        assert result_ts == newer
+
+    def test_best_lead_time_days_populated(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        _make_sighting_extended(db_session, item.id, lead_time_days=3)
+        _make_sighting_extended(db_session, item.id, lead_time_days=7)
+        _make_sighting_extended(db_session, item.id, lead_time_days=None)
+        db_session.commit()
+
+        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=300):
+            results = rebuild_vendor_summaries(db_session, item.id)
+
+        assert len(results) == 1
+        assert results[0].best_lead_time_days == 3  # min of non-null
+
+    def test_min_moq_populated(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        _make_sighting_extended(db_session, item.id, moq=10)
+        _make_sighting_extended(db_session, item.id, moq=50)
+        _make_sighting_extended(db_session, item.id, moq=None)
+        db_session.commit()
+
+        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=300):
+            results = rebuild_vendor_summaries(db_session, item.id)
+
+        assert len(results) == 1
+        assert results[0].min_moq == 10  # min of non-null
+
+    def test_vendor_card_id_set(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        card = VendorCard(
+            normalized_name="arrow electronics",
+            display_name="Arrow Electronics",
+            phones=[],
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(card)
+        db_session.flush()
+
+        _make_sighting_extended(db_session, item.id, vendor_name="Arrow Electronics")
+        db_session.commit()
+
+        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+            results = rebuild_vendor_summaries(db_session, item.id)
+
+        assert len(results) == 1
+        assert results[0].vendor_card_id == card.id
+
+    def test_has_contact_info_from_sighting_email(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        _make_sighting_extended(db_session, item.id, vendor_email="sales@arrow.com")
+        db_session.commit()
+
+        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+            results = rebuild_vendor_summaries(db_session, item.id)
+
+        assert results[0].has_contact_info is True
+
+    def test_has_contact_info_from_vendor_card_phone(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        card = VendorCard(
+            normalized_name="arrow electronics",
+            display_name="Arrow Electronics",
+            phones=["+1-555-0100"],
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(card)
+        db_session.flush()
+
+        _make_sighting_extended(db_session, item.id, vendor_name="Arrow Electronics")
+        db_session.commit()
+
+        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+            results = rebuild_vendor_summaries(db_session, item.id)
+
+        assert results[0].has_contact_info is True
+
+    def test_has_contact_info_false_when_no_contact(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        _make_sighting_extended(db_session, item.id, vendor_email=None, vendor_phone=None)
+        db_session.commit()
+
+        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+            results = rebuild_vendor_summaries(db_session, item.id)
+
+        assert results[0].has_contact_info is False
+
+    def test_all_null_lead_times_gives_none(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        _make_sighting_extended(db_session, item.id, lead_time_days=None)
+        db_session.commit()
+
+        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+            results = rebuild_vendor_summaries(db_session, item.id)
+
+        assert results[0].best_lead_time_days is None
+
+    def test_all_null_moq_gives_none(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        _make_sighting_extended(db_session, item.id, moq=None)
+        db_session.commit()
+
+        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+            results = rebuild_vendor_summaries(db_session, item.id)
+
+        assert results[0].min_moq is None

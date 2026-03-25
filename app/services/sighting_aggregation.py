@@ -99,17 +99,19 @@ def rebuild_vendor_summaries(
         vn = (s.vendor_name or "unknown").lower().strip()
         groups.setdefault(vn, []).append(s)
 
-    # Look up vendor phones in bulk
+    # Look up vendor phones and card IDs in bulk
     vendor_phones: dict[str, str | None] = {}
+    vendor_card_ids: dict[str, int] = {}
     if groups:
         cards = (
-            db.query(VendorCard.normalized_name, VendorCard.phones)
+            db.query(VendorCard.id, VendorCard.normalized_name, VendorCard.phones)
             .filter(VendorCard.normalized_name.in_(list(groups.keys())))
             .all()
         )
         for card in cards:
             phones = card.phones or []
             vendor_phones[card.normalized_name] = phones[0] if phones else None
+            vendor_card_ids[card.normalized_name] = card.id
 
     results = []
     for vn, group in groups.items():
@@ -126,6 +128,12 @@ def rebuild_vendor_summaries(
             non_null_qtys = [q for q in qtys if q is not None]
             estimated_qty = sum(non_null_qtys) if non_null_qtys else None
 
+        # New pre-aggregated fields
+        lead_times = [s.lead_time_days for s in group if s.lead_time_days is not None]
+        moqs = [s.moq for s in group if s.moq is not None]
+        newest = max((s.created_at for s in group if s.created_at), default=None)
+        has_contact = any(s.vendor_email or s.vendor_phone for s in group) or bool(vendor_phones.get(vn))
+
         # Upsert summary
         existing = db.query(VendorSightingSummary).filter_by(requirement_id=requirement_id, vendor_name=vn).first()
         if existing:
@@ -138,6 +146,11 @@ def rebuild_vendor_summaries(
             existing.score = round(max_score, 1) if max_score else None
             existing.tier = _score_to_tier(max_score)
             existing.updated_at = datetime.now(timezone.utc)
+            existing.vendor_card_id = vendor_card_ids.get(vn)
+            existing.newest_sighting_at = newest
+            existing.best_lead_time_days = min(lead_times) if lead_times else None
+            existing.min_moq = min(moqs) if moqs else None
+            existing.has_contact_info = has_contact
             results.append(existing)
         else:
             summary = VendorSightingSummary(
@@ -152,6 +165,11 @@ def rebuild_vendor_summaries(
                 score=round(max_score, 1) if max_score else None,
                 tier=_score_to_tier(max_score),
                 updated_at=datetime.now(timezone.utc),
+                vendor_card_id=vendor_card_ids.get(vn),
+                newest_sighting_at=newest,
+                best_lead_time_days=min(lead_times) if lead_times else None,
+                min_moq=min(moqs) if moqs else None,
+                has_contact_info=has_contact,
             )
             db.add(summary)
             results.append(summary)
