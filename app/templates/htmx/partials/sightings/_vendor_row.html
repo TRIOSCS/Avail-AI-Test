@@ -1,0 +1,166 @@
+{# _vendor_row.html — Single vendor row with expandable intelligence.
+   Called by: detail.html (loop include)
+   Depends on: source_badge.html, _macros.html
+   Context: s (VendorSightingSummary), vs (vendor status string),
+            intel (vendor_intel dict for this vendor),
+            vendor_phone (str or None), requirement,
+            ooo_vendor (OOO contact or None),
+            stale_days (int, from config)
+#}
+
+{% set intel = vendor_intel.get(s.vendor_name, {}) %}
+{% set vendor_phone = vendor_phones.get(s.vendor_name) %}
+{% set ooo = ooo_map.get(s.vendor_name|lower|trim) if ooo_map is defined else none %}
+
+<tr class="group border-b border-gray-50 last:border-0"
+    x-data="{ expanded: false }">
+  <td colspan="7" class="p-0">
+    {# ── Always-visible row ─────────────────────────────── #}
+    <div class="flex items-center px-2 py-1.5 cursor-pointer hover:bg-gray-50/50 transition-colors"
+         @click="expanded = !expanded">
+      <div class="flex-1 min-w-0">
+        <div class="flex items-center gap-2">
+          <span class="font-medium text-gray-900 text-sm">{{ s.vendor_name }}</span>
+          {% set vs_styles = {
+            'sighting': 'bg-gray-100 text-gray-600',
+            'contacted': 'bg-blue-50 text-blue-700',
+            'offer-in': 'bg-emerald-50 text-emerald-700',
+            'unavailable': 'bg-gray-100 text-gray-500',
+            'blacklisted': 'bg-red-50 text-red-700',
+          } %}
+          <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ vs_styles.get(vs, 'bg-gray-100 text-gray-600') }}">
+            {{ vs|replace('-', ' ')|capitalize }}
+          </span>
+          {% if ooo %}
+          <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-50 text-amber-700">
+            OOO{% if ooo.ooo_return_date %} until {{ ooo.ooo_return_date.strftime('%m/%d') }}{% endif %}
+          </span>
+          {% endif %}
+        </div>
+        {# Inline metrics: response rate + best price with freshness #}
+        <div class="flex items-center gap-3 mt-0.5 text-[11px] text-gray-400">
+          {% if intel.get('response_rate') is not none %}
+          <span>{{ (intel.response_rate * 100)|int }}% response</span>
+          {% endif %}
+          {% if s.best_price %}
+          <span class="font-mono">${{ '%.2f'|format(s.best_price) }}
+            {% if intel.get('age_days') is not none %}
+            <span class="text-{{ 'amber-500' if intel.age_days > stale_days|default(3) else 'gray-300' }}">— {{ intel.age_days }}d ago</span>
+            {% endif %}
+          </span>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="flex items-center gap-3 shrink-0">
+        <span class="font-mono text-xs text-gray-600">{{ s.estimated_qty or '—' }} pcs</span>
+        {% set score_color = 'text-emerald-600' if s.score >= 70 else ('text-amber-600' if s.score >= 40 else 'text-gray-500') %}
+        <span class="font-mono text-xs {{ score_color }}">{{ s.score|round|int }}%</span>
+        <svg :class="expanded ? 'rotate-180' : ''" class="h-3.5 w-3.5 text-gray-300 transition-transform" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/>
+        </svg>
+      </div>
+    </div>
+
+    {# ── Expandable detail ──────────────────────────────── #}
+    <div x-show="expanded" x-collapse class="px-3 pb-2 bg-gray-50/50 border-t border-gray-100">
+      <div class="grid grid-cols-2 gap-x-4 gap-y-1.5 py-2 text-xs">
+        {% if intel.get('listing_count') %}
+        <div>
+          <span class="text-gray-400">Sources:</span>
+          <span class="text-gray-700">Found on {{ intel.listing_count }} source{{ 's' if intel.listing_count != 1 }}</span>
+        </div>
+        {% endif %}
+
+        {% if intel.get('source_types') %}
+        <div>
+          <span class="text-gray-400">Via:</span>
+          {% for src in intel.source_types[:3] %}
+            {% set source_name = src %}
+            {% include "htmx/partials/shared/source_badge.html" %}
+          {% endfor %}
+          {% if intel.source_types|length > 3 %}
+          <span class="text-gray-400 text-[10px]">+{{ intel.source_types|length - 3 }}</span>
+          {% endif %}
+        </div>
+        {% endif %}
+
+        {% if intel.get('tier') %}
+        <div>
+          <span class="text-gray-400">Evidence:</span>
+          <span class="text-gray-700">{{ intel.tier }}</span>
+        </div>
+        {% endif %}
+
+        {% if s.avg_price and s.best_price %}
+        <div>
+          <span class="text-gray-400">Price Range:</span>
+          <span class="font-mono text-gray-700">${{ '%.2f'|format(s.best_price) }} — ${{ '%.2f'|format(s.avg_price) }}</span>
+        </div>
+        {% endif %}
+
+        {% if intel.get('response_rate') is not none %}
+        <div>
+          <span class="text-gray-400">Response Rate:</span>
+          <span class="text-gray-700">{{ (intel.response_rate * 100)|int }}%</span>
+        </div>
+        {% endif %}
+
+        {% if intel.get('ghost_rate') is not none %}
+        <div>
+          <span class="text-gray-400">Ghost Rate:</span>
+          <span class="{{ 'text-rose-600' if intel.ghost_rate > 0.3 else 'text-gray-700' }}">{{ (intel.ghost_rate * 100)|int }}%</span>
+        </div>
+        {% endif %}
+
+        {% if intel.get('best_lead_time_days') %}
+        <div>
+          <span class="text-gray-400">Lead Time:</span>
+          <span class="text-gray-700">{{ intel.best_lead_time_days }} day{{ 's' if intel.best_lead_time_days != 1 }}</span>
+        </div>
+        {% endif %}
+
+        {% if intel.get('min_moq') %}
+        <div>
+          <span class="text-gray-400">MOQ:</span>
+          <span class="font-mono text-gray-700">{{ intel.min_moq }}</span>
+        </div>
+        {% endif %}
+
+        {% if vendor_phone %}
+        <div>
+          <span class="text-gray-400">Phone:</span>
+          <a href="tel:{{ vendor_phone }}" class="text-brand-500 hover:text-brand-700">{{ vendor_phone }}</a>
+        </div>
+        {% endif %}
+      </div>
+
+      {# explain_lead one-liner #}
+      {% if intel.get('explain_lead') %}
+      <p class="text-[11px] text-gray-500 italic border-t border-gray-100 pt-1.5 mt-1">
+        {{ intel.explain_lead }}
+      </p>
+      {% endif %}
+
+      {# Actions row #}
+      <div class="flex items-center gap-2 mt-2 pt-1.5 border-t border-gray-100">
+        {% if vs != 'blacklisted' and vs != 'unavailable' %}
+        <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids={{ requirement.id }}&preselect={{ s.vendor_name|urlencode }}'})"
+                class="text-[10px] text-brand-600 hover:text-brand-800 font-medium">
+          Send RFQ
+        </button>
+        <button hx-post="/v2/partials/sightings/{{ requirement.id }}/mark-unavailable"
+                hx-vals='{"vendor_name": "{{ s.vendor_name }}"}'
+                hx-target="#sightings-detail"
+                hx-swap="innerHTML"
+                hx-confirm="Mark {{ s.vendor_name }} as unavailable for this part?"
+                data-loading-disable
+                @click.stop
+                class="text-[10px] text-gray-400 hover:text-rose-500">
+          Mark Unavail
+        </button>
+        {% endif %}
+      </div>
+    </div>
+  </td>
+</tr>
