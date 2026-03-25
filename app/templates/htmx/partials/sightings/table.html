@@ -30,9 +30,10 @@
 
 {# ── Filter Bar ──────────────────────────────────────────────── #}
 <div class="px-3 py-2 border-b border-gray-100 flex items-center gap-2 flex-wrap"
-     x-data="{ sStatus: '{{ status }}', sAssigned: '{{ assigned }}', sGroupBy: '{{ group_by }}' }">
+     x-data="{ sStatus: '{{ status }}', sAssigned: '{{ assigned }}', sGroupBy: '{{ group_by }}', sQ: '{{ q }}' }">
   <input aria-label="Search sightings" type="text" name="q" value="{{ q }}"
          placeholder="Search MPN or customer..."
+         x-model="sQ"
          hx-get="/v2/partials/sightings"
          hx-trigger="keyup changed delay:300ms"
          hx-target="#sightings-table"
@@ -42,7 +43,7 @@
           hx-get="/v2/partials/sightings"
           hx-trigger="change"
           hx-target="#sightings-table"
-          :hx-vals="JSON.stringify({status: sStatus, assigned: sAssigned, q: document.querySelector('#sightings-table input[name=q]')?.value || ''})"
+          :hx-vals="JSON.stringify({status: sStatus, assigned: sAssigned, q: sQ})"
           class="rounded-lg border border-gray-200 px-3 py-1.5 text-sm text-gray-600">
     <option value="" {{ 'selected' if not group_by }}>Flat</option>
     <option value="brand" {{ 'selected' if group_by == 'brand' }}>By Brand</option>

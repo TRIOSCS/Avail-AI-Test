@@ -38,6 +38,7 @@ from app.constants import (
     RequisitionStatus,
     SourcingStatus,
     SOVerificationStatus,
+    UserRole,
 )
 from app.database import SessionLocal
 from app.models.auth import User
@@ -50,12 +51,10 @@ from app.models.quotes import Quote, QuoteLine
 from app.models.sourcing import Requirement, Requisition
 from app.models.vendors import VendorCard
 
-now = datetime.now(timezone.utc)
-
 
 def get_or_create_user(db):
     """Get first admin user for FK references."""
-    user = db.query(User).filter(User.role == "admin").first()
+    user = db.query(User).filter(User.role == UserRole.ADMIN).first()
     if not user:
         raise RuntimeError("No admin user found — seed at least one user first")
     return user
@@ -375,7 +374,14 @@ def seed_requisitions(db, user, companies, sites, material_cards, vendor_cards):
             all_requirements.append(requirement)
 
             # Create offers for reqs that are past sourcing stage
-            if cfg["status"].value in ("offers", "quoting", "quoted", "won", "lost", "reopened"):
+            if cfg["status"] in (
+                RequisitionStatus.OFFERS,
+                RequisitionStatus.QUOTING,
+                RequisitionStatus.QUOTED,
+                RequisitionStatus.WON,
+                RequisitionStatus.LOST,
+                RequisitionStatus.REOPENED,
+            ):
                 offer_statuses = list(OfferStatus)
                 for k in range(2):
                     vc = vendor_cards[(i + j + k) % len(vendor_cards)]
@@ -409,7 +415,7 @@ def seed_requisitions(db, user, companies, sites, material_cards, vendor_cards):
     return requisitions, all_requirements, all_offers
 
 
-def seed_quotes(db, user, requisitions, requirements, offers, sites):
+def seed_quotes(db, user, requisitions, requirements, offers, sites, *, now):
     """Create quotes in every status."""
     quote_configs = [
         {"status": QuoteStatus.DRAFT, "req_idx": 5},
@@ -476,7 +482,7 @@ def seed_quotes(db, user, requisitions, requirements, offers, sites):
     return quotes
 
 
-def seed_buy_plans(db, user, quotes, requisitions, requirements, offers):
+def seed_buy_plans(db, user, quotes, requisitions, requirements, offers, *, now):
     """Create buy plans in every status."""
     bp_configs = [
         {"status": BuyPlanStatus.DRAFT, "so_status": SOVerificationStatus.PENDING, "quote_idx": 0},
@@ -611,7 +617,7 @@ def seed_excess_lists(db, user, companies, sites, vendor_cards):
             db.flush()
 
             # Add bids for bidding/closed lists
-            if ecfg["status"].value in ("bidding", "closed"):
+            if ecfg["status"] in (ExcessListStatus.BIDDING, ExcessListStatus.CLOSED):
                 for k in range(2):
                     vc = vendor_cards[(i + j + k) % len(vendor_cards)]
                     bs = bid_statuses[(i + j + k) % len(bid_statuses)]
@@ -634,6 +640,7 @@ def seed_excess_lists(db, user, companies, sites, vendor_cards):
 
 def main():
     logger.info("=== Seeding test data ===")
+    now = datetime.now(timezone.utc)
     db = SessionLocal()
     try:
         user = get_or_create_user(db)
@@ -643,8 +650,8 @@ def main():
         vendor_cards = seed_vendor_cards(db)
         material_cards = seed_material_cards(db)
         requisitions, requirements, offers = seed_requisitions(db, user, companies, sites, material_cards, vendor_cards)
-        quotes = seed_quotes(db, user, requisitions, requirements, offers, sites)
-        seed_buy_plans(db, user, quotes, requisitions, requirements, offers)
+        quotes = seed_quotes(db, user, requisitions, requirements, offers, sites, now=now)
+        seed_buy_plans(db, user, quotes, requisitions, requirements, offers, now=now)
         seed_excess_lists(db, user, companies, sites, vendor_cards)
 
         db.commit()

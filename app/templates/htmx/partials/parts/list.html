@@ -5,7 +5,9 @@
 #}
 
 <div class="flex flex-col h-full"
-     x-data="{ ...partsListSelection(), pStatus: '{{ status }}', pSort: '{{ sort }}', pDir: '{{ dir }}', pArchived: {{ 'true' if include_archived else 'false' }} }"
+     x-data="{ ...partsListSelection(), pStatus: '{{ status }}', pSort: '{{ sort }}', pDir: '{{ dir }}', pArchived: {{ 'true' if include_archived else 'false' }},
+       _fp(extra) { return JSON.stringify({status: this.pStatus, sort: this.pSort, dir: this.pDir, include_archived: this.pArchived || undefined, ...extra}); },
+       get filterVals() { return this._fp(); } }"
      @part-updated.window="htmx.ajax('GET', '/v2/partials/parts' + window.location.search, {target: '#parts-list', swap: 'innerHTML'})"
      @part-archived.window="htmx.ajax('GET', '/v2/partials/parts' + window.location.search, {target: '#parts-list', swap: 'innerHTML'})">
 
@@ -36,7 +38,7 @@
                  hx-target="#parts-list"
                  hx-swap="morph:innerHTML"
                  hx-trigger="input delay:300ms"
-                 :hx-vals="JSON.stringify({status: pStatus, sort: pSort, dir: pDir, include_archived: pArchived || undefined})"
+                 :hx-vals="filterVals"
                  class="w-full pl-7 pr-2 py-0.5 text-[10px] border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 placeholder:text-gray-400">
         </div>
 
@@ -45,7 +47,7 @@
                 @click="pStatus = '{{ s_val }}'"
                 hx-get="/v2/partials/parts"
                 hx-target="#parts-list"
-                :hx-vals="JSON.stringify({status: '{{ s_val }}', sort: pSort, dir: pDir, include_archived: pArchived || undefined})"
+                :hx-vals="_fp({status: '{{ s_val }}'})"
                 class="px-2 py-0.5 text-[10px] font-semibold rounded transition-colors flex-shrink-0
                        {{ 'bg-brand-500 text-white' if status == s_val else 'bg-white text-gray-500 border border-gray-300 hover:bg-brand-50 hover:text-brand-600' }}">
           {{ s_label }}
@@ -111,7 +113,7 @@
                 {% if sort_key %}
                 <a hx-get="/v2/partials/parts"
                    hx-target="#parts-list"
-                   :hx-vals="JSON.stringify({status: pStatus, sort: '{{ sort_key }}', dir: '{{ 'asc' if sort == sort_key and dir == 'desc' else 'desc' }}', include_archived: pArchived || undefined})"
+                   :hx-vals="_fp({sort: '{{ sort_key }}', dir: '{{ 'asc' if sort == sort_key and dir == 'desc' else 'desc' }}'})"
                    class="cursor-pointer hover:text-brand-600 inline-flex items-center gap-0.5">
                   {{ label }}
                   {% if sort == sort_key %}
@@ -254,13 +256,13 @@
       {% if offset > 0 %}
       <button hx-get="/v2/partials/parts"
               hx-target="#parts-list"
-              :hx-vals="JSON.stringify({offset: {{ offset - limit }}, status: pStatus, sort: pSort, dir: pDir, include_archived: pArchived || undefined})"
+              :hx-vals="_fp({offset: {{ offset - limit }}})"
               class="px-2 py-0.5 text-[10px] font-semibold bg-white border border-gray-300 rounded hover:bg-brand-50 text-gray-600">Prev</button>
       {% endif %}
       {% if offset + limit < total %}
       <button hx-get="/v2/partials/parts"
               hx-target="#parts-list"
-              :hx-vals="JSON.stringify({offset: {{ offset + limit }}, status: pStatus, sort: pSort, dir: pDir, include_archived: pArchived || undefined})"
+              :hx-vals="_fp({offset: {{ offset + limit }}})"
               class="px-2 py-0.5 text-[10px] font-semibold bg-white border border-gray-300 rounded hover:bg-brand-50 text-gray-600">Next</button>
       {% endif %}
     </div>
