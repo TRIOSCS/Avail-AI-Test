@@ -21,7 +21,7 @@ The sightings page is the primary workspace for buyers triaging open requirement
 ## 2. Design Principles
 
 1. **Scan → Triage → Act:** Dashboard strip for page-level awareness, heatmap rows for row-level triage, detail panel for evaluation and action
-2. **Two-state visual hierarchy:** Rose = needs attention, no color = fine. No amber/green noise
+2. **Two-state row heatmap:** Table row backgrounds use only rose = needs attention, or no color = fine. No amber/green row noise. (Dashboard strip counters and detail panel elements may use semantic colors — amber, blue, red — as appropriate for their context.)
 3. **Progressive disclosure:** Show 2 key metrics inline, expand for full details. Collapse sections only if empty
 4. **Reuse shared components:** Replace all hand-rolled UI with existing shared partials and macros
 5. **Forward-only auto-progress:** Status auto-advancement never goes backwards, never overrides manual status
@@ -39,24 +39,30 @@ These are bugs/gaps that block the redesign and must be resolved before any feat
 `require_valid_transition("requirement", ...)` currently has no entry for SourcingStatus — it silently allows any transition. Add:
 
 ```python
+from ..constants import SourcingStatus
+
 SOURCING_TRANSITIONS = {
-    "open": ["sourcing", "archived"],
-    "sourcing": ["offered", "open", "archived"],
-    "offered": ["quoted", "sourcing", "archived"],
-    "quoted": ["won", "lost", "offered", "archived"],
-    "won": ["archived"],
-    "lost": ["open", "archived"],
-    "archived": [],  # terminal
+    SourcingStatus.OPEN: [SourcingStatus.SOURCING, SourcingStatus.ARCHIVED],
+    SourcingStatus.SOURCING: [SourcingStatus.OFFERED, SourcingStatus.OPEN, SourcingStatus.ARCHIVED],
+    SourcingStatus.OFFERED: [SourcingStatus.QUOTED, SourcingStatus.SOURCING, SourcingStatus.ARCHIVED],
+    SourcingStatus.QUOTED: [SourcingStatus.WON, SourcingStatus.LOST, SourcingStatus.OFFERED, SourcingStatus.ARCHIVED],
+    SourcingStatus.WON: [SourcingStatus.ARCHIVED],
+    SourcingStatus.LOST: [SourcingStatus.OPEN, SourcingStatus.ARCHIVED],
+    SourcingStatus.ARCHIVED: [],  # terminal
 }
 ```
 
-Register as `"requirement"` in `transition_map`.
+Register as `"requirement"` in `transition_map`. Import `SourcingStatus` from `constants.py` to match the existing code style (other entries use enum constants like `OfferStatus.PENDING_REVIEW`).
 
 ### 3.2 Extend `log_rfq_activity` Signature
 
 **File:** `/root/availai/app/services/activity_service.py`
 
-Add optional `requirement_id` parameter to `log_rfq_activity()`. Currently writes `requisition_id` only — switching to this helper without the extension would break the per-requirement activity timeline filter at `sightings.py:226-232`.
+Current signature: `log_rfq_activity(db, rfq_id, activity_type, description, metadata=None, user_id=None)` where `rfq_id` maps to `requisition_id`.
+
+Add optional `requirement_id` parameter: `log_rfq_activity(db, rfq_id, activity_type, description, metadata=None, user_id=None, requirement_id=None)`.
+
+**Why:** The current `sightings_send_inquiry` endpoint manually creates `ActivityLog` objects with both `requisition_id` and `requirement_id` set (line 492). The sightings activity timeline filters on `ActivityLog.requirement_id` (line 226-232). If we switch to `log_rfq_activity()` without adding `requirement_id`, the per-requirement activity timeline would show no RFQ activity. The extension also enables other future call sites to log per-requirement activity consistently.
 
 ### 3.3 Alembic Migration: Pre-aggregated Fields on VendorSightingSummary
 
@@ -81,6 +87,15 @@ UPDATE vendor_sighting_summary vss
 SET vendor_card_id = vc.id
 FROM vendor_cards vc
 WHERE vss.vendor_name = vc.normalized_name;
+
+-- Backfill vendor_phone from VendorCard where NULL
+UPDATE vendor_sighting_summary vss
+SET vendor_phone = (vc.phones->>0)
+FROM vendor_cards vc
+WHERE vss.vendor_name = vc.normalized_name
+  AND vss.vendor_phone IS NULL
+  AND vc.phones IS NOT NULL
+  AND jsonb_array_length(vc.phones) > 0;
 
 -- Backfill aggregated fields
 UPDATE vendor_sighting_summary vss SET
@@ -124,7 +139,7 @@ Move `Alpine.data('splitPanel', ...)` from inline `<script>` in `split_panel.htm
 
 ### 4.1 Fix Eager Loading
 
-**File:** `/root/availai/app/routers/sightings.py:78-82`
+**File:** `/root/availai/app/routers/sightings.py` — in `sightings_list()` query builder
 
 ```python
 .options(
@@ -169,9 +184,9 @@ Before merging, normalize all input `vendor_names` to lowercase/trimmed form and
 
 ### 4.4 Remove Vendor Phone Fallback
 
-**File:** `/root/availai/app/routers/sightings.py:212-224`
+**File:** `/root/availai/app/routers/sightings.py` — in `sightings_detail()`, vendor phone fallback block
 
-Replace the 12-line fallback dance with:
+Replace the fallback dance with:
 ```python
 vendor_phones = {s.vendor_name: s.vendor_phone for s in summaries if s.vendor_phone}
 ```
@@ -301,9 +316,9 @@ Row background: rose or none (heatmap). Stale indicator: refresh icon on coverag
 
 Collapsible section between header and vendor table. **Open by default if any constraint is non-null.**
 
-Fields (from existing `Requirement` model):
-- `need_by_date` — with urgency coloring
-- `urgency` — via existing `urgency_badge` macro (from `Requisition.urgency`)
+Fields from existing models:
+- `need_by_date` — from `Requirement` model, with urgency coloring
+- `urgency` — from `Requisition` model (accessed via `requirement.requisition.urgency`), rendered via existing `urgency_badge` macro
 - `condition`, `date_codes`, `firmware`, `packaging` — as label:value pairs
 - `sale_notes` — if present
 - `substitutes` — if present
@@ -328,6 +343,22 @@ Enhance each vendor row in the breakdown table:
 - `best_lead_time_days`, `min_moq` — from new VSS columns
 
 **Backend:** Extend the VendorCard batch query in `sightings_detail()` to also pull `response_rate`, `ghost_rate`, `engagement_score`, `avg_response_hours`. Call `explain_lead()` per summary. Net +0 queries (piggybacked on existing phone lookup query, which now also fetches intelligence fields).
+
+**`explain_lead()` field mapping** (signature: `explain_lead(vendor_name, **kwargs)`):
+
+| `explain_lead()` param | Source |
+|---|---|
+| `vendor_name` | `VendorSightingSummary.vendor_name` |
+| `is_authorized` | `False` (not on VSS; derive from `source_types` containing "digikey"/"mouser" if needed) |
+| `vendor_score` | `VendorCard.vendor_score` |
+| `unit_price` | `VendorSightingSummary.best_price` |
+| `median_price` | `None` (not available on VSS — omit, function handles None) |
+| `qty_available` | `VendorSightingSummary.estimated_qty` |
+| `target_qty` | `Requirement.target_qty` |
+| `has_contact` | `VendorSightingSummary.has_contact_info` (new column) |
+| `evidence_tier` | `VendorSightingSummary.tier` |
+| `source_type` | First entry from `VendorSightingSummary.source_types` JSON |
+| `age_days` | `(now - VendorSightingSummary.newest_sighting_at).days` (new column) |
 
 **Template:** Extract vendor row to `sightings/_vendor_row.html`.
 
@@ -453,7 +484,28 @@ Validates transition, updates status, logs `activity_type="status_change"` to Ac
 5. Log `ActivityLog` entry: `activity_type="status_change"`, `notes="Auto-set to sourcing after RFQ send"`
 6. Show subtle toast: "Status auto-updated to Sourcing"
 
-**Gate on email success:** The current `sightings_send_inquiry` try/except at line 473-498 swallows email failures. Auto-progress must be inside the success path, not after the try/except.
+**Gate on email success:** The current `sightings_send_inquiry` try/except swallows email failures. Auto-progress must be placed INSIDE the `try` block, after `sent_count = len(results)` and before the ActivityLog loop:
+
+```python
+try:
+    results = await send_batch_rfq(...)
+    sent_count = len(results)
+
+    # AUTO-PROGRESS: only on confirmed send success, forward-only
+    for r in requirements:
+        if r.sourcing_status == SourcingStatus.OPEN:
+            r.sourcing_status = SourcingStatus.SOURCING
+            db.add(ActivityLog(
+                user_id=user.id, activity_type="status_change",
+                requirement_id=r.id, requisition_id=r.requisition_id,
+                notes="Auto-set to sourcing after RFQ send",
+            ))
+
+    # existing ActivityLog loop continues here...
+except Exception:
+    # email failed — do NOT advance status
+    ...
+```
 
 ### 7.5 Batch Operations
 
@@ -484,7 +536,18 @@ Add a preview step between compose and send in `vendor_modal.html`. Multi-step A
 2. **Step 2 (new):** Preview rendered email per vendor with recipients, subject, body. "Back" to edit, "Send" to confirm
 3. **Step 3:** Send confirmation toast
 
-New endpoint: `POST /v2/partials/sightings/preview-inquiry` — renders the email HTML without sending. Returns preview template.
+New endpoint: `POST /v2/partials/sightings/preview-inquiry`
+
+**Request** (form data, same as compose step):
+- `requirement_ids` — list of int IDs
+- `vendor_names` — list of vendor name strings
+- `email_body` — composed email text
+
+**Response:** HTML partial rendering the preview for each vendor: recipient email (or "No email on file" warning), subject line, rendered body with parts table. Returns `sightings/preview.html` template.
+
+**Error cases:**
+- 400 if `requirement_ids`, `vendor_names`, or `email_body` is empty
+- Vendor with no email: show amber warning "No email found for {vendor}" with option to enter manually or skip
 
 ### 7.7 Cross-Requirement Vendor Overlap
 
@@ -516,17 +579,27 @@ sem = asyncio.Semaphore(5)
 
 async def _refresh_one(req_id: int):
     async with sem:
-        with SessionLocal() as task_db:
+        task_db = SessionLocal()
+        try:
             req_obj = task_db.get(Requirement, req_id)
             if not req_obj:
                 return False
+            # search_requirement is async but uses sync SQLAlchemy internally.
+            # It runs connector calls via asyncio.gather (network I/O) and
+            # sync DB writes between awaits, which is safe in a single-worker
+            # deployment. Each task gets its own session to prevent cross-task
+            # interference.
             await search_requirement(req_obj, task_db)
             return True
+        finally:
+            task_db.close()
 
 results = await asyncio.gather(*[_refresh_one(rid) for rid in requirement_ids])
 ```
 
 Each task gets its own `SessionLocal()` and re-fetches its ORM objects. The pre-fetched `reqs_by_id` dict from the original session is NOT shared.
+
+**Note on sync/async:** `search_requirement` is an `async def` that uses sync SQLAlchemy sessions between awaited network calls. This is the established pattern throughout the codebase (single Gunicorn worker). The per-task session isolation prevents the actual issue (concurrent access to the SAME session object), not the sync-in-async pattern which is already accepted in this codebase.
 
 ---
 
@@ -623,7 +696,7 @@ SSE disconnect banner after 30s: thin amber bar below dashboard strip with "Live
 - `app/templates/htmx/partials/sightings/preview.html`
 - `alembic/versions/XXX_add_vss_preaggregated_fields.py`
 - `alembic/versions/XXX_backfill_vss_preaggregated_fields.py`
-- `tests/test_workflow_state_clarity.py` — 6 sourcing transition tests (if not existing)
+- `tests/test_workflow_state_clarity.py` — 6 sourcing transition tests (create new file if not existing, otherwise add new test class `TestSourcingStatusTransitions`)
 
 ---
 
