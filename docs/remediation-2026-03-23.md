@@ -1,6 +1,10 @@
 # Full-Stack Remediation Audit — 2026-03-23
 
-## Status: FINDINGS COLLECTED, FIXES NOT YET APPLIED
+## Status: ALL FINDINGS FIXED
+
+> **Completion note:** All findings from this audit have been remediated in two commits:
+> - `cc92b41c` (2026-03-23): 18 findings fixed
+> - `33075b60` (2026-03-25): 24 remaining findings fixed
 
 All audit streams completed except test coverage (still running).
 Skills/agents/hooks committed and deployed (commit `d159972f`).
@@ -106,9 +110,9 @@ Skills/agents/hooks committed and deployed (commit `d159972f`).
 
 ## NEXT STEPS
 
-1. Wait for test coverage audit results (may already be done)
-2. Fix ALL findings above — start with critical/high, then medium/low
-3. Run full test suite after fixes
-4. Run mypy/bandit/ruff to verify clean
-5. Commit as single remediation commit
-6. Deploy
+1. ~~Wait for test coverage audit results (may already be done)~~ DONE
+2. ~~Fix ALL findings above — start with critical/high, then medium/low~~ DONE (cc92b41c + 33075b60)
+3. ~~Run full test suite after fixes~~ DONE
+4. ~~Run mypy/bandit/ruff to verify clean~~ DONE
+5. ~~Commit as single remediation commit~~ DONE (split across two commits)
+6. ~~Deploy~~ DONE
