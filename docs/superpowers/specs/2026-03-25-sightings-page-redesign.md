@@ -42,13 +42,13 @@ These are bugs/gaps that block the redesign and must be resolved before any feat
 from ..constants import SourcingStatus
 
 SOURCING_TRANSITIONS = {
-    SourcingStatus.OPEN: [SourcingStatus.SOURCING, SourcingStatus.ARCHIVED],
-    SourcingStatus.SOURCING: [SourcingStatus.OFFERED, SourcingStatus.OPEN, SourcingStatus.ARCHIVED],
-    SourcingStatus.OFFERED: [SourcingStatus.QUOTED, SourcingStatus.SOURCING, SourcingStatus.ARCHIVED],
-    SourcingStatus.QUOTED: [SourcingStatus.WON, SourcingStatus.LOST, SourcingStatus.OFFERED, SourcingStatus.ARCHIVED],
-    SourcingStatus.WON: [SourcingStatus.ARCHIVED],
-    SourcingStatus.LOST: [SourcingStatus.OPEN, SourcingStatus.ARCHIVED],
-    SourcingStatus.ARCHIVED: [],  # terminal
+    SourcingStatus.OPEN: {SourcingStatus.SOURCING, SourcingStatus.ARCHIVED},
+    SourcingStatus.SOURCING: {SourcingStatus.OFFERED, SourcingStatus.OPEN, SourcingStatus.ARCHIVED},
+    SourcingStatus.OFFERED: {SourcingStatus.QUOTED, SourcingStatus.SOURCING, SourcingStatus.ARCHIVED},
+    SourcingStatus.QUOTED: {SourcingStatus.WON, SourcingStatus.LOST, SourcingStatus.OFFERED, SourcingStatus.ARCHIVED},
+    SourcingStatus.WON: {SourcingStatus.ARCHIVED},
+    SourcingStatus.LOST: {SourcingStatus.OPEN, SourcingStatus.ARCHIVED},
+    SourcingStatus.ARCHIVED: set(),  # terminal
 }
 ```
 
@@ -276,12 +276,17 @@ Move `selectedIds` from inline `x-data` to `$store.sightingSelection`:
 
 ```javascript
 Alpine.store('sightingSelection', {
-    ids: new Set(),
-    toggle(id) { this.ids.has(id) ? this.ids.delete(id) : this.ids.add(id) },
-    has(id) { return this.ids.has(id) },
-    clear() { this.ids = new Set() },
-    get count() { return this.ids.size },
-    get array() { return Array.from(this.ids) },
+    // Use an object (not Set) for Alpine reactivity — Set mutations
+    // (.add/.delete) are not tracked by Alpine's proxy system.
+    _map: {},
+    toggle(id) {
+        if (this._map[id]) { delete this._map[id] }
+        else { this._map[id] = true }
+    },
+    has(id) { return !!this._map[id] },
+    clear() { this._map = {} },
+    get count() { return Object.keys(this._map).length },
+    get array() { return Object.keys(this._map).map(Number) },
 })
 ```
 
@@ -478,7 +483,7 @@ Validates transition, updates status, logs `activity_type="status_change"` to Ac
 
 **Rules:**
 1. After successful RFQ send (confirmed by `send_batch_rfq` return, not before): set `sourcing_status = "sourcing"` IF current status is "open"
-2. After offer approval: set `sourcing_status = "offered"` IF current status is "open" or "sourcing"
+2. After offer approval: set `sourcing_status = "offered"` IF current status is "open" or "sourcing". Two approval endpoints exist: `PUT /api/offers/{id}/approve` in `crm/offers.py` and HTMX approve in `htmx_views.py` — both need the hook
 3. **Never override a manual status** that is already ahead (e.g., don't set "sourcing" on something already "offered")
 4. **Never go backwards** (e.g., don't set "sourcing" on something marked "won")
 5. Log `ActivityLog` entry: `activity_type="status_change"`, `notes="Auto-set to sourcing after RFQ send"`
@@ -610,10 +615,23 @@ Each task gets its own `SessionLocal()` and re-fetches its ORM objects. The pre-
 Use existing `SSEBroker` and `user:{id}` channel. Publish from:
 
 - `search_service.py` after VendorSightingSummary rebuild: `broker.publish(f"user:{user_id}", "sighting-updated", json.dumps({"requirement_id": rid}))`
-- `inbox_monitor.py` when offers are auto-created: same channel, event type `offer-created`
+- `email_service.py` in `_auto_create_offers_from_parse()` when offers are auto-created: same channel, event type `offer-created`
 - All mutation endpoints in Phase 4: add `broker.publish()` calls
 
-Frontend: Alpine listener on the global SSE stream (already connected in `base.html`). Conditionally triggers HTMX reload of `#sightings-detail` if `selectedReqId` matches incoming `requirement_id`.
+Frontend: Add a page-level SSE connection to the sightings workspace template (there is NO global SSE connection in `base.html`). Use the existing `/api/events/stream` endpoint with a `user:{id}` channel:
+
+```html
+{# In sightings/list.html, on the workspace container #}
+<div hx-ext="sse" sse-connect="/api/events/stream">
+  <div sse-swap="sighting-updated"
+       hx-get="/v2/partials/sightings/${selectedReqId}/detail"
+       hx-target="#sightings-detail"
+       hx-trigger="sse:sighting-updated[detail.requirement_id == $store.sightingSelection.current]">
+  </div>
+</div>
+```
+
+Alternatively, use Alpine's `EventSource` API directly in the workspace `x-data` for finer-grained control over which events trigger refreshes.
 
 SSE disconnect banner after 30s: thin amber bar below dashboard strip with "Live updates paused. [Refresh]".
 
@@ -686,7 +704,7 @@ SSE disconnect banner after 30s: thin amber bar below dashboard strip with "Live
 - `app/templates/htmx/partials/sightings/vendor_modal.html` — OOO warnings, email preview step
 - `app/templates/htmx/partials/shared/pagination.html` — configurable `hx_target`
 - `tests/test_sightings_router.py` — ~60 new tests
-- `tests/test_sighting_aggregation.py` — ~6 updated tests
+- `tests/test_sighting_aggregation.py` — ~6 updated tests. Note: `TestVendorPhoneLookup` class (2 tests) will break when phone fallback is removed in Phase 1 — update these to test the new backfilled data path
 
 ### Created
 - `app/templates/htmx/partials/sightings/_constraints.html`
@@ -696,7 +714,7 @@ SSE disconnect banner after 30s: thin amber bar below dashboard strip with "Live
 - `app/templates/htmx/partials/sightings/preview.html`
 - `alembic/versions/XXX_add_vss_preaggregated_fields.py`
 - `alembic/versions/XXX_backfill_vss_preaggregated_fields.py`
-- `tests/test_workflow_state_clarity.py` — 6 sourcing transition tests (create new file if not existing, otherwise add new test class `TestSourcingStatusTransitions`)
+- `tests/test_workflow_state_clarity.py` — file already exists; add new test class `TestSourcingStatusTransitions` (6 tests) alongside existing `TestStatusMachineValidation`
 
 ---
 
