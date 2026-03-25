@@ -34,6 +34,7 @@
           <input aria-label="Search parts" type="text" name="q" value="{{ q }}" placeholder="MPN, customer, req..."
                  hx-get="/v2/partials/parts"
                  hx-target="#parts-list"
+                 hx-swap="morph:innerHTML"
                  hx-trigger="input delay:300ms"
                  :hx-vals="JSON.stringify({status: pStatus, sort: pSort, dir: pDir, include_archived: pArchived || undefined})"
                  class="w-full pl-7 pr-2 py-0.5 text-[10px] border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 placeholder:text-gray-400">
