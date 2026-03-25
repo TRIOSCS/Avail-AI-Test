@@ -388,6 +388,33 @@ class TestWorkflowIntegration:
         assert vr.status == "reviewed"
 
 
+from app.services.status_machine import validate_transition
+
+
+class TestSourcingStatusTransitions:
+    """Verify SourcingStatus transitions in status_machine.py."""
+
+    def test_open_to_sourcing_valid(self):
+        assert validate_transition("requirement", "open", "sourcing") is True
+
+    def test_sourcing_to_offered_valid(self):
+        assert validate_transition("requirement", "sourcing", "offered") is True
+
+    def test_offered_to_quoted_valid(self):
+        assert validate_transition("requirement", "offered", "quoted") is True
+
+    def test_open_to_won_invalid(self):
+        """Skipping states should be rejected."""
+        assert validate_transition("requirement", "open", "won", raise_on_invalid=False) is False
+
+    def test_archived_is_terminal(self):
+        """No transitions from archived."""
+        assert validate_transition("requirement", "archived", "open", raise_on_invalid=False) is False
+
+    def test_noop_same_status_valid(self):
+        assert validate_transition("requirement", "open", "open") is True
+
+
 class TestStatusMachineValidation:
     """Status machine prevents invalid offer/quote transitions."""
 

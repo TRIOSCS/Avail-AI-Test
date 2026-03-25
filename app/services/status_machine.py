@@ -16,6 +16,7 @@ from ..constants import (
     OfferStatus,
     QuoteStatus,
     RequisitionStatus,
+    SourcingStatus,
 )
 
 # ── Offer Status Transitions ────────────────────────────────────────────
@@ -99,6 +100,17 @@ REQUISITION_TRANSITIONS: dict[str, set[str]] = {
     RequisitionStatus.CANCELLED: {RequisitionStatus.ACTIVE, RequisitionStatus.DRAFT},
 }
 
+# ── Sourcing Status Transitions (Requirement-level) ────────────────────
+SOURCING_TRANSITIONS: dict[str, set[str]] = {
+    SourcingStatus.OPEN: {SourcingStatus.SOURCING, SourcingStatus.ARCHIVED},
+    SourcingStatus.SOURCING: {SourcingStatus.OFFERED, SourcingStatus.OPEN, SourcingStatus.ARCHIVED},
+    SourcingStatus.OFFERED: {SourcingStatus.QUOTED, SourcingStatus.SOURCING, SourcingStatus.ARCHIVED},
+    SourcingStatus.QUOTED: {SourcingStatus.WON, SourcingStatus.LOST, SourcingStatus.OFFERED, SourcingStatus.ARCHIVED},
+    SourcingStatus.WON: {SourcingStatus.ARCHIVED},
+    SourcingStatus.LOST: {SourcingStatus.OPEN, SourcingStatus.ARCHIVED},
+    SourcingStatus.ARCHIVED: set(),  # terminal
+}
+
 
 def require_valid_transition(entity_type: str, current_status: str, new_status: str) -> None:
     """Validate a status transition or raise HTTPException 409."""
@@ -125,6 +137,7 @@ def validate_transition(
         "quote": QUOTE_TRANSITIONS,
         "buy_plan": BUY_PLAN_TRANSITIONS,
         "requisition": REQUISITION_TRANSITIONS,
+        "requirement": SOURCING_TRANSITIONS,
     }
 
     transitions = transition_map.get(entity_type)
