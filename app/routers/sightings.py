@@ -239,20 +239,7 @@ async def sightings_detail(
         db.query(Offer).filter(Offer.requirement_id == requirement_id, Offer.status == OfferStatus.PENDING_REVIEW).all()
     )
 
-    # Batch vendor phone lookup — single query instead of N+1
-    vendor_names_needing_phone = [s.vendor_name for s in summaries if not s.vendor_phone]
     vendor_phones = {s.vendor_name: s.vendor_phone for s in summaries if s.vendor_phone}
-    if vendor_names_needing_phone:
-        normalized_names = [normalize_vendor_name(vn) for vn in vendor_names_needing_phone]
-        cards = db.query(VendorCard).filter(VendorCard.normalized_name.in_(normalized_names)).all()
-        card_phones = {}
-        for card in cards:
-            if card.phones:
-                card_phones[card.normalized_name] = card.phones[0] if isinstance(card.phones, list) else card.phones
-        for vn in vendor_names_needing_phone:
-            phone = card_phones.get(normalize_vendor_name(vn))
-            if phone:
-                vendor_phones[vn] = phone
 
     activities = (
         db.query(ActivityLog)
