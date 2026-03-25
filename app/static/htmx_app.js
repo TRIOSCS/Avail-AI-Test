@@ -557,20 +557,34 @@ Alpine.data('customerPicker', () => ({
     newName: '',
     newLocation: '',
     lookingUp: false,
+    _onCustomerCreated: null,
     init() {
-        fetch('/api/companies/typeahead')
-            .then(r => r.json())
-            .then(data => { this.companies = data; })
-            .catch(() => {});
+        this.fetchCompanies();
         // Listen for customer-created event from quick-create
-        document.addEventListener('customer-created', (e) => {
+        this._onCustomerCreated = (e) => {
             this.selectById(e.detail.siteId, e.detail.displayName);
-            // Refresh typeahead so new company appears in future searches
-            fetch('/api/companies/typeahead')
-                .then(r => r.json())
-                .then(data => { this.companies = data; })
-                .catch(() => {});
-        });
+            this.fetchCompanies();
+        };
+        document.addEventListener('customer-created', this._onCustomerCreated);
+    },
+    destroy() {
+        if (this._onCustomerCreated) {
+            document.removeEventListener('customer-created', this._onCustomerCreated);
+        }
+    },
+    loadError: '',
+    fetchCompanies() {
+        this.loadError = '';
+        fetch('/api/companies/typeahead')
+            .then(r => {
+                if (!r.ok) throw new Error(`HTTP ${r.status}`);
+                return r.json();
+            })
+            .then(data => { this.companies = data; })
+            .catch(e => {
+                console.error('Failed to load customer list:', e);
+                this.loadError = 'Could not load customers.';
+            });
     },
     get filtered() {
         if (!this.query.trim()) return this.companies.slice(0, 20);
@@ -578,8 +592,8 @@ Alpine.data('customerPicker', () => ({
         return this.companies.filter(c => c.name.toLowerCase().includes(q)).slice(0, 20);
     },
     select(company, site) {
-        this.selectedSiteId = site.id;
-        this.selectedName = company.name + ' \u2014 ' + site.site_name;
+        this.selectedSiteId = site.id || '';
+        this.selectedName = site.id ? company.name + ' \u2014 ' + site.site_name : company.name;
         this.open = false;
         this.query = '';
         this.addNew = false;
@@ -596,19 +610,29 @@ Alpine.data('customerPicker', () => ({
     },
     async lookupCompany() {
         this.lookingUp = true;
-        // Use data-lookup-result within this component's root element to avoid
-        // global ID collisions when multiple pickers exist on the same page.
         const resultEl = this.$el.querySelector('[data-lookup-result]');
+        if (!resultEl) {
+            console.error('customerPicker: [data-lookup-result] element not found');
+            this.lookingUp = false;
+            return;
+        }
         try {
             const formData = new FormData();
             formData.append('company_name', this.newName);
             formData.append('location', this.newLocation);
             const resp = await fetch('/v2/partials/customers/lookup', { method: 'POST', body: formData });
+            if (!resp.ok) {
+                resultEl.textContent = `Lookup failed (${resp.status}). Try again.`;
+                resultEl.classList.add('text-xs', 'text-rose-500');
+                this.lookingUp = false;
+                return;
+            }
             // Server HTML is trusted (same-origin, auth-protected endpoint)
             resultEl.replaceChildren();
             resultEl.insertAdjacentHTML('afterbegin', await resp.text());
             htmx.process(resultEl);
         } catch (e) {
+            console.error('Customer lookup failed:', e);
             resultEl.textContent = 'Lookup failed. Try again.';
             resultEl.classList.add('text-xs', 'text-rose-500');
         }
@@ -627,14 +651,14 @@ Alpine.data('unifiedReqModal', () => ({
     inputMode: 'paste',
     rawText: '',
     // State
-    parsed: false,
     parsing: false,
     saving: false,
     parseError: '',
     parts: [],
     showAllColumns: false,
+    showBulkFill: false,
     init() {
-        // No-op: modal opens fresh each time
+        this.addBlankPart();
     },
     get errorCount() {
         return this.parts.filter(p => p.primary_mpn && !p.manufacturer).length;
@@ -645,32 +669,31 @@ Alpine.data('unifiedReqModal', () => ({
     get hasErrors() {
         return this.errorCount > 0;
     },
-    addBlankPart() {
-        this.parts.push({
+    /** Build a part row object, optionally seeded from AI-parsed data. */
+    _makePart(src) {
+        return {
             _id: Date.now() + Math.random(),
-            primary_mpn: '',
-            manufacturer: '',
-            target_qty: 1,
-            brand: '',
-            condition: 'new',
-            target_price: '',
-            customer_pn: '',
-            date_codes: '',
-            packaging: '',
-            firmware: '',
-            hardware_codes: '',
-            need_by_date: '',
-            sale_notes: '',
-            substitutes: [],
-        });
+            primary_mpn: src?.primary_mpn || '',
+            manufacturer: src?.manufacturer || '',
+            target_qty: src?.target_qty || 1,
+            brand: src?.brand || '',
+            condition: src?.condition || 'new',
+            target_price: src?.target_price || '',
+            customer_pn: src?.customer_pn || '',
+            date_codes: src?.date_codes || '',
+            packaging: src?.packaging || '',
+            firmware: src?.firmware || '',
+            hardware_codes: src?.hardware_codes || '',
+            need_by_date: src?.need_by_date || '',
+            sale_notes: src?.notes || src?.sale_notes || '',
+            substitutes: src?.substitutes || [],
+        };
+    },
+    addBlankPart() {
+        this.parts.push(this._makePart());
     },
     removePart(idx) {
         this.parts.splice(idx, 1);
-    },
-    resetParse() {
-        this.parsed = false;
-        this.parts = [];
-        this.parseError = '';
     },
     async parseWithAI() {
         this.parsing = true;
@@ -690,41 +713,37 @@ Alpine.data('unifiedReqModal', () => ({
                 method: 'POST',
                 body: formData,
             });
+            if (!resp.ok) {
+                this.parseError = resp.status === 401
+                    ? 'Session expired. Please refresh and log in again.'
+                    : `Server error (${resp.status}). Please try again.`;
+                this.parsing = false;
+                return;
+            }
             const data = await resp.json();
             if (data.error) {
                 this.parseError = data.error;
             } else {
-                this.parts = (data.requirements || []).map((r, i) => ({
-                    _id: i + Date.now(),
-                    primary_mpn: r.primary_mpn || '',
-                    manufacturer: r.manufacturer || '',
-                    target_qty: r.target_qty || 1,
-                    brand: r.brand || '',
-                    condition: r.condition || 'new',
-                    target_price: r.target_price || '',
-                    customer_pn: r.customer_pn || '',
-                    date_codes: r.date_codes || '',
-                    packaging: r.packaging || '',
-                    firmware: r.firmware || '',
-                    hardware_codes: r.hardware_codes || '',
-                    need_by_date: r.need_by_date || '',
-                    sale_notes: r.notes || r.sale_notes || '',
-                    substitutes: r.substitutes || [],
-                }));
+                const parsed = (data.requirements || []).map(r => this._makePart(r));
+                if (parsed.length === 0) {
+                    this.parseError = 'No parts could be extracted. Try a different format.';
+                } else {
+                    // Remove empty rows, then append parsed parts
+                    this.parts = this.parts.filter(p => p.primary_mpn.trim());
+                    this.parts.push(...parsed);
+                    this.showBulkFill = false;
+                    this.rawText = '';
+                }
                 if (data.inferred_name && !this.reqName.trim()) {
                     this.reqName = data.inferred_name;
                 }
                 if (data.inferred_customer && !this.customerName.trim()) {
                     this.customerName = data.inferred_customer;
                 }
-                this.parsed = true;
-                if (this.parts.length === 0) {
-                    this.parseError = 'No parts could be extracted. Try a different format.';
-                    this.parsed = false;
-                }
             }
         } catch (e) {
-            this.parseError = 'Parse failed. Please try again.';
+            console.error('parseWithAI error:', e);
+            this.parseError = 'Network error — check your connection and try again.';
         }
         this.parsing = false;
     },

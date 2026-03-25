@@ -271,7 +271,7 @@ async def import_customers(
 
         company = seen_companies[key]
 
-        site_name = (row.get("site_name") or company_name).strip()
+        site_name = (row.get("site_name") or "HQ").strip()
         site_key = f"{key}|{site_name.lower()}"
         if site_key not in seen_sites:
             site = (

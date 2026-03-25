@@ -47,14 +47,23 @@
   {% endblock %}
 
   {# ── Modal (global) ──────────────────────────────────────── #}
-  <div x-data="{ open: false }" x-show="open" x-cloak x-transition
-       @open-modal.window="open = true; if ($event.detail && $event.detail.url) htmx.ajax('GET', $event.detail.url, {target: '#modal-content', swap: 'innerHTML'})"
-       @close-modal.window="open = false"
+  <div x-data="{ open: false, wide: false }" x-show="open" x-cloak x-transition
+       @open-modal.window="
+         wide = !!($event.detail && $event.detail.wide);
+         open = true;
+         if ($event.detail && $event.detail.url) {
+           htmx.ajax('GET', $event.detail.url, {target: '#modal-content', swap: 'innerHTML'});
+         }
+       "
+       @close-modal.window="open = false; wide = false"
        @keydown.escape.window="open = false"
        class="fixed inset-0 z-50">
     <div class="fixed inset-0 bg-black/50" role="presentation" @click="open = false" aria-hidden="true"></div>
     <div class="fixed inset-0 flex items-center justify-center p-4">
-      <div class="bg-white rounded-lg shadow-xl max-w-lg w-full max-h-[90vh] overflow-y-auto" x-trap.noscroll="open">
+      <div class="bg-white rounded-lg shadow-xl w-full max-h-[90vh] overflow-y-auto"
+           role="dialog" aria-modal="true"
+           :class="wide ? 'max-w-5xl' : 'max-w-lg'"
+           x-trap.noscroll="open">
         <div id="modal-content"></div>
       </div>
     </div>
