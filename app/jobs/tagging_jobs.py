@@ -54,13 +54,13 @@ def register_tagging_jobs(scheduler, settings):
     #     name="Backfill untagged cards via Nexar (primary high-confidence source)",
     # )
 
-    # Claude Haiku AI classification — runs every 30 min, 500 cards per batch
-    scheduler.add_job(
-        _job_ai_tagging,
-        IntervalTrigger(minutes=30),
-        id="ai_tagging",
-        name="Classify untagged cards via Claude Haiku",
-    )
+    # DISABLED (2026-03-26) — AI tagging consumes significant Anthropic API quota
+    # scheduler.add_job(
+    #     _job_ai_tagging,
+    #     IntervalTrigger(minutes=30),
+    #     id="ai_tagging",
+    #     name="Classify untagged cards via Claude Haiku",
+    # )
 
     if settings.material_enrichment_enabled:
         scheduler.add_job(
