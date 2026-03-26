@@ -60,6 +60,7 @@ async def _job_cleanup_usage_log():
     except Exception:
         logger.exception("Usage log cleanup failed")
         db.rollback()
+        raise
     finally:
         db.close()
 
@@ -78,5 +79,6 @@ async def _job_reset_monthly_usage():
     except Exception:
         logger.exception("Monthly usage reset failed")
         db.rollback()
+        raise
     finally:
         db.close()

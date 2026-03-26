@@ -31,7 +31,7 @@ from ..constants import (
     UserRole,
 )
 from ..database import get_db
-from ..dependencies import get_user, require_user
+from ..dependencies import get_user, require_admin, require_user
 from ..models import (
     ApiSource,
     BuyPlan,
@@ -1070,7 +1070,7 @@ async def add_requirement(
                 if req_obj:
                     asyncio.run(do_search(req_obj, bg_db))
             except Exception:
-                logger.debug("Auto-search failed for requirement %s", requirement_id, exc_info=True)
+                logger.warning("Auto-search failed for requirement %s", requirement_id, exc_info=True)
             finally:
                 bg_db.close()
 
@@ -8469,7 +8469,7 @@ async def create_knowledge_entry(
 @router.get("/v2/partials/admin/api-health", response_class=HTMLResponse)
 async def admin_api_health(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Return connector health dashboard."""
@@ -8489,7 +8489,7 @@ async def admin_api_health(
 @router.post("/v2/partials/admin/import/vendors", response_class=HTMLResponse)
 async def import_vendors_csv(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Import vendors from CSV upload."""
@@ -8535,7 +8535,7 @@ async def import_vendors_csv(
 @router.get("/v2/partials/admin/data-ops", response_class=HTMLResponse)
 async def admin_data_ops(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Return admin data operations panel."""

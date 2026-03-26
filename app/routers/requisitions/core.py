@@ -70,14 +70,21 @@ async def requisition_counts(
     db: Session = Depends(get_db),
 ):
     """Lightweight counts for dashboard widgets — avoids the heavy list query."""
-    total = db.scalar(select(sqlfunc.count(Requisition.id)))
+    # Sales sees own reqs only; all other roles see everything
+    base_filter = []
+    if user.role == UserRole.SALES:
+        base_filter.append(Requisition.created_by == user.id)
+
+    total = db.scalar(select(sqlfunc.count(Requisition.id)).where(*base_filter))
     open_cnt = db.scalar(
         select(sqlfunc.count(Requisition.id)).where(
-            Requisition.status.in_([RequisitionStatus.ACTIVE, RequisitionStatus.SOURCING, RequisitionStatus.DRAFT])
+            *base_filter,
+            Requisition.status.in_([RequisitionStatus.ACTIVE, RequisitionStatus.SOURCING, RequisitionStatus.DRAFT]),
         )
     )
     archive_cnt = db.scalar(
         select(sqlfunc.count(Requisition.id)).where(
+            *base_filter,
             Requisition.status.in_(
                 [
                     RequisitionStatus.ARCHIVED,
@@ -85,7 +92,7 @@ async def requisition_counts(
                     RequisitionStatus.LOST,
                     RequisitionStatus.CANCELLED,
                 ]
-            )
+            ),
         )
     )
     return {"total": total or 0, "open": open_cnt or 0, "archive": archive_cnt or 0}

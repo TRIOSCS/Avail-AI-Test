@@ -141,6 +141,7 @@ def _seed_admin_user_if_env_set(db=None) -> None:
     except Exception:
         logger.exception("Failed creating admin user %s", email)
         db.rollback()
+        raise
     finally:
         if own_session:
             db.close()
@@ -167,6 +168,7 @@ def _seed_agent_user() -> None:
     except Exception:
         logger.exception("Failed seeding agent user")
         db.rollback()
+        raise
     finally:
         db.close()
 
