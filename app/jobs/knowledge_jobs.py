@@ -18,30 +18,33 @@ from ..scheduler import _traced_job
 
 def register_knowledge_jobs(scheduler, settings):
     """Register knowledge ledger background jobs."""
-    scheduler.add_job(
-        _job_refresh_insights,
-        IntervalTrigger(hours=6),
-        id="knowledge_refresh_insights",
-        name="Refresh AI insights for active requisitions",
-    )
+    # DISABLED (2026-03-26) — Knowledge insights not active in UI; heavy Anthropic
+    # API cost (~141 Sonnet calls w/ extended thinking every 6h).
+    # scheduler.add_job(
+    #     _job_refresh_insights,
+    #     IntervalTrigger(hours=6),
+    #     id="knowledge_refresh_insights",
+    #     name="Refresh AI insights for active requisitions",
+    # )
     scheduler.add_job(
         _job_expire_stale,
         CronTrigger(hour=3, minute=0),
         id="knowledge_expire_stale",
         name="Mark expired knowledge entries",
     )
-    scheduler.add_job(
-        _job_deliver_question_batches,
-        IntervalTrigger(hours=1),
-        id="knowledge_deliver_batches",
-        name="Deliver batched Q&A questions to buyers",
-    )
-    scheduler.add_job(
-        _job_send_knowledge_digests,
-        IntervalTrigger(hours=1),
-        id="knowledge_send_digests",
-        name="Send daily knowledge digests",
-    )
+    # No-ops (Teams removed) — kept disabled to avoid scheduler churn
+    # scheduler.add_job(
+    #     _job_deliver_question_batches,
+    #     IntervalTrigger(hours=1),
+    #     id="knowledge_deliver_batches",
+    #     name="Deliver batched Q&A questions to buyers",
+    # )
+    # scheduler.add_job(
+    #     _job_send_knowledge_digests,
+    #     IntervalTrigger(hours=1),
+    #     id="knowledge_send_digests",
+    #     name="Send daily knowledge digests",
+    # )
 
 
 @_traced_job
