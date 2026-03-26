@@ -607,6 +607,9 @@ async def requisition_import_save(
                     ],
                     "firmware": form.get(f"reqs[{idx}].firmware", "").strip() or None,
                     "hardware_codes": form.get(f"reqs[{idx}].hardware_codes", "").strip() or None,
+                    "description": form.get(f"reqs[{idx}].description", "").strip() or None,
+                    "package_type": form.get(f"reqs[{idx}].package_type", "").strip() or None,
+                    "revision": form.get(f"reqs[{idx}].revision", "").strip() or None,
                     "need_by_date": form.get(f"reqs[{idx}].need_by_date", "").strip() or None,
                     "sale_notes": form.get(f"reqs[{idx}].sale_notes", "").strip() or None,
                 }
@@ -656,6 +659,9 @@ async def requisition_import_save(
             packaging=item.get("packaging", ""),
             firmware=item.get("firmware", ""),
             hardware_codes=item.get("hardware_codes", ""),
+            description=item.get("description"),
+            package_type=item.get("package_type"),
+            revision=item.get("revision"),
             need_by_date=item.get("need_by_date"),
             sale_notes=item.get("sale_notes", ""),
         )

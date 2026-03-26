@@ -655,7 +655,6 @@ Alpine.data('unifiedReqModal', () => ({
     saving: false,
     parseError: '',
     parts: [],
-    showAllColumns: false,
     showBulkFill: false,
     init() {
         this.addBlankPart();
@@ -669,8 +668,19 @@ Alpine.data('unifiedReqModal', () => ({
     get hasErrors() {
         return this.errorCount > 0;
     },
+    /** Build a sub object for a substitute part. */
+    _makeSub(src) {
+        if (typeof src === 'string') return { mpn: src, manufacturer: '', revision: '', hardware_codes: '' };
+        return {
+            mpn: src?.mpn || src?.primary_mpn || '',
+            manufacturer: src?.manufacturer || '',
+            revision: src?.revision || '',
+            hardware_codes: src?.hardware_codes || '',
+        };
+    },
     /** Build a part row object, optionally seeded from AI-parsed data. */
     _makePart(src) {
+        const subs = (src?.substitutes || []).map(s => this._makeSub(s));
         return {
             _id: Date.now() + Math.random(),
             primary_mpn: src?.primary_mpn || '',
@@ -684,13 +694,25 @@ Alpine.data('unifiedReqModal', () => ({
             packaging: src?.packaging || '',
             firmware: src?.firmware || '',
             hardware_codes: src?.hardware_codes || '',
+            description: src?.description || '',
+            package_type: src?.package_type || '',
+            revision: src?.revision || '',
             need_by_date: src?.need_by_date || '',
             sale_notes: src?.notes || src?.sale_notes || '',
-            substitutes: src?.substitutes || [],
+            substitutes: subs,
+            showSubs: subs.length > 0,
         };
     },
     addBlankPart() {
         this.parts.push(this._makePart());
+    },
+    addSub(part) {
+        part.substitutes.push(this._makeSub());
+        part.showSubs = true;
+    },
+    removeSub(part, idx) {
+        part.substitutes.splice(idx, 1);
+        if (part.substitutes.length === 0) part.showSubs = false;
     },
     removePart(idx) {
         this.parts.splice(idx, 1);

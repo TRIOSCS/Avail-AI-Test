@@ -105,6 +105,9 @@ class RequirementCreate(BaseModel):
     firmware: str | None = None
     hardware_codes: str | None = None
     packaging: str | None = None
+    description: str | None = None
+    package_type: str | None = None
+    revision: str | None = None
     customer_pn: str | None = None
     need_by_date: date | None = None
     notes: str | None = None
@@ -161,6 +164,9 @@ class RequirementUpdate(BaseModel):
     hardware_codes: str | None = None
     packaging: str | None = None
     condition: str | None = None
+    description: str | None = None
+    package_type: str | None = None
+    revision: str | None = None
     customer_pn: str | None = None
     need_by_date: date | None = None
     notes: str | None = None
@@ -210,6 +216,9 @@ class RequirementOut(BaseModel):
     firmware: str | None = None
     hardware_codes: str | None = None
     packaging: str | None = None
+    description: str | None = None
+    package_type: str | None = None
+    revision: str | None = None
     customer_pn: str | None = None
     need_by_date: date | None = None
     notes: str | None = None
