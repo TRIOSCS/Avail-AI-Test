@@ -655,9 +655,13 @@ Alpine.data('unifiedReqModal', () => ({
     saving: false,
     parseError: '',
     parts: [],
+    activePartIdx: 0,
     showBulkFill: false,
     init() {
         this.addBlankPart();
+    },
+    focusPart(idx) {
+        this.activePartIdx = idx;
     },
     get errorCount() {
         return this.parts.filter(p => p.primary_mpn && !p.manufacturer).length;
@@ -701,14 +705,20 @@ Alpine.data('unifiedReqModal', () => ({
             sale_notes: src?.notes || src?.sale_notes || '',
             substitutes: subs,
             showSubs: subs.length > 0,
+            noteOpen: false,
         };
     },
     addBlankPart() {
         this.parts.push(this._makePart());
     },
     addSub(part) {
-        part.substitutes.push(this._makeSub());
-        part.showSubs = true;
+        const target = part || this.parts[this.activePartIdx] || this.parts[0];
+        if (!target) return;
+        target.substitutes.push(this._makeSub());
+        target.showSubs = true;
+    },
+    addSubToActive() {
+        this.addSub(this.parts[this.activePartIdx]);
     },
     removeSub(part, idx) {
         part.substitutes.splice(idx, 1);
@@ -716,6 +726,28 @@ Alpine.data('unifiedReqModal', () => ({
     },
     removePart(idx) {
         this.parts.splice(idx, 1);
+        if (this.activePartIdx >= this.parts.length) this.activePartIdx = Math.max(0, this.parts.length - 1);
+    },
+    async standardizeDescription(part) {
+        const raw = (part.description || '').trim();
+        if (!raw || raw.length < 3) return;
+        try {
+            const resp = await fetch('/api/ai/standardize-description', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    description: raw,
+                    mpn: part.primary_mpn || '',
+                    manufacturer: part.manufacturer || '',
+                }),
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data.description) part.description = data.description;
+            }
+        } catch (e) {
+            console.warn('Description standardize failed:', e);
+        }
     },
     async parseWithAI() {
         this.parsing = true;

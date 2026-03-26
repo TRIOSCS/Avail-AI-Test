@@ -14,6 +14,7 @@ Depends on: services/ai_service.py, services/response_parser.py
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
+from pydantic import BaseModel as PydanticBaseModel
 from sqlalchemy.orm import Session
 
 from ..config import settings
@@ -338,6 +339,54 @@ async def ai_normalize_parts(
 
     results = await normalize_parts(payload.parts)
     return {"parts": results, "count": len(results)}
+
+
+class StandardizeDescriptionRequest(PydanticBaseModel):
+    """Standardize a free-text part description into a uniform format."""
+
+    description: str
+    mpn: str = ""
+    manufacturer: str = ""
+
+
+@router.post("/api/ai/standardize-description")
+@limiter.limit("30/minute")
+async def ai_standardize_description(
+    payload: StandardizeDescriptionRequest,
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Use AI to clean a part description into Trio Avail standard format.
+
+    Standard format: CATEGORY SUBCATEGORY KEY-SPECS PACKAGE
+    Example: IC MCU 32-BIT 168MHZ 1MB FLASH LQFP-100
+    """
+    if not payload.description.strip():
+        return {"description": ""}
+
+    from app.utils.claude_client import claude_text
+
+    prompt = (
+        f"Standardize this electronic component description into a short, "
+        f"uppercase, distributor-style format.\n\n"
+        f"Rules:\n"
+        f"- ALL CAPS\n"
+        f"- Category first (IC, CONNECTOR, RESISTOR, CAPACITOR, etc.)\n"
+        f"- Then subcategory (MCU, OPAMP, USB, MLCC, etc.)\n"
+        f"- Then key specs (voltage, current, freq, memory, bits, etc.)\n"
+        f"- Then package if known (QFP-100, 0402, SOIC-8, etc.)\n"
+        f"- No sentences — just abbreviated spec tokens\n"
+        f"- Max ~60 characters\n"
+        f"- If the input is too vague, clean it up as best you can\n\n"
+        f"MPN: {payload.mpn}\n"
+        f"Manufacturer: {payload.manufacturer}\n"
+        f"Raw description: {payload.description}\n\n"
+        f"Return ONLY the standardized description, nothing else."
+    )
+    result = await claude_text(prompt, model_tier="fast", max_tokens=100)
+    if result:
+        result = result.strip().strip('"').strip("'")
+    return {"description": result or payload.description.upper()}
 
 
 # ── Feature 2b: Parse Vendor Reply → Structured Offer (Anthropic) ────────

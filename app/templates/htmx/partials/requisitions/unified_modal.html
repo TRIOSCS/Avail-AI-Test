@@ -3,7 +3,7 @@
    Called by: "+ Req" button in parts workspace filter bar.
    Depends on: Alpine.js (unifiedReqModal, customerPicker), HTMX, brand palette.
 #}
-<div class="p-6 flex flex-col max-h-[90vh]" x-data="unifiedReqModal()">
+<div class="p-4 sm:p-5 lg:p-6 flex flex-col h-full" x-data="unifiedReqModal()">
 
   {# ── Header ──────────────────────────────────────────────────────── #}
   <div class="flex items-center justify-between mb-4 flex-shrink-0">
@@ -16,7 +16,7 @@
   </div>
 
   {# ── Zone 1: Metadata (pinned top) ──────────────────────────────── #}
-  <div class="grid grid-cols-3 gap-3 mb-4 flex-shrink-0">
+  <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4 flex-shrink-0">
     {# Name #}
     <div>
       <label class="block text-xs font-medium text-gray-700 mb-1">Name <span class="text-rose-500">*</span></label>
@@ -124,7 +124,7 @@
   </div>
 
   {# ── Zone 2: Parts Table (always visible, starts with one blank row) ── #}
-  <div class="flex-1 min-h-0 mb-4">
+  <div class="flex-1 min-h-0 mb-4 flex flex-col">
     {# Toolbar: add row + show columns + bulk fill #}
     <div class="flex items-center justify-between mb-1">
       <div class="flex items-center gap-2">
@@ -132,6 +132,13 @@
                 class="text-xs font-medium text-brand-500 hover:text-brand-700 transition-colors">
           + Add row
         </button>
+        <span class="text-gray-300">|</span>
+        <button type="button" @click="addSubToActive()"
+                class="text-xs font-medium text-brand-500 hover:text-brand-700 transition-colors">
+          + Add sub
+        </button>
+        <span class="text-[10px] text-gray-400" x-show="parts.length > 0" x-cloak
+              x-text="'(to row ' + (activePartIdx + 1) + ')'"></span>
         <span class="text-gray-300">|</span>
         <button type="button" @click="showBulkFill = !showBulkFill"
                 class="text-xs font-medium transition-colors"
@@ -186,210 +193,195 @@
       </div>
     </div>
 
-    {# Parts table #}
-    <div class="overflow-x-auto max-h-[55vh] overflow-y-auto border border-gray-400/60 rounded-lg shadow-sm">
-      <table class="w-full text-xs">
-        <thead class="bg-gray-700 sticky top-0 z-10">
-          <tr class="text-left text-[10px] font-bold text-gray-100 uppercase tracking-wider">
-            <th class="px-2 py-2.5 border-r border-gray-600">MPN</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">Subs</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">Manufacturer</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">Qty</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">Cond</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">Target $</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">Brand</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">Cust PN</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">Description</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">Pkg Type</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">Rev</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">DC</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">Packaging</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">FW</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">HW</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">Need By</th>
-            <th class="px-2 py-2.5 border-r border-gray-600">Notes</th>
-            <th class="px-2 py-2.5 w-7"></th>
-          </tr>
-        </thead>
-        <tbody>
-          <template x-for="(part, i) in parts" :key="part._id">
-            <tr>
-              {# ── Main part row ── #}
-              <td colspan="18" class="p-0">
-                <div class="flex border-t border-gray-300" :class="i % 2 === 0 ? 'bg-white' : 'bg-gray-50'">
-                  {# MPN #}
-                  <div class="flex-none w-[150px] px-2 py-2 border-r border-gray-200">
-                    <input aria-label="MPN *" type="text" x-model="part.primary_mpn" placeholder="MPN *"
-                           class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 font-mono bg-white">
+    {# Parts grid #}
+    <div class="overflow-auto flex-1 min-h-0 border border-gray-400/60 rounded-lg shadow-sm text-xs">
+      <div class="min-w-max">
+      {# ── Header row ── #}
+      <div class="flex bg-brand-700 sticky top-0 z-10 border-b-2 border-brand-800 text-[10px] font-bold text-white uppercase tracking-wider">
+        <div class="flex-none w-[150px] px-2 py-2.5 border-r border-brand-600">MPN</div>
+        <div class="flex-none w-[140px] px-2 py-2.5 border-r border-brand-600">Manufacturer</div>
+        <div class="flex-none w-[65px] px-1.5 py-2.5 border-r border-brand-600">Qty</div>
+        <div class="flex-none w-[75px] px-1.5 py-2.5 border-r border-brand-600">Cond</div>
+        <div class="flex-none w-[80px] px-1.5 py-2.5 border-r border-brand-600">Target $</div>
+        <div class="flex-none w-[85px] px-1.5 py-2.5 border-r border-brand-600">Cust PN</div>
+        <div class="flex-none w-[100px] px-1.5 py-2.5 border-r border-brand-600">Description</div>
+        <div class="flex-none w-[90px] px-1.5 py-2.5 border-r border-brand-600">Packaging</div>
+        <div class="flex-none w-[55px] px-1 py-2.5 border-r border-brand-600">Rev</div>
+        <div class="flex-none w-[60px] px-1 py-2.5 border-r border-brand-600">DC</div>
+        <div class="flex-none w-[55px] px-1 py-2.5 border-r border-brand-600">FW</div>
+        <div class="flex-none w-[55px] px-1 py-2.5 border-r border-brand-600">HW</div>
+        <div class="flex-none w-[115px] px-1 py-2.5 border-r border-brand-600">Need By</div>
+        <div class="flex-none w-[50px] px-1 py-2.5 border-r border-brand-600">Notes</div>
+        <div class="flex-none w-7"></div>
+      </div>
+
+      {# ── Body rows ── #}
+      <template x-for="(part, i) in parts" :key="part._id">
+        <div>
+          {# ── Main part row ── #}
+          <div class="flex border-t border-gray-300/80" :class="[i % 2 === 0 ? 'bg-white' : 'bg-gray-50', activePartIdx === i ? 'ring-1 ring-inset ring-brand-300' : '']"
+               @focusin="focusPart(i)">
+            {# MPN + subs count badge #}
+            <div class="flex-none w-[150px] px-2 py-2 border-r border-gray-300">
+              <input aria-label="MPN *" type="text" x-model="part.primary_mpn" placeholder="MPN *"
+                     class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 font-mono bg-white">
+              <button x-show="part.substitutes.length > 0" x-cloak type="button" @click="part.showSubs = !part.showSubs"
+                      class="mt-1 text-[10px] font-semibold px-2 py-0.5 rounded bg-brand-100 text-brand-700 hover:bg-brand-200 transition-colors w-full text-center">
+                <span x-text="part.substitutes.length + ' sub' + (part.substitutes.length !== 1 ? 's' : '') + (part.showSubs ? ' ▴' : ' ▾')"></span>
+              </button>
+            </div>
+            {# Manufacturer #}
+            <div class="flex-none w-[140px] px-2 py-2 border-r border-gray-300 relative">
+              <input aria-label="Mfr *" type="text" x-model="part.manufacturer" placeholder="Mfr *"
+                     hx-get="/v2/partials/manufacturers/search"
+                     hx-trigger="input changed delay:300ms"
+                     hx-target="next .mfr-dropdown"
+                     hx-vals="js:{q: event.target.value}"
+                     hx-swap="innerHTML"
+                     class="w-full px-1.5 py-1.5 text-xs border rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white"
+                     :class="part.primary_mpn && !part.manufacturer ? 'border-red-400 bg-red-50' : 'border-gray-300'">
+              <div class="mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-brand-200 rounded-lg shadow-lg max-h-32 overflow-y-auto"
+                   x-cloak></div>
+            </div>
+            {# Qty #}
+            <div class="flex-none w-[65px] px-1.5 py-2 border-r border-gray-300">
+              <input aria-label="Qty" type="number" x-model.number="part.target_qty" min="1"
+                     class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
+            </div>
+            {# Condition #}
+            <div class="flex-none w-[75px] px-1.5 py-2 border-r border-gray-300">
+              <select x-model="part.condition"
+                      class="w-full px-1 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
+                <option value="new">New</option>
+                <option value="refurbished">Refurb</option>
+                <option value="used">Used</option>
+              </select>
+            </div>
+            {# Target $ #}
+            <div class="flex-none w-[80px] px-1.5 py-2 border-r border-gray-300">
+              <input aria-label="$" type="number" step="0.01" x-model.number="part.target_price" placeholder="$"
+                     class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
+            </div>
+            {# Cust PN #}
+            <div class="flex-none w-[85px] px-1.5 py-2 border-r border-gray-300">
+              <input aria-label="Cust PN" type="text" x-model="part.customer_pn" placeholder="Cust PN"
+                     class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
+            </div>
+            {# Description — AI standardizes on blur #}
+            <div class="flex-none w-[100px] px-1.5 py-2 border-r border-gray-300">
+              <input aria-label="Description" type="text" x-model="part.description" placeholder="Description"
+                     @blur="standardizeDescription(part)"
+                     class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
+            </div>
+            {# Packaging (combined: package type + shipping format) #}
+            <div class="flex-none w-[90px] px-1.5 py-2 border-r border-gray-300">
+              <input aria-label="Packaging" type="text" x-model="part.packaging" placeholder="T&R, QFP..."
+                     class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
+            </div>
+            {# Rev #}
+            <div class="flex-none w-[55px] px-1 py-2 border-r border-gray-300">
+              <input aria-label="Rev" type="text" x-model="part.revision" placeholder="Rev"
+                     class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
+            </div>
+            {# DC #}
+            <div class="flex-none w-[60px] px-1 py-2 border-r border-gray-300">
+              <input aria-label="DC" type="text" x-model="part.date_codes" placeholder="DC"
+                     class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
+            </div>
+            {# FW #}
+            <div class="flex-none w-[55px] px-1 py-2 border-r border-gray-300">
+              <input aria-label="FW" type="text" x-model="part.firmware" placeholder="FW"
+                     class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
+            </div>
+            {# HW #}
+            <div class="flex-none w-[55px] px-1 py-2 border-r border-gray-300">
+              <input aria-label="HW" type="text" x-model="part.hardware_codes" placeholder="HW"
+                     class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
+            </div>
+            {# Need By #}
+            <div class="flex-none w-[115px] px-1 py-2 border-r border-gray-300">
+              <input aria-label="Need by" type="date" x-model="part.need_by_date"
+                     class="w-full px-1 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
+            </div>
+            {# Notes toggle #}
+            <div class="flex-none w-[50px] px-1 py-2 border-r border-gray-300">
+              <button type="button" @click="part.noteOpen = !part.noteOpen"
+                      class="w-full text-[10px] font-medium px-1 py-1 rounded transition-colors text-center truncate"
+                      :class="part.sale_notes ? 'bg-blue-50 text-blue-700 hover:bg-blue-100 border border-blue-200' : 'text-gray-400 hover:text-brand-600 hover:bg-gray-100'">
+                <template x-if="!part.sale_notes"><span>+ Note</span></template>
+                <template x-if="part.sale_notes"><span class="block truncate" x-text="part.sale_notes.substring(0, 8) + '…'"></span></template>
+              </button>
+            </div>
+            {# Remove #}
+            <div class="flex-none w-7 flex items-start justify-center pt-2">
+              <button type="button" @click="removePart(i)"
+                      class="text-gray-400 hover:text-rose-500 p-0.5" title="Remove" aria-label="Remove part">
+                <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
+                </svg>
+              </button>
+            </div>
+          </div>
+
+          {# ── Notes row (inline, expands modal height) ── #}
+          <template x-if="part.noteOpen">
+            <div class="flex items-start gap-3 px-4 py-2 bg-blue-50/50 border-t border-blue-200/50">
+              <label class="flex-none text-[10px] font-bold text-blue-600 uppercase tracking-wide pt-1.5">Notes</label>
+              <textarea x-model="part.sale_notes" placeholder="Enter notes, special instructions, customer requirements..." rows="3"
+                        class="flex-1 px-2.5 py-1.5 text-xs border border-blue-200 rounded-lg focus:ring-1 focus:ring-brand-500 focus:border-brand-500 resize-y bg-white"></textarea>
+              <button type="button" @click="part.noteOpen = false"
+                      class="flex-none text-[10px] font-semibold text-blue-600 hover:text-blue-800 pt-1.5">Done</button>
+            </div>
+          </template>
+
+          {# ── Substitute detail rows ── #}
+          <template x-if="part.showSubs">
+            <div class="border-t border-gray-200">
+              <template x-for="(sub, si) in part.substitutes" :key="si">
+                <div class="flex items-center bg-amber-50/60 border-b border-amber-200/50 border-l-[3px] border-l-amber-400">
+                  <div class="flex-none w-[40px] px-2 py-1.5 text-center">
+                    <span class="text-[9px] font-bold text-amber-500 uppercase">Alt</span>
                   </div>
-                  {# Subs toggle / count #}
-                  <div class="flex-none w-[70px] px-1.5 py-2 border-r border-gray-200 flex items-center">
-                    <button type="button" @click="part.showSubs ? (part.showSubs = false) : addSub(part)"
-                            class="text-[10px] font-semibold px-2 py-1 rounded transition-colors w-full text-center"
-                            :class="part.substitutes.length > 0 ? 'bg-brand-100 text-brand-700 hover:bg-brand-200' : 'bg-gray-100 text-gray-500 hover:bg-gray-200'">
-                      <span x-text="part.substitutes.length > 0 ? part.substitutes.length + ' sub' + (part.substitutes.length !== 1 ? 's' : '') : '+ Sub'"></span>
-                    </button>
+                  <div class="flex-none w-[150px] px-1.5 py-1.5">
+                    <input aria-label="Sub MPN" type="text" x-model="sub.mpn" placeholder="Sub MPN"
+                           class="w-full px-1.5 py-1 text-xs border border-amber-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 font-mono bg-white">
                   </div>
-                  {# Manufacturer #}
-                  <div class="flex-none w-[140px] px-2 py-2 border-r border-gray-200 relative">
-                    <input aria-label="Mfr *" type="text" x-model="part.manufacturer" placeholder="Mfr *"
+                  <div class="flex-none w-[140px] px-1.5 py-1.5 relative">
+                    <input aria-label="Sub Mfr" type="text" x-model="sub.manufacturer" placeholder="Manufacturer"
                            hx-get="/v2/partials/manufacturers/search"
                            hx-trigger="input changed delay:300ms"
-                           hx-target="next .mfr-dropdown"
+                           hx-target="next .sub-mfr-dropdown"
                            hx-vals="js:{q: event.target.value}"
                            hx-swap="innerHTML"
-                           class="w-full px-1.5 py-1.5 text-xs border rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white"
-                           :class="part.primary_mpn && !part.manufacturer ? 'border-red-400 bg-red-50' : 'border-gray-300'">
-                    <div class="mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-brand-200 rounded-lg shadow-lg max-h-32 overflow-y-auto"
+                           class="w-full px-1.5 py-1 text-xs border border-amber-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
+                    <div class="sub-mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-brand-200 rounded-lg shadow-lg max-h-32 overflow-y-auto"
                          x-cloak></div>
                   </div>
-                  {# Qty #}
-                  <div class="flex-none w-[65px] px-1.5 py-2 border-r border-gray-200">
-                    <input aria-label="Qty" type="number" x-model.number="part.target_qty" min="1"
-                           class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
+                  <div class="flex-none w-[80px] px-1.5 py-1.5">
+                    <input aria-label="Sub Rev" type="text" x-model="sub.revision" placeholder="Rev"
+                           class="w-full px-1.5 py-1 text-xs border border-amber-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
                   </div>
-                  {# Condition #}
-                  <div class="flex-none w-[75px] px-1.5 py-2 border-r border-gray-200">
-                    <select x-model="part.condition"
-                            class="w-full px-1 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                      <option value="new">New</option>
-                      <option value="refurbished">Refurb</option>
-                      <option value="used">Used</option>
-                    </select>
+                  <div class="flex-none w-[80px] px-1.5 py-1.5">
+                    <input aria-label="Sub HW" type="text" x-model="sub.hardware_codes" placeholder="HW"
+                           class="w-full px-1.5 py-1 text-xs border border-amber-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
                   </div>
-                  {# Target $ #}
-                  <div class="flex-none w-[80px] px-1.5 py-2 border-r border-gray-200">
-                    <input aria-label="$" type="number" step="0.01" x-model.number="part.target_price" placeholder="$"
-                           class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                  </div>
-                  {# Brand #}
-                  <div class="flex-none w-[80px] px-1.5 py-2 border-r border-gray-200">
-                    <input aria-label="Brand" type="text" x-model="part.brand" placeholder="Brand"
-                           class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                  </div>
-                  {# Cust PN #}
-                  <div class="flex-none w-[85px] px-1.5 py-2 border-r border-gray-200">
-                    <input aria-label="Cust PN" type="text" x-model="part.customer_pn" placeholder="Cust PN"
-                           class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                  </div>
-                  {# Description #}
-                  <div class="flex-1 min-w-[120px] px-1.5 py-2 border-r border-gray-200">
-                    <input aria-label="Description" type="text" x-model="part.description" placeholder="Part description"
-                           class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                  </div>
-                  {# Pkg Type #}
-                  <div class="flex-none w-[75px] px-1.5 py-2 border-r border-gray-200">
-                    <input aria-label="Pkg Type" type="text" x-model="part.package_type" placeholder="QFP..."
-                           class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                  </div>
-                  {# Rev #}
-                  <div class="flex-none w-[55px] px-1 py-2 border-r border-gray-200">
-                    <input aria-label="Rev" type="text" x-model="part.revision" placeholder="Rev"
-                           class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                  </div>
-                  {# DC #}
-                  <div class="flex-none w-[60px] px-1 py-2 border-r border-gray-200">
-                    <input aria-label="DC" type="text" x-model="part.date_codes" placeholder="DC"
-                           class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                  </div>
-                  {# Packaging #}
-                  <div class="flex-none w-[70px] px-1 py-2 border-r border-gray-200">
-                    <select x-model="part.packaging"
-                            class="w-full px-1 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                      <option value="">—</option>
-                      <option value="tape & reel">T&R</option>
-                      <option value="tray">Tray</option>
-                      <option value="tube">Tube</option>
-                      <option value="bulk">Bulk</option>
-                    </select>
-                  </div>
-                  {# FW #}
-                  <div class="flex-none w-[55px] px-1 py-2 border-r border-gray-200">
-                    <input aria-label="FW" type="text" x-model="part.firmware" placeholder="FW"
-                           class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                  </div>
-                  {# HW #}
-                  <div class="flex-none w-[55px] px-1 py-2 border-r border-gray-200">
-                    <input aria-label="HW" type="text" x-model="part.hardware_codes" placeholder="HW"
-                           class="w-full px-1.5 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                  </div>
-                  {# Need By #}
-                  <div class="flex-none w-[115px] px-1 py-2 border-r border-gray-200">
-                    <input aria-label="Need by" type="date" x-model="part.need_by_date"
-                           class="w-full px-1 py-1.5 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                  </div>
-                  {# Notes #}
-                  <div class="flex-none w-[160px] px-1.5 py-2 border-r border-gray-200">
-                    <textarea aria-label="Notes" x-model="part.sale_notes" placeholder="Notes..." rows="2"
-                              class="w-full px-1.5 py-1 text-xs border border-gray-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 resize-y bg-white"></textarea>
-                  </div>
-                  {# Remove #}
-                  <div class="flex-none w-7 flex items-center justify-center">
-                    <button type="button" @click="removePart(i)"
-                            class="text-gray-400 hover:text-rose-500 p-0.5" title="Remove" aria-label="Remove part">
-                      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+                  <div class="flex items-center gap-1.5 px-2 py-1.5">
+                    <button type="button" @click="addSub(part)"
+                            class="text-[10px] font-semibold text-brand-500 hover:text-brand-700" title="Add another sub">+</button>
+                    <button type="button" @click="removeSub(part, si)"
+                            class="text-gray-400 hover:text-rose-500" title="Remove sub">
+                      <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
                         <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
                       </svg>
                     </button>
                   </div>
                 </div>
-
-                {# ── Substitute detail rows ── #}
-                <template x-if="part.showSubs">
-                  <div class="border-t border-gray-200">
-                    <template x-for="(sub, si) in part.substitutes" :key="si">
-                      <div class="flex items-center bg-amber-50/60 border-b border-amber-200/50 border-l-[3px] border-l-amber-400">
-                        {# Indent + label #}
-                        <div class="flex-none w-[40px] px-2 py-1.5 text-center">
-                          <span class="text-[9px] font-bold text-amber-500 uppercase">Alt</span>
-                        </div>
-                        {# Sub MPN #}
-                        <div class="flex-none w-[150px] px-1.5 py-1.5">
-                          <input aria-label="Sub MPN" type="text" x-model="sub.mpn" placeholder="Sub MPN"
-                                 class="w-full px-1.5 py-1 text-xs border border-amber-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 font-mono bg-white">
-                        </div>
-                        {# Sub Manufacturer #}
-                        <div class="flex-none w-[140px] px-1.5 py-1.5 relative">
-                          <input aria-label="Sub Mfr" type="text" x-model="sub.manufacturer" placeholder="Manufacturer"
-                                 hx-get="/v2/partials/manufacturers/search"
-                                 hx-trigger="input changed delay:300ms"
-                                 hx-target="next .sub-mfr-dropdown"
-                                 hx-vals="js:{q: event.target.value}"
-                                 hx-swap="innerHTML"
-                                 class="w-full px-1.5 py-1 text-xs border border-amber-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                          <div class="sub-mfr-dropdown absolute z-50 w-full mt-0.5 bg-white border border-brand-200 rounded-lg shadow-lg max-h-32 overflow-y-auto"
-                               x-cloak></div>
-                        </div>
-                        {# Sub Rev #}
-                        <div class="flex-none w-[80px] px-1.5 py-1.5">
-                          <input aria-label="Sub Rev" type="text" x-model="sub.revision" placeholder="Rev"
-                                 class="w-full px-1.5 py-1 text-xs border border-amber-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                        </div>
-                        {# Sub HW #}
-                        <div class="flex-none w-[80px] px-1.5 py-1.5">
-                          <input aria-label="Sub HW" type="text" x-model="sub.hardware_codes" placeholder="HW"
-                                 class="w-full px-1.5 py-1 text-xs border border-amber-300 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500 bg-white">
-                        </div>
-                        {# Add more / Remove sub #}
-                        <div class="flex items-center gap-1.5 px-2 py-1.5">
-                          <button type="button" @click="addSub(part)"
-                                  class="text-[10px] font-semibold text-brand-500 hover:text-brand-700" title="Add another sub">+</button>
-                          <button type="button" @click="removeSub(part, si)"
-                                  class="text-gray-400 hover:text-rose-500" title="Remove sub">
-                            <svg class="h-3 w-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-                              <path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/>
-                            </svg>
-                          </button>
-                        </div>
-                      </div>
-                    </template>
-                  </div>
-                </template>
-              </td>
-            </tr>
+              </template>
+            </div>
           </template>
-        </tbody>
-      </table>
+        </div>
+      </template>
+      </div>{# /min-w-max #}
     </div>
   </div>
 
