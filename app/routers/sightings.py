@@ -36,6 +36,7 @@ from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
 from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transition
 from ..template_env import templates
+from ..utils.sql_helpers import escape_like
 from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["sightings"])
@@ -114,12 +115,14 @@ async def sightings_list(
     if filters.status:
         query = query.filter(Requirement.sourcing_status == filters.status)
     if filters.sales_person:
-        query = query.join(User, Requisition.created_by == User.id).filter(User.name.ilike(f"%{filters.sales_person}%"))
+        safe = escape_like(filters.sales_person)
+        query = query.join(User, Requisition.created_by == User.id).filter(User.name.ilike(f"%{safe}%"))
     if filters.assigned == "mine":
         query = query.filter(Requirement.assigned_buyer_id == user.id)
     if filters.q:
+        safe_q = escape_like(filters.q)
         query = query.filter(
-            Requirement.primary_mpn.ilike(f"%{filters.q}%") | Requisition.customer_name.ilike(f"%{filters.q}%")
+            Requirement.primary_mpn.ilike(f"%{safe_q}%") | Requisition.customer_name.ilike(f"%{safe_q}%")
         )
 
     total = query.count()

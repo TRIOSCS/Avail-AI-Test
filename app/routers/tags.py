@@ -11,6 +11,7 @@ from app.database import get_db
 from app.dependencies import require_user
 from app.models.tags import EntityTag, MaterialTag, Tag
 from app.schemas.tags import EntityTagResponse, MaterialTagResponse, TagResponse
+from app.utils.sql_helpers import escape_like
 
 router = APIRouter(prefix="/api/tags", tags=["tags"])
 
@@ -29,7 +30,7 @@ async def list_tags(
     if tag_type:
         query = query.filter(Tag.tag_type == tag_type)
     if q:
-        query = query.filter(Tag.name.ilike(f"%{q}%"))
+        query = query.filter(Tag.name.ilike(f"%{escape_like(q)}%"))
 
     total = query.count()
     tags = query.order_by(Tag.name).offset(offset).limit(limit).all()
