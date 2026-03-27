@@ -28,10 +28,17 @@
         {% if a.user and a.user.name %}
         <span class="font-medium">{{ a.user.name }}</span> —
         {% endif %}
-        {{ a.details or a.activity_type|replace('_', ' ')|capitalize }}
+        {{ a.notes or a.details or a.activity_type|replace('_', ' ')|capitalize }}
       </p>
+      {% if a.contact_name %}
+      <p class="text-[10px] text-gray-500 mt-0.5">re: {{ a.contact_name }}</p>
+      {% endif %}
       <p class="text-[10px] text-gray-400 mt-0.5">
         {{ a.created_at.strftime('%b %d, %H:%M') if a.created_at else '' }}
+        {% if a.channel and a.channel not in ('system', 'manual') %}
+        <span class="ml-1 text-gray-300">&middot;</span>
+        <span class="ml-1">{{ a.channel|capitalize }}</span>
+        {% endif %}
       </p>
     </div>
   </div>

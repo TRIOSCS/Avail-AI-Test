@@ -1190,6 +1190,26 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
         except Exception as e:
             logger.error("Failed to create offer for %s: %s", draft.get("mpn", "?"), e, exc_info=True)
 
+    # Publish SSE event so sightings page refreshes for affected requirements
+    if owner_id:
+        try:
+            import asyncio
+
+            from .services.sse_broker import broker
+
+            affected_req_ids = set(mpn_to_req_id.values())
+            loop = asyncio.get_event_loop()
+            for rid in affected_req_ids:
+                loop.create_task(
+                    broker.publish(
+                        f"user:{owner_id}",
+                        "sighting-updated",
+                        json.dumps({"requirement_id": rid}),
+                    )
+                )
+        except Exception:
+            logger.debug("SSE publish from auto-create offers skipped (no event loop)")
+
 
 async def process_batch_results(db: Session) -> int:
     """Poll for completed Anthropic batches and apply results.

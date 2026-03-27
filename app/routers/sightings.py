@@ -14,14 +14,14 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
-from ..constants import OfferStatus, RequisitionStatus
+from ..constants import OfferStatus, RequisitionStatus, SourcingStatus
 from ..database import get_db
 from ..dependencies import require_fresh_token, require_user
 from ..models import User
@@ -33,6 +33,8 @@ from ..models.vendors import VendorCard, VendorContact
 from ..schemas.sightings import SightingsListParams
 from ..services.activity_service import log_rfq_activity
 from ..services.sighting_status import compute_vendor_statuses
+from ..services.sse_broker import broker
+from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transition
 from ..template_env import templates
 from ..vendor_utils import normalize_vendor_name
 
@@ -305,6 +307,9 @@ async def sightings_list(
         "heatmap_req_ids": heatmap_req_ids,
         "groups": groups,
         "user": user,
+        "all_buyers": _get_cached(
+            "all_buyers", 300, lambda: db.query(User.id, User.name).filter(User.is_active.is_(True)).all()
+        ),
     }
     return templates.TemplateResponse("htmx/partials/sightings/table.html", ctx)
 
@@ -466,6 +471,20 @@ async def sightings_detail(
     if requirement.material_card_id:
         material_card = db.get(MaterialCard, requirement.material_card_id)
 
+    # ── Cross-Requirement Vendor Overlap (Phase 4.7) ────────────
+    overlap_counts: dict[str, int] = dict(
+        db.query(
+            VendorSightingSummary.vendor_name,
+            sqlfunc.count(sqlfunc.distinct(VendorSightingSummary.requirement_id)),
+        )
+        .join(Requirement, VendorSightingSummary.requirement_id == Requirement.id)
+        .join(Requisition, Requirement.requisition_id == Requisition.id)
+        .filter(Requisition.status == RequisitionStatus.ACTIVE)
+        .group_by(VendorSightingSummary.vendor_name)
+        .having(sqlfunc.count(sqlfunc.distinct(VendorSightingSummary.requirement_id)) > 1)
+        .all()
+    )
+
     activities = (
         db.query(ActivityLog)
         .filter(ActivityLog.requirement_id == requirement_id)
@@ -478,6 +497,9 @@ async def sightings_detail(
         "all_buyers", 300, lambda: db.query(User.id, User.name).filter(User.is_active.is_(True)).all()
     )
 
+    # ── Available Status Transitions (Phase 4.3) ────────────────
+    available_statuses = sorted(SOURCING_TRANSITIONS.get(status, set()))
+
     ctx = {
         "request": request,
         "requirement": requirement,
@@ -488,7 +510,9 @@ async def sightings_detail(
         "vendor_phones": vendor_phones,
         "vendor_intel": vendor_intel,
         "ooo_map": ooo_map,
+        "overlap_counts": overlap_counts,
         "suggested_action": suggested_action,
+        "available_statuses": available_statuses,
         "material_card": material_card,
         "activities": activities,
         "all_buyers": all_buyers,
@@ -518,6 +542,12 @@ async def sightings_refresh(
         await search_requirement(requirement, db)
     except Exception:
         logger.warning("Search refresh failed for requirement %s", requirement_id, exc_info=True)
+
+    await broker.publish(
+        f"user:{user.id}",
+        "sighting-updated",
+        json.dumps({"requirement_id": requirement_id}),
+    )
 
     return await sightings_detail(request, requirement_id, db, user)
 
@@ -558,10 +588,156 @@ async def sightings_batch_refresh(
             logger.warning("Batch refresh failed for requirement %s", rid, exc_info=True)
             failed += 1
 
+    # Notify all connected clients that these requirements changed
+    for rid in requirement_ids:
+        await broker.publish(
+            f"user:{user.id}",
+            "sighting-updated",
+            json.dumps({"requirement_id": int(rid)}),
+        )
+
     msg = f"Refreshed {success}/{success + failed} requirements."
     if failed:
         msg += f" {failed} failed."
     return _oob_toast(msg, "warning" if failed else "success")
+
+
+@router.post("/v2/partials/sightings/batch-assign", response_class=HTMLResponse)
+async def sightings_batch_assign(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Batch-assign a buyer to multiple requirements."""
+    form = await request.form()
+    req_ids_raw = form.get("requirement_ids", "[]")
+    requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+    buyer_id_str = form.get("buyer_id", "")
+    buyer_id = int(buyer_id_str) if buyer_id_str else None
+
+    if len(requirement_ids) > MAX_BATCH_SIZE:
+        raise HTTPException(status_code=400, detail=f"Maximum {MAX_BATCH_SIZE} requirements per batch")
+
+    if not requirement_ids:
+        return _oob_toast("No requirements selected", "warning")
+
+    int_ids = [int(rid) for rid in requirement_ids]
+    reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
+
+    buyer_name = "nobody"
+    if buyer_id:
+        buyer = db.get(User, buyer_id)
+        buyer_name = buyer.name if buyer else f"user {buyer_id}"
+
+    for r in reqs:
+        r.assigned_buyer_id = buyer_id
+    db.commit()
+
+    _invalidate_cache("sightings_stat_counts")
+    msg = f"Assigned {len(reqs)} requirement{'s' if len(reqs) != 1 else ''} to {buyer_name}"
+    return _oob_toast(msg)
+
+
+@router.post("/v2/partials/sightings/batch-status", response_class=HTMLResponse)
+async def sightings_batch_status(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Batch-update sourcing status on multiple requirements with transition
+    validation."""
+    from ..services.status_machine import validate_transition
+
+    form = await request.form()
+    req_ids_raw = form.get("requirement_ids", "[]")
+    requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+    new_status = form.get("status", "")
+
+    if len(requirement_ids) > MAX_BATCH_SIZE:
+        raise HTTPException(status_code=400, detail=f"Maximum {MAX_BATCH_SIZE} requirements per batch")
+
+    if not requirement_ids:
+        return _oob_toast("No requirements selected", "warning")
+
+    try:
+        SourcingStatus(new_status)
+    except ValueError:
+        raise HTTPException(status_code=400, detail=f"Invalid status: {new_status}")
+
+    int_ids = [int(rid) for rid in requirement_ids]
+    reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
+
+    updated = 0
+    skipped = 0
+    for r in reqs:
+        current = r.sourcing_status or "open"
+        if validate_transition("requirement", current, new_status, raise_on_invalid=False):
+            old_status = r.sourcing_status
+            r.sourcing_status = new_status
+            activity = ActivityLog(
+                user_id=user.id,
+                activity_type="status_change",
+                channel="system",
+                requirement_id=r.id,
+                requisition_id=r.requisition_id,
+                notes=f"Status changed from {old_status} to {new_status} (batch)",
+            )
+            db.add(activity)
+            updated += 1
+        else:
+            skipped += 1
+
+    db.commit()
+    _invalidate_cache("sightings_stat_counts")
+
+    total = updated + skipped
+    msg = f"Updated {updated} of {total} requirement{'s' if total != 1 else ''}."
+    if skipped:
+        msg += f" {skipped} skipped (invalid transition)."
+    level = "success" if skipped == 0 else "warning"
+    return _oob_toast(msg, level)
+
+
+@router.post("/v2/partials/sightings/batch-notes", response_class=HTMLResponse)
+async def sightings_batch_notes(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Add a note to multiple requirements."""
+    form = await request.form()
+    req_ids_raw = form.get("requirement_ids", "[]")
+    requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+    notes = form.get("notes", "").strip()
+
+    if len(requirement_ids) > MAX_BATCH_SIZE:
+        raise HTTPException(status_code=400, detail=f"Maximum {MAX_BATCH_SIZE} requirements per batch")
+
+    if not requirement_ids:
+        return _oob_toast("No requirements selected", "warning")
+
+    if not notes:
+        return _oob_toast("Note text is required", "warning")
+
+    int_ids = [int(rid) for rid in requirement_ids]
+    reqs = db.query(Requirement).filter(Requirement.id.in_(int_ids)).all()
+
+    for r in reqs:
+        activity = ActivityLog(
+            user_id=user.id,
+            activity_type="note",
+            channel="manual",
+            requirement_id=r.id,
+            requisition_id=r.requisition_id,
+            notes=notes,
+        )
+        db.add(activity)
+
+    db.commit()
+
+    count = len(reqs)
+    msg = f"Added note to {count} requirement{'s' if count != 1 else ''}"
+    return _oob_toast(msg)
 
 
 @router.post("/v2/partials/sightings/{requirement_id}/mark-unavailable", response_class=HTMLResponse)
@@ -590,6 +766,12 @@ async def sightings_mark_unavailable(
         s.is_unavailable = True
     db.commit()
 
+    await broker.publish(
+        f"user:{user.id}",
+        "sighting-updated",
+        json.dumps({"requirement_id": requirement_id}),
+    )
+
     return await sightings_detail(request, requirement_id, db, user)
 
 
@@ -612,7 +794,126 @@ async def sightings_assign_buyer(
     requirement.assigned_buyer_id = buyer_id
     db.commit()
 
+    await broker.publish(
+        f"user:{user.id}",
+        "sighting-updated",
+        json.dumps({"requirement_id": requirement_id}),
+    )
+
     return await sightings_detail(request, requirement_id, db, user)
+
+
+@router.patch("/v2/partials/sightings/{requirement_id}/advance-status", response_class=HTMLResponse)
+async def sightings_advance_status(
+    request: Request,
+    requirement_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Advance the sourcing status for a requirement via state machine validation."""
+    form = await request.form()
+    target_status = form.get("status", "")
+    if not target_status:
+        raise HTTPException(status_code=400, detail="status is required")
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+    current = requirement.sourcing_status or SourcingStatus.OPEN
+
+    # Validates transition; raises HTTPException 409 on invalid
+    require_valid_transition("requirement", current, target_status)
+
+    old_status = current
+    requirement.sourcing_status = target_status
+    _invalidate_cache("sightings_stat_counts")
+
+    log_rfq_activity(
+        db=db,
+        rfq_id=requirement.requisition_id,
+        activity_type="status_change",
+        description=f"Status changed from {old_status} to {target_status}",
+        user_id=user.id,
+        requirement_id=requirement_id,
+    )
+    db.commit()
+
+    await broker.publish(
+        f"user:{user.id}",
+        "sighting-updated",
+        json.dumps({"requirement_id": requirement_id}),
+    )
+
+    return await sightings_detail(request, requirement_id, db, user)
+
+
+@router.post("/v2/partials/sightings/{requirement_id}/log-activity", response_class=HTMLResponse)
+async def sightings_log_activity(
+    request: Request,
+    requirement_id: int,
+    notes: str = Form(...),
+    channel: str = Form("note"),
+    vendor_name: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Log a manual note/call/email activity against a requirement.
+
+    Returns the updated activity timeline section so the new entry appears inline.
+    """
+    if not notes or not notes.strip():
+        raise HTTPException(status_code=400, detail="Notes cannot be empty")
+
+    if channel not in ("note", "call", "email"):
+        raise HTTPException(status_code=400, detail="Channel must be note, call, or email")
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(status_code=404, detail="Requirement not found")
+
+    activity_type_map = {"note": "note", "call": "call_outbound", "email": "email_sent"}
+
+    record = ActivityLog(
+        user_id=user.id,
+        activity_type=activity_type_map[channel],
+        channel=channel if channel != "note" else "manual",
+        requirement_id=requirement_id,
+        requisition_id=requirement.requisition_id,
+        notes=notes.strip(),
+        contact_name=vendor_name.strip() if vendor_name and vendor_name.strip() else None,
+    )
+    db.add(record)
+    db.commit()
+
+    logger.info(
+        "Sighting activity logged: %s on requirement %d by user %d",
+        channel,
+        requirement_id,
+        user.id,
+    )
+
+    await broker.publish(
+        f"user:{user.id}",
+        "sighting-updated",
+        json.dumps({"requirement_id": requirement_id}),
+    )
+
+    # Re-fetch activities for the timeline
+    activities = (
+        db.query(ActivityLog)
+        .filter(ActivityLog.requirement_id == requirement_id)
+        .order_by(ActivityLog.created_at.desc())
+        .limit(50)
+        .all()
+    )
+
+    ctx = {
+        "request": request,
+        "activities": activities,
+        "requirement": requirement,
+    }
+    return templates.TemplateResponse("htmx/partials/sightings/activity_section.html", ctx)
 
 
 @router.get("/v2/partials/sightings/vendor-modal", response_class=HTMLResponse)
@@ -663,6 +964,77 @@ async def sightings_vendor_modal(
         "parts": parts,
     }
     return templates.TemplateResponse("htmx/partials/sightings/vendor_modal.html", ctx)
+
+
+@router.post("/v2/partials/sightings/preview-inquiry", response_class=HTMLResponse)
+async def sightings_preview_inquiry(
+    request: Request,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Preview rendered RFQ emails per vendor without sending.
+
+    Called by: vendor_modal.html Preview button
+    Depends on: email_service._build_html_body, VendorCard, VendorContact
+    """
+    form = await request.form()
+    requirement_ids = [int(x) for x in form.getlist("requirement_ids") if x.isdigit()]
+    vendor_names = form.getlist("vendor_names")
+    email_body = form.get("email_body", "")
+
+    if not requirement_ids or not vendor_names:
+        raise HTTPException(status_code=400, detail="requirement_ids and vendor_names required")
+
+    requirements = db.query(Requirement).filter(Requirement.id.in_(requirement_ids)).all()
+
+    requisition_ids = {r.requisition_id for r in requirements}
+    requisition_id = next(iter(requisition_ids)) if requisition_ids else None
+
+    # Batch-fetch vendor cards + contacts (same logic as send-inquiry)
+    normalized_names = [normalize_vendor_name(vn) for vn in vendor_names]
+    cards = db.query(VendorCard).filter(VendorCard.normalized_name.in_(normalized_names)).all()
+    card_map = {c.normalized_name: c for c in cards}
+
+    card_ids = [c.id for c in cards]
+    contacts = db.query(VendorContact).filter(VendorContact.vendor_card_id.in_(card_ids)).all() if card_ids else []
+    contact_map = {c.vendor_card_id: c for c in contacts}
+
+    from ..email_service import _build_html_body
+
+    avail_token = f"[ref:{requisition_id}]" if requisition_id else ""
+    parts_list = [{"mpn": r.primary_mpn, "qty": r.target_qty} for r in requirements]
+
+    previews = []
+    for vn in vendor_names:
+        card = card_map.get(normalize_vendor_name(vn))
+        vendor_email = ""
+        if card:
+            contact = contact_map.get(card.id)
+            if contact and contact.email:
+                vendor_email = contact.email
+
+        raw_subject = f"RFQ — {len(requirements)} part{'s' if len(requirements) != 1 else ''}"
+        tagged_subject = f"{raw_subject} {avail_token}" if avail_token else raw_subject
+        html_body = _build_html_body(email_body)
+
+        previews.append(
+            {
+                "vendor_name": vn,
+                "vendor_email": vendor_email,
+                "subject": tagged_subject,
+                "html_body": html_body,
+                "parts": parts_list,
+            }
+        )
+
+    ctx = {
+        "request": request,
+        "previews": previews,
+        "requirement_ids": requirement_ids,
+        "vendor_names": vendor_names,
+        "email_body": email_body,
+    }
+    return templates.TemplateResponse("htmx/partials/sightings/preview_inquiry.html", ctx)
 
 
 @router.post("/v2/partials/sightings/send-inquiry", response_class=HTMLResponse)
@@ -721,6 +1093,7 @@ async def sightings_send_inquiry(
         )
 
     sent_count = 0
+    progressed_count = 0
     failed_vendors = []
     try:
         from ..email_service import send_batch_rfq
@@ -744,16 +1117,33 @@ async def sightings_send_inquiry(
                     user_id=user.id,
                     requirement_id=r.id,
                 )
+
+        # Auto-progress sourcing status OPEN → SOURCING on successful send
+        from ..services.sourcing_auto_progress import auto_progress_status
+
+        for r in requirements:
+            if auto_progress_status(r, SourcingStatus.SOURCING, db, user.id):
+                progressed_count += 1
     except Exception:
         logger.warning("RFQ send failed", exc_info=True)
         failed_vendors = vendor_names
 
     db.commit()
 
+    # Notify SSE listeners for each affected requirement
+    for r in requirements:
+        await broker.publish(
+            f"user:{user.id}",
+            "sighting-updated",
+            json.dumps({"requirement_id": r.id}),
+        )
+
     total = len(vendor_names)
     if failed_vendors:
         msg = f"Sent to {sent_count}/{total} vendors. Failed: {', '.join(failed_vendors)}."
     else:
         msg = f"RFQ sent to {sent_count} vendor{'s' if sent_count != 1 else ''}."
+        if progressed_count:
+            msg += f" {progressed_count} requirement{'s' if progressed_count != 1 else ''} advanced to sourcing."
 
     return _oob_toast(msg, "warning" if failed_vendors else "success")

@@ -445,3 +445,70 @@ table {
 .qb-decision-flash {
   animation: qbDecisionFlash 0.8s ease-out;
 }
+
+/* ── Sightings — loading & transition polish ─────────────────────── */
+.sightings-fade { transition: opacity 150ms ease; }
+.sightings-slide-down { animation: sightingsSlideDown 300ms ease; }
+.sightings-slide-up { animation: sightingsSlideUp 200ms ease; }
+
+@keyframes sightingsSlideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes sightingsSlideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Detail panel crossfade on HTMX swap */
+#sightings-detail {
+  transition: opacity 150ms ease;
+}
+#sightings-detail.htmx-swapping {
+  opacity: 0;
+}
+
+/* Skeleton shimmer for vendor loading */
+@keyframes shimmer {
+  0%   { background-position: -200px 0; }
+  100% { background-position: 200px 0; }
+}
+.sighting-skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200px 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+/* Action bar slide-up entrance */
+.sightings-action-bar {
+  transform: translateY(100%);
+  opacity: 0;
+  transition: transform 200ms ease, opacity 200ms ease;
+}
+.sightings-action-bar.is-visible {
+  transform: translateY(0);
+  opacity: 1;
+}
+
+/* Coverage bar refresh spinner overlay */
+.coverage-cell { position: relative; }
+.coverage-cell .refresh-spinner-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.7);
+  border-radius: 4px;
+}
+
+/* ── Sightings — mobile card view (below 640px) ──────────────────── */
+@media (max-width: 639px) {
+  .sightings-table-wrapper table,
+  .sightings-table-wrapper thead { display: none; }
+  .sightings-card-list { display: flex !important; }
+}
+@media (min-width: 640px) {
+  .sightings-card-list { display: none !important; }
+}

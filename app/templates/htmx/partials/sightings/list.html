@@ -1,16 +1,43 @@
 {# Sightings page — split-panel layout for buyer sourcing command view.
    Left: requirements table. Right: requirement detail with vendor breakdown.
    Called by: GET /v2/sightings → v2_page() → base_page.html lazy load
-   Depends on: sightings/table.html, sightings/detail.html, Alpine.js, HTMX
+   Depends on: sightings/table.html, sightings/detail.html, Alpine.js, HTMX, SSE broker
 #}
 
 {% include "htmx/partials/shared/_macros.html" %}
 
-<div class="h-[calc(100vh-90px)] flex"
+{# ── SSE Disconnect Banner ─────────────────────────────────── #}
+<div x-data="{
+       sseDisconnected: false,
+       _disconnectTimer: null,
+       sseConnected() {
+         clearTimeout(this._disconnectTimer);
+         this.sseDisconnected = false;
+       },
+       sseDropped() {
+         clearTimeout(this._disconnectTimer);
+         this._disconnectTimer = setTimeout(() => { this.sseDisconnected = true; }, 30000);
+       }
+     }"
+     @sse-open.window="sseConnected()"
+     @sse-error.window="sseDropped()">
+  <div x-show="sseDisconnected" x-cloak x-transition
+       class="w-full px-3 py-1.5 bg-amber-50 border-b border-amber-200 flex items-center justify-center gap-2 text-xs text-amber-700">
+    <svg class="h-3.5 w-3.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
+    </svg>
+    <span>Live updates paused.</span>
+    <button @click="window.location.reload()"
+            class="underline font-medium hover:text-amber-900">Refresh</button>
+  </div>
+</div>
+
+<div class="h-[calc(100vh-90px)] flex flex-col lg:flex-row"
      x-data="{
        splitRatio: parseFloat(localStorage.getItem('sightings-split') || '0.50'),
        dragging: false,
        selectedReqId: null,
+       mobileDetailOpen: false,
        startDrag(e) {
          this.dragging = true;
          e.preventDefault();
@@ -30,15 +57,54 @@
        },
        selectReq(id) {
          this.selectedReqId = id;
+         if (window.innerWidth < 1024) { this.mobileDetailOpen = true; }
+       },
+       closeMobileDetail() {
+         this.mobileDetailOpen = false;
        }
      }"
      x-ref="container"
      @mousemove.window="onDrag($event)"
      @mouseup.window="stopDrag()">
 
+  {# ── SSE Live Update Listener ─────────────────────────────── #}
+  {# Connects to user-scoped SSE stream via native EventSource. On sighting-updated
+     events, conditionally refreshes the detail panel when the updated requirement
+     matches the current selection. Dispatches sse-open/sse-error for disconnect banner. #}
+  <div x-data="{
+         _sse: null,
+         init() {
+           this._sse = new EventSource('/api/events/stream');
+           this._sse.addEventListener('sighting-updated', (e) => {
+             try {
+               const data = JSON.parse(e.data || '{}');
+               const reqId = data.requirement_id;
+               const container = document.querySelector('[x-ref=container]');
+               if (!container || !container._x_dataStack) return;
+               const sel = container._x_dataStack[0].selectedReqId;
+               if (reqId && sel && String(reqId) === String(sel)) {
+                 htmx.ajax('GET', '/v2/partials/sightings/' + reqId + '/detail',
+                            {target: '#sightings-detail', swap: 'innerHTML'});
+               }
+             } catch(err) { /* ignore parse errors */ }
+           });
+           this._sse.onerror = () => {
+             window.dispatchEvent(new CustomEvent('sse-error'));
+           };
+           this._sse.onopen = () => {
+             window.dispatchEvent(new CustomEvent('sse-open'));
+           };
+         },
+         destroy() {
+           if (this._sse) { this._sse.close(); this._sse = null; }
+         }
+       }"
+       class="hidden"></div>
+
   {# ── Left Panel: Requirements Table ──────────────────────── #}
-  <div class="flex flex-col min-w-0 border-r border-gray-200"
-       :style="'width: ' + (splitRatio * 100) + '%'">
+  <div class="flex flex-col min-w-0 border-r border-gray-200 w-full lg:w-auto"
+       :class="mobileDetailOpen ? 'hidden lg:flex' : 'flex'"
+       :style="window.innerWidth >= 1024 ? 'width: ' + (splitRatio * 100) + '%' : ''">
     <div id="sightings-table" class="flex-1 flex flex-col min-h-0"
          hx-get="/v2/partials/sightings"
          hx-trigger="load"
@@ -49,8 +115,8 @@
     </div>
   </div>
 
-  {# ── Drag Handle ──────────────────────────────────────────── #}
-  <div class="w-[3px] cursor-col-resize bg-gray-200 hover:bg-brand-400 transition-colors flex-shrink-0 relative group"
+  {# ── Drag Handle (desktop only) ────────────────────────────── #}
+  <div class="hidden lg:block w-[3px] cursor-col-resize bg-gray-200 hover:bg-brand-400 transition-colors flex-shrink-0 relative group"
        :class="dragging ? 'bg-brand-500' : ''"
        @mousedown="startDrag($event)">
     <div class="absolute inset-y-0 -left-2 -right-2"></div>
@@ -64,7 +130,17 @@
   </div>
 
   {# ── Right Panel: Requirement Detail ─────────────────────── #}
-  <div class="flex-1 min-w-0 flex flex-col bg-white overflow-y-auto">
+  <div class="min-w-0 flex flex-col bg-white overflow-y-auto w-full lg:w-auto lg:flex-1"
+       :class="mobileDetailOpen ? 'flex' : 'hidden lg:flex'">
+    {# Mobile back button #}
+    <button x-show="mobileDetailOpen" x-cloak
+            @click="closeMobileDetail()"
+            class="lg:hidden flex items-center gap-1 px-3 py-2 text-xs font-medium text-brand-600 border-b border-gray-100">
+      <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+        <path stroke-linecap="round" stroke-linejoin="round" d="M15 19l-7-7 7-7"/>
+      </svg>
+      Back to list
+    </button>
     {# Empty state #}
     <div x-show="!selectedReqId" x-cloak class="flex flex-col items-center justify-center h-full text-gray-400">
       <svg class="h-12 w-12 mb-3 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1">
@@ -74,7 +150,35 @@
       <p class="text-sm font-medium text-gray-500">Select a requirement</p>
       <p class="text-xs text-gray-400 mt-1">Click a row to view vendors, offers & activity</p>
     </div>
+    {# Skeleton loader — visible while HTMX request is in-flight #}
+    <div id="sightings-detail-skeleton" class="htmx-indicator p-3 space-y-3">
+      <div class="flex items-start justify-between">
+        <div>
+          <div class="sighting-skeleton h-5 w-40 mb-2"></div>
+          <div class="sighting-skeleton h-3 w-24"></div>
+        </div>
+        <div class="sighting-skeleton h-7 w-20 rounded-lg"></div>
+      </div>
+      <div class="grid grid-cols-2 gap-2">
+        <div class="sighting-skeleton h-3 w-28"></div>
+        <div class="sighting-skeleton h-3 w-32"></div>
+        <div class="sighting-skeleton h-3 w-24"></div>
+        <div class="sighting-skeleton h-3 w-20"></div>
+      </div>
+      <div class="border-t border-gray-100 pt-3 space-y-2">
+        <div class="sighting-skeleton h-3 w-20 mb-2"></div>
+        {% for _ in range(5) %}
+        <div class="flex items-center gap-3">
+          <div class="sighting-skeleton h-4 flex-1"></div>
+          <div class="sighting-skeleton h-4 w-16"></div>
+          <div class="sighting-skeleton h-4 w-12"></div>
+          <div class="sighting-skeleton h-4 w-10"></div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
     {# Detail content — loaded via HTMX when row selected #}
-    <div x-show="selectedReqId" x-cloak id="sightings-detail" class="p-3"></div>
+    <div x-show="selectedReqId" x-cloak id="sightings-detail" class="sightings-fade p-3"
+         hx-indicator="#sightings-detail-skeleton"></div>
   </div>
 </div>

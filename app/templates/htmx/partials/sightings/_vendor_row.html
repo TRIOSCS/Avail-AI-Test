@@ -36,6 +36,12 @@
             OOO{% if ooo.ooo_return_date %} until {{ ooo.ooo_return_date.strftime('%m/%d') }}{% endif %}
           </span>
           {% endif %}
+          {% set overlap = overlap_counts.get(s.vendor_name, 0) if overlap_counts is defined else 0 %}
+          {% if overlap > 1 %}
+          <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-indigo-50 text-indigo-700">
+            Also on {{ overlap - 1 }} other req{{ 's' if overlap - 1 != 1 }}
+          </span>
+          {% endif %}
         </div>
         {# Inline metrics: response rate + best price with freshness #}
         <div class="flex items-center gap-3 mt-0.5 text-[11px] text-gray-400">
