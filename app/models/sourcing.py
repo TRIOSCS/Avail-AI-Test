@@ -93,6 +93,9 @@ class Requirement(Base):
     hardware_codes = Column(String(100))
     packaging = Column(String(100))
     condition = Column(String(50))
+    description = Column(Text)  # Free-text part description
+    package_type = Column(String(100))  # Physical package (QFP, BGA, SOIC, DIP, etc.)
+    revision = Column(String(100))  # Part revision / version level
     customer_pn = Column(String(255))  # Customer's internal part number
     need_by_date = Column(Date)  # When customer needs the parts
     sale_notes = Column(Text)

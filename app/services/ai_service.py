@@ -186,7 +186,7 @@ async def company_intel(company_name: str, domain: str | None = None) -> dict | 
     Returns: {summary, revenue, employees, products, components_they_buy[],
               recent_news[], opportunity_signals[], sources[]}
     """
-    cache_key = f"intel:{company_name.lower().strip()}"
+    cache_key = f"intel:{company_name.lower().strip()}:{(domain or '').lower().strip()}"
     cached = get_cached(cache_key)
     if cached:
         return cached
@@ -250,6 +250,7 @@ async def draft_rfq(
     """
     # If buyer provided their own draft, clean it up instead of generating from scratch
     if user_draft:
+        user_draft = user_draft[:12000]
         parts_str = "\n".join(
             f"- {p.get('mpn', '?')}: {p.get('qty', '?')} pcs"
             + (f" (target: ${p['target_price']})" if p.get("target_price") else "")

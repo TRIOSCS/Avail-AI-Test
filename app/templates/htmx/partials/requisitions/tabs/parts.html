@@ -7,13 +7,28 @@
 <div>
   {# Collapsible add requirement form #}
   <div x-data="{ addOpen: false }" class="mb-4">
-    <button @click="addOpen = !addOpen" type="button"
-            class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 transition-colors mb-2">
-      <svg class="h-3.5 w-3.5 transition-transform" :class="addOpen && 'rotate-45'" fill="none" viewBox="0 0 24 24" stroke="currentColor">
-        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
-      </svg>
-      Add Requirement
-    </button>
+    <div class="flex items-center gap-2 mb-2">
+      <button @click="addOpen = !addOpen" type="button"
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 transition-colors">
+        <svg class="h-3.5 w-3.5 transition-transform" :class="addOpen && 'rotate-45'" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 4v16m8-8H4"/>
+        </svg>
+        Add Requirement
+      </button>
+      {% if requirements %}
+      <button type="button"
+              hx-post="/v2/partials/requisitions/{{ req.id }}/search-all"
+              hx-target="closest div"
+              hx-swap="innerHTML"
+              data-loading-disable
+              class="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm font-medium text-white bg-brand-500 rounded-lg hover:bg-brand-600 transition-colors">
+        <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+        </svg>
+        Search All Sources
+      </button>
+      {% endif %}
+    </div>
     <div x-show="addOpen" x-collapse x-cloak class="p-4 bg-brand-50 rounded-lg border border-brand-200">
     <form hx-post="/v2/partials/requisitions/{{ req.id }}/requirements"
           hx-target="#parts-tbody"
@@ -157,7 +172,22 @@
     </div>
   </div>
 
+  {% if search_triggered is defined and search_triggered %}
+  <div class="mb-3 px-3 py-2 bg-brand-50 border border-brand-200 rounded-lg text-sm text-brand-700 flex items-center gap-2"
+       hx-get="/v2/partials/requisitions/{{ req.id }}/tab/parts"
+       hx-trigger="load delay:8s"
+       hx-target="closest div"
+       hx-swap="innerHTML">
+    <svg class="h-4 w-4 animate-spin flex-none" fill="none" viewBox="0 0 24 24">
+      <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+      <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+    </svg>
+    Searching all sources for {{ requirements|length }} part{{ "s" if requirements|length != 1 }}… This page will refresh automatically.
+  </div>
+  {% endif %}
+
   {# Requirements table #}
+  <div id="parts-table-wrapper">
   {% if requirements %}
   <p class="text-xs text-gray-400 mb-2">{{ requirements|length }} requirement{{ "s" if requirements|length != 1 }}. Double-click any row to edit inline.</p>
   <div class="overflow-x-auto bg-white rounded-lg border border-brand-200">
@@ -193,4 +223,5 @@
   {% set message = "No requirements yet. Add parts using the form above." %}
   {% include "htmx/partials/shared/empty_state.html" %}
   {% endif %}
+  </div>{# /parts-table-wrapper #}
 </div>

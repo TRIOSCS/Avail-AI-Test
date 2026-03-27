@@ -47,9 +47,9 @@ router = APIRouter(tags=["rfq"])
 
 
 def _enforce_req_scope_for_user(db: Session, user: User, req_id: int) -> None:
-    """Apply owner-only requisition scope for non-admin users."""
-    if user.role == UserRole.ADMIN:
-        return
+    """Apply owner-only requisition scope for SALES users."""
+    if user.role != UserRole.SALES:
+        return  # Only SALES is restricted to own requisitions
     allowed = db.query(Requisition.id).filter(Requisition.id == req_id, Requisition.created_by == user.id).first()
     if not allowed:
         raise HTTPException(status_code=404, detail="Requisition not found")

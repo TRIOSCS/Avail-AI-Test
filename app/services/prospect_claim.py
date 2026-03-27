@@ -97,6 +97,15 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
             )
             db.add(company)
             db.flush()
+            # Auto-create default HQ site so company appears in pickers
+            from app.models.crm import CustomerSite
+
+            default_site = CustomerSite(company_id=company.id, site_name="HQ")
+            db.add(default_site)
+            db.flush()
+            from app.cache.decorators import invalidate_prefix
+
+            invalidate_prefix("companies_typeahead")
             prospect.company_id = company.id
             path = "new_company"
 

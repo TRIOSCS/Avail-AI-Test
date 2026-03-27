@@ -284,6 +284,47 @@ def test_delete_requirement_not_found(client):
     assert resp.status_code == 404
 
 
+def test_add_requirement_with_new_fields(client, test_requisition):
+    """POST /api/requisitions/{id}/requirements accepts description, package_type,
+    revision."""
+    resp = client.post(
+        f"/api/requisitions/{test_requisition.id}/requirements",
+        json={
+            "primary_mpn": "STM32F407VGT6",
+            "manufacturer": "STMicroelectronics",
+            "target_qty": 100,
+            "description": "32-bit ARM Cortex-M4 MCU",
+            "package_type": "LQFP-100",
+            "revision": "Rev B",
+        },
+    )
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["created"]) == 1
+    created = data["created"][0]
+    assert created["primary_mpn"] == "STM32F407VGT6"
+
+
+def test_update_requirement_new_fields(client, db_session, test_requisition):
+    """PUT /api/requirements/{id} can update description, package_type, revision."""
+    from app.models import Requirement
+
+    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
+    resp = client.put(
+        f"/api/requirements/{req_item.id}",
+        json={
+            "description": "Quad 2-input NAND gate",
+            "package_type": "SOIC-14",
+            "revision": "Rev C",
+        },
+    )
+    assert resp.status_code == 200
+    db_session.refresh(req_item)
+    assert req_item.description == "Quad 2-input NAND gate"
+    assert req_item.package_type == "SOIC-14"
+    assert req_item.revision == "Rev C"
+
+
 # ── Sourcing Score ────────────────────────────────────────────────────
 
 

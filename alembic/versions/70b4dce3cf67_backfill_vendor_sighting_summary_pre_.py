@@ -38,7 +38,7 @@ def upgrade() -> None:
         WHERE vss.vendor_name = vc.normalized_name
           AND vss.vendor_phone IS NULL
           AND vc.phones IS NOT NULL
-          AND jsonb_array_length(vc.phones) > 0
+          AND jsonb_array_length(vc.phones::jsonb) > 0
     """)
     )
     # Backfill aggregated fields from sightings

@@ -13,6 +13,7 @@ Includes:
 
 import asyncio
 import re
+from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.triggers.cron import CronTrigger
@@ -404,34 +405,22 @@ async def _scan_user_inbox(user, db):
 
     # Use sequential sub-operations on a single session to avoid concurrent
     # access to the same SQLAlchemy Session object.
-    async def _safe_stock_scan():
+    sub_ops: list[tuple[str, Callable]] = [
+        ("stock_scan", lambda: _scan_stock_list_attachments(user, db, is_backfill)),
+        ("mine_contacts", lambda: _mine_vendor_contacts(user, db, is_backfill)),
+        ("outbound_scan", lambda: _scan_outbound_rfqs(user, db, is_backfill)),
+        ("excess_bid_scan", lambda: _scan_excess_bid_responses(user, db)),
+    ]
+    sub_op_failures: list[str] = []
+    for name, fn in sub_ops:
         try:
-            await _scan_stock_list_attachments(user, db, is_backfill)
+            await fn()
         except Exception as e:
-            logger.error(f"Stock list scan failed for {user.email}: {e}")
+            logger.error("Sub-op %s failed for %s: %s", name, user.email, e)
+            sub_op_failures.append(name)
 
-    async def _safe_mine_contacts():
-        try:
-            await _mine_vendor_contacts(user, db, is_backfill)
-        except Exception as e:
-            logger.error(f"Vendor mining failed for {user.email}: {e}")
-
-    async def _safe_outbound_scan():
-        try:
-            await _scan_outbound_rfqs(user, db, is_backfill)
-        except Exception as e:
-            logger.error(f"Outbound scan failed for {user.email}: {e}")
-
-    async def _safe_excess_bid_scan():
-        try:
-            await _scan_excess_bid_responses(user, db)
-        except Exception as e:
-            logger.error(f"Excess bid scan failed for {user.email}: {e}")
-
-    await _safe_stock_scan()
-    await _safe_mine_contacts()
-    await _safe_outbound_scan()
-    await _safe_excess_bid_scan()
+    if sub_op_failures:
+        logger.warning("Inbox scan partial failure for %s — failed sub-ops: %s", user.email, sub_op_failures)
 
     if poll_succeeded:
         user.last_inbox_scan = datetime.now(timezone.utc)

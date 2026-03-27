@@ -127,6 +127,7 @@ async def _job_reset_connector_errors():
     except Exception:
         logger.exception("Reset connector error counts failed")
         db.rollback()
+        raise
     finally:
         db.close()
 
@@ -183,6 +184,7 @@ async def _job_contact_dedup():
     except Exception:
         logger.exception("Contact dedup job failed")
         db.rollback()
+        raise
     finally:
         db.close()
 

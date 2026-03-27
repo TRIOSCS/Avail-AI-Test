@@ -753,6 +753,18 @@ async def update_requirement(
         r.notes = data.notes.strip()
     if data.sale_notes is not None:
         r.sale_notes = data.sale_notes.strip()
+    if data.description is not None:
+        r.description = data.description.strip()
+    if data.package_type is not None:
+        r.package_type = data.package_type.strip()
+    if data.revision is not None:
+        r.revision = data.revision.strip()
+    if data.customer_pn is not None:
+        r.customer_pn = data.customer_pn.strip()
+    if data.brand is not None:
+        r.brand = data.brand.strip()
+    if data.need_by_date is not None:
+        r.need_by_date = data.need_by_date
     new_vals = {f: getattr(r, f) for f in _req_track_fields}
     for f in _req_track_fields:
         old_v = str(old_vals.get(f) or "")

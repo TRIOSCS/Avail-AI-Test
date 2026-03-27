@@ -31,7 +31,7 @@ from ..constants import (
     UserRole,
 )
 from ..database import get_db
-from ..dependencies import get_user, require_user
+from ..dependencies import get_user, require_admin, require_user
 from ..models import (
     ApiSource,
     BuyPlan,
@@ -572,6 +572,7 @@ async def requisition_import_parse(
 @router.post("/v2/partials/requisitions/import-save", response_class=HTMLResponse)
 async def requisition_import_save(
     request: Request,
+    background_tasks: BackgroundTasks,
     name: str = Form(...),
     customer_name: str = Form(""),
     customer_site_id: str = Form(""),
@@ -607,6 +608,9 @@ async def requisition_import_save(
                     ],
                     "firmware": form.get(f"reqs[{idx}].firmware", "").strip() or None,
                     "hardware_codes": form.get(f"reqs[{idx}].hardware_codes", "").strip() or None,
+                    "description": form.get(f"reqs[{idx}].description", "").strip() or None,
+                    "package_type": form.get(f"reqs[{idx}].package_type", "").strip() or None,
+                    "revision": form.get(f"reqs[{idx}].revision", "").strip() or None,
                     "need_by_date": form.get(f"reqs[{idx}].need_by_date", "").strip() or None,
                     "sale_notes": form.get(f"reqs[{idx}].sale_notes", "").strip() or None,
                 }
@@ -637,6 +641,7 @@ async def requisition_import_save(
     from ..search_service import resolve_material_card
 
     added = len(requirements)
+    created_reqs = []
     for item in requirements:
         mpn = item["primary_mpn"]
         card = resolve_material_card(mpn, db)
@@ -656,16 +661,46 @@ async def requisition_import_save(
             packaging=item.get("packaging", ""),
             firmware=item.get("firmware", ""),
             hardware_codes=item.get("hardware_codes", ""),
+            description=item.get("description"),
+            package_type=item.get("package_type"),
+            revision=item.get("revision"),
             need_by_date=item.get("need_by_date"),
             sale_notes=item.get("sale_notes", ""),
         )
         db.add(r)
+        created_reqs.append(r)
         for sub in item.get("substitutes", []):
             sub_mpn = sub["mpn"] if isinstance(sub, dict) else sub
             sub_mfr = sub.get("manufacturer", "") if isinstance(sub, dict) else ""
             resolve_material_card(sub_mpn, db, manufacturer=sub_mfr)
 
     db.commit()
+
+    # Auto-search all created requirements in background
+    import os
+
+    if not os.environ.get("TESTING"):
+        requirement_ids = [r.id for r in created_reqs]
+
+        def _bg_full_search(req_ids: list[int]):
+            import asyncio
+
+            from app.database import SessionLocal
+            from app.search_service import search_requirement as do_search
+
+            bg_db = SessionLocal()
+            try:
+                for rid in req_ids:
+                    try:
+                        req_obj = bg_db.get(Requirement, rid)
+                        if req_obj:
+                            asyncio.run(do_search(req_obj, bg_db))
+                    except Exception:
+                        logger.warning("Auto-search failed for requirement %s", rid, exc_info=True)
+            finally:
+                bg_db.close()
+
+        background_tasks.add_task(_bg_full_search, requirement_ids)
 
     # Return success — close modal + refresh parts list + toast
     safe_added = int(added)  # safe: server-computed int
@@ -1064,7 +1099,7 @@ async def add_requirement(
                 if req_obj:
                     asyncio.run(do_search(req_obj, bg_db))
             except Exception:
-                logger.debug("Auto-search failed for requirement %s", requirement_id, exc_info=True)
+                logger.warning("Auto-search failed for requirement %s", requirement_id, exc_info=True)
             finally:
                 bg_db.close()
 
@@ -1076,6 +1111,71 @@ async def add_requirement(
     ctx["r"] = r
     ctx["req"] = req
     return templates.TemplateResponse("htmx/partials/requisitions/tabs/req_row.html", ctx)
+
+
+@router.post("/v2/partials/requisitions/{req_id}/search-all", response_class=HTMLResponse)
+async def requisition_search_all(
+    request: Request,
+    req_id: int,
+    background_tasks: BackgroundTasks,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Trigger search for all requirements in a requisition, then refresh parts
+    table."""
+    req = get_requisition_or_404(db, req_id)
+    requirements = db.query(Requirement).filter(Requirement.requisition_id == req_id).all()
+    if not requirements:
+        return HTMLResponse(
+            "<div id='parts-table-wrapper'><p class='text-sm text-gray-500 p-4'>No requirements to search.</p></div>"
+        )
+
+    # Run searches in background
+    import os
+
+    if not os.environ.get("TESTING"):
+        requirement_ids = [r.id for r in requirements]
+
+        def _bg_search(req_ids: list[int]):
+            import asyncio
+
+            from app.database import SessionLocal
+            from app.search_service import search_requirement as do_search
+
+            bg_db = SessionLocal()
+            try:
+                for rid in req_ids:
+                    try:
+                        req_obj = bg_db.get(Requirement, rid)
+                        if req_obj:
+                            asyncio.run(do_search(req_obj, bg_db))
+                    except Exception:
+                        logger.warning("Manual search failed for requirement %s", rid, exc_info=True)
+            finally:
+                bg_db.close()
+
+        background_tasks.add_task(_bg_search, requirement_ids)
+
+    # Return the parts table with a searching indicator
+    requirements = (
+        db.query(Requirement)
+        .options(selectinload(Requirement.sightings))
+        .filter(Requirement.requisition_id == req_id)
+        .all()
+    )
+    for r in requirements:
+        r.sighting_count = len(r.sightings) if r.sightings else 0
+
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["req"] = req
+    ctx["requirements"] = requirements
+    ctx["req_visible_cols"] = user.requirements_column_prefs or _DEFAULT_REQ_COLUMNS
+    ctx["req_all_columns"] = [
+        {"key": k, "label": label, "default": k in _DEFAULT_REQ_COLUMNS} for k, label in _ALL_REQ_COLUMNS
+    ]
+    ctx["search_triggered"] = True
+    resp = templates.TemplateResponse("htmx/partials/requisitions/tabs/parts.html", ctx)
+    return resp
 
 
 @router.get("/v2/partials/requisitions/{req_id}/tab/{tab}", response_class=HTMLResponse)
@@ -8463,7 +8563,7 @@ async def create_knowledge_entry(
 @router.get("/v2/partials/admin/api-health", response_class=HTMLResponse)
 async def admin_api_health(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Return connector health dashboard."""
@@ -8483,7 +8583,7 @@ async def admin_api_health(
 @router.post("/v2/partials/admin/import/vendors", response_class=HTMLResponse)
 async def import_vendors_csv(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Import vendors from CSV upload."""
@@ -8529,7 +8629,7 @@ async def import_vendors_csv(
 @router.get("/v2/partials/admin/data-ops", response_class=HTMLResponse)
 async def admin_data_ops(
     request: Request,
-    user: User = Depends(require_user),
+    user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Return admin data operations panel."""

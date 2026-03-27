@@ -1,0 +1,74 @@
+{# Email preview partial — rendered per-vendor before sending RFQ.
+   Called by: sightings_preview_inquiry endpoint (POST preview-inquiry)
+   Depends on: vendor_modal.html (parent modal), email_service._build_html_body
+   Context: previews (list of dicts), requirement_ids, vendor_names, email_body
+#}
+
+<div class="space-y-4">
+  <div class="flex items-center gap-2 mb-2">
+    <svg class="w-5 h-5 text-brand-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"/>
+    </svg>
+    <h4 class="text-sm font-semibold text-gray-900">
+      Preview — {{ previews|length }} vendor{{ 's' if previews|length != 1 else '' }}
+    </h4>
+  </div>
+
+  {% for p in previews %}
+  <div class="border {{ 'border-amber-300 bg-amber-50/50' if not p.vendor_email else 'border-gray-200 bg-white' }} rounded-lg overflow-hidden">
+    {# Header #}
+    <div class="px-3 py-2 border-b {{ 'border-amber-200 bg-amber-50' if not p.vendor_email else 'border-gray-100 bg-gray-50' }}">
+      <div class="flex items-center justify-between">
+        <span class="text-sm font-medium text-gray-900">{{ p.vendor_name }}</span>
+        {% if not p.vendor_email %}
+        <span class="inline-flex items-center gap-1 text-xs text-amber-700 bg-amber-100 px-2 py-0.5 rounded-full">
+          <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"/>
+          </svg>
+          No email found — will be skipped
+        </span>
+        {% endif %}
+      </div>
+    </div>
+    {# Email details #}
+    <div class="px-3 py-2 space-y-1.5">
+      <div class="flex gap-2 text-xs">
+        <span class="text-gray-400 w-10 shrink-0">To:</span>
+        <span class="text-gray-700 {{ 'text-amber-600 italic' if not p.vendor_email else '' }}">
+          {{ p.vendor_email if p.vendor_email else 'No email on file for ' ~ p.vendor_name }}
+        </span>
+      </div>
+      <div class="flex gap-2 text-xs">
+        <span class="text-gray-400 w-10 shrink-0">Subj:</span>
+        <span class="text-gray-700 font-medium">{{ p.subject }}</span>
+      </div>
+      {# Parts summary #}
+      {% if p.parts %}
+      <div class="flex gap-2 text-xs">
+        <span class="text-gray-400 w-10 shrink-0">Parts:</span>
+        <span class="text-gray-500">
+          {% for part in p.parts %}{{ part.mpn }} ({{ part.qty }} pcs){{ ', ' if not loop.last else '' }}{% endfor %}
+        </span>
+      </div>
+      {% endif %}
+      {# Rendered body #}
+      <div class="mt-2 pt-2 border-t border-gray-100">
+        <div class="text-[10px] uppercase tracking-wider text-gray-400 mb-1">Body Preview</div>
+        <div class="text-xs text-gray-600 bg-gray-50 rounded p-2 max-h-32 overflow-y-auto email-preview-body">
+          {{ p.html_body|sanitize_html|safe }}
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+
+  {# Hidden form fields to carry data through to the send step #}
+  {% for rid in requirement_ids %}
+  <input type="hidden" name="requirement_ids" value="{{ rid }}" form="confirm-send-form">
+  {% endfor %}
+  {% for vn in vendor_names %}
+  <input type="hidden" name="vendor_names" value="{{ vn }}" form="confirm-send-form">
+  {% endfor %}
+  <input type="hidden" name="email_body" value="{{ email_body }}" form="confirm-send-form">
+</div>

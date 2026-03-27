@@ -125,6 +125,7 @@ async def _job_token_refresh():
 
             r = _get_redis()
             lock_key = f"lock:token_refresh:{user_id}"
+            acquired = False
             try:
                 user = task_db.get(User, user_id)
                 if not user:
@@ -137,8 +138,16 @@ async def _job_token_refresh():
                 await refresh_user_token(user, task_db)
             except Exception as e:
                 logger.error(f"Token refresh error for user {user_id}: {e}")
+                task_db.rollback()
+                try:
+                    user = task_db.get(User, user_id)
+                    if user:
+                        user.m365_error_reason = str(e)[:255]
+                        task_db.commit()
+                except Exception:
+                    task_db.rollback()
             finally:
-                if r:
+                if r and acquired:
                     try:
                         r.delete(lock_key)
                     except Exception as e:
@@ -207,6 +216,13 @@ async def _job_inbox_scan():
             except Exception as e:
                 logger.error(f"Inbox scan error for user {user_id}: {e}")
                 scan_db.rollback()
+                try:
+                    user = scan_db.get(User, user_id)
+                    if user:
+                        user.m365_error_reason = str(e)[:255]
+                        scan_db.commit()
+                except Exception:
+                    scan_db.rollback()
             finally:
                 scan_db.close()
 
