@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -32,6 +33,20 @@ from ...vendor_utils import normalize_vendor_name
 from ._helpers import _preload_last_quoted_prices, record_changes
 
 router = APIRouter()
+
+ALLOWED_OFFER_EXTENSIONS = {
+    ".pdf",
+    ".xlsx",
+    ".xls",
+    ".csv",
+    ".doc",
+    ".docx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".txt",
+    ".zip",
+}
 
 
 # ── Offers ───────────────────────────────────────────────────────────────
@@ -712,6 +727,12 @@ async def upload_offer_attachment(
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(400, "File too large (max 10 MB)")
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_OFFER_EXTENSIONS:
+        raise HTTPException(
+            400,
+            f"File type '{ext}' not allowed. Accepted: {', '.join(sorted(ALLOWED_OFFER_EXTENSIONS))}",
+        )
     # Upload to OneDrive: AvailAI/Offers/{req_id}/{filename}
     from ...scheduler import get_valid_token
 

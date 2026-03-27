@@ -39,6 +39,8 @@ from ...schemas.crm import CompanyMergeRequest, MassTransferRequest
 
 router = APIRouter(tags=["admin"])
 
+MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB limit for CSV imports
+
 
 # -- Schemas ---------------------------------------------------------------
 
@@ -46,6 +48,13 @@ router = APIRouter(tags=["admin"])
 class VendorMergeRequest(BaseModel):
     keep_id: int = Field(..., description="ID of the vendor card to keep")
     remove_id: int = Field(..., description="ID of the vendor card to merge into keep_id and delete")
+
+
+class DataCleanupRequest(BaseModel):
+    """Request body for destructive data-cleanup operations."""
+
+    dry_run: bool = True
+    confirm: bool = False
 
 
 class TeamsConfigRequest(BaseModel):
@@ -237,6 +246,8 @@ async def import_customers(
     address_line1, city, state, zip, country, payment_terms, shipping_terms
     """
     content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(400, f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)")
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -350,6 +361,8 @@ async def import_vendors(
     contact_name, contact_email, contact_phone, contact_title
     """
     content = await file.read()
+    if len(content) > MAX_UPLOAD_BYTES:
+        raise HTTPException(400, f"File too large (max {MAX_UPLOAD_BYTES // (1024 * 1024)} MB)")
     try:
         text = content.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -763,37 +776,42 @@ def _upsert_config(db: Session, key: str, value: str, admin_email: str):
 
 @router.post("/api/admin/data-cleanup/scan")
 async def scan_data_quality(
-    dry_run: bool = True,
+    body: DataCleanupRequest,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Scan production data for test/junk/XSS records.
 
     dry_run=True (default): returns flagged records without changing anything.
-    dry_run=False: quarantines flagged records (archive reqs, reject offers, blacklist vendors).
+    dry_run=False + confirm=True: quarantines flagged records (archive reqs, reject offers,
+    blacklist vendors).
 
     Called by: admin panel data quality section
     Depends on: services/data_cleanup_service.py
     """
+    if not body.dry_run and not body.confirm:
+        raise HTTPException(400, "Set confirm=true to execute destructive cleanup")
     from ...services.data_cleanup_service import scan_junk_data
 
-    return scan_junk_data(db, dry_run=dry_run)
+    return scan_junk_data(db, dry_run=body.dry_run)
 
 
 @router.post("/api/admin/data-cleanup/fix-dates")
 async def fix_sentinel_dates_endpoint(
-    dry_run: bool = True,
+    body: DataCleanupRequest,
     user: User = Depends(require_admin),
     db: Session = Depends(get_db),
 ):
     """Find and fix sentinel dates (1970-01-01, etc) in production data.
 
     dry_run=True (default): returns count of fixable records.
-    dry_run=False: applies fixes.
+    dry_run=False + confirm=True: applies fixes.
 
     Called by: admin panel data quality section
     Depends on: services/data_cleanup_service.py
     """
+    if not body.dry_run and not body.confirm:
+        raise HTTPException(400, "Set confirm=true to execute destructive cleanup")
     from ...services.data_cleanup_service import fix_sentinel_dates
 
-    return fix_sentinel_dates(db, dry_run=dry_run)
+    return fix_sentinel_dates(db, dry_run=body.dry_run)
