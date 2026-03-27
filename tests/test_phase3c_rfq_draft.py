@@ -24,7 +24,7 @@ def rfq_requisition(db_session: Session, test_user: User) -> Requisition:
     req = Requisition(
         name="REQ-RFQ-001",
         customer_name="Acme Corp",
-        status="open",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

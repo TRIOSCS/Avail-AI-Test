@@ -430,15 +430,15 @@ async def sightings_detail(
                 ooo_map[vc.normalized_name] = c
 
     # ── Suggested Next Action (Phase 3) ──────────────────────────
-    status = requirement.sourcing_status or "open"
+    status = requirement.sourcing_status or SourcingStatus.OPEN
     vendor_count = len(summaries)
     pending_count_detail = len(pending_offers)
 
-    if status == "open" and vendor_count > 0:
+    if status == SourcingStatus.OPEN and vendor_count > 0:
         suggested_action = f"{vendor_count} vendor{'s' if vendor_count != 1 else ''} available — send RFQs"
-    elif status == "open" and vendor_count == 0:
+    elif status == SourcingStatus.OPEN and vendor_count == 0:
         suggested_action = "No vendors found — run search"
-    elif status == "sourcing":
+    elif status == SourcingStatus.SOURCING:
         # Check days since last RFQ activity
         last_rfq = (
             db.query(sqlfunc.max(ActivityLog.created_at))
@@ -456,13 +456,13 @@ async def sightings_detail(
                 suggested_action = "RFQs sent — awaiting vendor responses"
         else:
             suggested_action = "Status is sourcing but no RFQs sent — send RFQs"
-    elif status == "offered" and pending_count_detail > 0:
+    elif status == SourcingStatus.OFFERED and pending_count_detail > 0:
         suggested_action = f"{pending_count_detail} offer{'s' if pending_count_detail != 1 else ''} received — review and accept/reject"
-    elif status == "offered":
+    elif status == SourcingStatus.OFFERED:
         suggested_action = "Offers reviewed — advance to quoted when ready"
-    elif status == "quoted":
+    elif status == SourcingStatus.QUOTED:
         suggested_action = "Quote sent — awaiting customer response"
-    elif status == "won":
+    elif status == SourcingStatus.WON:
         suggested_action = "Order won — proceed to fulfillment"
     else:
         suggested_action = None

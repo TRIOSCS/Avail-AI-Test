@@ -2504,7 +2504,7 @@ class TestBuildBuyPlanCustomerSiteRegion:
         site = CustomerSite(company_id=co.id, site_name="HQ", country="united states")
         db_session.add(site)
         db_session.flush()
-        req = Requisition(name="REQ-REG2", customer_name="Co2", status="open", created_by=user.id)
+        req = Requisition(name="REQ-REG2", customer_name="Co2", status="active", created_by=user.id)
         db_session.add(req)
         db_session.flush()
         item = Requirement(requisition_id=req.id, primary_mpn="Z2", target_qty=50, target_price=2.00)

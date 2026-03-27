@@ -22,11 +22,16 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..constants import (
+    AttributionStatus,
+    BuyPlanStatus,
     ContactStatus,
     OfferStatus,
+    ProactiveMatchStatus,
+    ProspectAccountStatus,
     QuoteStatus,
     RequisitionStatus,
     SourcingStatus,
+    TaskStatus,
     TicketSource,
     UserRole,
 )
@@ -51,7 +56,6 @@ from ..models import (
     VendorCard,
     VerificationGroupMember,
 )
-from ..models.buy_plan import BuyPlanStatus
 from ..models.enrichment import ProspectContact
 from ..models.faceted_search import CommoditySpecSchema
 from ..models.prospect_account import ProspectAccount
@@ -630,7 +634,7 @@ async def requisition_import_save(
         customer_site_id=site_id,
         deadline=deadline.strip() or None,
         urgency=urgency,
-        status="active",
+        status=RequisitionStatus.ACTIVE,
         created_by=user.id,
         claimed_by_id=user.id,
     )
@@ -959,7 +963,7 @@ async def requisition_create(
         customer_name=customer_name or None,
         deadline=deadline or None,
         urgency=urgency,
-        status="active",
+        status=RequisitionStatus.ACTIVE,
         created_by=user.id,
         claimed_by_id=user.id,
     )
@@ -992,7 +996,7 @@ async def requisition_create(
                     normalized_mpn=normalize_mpn_key(mpn),
                     material_card_id=card.id if card else None,
                     target_qty=qty,
-                    sourcing_status="open",
+                    sourcing_status=SourcingStatus.OPEN,
                 )
                 db.add(r)
                 part_count += 1
@@ -1072,7 +1076,7 @@ async def add_requirement(
         notes=notes or None,
         customer_pn=customer_pn or None,
         need_by_date=_parse_date_safe(need_by_date, date_type),
-        sourcing_status="open",
+        sourcing_status=SourcingStatus.OPEN,
     )
     db.add(r)
     for sub in sub_list:
@@ -1219,7 +1223,7 @@ async def requisition_tab(
         # Check for existing draft quote to show "Add to Quote" button
         draft_quote = (
             db.query(Quote)
-            .filter(Quote.requisition_id == req_id, Quote.status == "draft")
+            .filter(Quote.requisition_id == req_id, Quote.status == QuoteStatus.DRAFT)
             .order_by(Quote.created_at.desc())
             .first()
         )
@@ -1550,7 +1554,7 @@ async def save_parsed_offers(
             notes=o.get("notes"),
             source="ai_parsed",
             entered_by_id=user.id,
-            status="active",
+            status=OfferStatus.ACTIVE,
         )
         db.add(offer)
         saved_count += 1
@@ -1901,7 +1905,7 @@ async def create_quote_from_offers(
     quote = Quote(
         requisition_id=req_id,
         quote_number=quote_number,
-        status="draft",
+        status=QuoteStatus.DRAFT,
         created_by_id=user.id,
         customer_site_id=req.customer_site_id,
     )
@@ -2049,7 +2053,7 @@ async def add_offer(
         notes=form.get("notes") or None,
         requirement_id=_safe_int(form.get("requirement_id")),
         source="manual",
-        status="active",
+        status=OfferStatus.ACTIVE,
         entered_by_id=user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -2077,7 +2081,7 @@ async def reconfirm_offer(
     offer.reconfirmed_at = now
     offer.reconfirm_count = (offer.reconfirm_count or 0) + 1
     offer.expires_at = now + timedelta(days=14)
-    offer.attribution_status = "active"
+    offer.attribution_status = AttributionStatus.ACTIVE
     offer.is_stale = False
     offer.updated_at = now
     offer.updated_by_id = user.id
@@ -2224,7 +2228,7 @@ async def mark_offer_sold_htmx(
     offer = db.query(Offer).filter(Offer.id == offer_id, Offer.requisition_id == req_id).first()
     if not offer:
         raise HTTPException(404, "Offer not found")
-    if offer.status == "sold":
+    if offer.status == OfferStatus.SOLD:
         return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
     old_status = offer.status
@@ -2255,7 +2259,13 @@ async def offer_review_queue(
     db: Session = Depends(get_db),
 ):
     """Render the offer review queue page — medium-confidence AI-parsed offers."""
-    offers = db.query(Offer).filter(Offer.status == "pending_review").order_by(Offer.created_at.desc()).limit(100).all()
+    offers = (
+        db.query(Offer)
+        .filter(Offer.status == OfferStatus.PENDING_REVIEW)
+        .order_by(Offer.created_at.desc())
+        .limit(100)
+        .all()
+    )
     return templates.TemplateResponse(
         "htmx/partials/offers/review_queue.html",
         {"request": request, "offers": offers, "user": user},
@@ -2573,7 +2583,7 @@ async def rfq_send(
                         vendor_contact=email,
                         parts_included=parts_text,
                         subject=subject,
-                        status="draft",
+                        status=ContactStatus.PENDING,
                         status_updated_at=datetime.now(timezone.utc),
                     )
                     db.add(contact)
@@ -2593,7 +2603,7 @@ async def rfq_send(
                 vendor_contact=email,
                 parts_included=parts_text,
                 subject=subject,
-                status="sent",
+                status=ContactStatus.SENT,
                 status_updated_at=datetime.now(timezone.utc),
             )
             db.add(contact)
@@ -2723,7 +2733,7 @@ async def send_follow_up_htmx(
 
     from datetime import timezone as tz
 
-    contact.status = "sent"
+    contact.status = ContactStatus.SENT
     contact.status_updated_at = datetime.now(tz.utc)
     db.commit()
 
@@ -3308,7 +3318,7 @@ async def add_to_requisition(
             primary_mpn=mpn,
             normalized_mpn=mpn.strip().upper(),
             target_qty=None,
-            sourcing_status="open",
+            sourcing_status=SourcingStatus.OPEN,
         )
         db.add(requirement)
         db.flush()
@@ -5193,7 +5203,7 @@ async def log_phone_call(
         vendor_name=vendor_name,
         vendor_contact=vendor_phone,
         details=notes or f"Phone call to {vendor_name}",
-        status="completed",
+        status=ContactStatus.SENT,
     )
     db.add(contact)
 
@@ -5905,7 +5915,7 @@ async def buy_plan_verify_po_partial(
         verify_po(plan_id, line_id, action, user, db, rejection_note=form.get("rejection_note"))
         db.commit()
         updated = check_completion(plan_id, db)
-        if updated and updated.status == "completed":
+        if updated and updated.status == BuyPlanStatus.COMPLETED:
             db.commit()
             await run_notify_bg(notify_completed, plan_id)
     except (ValueError, PermissionError) as e:
@@ -7403,7 +7413,7 @@ async def revise_quote_htmx(
         shipping_terms=quote.shipping_terms,
         validity_days=quote.validity_days,
         notes=quote.notes,
-        status="draft",
+        status=QuoteStatus.DRAFT,
         created_by_id=user.id,
     )
     db.add(new_quote)
@@ -7697,7 +7707,7 @@ async def dismiss_prospect_htmx(
     prospect = db.get(ProspectAccount, prospect_id)
     if not prospect:
         raise HTTPException(404, "Prospect not found")
-    prospect.status = "dismissed"
+    prospect.status = ProspectAccountStatus.DISMISSED
     prospect.dismissed_by = user.id
     prospect.dismissed_at = datetime.now(timezone.utc)
     db.commit()
@@ -7917,7 +7927,7 @@ async def proactive_list_partial(
     """Proactive matches list partial — shows matches and sent offers."""
     from ..services.proactive_service import get_matches_for_user, get_sent_offers
 
-    result = get_matches_for_user(db, user.id, status="new")
+    result = get_matches_for_user(db, user.id, status=ProactiveMatchStatus.NEW)
     groups = result.get("groups", []) if isinstance(result, dict) else result
     match_count = result.get("stats", {}).get("total", 0) if isinstance(result, dict) else 0
     sent = get_sent_offers(db, user.id) if tab == "sent" else []
@@ -7948,14 +7958,16 @@ async def proactive_batch_dismiss(
         db.query(ProactiveMatch).filter(
             ProactiveMatch.id.in_(match_ids),
             ProactiveMatch.salesperson_id == user.id,
-            ProactiveMatch.status == "new",
-        ).update({"status": "dismissed", "dismiss_reason": "batch_dismiss"}, synchronize_session=False)
+            ProactiveMatch.status == ProactiveMatchStatus.NEW,
+        ).update(
+            {"status": ProactiveMatchStatus.DISMISSED, "dismiss_reason": "batch_dismiss"}, synchronize_session=False
+        )
         db.commit()
 
     # Re-render list
     from ..services.proactive_service import get_matches_for_user
 
-    result = get_matches_for_user(db, user.id, status="new")
+    result = get_matches_for_user(db, user.id, status=ProactiveMatchStatus.NEW)
     groups = result.get("groups", []) if isinstance(result, dict) else result
     match_count = result.get("stats", {}).get("total", 0) if isinstance(result, dict) else 0
     ctx = _base_ctx(request, user, "proactive")
@@ -8208,7 +8220,7 @@ async def proactive_send_offer(
         # Success — reload matches list with success banner
         from ..services.proactive_service import get_matches_for_user
 
-        match_result = get_matches_for_user(db, user.id, status="new")
+        match_result = get_matches_for_user(db, user.id, status=ProactiveMatchStatus.NEW)
         groups = match_result.get("groups", []) if isinstance(match_result, dict) else match_result
         match_count = match_result.get("stats", {}).get("total", 0) if isinstance(match_result, dict) else 0
         parts_count = len(result.get("line_items", []))
@@ -8254,7 +8266,7 @@ async def proactive_send_legacy(
         raise HTTPException(400, "Email body is required")
 
     # Mark as sent
-    match.status = "sent"
+    match.status = ProactiveMatchStatus.SENT
     db.commit()
     logger.info("Proactive match {} sent by {}", match_id, user.email)
 
@@ -8330,7 +8342,7 @@ async def proactive_badge(
 
     count = (
         db.query(sqlfunc.count(ProactiveMatch.id))
-        .filter(ProactiveMatch.salesperson_id == user.id, ProactiveMatch.status == "new")
+        .filter(ProactiveMatch.salesperson_id == user.id, ProactiveMatch.status == ProactiveMatchStatus.NEW)
         .scalar()
         or 0
     )
@@ -8802,7 +8814,7 @@ async def parts_list_partial(
     # - include_archived → show everything (no filtering)
     # - default          → exclude archived parts AND archived requisitions
     if status == "archived":
-        query = query.filter(Requirement.sourcing_status == "archived")
+        query = query.filter(Requirement.sourcing_status == SourcingStatus.ARCHIVED)
     elif not include_archived:
         query = query.filter(
             Requisition.status.in_(
@@ -8812,7 +8824,7 @@ async def parts_list_partial(
                 ]
             )
         )
-        query = query.filter(Requirement.sourcing_status != "archived")
+        query = query.filter(Requirement.sourcing_status != SourcingStatus.ARCHIVED)
 
     # Filters
     if q:
@@ -9390,7 +9402,7 @@ async def part_spec_edit(
     if not req:
         raise HTTPException(404, "Part not found")
 
-    if req.sourcing_status == "archived":
+    if req.sourcing_status == SourcingStatus.ARCHIVED:
         return HTMLResponse("Cannot edit archived part", status_code=403)
 
     ctx = _base_ctx(request, user, "requisitions")
@@ -9423,7 +9435,7 @@ async def part_spec_save(
     if not req:
         raise HTTPException(404, "Part not found")
 
-    if req.sourcing_status == "archived":
+    if req.sourcing_status == SourcingStatus.ARCHIVED:
         return HTMLResponse("Cannot edit archived part", status_code=403)
 
     clean = (value or "").strip() or None
@@ -9565,7 +9577,7 @@ async def create_part_task(
         assigned_to_id=_safe_int(form.get("assigned_to")),
         created_by=user.id,
         due_at=form.get("due_date") or None,
-        status="todo",
+        status=TaskStatus.TODO,
         source="manual",
     )
     db.add(task)
@@ -9589,7 +9601,7 @@ async def mark_task_done(
     if not task:
         raise HTTPException(404, "Task not found")
 
-    task.status = "done"
+    task.status = TaskStatus.DONE
     task.completed_at = datetime.now(timezone.utc)
     db.commit()
     logger.info("Task {} marked done by {}", task_id, user.email)
@@ -9617,7 +9629,7 @@ async def reopen_task(
     if not task:
         raise HTTPException(404, "Task not found")
 
-    task.status = "todo"
+    task.status = TaskStatus.TODO
     task.completed_at = None
     db.commit()
     logger.info("Task {} reopened by {}", task_id, user.email)

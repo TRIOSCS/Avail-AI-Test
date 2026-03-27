@@ -1607,7 +1607,7 @@ def test_follow_ups_sales_role_filtering(
     sales_req = Requisition(
         name="SALES-REQ-001",
         customer_name="Sales Customer",
-        status="open",
+        status="active",
         created_by=sales_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -1670,7 +1670,7 @@ def test_follow_ups_summary_sales_role_filtering(
     sales_req = Requisition(
         name="SALES-REQ-002",
         customer_name="Sales Customer",
-        status="open",
+        status="active",
         created_by=sales_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -1723,7 +1723,7 @@ def test_sales_can_list_contacts_for_owned_requisition(db_session, sales_user):
     sales_req = Requisition(
         name="SALES-REQ-003",
         customer_name="Sales Customer",
-        status="open",
+        status="active",
         created_by=sales_user.id,
         created_at=datetime.now(timezone.utc),
     )

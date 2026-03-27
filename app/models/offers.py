@@ -16,7 +16,7 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from .base import Base
 
@@ -90,6 +90,36 @@ class Offer(Base):
     reconfirmed_at = Column(DateTime)
     reconfirm_count = Column(Integer, default=0)
     attribution_status = Column(String(20), default="active")  # active, expired, converted
+
+    # --- Validators ---
+    @validates("unit_price")
+    def _validate_unit_price(self, _key, value):
+        if value is not None and value < 0:
+            raise ValueError(f"unit_price must be >= 0, got {value}")
+        return value
+
+    @validates("parse_confidence")
+    def _validate_parse_confidence(self, _key, value):
+        if value is not None and not (0.0 <= value <= 1.0):
+            raise ValueError(f"parse_confidence must be 0.0-1.0, got {value}")
+        return value
+
+    @validates("status")
+    def _validate_status(self, _key, value):
+        from ..constants import OfferStatus
+
+        valid = {e.value for e in OfferStatus}
+        if value and value not in valid:
+            from loguru import logger
+
+            logger.warning("Unexpected offer status: {}. Expected one of {}", value, valid)
+        return value
+
+    @validates("qty_available")
+    def _validate_qty_available(self, _key, value):
+        if value is not None and value < 0:
+            raise ValueError(f"qty_available must be >= 0, got {value}")
+        return value
 
     requisition = relationship("Requisition", back_populates="offers")
     requirement = relationship("Requirement", back_populates="offers")

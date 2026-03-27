@@ -14,6 +14,8 @@ from datetime import datetime, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.constants import OfferStatus, RequisitionStatus
+
 # Patterns that indicate test/junk data
 _TEST_PATTERNS = [
     re.compile(r"^test[\s_-]", re.IGNORECASE),
@@ -71,12 +73,12 @@ def scan_junk_data(db: Session, *, dry_run: bool = True) -> dict:
                 }
             )
             if not dry_run:
-                r.status = "archived"
+                r.status = RequisitionStatus.ARCHIVED
                 r.name = f"[QUARANTINED] {r.name}"
             results["total_flagged"] += 1
 
     # Scan offers for XSS payloads
-    offers = db.query(Offer).filter(Offer.status == "active").limit(10000).all()
+    offers = db.query(Offer).filter(Offer.status == OfferStatus.ACTIVE).limit(10000).all()
     for o in offers:
         flagged_fields = []
         for field in ("vendor_name", "mpn", "notes", "manufacturer"):
@@ -94,7 +96,7 @@ def scan_junk_data(db: Session, *, dry_run: bool = True) -> dict:
                 }
             )
             if not dry_run:
-                o.status = "rejected"
+                o.status = OfferStatus.REJECTED
                 o.notes = f"[QUARANTINED: {', '.join(flagged_fields)}] {o.notes or ''}"
             results["total_flagged"] += 1
 

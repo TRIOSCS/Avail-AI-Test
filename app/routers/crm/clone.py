@@ -1,6 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
+from ...constants import RequisitionStatus
 from ...database import get_db
 from ...dependencies import require_user
 from ...models import Offer, Requirement, Requisition, User
@@ -28,7 +29,7 @@ async def clone_requisition(req_id: int, user: User = Depends(require_user), db:
         name=f"{req.name} (clone)",
         customer_name=req.customer_name,
         customer_site_id=req.customer_site_id,
-        status="active",
+        status=RequisitionStatus.ACTIVE,
         cloned_from_id=req.id,
         created_by=user.id,
     )

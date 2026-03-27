@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from ..database import UTCDateTime
 from .base import Base
@@ -79,6 +79,15 @@ class Company(Base):
     sites = relationship("CustomerSite", back_populates="company", cascade="all, delete-orphan")
     account_owner = relationship("User", foreign_keys=[account_owner_id])
 
+    @validates("currency")
+    def _validate_currency(self, _key, value):
+        if value is not None:
+            import re
+
+            if not re.fullmatch(r"[A-Z]{3}", value):
+                raise ValueError(f"Invalid ISO 4217 currency code: {value}")
+        return value
+
     __table_args__ = (
         Index("ix_companies_name", "name"),
         Index("ix_companies_account_owner", "account_owner_id"),
@@ -140,6 +149,12 @@ class CustomerSite(Base):
     owner = relationship("User", foreign_keys=[owner_id])
     site_contacts = relationship("SiteContact", back_populates="customer_site", cascade="all, delete-orphan")
 
+    @validates("contact_email")
+    def _validate_contact_email(self, _key, value):
+        if value and "@" not in value:
+            raise ValueError(f"Invalid contact email: {value}")
+        return value
+
     __table_args__ = (
         Index("ix_cs_company", "company_id"),
         Index("ix_cs_owner", "owner_id"),
@@ -181,6 +196,12 @@ class SiteContact(Base):
     )
 
     customer_site = relationship("CustomerSite", back_populates="site_contacts")
+
+    @validates("email")
+    def _validate_email(self, _key, value):
+        if value and "@" not in value:
+            raise ValueError(f"Invalid email: {value}")
+        return value
 
     __table_args__ = (
         Index("ix_site_contacts_site", "customer_site_id"),

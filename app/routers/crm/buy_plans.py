@@ -30,7 +30,7 @@ from fastapi.responses import JSONResponse
 from loguru import logger
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ...constants import UserRole
+from ...constants import OfferStatus, UserRole
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin
 from ...dependencies import require_buyer, require_user
@@ -40,6 +40,7 @@ from ...models.buy_plan import (
     BuyPlanLine,
     BuyPlanLineStatus,
     BuyPlanStatus,
+    SOVerificationStatus,
     VerificationGroupMember,
 )
 from ...rate_limit import limiter
@@ -102,10 +103,10 @@ def _map_v3_status_to_v1(plan: BuyPlan) -> str:
     """
     v3_status = plan.status
 
-    if v3_status == "draft" and plan.cancellation_reason:
+    if v3_status == BuyPlanStatus.DRAFT and plan.cancellation_reason:
         return "rejected"
 
-    if v3_status == "active":
+    if v3_status == BuyPlanStatus.ACTIVE:
         lines = plan.lines or []
         lines_with_po = [ln for ln in lines if ln.po_number]
         if lines_with_po:
@@ -526,8 +527,8 @@ async def list_buy_plans(
         "complete": "completed",
         "rejected": "draft",
     }
-    _valid_v3_statuses = {"draft", "pending", "active", "halted", "completed", "cancelled"}
-    _valid_so_statuses = {"pending", "approved", "rejected"}
+    _valid_v3_statuses = {e.value for e in BuyPlanStatus}
+    _valid_so_statuses = {e.value for e in SOVerificationStatus}
 
     if status:
         # Translate V1 status filter to V3 for querying
@@ -805,7 +806,7 @@ async def offer_comparison(
     # Current selections
     selected_ids = {ln.offer_id for ln in (plan.lines or []) if ln.requirement_id == requirement_id and ln.offer_id}
 
-    offers = db.query(Offer).filter(Offer.requirement_id == requirement_id, Offer.status == "active").all()
+    offers = db.query(Offer).filter(Offer.requirement_id == requirement_id, Offer.status == OfferStatus.ACTIVE).all()
     items = []
     for o in offers:
         items.append(

@@ -167,7 +167,11 @@ class TestVendorMergeService:
         remove = _make_vendor(db_session, "Remove V")
 
         req = Requisition(
-            name="REQ-1", customer_name="Test", status="open", created_by=user.id, created_at=datetime.now(timezone.utc)
+            name="REQ-1",
+            customer_name="Test",
+            status="active",
+            created_by=user.id,
+            created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
         db_session.flush()

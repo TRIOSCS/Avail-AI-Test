@@ -42,6 +42,18 @@ from ..schemas.ai import (
     SaveDraftOffersRequest,
     SaveFreeformOffersRequest,
 )
+from ..schemas.responses import (
+    AiDraftRfqResponse,
+    AiFindContactsResponse,
+    AiIntakeParseResponse,
+    AiNormalizePartsResponse,
+    AiParseEmailResponse,
+    AiParseResponseResult,
+    AiStandardizeResponse,
+    CompanyIntelResponse,
+    SimpleOkIdResponse,
+    SimpleOkResponse,
+)
 from ..utils.sql_helpers import escape_like
 from ..vendor_utils import normalize_vendor_name
 
@@ -110,7 +122,7 @@ def _build_vendor_history(vendor_name: str, db: Session) -> dict:
 from ..rate_limit import limiter
 
 
-@router.post("/api/ai/find-contacts")
+@router.post("/api/ai/find-contacts", response_model=AiFindContactsResponse)
 @limiter.limit("10/minute")
 async def ai_find_contacts(
     payload: ProspectFinderRequest,
@@ -229,7 +241,7 @@ async def list_prospect_contacts(
     ]
 
 
-@router.post("/api/ai/prospect-contacts/{contact_id}/save")
+@router.post("/api/ai/prospect-contacts/{contact_id}/save", response_model=SimpleOkIdResponse)
 async def save_prospect_contact(
     contact_id: int,
     payload: ProspectContactSave | None = None,
@@ -259,7 +271,7 @@ async def save_prospect_contact(
     }
 
 
-@router.delete("/api/ai/prospect-contacts/{contact_id}")
+@router.delete("/api/ai/prospect-contacts/{contact_id}", response_model=SimpleOkResponse)
 async def delete_prospect_contact(
     contact_id: int,
     user: User = Depends(require_user),
@@ -295,7 +307,7 @@ async def promote_prospect_contact(
 # ── Feature 2a: Parse RFQ Email (Gradient) ────────────────────────────────
 
 
-@router.post("/api/ai/parse-email")
+@router.post("/api/ai/parse-email", response_model=AiParseEmailResponse)
 @limiter.limit("10/minute")
 async def ai_parse_email(
     payload: ParseEmailRequest,
@@ -331,7 +343,7 @@ async def ai_parse_email(
 # ── Feature 2c: Part Number Normalization ──────────────────────────────
 
 
-@router.post("/api/ai/normalize-parts")
+@router.post("/api/ai/normalize-parts", response_model=AiNormalizePartsResponse)
 @limiter.limit("10/minute")
 async def ai_normalize_parts(
     payload: NormalizePartsRequest,
@@ -356,7 +368,7 @@ class StandardizeDescriptionRequest(PydanticBaseModel):
     manufacturer: str = ""
 
 
-@router.post("/api/ai/standardize-description")
+@router.post("/api/ai/standardize-description", response_model=AiStandardizeResponse)
 @limiter.limit("30/minute")
 async def ai_standardize_description(
     payload: StandardizeDescriptionRequest,
@@ -399,7 +411,7 @@ async def ai_standardize_description(
 # ── Feature 2b: Parse Vendor Reply → Structured Offer (Anthropic) ────────
 
 
-@router.post("/api/ai/parse-response/{response_id}")
+@router.post("/api/ai/parse-response/{response_id}", response_model=AiParseResponseResult)
 @limiter.limit("10/minute")
 async def ai_parse_response(
     response_id: int,
@@ -500,7 +512,7 @@ async def save_parsed_offers(
 # ── Feature 3: Company Intelligence Cards ─────────────────────────────────
 
 
-@router.get("/api/ai/company-intel")
+@router.get("/api/ai/company-intel", response_model=CompanyIntelResponse)
 @limiter.limit("10/minute")
 async def get_company_intel(
     request: Request,
@@ -530,7 +542,7 @@ async def get_company_intel(
 # ── Feature 4: Smart RFQ Drafts ──────────────────────────────────────────
 
 
-@router.post("/api/ai/draft-rfq")
+@router.post("/api/ai/draft-rfq", response_model=AiDraftRfqResponse)
 @limiter.limit("10/minute")
 async def ai_draft_rfq(
     payload: RfqDraftRequest,
@@ -564,7 +576,7 @@ async def ai_draft_rfq(
 # ── Feature 5b: Unified AI Intake Parser ──────────────────────────────────
 
 
-@router.post("/api/ai/intake-parse")
+@router.post("/api/ai/intake-parse", response_model=AiIntakeParseResponse)
 @limiter.limit("10/minute")
 async def ai_intake_parse(
     request: Request,
@@ -607,7 +619,7 @@ async def ai_intake_parse(
 # ── Feature 6: Freeform paste → RFQ/Offer templates ──────────────────────
 
 
-@router.post("/api/ai/parse-freeform-rfq")
+@router.post("/api/ai/parse-freeform-rfq", response_model=AiIntakeParseResponse)
 @limiter.limit("10/minute")
 async def ai_parse_freeform_rfq(
     payload: ParseFreeformRfqRequest,
@@ -626,7 +638,7 @@ async def ai_parse_freeform_rfq(
     return {"parsed": True, "template": result}
 
 
-@router.post("/api/ai/parse-freeform-offer")
+@router.post("/api/ai/parse-freeform-offer", response_model=AiIntakeParseResponse)
 @limiter.limit("10/minute")
 async def ai_parse_freeform_offer(
     payload: ParseFreeformOfferRequest,

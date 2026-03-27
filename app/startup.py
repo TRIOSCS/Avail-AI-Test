@@ -109,6 +109,8 @@ def _create_default_user_if_env_set() -> None:
         logger.info("Created default user %s with role %s", email, role)
     except Exception:
         logger.exception("Failed creating default user")
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -602,7 +604,10 @@ def _backfill_sighting_vendor_normalized() -> None:
 
 
 def _create_count_triggers(conn) -> None:
-    """Create triggers to keep companies.site_count and open_req_count in sync."""
+    """Create triggers to keep companies.site_count and open_req_count in sync.
+
+    NOTE: Status strings in PL/pgSQL below must stay in sync with RequisitionStatus in app/constants.py.
+    """
     # Trigger function: update site_count when customer_sites change
     _exec(
         conn,
@@ -833,6 +838,7 @@ def _seed_commodity_schemas() -> None:
     except Exception:
         logger.exception("Failed seeding commodity schemas")
         db.rollback()
+        raise
     finally:
         db.close()
 

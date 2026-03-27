@@ -23,6 +23,8 @@ from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.constants import OfferStatus
+
 # ── Weights ──
 W_RESPONSE_RATE = 0.30
 W_GHOST_RATE = 0.20
@@ -245,7 +247,7 @@ async def compute_all_engagement_scores(db: Session) -> dict:
             Offer.vendor_name,
             func.count(Offer.id).label("total_wins"),
         )
-        .filter(Offer.status == "won")
+        .filter(Offer.status == OfferStatus.WON)
         .group_by(Offer.vendor_name)
         .all()
     )
@@ -354,7 +356,7 @@ def compute_single_vendor_score(card, db: Session) -> float | None:
     wins = (
         db.query(func.count(Offer.id))
         .filter(Offer.vendor_name_normalized == norm)
-        .filter(Offer.status == "won")
+        .filter(Offer.status == OfferStatus.WON)
         .scalar()
         or 0
     )

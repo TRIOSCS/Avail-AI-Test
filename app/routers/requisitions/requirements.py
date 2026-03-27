@@ -19,6 +19,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
+from ...constants import TaskStatus
 from ...database import get_db
 from ...dependencies import get_req_for_user, require_buyer, require_user
 from ...models import (
@@ -1602,7 +1603,7 @@ async def create_requirement_task(
         requisition_id=req.requisition_id,
         title=body.title,
         task_type="general",
-        status="todo",
+        status=TaskStatus.TODO,
         source="manual",
         source_ref=f"requirement:{requirement_id}",
         created_by=user.id,

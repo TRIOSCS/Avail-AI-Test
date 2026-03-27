@@ -14,6 +14,7 @@ from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.constants import TaskStatus
 from app.models.task import RequisitionTask
 
 # ---------------------------------------------------------------------------
@@ -96,7 +97,7 @@ def get_my_tasks(
         q = q.filter(RequisitionTask.status == status)
     else:
         # Default: exclude done tasks
-        q = q.filter(RequisitionTask.status != "done")
+        q = q.filter(RequisitionTask.status != TaskStatus.DONE)
     return q.order_by(
         RequisitionTask.due_at.asc().nullslast(),
         RequisitionTask.created_at,
@@ -110,7 +111,7 @@ def get_my_tasks_summary(db: Session, user_id: int) -> dict:
         db.query(func.count(RequisitionTask.id))
         .filter(
             RequisitionTask.assigned_to_id == user_id,
-            RequisitionTask.status != "done",
+            RequisitionTask.status != TaskStatus.DONE,
         )
         .scalar()
     ) or 0
@@ -119,7 +120,7 @@ def get_my_tasks_summary(db: Session, user_id: int) -> dict:
         .filter(
             RequisitionTask.created_by == user_id,
             RequisitionTask.assigned_to_id != user_id,
-            RequisitionTask.status != "done",
+            RequisitionTask.status != TaskStatus.DONE,
         )
         .scalar()
     ) or 0
@@ -127,7 +128,7 @@ def get_my_tasks_summary(db: Session, user_id: int) -> dict:
         db.query(func.count(RequisitionTask.id))
         .filter(
             RequisitionTask.assigned_to_id == user_id,
-            RequisitionTask.status != "done",
+            RequisitionTask.status != TaskStatus.DONE,
             RequisitionTask.due_at < now,
         )
         .scalar()
@@ -156,10 +157,10 @@ def update_task(db: Session, task_id: int, **kwargs) -> RequisitionTask | None:
         if val is not None and hasattr(task, key):
             setattr(task, key, val)
     # Auto-set completed_at when transitioning to done
-    if kwargs.get("status") == "done" and not task.completed_at:
+    if kwargs.get("status") == TaskStatus.DONE and not task.completed_at:
         task.completed_at = datetime.now(timezone.utc)
     # Clear completed_at if moved back from done
-    if kwargs.get("status") and kwargs["status"] != "done":
+    if kwargs.get("status") and kwargs["status"] != TaskStatus.DONE:
         task.completed_at = None
     db.commit()
     db.refresh(task)
@@ -190,7 +191,7 @@ def complete_task(
         return None
     if task.assigned_to_id != user_id:
         raise PermissionError("Only the assignee can complete this task")
-    task.status = "done"
+    task.status = TaskStatus.DONE
     task.completed_at = datetime.now(timezone.utc)
     task.completion_note = completion_note
     db.commit()
@@ -206,7 +207,7 @@ def get_waiting_on_tasks(db: Session, user_id: int) -> list[RequisitionTask]:
         .filter(
             RequisitionTask.created_by == user_id,
             RequisitionTask.assigned_to_id != user_id,
-            RequisitionTask.status != "done",
+            RequisitionTask.status != TaskStatus.DONE,
         )
         .order_by(RequisitionTask.due_at.asc().nullslast(), RequisitionTask.created_at)
         .all()
@@ -249,7 +250,7 @@ def auto_create_task(
         .filter(
             RequisitionTask.requisition_id == requisition_id,
             RequisitionTask.source_ref == source_ref,
-            RequisitionTask.status != "done",
+            RequisitionTask.status != TaskStatus.DONE,
         )
         .first()
     )
@@ -275,12 +276,12 @@ def auto_close_task(db: Session, requisition_id: int, source_ref: str) -> Requis
         .filter(
             RequisitionTask.requisition_id == requisition_id,
             RequisitionTask.source_ref == source_ref,
-            RequisitionTask.status != "done",
+            RequisitionTask.status != TaskStatus.DONE,
         )
         .first()
     )
     if task:
-        task.status = "done"
+        task.status = TaskStatus.DONE
         task.completed_at = datetime.now(timezone.utc)
         db.commit()
         db.refresh(task)
@@ -518,6 +519,6 @@ def apply_simple_scoring(db: Session, tasks: list[RequisitionTask]) -> None:
             t.ai_risk_flag = "Overdue"
         elif due and (due - now).days <= 1:
             t.ai_risk_flag = "Due today"
-        elif created and (now - created).days >= 3 and t.status == "todo":
+        elif created and (now - created).days >= 3 and t.status == TaskStatus.TODO:
             t.ai_risk_flag = "No activity in 3+ days"
     db.commit()

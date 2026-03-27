@@ -12,6 +12,7 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
+from ..constants import RequisitionStatus
 from ..database import get_db
 from ..dependencies import require_buyer, require_fresh_token, require_user
 from ..models import User
@@ -159,7 +160,7 @@ async def send_vendor_inquiries(
         req = Requisition(
             name=f"Stock Inquiry — {', '.join(mpns[:3])}",
             created_by=user.id,
-            status="sourcing",
+            status=RequisitionStatus.SOURCING,
         )
         db.add(req)
         db.flush()

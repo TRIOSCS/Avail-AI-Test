@@ -90,7 +90,7 @@ def _make_contact(db, customer_site_id, full_name="John Doe", title=None, is_pri
     return contact
 
 
-def _make_requisition(db, customer_site_id, name="REQ-001", status="open", created_at=None):
+def _make_requisition(db, customer_site_id, name="REQ-001", status="active", created_at=None):
     req = Requisition(
         customer_site_id=customer_site_id,
         name=name,
@@ -396,7 +396,7 @@ class TestAccountSummaryService:
         req = Requisition(
             customer_site_id=site.id,
             name="REQ-NODATE",
-            status="open",
+            status="active",
         )
         db_session.add(req)
         db_session.flush()

@@ -31,7 +31,7 @@ def _make_queue_item(db_session, test_user, mpn, manufacturer=None, index=0):
     req = Requisition(
         name=f"REQ-GATE-{mpn}-{index}",
         customer_name="Test",
-        status="open",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

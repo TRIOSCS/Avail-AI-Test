@@ -131,7 +131,7 @@ def test_material_card_to_dict_with_sightings_and_offers(db_session, test_materi
     req = Requisition(
         name="REQ-MAT-001",
         customer_name="Test Co",
-        status="open",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -186,7 +186,7 @@ def test_material_card_to_dict_unavailable_sightings_excluded(db_session, test_m
     req = Requisition(
         name="REQ-MAT-002",
         customer_name="Test Co",
-        status="open",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -206,7 +206,7 @@ def test_material_card_to_dict_unavailable_sightings_excluded(db_session, test_m
         requirement_id=requirement.id,
         vendor_name="Gone Vendor",
         mpn_matched="LM317T",
-        qty_available=0,
+        qty_available=1,
         source_type="api",
         is_unavailable=True,
         created_at=datetime.now(timezone.utc),

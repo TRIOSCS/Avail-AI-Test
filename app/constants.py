@@ -195,6 +195,7 @@ class ProactiveOfferStatus(StrEnum):
 
     SENT = "sent"
     CONVERTED = "converted"
+    EXPIRED = "expired"
 
 
 class TicketStatus(StrEnum):

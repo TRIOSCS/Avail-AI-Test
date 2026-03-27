@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.constants import ProspectAccountStatus
 from app.models import Company, User
 from app.models.crm import CustomerSite, SiteContact
 from app.models.prospect_account import ProspectAccount
@@ -34,10 +35,10 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
     if not prospect:
         raise LookupError("Prospect not found")
 
-    if prospect.status == "claimed":
+    if prospect.status == ProspectAccountStatus.CLAIMED:
         raise ValueError("Already claimed")
 
-    if prospect.status not in ("suggested",):
+    if prospect.status not in (ProspectAccountStatus.SUGGESTED,):
         raise ValueError(f"Cannot claim prospect with status '{prospect.status}'")
 
     user = db.get(User, user_id)
@@ -110,7 +111,7 @@ def claim_prospect(prospect_id: int, user_id: int, db: Session) -> dict:
             path = "new_company"
 
     # Update prospect status
-    prospect.status = "claimed"
+    prospect.status = ProspectAccountStatus.CLAIMED
     prospect.claimed_by = user_id
     prospect.claimed_at = datetime.now(timezone.utc)
 
@@ -461,7 +462,7 @@ def add_prospect_manually(domain: str, user_id: int, db: Session) -> dict:
         name=name,
         domain=domain,
         discovery_source="manual",
-        status="suggested",
+        status=ProspectAccountStatus.SUGGESTED,
         fit_score=0,
         readiness_score=0,
         enrichment_data={"submitted_by": user_id},

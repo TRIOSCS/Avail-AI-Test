@@ -11,7 +11,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
-from ..constants import OfferStatus
+from ..constants import OfferStatus, ProactiveMatchStatus, ProactiveOfferStatus
 from ..scheduler import _traced_job
 
 
@@ -86,7 +86,7 @@ async def _job_proactive_matching():
 
         # Summary log with total pending
         new_matches = scan_result.get("matches_created", 0)
-        total_pending = db.query(ProactiveMatch).filter(ProactiveMatch.status == "new").count()
+        total_pending = db.query(ProactiveMatch).filter(ProactiveMatch.status == ProactiveMatchStatus.NEW).count()
         logger.info(f"Proactive scan complete: {new_matches} new matches, {total_pending} pending")
     except asyncio.TimeoutError:
         logger.error("Proactive matching timed out after 300s")
@@ -200,10 +200,10 @@ async def _job_proactive_offer_expiry():
         expired_count = (
             db.query(ProactiveOffer)
             .filter(
-                ProactiveOffer.status == "sent",
+                ProactiveOffer.status == ProactiveOfferStatus.SENT,
                 ProactiveOffer.sent_at < cutoff,
             )
-            .update({"status": "expired"}, synchronize_session="fetch")
+            .update({"status": ProactiveOfferStatus.EXPIRED}, synchronize_session="fetch")
         )
         if expired_count:
             db.commit()

@@ -16,7 +16,7 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import TSVECTOR
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from .base import Base
 
@@ -108,6 +108,27 @@ class VendorCard(Base):
     vendor_contacts = relationship("VendorContact", back_populates="vendor_card", cascade="all, delete-orphan")
     strategic_vendors = relationship("StrategicVendor", back_populates="vendor_card")
 
+    # --- Validators ---
+    @validates(
+        "response_rate",
+        "cancellation_rate",
+        "rma_rate",
+        "ghost_rate",
+        "overall_win_rate",
+        "quote_quality_rate",
+        "specialty_confidence",
+    )
+    def _validate_rate(self, _key, value):
+        if value is not None and not (0.0 <= value <= 1.0):
+            raise ValueError(f"Rate {_key} must be 0.0-1.0, got {value}")
+        return value
+
+    @validates("vendor_score", "advancement_score", "email_health_score")
+    def _validate_score(self, _key, value):
+        if value is not None and not (0 <= value <= 100):
+            raise ValueError(f"Score {_key} must be 0-100, got {value}")
+        return value
+
     __table_args__ = (
         Index("ix_vendor_cards_created_at", "created_at"),
         Index("ix_vendor_cards_score_computed_at", "vendor_score_computed_at"),
@@ -152,6 +173,19 @@ class VendorContact(Base):
     ooo_return_date = Column(DateTime)
 
     vendor_card = relationship("VendorCard", back_populates="vendor_contacts")
+
+    # --- Validators ---
+    @validates("email")
+    def _validate_email(self, _key, value):
+        if value and "@" not in value:
+            raise ValueError(f"Invalid email: {value!r} (missing '@')")
+        return value
+
+    @validates("confidence")
+    def _validate_confidence(self, _key, value):
+        if value is not None and not (0 <= value <= 100):
+            raise ValueError(f"Confidence must be 0-100, got {value}")
+        return value
 
     __table_args__ = (
         Index("ix_vendor_contacts_card", "vendor_card_id"),

@@ -786,7 +786,7 @@ class TestQueueManager:
         assert item is not None
         assert item.mpn == "LM317T"
         assert item.status == "pending"
-        assert item.priority == 3  # "open" is not an active sourcing status
+        assert item.priority == 1  # "active" is in _ACTIVE_STATUSES
 
     def test_enqueue_active_requisition_gets_priority(self, db_session, test_requisition):
         test_requisition.status = "sourcing"
@@ -817,7 +817,7 @@ class TestQueueManager:
         req1 = Requisition(
             name="REQ-1",
             customer_name="Acme",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -861,7 +861,7 @@ class TestQueueManager:
         req2 = Requisition(
             name="REQ-2",
             customer_name="Beta Corp",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -895,7 +895,7 @@ class TestQueueManager:
         req1 = Requisition(
             name="REQ-D1",
             customer_name="X",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -925,7 +925,7 @@ class TestQueueManager:
         req2 = Requisition(
             name="REQ-D2",
             customer_name="Y",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -988,14 +988,14 @@ class TestQueueManager:
         r1 = Requisition(
             name="OLD",
             customer_name="A",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime(2026, 1, 1, tzinfo=timezone.utc),
         )
         r2 = Requisition(
             name="NEW",
             customer_name="B",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime(2026, 2, 1, tzinfo=timezone.utc),
         )

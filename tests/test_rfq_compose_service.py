@@ -72,7 +72,7 @@ class TestBuildRfqVendorList:
         req = Requisition(
             name="EMPTY-REQ",
             customer_name="Test Co",
-            status="open",
+            status="active",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)

@@ -118,7 +118,7 @@ def test_list_requisitions_pagination(client, db_session, test_user):
         db_session.add(
             Requisition(
                 name=f"REQ-PAGE-{i}",
-                status="open",
+                status="active",
                 created_by=test_user.id,
                 created_at=datetime.now(timezone.utc),
             )
@@ -593,13 +593,13 @@ def test_bulk_archive(client, db_session, test_user):
 
     r1 = Requisition(
         name="BULK-1",
-        status="open",
+        status="active",
         created_by=other.id,
         created_at=datetime.now(timezone.utc),
     )
     r2 = Requisition(
         name="BULK-2",
-        status="open",
+        status="active",
         created_by=other.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -617,9 +617,9 @@ def test_batch_archive_by_ids(client, db_session, test_user):
     """PUT /api/requisitions/batch-archive archives specific reqs by ID."""
     from app.models import Requisition
 
-    r1 = Requisition(name="BA-1", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
-    r2 = Requisition(name="BA-2", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
-    r3 = Requisition(name="BA-3", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r1 = Requisition(name="BA-1", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r2 = Requisition(name="BA-2", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r3 = Requisition(name="BA-3", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
     db_session.add_all([r1, r2, r3])
     db_session.commit()
 
@@ -630,7 +630,7 @@ def test_batch_archive_by_ids(client, db_session, test_user):
     assert data["archived_count"] == 2
     # r3 should still be open
     db_session.refresh(r3)
-    assert r3.status == "open"
+    assert r3.status == "active"
 
 
 def test_batch_assign(client, db_session, test_user):
@@ -643,8 +643,8 @@ def test_batch_assign(client, db_session, test_user):
     # batch-assign requires admin; override for this test
     app.dependency_overrides[require_admin] = lambda: test_user
 
-    r1 = Requisition(name="ASSIGN-1", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
-    r2 = Requisition(name="ASSIGN-2", status="open", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r1 = Requisition(name="ASSIGN-1", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
+    r2 = Requisition(name="ASSIGN-2", status="active", created_by=test_user.id, created_at=datetime.now(timezone.utc))
     db_session.add_all([r1, r2])
     db_session.commit()
 
@@ -760,14 +760,14 @@ def test_sales_user_sees_only_own_requisitions(client, db_session, test_user, sa
     # Create a requisition owned by test_user (buyer)
     buyer_req = Requisition(
         name="Buyer-REQ",
-        status="open",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
     # Create a requisition owned by sales_user
     sales_req = Requisition(
         name="Sales-REQ",
-        status="open",
+        status="active",
         created_by=sales_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -799,7 +799,7 @@ def test_list_requisitions_with_customer_site(client, db_session, test_user, tes
 
     req = Requisition(
         name="REQ-SITE",
-        status="open",
+        status="active",
         customer_site_id=test_customer_site.id,
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
@@ -1131,7 +1131,7 @@ def test_saved_sightings_with_historical_offers(client, db_session, test_requisi
     # Create another requisition with an offer for the same MPN
     other_req = Requisition(
         name="OTHER-REQ",
-        status="open",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

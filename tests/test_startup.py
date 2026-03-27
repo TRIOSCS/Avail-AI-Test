@@ -118,7 +118,8 @@ class TestCreateDefaultUser:
 
     @patch("app.startup.SessionLocal")
     def test_handles_creation_error(self, mock_sl, db_session):
-        """Handles exception during user creation gracefully."""
+        """Creation error is logged and re-raised (M6: critical seed failures
+        propagate)."""
         from app.startup import _create_default_user_if_env_set
 
         mock_db = MagicMock()
@@ -133,7 +134,8 @@ class TestCreateDefaultUser:
             "DEFAULT_USER_PASSWORD": "secret",
         }
         with patch.dict(os.environ, env, clear=False):
-            _create_default_user_if_env_set()
+            with pytest.raises(RuntimeError, match="DB error"):
+                _create_default_user_if_env_set()
 
 
 class TestSeedVinodUser:

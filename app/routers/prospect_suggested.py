@@ -11,6 +11,7 @@ from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from ..constants import ProspectAccountStatus
 from ..database import get_db
 from ..dependencies import require_user
 from ..models import User
@@ -147,7 +148,7 @@ async def suggested_stats(
     db: Session = Depends(get_db),
 ):
     """Aggregate stats for the Suggested tab header."""
-    base = db.query(ProspectAccount).filter(ProspectAccount.status == "suggested")
+    base = db.query(ProspectAccount).filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED)
     total = base.count()
     call_now = base.filter(ProspectAccount.readiness_score >= 70).count()
     nurture = base.filter(
@@ -162,7 +163,7 @@ async def suggested_stats(
     claimed = (
         db.query(func.count(ProspectAccount.id))
         .filter(
-            ProspectAccount.status == "claimed",
+            ProspectAccount.status == ProspectAccountStatus.CLAIMED,
             ProspectAccount.claimed_at >= month_start,
         )
         .scalar()
@@ -172,7 +173,7 @@ async def suggested_stats(
     industries = sorted(
         r[0]
         for r in db.query(ProspectAccount.industry)
-        .filter(ProspectAccount.status == "suggested", ProspectAccount.industry.isnot(None))
+        .filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED, ProspectAccount.industry.isnot(None))
         .distinct()
         .all()
         if r[0]
@@ -181,7 +182,7 @@ async def suggested_stats(
     regions = sorted(
         r[0]
         for r in db.query(ProspectAccount.region)
-        .filter(ProspectAccount.status == "suggested", ProspectAccount.region.isnot(None))
+        .filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED, ProspectAccount.region.isnot(None))
         .distinct()
         .all()
         if r[0]
@@ -278,12 +279,12 @@ async def dismiss_suggested(
     if not prospect:
         raise HTTPException(404, "Prospect not found")
 
-    if prospect.status != "suggested":
+    if prospect.status != ProspectAccountStatus.SUGGESTED:
         raise HTTPException(409, "Can only dismiss suggested prospects")
 
     reason = (payload.get("reason") or "other").strip()
 
-    prospect.status = "dismissed"
+    prospect.status = ProspectAccountStatus.DISMISSED
     prospect.dismissed_by = user.id
     prospect.dismissed_at = datetime.now(timezone.utc)
     prospect.dismiss_reason = reason

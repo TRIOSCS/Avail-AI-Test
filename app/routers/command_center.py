@@ -14,11 +14,12 @@ from sqlalchemy.orm import Session
 
 from ..database import get_db
 from ..dependencies import require_user
+from ..schemas.responses import CommandCenterResponse
 
 router = APIRouter(prefix="/api/command-center", tags=["command-center"])
 
 
-@router.get("/actions")
+@router.get("/actions", response_model=CommandCenterResponse)
 def get_command_center_actions(
     db: Session = Depends(get_db),
     user=Depends(require_user),

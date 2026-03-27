@@ -15,7 +15,7 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from ..constants import ProactiveMatchStatus
 from .base import Base
@@ -57,6 +57,13 @@ class MaterialCard(Base):
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
+
+    # --- Validators ---
+    @validates("search_count")
+    def _validate_search_count(self, _key, value):
+        if value is not None and value < 0:
+            raise ValueError(f"search_count must be >= 0, got {value}")
+        return value
 
     vendor_history = relationship(
         "MaterialVendorHistory",

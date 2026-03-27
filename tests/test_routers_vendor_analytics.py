@@ -101,7 +101,7 @@ def test_confirmed_offers_with_search(client, db_session, test_vendor_card, test
     req = Requisition(
         name="REQ-CONF-001",
         customer_name="Test Customer",
-        status="open",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -147,7 +147,7 @@ def test_confirmed_offers_serialization(client, db_session, test_vendor_card, te
     req = Requisition(
         name="REQ-SER-001",
         customer_name="Serialize Customer",
-        status="open",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

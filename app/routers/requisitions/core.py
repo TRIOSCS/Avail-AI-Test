@@ -535,7 +535,7 @@ async def create_requisition(
         customer_name=safe_customer,
         deadline=body.deadline,
         created_by=user.id,
-        status="draft",
+        status=RequisitionStatus.DRAFT,
     )
     db.add(req)
     db.commit()

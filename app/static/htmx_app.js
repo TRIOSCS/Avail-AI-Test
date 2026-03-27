@@ -143,6 +143,7 @@ Alpine.store('shortlist', {
 // Sightings multi-select store (reactive object, not Set)
 Alpine.store('sightingSelection', {
     _map: {},
+    selectedReqId: null,
     toggle(id) {
         if (this._map[id]) { delete this._map[id]; }
         else { this._map[id] = true; }

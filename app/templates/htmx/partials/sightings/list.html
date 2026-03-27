@@ -57,6 +57,7 @@
        },
        selectReq(id) {
          this.selectedReqId = id;
+         Alpine.store('sightingSelection').selectedReqId = id;
          if (window.innerWidth < 1024) { this.mobileDetailOpen = true; }
        },
        closeMobileDetail() {
@@ -79,9 +80,7 @@
              try {
                const data = JSON.parse(e.data || '{}');
                const reqId = data.requirement_id;
-               const container = document.querySelector('[x-ref=container]');
-               if (!container || !container._x_dataStack) return;
-               const sel = container._x_dataStack[0].selectedReqId;
+               const sel = Alpine.store('sightingSelection')?.selectedReqId;
                if (reqId && sel && String(reqId) === String(sel)) {
                  htmx.ajax('GET', '/v2/partials/sightings/' + reqId + '/detail',
                             {target: '#sightings-detail', swap: 'innerHTML'});

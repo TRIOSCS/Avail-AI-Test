@@ -213,7 +213,7 @@ class TestMergeMaterialCards:
 
         req = Requisition(
             name="MergeTest",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

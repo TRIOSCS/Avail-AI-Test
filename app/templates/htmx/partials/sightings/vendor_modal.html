@@ -22,15 +22,13 @@
     this.selectedVendors.forEach(v => form.append('vendor_names', v));
     form.append('email_body', this.emailBody);
     try {
-      const resp = await fetch('/v2/partials/sightings/preview-inquiry', {
-        method: 'POST', body: form
+      const target = this.$refs.previewContent;
+      await htmx.ajax('POST', '/v2/partials/sightings/preview-inquiry', {
+        target: target, swap: 'innerHTML', values: Object.fromEntries(form)
       });
-      if (resp.ok) {
-        this.$refs.previewContent.innerHTML = await resp.text();
-        this.step = 'preview';
-      } else {
-        $store.toast.show('Preview failed — check your selections', 'error');
-      }
+      this.step = 'preview';
+    } catch {
+      $store.toast.show('Preview failed — check your selections', 'error');
     } finally {
       this.previewing = false;
     }
@@ -41,7 +39,10 @@
     {{ requirement_ids|tojson }}.forEach(id => form.append('requirement_ids', id));
     this.selectedVendors.forEach(v => form.append('vendor_names', v));
     form.append('email_body', this.emailBody);
-    htmx.ajax('POST', '/v2/partials/sightings/send-inquiry', {values: Object.fromEntries(form), target: '#sightings-table'});
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/v2/partials/sightings/send-inquiry');
+    xhr.onload = () => { const t = document.getElementById('sightings-table'); if (t) htmx.ajax('GET', t.getAttribute('hx-get') || window.location.pathname, {target: '#sightings-table'}); };
+    xhr.send(form);
     $dispatch('close-modal');
   }
 }">

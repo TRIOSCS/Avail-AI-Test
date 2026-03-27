@@ -13,6 +13,7 @@ from datetime import datetime, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from ..constants import ContactStatus
 from ..models import Requirement, Sighting, VendorCard, VendorContact
 from ..models.offers import Contact as RfqContact
 
@@ -100,11 +101,11 @@ def create_rfq_contacts(
             vendor_contact=email,
             parts_included=parts_text,
             subject=subject,
-            status="sent",
+            status=ContactStatus.SENT,
             status_updated_at=datetime.now(timezone.utc),
         )
         db.add(contact)
-        sent.append({"vendor": name, "email": email, "status": "sent"})
+        sent.append({"vendor": name, "email": email, "status": ContactStatus.SENT})
 
     logger.info("Created {} RFQ contacts for requisition_id={}", len(sent), req_id)
     return sent

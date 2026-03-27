@@ -10,7 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from loguru import logger
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import QuoteStatus, UserRole
+from ...constants import QuoteStatus, RequisitionStatus, UserRole
 from ...database import get_db
 from ...dependencies import require_user
 from ...models import ActivityLog, CustomerSite, Offer, Quote, Requisition, User
@@ -401,8 +401,8 @@ async def send_quote(
     quote.sent_at = datetime.now(timezone.utc)
     req = db.get(Requisition, quote.requisition_id)
     old_status = req.status if req else None
-    if req and req.status not in ("won", "lost", "archived"):
-        req.status = "quoted"
+    if req and req.status not in (RequisitionStatus.WON, RequisitionStatus.LOST, RequisitionStatus.ARCHIVED):
+        req.status = RequisitionStatus.QUOTED
 
     db.commit()
     return {
@@ -432,14 +432,14 @@ async def quote_result(
     quote.result_at = datetime.now(timezone.utc)
     require_valid_transition("quote", quote.status, payload.result)
     quote.status = payload.result
-    if payload.result == "won":
+    if payload.result == QuoteStatus.WON:
         quote.won_revenue = quote.subtotal
     req = db.get(Requisition, quote.requisition_id)
     if req:
         req.status = payload.result
 
     # CPH hook: record purchase history when quote is won
-    if payload.result == "won":
+    if payload.result == QuoteStatus.WON:
         _record_quote_won_history(db, req, quote)
 
     # Notify requisition creator about quote outcome
@@ -479,7 +479,7 @@ async def revise_quote(quote_id: int, user: User = Depends(require_user), db: Se
     if not old:
         raise HTTPException(404, "Quote not found")
     require_valid_transition("quote", old.status, QuoteStatus.REVISED)
-    old.status = "revised"
+    old.status = QuoteStatus.REVISED
     old_number = old.quote_number
     old.quote_number = f"{old_number}-R{old.revision}"
     new_quote = Quote(
@@ -513,10 +513,10 @@ async def reopen_quote(
         raise HTTPException(404, "Quote not found")
     req = db.get(Requisition, quote.requisition_id)
     if req:
-        req.status = "reopened"
+        req.status = RequisitionStatus.REOPENED
     if payload.revise:
         require_valid_transition("quote", quote.status, QuoteStatus.REVISED)
-        quote.status = "revised"
+        quote.status = QuoteStatus.REVISED
         old_number = quote.quote_number
         quote.quote_number = f"{old_number}-R{quote.revision}"
         new_quote = Quote(

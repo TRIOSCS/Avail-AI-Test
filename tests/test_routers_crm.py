@@ -357,7 +357,7 @@ class TestCompanyDetail:
             name="REQ-DETAIL-001",
             customer_name="Acme Electronics",
             customer_site_id=test_customer_site.id,
-            status="open",
+            status="active",
             created_by=test_user.id,
         )
         db_session.add(req)
@@ -1692,7 +1692,7 @@ class TestOffersAdditional:
         req2 = Requisition(
             name="REQ-OTHER",
             customer_name="Other Co",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -1966,31 +1966,13 @@ class TestQuotesAdditional:
         assert resp.status_code == 400
 
     def test_send_quote_invalid_email(self, client, db_session, test_requisition, test_company, test_user):
-        """Sending to an email without '@' raises 400."""
-        site = CustomerSite(
-            company_id=test_company.id,
-            site_name="Bad Email Site",
-            contact_email="notanemail",
-        )
-        db_session.add(site)
-        db_session.flush()
-        q = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=site.id,
-            quote_number="Q-2026-BADE",
-            status="draft",
-            line_items=[],
-            subtotal=0,
-            total_cost=0,
-            total_margin_pct=0,
-            created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(q)
-        db_session.commit()
-
-        resp = client.post(f"/api/quotes/{q.id}/send")
-        assert resp.status_code == 400
+        """Invalid email is caught by @validates at model level."""
+        with pytest.raises(ValueError, match="Invalid contact email"):
+            CustomerSite(
+                company_id=test_company.id,
+                site_name="Bad Email Site",
+                contact_email="notanemail",
+            )
 
     @patch("app.dependencies.require_fresh_token", new_callable=AsyncMock)
     @patch("app.utils.graph_client.GraphClient.post_json", new_callable=AsyncMock)
@@ -3152,7 +3134,7 @@ class TestHistoricalOffersSubstitutes:
         req2 = Requisition(
             name="REQ-SUB",
             customer_name="Sub Co",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -3493,7 +3475,7 @@ class TestCompanyTags:
         req = Requisition(
             name="TAG-REQ-001",
             customer_site_id=site.id,
-            status="open",
+            status="active",
         )
         db_session.add(req)
         db_session.flush()

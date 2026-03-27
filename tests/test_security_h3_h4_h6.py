@@ -134,7 +134,7 @@ class TestOfferAttachmentFileType:
         req = Requisition(
             name="REQ-ATT-001",
             customer_name="Test Co",
-            status="open",
+            status="active",
             created_by=user.id,
         )
         db_session.add(req)
@@ -166,7 +166,7 @@ class TestOfferAttachmentFileType:
         req = Requisition(
             name="REQ-ATT-002",
             customer_name="Test Co",
-            status="open",
+            status="active",
             created_by=user.id,
         )
         db_session.add(req)
@@ -198,7 +198,7 @@ class TestOfferAttachmentFileType:
         req = Requisition(
             name="REQ-ATT-003",
             customer_name="Test Co",
-            status="open",
+            status="active",
             created_by=user.id,
         )
         db_session.add(req)
@@ -231,7 +231,7 @@ class TestOfferAttachmentFileType:
         req = Requisition(
             name="REQ-ATT-004",
             customer_name="Test Co",
-            status="open",
+            status="active",
             created_by=user.id,
         )
         db_session.add(req)

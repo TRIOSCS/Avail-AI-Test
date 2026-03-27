@@ -21,7 +21,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
-from ..constants import UserRole
+from ..constants import ContactStatus, UserRole
 from ..database import get_db
 from ..dependencies import (
     get_req_for_user,
@@ -99,7 +99,7 @@ async def retry_failed_rfq(
 ):
     """Re-send a failed RFQ email."""
     contact = _get_contact_for_user(db, user, contact_id)
-    if contact.status != "failed":
+    if contact.status != ContactStatus.FAILED:
         raise HTTPException(status_code=400, detail="Only failed contacts can be retried")
 
     token = await require_fresh_token(request, db)
@@ -119,7 +119,7 @@ async def retry_failed_rfq(
         ],
     )
     # Mark old contact as superseded
-    contact.status = "retried"
+    contact.status = ContactStatus.RETRIED
     contact.status_updated_at = datetime.now(timezone.utc)
     db.commit()
 
@@ -441,20 +441,24 @@ async def get_activity(req_id: int, user: User = Depends(require_user), db: Sess
 
         # Derive vendor-level status from best contact status + responses
         # Priority: quoted > declined > replied > responded > opened > awaiting
-        contact_statuses = {c.get("status", "sent") for c in v["contacts"]}
-        if has_response or "quoted" in contact_statuses:
-            if "quoted" in contact_statuses:
+        contact_statuses = {c.get("status", ContactStatus.SENT) for c in v["contacts"]}
+        if has_response or ContactStatus.QUOTED in contact_statuses:
+            if ContactStatus.QUOTED in contact_statuses:
                 vendor_status = "quoted"
-            elif "declined" in contact_statuses:
+            elif ContactStatus.DECLINED in contact_statuses:
                 # Has responses, at least one declined
-                vendor_status = "replied" if (contact_statuses - {"declined", "sent", "opened"}) else "declined"
+                vendor_status = (
+                    "replied"
+                    if (contact_statuses - {ContactStatus.DECLINED, ContactStatus.SENT, ContactStatus.OPENED})
+                    else "declined"
+                )
             else:
                 vendor_status = "replied"
-        elif "responded" in contact_statuses:
+        elif ContactStatus.RESPONDED in contact_statuses:
             vendor_status = "replied"
-        elif "declined" in contact_statuses:
+        elif ContactStatus.DECLINED in contact_statuses:
             vendor_status = "declined"
-        elif "opened" in contact_statuses:
+        elif ContactStatus.OPENED in contact_statuses:
             vendor_status = "opened"
         else:
             vendor_status = "awaiting"
@@ -790,7 +794,7 @@ async def send_follow_up(
     await gc.post_json("/me/sendMail", payload)
 
     # Update contact status
-    contact.status = "sent"  # Reset to sent — new follow-up cycle
+    contact.status = ContactStatus.SENT  # Reset to sent — new follow-up cycle
     contact.status_updated_at = datetime.now(timezone.utc)
     db.commit()
 
@@ -846,7 +850,7 @@ async def send_follow_up_batch(
                     "saveToSentItems": "true",
                 },
             )
-            contact.status = "sent"
+            contact.status = ContactStatus.SENT
             contact.status_updated_at = datetime.now(timezone.utc)
             results.append({"contact_id": cid, "status": "sent"})
         except Exception as e:

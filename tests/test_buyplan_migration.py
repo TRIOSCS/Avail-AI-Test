@@ -99,7 +99,7 @@ def _create_prereqs(db, quote_id, requisition_id):
             id=requisition_id,
             name=f"REQ-MIG-{requisition_id}",
             customer_name="Migration Test Co",
-            status="open",
+            status="active",
             created_by=user_id,
             created_at=datetime.now(timezone.utc),
         )
