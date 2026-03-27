@@ -34,18 +34,18 @@ def _score_to_tier(score: float | None) -> str:
     return "Poor"
 
 
-def _estimate_qty_with_ai(qty_values: list[int | None]) -> int | None:
+def _estimate_qty_with_ai(qty_values: list[int | None]) -> dict:
     """Use Claude Haiku to estimate total available qty from varied listings.
 
-    Returns estimated integer or None on failure.
+    Returns {"qty": int | None, "approximate": bool}.
     """
     non_null = [q for q in qty_values if q is not None]
     if not non_null:
-        return None
+        return {"qty": None, "approximate": False}
 
     # For simple cases (all numeric), just sum — no AI needed
     if len(non_null) <= 2:
-        return sum(non_null)
+        return {"qty": sum(non_null), "approximate": False}
 
     try:
         import anthropic
@@ -54,7 +54,7 @@ def _estimate_qty_with_ai(qty_values: list[int | None]) -> int | None:
         from app.utils.claude_client import MODELS
 
         if not settings.ANTHROPIC_API_KEY:
-            return sum(non_null)
+            return {"qty": max(non_null), "approximate": True}
 
         client = anthropic.Anthropic(api_key=settings.ANTHROPIC_API_KEY)
         prompt = (
@@ -69,10 +69,10 @@ def _estimate_qty_with_ai(qty_values: list[int | None]) -> int | None:
             messages=[{"role": "user", "content": prompt}],
         )
         text = resp.content[0].text.strip()
-        return int(text)
+        return {"qty": int(text), "approximate": False}
     except Exception:
-        logger.warning("AI qty estimation failed, using sum fallback")
-        return sum(non_null)
+        logger.warning("AI qty estimation failed, using max fallback")
+        return {"qty": max(non_null), "approximate": True}
 
 
 def rebuild_vendor_summaries(
@@ -123,10 +123,13 @@ def rebuild_vendor_summaries(
         max_score = max(scores) if scores else None
         avg_price = sum(prices) / len(prices) if prices else None
         best_price = min(prices) if prices else None
-        estimated_qty = _estimate_qty_with_ai(qtys)
+        qty_result = _estimate_qty_with_ai(qtys)
+        estimated_qty = qty_result["qty"]
+        if qty_result["approximate"]:
+            logger.info("Approximate qty {} for vendor {} (AI fallback)", estimated_qty, vn)
         if estimated_qty is None:
             non_null_qtys = [q for q in qtys if q is not None]
-            estimated_qty = sum(non_null_qtys) if non_null_qtys else None
+            estimated_qty = max(non_null_qtys) if non_null_qtys else None
 
         # New pre-aggregated fields
         lead_times = [s.lead_time_days for s in group if s.lead_time_days is not None]

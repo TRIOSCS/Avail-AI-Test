@@ -539,12 +539,14 @@ async def sightings_refresh(
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
 
+    refresh_failed = False
     try:
         from ..search_service import search_requirement
 
         await search_requirement(requirement, db)
     except Exception:
         logger.warning("Search refresh failed for requirement %s", requirement_id, exc_info=True)
+        refresh_failed = True
 
     await broker.publish(
         f"user:{user.id}",
@@ -552,7 +554,12 @@ async def sightings_refresh(
         json.dumps({"requirement_id": requirement_id}),
     )
 
-    return await sightings_detail(request, requirement_id, db, user)
+    response = await sightings_detail(request, requirement_id, db, user)
+    if refresh_failed:
+        response.headers["HX-Trigger"] = (
+            '{"showToast": {"message": "Search refresh failed - showing cached results", "type": "warning"}}'
+        )
+    return response
 
 
 @router.post("/v2/partials/sightings/batch-refresh", response_class=HTMLResponse)

@@ -83,14 +83,24 @@ def mask_value(plaintext: str) -> str:
 def get_credential(db: Session, source_name: str, env_var_name: str) -> str | None:
     """Get a credential value: DB first, then env var fallback."""
     src = db.query(ApiSource).filter_by(name=source_name).first()
+    decrypt_failed = False
     if src and src.credentials:
         encrypted = src.credentials.get(env_var_name)
         if encrypted:
             try:
                 return decrypt_value(encrypted)
             except Exception:
-                logger.error("Credential decrypt fallback for %s", env_var_name, exc_info=True)
-    return os.getenv(env_var_name) or None
+                logger.error(
+                    "Credential decrypt FAILED for %s/%s — falling back to env var. DB credentials may be corrupted.",
+                    source_name,
+                    env_var_name,
+                    exc_info=True,
+                )
+                decrypt_failed = True
+    fallback = os.getenv(env_var_name) or None
+    if decrypt_failed and fallback:
+        logger.warning("Using env var fallback for %s/%s", source_name, env_var_name)
+    return fallback
 
 
 def get_all_credentials_for_source(db: Session, source_name: str) -> dict[str, str]:

@@ -164,6 +164,13 @@ async def ai_find_contacts(
             seen_emails.add(key)
             merged.append(c)
 
+    _MAX_LEN = {"full_name": 255, "title": 255, "email": 255, "phone": 50, "linkedin_url": 512, "source": 100}
+    for c in merged:
+        for field, max_len in _MAX_LEN.items():
+            val = c.get(field)
+            if val and isinstance(val, str) and len(val) > max_len:
+                c[field] = val[:max_len]
+
     saved_ids = []
     for c in merged:
         pc = ProspectContact(
