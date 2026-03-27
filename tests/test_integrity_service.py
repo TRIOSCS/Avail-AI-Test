@@ -842,7 +842,7 @@ class TestAuditLog:
         healed_entries = db_session.query(MaterialCardAudit).filter_by(action="healed").all()
         assert len(healed_entries) == 2  # 1 requirement + 1 sighting
         entity_types = {e.entity_type for e in healed_entries}
-        assert entity_types == {"requirement", "sighting"}
+        assert entity_types == {"requirements", "sightings"}
 
     def test_audit_entry_fields(self, db_session):
         """Audit entries have all expected fields populated."""

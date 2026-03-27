@@ -16,6 +16,7 @@ import json
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy import text as sqltext
 from sqlalchemy.pool import StaticPool
@@ -180,7 +181,7 @@ class TestSeedVinodUser:
 
     @patch("app.startup.SessionLocal")
     def test_seed_vinod_handles_error(self, mock_sl):
-        """Handles DB error gracefully (lines 112-114)."""
+        """DB error is rolled back and re-raised."""
         from app.startup import _seed_admin_user_if_env_set
 
         mock_db = MagicMock()
@@ -190,7 +191,8 @@ class TestSeedVinodUser:
         mock_db.close = MagicMock()
         mock_sl.return_value = mock_db
 
-        _seed_admin_user_if_env_set()
+        with pytest.raises(RuntimeError, match="DB error"):
+            _seed_admin_user_if_env_set()
         mock_db.rollback.assert_called_once()
         mock_db.close.assert_called_once()
 
@@ -716,6 +718,7 @@ class TestRunStartupMigrationsNonTesting:
                 patch("app.startup._backfill_fts") as m_bfts,
                 patch("app.startup._seed_system_config") as m_seed,
                 patch("app.startup._seed_site_contacts") as m_site,
+                patch("app.startup._seed_manufacturers"),
                 patch("app.startup._create_count_triggers") as m_ct,
                 patch("app.startup._backfill_company_counts") as m_bc,
                 patch("app.startup._analyze_hot_tables") as m_analyze,
@@ -723,8 +726,11 @@ class TestRunStartupMigrationsNonTesting:
                 patch("app.startup._backfill_sighting_offer_normalized_mpn") as m_so,
                 patch("app.startup._backfill_sighting_vendor_normalized") as m_sv,
                 patch("app.startup._backfill_proactive_offer_qty") as m_pq,
+                patch("app.startup._backfill_ticket_defaults"),
                 patch("app.startup._exec") as m_exec,
                 patch("app.startup._seed_admin_user_if_env_set") as m_vinod,
+                patch("app.startup._seed_agent_user"),
+                patch("app.startup._seed_commodity_schemas"),
             ):
                 run_startup_migrations()
                 m_fts.assert_called_once()

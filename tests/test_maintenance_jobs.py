@@ -8,6 +8,8 @@ Depends on: app.jobs.maintenance_jobs
 import asyncio
 from unittest.mock import MagicMock, patch
 
+import pytest
+
 
 def _run(coro):
     """Run an async coroutine synchronously."""
@@ -157,7 +159,7 @@ class TestJobContactDedup:
 
     @patch("app.database.SessionLocal")
     def test_error_triggers_rollback(self, mock_session_local):
-        """On exception, the session is rolled back and closed."""
+        """On exception, the session is rolled back, closed, and error re-raised."""
         db = MagicMock()
         dupe_chain = MagicMock()
         dupe_chain.filter.side_effect = RuntimeError("DB exploded")
@@ -166,7 +168,8 @@ class TestJobContactDedup:
 
         from app.jobs.maintenance_jobs import _job_contact_dedup
 
-        _run(_job_contact_dedup())
+        with pytest.raises(RuntimeError, match="DB exploded"):
+            _run(_job_contact_dedup())
 
         db.rollback.assert_called()
         db.close.assert_called_once()

@@ -294,9 +294,10 @@ def test_list_contacts(client, db_session, test_user, test_requisition):
 
 
 def test_list_contacts_missing_req(client):
-    """Contacts for nonexistent requisition returns 404."""
+    """Contacts for nonexistent requisition returns empty list."""
     resp = client.get("/api/requisitions/99999/contacts")
-    assert resp.status_code == 404
+    assert resp.status_code == 200
+    assert resp.json() == []
 
 
 # ── POST /api/contacts/{id}/retry ─────────────────────────────────────
@@ -450,9 +451,12 @@ def test_get_activity_empty(client, test_requisition):
 
 
 def test_get_activity_no_req(client):
-    """Activity for non-existent requisition returns 404."""
+    """Activity for non-existent requisition returns empty activity."""
     resp = client.get("/api/requisitions/99999/activity")
-    assert resp.status_code == 404
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["vendors"] == []
+    assert data["summary"]["sent"] == 0
 
 
 # ── POST /api/contacts/phone ─────────────────────────────────────────
