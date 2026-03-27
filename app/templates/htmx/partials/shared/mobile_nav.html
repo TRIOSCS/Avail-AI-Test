@@ -53,14 +53,14 @@
        class="relative flex flex-col items-center justify-center py-1.5 text-center transition-colors duration-150 w-[62px] min-w-0">
       <span x-show="activeNav === '{{ id }}'" x-cloak class="absolute top-0 inset-x-[8px] h-[3px] bg-brand-600 rounded-b-sm"></span>
       <svg xmlns="http://www.w3.org/2000/svg"
-           class="h-[17px] w-[17px]" fill="none"
+           class="h-[19px] w-[19px]" fill="none"
            viewBox="0 0 24 24" stroke="currentColor"
            :stroke-width="activeNav === '{{ id }}' ? '2.25' : '1.75'"
            stroke-linecap="round" stroke-linejoin="round">
         <path d="{{ icon_path }}"/>
       </svg>
-      <span :class="activeNav === '{{ id }}' ? 'text-[9px] font-semibold text-brand-800 tracking-tight' : 'text-[8px] font-semibold text-gray-500 tracking-normal'"
-            class="mt-px leading-none">{{ label }}</span>
+      <span :class="activeNav === '{{ id }}' ? 'text-[10px] font-semibold text-brand-800' : 'text-[10px] font-medium text-gray-500'"
+            class="mt-0.5 leading-none">{{ label }}</span>
     </a>
     {% endfor %}
 

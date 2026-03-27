@@ -4,6 +4,9 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>{% block title %}AvailAI{% endblock %}</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
   {% for css_file in vite_css|default([]) %}
   <link rel="stylesheet" href="/static/{{ css_file }}">
   {% endfor %}
@@ -59,13 +62,12 @@
        @keydown.escape.window="open = false"
        class="fixed inset-0 z-50">
     <div class="fixed inset-0 bg-black/50" role="presentation" @click="open = false" aria-hidden="true"></div>
-    <div class="fixed flex items-center justify-center"
-         :class="wide ? 'inset-2 sm:inset-3 lg:inset-4' : 'inset-4'">
-      <div class="bg-white rounded-lg shadow-xl w-full h-full flex flex-col overflow-hidden"
+    <div class="fixed inset-0 flex items-start justify-center overflow-y-auto p-4">
+      <div class="bg-white rounded-lg shadow-xl w-full my-auto"
            role="dialog" aria-modal="true"
-           :class="wide ? '' : 'max-w-lg max-h-[90vh]'"
+           :class="wide ? 'max-w-[calc(100vw-2rem)]' : 'max-w-lg'"
            x-trap.noscroll="open">
-        <div id="modal-content" class="flex-1 min-h-0 overflow-y-auto"></div>
+        <div id="modal-content"></div>
       </div>
     </div>
   </div>
