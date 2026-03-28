@@ -68,7 +68,7 @@ def _make_offer(db: Session, req: Requisition, req_item: Requirement, user: User
         requisition_id=req.id,
         requirement_id=req_item.id,
         vendor_name="Arrow Electronics",
-        vendor_name_normalized="arrowelectronics",
+        vendor_name_normalized="arrow electronics",
         mpn="LM317T",
         normalized_mpn="lm317t",
         qty_available=1000,
