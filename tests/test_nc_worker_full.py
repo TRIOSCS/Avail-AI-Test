@@ -1231,7 +1231,9 @@ class TestSessionManager:
         cfg = NcConfig()
         session = NcSessionManager(cfg)
 
-        with patch.object(session.session, "get", side_effect=Exception("network error")):
+        import requests
+
+        with patch.object(session.session, "get", side_effect=requests.RequestException("network error")):
             result = session.check_session_health()
         assert result is False
 
@@ -1304,6 +1306,8 @@ class TestSessionManager:
 
     def test_login_exception(self):
         """Login() handles exceptions gracefully."""
+        import requests
+
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
@@ -1312,7 +1316,7 @@ class TestSessionManager:
         cfg.NC_PASSWORD = "pass"
         session = NcSessionManager(cfg)
 
-        with patch.object(session.session, "get", side_effect=Exception("Connection refused")):
+        with patch.object(session.session, "get", side_effect=requests.RequestException("Connection refused")):
             result = session.login()
         assert result is False
         assert session.is_logged_in is False
@@ -3144,7 +3148,7 @@ class TestNcSessionManagerFull:
         sm = NcSessionManager(cfg)
         sm._browser_started = True
         sm._page = AsyncMock()
-        sm._page.goto = AsyncMock(side_effect=Exception("Browser crashed"))
+        sm._page.goto = AsyncMock(side_effect=TimeoutError("Browser crashed"))
 
         result = await sm.login_browser()
         assert result is False
@@ -3194,7 +3198,7 @@ class TestNcSessionManagerFull:
         sm = NcSessionManager(cfg)
         sm.is_logged_in = True
         sm.session = MagicMock()
-        sm.session.close = MagicMock(side_effect=Exception("close error"))
+        sm.session.close = MagicMock(side_effect=OSError("close error"))
 
         sm.stop()
         assert sm.is_logged_in is False
@@ -3226,7 +3230,7 @@ class TestNcSessionManagerFull:
         cfg = NcConfig()
         sm = NcSessionManager(cfg)
         sm._context = AsyncMock()
-        sm._context.close = AsyncMock(side_effect=Exception("Close error"))
+        sm._context.close = AsyncMock(side_effect=RuntimeError("Close error"))
         sm._playwright = AsyncMock()
         sm._browser_started = True
 

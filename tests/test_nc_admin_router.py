@@ -115,7 +115,7 @@ class TestNcForceSearch:
         item = _make_queue_item(db_session, mpn="FORCE1", status="completed")
         db_session.commit()
 
-        with patch("app.services.nc_worker.queue_manager.mark_status") as mock_mark:
+        with patch("app.routers.nc_admin.mark_status") as mock_mark:
             resp = client.post(f"/api/nc/queue/{item.id}/force-search")
         assert resp.status_code == 200
         assert resp.json()["status"] == "queued"
@@ -131,7 +131,7 @@ class TestNcSkip:
         item = _make_queue_item(db_session, mpn="SKIP1", status="queued")
         db_session.commit()
 
-        with patch("app.services.nc_worker.queue_manager.mark_status") as mock_mark:
+        with patch("app.routers.nc_admin.mark_status") as mock_mark:
             resp = client.post(f"/api/nc/queue/{item.id}/skip")
         assert resp.status_code == 200
         assert resp.json()["status"] == "gated_out"
