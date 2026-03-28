@@ -133,10 +133,12 @@ def get_quote_for_user(db: Session, user: User, quote_id: int, options=None) -> 
 
 
 async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -> str:
-    """Return a valid M365 access token, refreshing proactively if near expiry.
+    """Return a valid M365 access token, raising 401 only if truly expired.
 
-    Tokens stored in DB (not just session) so background jobs can use them. Refreshes
-    when within 15 min of expiry.
+    Tokens stored in DB (not just session) so background jobs can use them. The
+    background scheduler job (_job_token_refresh) refreshes tokens proactively when
+    within 15 min of expiry — no inline refresh is done here to avoid latency spikes on
+    request handlers.
     """
     user = get_user(request, db)
     if not user:
@@ -158,14 +160,14 @@ async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -
             needs_refresh = True
 
     if needs_refresh:
-        if user.refresh_token:
-            from .scheduler import refresh_user_token
-
-            result = await refresh_user_token(user, db)
-            if result:
-                return result
-        user.m365_connected = False
-        db.commit()
-        raise HTTPException(401, "Session expired — please log in again")
+        # Background scheduler job refreshes tokens proactively.
+        # If within buffer but not expired, continue with current token.
+        if datetime.now(timezone.utc) > expiry:
+            # Truly expired — background job missed it or no refresh token
+            user.m365_connected = False
+            db.commit()
+            raise HTTPException(401, "Session expired — please log in again")
+        # Within buffer, not yet expired — use current token
+        return str(token)
 
     return str(token)
