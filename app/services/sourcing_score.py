@@ -338,3 +338,16 @@ def _color(score: float) -> str:
     if score >= 25:
         return "yellow"
     return "red"
+
+
+def compute_sourcing_score_safe(req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt):
+    """Null-safe wrapper for list views."""
+    return compute_requisition_score_fast(
+        req_count=req_cnt or 0,
+        sourced_count=sourced_cnt or 0,
+        rfq_sent_count=rfq_sent or 0,
+        reply_count=reply_cnt or 0,
+        offer_count=offer_cnt or 0,
+        call_count=call_cnt or 0,
+        email_count=email_act_cnt or 0,
+    )
