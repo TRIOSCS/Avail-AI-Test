@@ -7,7 +7,7 @@ Depends on: conftest.py fixtures, app/services/task_service.py, app/routers/task
 """
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
@@ -413,6 +413,253 @@ class TestTaskAPI:
             json={"title": "Ghost"},
         )
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# AI scoring & simple priority scoring — lines 436-524
+# ---------------------------------------------------------------------------
+
+
+def _ensure_tz_aware(task):
+    """SQLite stores naive datetimes — fix them for tz-aware arithmetic in tests."""
+    if task.created_at and task.created_at.tzinfo is None:
+        task.created_at = task.created_at.replace(tzinfo=timezone.utc)
+    if task.due_at and task.due_at.tzinfo is None:
+        task.due_at = task.due_at.replace(tzinfo=timezone.utc)
+
+
+class TestScoreTasksWithAI:
+    @pytest.mark.asyncio
+    async def test_empty_task_list_returns_early(self, db_session: Session):
+        """Empty task list should return immediately without calling AI."""
+        result = await task_service.score_tasks_with_ai(db_session, [])
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_scores_tasks_from_ai(self, db_session: Session, test_user: User, test_requisition: Requisition):
+        """AI returns scores and risk flags that are applied to tasks."""
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Urgent sourcing",
+            task_type="sourcing",
+            assigned_to_id=test_user.id,
+        )
+        _ensure_tz_aware(task)
+        ai_response = [{"priority_score": 0.85, "risk_flag": "Bid due tomorrow"}]
+        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=ai_response):
+            await task_service.score_tasks_with_ai(db_session, [task])
+        db_session.refresh(task)
+        assert task.ai_priority_score == 0.85
+        assert task.ai_risk_flag == "Bid due tomorrow"
+
+    @pytest.mark.asyncio
+    async def test_ai_returns_none_no_crash(self, db_session: Session, test_user: User, test_requisition: Requisition):
+        """AI returning None should not crash."""
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Test",
+            assigned_to_id=test_user.id,
+        )
+        _ensure_tz_aware(task)
+        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=None):
+            await task_service.score_tasks_with_ai(db_session, [task])
+        db_session.refresh(task)
+
+    @pytest.mark.asyncio
+    async def test_ai_returns_non_list_no_crash(
+        self, db_session: Session, test_user: User, test_requisition: Requisition
+    ):
+        """AI returning a non-list should not crash."""
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Test",
+            assigned_to_id=test_user.id,
+        )
+        _ensure_tz_aware(task)
+        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value={"error": "bad"}):
+            await task_service.score_tasks_with_ai(db_session, [task])
+
+    @pytest.mark.asyncio
+    async def test_ai_exception_handled(self, db_session: Session, test_user: User, test_requisition: Requisition):
+        """AI exception should be caught and logged, not raised."""
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Test",
+            assigned_to_id=test_user.id,
+        )
+        _ensure_tz_aware(task)
+        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, side_effect=RuntimeError("API down")):
+            await task_service.score_tasks_with_ai(db_session, [task])
+        # Should not raise
+
+    @pytest.mark.asyncio
+    async def test_ai_scores_with_due_at(self, db_session: Session, test_user: User, test_requisition: Requisition):
+        """Tasks with due_at get days_until_due in the prompt."""
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Due soon",
+            task_type="sourcing",
+            assigned_to_id=test_user.id,
+            source="system",
+            due_at=datetime.now(timezone.utc) + timedelta(days=2),
+        )
+        _ensure_tz_aware(task)
+        ai_response = [{"priority_score": 0.7, "risk_flag": None}]
+        with patch("app.utils.claude_client.claude_json", new_callable=AsyncMock, return_value=ai_response):
+            await task_service.score_tasks_with_ai(db_session, [task])
+        db_session.refresh(task)
+        assert task.ai_priority_score == 0.7
+
+
+class TestComputeSimplePriority:
+    def test_base_score(self, db_session: Session, test_requisition: Requisition):
+        """Task with default priority=2 and no due_at gets base + priority boost."""
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Base",
+            priority=1,
+        )
+        score = task_service.compute_simple_priority(task)
+        assert 0.25 <= score <= 0.35  # base ~0.3
+
+    def test_high_priority_boost(self, db_session: Session, test_requisition: Requisition):
+        """Priority 3 adds 0.3 boost."""
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="High pri",
+            priority=3,
+        )
+        score = task_service.compute_simple_priority(task)
+        assert score >= 0.55  # 0.3 + 0.3
+
+    def test_medium_priority_boost(self, db_session: Session, test_requisition: Requisition):
+        """Priority 2 adds 0.15 boost."""
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Med pri",
+            priority=2,
+        )
+        score = task_service.compute_simple_priority(task)
+        assert score >= 0.4  # 0.3 + 0.15
+
+    def test_overdue_boost(self, db_session: Session, test_requisition: Requisition):
+        """Overdue task gets +0.4 boost."""
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Overdue",
+            priority=1,
+            source="system",
+            due_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        score = task_service.compute_simple_priority(task)
+        assert score >= 0.65  # 0.3 + 0.4
+
+    def test_due_today_boost(self, db_session: Session, test_requisition: Requisition):
+        """Task due within 24h gets +0.3 boost."""
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Due today",
+            priority=1,
+            source="system",
+            due_at=datetime.now(timezone.utc) + timedelta(hours=12),
+        )
+        score = task_service.compute_simple_priority(task)
+        assert score >= 0.55  # 0.3 + 0.3
+
+    def test_due_soon_boost(self, db_session: Session, test_requisition: Requisition):
+        """Task due within 3 days gets +0.15 boost."""
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Due soon",
+            priority=1,
+            source="system",
+            due_at=datetime.now(timezone.utc) + timedelta(days=2),
+        )
+        score = task_service.compute_simple_priority(task)
+        assert score >= 0.4  # 0.3 + 0.15
+
+    def test_sales_type_boost(self, db_session: Session, test_requisition: Requisition):
+        """Sales task type adds +0.05."""
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Sales task",
+            task_type="sales",
+            priority=1,
+        )
+        score = task_service.compute_simple_priority(task)
+        assert score >= 0.3  # 0.3 + 0.05
+
+    def test_max_score_capped_at_1(self, db_session: Session, test_requisition: Requisition):
+        """Score never exceeds 1.0."""
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Max score",
+            task_type="sales",
+            priority=3,
+            source="system",
+            due_at=datetime.now(timezone.utc) - timedelta(days=1),
+        )
+        score = task_service.compute_simple_priority(task)
+        assert score <= 1.0
+
+
+class TestApplySimpleScoring:
+    def test_scores_and_risk_flags(self, db_session: Session, test_user: User, test_requisition: Requisition):
+        """Apply scoring sets ai_priority_score and risk flags on tasks."""
+        overdue_task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Overdue",
+            priority=3,
+            source="system",
+            due_at=datetime.now(timezone.utc) - timedelta(days=1),
+            assigned_to_id=test_user.id,
+        )
+        due_today = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Due today",
+            priority=2,
+            source="system",
+            due_at=datetime.now(timezone.utc) + timedelta(hours=12),
+            assigned_to_id=test_user.id,
+        )
+        task_service.apply_simple_scoring(db_session, [overdue_task, due_today])
+        db_session.refresh(overdue_task)
+        db_session.refresh(due_today)
+        assert overdue_task.ai_priority_score is not None
+        assert overdue_task.ai_risk_flag == "Overdue"
+        assert due_today.ai_risk_flag == "Due today"
+
+    def test_stale_task_risk_flag(self, db_session: Session, test_user: User, test_requisition: Requisition):
+        """Task open 3+ days with no activity gets risk flag."""
+
+        task = task_service.create_task(
+            db_session,
+            requisition_id=test_requisition.id,
+            title="Stale",
+            assigned_to_id=test_user.id,
+        )
+        # Manually backdate created_at
+        task.created_at = datetime.now(timezone.utc) - timedelta(days=5)
+        db_session.commit()
+
+        task_service.apply_simple_scoring(db_session, [task])
+        db_session.refresh(task)
+        assert task.ai_risk_flag == "No activity in 3+ days"
 
 
 class TestCompleteAPI:

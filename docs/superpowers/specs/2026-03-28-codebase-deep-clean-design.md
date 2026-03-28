@@ -9,7 +9,7 @@
 - **10,351 tests** — 216 failing, 10,126 passing, 9 skipped
 - **~101K lines** of Python in `app/`
 - **Ruff:** All checks passed (0 violations)
-- **Coverage:** ~50% threshold in CI (exact number pending)
+- **Coverage:** CI threshold is 50%. Actual number requires single-process run (pytest-xdist breaks coverage collection). Run pending.
 
 ---
 

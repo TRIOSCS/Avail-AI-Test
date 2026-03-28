@@ -354,3 +354,298 @@ def test_tagging_admin_requires_admin(db_session, sales_user, monkeypatch):
     finally:
         app.dependency_overrides.pop(get_db, None)
     assert resp.status_code == 403
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  backfill_manufacturer_from_sightings — lines 204-299
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def test_backfill_mfr_sightings_no_untagged(db_session):
+    """No untagged cards → early return with zeros."""
+    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    result = backfill_manufacturer_from_sightings(db_session)
+    assert result == {"total_processed": 0, "total_tagged": 0, "total_skipped": 0}
+
+
+def test_backfill_mfr_sightings_consensus_3_plus(db_session, test_requisition):
+    """3+ sightings same manufacturer → sighting_consensus at 0.95."""
+    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    card = _make_card(db_session, "BF-CONSENSUS-3")
+    req_item = test_requisition.requirements[0]
+
+    for i in range(3):
+        from app.models.sourcing import Sighting
+
+        s = Sighting(
+            requirement_id=req_item.id,
+            material_card_id=card.id,
+            vendor_name=f"Vendor{i}",
+            manufacturer="Texas Instruments",
+            mpn_matched="BF-CONSENSUS-3",
+            source_type="test",
+        )
+        db_session.add(s)
+    db_session.flush()
+
+    result = backfill_manufacturer_from_sightings(db_session)
+    assert result["total_tagged"] == 1
+    assert result["total_skipped"] == 0
+    db_session.refresh(card)
+    assert card.manufacturer == "Texas Instruments"
+
+
+def test_backfill_mfr_sightings_2_agree(db_session, test_requisition):
+    """2 sightings same manufacturer → sighting_consensus at 0.90."""
+    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    card = _make_card(db_session, "BF-TWOVOTE")
+    req_item = test_requisition.requirements[0]
+
+    for i in range(2):
+        from app.models.sourcing import Sighting
+
+        s = Sighting(
+            requirement_id=req_item.id,
+            material_card_id=card.id,
+            vendor_name=f"Vendor{i}",
+            manufacturer="Analog Devices",
+            mpn_matched="BF-TWOVOTE",
+            source_type="test",
+        )
+        db_session.add(s)
+    db_session.flush()
+
+    result = backfill_manufacturer_from_sightings(db_session)
+    assert result["total_tagged"] == 1
+
+
+def test_backfill_mfr_sightings_single_skipped(db_session, test_requisition):
+    """Single sighting with single distinct source → skipped (below 0.90 floor)."""
+    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    card = _make_card(db_session, "BF-SINGLE")
+    req_item = test_requisition.requirements[0]
+
+    from app.models.sourcing import Sighting
+
+    s = Sighting(
+        requirement_id=req_item.id,
+        material_card_id=card.id,
+        vendor_name="Vendor1",
+        manufacturer="OnSemi",
+        mpn_matched="BF-SINGLE",
+        source_type="test",
+    )
+    db_session.add(s)
+    db_session.flush()
+
+    result = backfill_manufacturer_from_sightings(db_session)
+    assert result["total_skipped"] == 1
+    assert result["total_tagged"] == 0
+
+
+def test_backfill_mfr_sightings_junk_filtered(db_session, test_requisition):
+    """Junk manufacturers ('Unknown', 'N/A', etc.) are filtered out."""
+    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    card = _make_card(db_session, "BF-JUNK")
+    req_item = test_requisition.requirements[0]
+
+    from app.models.sourcing import Sighting
+
+    for junk in ["Unknown", "N/A", "Various"]:
+        s = Sighting(
+            requirement_id=req_item.id,
+            material_card_id=card.id,
+            vendor_name="Vendor",
+            manufacturer=junk,
+            mpn_matched="BF-JUNK",
+            source_type="test",
+        )
+        db_session.add(s)
+    db_session.flush()
+
+    result = backfill_manufacturer_from_sightings(db_session)
+    assert result["total_skipped"] == 1
+
+
+def test_backfill_mfr_sightings_no_sightings(db_session):
+    """Card with no sightings → skipped."""
+    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    _make_card(db_session, "BF-NOSIGHT")
+
+    result = backfill_manufacturer_from_sightings(db_session)
+    assert result["total_skipped"] == 1
+
+
+def test_backfill_mfr_sightings_keeps_existing_manufacturer(db_session, test_requisition):
+    """If card.manufacturer already set, don't overwrite."""
+    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    card = _make_card(db_session, "BF-KEEPMFR", manufacturer="Original Corp")
+    req_item = test_requisition.requirements[0]
+
+    from app.models.sourcing import Sighting
+
+    for i in range(3):
+        s = Sighting(
+            requirement_id=req_item.id,
+            material_card_id=card.id,
+            vendor_name=f"Vendor{i}",
+            manufacturer="Different Corp",
+            mpn_matched="BF-KEEPMFR",
+            source_type="test",
+        )
+        db_session.add(s)
+    db_session.flush()
+
+    backfill_manufacturer_from_sightings(db_session)
+    db_session.refresh(card)
+    assert card.manufacturer == "Original Corp"
+
+
+def test_backfill_mfr_sightings_distinct_sources_triggers_consensus(db_session, test_requisition):
+    """2+ distinct manufacturers (even with count=1 each) → sighting_consensus at
+    0.90."""
+    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    card = _make_card(db_session, "BF-MULTISRC")
+    req_item = test_requisition.requirements[0]
+
+    from app.models.sourcing import Sighting
+
+    s1 = Sighting(
+        requirement_id=req_item.id,
+        material_card_id=card.id,
+        vendor_name="VendorA",
+        manufacturer="TI",
+        mpn_matched="BF-MULTISRC",
+        source_type="test",
+    )
+    s2 = Sighting(
+        requirement_id=req_item.id,
+        material_card_id=card.id,
+        vendor_name="VendorB",
+        manufacturer="Analog Devices",
+        mpn_matched="BF-MULTISRC",
+        source_type="test",
+    )
+    db_session.add_all([s1, s2])
+    db_session.flush()
+
+    result = backfill_manufacturer_from_sightings(db_session)
+    assert result["total_tagged"] == 1
+
+
+def test_backfill_mfr_sightings_batch_processing(db_session, test_requisition):
+    """Processes cards across batch boundaries."""
+    from app.services.tagging_backfill import backfill_manufacturer_from_sightings
+
+    req_item = test_requisition.requirements[0]
+
+    from app.models.sourcing import Sighting
+
+    for i in range(3):
+        card = _make_card(db_session, f"BF-BATCH{i}")
+        for j in range(3):
+            s = Sighting(
+                requirement_id=req_item.id,
+                material_card_id=card.id,
+                vendor_name=f"Vendor{j}",
+                manufacturer="TI",
+                mpn_matched=f"BF-BATCH{i}",
+                source_type="test",
+            )
+            db_session.add(s)
+    db_session.flush()
+
+    result = backfill_manufacturer_from_sightings(db_session, batch_size=2)
+    assert result["total_processed"] == 3
+    assert result["total_tagged"] == 3
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  repair_entity_tag_visibility — lines 414-442
+# ═══════════════════════════════════════════════════════════════════════
+
+
+def test_repair_visibility_no_entity_tags(db_session):
+    """No entity tags → early return with zeros."""
+    from app.services.tagging_backfill import repair_entity_tag_visibility
+
+    result = repair_entity_tag_visibility(db_session)
+    assert result == {"total_entities": 0, "total_tags_updated": 0, "now_visible": 0, "now_hidden": 0}
+
+
+def test_repair_visibility_processes_entities(db_session):
+    """All distinct entity (type, id) pairs are recalculated."""
+    from unittest.mock import patch
+
+    from app.models.tags import EntityTag
+    from app.services.tagging_backfill import repair_entity_tag_visibility
+
+    tag = Tag(name="RepairBrand", tag_type="brand", created_at=datetime.now(timezone.utc))
+    db_session.add(tag)
+    db_session.flush()
+
+    et1 = EntityTag(
+        entity_type="vendor_card",
+        entity_id=1,
+        tag_id=tag.id,
+        interaction_count=5,
+        total_entity_interactions=10,
+        is_visible=False,
+    )
+    et2 = EntityTag(
+        entity_type="company",
+        entity_id=2,
+        tag_id=tag.id,
+        interaction_count=3,
+        total_entity_interactions=10,
+        is_visible=True,
+    )
+    db_session.add_all([et1, et2])
+    db_session.commit()
+
+    with patch("app.services.tagging.recalculate_entity_tag_visibility") as mock_recalc:
+        result = repair_entity_tag_visibility(db_session)
+
+    assert result["total_entities"] == 2
+    assert mock_recalc.call_count == 2
+
+
+def test_repair_visibility_counts_visible_hidden(db_session):
+    """Result includes now_visible and now_hidden counts."""
+    from unittest.mock import patch
+
+    from app.models.tags import EntityTag
+    from app.services.tagging_backfill import repair_entity_tag_visibility
+
+    tag = Tag(name="CountBrand", tag_type="brand", created_at=datetime.now(timezone.utc))
+    db_session.add(tag)
+    db_session.flush()
+
+    # Create 2 visible, 1 hidden entity tag
+    for i, visible in enumerate([True, True, False]):
+        et = EntityTag(
+            entity_type="vendor_card",
+            entity_id=i + 10,
+            tag_id=tag.id,
+            interaction_count=5,
+            total_entity_interactions=10,
+            is_visible=visible,
+        )
+        db_session.add(et)
+    db_session.commit()
+
+    with patch("app.services.tagging.recalculate_entity_tag_visibility"):
+        result = repair_entity_tag_visibility(db_session)
+
+    assert result["total_entities"] == 3
+    assert result["now_visible"] == 2
+    assert result["now_hidden"] == 1
+    assert result["total_tags_updated"] == 3

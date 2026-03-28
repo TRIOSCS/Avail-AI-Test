@@ -102,7 +102,7 @@ async def run_customer_enrichment_batch(
     }
 
 
-async def run_email_reverification(db: Session, max_contacts: int = 200) -> dict:
+async def run_email_reverification(db: Session, _max_contacts: int = 200) -> dict:
     """Re-verify emails for contacts that were verified more than 90 days ago.
 
     Returns a stub result until an email verification provider is configured.

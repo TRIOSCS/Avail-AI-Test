@@ -56,7 +56,7 @@ async def lifespan(app):
         from sentry_sdk.integrations.loguru import LoguruIntegration
         from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
-        def _sentry_before_send(event, hint):
+        def _sentry_before_send(event, _hint):
             """Scrub sensitive data from Sentry events."""
             _SENSITIVE_HEADERS = {
                 "authorization",

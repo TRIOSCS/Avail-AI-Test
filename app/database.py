@@ -56,7 +56,7 @@ SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 if not _is_sqlite:
 
     @event.listens_for(engine, "connect")
-    def _set_timezone(dbapi_conn, connection_record):
+    def _set_timezone(dbapi_conn, _connection_record):
         cursor = dbapi_conn.cursor()
         cursor.execute("SET timezone = 'UTC'")
         cursor.close()

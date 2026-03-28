@@ -8,6 +8,7 @@ Depends on: session_manager (page), human_behavior
 """
 
 import asyncio
+import tempfile
 import time
 
 from loguru import logger
@@ -101,8 +102,10 @@ async def search_part(page, part_number: str) -> dict:
 
     # Take a diagnostic screenshot
     try:
-        await page.screenshot(path="/tmp/ics_search_debug.png")
-        logger.info("ICS search: saved diagnostic screenshot to /tmp/ics_search_debug.png")
+        _tmp = tempfile.gettempdir()
+        _screenshot_path = f"{_tmp}/ics_search_debug.png"
+        await page.screenshot(path=_screenshot_path)
+        logger.info("ICS search: saved diagnostic screenshot to {}", _screenshot_path)
     except Exception as e:
         logger.warning("ICS search: screenshot failed: {}", e)
 

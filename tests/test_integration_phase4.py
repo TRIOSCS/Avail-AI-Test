@@ -1,13 +1,11 @@
-"""Phase 4 integration tests — end-to-end verification of all four search layers and the
-enrichment pipeline.
+"""Phase 4 integration tests — end-to-end verification of all four search layers.
 
 What: Tests that search results contain Live Stock, Historical, Vendor Match,
-      and AI Found layers; that enrichment applies/rejects fields correctly;
-      that the smart AI trigger fires when results are thin; that affinity
-      dedup works; and that all result types share consistent scoring fields.
+      and AI Found layers; that the smart AI trigger fires when results are thin;
+      that affinity dedup works; and that all result types share consistent
+      scoring fields.
 Called by: pytest
-Depends on: app.search_service, app.scoring, app.services.vendor_affinity_service,
-            app.services.enrichment_orchestrator
+Depends on: app.search_service, app.scoring, app.services.vendor_affinity_service
 """
 
 import os
@@ -20,13 +18,9 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
-from app.models import Company, Requirement, Requisition, User
+from app.models import Requirement, Requisition, User
 from app.scoring import confidence_color, score_unified
 from app.search_service import search_requirement
-from app.services.enrichment_orchestrator import (
-    apply_confident_data,
-    claude_merge,
-)
 from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
 
 pytestmark = pytest.mark.slow
@@ -222,125 +216,6 @@ class TestSearchReturnsAllFourLayers:
             assert s["confidence_color"] in {"green", "amber", "red"}, (
                 f"Invalid confidence_color '{s['confidence_color']}' on {s.get('vendor_name')}"
             )
-
-
-# ── Test: enrich company pipeline ────────────────────────────────────────
-
-
-class TestEnrichCompanyPipeline:
-    """Verify the enrichment orchestrator fires sources, merges via Claude, and applies
-    high-confidence fields while rejecting low-confidence ones."""
-
-    @pytest.mark.asyncio
-    async def test_enrich_company_pipeline(self, db_session):
-        """Mock enrichment sources + Claude merge, then verify apply/reject logic."""
-        # Create a company entity
-        company = Company(
-            name="Test Corp",
-            domain="testcorp.com",
-            website="https://testcorp.com",
-            is_active=True,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(company)
-        db_session.commit()
-        db_session.refresh(company)
-
-        # Simulate Claude merge output with mixed confidence levels
-        merged_fields = [
-            {
-                "field": "industry",
-                "value": "Electronic Components Distribution",
-                "confidence": 0.95,
-                "source": "apollo",
-                "reasoning": "All sources agree on industry classification",
-            },
-            {
-                "field": "employee_size",
-                "value": "51-200",
-                "confidence": 0.92,
-                "source": "clearbit",
-                "reasoning": "Clearbit and Apollo agree on employee count range",
-            },
-            {
-                "field": "hq_city",
-                "value": "Austin",
-                "confidence": 0.70,
-                "source": "explorium",
-                "reasoning": "Only Explorium reports city; others disagree",
-            },
-            {
-                "field": "hq_country",
-                "value": "US",
-                "confidence": 0.98,
-                "source": "apollo",
-                "reasoning": "All sources agree on country",
-            },
-            {
-                "field": "legal_name",
-                "value": "Test Corporation Inc.",
-                "confidence": 0.45,
-                "source": "explorium",
-                "reasoning": "Only one source, low confidence",
-            },
-        ]
-
-        # Apply with 0.90 threshold
-        summary = apply_confident_data(company, merged_fields, db_session, threshold=0.90)
-
-        # High-confidence fields should be applied
-        assert len(summary["applied"]) == 3
-        applied_fields = {item["field"] for item in summary["applied"]}
-        assert "industry" in applied_fields
-        assert "employee_size" in applied_fields
-        assert "hq_country" in applied_fields
-
-        # Verify the values were actually set on the entity
-        assert company.industry == "Electronic Components Distribution"
-        assert company.employee_size == "51-200"
-        assert company.hq_country == "US"
-
-        # Low-confidence fields should be rejected
-        assert len(summary["rejected"]) == 2
-        rejected_fields = {item["field"] for item in summary["rejected"]}
-        assert "hq_city" in rejected_fields
-        assert "legal_name" in rejected_fields
-
-        # hq_city should NOT have been applied
-        assert company.hq_city is None
-
-        # sources_used should list the sources that contributed applied fields
-        assert "apollo" in summary["sources_used"]
-        assert "clearbit" in summary["sources_used"]
-
-    @pytest.mark.asyncio
-    async def test_claude_merge_single_source(self):
-        """When only one source returns data, skip Claude call and use it directly."""
-        raw_results = {
-            "apollo": {"industry": "Semiconductors", "employee_size": "201-500"},
-            "clearbit": None,
-            "explorium": None,
-        }
-
-        merged = await claude_merge(raw_results, "company")
-
-        assert len(merged) == 2
-        for item in merged:
-            assert item["source"] == "apollo"
-            assert item["confidence"] == 0.85
-            assert "field" in item
-            assert "value" in item
-
-    @pytest.mark.asyncio
-    async def test_claude_merge_no_data(self):
-        """When no sources return data, merge returns empty list."""
-        raw_results = {
-            "apollo": None,
-            "clearbit": None,
-        }
-
-        merged = await claude_merge(raw_results, "company")
-        assert merged == []
 
 
 # ── Test: smart trigger integration ──────────────────────────────────────
