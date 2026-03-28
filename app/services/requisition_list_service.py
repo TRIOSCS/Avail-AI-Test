@@ -28,22 +28,8 @@ from app.models import (
     VendorResponse,
 )
 from app.schemas.requisitions2 import PaginationContext, ReqListFilters
+from app.services.sourcing_score import compute_sourcing_score_safe
 from app.utils.sql_helpers import escape_like
-
-
-def _compute_sourcing_score(req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt):
-    """Lightweight sourcing score for list views."""
-    from app.services.sourcing_score import compute_requisition_score_fast
-
-    return compute_requisition_score_fast(
-        req_count=req_cnt or 0,
-        sourced_count=sourced_cnt or 0,
-        rfq_sent_count=rfq_sent or 0,
-        reply_count=reply_cnt or 0,
-        offer_count=offer_cnt or 0,
-        call_count=call_cnt or 0,
-        email_count=email_act_cnt or 0,
-    )
 
 
 def _build_pagination(page: int, per_page: int, total: int) -> PaginationContext:
@@ -397,7 +383,7 @@ def list_requisitions(
         email_act_cnt,
         latest_rfq_sent,
     ) in rows:
-        _sc, _sc_color, _sc_signals = _compute_sourcing_score(
+        _sc, _sc_color, _sc_signals = compute_sourcing_score_safe(
             req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt
         )
         requisitions.append(

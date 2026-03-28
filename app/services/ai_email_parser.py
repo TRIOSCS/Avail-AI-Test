@@ -17,8 +17,6 @@ Called by: routers/ai.py (POST /api/ai/parse-email)
 Depends on: utils/claude_client.py, utils/normalization.py
 """
 
-import re
-
 from loguru import logger
 
 from app.utils.claude_client import claude_json
@@ -33,6 +31,7 @@ from app.utils.normalization import (
     normalize_price,
     normalize_quantity,
 )
+from app.utils.text_utils import clean_email_body
 
 CONFIDENCE_AUTO = 0.8
 CONFIDENCE_REVIEW = 0.5
@@ -105,7 +104,7 @@ async def parse_email(
     Returns:
         Parsed result dict with quotes list and confidence, or None on failure.
     """
-    body = _clean_email_body(email_body)
+    body = clean_email_body(email_body)
     if not body:
         logger.warning("Empty email body — nothing to parse")
         return None
@@ -209,28 +208,3 @@ def should_flag_review(result: dict) -> bool:
     """Check if parsed result needs human review."""
     conf = result.get("overall_confidence") or 0
     return CONFIDENCE_REVIEW <= conf < CONFIDENCE_AUTO
-
-
-def _clean_email_body(body: str) -> str:
-    """Strip HTML, excessive whitespace, and email disclaimers.
-
-    Preserves newlines so tabular data and list formatting survive intact — the LLM
-    needs structure to parse tables accurately.
-    """
-    if not body:
-        return ""
-    # Replace <br>, <p>, <tr>, <li> with newlines before stripping tags
-    text = re.sub(r"<br\s*/?>|</p>|</tr>|</li>", "\n", body, flags=re.IGNORECASE)
-    text = re.sub(r"<[^>]+>", " ", text)
-    # Collapse horizontal whitespace per line (preserve newlines)
-    text = re.sub(r"[^\S\n]+", " ", text)
-    # Collapse 3+ consecutive newlines to 2
-    text = re.sub(r"\n{3,}", "\n\n", text)
-    disclaimer_patterns = [
-        r"(?i)this email and any attachments.*?(?=\n\n|\Z)",
-        r"(?i)confidentiality notice.*?(?=\n\n|\Z)",
-        r"(?i)DISCLAIMER.*?(?=\n\n|\Z)",
-    ]
-    for pat in disclaimer_patterns:
-        text = re.sub(pat, "", text, flags=re.DOTALL)
-    return text.strip()

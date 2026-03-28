@@ -32,6 +32,7 @@ from app.utils.normalization import (
     normalize_price,
     normalize_quantity,
 )
+from app.utils.text_utils import clean_email_body
 
 # ── Confidence thresholds ─────────────────────────────────────────────
 
@@ -132,7 +133,7 @@ async def parse_vendor_response(
         Parsed result dict with confidence score, or None on failure
     """
     # Truncate body to avoid token waste
-    body_truncated = _clean_email_body(email_body)[:4000]
+    body_truncated = clean_email_body(email_body)[:4000]
 
     context_str = ""
     if rfq_context:
@@ -254,27 +255,6 @@ def _cross_validate(result: dict, rfq_context: dict | list) -> None:
     for part in result.get("parts", []):
         mpn = part.get("mpn", "")
         part["mpn_matches_rfq"] = any(fuzzy_mpn_match(mpn, rfq_mpn) for rfq_mpn in rfq_mpns)
-
-
-def _clean_email_body(body: str) -> str:
-    """Strip HTML tags, excessive whitespace, and email signatures."""
-    import re
-
-    if not body:
-        return ""
-    # Remove HTML tags
-    text = re.sub(r"<[^>]+>", " ", body)
-    # Collapse whitespace
-    text = re.sub(r"\s+", " ", text).strip()
-    # Remove common email disclaimers (often very long)
-    disclaimer_patterns = [
-        r"(?i)this email and any attachments.*?(?=\n\n|\Z)",
-        r"(?i)confidentiality notice.*?(?=\n\n|\Z)",
-        r"(?i)DISCLAIMER.*?(?=\n\n|\Z)",
-    ]
-    for pat in disclaimer_patterns:
-        text = re.sub(pat, "", text)
-    return text.strip()
 
 
 def should_auto_apply(result: dict) -> bool:
