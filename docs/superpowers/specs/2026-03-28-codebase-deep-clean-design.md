@@ -192,21 +192,32 @@ The `app/routers/htmx/` directory has 3 files from a stalled refactor (~2-3% com
 
 ---
 
-## Phase 8: Fix 216 Failing Tests
+## Phase 8: Fix Failing Tests
 
-Root cause categorization pending (agent running pytest). Known failure clusters:
+**Key finding:** 216 fail with `-n auto` (parallel), only 146 fail sequentially. ~70 failures are **test isolation issues** (race conditions).
 
-- `test_prospect_free_enrichment.py` — Session | None mypy false positive pattern
-- `test_materials_router.py` — AttributeError (likely model/schema change)
-- `test_rfq.py` — AttributeError in follow-up endpoints
-- `test_requirements.py` — assertion failures (logic/behavior changed)
-- `test_htmx_views.py` — 8+ failures across various endpoints
-- `test_health_monitor.py` — 7 failures
-- `test_knowledge_service_comprehensive.py` — 4 failures
-- `test_ownership_service.py` — 4 failures
-- `test_sightings_router_comprehensive.py` — 5 failures
+### Failure breakdown by file (sequential run, 146 failures):
 
-Fix approach: Group by root cause, fix cause not symptom, verify each batch.
+| File | Failures | Likely Root Cause |
+|---|---|---|
+| `test_core_jobs.py` | 37 | Model/fixture change — AttributeError across all job test classes |
+| `test_knowledge_service_comprehensive.py` | 24 | Service API changed — all test classes affected |
+| `test_prospect_free_enrichment.py` | 16 | Session|None pattern + httpx mock issues |
+| `test_enrichment_service.py` | 11 | Nexar/boost functions changed signature |
+| `test_buyplan_workflow.py` | 11 | AttributeError — model/helper changes |
+| `test_health_monitor.py` | 7 | Service refactored |
+| `test_cph_hooks.py` | 3 | Model relationship change |
+| `test_sightings_advance_status.py` | 2 | Status enum or logic change |
+| `test_data_cleanup.py` | 2 | Site contact dedup logic changed |
+| `test_buyplan_token.py` | 2 | Token response format changed |
+| 27 other files | 1 each | Mixed: worker crashes, assertion mismatches, template changes |
+
+### Fix approach:
+1. Fix `test_core_jobs.py` first (37 failures — biggest bang)
+2. Fix `test_knowledge_service_comprehensive.py` (24 failures)
+3. Fix `test_prospect_free_enrichment.py` (16 failures)
+4. Fix remaining 69 failures grouped by root cause
+5. Fix ~70 parallel isolation issues (shared DB state, fixture leaks)
 
 ---
 
@@ -232,7 +243,28 @@ Priority test files to write (ordered by coverage impact):
 
 ---
 
-## Phase 10: Code Quality Fixes (5 items)
+## Phase 10: Dead JSON API Routes (informational — NOT deleting)
+
+The dead routes audit found **~255 of ~340 endpoints (75%) have zero frontend references**. This is because the HTMX rewrite in `htmx_views.py` calls the service layer directly, bypassing the original JSON API routers.
+
+**NOT removing these in this cleanup** because:
+- Admin/CLI routes (tagging_admin, nc_admin, ics_admin) are used operationally via cURL
+- Some may serve as webhook receivers (`/api/webhooks/graph`)
+- Future mobile app may need them
+- Removing active routers risks breaking unknown consumers
+
+**Candidates for future cleanup (entire routers with zero references):**
+- `command_center.py` (1 endpoint)
+- `strategic.py` (6 endpoints)
+- `outreach.py` (1 endpoint)
+- `prospect_pool.py` (5 endpoints)
+- `v13_features/sales.py` (10 endpoints)
+- `v13_features/activity.py` (15 endpoints)
+- `v13_features/prospecting.py` (9 endpoints)
+
+---
+
+## Phase 11: Code Quality Fixes (5 items)
 
 1. **`prospect_free_enrichment.py:195`** — Add `assert db is not None` after Session guard clause
 2. **`nc_worker/session_manager.py`** — Add `Page | None` type annotation + None guard
@@ -265,7 +297,7 @@ Phase 8 (fix 216 failing tests) ─ Must run after dead code removal (some tests
 Phase 9 (new tests to 85%) ────── Must run after test fixes (clean baseline)
          │
          ▼
-Phase 10 (quality fixes) ─────── Last (minor, low risk)
+Phase 11 (quality fixes) ─────── Last (minor, low risk)
 ```
 
 ### Verification gates
