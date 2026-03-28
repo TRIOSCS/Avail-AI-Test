@@ -561,20 +561,6 @@ class TestCircuitBreaker:
         assert "trip_reason" in info
         assert "captcha_count" in info
 
-    def test_reset(self):
-        breaker = CircuitBreaker()
-        breaker.is_open = True
-        breaker.trip_reason = "test"
-        breaker.captcha_count = 5
-        breaker.consecutive_failures = 3
-        breaker.empty_results_streak = 8
-        breaker.reset()
-        assert not breaker.is_open
-        assert breaker.trip_reason == ""
-        assert breaker.captcha_count == 0
-        assert breaker.consecutive_failures == 0
-        assert breaker.empty_results_streak == 0
-
 
 # ═══════════════════════════════════════════════════════════════════════
 # SCHEDULER

@@ -13,7 +13,6 @@ from app.dependencies import (
     get_req_for_user,
     get_user,
     is_admin,
-    user_reqs_query,
 )
 
 # ── Helpers ─────────────────────────────────────────────────────────
@@ -55,23 +54,6 @@ class TestIsAdmin:
 
     def test_buyer_role(self, test_user):
         assert is_admin(test_user) is False
-
-
-# ── Role-based queries ──────────────────────────────────────────────
-
-
-class TestUserReqsQuery:
-    def test_buyer_sees_all(self, db_session, test_user, test_requisition):
-        query = user_reqs_query(db_session, test_user)
-        results = query.all()
-        assert len(results) >= 1
-
-    def test_sales_sees_own_only(self, db_session, sales_user, test_user, test_requisition):
-        """Sales user should only see reqs they created."""
-        query = user_reqs_query(db_session, sales_user)
-        results = query.all()
-        # sales_user didn't create test_requisition, so should see 0
-        assert len(results) == 0
 
 
 class TestGetReqForUser:

@@ -1245,34 +1245,6 @@ def test_site_ownership_sweep_error_handling(scheduler_db):
             asyncio.run(_job_site_ownership_sweep())
 
 
-# ── _compute_vendor_scores_job() ──────────────────────────────────────
-
-
-def test_compute_engagement_scores_job_delegates(db_session):
-    """Vendor scores job delegates to compute_all_vendor_scores."""
-    with patch(
-        "app.services.vendor_score.compute_all_vendor_scores",
-        new_callable=AsyncMock,
-    ) as mock_compute:
-        mock_compute.return_value = {"updated": 10, "skipped": 2}
-        from app.jobs.email_jobs import _compute_vendor_scores_job
-
-        asyncio.run(_compute_vendor_scores_job(db_session))
-        mock_compute.assert_called_once_with(db_session)
-
-
-def test_compute_engagement_scores_job_handles_error(db_session):
-    """Vendor scores job handles errors without propagating."""
-    with patch(
-        "app.services.vendor_score.compute_all_vendor_scores",
-        new_callable=AsyncMock,
-        side_effect=Exception("Scorer crashed"),
-    ):
-        from app.jobs.email_jobs import _compute_vendor_scores_job
-
-        asyncio.run(_compute_vendor_scores_job(db_session))
-
-
 # ── _job_contact_scoring() ────────────────────────────────────────────
 
 

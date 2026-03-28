@@ -8,10 +8,8 @@ Business Rules:
 - get_user returns None if not logged in (non-throwing)
 - require_user raises 401 if not logged in, 403 if deactivated
 - require_buyer raises 403 if user is not buyer/sales/trader/manager/admin
-- require_sales raises 403 if user is not sales/trader/manager/admin
 - require_admin raises 403 if user.role != "admin"
 - require_settings_access allows admin only
-- user_reqs_query enforces role-based access: sales sees own only
 - require_fresh_token handles M365 token refresh with 15-min buffer
 
 Called by: all routers
@@ -100,26 +98,7 @@ def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
     return user
 
 
-def require_sales(request: Request, db: Session = Depends(get_db)) -> User:
-    """Dependency: requires sales role for prospecting/CRM actions."""
-    user = require_user(request, db)
-    if user.role not in (UserRole.SALES, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN):
-        raise HTTPException(403, "Sales role required for this action")
-    return user
-
-
 # ── Query Helpers ─────────────────────────────────────────────────────
-
-
-def user_reqs_query(db: Session, user: User):
-    """Base requisition query respecting role-based access.
-
-    Sales sees own reqs only; all other roles see all.
-    """
-    q = db.query(Requisition)
-    if user.role == UserRole.SALES:
-        q = q.filter(Requisition.created_by == user.id)
-    return q
 
 
 def get_req_for_user(db: Session, user: User, req_id: int, options=None) -> Requisition:
@@ -190,16 +169,3 @@ async def require_fresh_token(request: Request, db: Session = Depends(get_db)) -
         raise HTTPException(401, "Session expired — please log in again")
 
     return str(token)
-
-
-# ── HTMX Detection Utilities ────────────────────────────────────────
-
-
-def wants_html(request: Request) -> bool:
-    """Return True if the client wants an HTML partial (HTMX request)."""
-    return request.headers.get("HX-Request") == "true"
-
-
-def is_htmx_boosted(request: Request) -> bool:
-    """Return True if this is an hx-boost navigation (needs full page shell)."""
-    return request.headers.get("HX-Boosted") == "true"

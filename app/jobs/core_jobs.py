@@ -25,20 +25,6 @@ def register_core_jobs(scheduler, settings):
         _job_inbox_scan, IntervalTrigger(minutes=settings.inbox_scan_interval_min), id="inbox_scan", name="Inbox scan"
     )
     scheduler.add_job(_job_batch_results, IntervalTrigger(minutes=5), id="batch_results", name="Process batch results")
-    # Material enrichment jobs disabled — AI-only enrichment produces hallucinated
-    # data. Rebuild with real connector data before re-enabling.
-    # scheduler.add_job(
-    #     _job_batch_enrich_materials,
-    #     IntervalTrigger(minutes=30),
-    #     id="batch_enrich_materials",
-    #     name="Batch enrich materials",
-    # )
-    # scheduler.add_job(
-    #     _job_poll_material_batch,
-    #     IntervalTrigger(minutes=5),
-    #     id="poll_material_batch",
-    #     name="Poll material batch results",
-    # )
     scheduler.add_job(
         _job_batch_parse_signatures,
         IntervalTrigger(minutes=10),
@@ -255,52 +241,6 @@ async def _job_batch_results():
             db.rollback()
         except Exception:
             logger.debug("Batch results cleanup rollback", exc_info=True)
-        db.close()
-
-
-@_traced_job
-async def _job_batch_enrich_materials():
-    """Submit unenriched material cards to Claude Batch API (runs every 30 min)."""
-    from ..database import SessionLocal
-    from ..services.material_enrichment_service import batch_enrich_materials
-
-    db = SessionLocal()
-    try:
-        batch_id = await asyncio.wait_for(batch_enrich_materials(db), timeout=120)
-        if batch_id:
-            logger.info(f"Material batch enrich submitted: {batch_id}")
-    except asyncio.TimeoutError:
-        logger.error("Material batch enrich timed out (120s)")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    except Exception as e:
-        logger.error(f"Material batch enrich error: {e}")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    finally:
-        db.close()
-
-
-@_traced_job
-async def _job_poll_material_batch():
-    """Poll and apply material batch enrichment results (runs every 5 min)."""
-    from ..database import SessionLocal
-    from ..services.material_enrichment_service import process_material_batch_results
-
-    db = SessionLocal()
-    try:
-        result = await asyncio.wait_for(process_material_batch_results(db), timeout=120)
-        if result is not None:
-            logger.info(f"Material batch results: {result['applied']} applied, {result['errors']} errors")
-    except asyncio.TimeoutError:
-        logger.error("Material batch poll timed out (120s)")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    except Exception as e:
-        logger.error(f"Material batch poll error: {e}")
-        db.rollback()
-        raise  # Re-raise so _traced_job / Sentry can capture
-    finally:
         db.close()
 
 

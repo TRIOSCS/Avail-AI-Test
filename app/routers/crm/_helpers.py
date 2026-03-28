@@ -39,37 +39,6 @@ def record_changes(
             )
 
 
-def get_last_quoted_price(mpn: str, db: Session) -> dict | None:
-    """Find most recent sell price for an MPN across all quotes."""
-    from ...models import MaterialCard
-    from ...utils.normalization import normalize_mpn_key
-
-    quotes = (
-        db.query(Quote)
-        .filter(Quote.status.in_(_PRICED_STATUSES))
-        .order_by(Quote.sent_at.desc().nullslast(), Quote.created_at.desc())
-        .limit(100)
-        .all()
-    )
-    norm_key = normalize_mpn_key(mpn)
-    card = db.query(MaterialCard).filter(MaterialCard.normalized_mpn == norm_key).first() if norm_key else None
-    card_id = card.id if card else None
-    mpn_upper = mpn.upper().strip()
-    for q in quotes:
-        for item in q.line_items or []:
-            matched_by_card = card_id and item.get("material_card_id") == card_id
-            matched_by_mpn = (item.get("mpn") or "").upper().strip() == mpn_upper
-            if matched_by_card or matched_by_mpn:
-                return {
-                    "sell_price": item.get("sell_price"),
-                    "margin_pct": item.get("margin_pct"),
-                    "quote_number": q.quote_number,
-                    "date": _quote_date_iso(q),
-                    "result": q.result,
-                }
-    return None
-
-
 def _preload_last_quoted_prices(db: Session) -> dict[str, dict]:
     """Load recent quotes ONCE and build MPN/card_id to price lookup dict.
 

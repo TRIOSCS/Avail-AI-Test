@@ -11,7 +11,6 @@ from datetime import datetime, timezone
 from unittest.mock import MagicMock
 
 import pytest
-from fastapi import HTTPException
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -83,51 +82,6 @@ def _mock_request(user_id: int) -> MagicMock:
     request.session = {"user_id": user_id}
     request.headers = {}
     return request
-
-
-class TestRequireSalesDependency:
-    """Unit tests calling require_sales directly."""
-
-    def test_require_sales_allows_sales(self, db_session: Session, sales_user: User):
-        from app.dependencies import require_sales
-
-        request = _mock_request(sales_user.id)
-        result = require_sales(request=request, db=db_session)
-        assert result.id == sales_user.id
-        assert result.role == "sales"
-
-    def test_require_sales_allows_admin(self, db_session: Session, admin_user: User):
-        from app.dependencies import require_sales
-
-        request = _mock_request(admin_user.id)
-        result = require_sales(request=request, db=db_session)
-        assert result.id == admin_user.id
-        assert result.role == "admin"
-
-    def test_require_sales_allows_trader(self, db_session: Session, trader_user: User):
-        from app.dependencies import require_sales
-
-        request = _mock_request(trader_user.id)
-        result = require_sales(request=request, db=db_session)
-        assert result.id == trader_user.id
-        assert result.role == "trader"
-
-    def test_require_sales_allows_manager(self, db_session: Session, manager_user: User):
-        from app.dependencies import require_sales
-
-        request = _mock_request(manager_user.id)
-        result = require_sales(request=request, db=db_session)
-        assert result.id == manager_user.id
-        assert result.role == "manager"
-
-    def test_require_sales_blocks_buyer(self, db_session: Session, buyer_user: User):
-        from app.dependencies import require_sales
-
-        request = _mock_request(buyer_user.id)
-        with pytest.raises(HTTPException) as exc_info:
-            require_sales(request=request, db=db_session)
-        assert exc_info.value.status_code == 403
-        assert "Sales role required" in str(exc_info.value.detail)
 
 
 class TestRequireBuyerIncludesSales:

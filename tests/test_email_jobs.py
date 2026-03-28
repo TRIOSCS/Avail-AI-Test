@@ -864,36 +864,6 @@ class TestScanOutboundRfqs:
             assert card.total_outreach == 7  # 5 + 2
 
 
-# ── _compute_vendor_scores_job ───────────────────────────────────────
-
-
-class TestComputeVendorScores:
-    @pytest.mark.asyncio
-    async def test_compute_scores(self):
-        from app.jobs.email_jobs import _compute_vendor_scores_job
-
-        mock_db = MagicMock()
-        with patch(
-            "app.services.vendor_score.compute_all_vendor_scores",
-            new_callable=AsyncMock,
-            return_value={"updated": 10, "skipped": 2},
-        ):
-            await _compute_vendor_scores_job(mock_db)
-
-    @pytest.mark.asyncio
-    async def test_compute_scores_error(self):
-        from app.jobs.email_jobs import _compute_vendor_scores_job
-
-        mock_db = MagicMock()
-        with patch(
-            "app.services.vendor_score.compute_all_vendor_scores",
-            new_callable=AsyncMock,
-            side_effect=Exception("score fail"),
-        ):
-            # Should not raise — error is logged
-            await _compute_vendor_scores_job(mock_db)
-
-
 # ── _sync_user_contacts ─────────────────────────────────────────────
 
 

@@ -28,7 +28,6 @@ from app.models import (
 )
 from app.routers.crm import (
     _preload_last_quoted_prices,
-    get_last_quoted_price,
     next_quote_number,
     quote_to_dict,
 )
@@ -179,47 +178,6 @@ def test_quote_creation_retries_on_integrity_error(
     assert resp.status_code == 200
     data = resp.json()
     assert "quote_number" in data
-
-
-# ── get_last_quoted_price ────────────────────────────────────────────────
-
-
-def test_get_last_quoted_price_found():
-    q = MagicMock()
-    q.line_items = [{"mpn": "LM317T", "sell_price": 2.50, "margin_pct": 15.0}]
-    q.quote_number = "Q-2026-0005"
-    q.sent_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
-    q.created_at = datetime(2026, 1, 28, tzinfo=timezone.utc)
-    q.result = "won"
-    db = MagicMock()
-    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [q]
-
-    result = get_last_quoted_price("LM317T", db)
-    assert result is not None
-    assert result["sell_price"] == 2.50
-    assert result["quote_number"] == "Q-2026-0005"
-
-
-def test_get_last_quoted_price_case_insensitive():
-    q = MagicMock()
-    q.line_items = [{"mpn": "lm317t", "sell_price": 3.00, "margin_pct": 10.0}]
-    q.quote_number = "Q-2026-0010"
-    q.sent_at = datetime(2026, 2, 5, tzinfo=timezone.utc)
-    q.created_at = datetime(2026, 2, 4, tzinfo=timezone.utc)
-    q.result = "sent"
-    db = MagicMock()
-    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [q]
-
-    result = get_last_quoted_price("  LM317T  ", db)
-    assert result is not None
-    assert result["sell_price"] == 3.00
-
-
-def test_get_last_quoted_price_not_found():
-    db = MagicMock()
-    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
-    result = get_last_quoted_price("NOEXIST", db)
-    assert result is None
 
 
 # ── Margin calculation (update_quote logic) ──────────────────────────────

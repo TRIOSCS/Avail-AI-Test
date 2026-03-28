@@ -639,23 +639,6 @@ async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
         db.rollback()
 
 
-# ── Engagement Score Computation ───────────────────────────────────────
-
-
-async def _compute_vendor_scores_job(db):
-    """Recompute unified vendor scores for all vendors.
-
-    Called every 12h by the scheduler.
-    """
-    from ..services.vendor_score import compute_all_vendor_scores
-
-    try:
-        result = await compute_all_vendor_scores(db)
-        logger.info(f"Vendor scoring complete: {result['updated']} updated, {result['skipped']} skipped")
-    except Exception as e:
-        logger.error(f"Vendor scoring failed: {e}")
-
-
 # ── Contacts Sync (Outlook → VendorCards) ───────────────────────────────
 
 

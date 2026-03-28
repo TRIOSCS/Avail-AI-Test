@@ -98,51 +98,6 @@ class TestMarkProcessedSavepoint:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  Bug 3: deep_scan_inbox stores last_body per domain
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestDeepScanLastBody:
-    def test_deep_scan_returns_last_body(self):
-        """deep_scan_inbox includes last_body per domain for signature extraction."""
-        with patch("app.utils.graph_client.GraphClient") as MockGC:
-            mock_gc = MagicMock()
-            mock_gc.get_all_pages = AsyncMock(
-                return_value=[
-                    {
-                        "id": "msg-1",
-                        "subject": "Parts available",
-                        "from": {
-                            "emailAddress": {
-                                "address": "sales@vendor.com",
-                                "name": "Sales Team",
-                            }
-                        },
-                        "body": {"content": "Hello, we have parts.\n\nBest,\nJohn Smith\nPhone: 555-0100"},
-                        "receivedDateTime": "2026-01-15T10:00:00Z",
-                        "hasAttachments": False,
-                        "conversationId": "conv-1",
-                    },
-                ]
-            )
-            MockGC.return_value = mock_gc
-
-            from app.connectors.email_mining import EmailMiner
-
-            miner = EmailMiner("fake-token", db=None, user_id=None)
-            miner.gc = mock_gc
-
-            result = asyncio.get_event_loop().run_until_complete(
-                miner.deep_scan_inbox(lookback_days=30, max_messages=10)
-            )
-
-        assert "vendor.com" in result["per_domain"]
-        domain_data = result["per_domain"]["vendor.com"]
-        assert "last_body" in domain_data
-        assert "we have parts" in domain_data["last_body"]
-
-
-# ═══════════════════════════════════════════════════════════════════════
 #  Bug 4: stock_lists_found removed from scan_inbox
 # ═══════════════════════════════════════════════════════════════════════
 

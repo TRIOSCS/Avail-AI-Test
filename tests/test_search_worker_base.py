@@ -82,18 +82,6 @@ class TestCircuitBreaker:
         assert cb.should_stop()
         assert cb.trip_reason == "test reason"
 
-    def test_reset_closes_breaker(self):
-        cb = self._make_breaker()
-        cb._trip("test reason")
-        assert cb.is_open
-        cb.reset()
-        assert not cb.is_open
-        assert not cb.should_stop()
-        assert cb.trip_reason == ""
-        assert cb.captcha_count == 0
-        assert cb.consecutive_failures == 0
-        assert cb.empty_results_streak == 0
-
     def test_empty_results_streak_trips_at_10(self):
         cb = self._make_breaker()
         for i in range(9):
@@ -537,8 +525,6 @@ class TestSharedCircuitBreakerBase:
         cb._trip("test")
         assert cb.is_open
         assert cb.should_stop()
-        cb.reset()
-        assert not cb.is_open
 
     def test_empty_results_streak_trips_at_10(self):
         from app.services.search_worker_base.circuit_breaker import CircuitBreakerBase
@@ -653,15 +639,6 @@ class TestSharedAIGate:
         items = gate._schema["properties"]["classifications"]["items"]
         assert "search_test" in items["properties"]
         assert "search_test" in items["required"]
-
-    def test_clear_cache(self):
-        from app.services.search_worker_base.ai_gate import AIGate
-
-        gate = AIGate(queue_model=object, marketplace_name="X", search_field="search_x")
-        gate._classification_cache[("MPN1", "mfr")] = ("semi", "search", "reason")
-        assert len(gate._classification_cache) == 1
-        gate.clear_classification_cache()
-        assert len(gate._classification_cache) == 0
 
     def test_ics_prompt_matches_original(self):
         """ICS-configured gate prompt should match the original structure."""

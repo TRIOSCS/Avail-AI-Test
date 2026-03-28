@@ -18,14 +18,6 @@ def register_tagging_jobs(scheduler, settings):
     DISABLED (Nexar/DigiKey/Mouser/Element14/OEMSecrets). Prefix/sighting/boost run
     frequently to maximize non-API coverage.
     """
-    # DISABLED — consumes DigiKey/Mouser/Element14/OEMSecrets/Nexar API quota
-    # scheduler.add_job(
-    #     _job_connector_enrichment,
-    #     IntervalTrigger(hours=2),
-    #     id="connector_enrichment",
-    #     name="Enrich low-confidence material cards via connectors",
-    # )
-
     # Non-API jobs — run more frequently to maximize free coverage
     scheduler.add_job(
         _job_internal_boost,
@@ -46,14 +38,6 @@ def register_tagging_jobs(scheduler, settings):
         name="Mine sighting manufacturer data for untagged cards",
     )
 
-    # DISABLED — Nexar API quota exhausted (2000 part limit hit)
-    # scheduler.add_job(
-    #     _job_nexar_backfill,
-    #     IntervalTrigger(hours=2),
-    #     id="nexar_backfill",
-    #     name="Backfill untagged cards via Nexar (primary high-confidence source)",
-    # )
-
     # Claude Haiku AI classification — runs every 30 min, 500 cards per batch
     scheduler.add_job(
         _job_ai_tagging,
@@ -69,56 +53,6 @@ def register_tagging_jobs(scheduler, settings):
             id="material_enrichment",
             name="Material card AI enrichment (Claude Haiku)",
         )
-
-
-@_traced_job
-async def _job_connector_enrichment():  # pragma: no cover
-    """Enrich untagged material cards via API connectors (0.95 confidence).
-
-    DISABLED.
-    """
-    from ..database import SessionLocal
-    from ..models.intelligence import MaterialCard
-    from ..models.tags import MaterialTag, Tag
-    from ..services.enrichment import enrich_batch
-
-    db = SessionLocal()
-    try:
-        tagged_brand_ids = (
-            db.query(MaterialTag.material_card_id)
-            .join(Tag, MaterialTag.tag_id == Tag.id)
-            .filter(Tag.tag_type == "brand")
-            .distinct()
-            .subquery()
-        )
-        untagged_cards = (
-            db.query(MaterialCard.normalized_mpn)
-            .filter(~MaterialCard.id.in_(db.query(tagged_brand_ids.c.material_card_id)))
-            .order_by(MaterialCard.id)
-            .limit(2000)
-            .all()
-        )
-        mpns = [row.normalized_mpn for row in untagged_cards]
-        if mpns:
-            logger.info(f"Connector enrichment: processing {len(mpns)} untagged cards")
-            result = await enrich_batch(mpns, db, concurrency=3)
-            logger.info(f"Connector enrichment done: {result}")
-
-        from ..services.enrichment import boost_confidence_internal
-        from ..services.tagging_backfill import backfill_manufacturer_from_sightings
-
-        boost_result = boost_confidence_internal(db)
-        if boost_result.get("total_boosted", 0) > 0:
-            logger.info(f"Post-enrichment boost: {boost_result}")
-
-        sighting_result = backfill_manufacturer_from_sightings(db)
-        if sighting_result.get("total_tagged", 0) > 0:
-            logger.info(f"Post-enrichment sighting mining: {sighting_result}")
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
 
 
 @_traced_job
@@ -180,23 +114,6 @@ async def _job_sighting_mining():
     try:
         result = await asyncio.to_thread(backfill_manufacturer_from_sightings, db)
         logger.info(f"Sighting mining: {result}")
-    except Exception:
-        db.rollback()
-        raise
-    finally:
-        db.close()
-
-
-@_traced_job
-async def _job_nexar_backfill():
-    """Backfill untagged cards via Nexar — DISABLED (quota exhausted)."""
-    from ..database import SessionLocal
-    from ..services.enrichment import nexar_backfill_untagged
-
-    db = SessionLocal()
-    try:
-        result = await nexar_backfill_untagged(db, limit=5000)
-        logger.info(f"Nexar backfill job: {result}")
     except Exception:
         db.rollback()
         raise
@@ -305,23 +222,6 @@ async def _job_material_enrichment():
         )
     except Exception:
         logger.exception("Material enrichment job failed")
-        db.rollback()
-        raise
-    finally:
-        db.close()
-
-
-@_traced_job
-async def _job_tagging_backfill():  # pragma: no cover
-    """One-shot: classify untagged material cards via prefix lookup."""
-    from ..database import SessionLocal
-    from ..services.tagging_backfill import run_prefix_backfill, seed_from_existing_manufacturers
-
-    db = SessionLocal()
-    try:
-        seed_from_existing_manufacturers(db)
-        run_prefix_backfill(db)
-    except Exception:
         db.rollback()
         raise
     finally:

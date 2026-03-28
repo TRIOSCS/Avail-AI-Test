@@ -16,7 +16,6 @@ from fastapi import APIRouter
 from ._helpers import (  # noqa: F401
     _build_quote_email_html,
     _preload_last_quoted_prices,
-    get_last_quoted_price,
     next_quote_number,
     quote_to_dict,
     record_changes,

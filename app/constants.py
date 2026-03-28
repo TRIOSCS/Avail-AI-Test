@@ -38,41 +38,6 @@ class ContactStatus(StrEnum):
     RETRIED = "retried"
 
 
-class MatchMethod(StrEnum):
-    """How an inbound email was matched to an outbound RFQ contact."""
-
-    CONVERSATION_ID = "conversation_id"
-    SUBJECT_TOKEN = "subject_token"
-    SUBJECT_TOKEN_REQ_ONLY = "subject_token_req_only"
-    EMAIL_EXACT = "email_exact"
-    DOMAIN = "domain"
-    UNMATCHED = "unmatched"
-
-
-class OfferSource(StrEnum):
-    """Origin of an Offer record."""
-
-    EMAIL_PARSE = "email_parse"
-    MANUAL = "manual"
-    SEARCH = "search"
-    HISTORICAL = "historical"
-    VENDOR_AFFINITY = "vendor_affinity"
-    AI_PARSED = "ai_parsed"
-    AI_LOOKUP = "ai_lookup"
-
-
-class ResponseClassification(StrEnum):
-    """AI-derived classification of a vendor's email response."""
-
-    QUOTE_PROVIDED = "quote_provided"
-    NO_STOCK = "no_stock"
-    OOO_BOUNCE = "ooo_bounce"
-    COUNTER_OFFER = "counter_offer"
-    CLARIFICATION_NEEDED = "clarification_needed"
-    PARTIAL_AVAILABILITY = "partial_availability"
-    FOLLOW_UP_PENDING = "follow_up_pending"
-
-
 class OfferStatus(StrEnum):
     """Status lifecycle for Offer records."""
 
@@ -305,12 +270,4 @@ class PendingBatchStatus(StrEnum):
 
     PROCESSING = "processing"
     COMPLETED = "completed"
-    FAILED = "failed"
-
-
-class DiscoveryBatchStatus(StrEnum):
-    """Status lifecycle for DiscoveryBatch (prospect discovery run) records."""
-
-    RUNNING = "running"
-    COMPLETE = "complete"
     FAILED = "failed"

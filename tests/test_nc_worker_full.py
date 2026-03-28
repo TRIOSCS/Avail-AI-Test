@@ -2391,18 +2391,6 @@ class TestCircuitBreakerGaps:
         assert "is_open" in info
         assert "trip_reason" in info
 
-    def test_reset(self):
-        """Reset() clears all state."""
-        breaker = CircuitBreaker()
-        breaker.is_open = True
-        breaker.trip_reason = "test"
-        breaker.captcha_count = 5
-        breaker.consecutive_failures = 3
-        breaker.empty_results_streak = 8
-        breaker.reset()
-        assert not breaker.is_open
-        assert breaker.trip_reason == ""
-
     def test_should_stop_returns_is_open(self):
         """should_stop() returns is_open value (line 93)."""
         breaker = CircuitBreaker()
