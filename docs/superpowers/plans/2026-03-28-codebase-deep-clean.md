@@ -620,49 +620,77 @@ Record the exact count after dead code removal.
 
 - [ ] **Step 2: Fix test_core_jobs.py failures (37 → 0)**
 
-Run the first failure with full traceback to identify the root cause:
+**Root cause:** All tests patch `app.jobs.core_jobs.SessionLocal`, but `SessionLocal` is lazy-imported inside each function (never a module-level attribute).
+
+**Fix:** In `tests/test_core_jobs.py`, change every `patch("app.jobs.core_jobs.SessionLocal", ...)` to `patch("app.database.SessionLocal", ...)`. There are ~10 such patch calls.
+
 ```bash
-TESTING=1 PYTHONPATH=/root/availai python3 -m pytest tests/test_core_jobs.py -x --tb=long -o "addopts=" 2>&1 | tail -60
+# Find all instances:
+grep -n 'app.jobs.core_jobs.SessionLocal' tests/test_core_jobs.py
+# Replace all:
+sed -i 's/app\.jobs\.core_jobs\.SessionLocal/app.database.SessionLocal/g' tests/test_core_jobs.py
 ```
 
-Apply the fix for the identified AttributeError (likely a model/fixture column rename). After fixing, run:
+Verify:
 ```bash
 TESTING=1 PYTHONPATH=/root/availai python3 -m pytest tests/test_core_jobs.py -v -o "addopts=" 2>&1 | tail -5
 ```
 
-Expected: All core_jobs tests pass.
-
 - [ ] **Step 3: Fix test_knowledge_service_comprehensive.py failures (24 → 0)**
 
-```bash
-TESTING=1 PYTHONPATH=/root/availai python3 -m pytest tests/test_knowledge_service_comprehensive.py -x --tb=long -o "addopts=" 2>&1 | tail -60
+**Root cause:** `capture_offer_fact()` in `app/services/knowledge_service.py:294` passes `user_id=user_id or 0`. When `user_id=None`, this becomes `created_by=0`. No user with id=0 exists, causing FK constraint violation. The column is nullable, so `None` is valid.
+
+**Fix (source code):** In `app/services/knowledge_service.py`, line 294, change:
+```python
+user_id=user_id or 0
+```
+to:
+```python
+user_id=user_id
 ```
 
-Apply fix. Verify all 24 pass.
+Verify:
+```bash
+TESTING=1 PYTHONPATH=/root/availai python3 -m pytest tests/test_knowledge_service_comprehensive.py -v -o "addopts=" 2>&1 | tail -5
+```
 
 - [ ] **Step 4: Fix test_prospect_free_enrichment.py failures (16 → 0)**
 
+**Root cause:** Tests patch `app.services.prospect_free_enrichment.http`, but `http` is lazy-imported inside the function from `app.http_client`.
+
+**Fix:** In `tests/test_prospect_free_enrichment.py`, change every `patch("app.services.prospect_free_enrichment.http", ...)` to `patch("app.http_client.http", ...)`.
+
 ```bash
-TESTING=1 PYTHONPATH=/root/availai python3 -m pytest tests/test_prospect_free_enrichment.py -x --tb=long -o "addopts=" 2>&1 | tail -60
+sed -i 's/app\.services\.prospect_free_enrichment\.http/app.http_client.http/g' tests/test_prospect_free_enrichment.py
 ```
 
-Apply fix. Verify all 16 pass.
+Verify:
+```bash
+TESTING=1 PYTHONPATH=/root/availai python3 -m pytest tests/test_prospect_free_enrichment.py -v -o "addopts=" 2>&1 | tail -5
+```
 
 - [ ] **Step 5: Fix test_buyplan_workflow.py failures (11 → 0)**
 
+**Root cause:** Tests patch `app.services.buyplan_workflow.on_buy_plan_assigned`, but it's lazy-imported from `app.services.task_service`.
+
+**Fix:** In `tests/test_buyplan_workflow.py`, change every `patch("app.services.buyplan_workflow.on_buy_plan_assigned", ...)` to `patch("app.services.task_service.on_buy_plan_assigned", ...)`.
+
 ```bash
-TESTING=1 PYTHONPATH=/root/availai python3 -m pytest tests/test_buyplan_workflow.py -x --tb=long -o "addopts=" 2>&1 | tail -60
+sed -i 's/app\.services\.buyplan_workflow\.on_buy_plan_assigned/app.services.task_service.on_buy_plan_assigned/g' tests/test_buyplan_workflow.py
 ```
 
-Apply fix. Verify all 11 pass.
+Verify:
+```bash
+TESTING=1 PYTHONPATH=/root/availai python3 -m pytest tests/test_buyplan_workflow.py -v -o "addopts=" 2>&1 | tail -5
+```
 
 - [ ] **Step 6: Fix test_enrichment_service.py failures (11 → 0)**
 
-Same pattern — run with `-x --tb=long`, identify root cause, fix, verify.
+Run with `-x --tb=long`, identify root cause (likely same lazy-import pattern), fix, verify.
 
 - [ ] **Step 7: Fix test_health_monitor.py failures (7 → 0)**
 
-Same pattern.
+Run with `-x --tb=long`, identify root cause, fix, verify.
 
 - [ ] **Step 8: Fix remaining ~40 individual failures**
 
