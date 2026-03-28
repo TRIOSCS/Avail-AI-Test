@@ -1,7 +1,7 @@
 """Drop 7 dead tables and legacy_error_report_id column.
 
 Revision ID: a3f9c1d82e47
-Revises: restructure_substitutes_json
+Revises: 8c22bd2f6837
 Create Date: 2026-03-28
 """
 
@@ -11,7 +11,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "a3f9c1d82e47"
-down_revision: Union[str, None] = "restructure_substitutes_json"
+down_revision: Union[str, None] = "8c22bd2f6837"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
