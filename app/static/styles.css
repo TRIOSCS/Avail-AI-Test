@@ -21,18 +21,6 @@
     @apply bg-brand-500 text-white hover:bg-brand-600 px-4 py-2 text-sm font-medium rounded-lg transition-colors focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
-  .btn-secondary {
-    @apply bg-white text-brand-700 border border-brand-300 hover:bg-brand-50 px-4 py-2 text-sm font-medium rounded-lg transition-colors;
-  }
-
-  .btn-danger {
-    @apply bg-rose-600 text-white hover:bg-rose-700 px-4 py-2 text-sm font-medium rounded-lg transition-colors;
-  }
-
-  .btn-sm {
-    @apply px-3 py-1.5 text-xs;
-  }
-
   /* ── Status badges — unified system ─────────────────────────────── */
   .badge-success {
     @apply bg-emerald-50 text-emerald-700 px-2.5 py-0.5 text-[11px] font-semibold rounded-full;
@@ -42,30 +30,8 @@
     @apply bg-amber-50 text-amber-700 px-2.5 py-0.5 text-[11px] font-semibold rounded-full;
   }
 
-  .badge-danger {
-    @apply bg-rose-50 text-rose-700 px-2.5 py-0.5 text-[11px] font-semibold rounded-full;
-  }
-
   .badge-info {
     @apply bg-brand-100 text-brand-700 px-2.5 py-0.5 text-[11px] font-semibold rounded-full;
-  }
-
-  .badge-neutral {
-    @apply bg-gray-100 text-gray-700 px-2.5 py-0.5 text-[11px] font-semibold rounded-full;
-  }
-
-  /* ── Cards ──────────────────────────────────────────────────────── */
-  .card {
-    @apply bg-white border border-gray-200 rounded-xl shadow-sm;
-  }
-
-  .card-padded {
-    @apply bg-white border border-gray-200 rounded-xl shadow-sm p-6;
-  }
-
-  /* ── Filter bar ─────────────────────────────────────────────────── */
-  .filter-bar {
-    @apply bg-white rounded-xl shadow-sm border border-gray-200 p-4;
   }
 
   /* ── Table wrapper ──────────────────────────────────────────────── */
@@ -280,21 +246,6 @@ table {
   border-radius: 4px;
   font-family: 'Inter', system-ui, sans-serif;
 }
-.badge-secondary {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 6px;
-  font-size: 10px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  border-radius: 3px;
-  color: #475569;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-}
-
 /* ── Panel chrome — workspace panels ──────────────────────────────── */
 .panel-header {
   display: flex;
@@ -334,36 +285,6 @@ table {
   border-bottom-color: #3A4252;
 }
 
-/* ── Column picker dropdown ───────────────────────────────────────── */
-.col-picker {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  margin-top: 4px;
-  width: 220px;
-  background: white;
-  border: 1px solid #D5D8DF;
-  border-radius: 8px;
-  box-shadow: 0 4px 16px rgba(0,0,0,0.1);
-  z-index: 30;
-  padding: 8px;
-  max-height: 300px;
-  overflow-y: auto;
-}
-.col-picker label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 4px 6px;
-  font-size: 12px;
-  color: #1e293b;
-  border-radius: 4px;
-  cursor: pointer;
-}
-.col-picker label:hover {
-  background: #F4F5F7;
-}
-
 /* ── Source progress chips ────────────────────────────────────────── */
 .source-chip {
   @apply px-2.5 py-1 text-xs font-medium rounded-full border transition-all duration-300;
@@ -374,10 +295,8 @@ table {
 .source-chip--brokerbin { @apply bg-sky-600; }
 .source-chip--digikey { @apply bg-orange-600; }
 .source-chip--mouser { @apply bg-teal-600; }
-.source-chip--ebay { @apply bg-yellow-600; }
 .source-chip--oemsecrets { @apply bg-fuchsia-600; }
 .source-chip--element14 { @apply bg-lime-600; }
-.source-chip--sourcengine { @apply bg-emerald-600; }
 .source-chip--empty { @apply bg-gray-200 text-gray-400 border-gray-200; }
 .source-chip--error { @apply bg-rose-100 text-rose-600 border-rose-200; }
 .source-chip--disabled { @apply bg-gray-100 text-gray-400 border-gray-200 opacity-50; }
@@ -430,14 +349,6 @@ table {
 }
 
 /* ── Quote Builder ────────────────────────────────────────────────── */
-@keyframes qbPanelSlide {
-  from { opacity: 0; transform: translateX(8px); }
-  to { opacity: 1; transform: translateX(0); }
-}
-.qb-panel-enter {
-  animation: qbPanelSlide 0.2s ease-out;
-}
-
 @keyframes qbDecisionFlash {
   0% { background-color: rgba(16, 185, 129, 0.15); }
   100% { background-color: transparent; }
@@ -478,17 +389,6 @@ table {
   background-size: 200px 100%;
   animation: shimmer 1.2s ease-in-out infinite;
   border-radius: 4px;
-}
-
-/* Action bar slide-up entrance */
-.sightings-action-bar {
-  transform: translateY(100%);
-  opacity: 0;
-  transition: transform 200ms ease, opacity 200ms ease;
-}
-.sightings-action-bar.is-visible {
-  transform: translateY(0);
-  opacity: 1;
 }
 
 /* Coverage bar refresh spinner overlay */

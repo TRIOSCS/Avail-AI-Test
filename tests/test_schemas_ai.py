@@ -79,15 +79,8 @@ class TestRfqDraftRequest:
 # ── Additional coverage for missing lines ───────────────────────────
 
 from app.schemas.ai import (
-    CompareQuotesRequest,
-    NormalizedPart,
     NormalizePartsRequest,
-    ParsedQuote,
     ParseEmailRequest,
-    ParseEmailResponse,
-    QuoteForAnalysis,
-    RfqDraftEmailRequest,
-    RfqDraftPart,
 )
 
 
@@ -125,20 +118,6 @@ class TestParseEmailRequest:
         assert r.vendor_name == ""
 
 
-class TestParsedQuote:
-    def test_defaults(self):
-        q = ParsedQuote()
-        assert q.confidence == 0.5
-        assert q.currency == "USD"
-
-
-class TestParseEmailResponse:
-    def test_defaults(self):
-        r = ParseEmailResponse(parsed=True)
-        assert r.quotes == []
-        assert r.overall_confidence == 0.0
-
-
 class TestNormalizePartsRequest:
     def test_valid(self):
         r = NormalizePartsRequest(parts=["LM317T"])
@@ -147,53 +126,3 @@ class TestNormalizePartsRequest:
     def test_empty_raises(self):
         with pytest.raises(ValidationError):
             NormalizePartsRequest(parts=[])
-
-
-class TestNormalizedPart:
-    def test_defaults(self):
-        p = NormalizedPart(original="lm317t", normalized="LM317T")
-        assert p.is_alias is False
-        assert p.confidence == 0.0
-
-
-class TestRfqDraftPart:
-    def test_valid(self):
-        p = RfqDraftPart(part_number="LM317T", quantity=1000)
-        assert p.manufacturer is None
-        assert p.target_price is None
-
-
-class TestRfqDraftEmailRequest:
-    def test_valid(self):
-        r = RfqDraftEmailRequest(
-            vendor_name="Arrow",
-            buyer_name="John",
-            parts=[RfqDraftPart(part_number="LM317T", quantity=1000)],
-        )
-        assert r.vendor_contact_name is None
-
-
-class TestQuoteForAnalysis:
-    def test_defaults(self):
-        q = QuoteForAnalysis(vendor_name="Arrow")
-        assert q.currency == "USD"
-        assert q.vendor_score is None
-
-
-class TestCompareQuotesRequest:
-    def test_valid(self):
-        r = CompareQuotesRequest(
-            part_number="LM317T",
-            quotes=[
-                QuoteForAnalysis(vendor_name="A"),
-                QuoteForAnalysis(vendor_name="B"),
-            ],
-        )
-        assert r.required_qty is None
-
-    def test_too_few_quotes_raises(self):
-        with pytest.raises(ValidationError):
-            CompareQuotesRequest(
-                part_number="LM317T",
-                quotes=[QuoteForAnalysis(vendor_name="A")],
-            )

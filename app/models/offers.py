@@ -123,12 +123,10 @@ class Offer(Base):
 
     requisition = relationship("Requisition", back_populates="offers")
     requirement = relationship("Requirement", back_populates="offers")
-    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
     entered_by = relationship("User", foreign_keys=[entered_by_id])
     updated_by = relationship("User", foreign_keys=[updated_by_id])
     approved_by = relationship("User", foreign_keys=[approved_by_id])
-    promoted_by = relationship("User", foreign_keys=[promoted_by_id])
     attachments = relationship("OfferAttachment", back_populates="offer", cascade="all, delete-orphan")
 
     __table_args__ = (
@@ -223,8 +221,6 @@ class VendorResponse(Base):
     message_id = Column(String(255), unique=True, index=True, nullable=True)
     graph_conversation_id = Column(String(500))
     scanned_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    match_method = Column(String(50))  # conversation_id, subject_token, email_exact, domain, unmatched
-    teams_alert_sent_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (

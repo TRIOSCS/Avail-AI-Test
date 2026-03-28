@@ -145,36 +145,11 @@ class QuoteDetailResponse(BaseModel):
     days_until_expiry: int | None = None
 
 
-# ── Buy Plans ───────────────────────────────────────────────────────────
-
-
-class BuyPlanListItem(BaseModel):
-    id: int
-    status: str = ""
-    line_items: list[dict] = Field(default_factory=list)
-    total_cost: float = 0
-    total_revenue: float = 0
-
-
-# ── Performance ─────────────────────────────────────────────────────────
-
-
-class VendorScorecardListResponse(PaginatedResponse):
-    vendors: list[dict] = Field(default_factory=list)
-
-
 # ── Sources ─────────────────────────────────────────────────────────────
 
 
 class SourceListResponse(BaseModel):
     sources: list[dict] = Field(default_factory=list)
-
-
-# ── Enrichment ──────────────────────────────────────────────────────────
-
-
-class EnrichmentQueueResponse(PaginatedResponse):
-    items: list[dict] = Field(default_factory=list)
 
 
 # ── Vendor Sub-endpoints ────────────────────────────────────────────────

@@ -199,27 +199,6 @@ class RequirementUpdate(BaseModel):
         return normalize_packaging(v) or v
 
 
-class RequirementOut(BaseModel):
-    id: int
-    primary_mpn: str
-    target_qty: int = 1
-    target_price: float | None = None
-    brand: str | None = None
-    substitutes: list[str] = Field(default_factory=list)
-    condition: str | None = None
-    date_codes: str | None = None
-    firmware: str | None = None
-    hardware_codes: str | None = None
-    packaging: str | None = None
-    description: str | None = None
-    package_type: str | None = None
-    revision: str | None = None
-    customer_pn: str | None = None
-    need_by_date: date | None = None
-    notes: str | None = None
-    sighting_count: int = 0
-
-
 class SightingUnavailableIn(BaseModel):
     unavailable: bool = True
 

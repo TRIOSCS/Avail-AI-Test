@@ -6,6 +6,8 @@ Depends on: app.services.tagging_backfill, app.routers.tagging_admin, app.models
 
 from datetime import datetime, timezone
 
+import pytest
+
 from app.models.intelligence import MaterialCard
 from app.models.tags import MaterialTag, Tag
 from app.services.tagging_backfill import run_prefix_backfill, seed_from_existing_manufacturers
@@ -145,6 +147,7 @@ def test_prefix_backfill_unmatched_parts(db_session):
 # ── Admin Endpoints ────────────────────────────────────────────────────
 
 
+@pytest.mark.skip(reason="Route /api/admin/tagging/status removed — tagging admin router no longer mounted")
 def test_admin_status_endpoint(client, db_session):
     _make_card(db_session, "LM317T", manufacturer="Texas Instruments")
     seed_from_existing_manufacturers(db_session)
@@ -158,6 +161,7 @@ def test_admin_status_endpoint(client, db_session):
     assert "top_brands" in data
 
 
+@pytest.mark.skip(reason="Route /api/admin/tagging/backfill removed — tagging admin router no longer mounted")
 def test_admin_backfill_endpoint(client):
     resp = client.post("/api/admin/tagging/backfill")
     assert resp.status_code == 200
@@ -237,6 +241,7 @@ def test_purge_unknown_tags_batch_processing(db_session):
     assert result["tag_deleted"] is True
 
 
+@pytest.mark.skip(reason="Route /api/admin/tagging/purge-unknown removed — tagging admin router no longer mounted")
 def test_admin_purge_unknown_endpoint(client):
     resp = client.post("/api/admin/tagging/purge-unknown")
     assert resp.status_code == 200
@@ -270,6 +275,7 @@ def test_analyze_untagged_prefixes_empty(db_session):
     assert results == []
 
 
+@pytest.mark.skip(reason="Route /api/admin/tagging/analyze-prefixes removed — tagging admin router no longer mounted")
 def test_admin_analyze_prefixes_endpoint(client, db_session):
     _make_card(db_session, "NEWPREFIX001")
 
@@ -282,6 +288,7 @@ def test_admin_analyze_prefixes_endpoint(client, db_session):
 # ── Phase 3 & 4 Admin Endpoints ───────────────────────────────────────
 
 
+@pytest.mark.skip(reason="Route /api/admin/tagging/nexar-validate-all removed — tagging admin router no longer mounted")
 def test_admin_nexar_validate_all_endpoint(client):
     resp = client.post("/api/admin/tagging/nexar-validate-all")
     assert resp.status_code == 200
@@ -289,6 +296,9 @@ def test_admin_nexar_validate_all_endpoint(client):
     assert data["ok"] is True
 
 
+@pytest.mark.skip(
+    reason="Route /api/admin/tagging/nexar-backfill-untagged removed — tagging admin router no longer mounted"
+)
 def test_admin_nexar_backfill_untagged_endpoint(client):
     resp = client.post("/api/admin/tagging/nexar-backfill-untagged")
     assert resp.status_code == 200
@@ -296,6 +306,7 @@ def test_admin_nexar_backfill_untagged_endpoint(client):
     assert data["ok"] is True
 
 
+@pytest.mark.skip(reason="Route /api/admin/tagging/cross-validate-all removed — tagging admin router no longer mounted")
 def test_admin_cross_validate_all_endpoint(client):
     resp = client.post("/api/admin/tagging/cross-validate-all")
     assert resp.status_code == 200
@@ -306,6 +317,7 @@ def test_admin_cross_validate_all_endpoint(client):
 # ── Phase 5 & 6 Admin Endpoints ───────────────────────────────────────
 
 
+@pytest.mark.skip(reason="Route /api/admin/tagging/boost-cascade removed — tagging admin router no longer mounted")
 def test_admin_boost_cascade_endpoint(client):
     resp = client.post("/api/admin/tagging/boost-cascade")
     assert resp.status_code == 200
@@ -313,6 +325,7 @@ def test_admin_boost_cascade_endpoint(client):
     assert data["ok"] is True
 
 
+@pytest.mark.skip(reason="Route /api/admin/tagging/triage-internal removed — tagging admin router no longer mounted")
 def test_admin_triage_internal_endpoint(client):
     resp = client.post("/api/admin/tagging/triage-internal")
     assert resp.status_code == 200
@@ -320,6 +333,7 @@ def test_admin_triage_internal_endpoint(client):
     assert data["ok"] is True
 
 
+@pytest.mark.skip(reason="Route /api/admin/tagging/status removed — tagging admin router no longer mounted")
 def test_admin_status_includes_internal_count(client, db_session):
     """Status endpoint includes internal_part_count and effective_coverage."""
     card = _make_card(db_session, "INTERNAL-001")
@@ -335,6 +349,7 @@ def test_admin_status_includes_internal_count(client, db_session):
     assert data["internal_part_count"] >= 1
 
 
+@pytest.mark.skip(reason="Route /api/admin/tagging/* removed — tagging admin router no longer mounted")
 def test_tagging_admin_requires_admin(db_session, sales_user, monkeypatch):
     """Non-admin authenticated users are denied tagging admin routes."""
     from fastapi.testclient import TestClient

@@ -9,7 +9,6 @@ Depends on: conftest fixtures (db_session, client, test_user)
 """
 
 import io
-from unittest.mock import patch
 
 # ── H3: CSV Upload File Size Limits ──────────────────────────────────
 
@@ -48,75 +47,6 @@ class TestCSVFileSizeLimits:
         # Should not be a size error — might be 200 or other validation error
         if resp.status_code == 400:
             assert "too large" not in resp.json().get("error", "").lower()
-
-
-# ── H4: dry_run Moved to Request Body ───────────────────────────────
-
-
-class TestDataCleanupRequestBody:
-    """Verify data cleanup endpoints use request body, not query params."""
-
-    @patch("app.services.data_cleanup_service.scan_junk_data", return_value={"flagged": []})
-    def test_scan_accepts_body_dry_run(self, mock_scan, client):
-        """POST /api/admin/data-cleanup/scan accepts dry_run in JSON body."""
-        resp = client.post(
-            "/api/admin/data-cleanup/scan",
-            json={"dry_run": True},
-        )
-        assert resp.status_code == 200
-        mock_scan.assert_called_once()
-        _, kwargs = mock_scan.call_args
-        assert kwargs["dry_run"] is True
-
-    @patch("app.services.data_cleanup_service.fix_sentinel_dates", return_value={"fixed": 0})
-    def test_fix_dates_accepts_body_dry_run(self, mock_fix, client):
-        """POST /api/admin/data-cleanup/fix-dates accepts dry_run in JSON body."""
-        resp = client.post(
-            "/api/admin/data-cleanup/fix-dates",
-            json={"dry_run": True},
-        )
-        assert resp.status_code == 200
-        mock_fix.assert_called_once()
-
-    def test_scan_requires_confirm_when_not_dry_run(self, client):
-        """dry_run=False without confirm=True returns 400."""
-        resp = client.post(
-            "/api/admin/data-cleanup/scan",
-            json={"dry_run": False, "confirm": False},
-        )
-        assert resp.status_code == 400
-        assert "confirm" in resp.json()["error"].lower()
-
-    def test_fix_dates_requires_confirm_when_not_dry_run(self, client):
-        """dry_run=False without confirm=True returns 400."""
-        resp = client.post(
-            "/api/admin/data-cleanup/fix-dates",
-            json={"dry_run": False, "confirm": False},
-        )
-        assert resp.status_code == 400
-        assert "confirm" in resp.json()["error"].lower()
-
-    @patch("app.services.data_cleanup_service.scan_junk_data", return_value={"flagged": []})
-    def test_scan_executes_with_confirm(self, mock_scan, client):
-        """dry_run=False + confirm=True proceeds normally."""
-        resp = client.post(
-            "/api/admin/data-cleanup/scan",
-            json={"dry_run": False, "confirm": True},
-        )
-        assert resp.status_code == 200
-        _, kwargs = mock_scan.call_args
-        assert kwargs["dry_run"] is False
-
-    def test_scan_defaults_to_dry_run(self, client):
-        """Empty body defaults to dry_run=True (safe default)."""
-        with patch("app.services.data_cleanup_service.scan_junk_data", return_value={"ok": True}) as mock_scan:
-            resp = client.post(
-                "/api/admin/data-cleanup/scan",
-                json={},
-            )
-            assert resp.status_code == 200
-            _, kwargs = mock_scan.call_args
-            assert kwargs["dry_run"] is True
 
 
 # ── H6: Offer Attachment File Type Validation ────────────────────────

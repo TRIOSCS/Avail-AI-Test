@@ -258,23 +258,6 @@ def client(db_session: Session, test_user: User) -> TestClient:
 
 
 @pytest.fixture()
-def override_client(db_session: Session, test_user: User) -> TestClient:
-    """TestClient with properly scoped dependency overrides."""
-    from app.database import get_db
-    from app.dependencies import require_user
-    from app.main import app
-
-    app.dependency_overrides[get_db] = lambda: db_session
-    app.dependency_overrides[require_user] = lambda: test_user
-    try:
-        with TestClient(app) as c:
-            yield c
-    finally:
-        app.dependency_overrides.pop(get_db, None)
-        app.dependency_overrides.pop(require_user, None)
-
-
-@pytest.fixture()
 def unauthenticated_client(db_session: Session) -> TestClient:
     """TestClient with DB override but NO user auth — for testing 401 paths."""
     from app.database import get_db

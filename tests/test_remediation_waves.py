@@ -7,7 +7,6 @@ Called by: pytest
 Depends on: conftest.py (client, db_session, test_user fixtures)
 """
 
-from app.services.data_cleanup_service import _is_test_data, scan_junk_data
 from app.services.status_machine import validate_transition
 
 # ── Status Machine ──────────────────────────────────────────────────────
@@ -74,67 +73,6 @@ class TestStatusMachine:
     def test_raise_on_invalid_false(self):
         result = validate_transition("offer", "sold", "active", raise_on_invalid=False)
         assert result is False
-
-
-# ── Data Cleanup ────────────────────────────────────────────────────────
-
-
-class TestDataCleanup:
-    """Data cleanup service identifies test/junk/XSS records."""
-
-    def test_is_test_data_patterns(self):
-        assert _is_test_data("test_requisition_123") is True
-        assert _is_test_data("<script>alert('xss')</script>") is True
-        assert _is_test_data("javascript:alert(1)") is True
-        assert _is_test_data("placeholder data") is True
-        assert _is_test_data("dummy vendor") is True
-        assert _is_test_data("fake company") is True
-        assert _is_test_data("sample_test") is True
-
-    def test_is_not_test_data(self):
-        assert _is_test_data("Arrow Electronics") is False
-        assert _is_test_data("LM317T") is False
-        assert _is_test_data("Acme Corp") is False
-        assert _is_test_data(None) is False
-        assert _is_test_data("") is False
-
-    def test_scan_junk_data_dry_run(self, db_session, test_user):
-        """Dry run scan identifies junk but doesn't modify."""
-        from app.models import Requisition
-
-        # Create a test/junk requisition
-        junk = Requisition(
-            name="test_junk_req",
-            status="active",
-            created_by=test_user.id,
-        )
-        db_session.add(junk)
-        db_session.commit()
-
-        result = scan_junk_data(db_session, dry_run=True)
-        assert result["dry_run"] is True
-        assert result["total_flagged"] >= 1
-        # Verify record was NOT changed
-        db_session.refresh(junk)
-        assert junk.status == "active"
-
-    def test_scan_junk_data_execute(self, db_session, test_user):
-        """Execute scan quarantines junk records."""
-        from app.models import Requisition
-
-        junk = Requisition(
-            name="test_garbage_req",
-            status="active",
-            created_by=test_user.id,
-        )
-        db_session.add(junk)
-        db_session.commit()
-
-        result = scan_junk_data(db_session, dry_run=False)
-        assert result["dry_run"] is False
-        db_session.refresh(junk)
-        assert junk.status == "archived"
-        assert "[QUARANTINED]" in junk.name
 
 
 # ── API Contract Fixes ──────────────────────────────────────────────────

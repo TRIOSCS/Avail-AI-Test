@@ -37,14 +37,9 @@ patchright==1.58.2
 pydantic-settings==2.13.1
 # SSE streaming for HTMX sourcing progress
 sse-starlette>=1.6.0
-# HTMX integration helpers for FastAPI
-fasthx>=3.1.0
 # Anthropic Claude API (used by claude_client, enrichment, batch extraction)
 anthropic>=0.40.0
 # HTML sanitization for untrusted email content (XSS prevention)
 nh3>=0.2.0
 # Safe XML parsing (XXE prevention)
 defusedxml>=0.7.0
-# Polar usage-based billing + PydanticAI LLM usage tracking
-polar-sdk>=0.30.0
-pydantic-ai>=1.70.0

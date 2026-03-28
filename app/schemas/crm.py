@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.utils.normalization import (
     normalize_condition,
@@ -127,200 +127,6 @@ class CompanyUpdate(BaseModel):
         return result
 
 
-# ── Customer Sites ───────────────────────────────────────────────────
-
-
-class SiteCreate(BaseModel):
-    site_name: str
-    owner_id: int | None = None
-    contact_name: str | None = None
-    contact_email: str | None = None
-    contact_phone: str | None = None
-    contact_phone_2: str | None = None
-    contact_title: str | None = None
-    contact_linkedin: str | None = None
-    address_line1: str | None = None
-    address_line2: str | None = None
-    city: str | None = None
-    state: str | None = None
-    zip: str | None = None
-    country: str = "US"
-    payment_terms: str | None = None
-    shipping_terms: str | None = None
-    site_type: str | None = None
-    timezone: str | None = None
-    receiving_hours: str | None = None
-    carrier_account: str | None = None
-    notes: str | None = None
-
-    @field_validator("site_name")
-    @classmethod
-    def site_name_not_blank(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("Site name is required")
-        return v
-
-    @field_validator("country")
-    @classmethod
-    def normalize_country_field(cls, v: str) -> str:
-        return normalize_country(v) or v
-
-    @field_validator("state")
-    @classmethod
-    def normalize_state_field(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_us_state(v) or v
-
-    @model_validator(mode="after")
-    def extract_phone_from_name(self) -> "SiteCreate":
-        import re
-
-        phone_re = re.compile(r"[\(+]?\d[\d\s\-\(\)\.]{8,}\d")
-        match = phone_re.search(self.site_name)
-        if not match:
-            return self
-        from app.utils.normalization_helpers import normalize_phone_e164
-
-        raw = match.group(0).strip()
-        e164 = normalize_phone_e164(raw)
-        if not e164:
-            return self
-        self.site_name = re.sub(r"\s+", " ", self.site_name[: match.start()] + self.site_name[match.end() :]).strip(
-            " -,"
-        )
-        if not self.contact_phone:
-            self.contact_phone = e164
-        elif not self.contact_phone_2:
-            self.contact_phone_2 = e164
-        return self
-
-    @field_validator("contact_phone")
-    @classmethod
-    def normalize_contact_phone(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        result = normalize_phone_e164(v)
-        if result is None:
-            raise ValueError(f"Could not parse phone number: {v}")
-        return result
-
-
-class SiteUpdate(BaseModel):
-    site_name: str | None = None
-    owner_id: int | None = None
-    contact_name: str | None = None
-    contact_email: str | None = None
-    contact_phone: str | None = None
-    contact_phone_2: str | None = None
-    contact_title: str | None = None
-    contact_linkedin: str | None = None
-    address_line1: str | None = None
-    address_line2: str | None = None
-    city: str | None = None
-    state: str | None = None
-    zip: str | None = None
-    country: str | None = None
-    payment_terms: str | None = None
-    shipping_terms: str | None = None
-    site_type: str | None = None
-    timezone: str | None = None
-    receiving_hours: str | None = None
-    carrier_account: str | None = None
-    notes: str | None = None
-    is_active: bool | None = None
-
-    @field_validator("country")
-    @classmethod
-    def normalize_country_field(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_country(v) or v
-
-    @field_validator("state")
-    @classmethod
-    def normalize_state_field(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return normalize_us_state(v) or v
-
-    @field_validator("contact_phone")
-    @classmethod
-    def normalize_contact_phone(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        result = normalize_phone_e164(v)
-        if result is None:
-            raise ValueError(f"Could not parse phone number: {v}")
-        return result
-
-
-# ── Site Contacts ────────────────────────────────────────────────────
-
-
-class SiteContactCreate(BaseModel):
-    full_name: str
-    title: str | None = None
-    email: str | None = None
-    phone: str | None = None
-    notes: str | None = None
-    is_primary: bool = False
-
-    @field_validator("full_name")
-    @classmethod
-    def full_name_not_blank(cls, v: str) -> str:
-        v = v.strip()
-        if not v:
-            raise ValueError("Contact name is required")
-        return v
-
-    @field_validator("phone")
-    @classmethod
-    def normalize_phone(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        result = normalize_phone_e164(v)
-        if result is None:
-            raise ValueError(f"Could not parse phone number: {v}")
-        return result
-
-    @field_validator("email")
-    @classmethod
-    def normalize_email(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return v.strip().lower()
-
-
-class SiteContactUpdate(BaseModel):
-    full_name: str | None = None
-    title: str | None = None
-    email: str | None = None
-    phone: str | None = None
-    notes: str | None = None
-    contact_status: str | None = None
-    is_primary: bool | None = None
-    is_active: bool | None = None
-
-    @field_validator("phone")
-    @classmethod
-    def normalize_phone(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        result = normalize_phone_e164(v)
-        if result is None:
-            raise ValueError(f"Could not parse phone number: {v}")
-        return result
-
-    @field_validator("email")
-    @classmethod
-    def normalize_email(cls, v: str | None) -> str | None:
-        if v is None:
-            return v
-        return v.strip().lower()
-
-
 # ── Offers ───────────────────────────────────────────────────────────
 
 
@@ -423,27 +229,6 @@ class OfferUpdate(BaseModel):
         if v is None:
             return v
         return normalize_packaging(v) or v
-
-
-class OfferOut(BaseModel):
-    id: int
-    vendor_name: str
-    mpn: str
-    manufacturer: str | None = None
-    qty_available: int | None = None
-    unit_price: float | None = None
-    lead_time: str | None = None
-    date_code: str | None = None
-    condition: str | None = None
-    packaging: str | None = None
-    firmware: str | None = None
-    hardware_code: str | None = None
-    moq: int | None = None
-    spq: int | None = None
-    warranty: str | None = None
-    country_of_origin: str | None = None
-    notes: str | None = None
-    status: str | None = None
 
 
 # ── Quotes ───────────────────────────────────────────────────────────
@@ -570,20 +355,3 @@ class OneDriveAttach(BaseModel):
 class QuoteSendOverride(BaseModel):
     to_email: str | None = None
     to_name: str | None = None
-
-
-# ── Company Dedup ──────────────────────────────────────────────────
-
-
-class CompanyMergeRequest(BaseModel):
-    keep_id: int
-    remove_id: int
-
-
-# ── Mass Account Transfer ─────────────────────────────────────────
-
-
-class MassTransferRequest(BaseModel):
-    source_user_id: int
-    target_user_id: int
-    site_ids: list[int] = Field(..., min_length=1, max_length=1000)

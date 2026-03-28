@@ -60,7 +60,6 @@ class Company(Base):
     # Salesforce import fields
     sf_account_id = Column(String(255), unique=True)
     import_priority = Column(String(20))  # "priority", "standard", "dismissed"
-    ownership_cooldown_until = Column(DateTime)
 
     # Deep enrichment tracking
     deep_enrichment_at = Column(DateTime)

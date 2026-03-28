@@ -12,8 +12,6 @@ from app.schemas.crm import (
     OfferCreate,
     QuoteReopen,
     QuoteResult,
-    SiteCreate,
-    SiteUpdate,
     SuggestedContactItem,
     SuggestedSiteContact,
 )
@@ -50,32 +48,6 @@ class TestCompanyUpdate:
         dumped = u.model_dump(exclude_unset=True)
         assert dumped == {"name": "New Name"}
         assert "website" not in dumped
-
-
-# ── Site schemas ─────────────────────────────────────────────────────
-
-
-class TestSiteCreate:
-    def test_valid(self) -> None:
-        s = SiteCreate(site_name="HQ")
-        assert s.site_name == "HQ"
-        assert s.country == "US"
-
-    def test_blank_name_raises(self) -> None:
-        with pytest.raises(ValidationError):
-            SiteCreate(site_name="")
-
-
-class TestSiteUpdate:
-    def test_all_optional(self) -> None:
-        u = SiteUpdate()
-        assert u.site_name is None
-        assert u.is_active is None
-
-    def test_exclude_unset(self) -> None:
-        u = SiteUpdate(city="Austin", is_active=False)
-        dumped = u.model_dump(exclude_unset=True)
-        assert dumped == {"city": "Austin", "is_active": False}
 
 
 # ── Offer schemas ────────────────────────────────────────────────────
@@ -188,8 +160,6 @@ from app.schemas.crm import (
     QuoteLineItem,
     QuoteSendOverride,
     QuoteUpdate,
-    SiteContactCreate,
-    SiteContactUpdate,
 )
 
 # ── CompanyCreate phone normalization ───────────────────────────────
@@ -234,115 +204,6 @@ class TestCompanyUpdateValidators:
         u = CompanyUpdate(phone="(555) 123-4567")
         assert u.phone is not None
         assert u.phone.startswith("+")
-
-
-# ── SiteCreate validators ──────────────────────────────────────────
-
-
-class TestSiteCreateValidators:
-    def test_country_normalized(self) -> None:
-        s = SiteCreate(site_name="HQ", country="United States")
-        assert s.country == "US"
-
-    def test_state_none_passes(self) -> None:
-        s = SiteCreate(site_name="HQ")
-        assert s.state is None
-
-    def test_state_normalized(self) -> None:
-        s = SiteCreate(site_name="HQ", state="California")
-        assert s.state == "CA"
-
-    def test_contact_phone_none(self) -> None:
-        s = SiteCreate(site_name="HQ")
-        assert s.contact_phone is None
-
-    def test_contact_phone_normalized(self) -> None:
-        s = SiteCreate(site_name="HQ", contact_phone="(555) 123-4567")
-        assert s.contact_phone.startswith("+")
-
-
-# ── SiteUpdate validators ──────────────────────────────────────────
-
-
-class TestSiteUpdateValidators:
-    def test_country_none(self) -> None:
-        u = SiteUpdate(country=None)
-        assert u.country is None
-
-    def test_country_normalized(self) -> None:
-        u = SiteUpdate(country="Germany")
-        assert u.country == "DE"
-
-    def test_state_none(self) -> None:
-        u = SiteUpdate(state=None)
-        assert u.state is None
-
-    def test_state_normalized(self) -> None:
-        u = SiteUpdate(state="Texas")
-        assert u.state == "TX"
-
-    def test_contact_phone_none(self) -> None:
-        u = SiteUpdate(contact_phone=None)
-        assert u.contact_phone is None
-
-    def test_contact_phone_normalized(self) -> None:
-        u = SiteUpdate(contact_phone="(555) 123-4567")
-        assert u.contact_phone.startswith("+")
-
-
-# ── SiteContactCreate ──────────────────────────────────────────────
-
-
-class TestSiteContactCreate:
-    def test_valid(self) -> None:
-        c = SiteContactCreate(full_name="John Doe")
-        assert c.full_name == "John Doe"
-        assert c.is_primary is False
-
-    def test_blank_name_raises(self) -> None:
-        with pytest.raises(ValidationError):
-            SiteContactCreate(full_name="   ")
-
-    def test_phone_none(self) -> None:
-        c = SiteContactCreate(full_name="John")
-        assert c.phone is None
-
-    def test_phone_normalized(self) -> None:
-        c = SiteContactCreate(full_name="John", phone="(555) 123-4567")
-        assert c.phone.startswith("+")
-
-    def test_email_none(self) -> None:
-        c = SiteContactCreate(full_name="John")
-        assert c.email is None
-
-    def test_email_lowered_stripped(self) -> None:
-        c = SiteContactCreate(full_name="John", email="  JOHN@ACME.COM  ")
-        assert c.email == "john@acme.com"
-
-
-# ── SiteContactUpdate ─────────────────────────────────────────────
-
-
-class TestSiteContactUpdate:
-    def test_all_none(self) -> None:
-        u = SiteContactUpdate()
-        assert u.full_name is None
-
-    def test_phone_none(self) -> None:
-        u = SiteContactUpdate(phone=None)
-        assert u.phone is None
-
-    def test_phone_normalized(self) -> None:
-        u = SiteContactUpdate(phone="(555) 123-4567")
-        assert u.phone.startswith("+")
-
-    def test_email_none(self) -> None:
-        u = SiteContactUpdate(email=None)
-        assert u.email is None
-
-    def test_email_lowered_stripped(self) -> None:
-        u = SiteContactUpdate(email="  TEST@EXAMPLE.COM  ")
-        assert u.email == "test@example.com"
 
 
 # ── OfferCreate validators ─────────────────────────────────────────

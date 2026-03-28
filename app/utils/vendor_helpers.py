@@ -37,13 +37,6 @@ _EMAIL_RE = re.compile(r"[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}")
 # ── Helper Functions ─────────────────────────────────────────────────────
 
 
-def _extract_domain_from_name(name: str) -> str | None:
-    """Try to extract a likely domain from a vendor name (e.g. 'Digi-Key' ->
-    'digikey')."""
-    cleaned = re.sub(r"[^a-z0-9]", "", name.lower())
-    return cleaned if len(cleaned) >= 3 else None
-
-
 def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None) -> VendorCard:
     """Find existing VendorCard by normalized name, domain, or fuzzy match, or create
     new.

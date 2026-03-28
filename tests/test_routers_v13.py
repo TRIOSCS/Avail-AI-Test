@@ -9,6 +9,8 @@ Covers: activity serialization, null handling, GET/POST activity endpoints
 from datetime import datetime, timezone
 from types import SimpleNamespace
 
+import pytest
+
 # ═══════════════════════════════════════════════════════════════════════
 #  _activity_to_dict unit tests (existing)
 # ═══════════════════════════════════════════════════════════════════════
@@ -266,6 +268,7 @@ def test_log_email_click(client):
 # ═══════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.skip(reason="Route /api/sales/my-accounts removed — sales router no longer mounted")
 def test_my_accounts(client):
     """GET /api/sales/my-accounts returns user's owned accounts."""
     resp = client.get("/api/sales/my-accounts")
@@ -274,6 +277,7 @@ def test_my_accounts(client):
     assert "accounts" in data or isinstance(data, list)
 
 
+@pytest.mark.skip(reason="Route /api/sales/at-risk removed — sales router no longer mounted")
 def test_at_risk_accounts(client):
     """GET /api/sales/at-risk returns accounts at risk of going stale."""
     resp = client.get("/api/sales/at-risk")
@@ -282,6 +286,7 @@ def test_at_risk_accounts(client):
     assert "accounts" in data or isinstance(data, list)
 
 
+@pytest.mark.skip(reason="Route /api/sales/open-pool removed — sales router no longer mounted")
 def test_open_pool_accounts(client):
     """GET /api/sales/open-pool returns unowned accounts."""
     resp = client.get("/api/sales/open-pool")
@@ -290,6 +295,7 @@ def test_open_pool_accounts(client):
     assert "accounts" in data or isinstance(data, list)
 
 
+@pytest.mark.skip(reason="Route /api/sales/claim removed — sales router no longer mounted")
 def test_claim_account(client, db_session, test_company, test_user):
     """POST /api/sales/claim/{id} claims an unowned account (needs sales role)."""
     # claim_account requires role='sales' or 'trader'
@@ -308,12 +314,14 @@ def test_claim_account(client, db_session, test_company, test_user):
         db_session.commit()
 
 
+@pytest.mark.skip(reason="Route /api/sales/claim removed — sales router no longer mounted")
 def test_claim_account_forbidden_for_buyer(client, test_company):
     """POST /api/sales/claim/{id} returns 403 for buyer role."""
     resp = client.post(f"/api/sales/claim/{test_company.id}")
     assert resp.status_code == 403
 
 
+@pytest.mark.skip(reason="Route /api/companies/{id}/strategic removed — sales router no longer mounted")
 def test_toggle_strategic(client, db_session, test_company, test_user):
     """PUT /api/companies/{id}/strategic toggles strategic flag (admin only)."""
     original_role = test_user.role
@@ -332,6 +340,7 @@ def test_toggle_strategic(client, db_session, test_company, test_user):
         db_session.commit()
 
 
+@pytest.mark.skip(reason="Route /api/companies/{id}/strategic removed — sales router no longer mounted")
 def test_toggle_strategic_forbidden_for_buyer(client, test_company):
     """PUT /api/companies/{id}/strategic returns 403 for non-admin."""
     resp = client.put(
@@ -346,6 +355,7 @@ def test_toggle_strategic_forbidden_for_buyer(client, test_company):
 # ═══════════════════════════════════════════════════════════════════════
 
 
+@pytest.mark.skip(reason="Route /api/sales/notifications removed — sales router no longer mounted")
 def test_sales_notifications_empty(client):
     """GET /api/sales/notifications returns empty list when none exist."""
     resp = client.get("/api/sales/notifications")
@@ -355,6 +365,7 @@ def test_sales_notifications_empty(client):
     assert len(data) == 0
 
 
+@pytest.mark.skip(reason="Route /api/sales/notifications/read-all removed — sales router no longer mounted")
 def test_mark_all_notifications_read(client):
     """POST /api/sales/notifications/read-all succeeds."""
     resp = client.post("/api/sales/notifications/read-all")
@@ -502,6 +513,7 @@ def test_company_activity_status_strategic(client, db_session, test_company, tes
     assert data["inactivity_limit"] >= 90
 
 
+@pytest.mark.skip(reason="Route /api/sales/claim removed — sales router no longer mounted")
 def test_claim_account_not_found(client, db_session, test_user):
     """POST /api/sales/claim/99999 returns 404."""
     test_user.role = "sales"
@@ -514,6 +526,7 @@ def test_claim_account_not_found(client, db_session, test_user):
         db_session.commit()
 
 
+@pytest.mark.skip(reason="Route /api/sales/claim removed — sales router no longer mounted")
 def test_claim_account_already_owned(client, db_session, test_company, test_user):
     """Claiming an already-owned account returns 409."""
     original_role = test_user.role
@@ -529,6 +542,7 @@ def test_claim_account_already_owned(client, db_session, test_company, test_user
         db_session.commit()
 
 
+@pytest.mark.skip(reason="Route /api/companies/{id}/strategic removed — sales router no longer mounted")
 def test_toggle_strategic_not_found(client, db_session, test_user):
     """PUT /api/companies/99999/strategic returns 404."""
     test_user.role = "admin"
@@ -541,6 +555,7 @@ def test_toggle_strategic_not_found(client, db_session, test_user):
         db_session.commit()
 
 
+@pytest.mark.skip(reason="Route /api/companies/{id}/strategic removed — sales router no longer mounted")
 def test_toggle_strategic_toggle_mode(client, db_session, test_company, test_user):
     """PUT /api/companies/{id}/strategic with None flips the current value."""
     test_user.role = "admin"
@@ -567,12 +582,14 @@ def test_toggle_strategic_toggle_mode(client, db_session, test_company, test_use
         db_session.commit()
 
 
+@pytest.mark.skip(reason="Route /api/sales/manager-digest removed — sales router no longer mounted")
 def test_manager_digest_requires_admin(client):
     """GET /api/sales/manager-digest returns 403 for non-admin."""
     resp = client.get("/api/sales/manager-digest")
     assert resp.status_code == 403
 
 
+@pytest.mark.skip(reason="Route /api/sales/manager-digest removed — sales router no longer mounted")
 def test_manager_digest_success(client, db_session, test_user):
     """GET /api/sales/manager-digest returns data for admin."""
     from unittest.mock import patch
@@ -588,6 +605,7 @@ def test_manager_digest_success(client, db_session, test_user):
         db_session.commit()
 
 
+@pytest.mark.skip(reason="Route /api/sales/notifications removed — sales router no longer mounted")
 def test_sales_notifications_with_data(client, db_session, test_user):
     """GET /api/sales/notifications returns notification records."""
     from app.models import ActivityLog
@@ -610,6 +628,7 @@ def test_sales_notifications_with_data(client, db_session, test_user):
     assert data[0]["type"] == "ownership_warning"
 
 
+@pytest.mark.skip(reason="Route /api/sales/notifications/{id}/read removed — sales router no longer mounted")
 def test_mark_notification_read(client, db_session, test_user):
     """POST /api/sales/notifications/{id}/read marks it as read."""
     from app.models import ActivityLog
@@ -629,12 +648,14 @@ def test_mark_notification_read(client, db_session, test_user):
     assert resp.json()["ok"] is True
 
 
+@pytest.mark.skip(reason="Route /api/sales/notifications/{id}/read removed — sales router no longer mounted")
 def test_mark_notification_read_not_found(client):
     """POST /api/sales/notifications/99999/read returns 404."""
     resp = client.post("/api/sales/notifications/99999/read")
     assert resp.status_code == 404
 
 
+@pytest.mark.skip(reason="Route /api/sales/notifications/{id}/read removed — sales router no longer mounted")
 def test_mark_notification_read_wrong_user(client, db_session, test_user):
     """Cannot mark another user's notification as read."""
     from app.models import ActivityLog, User
@@ -828,6 +849,7 @@ from datetime import timedelta
 from app.models import CustomerSite
 
 
+@pytest.mark.skip(reason="Route /api/prospecting/* removed — prospecting router no longer mounted")
 class TestProspectingMyAccounts:
     def test_no_owned_sites(self, client):
         """No owned sites -> empty accounts list."""
@@ -887,6 +909,7 @@ class TestProspectingMyAccounts:
         assert acct["health"] == "red"
 
 
+@pytest.mark.skip(reason="Route /api/prospecting/* removed — prospecting router no longer mounted")
 class TestProspectingAccountSites:
     def test_account_sites_not_found(self, client):
         """Non-existent company -> 404."""

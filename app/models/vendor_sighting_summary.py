@@ -56,5 +56,5 @@ class VendorSightingSummary(Base):
     min_moq = Column(Integer, nullable=True)
     has_contact_info = Column(Boolean, default=False, server_default="false")
 
-    requirement = relationship("Requirement", back_populates="vendor_summaries")
+    requirement = relationship("Requirement")
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])

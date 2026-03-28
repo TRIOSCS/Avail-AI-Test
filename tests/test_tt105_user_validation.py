@@ -7,9 +7,11 @@ Called by: pytest
 Depends on: app/routers/admin/users.py, conftest fixtures
 """
 
+import pytest
 from fastapi.testclient import TestClient
 
 
+@pytest.mark.skip(reason="Route POST /api/admin/users removed — admin users router no longer mounted")
 class TestCreateUserValidation:
     """Server-side validation for POST /api/admin/users."""
 

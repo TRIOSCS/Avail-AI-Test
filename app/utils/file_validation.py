@@ -127,19 +127,3 @@ def _get_extension(filename: str) -> str:
         return ""
     parts = filename.lower().rsplit(".", 1)
     return f".{parts[-1]}" if len(parts) > 1 else ""
-
-
-def is_password_protected(content: bytes) -> bool:
-    """Check if an Excel file appears to be password-protected."""
-    try:
-        import io
-
-        import openpyxl
-
-        openpyxl.load_workbook(io.BytesIO(content), read_only=True)
-        return False
-    except Exception as e:
-        err_str = str(e).lower()
-        if "password" in err_str or "encrypted" in err_str:
-            return True
-        return False  # Other errors aren't password-related

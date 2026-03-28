@@ -293,12 +293,6 @@ def test_malformed_json_returns_400_or_422(admin_client):
     assert r.status_code in (400, 422)
 
 
-def test_admin_users_rate_limited_endpoint(admin_client):
-    r = admin_client.get("/api/admin/users")
-    assert r.status_code == 200
-    assert isinstance(r.json(), list)
-
-
 def test_admin_health_rate_limited_endpoint(admin_client):
     r = admin_client.get("/api/admin/health")
     assert r.status_code == 200

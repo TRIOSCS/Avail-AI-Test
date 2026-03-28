@@ -3,7 +3,7 @@
  * Loaded when USE_HTMX=true. Replaces app.js + crm.js.
  *
  * What it does: Registers all Alpine.js plugins and HTMX extensions,
- *   sets up global Alpine stores (toast, preferences), and
+ *   sets up global Alpine stores (toast, errorLog, networkLog), and
  *   configures HTMX defaults.
  * What calls it: Vite bundles this as the main entry point; loaded by base.html.
  * Depends on: htmx.org, alpinejs, all @alpinejs/* plugins, all htmx-ext-* packages.
@@ -88,12 +88,6 @@ window.Alpine = Alpine;
 
 // ── Global Alpine stores ─────────────────────────────────────
 Alpine.store('toast', { message: '', type: 'info', show: false });
-
-Alpine.store('preferences', Alpine.$persist({
-    resultsPerPage: 25,
-    defaultView: 'requisitions',
-    compactTables: false,
-}).as('avail_preferences'));
 
 Alpine.store('errorLog', { entries: [] });
 window.onerror = function(msg, src, line, col) {
@@ -205,59 +199,6 @@ document.body.addEventListener('htmx:beforeSwap', (evt) => {
         window.location.href = '/auth/login';
     }
 });
-
-/**
- * sourcingProgress — Alpine component for SSE sourcing search progress.
- * Listens for SSE events from the HTMX SSE extension and updates the
- * per-source progress UI (count, elapsed time, status icon, progress bar).
- * On search-complete, loads the full sourcing results via HTMX ajax.
- *
- * Called by: partials/sourcing/search_progress.html
- * Depends on: htmx SSE extension, tpl-icon-check/tpl-icon-fail templates in base.html
- */
-Alpine.data('sourcingProgress', (requirementId, totalSources) => ({
-    completed: 0,
-    init() {
-        document.body.addEventListener('htmx:sseMessage', (evt) => {
-            if (evt.detail.type === 'source-complete') {
-                this.handleSourceComplete(JSON.parse(evt.detail.data));
-            }
-            if (evt.detail.type === 'search-complete') {
-                this.handleSearchComplete(JSON.parse(evt.detail.data));
-            }
-        });
-    },
-    handleSourceComplete(data) {
-        this.completed++;
-        var source = data.source.toLowerCase();
-        // Update count text
-        var countEl = document.getElementById('source-count-' + source + '-' + requirementId);
-        if (countEl) countEl.textContent = data.count + ' results';
-        // Update elapsed time text
-        var timeEl = document.getElementById('source-time-' + source + '-' + requirementId);
-        if (timeEl) timeEl.textContent = (data.elapsed_ms / 1000).toFixed(1) + 's';
-        // Update status icon — clone from template SVGs
-        var statusEl = document.getElementById('source-status-' + source + '-' + requirementId);
-        if (statusEl) {
-            var tplId = data.status === 'done' ? 'tpl-icon-check' : 'tpl-icon-fail';
-            var tpl = document.getElementById(tplId);
-            if (tpl) {
-                statusEl.replaceChildren(tpl.content.cloneNode(true));
-            }
-        }
-        // Update progress bar width
-        var pct = Math.round((this.completed / totalSources) * 100);
-        var bar = document.getElementById('progress-bar-' + requirementId);
-        if (bar) bar.style.width = pct + '%';
-        var counter = document.getElementById('progress-count-' + requirementId);
-        if (counter) counter.textContent = this.completed + ' / ' + totalSources + ' complete';
-    },
-    handleSearchComplete(data) {
-        setTimeout(function() {
-            htmx.ajax('GET', '/v2/partials/sourcing/' + requirementId, '#main-content');
-        }, 500);
-    }
-}));
 
 /**
  * splitPanel — Alpine.js component for resizable split-panel layout.

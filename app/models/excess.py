@@ -73,8 +73,6 @@ class ExcessLineItem(Base):
     date_code = Column(String(50), nullable=True)
     condition = Column(String(50), default="New")
     asking_price = Column(Numeric(12, 4), nullable=True)
-    market_price = Column(Numeric(12, 4), nullable=True)
-    demand_score = Column(Integer, nullable=True)  # 0–100
     demand_match_count = Column(Integer, default=0)
     status = Column(String(20), default="available")  # available, bidding, awarded, withdrawn
     notes = Column(Text, nullable=True)
@@ -101,12 +99,10 @@ class BidSolicitation(Base):
     excess_line_item_id = Column(Integer, ForeignKey("excess_line_items.id", ondelete="CASCADE"), nullable=False)
     contact_id = Column(Integer, nullable=False)  # generic FK — no EmailTrack model exists
     sent_by = Column(Integer, ForeignKey("users.id", ondelete="RESTRICT"), nullable=False)
-    email_track_id = Column(Integer, nullable=True)  # reserved for future email tracking FK
     recipient_email = Column(String(255), nullable=True)
     recipient_name = Column(String(255), nullable=True)
     graph_message_id = Column(String(500), nullable=True)  # Graph API message ID for tracking
     subject = Column(String(500), nullable=True)
-    body_preview = Column(Text, nullable=True)  # first ~200 chars of email body
     response_received_at = Column(DateTime, nullable=True)
     parsed_bid_id = Column(
         Integer, ForeignKey("bids.id", ondelete="SET NULL", use_alter=True), nullable=True
@@ -135,7 +131,6 @@ class Bid(Base):
     excess_line_item_id = Column(Integer, ForeignKey("excess_line_items.id", ondelete="CASCADE"), nullable=False)
     bidder_company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"), nullable=True)
     bidder_vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"), nullable=True)
-    bidder_contact_id = Column(Integer, nullable=True)
     unit_price = Column(Numeric(12, 4), nullable=False)
     quantity_wanted = Column(Integer, nullable=False)
     lead_time_days = Column(Integer, nullable=True)

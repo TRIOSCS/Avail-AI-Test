@@ -24,12 +24,6 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.models import Contact, Sighting, VendorCard, VendorContact
-from app.schemas.emails import (
-    EmailMessage,
-    EmailReplyRequest,
-    EmailThreadListResponse,
-    EmailThreadSummary,
-)
 from app.services.email_threads import (
     _build_thread_summary,
     _cache_get,
@@ -242,66 +236,6 @@ class TestBuildThreadSummary:
         summary = _build_thread_summary("conv-456", messages, "subject_token")
         assert "[ref:42]" not in summary["subject"]
         assert "RFQ for LM317T" in summary["subject"]
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  Pydantic Schema Validation
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestSchemaValidation:
-    def test_email_thread_summary(self):
-        summary = EmailThreadSummary(
-            conversation_id="conv-123",
-            subject="RFQ for parts",
-            participants=["vendor@arrow.com"],
-            message_count=5,
-            last_message_date=datetime.now(timezone.utc),
-            snippet="We can supply...",
-            needs_response=True,
-            matched_via="conversation_id",
-        )
-        assert summary.conversation_id == "conv-123"
-        assert summary.needs_response is True
-
-    def test_email_message(self):
-        msg = EmailMessage(
-            id="msg-1",
-            from_name="Arrow Sales",
-            from_email="sales@arrow.com",
-            to=["buyer@trioscs.com"],
-            subject="Re: RFQ",
-            body_preview="We have stock",
-            received_date=datetime.now(timezone.utc),
-            direction="received",
-        )
-        assert msg.direction == "received"
-        assert msg.from_email == "sales@arrow.com"
-
-    def test_email_thread_list_response(self):
-        resp = EmailThreadListResponse(threads=[], error=None)
-        assert resp.threads == []
-        assert resp.error is None
-
-    def test_email_thread_list_response_with_error(self):
-        resp = EmailThreadListResponse(threads=[], error="M365 connection needs refresh")
-        assert resp.error is not None
-
-    def test_email_reply_request(self):
-        req = EmailReplyRequest(
-            conversation_id="conv-123",
-            to="vendor@arrow.com",
-            subject="Re: RFQ",
-            body="Thanks for the quote",
-        )
-        assert req.to == "vendor@arrow.com"
-
-    def test_email_thread_summary_defaults(self):
-        summary = EmailThreadSummary(conversation_id="c1", subject="test")
-        assert summary.participants == []
-        assert summary.message_count == 0
-        assert summary.needs_response is False
-        assert summary.matched_via == ""
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -139,7 +139,6 @@ class ProspectContact(Base):
     source = Column(String(50), nullable=False)
     confidence = Column(String(10), nullable=False)
     found_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    verified_at = Column(DateTime)
 
     is_saved = Column(Boolean, default=False)
     saved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
@@ -160,25 +159,6 @@ class ProspectContact(Base):
         Index("ix_prospect_contacts_email", "email"),
         Index("ix_prospect_contacts_saved_by", "saved_by_id"),
     )
-
-
-class EnrichmentCreditUsage(Base):
-    """Monthly credit usage tracking per enrichment provider."""
-
-    __tablename__ = "enrichment_credit_usage"
-    id = Column(Integer, primary_key=True)
-    provider = Column(String(50), nullable=False)  # lusha, hunter, apollo
-    month = Column(String(7), nullable=False)  # "2026-02" format
-    credits_used = Column(Integer, default=0, nullable=False)
-    credits_limit = Column(Integer, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(
-        DateTime,
-        default=lambda: datetime.now(timezone.utc),
-        onupdate=lambda: datetime.now(timezone.utc),
-    )
-
-    __table_args__ = (Index("ix_ecu_provider_month", "provider", "month", unique=True),)
 
 
 class IntelCache(Base):

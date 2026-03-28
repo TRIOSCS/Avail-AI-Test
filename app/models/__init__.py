@@ -26,7 +26,6 @@ from .email_intelligence import EmailIntelligence  # noqa: F401
 # Enrichment
 from .enrichment import (  # noqa: F401
     EmailSignatureExtract,
-    EnrichmentCreditUsage,
     EnrichmentJob,
     EnrichmentQueue,
     IntelCache,
@@ -65,9 +64,6 @@ from .knowledge import KnowledgeConfig, KnowledgeEntry  # noqa: F401
 from .nc_search_log import NcSearchLog  # noqa: F401
 from .nc_search_queue import NcSearchQueue  # noqa: F401
 from .nc_worker_status import NcWorkerStatus  # noqa: F401
-
-# Notifications
-from .notification import Notification  # noqa: F401
 
 # Offers, Contacts, Vendor Responses
 from .offers import Contact, Offer, OfferAttachment, VendorResponse  # noqa: F401

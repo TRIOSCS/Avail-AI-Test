@@ -7,7 +7,7 @@ available for enrichment providers.
 Priority: Assigned accounts first, then unassigned accounts.
 
 Called by: enrichment router endpoints, batch scheduler.
-Depends on: credit_manager.py, enrichment_utils.py, contact_quality.py.
+Depends on: credit_manager.py, contact_quality.py.
 """
 
 from datetime import datetime, timedelta, timezone
@@ -75,73 +75,6 @@ def _get_company_domain(company: Company) -> str | None:
     if domain:
         domain = domain.replace("https://", "").replace("http://", "").replace("www.", "").split("/")[0].strip()
     return domain or None
-
-
-def _ensure_site(db: Session, company: Company) -> CustomerSite:
-    """Get or create a default site for the company."""
-    site = db.query(CustomerSite).filter_by(company_id=company.id).first()
-    if not site:
-        site = CustomerSite(
-            company_id=company.id,
-            site_name=f"{company.name} - HQ",
-        )
-        db.add(site)
-        db.flush()
-    return site
-
-
-def _dedup_contacts(contacts: list[dict]) -> list[dict]:
-    """Deduplicate contacts by email, keeping the first (higher-priority) source."""
-    from app.services.enrichment_utils import deduplicate_contacts
-
-    return deduplicate_contacts(contacts, key="email")
-
-
-def _save_contact(db: Session, site: CustomerSite, contact: dict, source: str) -> SiteContact | None:
-    """Save a contact to a customer site, deduplicating by email."""
-    email = (contact.get("email") or "").lower().strip()
-    if not email:
-        return None
-
-    field_sources = contact.get("enrichment_field_sources") or {
-        "email": source,
-        "phone": source if contact.get("phone") else None,
-        "name": source,
-    }
-
-    existing = db.query(SiteContact).filter_by(customer_site_id=site.id, email=email).first()
-    if existing:
-        # Update missing fields
-        if contact.get("phone") and not existing.phone:
-            existing.phone = contact["phone"]
-            existing.phone_verified = _is_direct_dial(contact.get("phone_type"))
-            # Update phone source attribution
-            efs = existing.enrichment_field_sources or {}
-            efs["phone"] = field_sources.get("phone", source)
-            existing.enrichment_field_sources = efs
-        if contact.get("linkedin_url") and not existing.linkedin_url:
-            existing.linkedin_url = contact["linkedin_url"]
-        if contact.get("title") and not existing.title:
-            existing.title = contact["title"]
-            existing.contact_role = _classify_contact_role(contact["title"])
-        existing.last_enriched_at = datetime.now(timezone.utc)
-        return existing
-
-    sc = SiteContact(
-        customer_site_id=site.id,
-        full_name=contact.get("full_name") or "Unknown",
-        title=contact.get("title"),
-        email=email,
-        phone=contact.get("phone"),
-        phone_verified=_is_direct_dial(contact.get("phone_type")),
-        enrichment_source=source,
-        contact_role=_classify_contact_role(contact.get("title")),
-        linkedin_url=contact.get("linkedin_url"),
-        last_enriched_at=datetime.now(timezone.utc),
-        enrichment_field_sources=field_sources,
-    )
-    db.add(sc)
-    return sc
 
 
 async def enrich_customer_account(

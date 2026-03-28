@@ -65,17 +65,6 @@ class MaterialCard(Base):
             raise ValueError(f"search_count must be >= 0, got {value}")
         return value
 
-    vendor_history = relationship(
-        "MaterialVendorHistory",
-        back_populates="material_card",
-        cascade="all, delete-orphan",
-    )
-    spec_facets = relationship(
-        "MaterialSpecFacet",
-        back_populates="material_card",
-        cascade="all, delete-orphan",
-    )
-
 
 class MaterialVendorHistory(Base):
     __tablename__ = "material_vendor_history"
@@ -98,7 +87,7 @@ class MaterialVendorHistory(Base):
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    material_card = relationship("MaterialCard", back_populates="vendor_history")
+    material_card = relationship("MaterialCard")
 
     __table_args__ = (
         Index("ix_mvh_card_vendor", "material_card_id", "vendor_name", unique=True),
@@ -156,8 +145,6 @@ class ProactiveMatch(Base):
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
     requisition = relationship("Requisition", foreign_keys=[requisition_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
-    salesperson = relationship("User", foreign_keys=[salesperson_id])
-    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
 
     __table_args__ = (
         Index("ix_pm_offer", "offer_id"),
@@ -196,7 +183,6 @@ class ProactiveOffer(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
-    salesperson = relationship("User", foreign_keys=[salesperson_id])
 
     __table_args__ = (
         Index("ix_poff_site", "customer_site_id"),
@@ -299,7 +285,6 @@ class ActivityLog(Base):
     direction = Column(String(20))  # "inbound" | "outbound"
     event_type = Column(String(30))  # "email" | "call" | "note" | "meeting"
     summary = Column(String(500))
-    source_url = Column(String(500))
     details = Column(JSON)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -312,7 +297,6 @@ class ActivityLog(Base):
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
     quote = relationship("Quote", foreign_keys=[quote_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
-    site_contact = relationship("SiteContact", foreign_keys=[site_contact_id])
 
     __table_args__ = (
         Index(

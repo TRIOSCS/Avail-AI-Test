@@ -55,7 +55,6 @@ class CustomerPartHistory(Base):
     )
 
     company = relationship("Company", foreign_keys=[company_id])
-    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
 
     __table_args__ = (
         UniqueConstraint(

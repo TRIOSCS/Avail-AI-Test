@@ -5262,9 +5262,9 @@ async def send_batch_follow_up(
     db.commit()
     logger.info("Batch follow-up: {} contacts marked by {}", sent_count, user.email)
 
-    return templates.TemplateResponse(
-        "htmx/partials/follow_ups/batch_result.html",
-        {"request": request, "sent_count": sent_count},
+    msg = f"{sent_count} contact{'s' if sent_count != 1 else ''} marked as responded."
+    return HTMLResponse(
+        f'<div class="text-sm text-green-700 bg-green-50 border border-green-200 rounded-lg px-3 py-2">{msg}</div>'
     )
 
 
@@ -7633,9 +7633,9 @@ async def add_prospect_domain(
         raise HTTPException(400, "Domain is required")
 
     try:
-        from ..services.prospect_claim import manual_add_prospect
+        from ..services.prospect_claim import add_prospect_manually
 
-        prospect = manual_add_prospect(db, domain, user.id)
+        prospect = add_prospect_manually(domain, user.id, db)
         return HTMLResponse(
             f'<div class="bg-emerald-50 border border-emerald-200 rounded p-2 text-sm text-emerald-700">'
             f"Prospect added: {domain} (ID {prospect.id})</div>"

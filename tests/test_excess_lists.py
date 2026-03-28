@@ -104,8 +104,8 @@ class TestSightingSourceCompanyId:
         )
         assert sighting.moq == 5
 
-    def test_sighting_source_company_relationship(self, db_session, test_requisition, test_company):
-        """source_company relationship should resolve to Company."""
+    def test_sighting_source_company_id(self, db_session, test_requisition, test_company):
+        """source_company_id column should persist correctly on Sighting."""
         requirement = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
 
         sighting = Sighting(
@@ -119,8 +119,7 @@ class TestSightingSourceCompanyId:
         db_session.commit()
         db_session.refresh(sighting)
 
-        assert sighting.source_company is not None
-        assert sighting.source_company.name == "Acme Electronics"
+        assert sighting.source_company_id == test_company.id
 
 
 class TestActivityLogDismissedAt:

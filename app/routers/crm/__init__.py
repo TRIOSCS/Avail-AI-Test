@@ -20,19 +20,15 @@ from ._helpers import (  # noqa: F401
     quote_to_dict,
     record_changes,
 )
-from .buy_plans import router as buy_plans_router
 from .clone import router as clone_router
 from .companies import router as companies_router
 from .enrichment import router as enrichment_router
 from .offers import router as offers_router
 from .quotes import router as quotes_router
-from .sites import router as sites_router
 
 router = APIRouter()
 router.include_router(companies_router)
-router.include_router(sites_router)
 router.include_router(enrichment_router)
 router.include_router(offers_router)
 router.include_router(quotes_router)
-router.include_router(buy_plans_router)
 router.include_router(clone_router)

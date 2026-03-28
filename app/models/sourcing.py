@@ -122,12 +122,9 @@ class Requirement(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="requirements")
-    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
     attachments = relationship("RequirementAttachment", back_populates="requirement", cascade="all, delete-orphan")
     sightings = relationship("Sighting", back_populates="requirement", cascade="all, delete-orphan")
     offers = relationship("Offer", back_populates="requirement", cascade="all, delete-orphan")
-    assigned_buyer = relationship("User", foreign_keys=[assigned_buyer_id])
-    vendor_summaries = relationship("VendorSightingSummary", back_populates="requirement")
 
     @validates("target_qty")
     def _validate_target_qty(self, _key, value):
@@ -214,8 +211,6 @@ class Sighting(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requirement = relationship("Requirement", back_populates="sightings")
-    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
-    source_company = relationship("Company", foreign_keys=[source_company_id])
 
     @validates("moq")
     def _coerce_moq(self, _key, value):

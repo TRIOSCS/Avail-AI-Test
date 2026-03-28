@@ -15,12 +15,9 @@ from sqlalchemy.orm import Session
 from app.models import Company, User
 from app.models.excess import Bid, BidSolicitation, ExcessLineItem, ExcessList
 from app.schemas.excess import (
-    BidCreate,
-    BidSolicitationCreate,
+    BidCreateRequest,
     BidUpdate,
     ExcessLineItemCreate,
-    ExcessLineItemImportRow,
-    ExcessLineItemUpdate,
     ExcessListCreate,
     ExcessListResponse,
     ExcessListUpdate,
@@ -239,38 +236,24 @@ class TestExcessLineItemSchemas:
         with pytest.raises(ValidationError):
             ExcessLineItemCreate(part_number="LM358N", quantity=1, asking_price=-1.0)
 
-    def test_import_row_valid(self):
-        row = ExcessLineItemImportRow(
-            part_number="SN74HC595N",
-            manufacturer="TI",
-            quantity=1000,
-            date_code="2024",
-            asking_price=0.25,
-        )
-        assert row.condition == "New"
-
-    def test_import_row_defaults(self):
-        row = ExcessLineItemImportRow(part_number="ABC123")
-        assert row.quantity == 1
-        assert row.condition == "New"
-
-    def test_update_with_valid_status(self):
-        schema = ExcessLineItemUpdate(status="withdrawn")
-        assert schema.status == "withdrawn"
+    def test_create_defaults(self):
+        schema = ExcessLineItemCreate(part_number="SN74HC595N", quantity=1)
+        assert schema.condition == "New"
+        assert schema.asking_price is None
 
 
 class TestBidSchemas:
     def test_create_valid(self):
-        schema = BidCreate(excess_line_item_id=1, unit_price=0.50, quantity_wanted=100)
+        schema = BidCreateRequest(unit_price=0.50, quantity_wanted=100)
         assert schema.source == "manual"
 
     def test_create_missing_unit_price_rejected(self):
         with pytest.raises(ValidationError):
-            BidCreate(excess_line_item_id=1, quantity_wanted=100)
+            BidCreateRequest(quantity_wanted=100)
 
     def test_create_missing_quantity_rejected(self):
         with pytest.raises(ValidationError):
-            BidCreate(excess_line_item_id=1, unit_price=0.50)
+            BidCreateRequest(unit_price=0.50)
 
     def test_update_valid(self):
         schema = BidUpdate(status="accepted", unit_price=0.60)
@@ -282,6 +265,16 @@ class TestBidSchemas:
 
 
 class TestBidSolicitationSchemas:
-    def test_create_valid(self):
-        schema = BidSolicitationCreate(excess_line_item_id=1, contact_id=42, recipient_email="test@example.com")
+    def test_response_from_attributes(self):
+        """BidSolicitationCreate was removed; verify the Response schema instead."""
+        from app.schemas.excess import BidSolicitationResponse
+
+        # Validate it can be instantiated with required fields
+        schema = BidSolicitationResponse(
+            id=1,
+            excess_line_item_id=1,
+            contact_id=42,
+            sent_by=1,
+            status="pending",
+        )
         assert schema.contact_id == 42

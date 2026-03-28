@@ -30,18 +30,6 @@ def register_knowledge_jobs(scheduler, settings):
         id="knowledge_expire_stale",
         name="Mark expired knowledge entries",
     )
-    scheduler.add_job(
-        _job_deliver_question_batches,
-        IntervalTrigger(hours=1),
-        id="knowledge_deliver_batches",
-        name="Deliver batched Q&A questions to buyers",
-    )
-    scheduler.add_job(
-        _job_send_knowledge_digests,
-        IntervalTrigger(hours=1),
-        id="knowledge_send_digests",
-        name="Send daily knowledge digests",
-    )
 
 
 @_traced_job
@@ -161,18 +149,6 @@ async def _job_refresh_insights():
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
-
-
-@_traced_job
-async def _job_deliver_question_batches():
-    """Deliver batched question cards to buyers (Teams removed — no-op)."""
-    logger.debug("Teams question batch delivery skipped (removed)")
-
-
-@_traced_job
-async def _job_send_knowledge_digests():
-    """Send daily knowledge digests (Teams removed — no-op)."""
-    logger.debug("Teams knowledge digest delivery skipped (removed)")
 
 
 @_traced_job

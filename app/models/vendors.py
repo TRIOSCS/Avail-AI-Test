@@ -13,7 +13,6 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
-    Text,
 )
 from sqlalchemy.dialects.postgresql import TSVECTOR
 from sqlalchemy.orm import relationship, validates
@@ -37,7 +36,6 @@ class VendorCard(Base):
     is_blacklisted = Column(Boolean, default=False)
     is_broadcast = Column(Boolean, default=False)  # Always include in stock inquiries
     source = Column(String(50))
-    raw_response = Column(Text)
 
     # Enrichment fields (shared structure with Company)
     linkedin_url = Column(String(500))
@@ -52,7 +50,6 @@ class VendorCard(Base):
     enrichment_source = Column(String(50))
 
     cancellation_rate = Column(Float)
-    rma_rate = Column(Float)
 
     # Engagement scoring (Email Mining v2 Upgrade 4)
     total_outreach = Column(Integer, default=0)
@@ -91,8 +88,6 @@ class VendorCard(Base):
 
     # Deep enrichment tracking
     deep_enrichment_at = Column(DateTime)
-    specialty_confidence = Column(Float)
-    email_history_scanned_at = Column(DateTime)
 
     # Full-text search (PostgreSQL tsvector, managed by trigger)
     search_vector = Column(TSVECTOR)
@@ -112,11 +107,9 @@ class VendorCard(Base):
     @validates(
         "response_rate",
         "cancellation_rate",
-        "rma_rate",
         "ghost_rate",
         "overall_win_rate",
         "quote_quality_rate",
-        "specialty_confidence",
     )
     def _validate_rate(self, _key, value):
         if value is not None and not (0.0 <= value <= 1.0):

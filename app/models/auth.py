@@ -29,7 +29,6 @@ class User(Base):
     m365_connected = Column(Boolean, default=False)
     m365_error_reason = Column(String(255))
     m365_last_healthy = Column(DateTime)
-    last_deep_email_scan = Column(DateTime)
     commodity_tags = Column(JSON, default=list)
 
     # Parts workspace — which columns the user wants visible in the split-panel view

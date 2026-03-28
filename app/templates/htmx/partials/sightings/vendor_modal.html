@@ -89,14 +89,8 @@
 
     {# Email compose #}
     <div class="mb-4">
-      <div class="flex items-center justify-between mb-1">
+      <div class="mb-1">
         <label class="text-xs font-medium text-gray-500 uppercase tracking-wider">Message</label>
-        <button @click="cleaning = true; fetch('/api/ai/clean-rfq-draft', {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({draft: emailBody, parts: {{ parts|tojson }}})}).then(r => r.json()).then(d => { emailBody = d.cleaned || emailBody; cleaning = false; }).catch(() => cleaning = false)"
-                :disabled="!emailBody || cleaning"
-                class="text-[10px] text-brand-500 hover:text-brand-700 disabled:text-gray-300">
-          <span x-show="!cleaning" x-cloak>Clean Up</span>
-          <span x-show="cleaning" x-cloak>Cleaning...</span>
-        </button>
       </div>
       <textarea x-model="emailBody" rows="5" placeholder="Write your inquiry..."
                 class="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm focus:border-brand-400 focus:ring-1 focus:ring-brand-200 outline-none"></textarea>
