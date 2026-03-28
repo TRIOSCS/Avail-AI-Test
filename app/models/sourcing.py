@@ -37,7 +37,7 @@ class Requisition(Base):
     )
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
-    customer_name = Column(String(255))  # Legacy — kept for migration
+    customer_name = Column(String(255))
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"))
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
     status = Column(String(50), default="active")
