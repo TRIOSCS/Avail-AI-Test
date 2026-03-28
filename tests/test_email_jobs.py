@@ -97,7 +97,7 @@ class TestJobContactsSync:
     async def test_contacts_sync_no_users(self, mock_sync):
         from app.jobs.email_jobs import _job_contacts_sync
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
             mock_db.query.return_value.filter.return_value.all.return_value = []
             MockSL.return_value = mock_db
@@ -116,7 +116,7 @@ class TestJobContactsSync:
         user.last_contacts_sync = None
         user.refresh_token = "ref"
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             list_db = MagicMock()
             list_db.query.return_value.filter.return_value.all.return_value = [user]
             sync_db = MagicMock()
@@ -136,7 +136,7 @@ class TestJobContactsSync:
         user.m365_connected = True
         user.last_contacts_sync = None
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             list_db = MagicMock()
             list_db.query.return_value.filter.return_value.all.return_value = [user]
             sync_db = MagicMock()
@@ -156,7 +156,7 @@ class TestJobContactsSync:
         user.last_contacts_sync = None
         user.refresh_token = "ref"
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
             mock_db.query.return_value.filter.return_value.all.return_value = [user]
             MockSL.return_value = mock_db
@@ -173,7 +173,7 @@ class TestJobContactsSync:
         user.refresh_token = "ref"
         user.last_contacts_sync = datetime.now(timezone.utc) - timedelta(hours=1)  # recent
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
             mock_db.query.return_value.filter.return_value.all.return_value = [user]
             MockSL.return_value = mock_db
@@ -189,7 +189,7 @@ class TestJobOwnershipSweep:
         from app.jobs.email_jobs import _job_ownership_sweep
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch("app.services.ownership_service.run_ownership_sweep", new_callable=AsyncMock) as mock_sweep,
         ):
             mock_db = MagicMock()
@@ -202,7 +202,7 @@ class TestJobOwnershipSweep:
         from app.jobs.email_jobs import _job_ownership_sweep
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch(
                 "app.services.ownership_service.run_ownership_sweep",
                 new_callable=AsyncMock,
@@ -225,7 +225,7 @@ class TestJobSiteOwnershipSweep:
         from app.jobs.email_jobs import _job_site_ownership_sweep
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch("app.services.ownership_service.run_site_ownership_sweep") as mock_sweep,
         ):
             mock_db = MagicMock()
@@ -238,7 +238,7 @@ class TestJobSiteOwnershipSweep:
         from app.jobs.email_jobs import _job_site_ownership_sweep
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch(
                 "app.services.ownership_service.run_site_ownership_sweep",
                 side_effect=Exception("fail"),
@@ -260,7 +260,7 @@ class TestJobContactScoring:
         from app.jobs.email_jobs import _job_contact_scoring
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch(
                 "app.services.contact_intelligence.compute_all_contact_scores",
                 return_value={"updated": 5, "skipped": 2},
@@ -280,7 +280,7 @@ class TestJobContactScoring:
             time.sleep(10)
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch("app.services.contact_intelligence.compute_all_contact_scores", side_effect=slow_fn),
             patch("app.jobs.email_jobs.asyncio.wait_for", side_effect=asyncio.TimeoutError),
         ):
@@ -295,7 +295,7 @@ class TestJobContactScoring:
         from app.jobs.email_jobs import _job_contact_scoring
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch(
                 "app.services.contact_intelligence.compute_all_contact_scores",
                 side_effect=Exception("score err"),
@@ -323,7 +323,7 @@ class TestJobContactStatusCompute:
         sc.created_at = datetime.now(timezone.utc) - timedelta(days=2)
         last_at = datetime.now(timezone.utc) - timedelta(days=3)
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
             mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [(sc, last_at)]
             MockSL.return_value = mock_db
@@ -340,7 +340,7 @@ class TestJobContactStatusCompute:
         sc.created_at = datetime.now(timezone.utc) - timedelta(days=100)
         last_at = datetime.now(timezone.utc) - timedelta(days=60)
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
             mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [(sc, last_at)]
             MockSL.return_value = mock_db
@@ -357,7 +357,7 @@ class TestJobContactStatusCompute:
         sc.created_at = datetime.now(timezone.utc) - timedelta(days=200)
         last_at = datetime.now(timezone.utc) - timedelta(days=100)
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
             mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [(sc, last_at)]
             MockSL.return_value = mock_db
@@ -373,7 +373,7 @@ class TestJobContactStatusCompute:
         sc.is_active = True
         last_at = datetime.now(timezone.utc) - timedelta(days=365)
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
             mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [(sc, last_at)]
             MockSL.return_value = mock_db
@@ -389,7 +389,7 @@ class TestJobContactStatusCompute:
         sc.is_active = True
         sc.created_at = datetime.now(timezone.utc) - timedelta(days=120)
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
             mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [
                 (sc, None)  # No activity
@@ -407,7 +407,7 @@ class TestJobContactStatusCompute:
         sc.is_active = True
         sc.created_at = datetime.now(timezone.utc) - timedelta(days=10)
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
             mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [(sc, None)]
             MockSL.return_value = mock_db
@@ -424,7 +424,7 @@ class TestJobContactStatusCompute:
         sc.is_active = True
         last_at = datetime.now(timezone.utc) - timedelta(days=15)
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
             mock_db.query.return_value.outerjoin.return_value.filter.return_value.all.return_value = [(sc, last_at)]
             MockSL.return_value = mock_db
@@ -436,7 +436,7 @@ class TestJobContactStatusCompute:
     async def test_status_compute_error(self):
         from app.jobs.email_jobs import _job_contact_status_compute
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
             mock_db.query.side_effect = Exception("DB down")
             MockSL.return_value = mock_db
@@ -454,7 +454,7 @@ class TestJobEmailHealthUpdate:
         from app.jobs.email_jobs import _job_email_health_update
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch(
                 "app.services.response_analytics.batch_update_email_health",
                 return_value={"updated": 10},
@@ -470,7 +470,7 @@ class TestJobEmailHealthUpdate:
         from app.jobs.email_jobs import _job_email_health_update
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch("app.jobs.email_jobs.asyncio.wait_for", side_effect=asyncio.TimeoutError),
         ):
             mock_db = MagicMock()
@@ -484,7 +484,7 @@ class TestJobEmailHealthUpdate:
         from app.jobs.email_jobs import _job_email_health_update
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch("app.jobs.email_jobs.asyncio.wait_for", side_effect=RuntimeError("fail")),
         ):
             mock_db = MagicMock()
@@ -502,7 +502,7 @@ class TestJobCalendarScan:
     async def test_calendar_scan_no_users(self):
         from app.jobs.email_jobs import _job_calendar_scan
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
             mock_db.query.return_value.filter.return_value.all.return_value = []
             MockSL.return_value = mock_db
@@ -519,7 +519,7 @@ class TestJobCalendarScan:
         user.m365_connected = True
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch(
                 "app.services.calendar_intelligence.scan_calendar_events",
                 new_callable=AsyncMock,
@@ -544,7 +544,7 @@ class TestJobEmailReverification:
         from app.jobs.email_jobs import _job_email_reverification
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch(
                 "app.services.customer_enrichment_batch.run_email_reverification",
                 new_callable=AsyncMock,
@@ -561,7 +561,7 @@ class TestJobEmailReverification:
         from app.jobs.email_jobs import _job_email_reverification
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch(
                 "app.services.customer_enrichment_batch.run_email_reverification",
                 new_callable=AsyncMock,
@@ -592,7 +592,7 @@ class TestScanUserInbox:
         with (
             patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="valid-tok"),
             patch("app.email_service.poll_inbox", new_callable=AsyncMock, return_value=[{"id": 1}]),
-            patch("app.jobs.email_jobs._scan_stock_list_attachments", new_callable=AsyncMock),
+            patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock),
             patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock),
             patch("app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock),
             patch("app.jobs.email_jobs._scan_excess_bid_responses", new_callable=AsyncMock),
@@ -626,7 +626,7 @@ class TestScanUserInbox:
         with (
             patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"),
             patch("app.email_service.poll_inbox", new_callable=AsyncMock, side_effect=Exception("Graph error")),
-            patch("app.jobs.email_jobs._scan_stock_list_attachments", new_callable=AsyncMock),
+            patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock),
             patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock),
             patch("app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock),
             patch("app.jobs.email_jobs._scan_excess_bid_responses", new_callable=AsyncMock),
@@ -648,7 +648,7 @@ class TestScanUserInbox:
             patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"),
             patch("app.email_service.poll_inbox", new_callable=AsyncMock, return_value=[]),
             patch(
-                "app.jobs.email_jobs._scan_stock_list_attachments",
+                "app.jobs.inventory_jobs._scan_stock_list_attachments",
                 new_callable=AsyncMock,
                 side_effect=Exception("stock err"),
             ),
@@ -671,7 +671,7 @@ class TestScanUserInbox:
         with (
             patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"),
             patch("app.email_service.poll_inbox", new_callable=AsyncMock, return_value=[]),
-            patch("app.jobs.email_jobs._scan_stock_list_attachments", new_callable=AsyncMock) as mock_stock,
+            patch("app.jobs.inventory_jobs._scan_stock_list_attachments", new_callable=AsyncMock) as mock_stock,
             patch("app.jobs.email_jobs._mine_vendor_contacts", new_callable=AsyncMock) as mock_mine,
             patch("app.jobs.email_jobs._scan_outbound_rfqs", new_callable=AsyncMock) as mock_rfq,
             patch("app.jobs.email_jobs._scan_excess_bid_responses", new_callable=AsyncMock),
@@ -984,7 +984,7 @@ class TestJobScanSentFolders:
     async def test_scan_no_users(self):
         from app.jobs.email_jobs import _job_scan_sent_folders
 
-        with patch("app.jobs.email_jobs.SessionLocal") as MockSL:
+        with patch("app.database.SessionLocal") as MockSL:
             mock_db = MagicMock()
             mock_db.query.return_value.filter.return_value.all.return_value = []
             MockSL.return_value = mock_db
@@ -1000,7 +1000,7 @@ class TestJobScanSentFolders:
         user.m365_connected = True
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch("app.jobs.email_jobs.scan_sent_folder", new_callable=AsyncMock) as mock_scan,
         ):
             list_db = MagicMock()
@@ -1021,7 +1021,7 @@ class TestJobScanSentFolders:
         user.m365_connected = True
 
         with (
-            patch("app.jobs.email_jobs.SessionLocal") as MockSL,
+            patch("app.database.SessionLocal") as MockSL,
             patch("app.jobs.email_jobs.scan_sent_folder", new_callable=AsyncMock, side_effect=asyncio.TimeoutError),
         ):
             list_db = MagicMock()
