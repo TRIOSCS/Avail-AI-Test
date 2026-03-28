@@ -1,97 +1,125 @@
 # Security Hardening + Test Isolation + htmx Decomposition — Design Spec
 
 **Date:** 2026-03-28
-**Scope:** Fix 11 security issues, 5 data model issues, ~30 parallel test isolation issues, decompose htmx_views.py
-**Status:** Research in progress — 3 agents gathering exact code locations
+**Scope:** 3 remaining security fixes, 5 data model fixes, parallel test isolation, htmx_views.py decomposition
 
 ---
 
-## Phase 1: Critical Security Fixes (11 issues from CODE_REVIEW.md)
+## Phase 1: Security Fixes (3 remaining — 8 of 11 already fixed)
 
-### Issue 1: Agent API Key Timing Attack (CRITICAL)
-- **File:** `app/dependencies.py:50-55`
-- **Fix:** Replace `==` with `secrets.compare_digest()` + add audit logging
+Prior audits resolved: timing attack (#1), SQL injection (#2), FK failure (#3), password hashing (#4), query validation (#6), rate limiting (#8), retry-after cap (#9), XSS (#10).
 
-### Issue 2: SQL Injection Risk (HIGH)
-- **File:** `app/routers/vendor_analytics.py:185-238`
-- **Fix:** Eliminate f-string SQL, use parameterized query with `%` wildcard for match-all
+### Fix A: Reduce broad `except Exception` (479 instances across 127 files)
 
-### Issue 3: Silent FK Failure in Vendor Merge (HIGH)
-- **File:** `app/services/vendor_merge_service.py:86-94`
-- **Fix:** Single transaction wrapper, raise on failure instead of silent continue
+Focus on top offenders first. Replace with specific exception types. Ensure `logger.exception()` used for unexpected errors.
 
-### Issue 4: SHA-256 Password Hashing (MEDIUM)
-- **File:** `app/startup.py:63-80`
-- **Fix:** Switch to `bcrypt` or `argon2` (only affects `ENABLE_PASSWORD_LOGIN` path)
+**Approach:** Categorize the 479 instances:
+- Intentional catch-all with proper logging → leave as-is with `# noqa` comment
+- Missing specific types → replace with `(ValueError, TypeError, KeyError)` etc.
+- Silent swallowing → add `logger.exception()`
 
-### Issue 5: Broad except Exception (MEDIUM)
-- **92 instances across 30 files**
-- **Fix:** Replace with specific exception types, ensure `logger.exception()` used
+### Fix B: Mouser API key in URL params
+- **File:** `app/connectors/mouser.py:47`
+- **Current:** `params={"apiKey": self.api_key}` — key appears in access logs, Sentry
+- **Fix:** Mouser API requires key as URL param (no header option). Add Sentry `before_send` scrubbing for `apiKey=` in URLs. Also mask in httpx request logging.
 
-### Issue 6: Missing Input Validation (MEDIUM)
-- **File:** `app/routers/vendor_analytics.py:42-44`
-- **Fix:** Use Pydantic `Query()` params with type constraints
-
-### Issue 7: Token Refresh Blocks Requests (MEDIUM)
-- **File:** `app/dependencies.py:130-166`
-- **Fix:** Background refresh via scheduler with tighter buffer window
-
-### Issue 8: No Rate Limiting on Password Login (HIGH)
-- **File:** `app/routers/auth.py:216`
-- **Fix:** Add `@limiter.limit("5/minute")` decorator
-
-### Issue 9: Retry-After Not Capped (MEDIUM)
-- **File:** `app/connectors/sources.py:153`
-- **Fix:** `min(max(float(header), 1.0), 300.0)`
-
-### Issue 10: XSS via javascript: URLs (MEDIUM)
-- **File:** `app/static/app.js:458`
-- **Fix:** Validate `href` starts with `http://`, `https://`, or `/`
-
-### Issue 11: API Keys in URL Parameters (MEDIUM)
-- **File:** `app/connectors/mouser.py:42`
-- **Fix:** Switch to header-based auth or mask keys in log output
+### Fix C: Token refresh blocks HTTP requests
+- **File:** `app/dependencies.py:164`
+- **Current:** `await refresh_user_token(user, db)` called synchronously in request handler
+- **Fix:** Move token refresh to APScheduler background job with tighter buffer (refresh 5 min before expiry instead of on-demand). Dependency just checks token validity; if expired and no refresh available, return 401.
 
 ---
 
-## Phase 2: Data Model Fixes (5 issues from CODE_REVIEW.md)
+## Phase 2: Data Model Fixes (5 issues, via Alembic migrations)
 
-### Issue 12: Missing Index on material_cards.deleted_at (HIGH)
-- Add migration with `Index("ix_material_cards_deleted_at", "deleted_at")`
+### Migration 1: Add index on material_cards.deleted_at (HIGH)
+```python
+op.create_index("ix_material_cards_deleted_at", "material_cards", ["deleted_at"])
+```
 
-### Issue 13: 101 Relationships Missing back_populates (MEDIUM)
-- Replace `backref=` with explicit `back_populates` on both sides
-- Prioritize models used in list endpoints
+### Migration 2: Add unique constraint on site_contacts (MEDIUM)
+```python
+op.create_unique_constraint("uq_site_contacts_site_email", "site_contacts", ["customer_site_id", "email"])
+```
 
-### Issue 14: Inconsistent Cascade Rules on BuyPlanLine (MEDIUM)
-- Review and fix cascade behavior for requirement_id and offer_id
+### Migration 3: Make count columns non-nullable (LOW)
+```python
+op.alter_column("companies", "site_count", nullable=False, server_default="0")
+op.alter_column("companies", "open_req_count", nullable=False, server_default="0")
+```
 
-### Issue 15: Missing Unique Constraint on site_contacts (MEDIUM)
-- Add `UniqueConstraint("customer_site_id", "email")` + migration
-
-### Issue 16: Denormalized Count Columns Allow NULL (LOW)
-- Add `nullable=False` to site_count, open_req_count + migration
+### Issue 13 (back_populates) and Issue 14 (cascade rules): Deferred
+These require careful review of 101 relationships and buy plan cascade behavior. Better as a separate focused spec.
 
 ---
 
 ## Phase 3: Parallel Test Isolation (~30 failures)
 
-Research agent investigating root causes. Common patterns:
-- Shared module-level state (global variables, caches)
-- Tests that INSERT specific IDs that collide
-- Tests that rely on empty tables
-- Tests that modify module-level configs
+Research agent still running. Will update with findings. Common fixes:
+- Add `autouse` fixture to reset module-level caches between tests
+- Use unique IDs in test data (UUID-based) to prevent collision
+- Ensure each test cleans up its own DB state
 
 ---
 
-## Phase 4: htmx_views.py Decomposition (9,888 lines)
+## Phase 4: htmx_views.py Decomposition (9,892 lines → 22 modules)
 
-Research agent mapping endpoint groups and dependencies. Target: split into ~10 domain-specific modules under `app/routers/htmx/`.
+### Target Structure
+
+```
+app/routers/
+├── htmx_shared.py        # 143 lines — helpers: _vite_assets, _base_ctx, _safe_int, etc.
+├── htmx_page.py          # 112 lines — universal /v2/* page loader
+└── htmx/
+    ├── __init__.py        # Router combiner
+    ├── trouble_tickets.py # 84 lines, 3 endpoints (LOWEST risk)
+    ├── knowledge.py       # 68 lines, 2 endpoints
+    ├── settings.py        # 161 lines, 5 endpoints
+    ├── search.py          # 52 lines, 3 endpoints
+    ├── emails.py          # 130 lines, 3 endpoints
+    ├── follow_ups.py      # 130 lines, 4 endpoints
+    ├── dashboard.py       # 168 lines, 8 endpoints
+    ├── prospecting.py     # 365 lines, 7 endpoints
+    ├── materials.py       # 419 lines, 12 endpoints
+    ├── sourcing.py        # 742 lines, 9 endpoints
+    ├── vendors.py         # 725 lines, 14 endpoints
+    ├── proactive.py       # 472 lines, 8 endpoints
+    ├── customers.py       # 1,017 lines, 16 endpoints
+    ├── quotes.py          # 390 lines, 16 endpoints
+    ├── buy_plans.py       # 364 lines, 10 endpoints
+    ├── parts.py           # 1,149 lines, 20 endpoints
+    └── requisitions.py    # 2,614 lines, 42 endpoints
+```
+
+### Extraction Order (by risk)
+
+| Phase | Modules | Lines | Risk |
+|-------|---------|-------|------|
+| 1. Foundation | htmx_shared.py + htmx_page.py | 255 | LOW |
+| 2. Isolated | trouble_tickets, knowledge, settings, search | 365 | LOWEST |
+| 3. Low-coupling | emails, follow_ups, dashboard, prospecting | 793 | LOW |
+| 4. Medium | materials, sourcing, vendors | 1,886 | MEDIUM |
+| 5. High-coupling | quotes + buy_plans, proactive, customers | 2,243 | HIGH |
+| 6. The monolith | requisitions + parts | 3,763 | HIGHEST |
+
+### Cross-domain Dependencies
+- `quotes ↔ buy_plans` — bidirectional (build buy plan from quote, add offer to quote)
+- `requisitions ↔ parts` — bidirectional (tab switching, UI state)
+- `proactive → quotes` — one-way (convert match to quote)
+- All → `htmx_shared` — shared helpers
 
 ---
 
 ## Execution Strategy
 
-Phases 1-3 can run in parallel (independent). Phase 4 is the largest and should run after Phase 1-3 to avoid merge conflicts with security fixes in htmx_views.py.
+**Phase 1 (security) + Phase 2 (data model)** can run in parallel — independent files.
 
-**Awaiting research agent results to fill in exact code locations and decomposition map.**
+**Phase 3 (test isolation)** — depends on Phase 1-2 landing cleanly.
+
+**Phase 4 (htmx decomposition)** — runs after Phases 1-3 since security fixes touch htmx_views.py. Each extraction phase is a separate commit with full test verification.
+
+### Estimated Scope
+- Phase 1: 3 security fixes (~2 hours)
+- Phase 2: 3 migrations (~1 hour)
+- Phase 3: ~30 test fixes (~2 hours)
+- Phase 4: 6 extraction phases (~8 hours across multiple sessions)
