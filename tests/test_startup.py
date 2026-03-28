@@ -298,13 +298,15 @@ class TestBackfillProactiveOfferQty:
     @patch("app.startup.engine")
     def test_handles_error_gracefully(self, mock_engine):
         """Catches and logs exceptions during backfill."""
+        from sqlalchemy.exc import OperationalError
+
         from app.startup import _backfill_proactive_offer_qty
 
         mock_conn = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_engine.connect.return_value = mock_conn
-        mock_conn.execute.side_effect = RuntimeError("DB gone")
+        mock_conn.execute.side_effect = OperationalError("select", {}, Exception("DB gone"))
         mock_conn.rollback = MagicMock()
 
         _backfill_proactive_offer_qty()

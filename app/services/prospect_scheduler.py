@@ -148,7 +148,7 @@ async def job_discover_prospects() -> dict:
             explorium_count = len(results)
             db.commit()
         except Exception as e:
-            logger.error("Explorium discovery failed: {}", e)
+            logger.exception("Explorium discovery failed: {}", e)
             db.rollback()
 
         # Email mining (always runs)
@@ -165,7 +165,7 @@ async def job_discover_prospects() -> dict:
             email_count = len(email_results)
             db.commit()
         except Exception as e:
-            logger.error("Email mining failed: {}", e)
+            logger.exception("Email mining failed: {}", e)
             db.rollback()
 
         # Update batch record
@@ -190,7 +190,7 @@ async def job_discover_prospects() -> dict:
         return summary
 
     except Exception as e:
-        logger.error("Discovery job failed: {}", e)
+        logger.exception("Discovery job failed: {}", e)
         db.rollback()
         return {"error": str(e)}
     finally:
@@ -213,7 +213,7 @@ async def job_enrich_pool() -> dict:
         logger.info("Pool enrichment complete: {}", result)
         return result
     except Exception as e:
-        logger.error("Pool enrichment failed: {}", e)
+        logger.exception("Pool enrichment failed: {}", e)
         return {"error": str(e)}
 
 
@@ -239,7 +239,7 @@ async def job_find_contacts() -> dict:
         )
         return result
     except Exception as e:
-        logger.error("Contact enrichment failed: {}", e)
+        logger.exception("Contact enrichment failed: {}", e)
         return {"error": str(e)}
 
 
@@ -315,7 +315,7 @@ async def job_refresh_scores() -> dict:
         return summary
 
     except Exception as e:
-        logger.error("Score refresh failed: {}", e)
+        logger.exception("Score refresh failed: {}", e)
         if db:
             db.rollback()
         return {"error": str(e)}
@@ -404,7 +404,7 @@ async def job_expire_and_resurface() -> dict:
         return summary
 
     except Exception as e:
-        logger.error("Expire/resurface failed: {}", e)
+        logger.exception("Expire/resurface failed: {}", e)
         if db:
             db.rollback()
         return {"error": str(e)}
@@ -491,7 +491,7 @@ async def job_pool_health_report() -> dict:
         return report
 
     except Exception as e:
-        logger.error("Pool health report failed: {}", e)
+        logger.exception("Pool health report failed: {}", e)
         return {"error": str(e)}
     finally:
         if db:

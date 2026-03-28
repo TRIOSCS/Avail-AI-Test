@@ -541,7 +541,7 @@ class EmailMiner:
                 self.db.flush()
             except Exception:
                 self.db.rollback()
-                logger.error("Failed to flush email mining dedup records", exc_info=True)
+                logger.warning("Email mining dedup records flush failed", exc_info=True)
 
         return {
             "messages_scanned": len(messages),

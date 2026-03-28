@@ -13,6 +13,7 @@ import re as _re
 
 from loguru import logger
 from sqlalchemy import text as sqltext
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from .database import SessionLocal, engine
 
@@ -181,7 +182,7 @@ def _exec(conn, stmt: str, params: dict | None = None) -> None:  # noqa: S603
     try:
         conn.execute(sqltext(stmt), params or {})
         conn.commit()
-    except Exception as e:
+    except (SQLAlchemyError, DBAPIError) as e:
         logger.warning("DDL failed: %s", e)
         conn.rollback()
 
@@ -386,7 +387,7 @@ def _seed_site_contacts(conn) -> None:
         )
         conn.commit()
         logger.info("Seeded site_contacts from existing customer_sites data")
-    except Exception as e:
+    except (SQLAlchemyError, DBAPIError) as e:
         logger.warning("Seed site_contacts failed: %s", e)
         conn.rollback()
 
@@ -428,7 +429,7 @@ def _backfill_normalized_mpn() -> None:
                     break
             if total_reqs:
                 logger.info("Backfilled normalized_mpn on %d requirements", total_reqs)
-        except Exception as e:
+        except (SQLAlchemyError, DBAPIError) as e:
             logger.warning("Backfill requirements.normalized_mpn failed: %s", e)
             conn.rollback()
 
@@ -482,7 +483,7 @@ def _backfill_normalized_mpn() -> None:
                 total_updated += len(batch)
             if total_updated:
                 logger.info("Backfilled normalized_mpn on %d material_cards", total_updated)
-        except Exception as e:
+        except (SQLAlchemyError, DBAPIError) as e:
             logger.warning("Backfill material_cards.normalized_mpn failed: %s", e)
             conn.rollback()
 
@@ -518,7 +519,7 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
                     break
             if total_sightings:
                 logger.info("Backfilled normalized_mpn on %d sightings", total_sightings)
-        except Exception as e:
+        except (SQLAlchemyError, DBAPIError) as e:
             logger.warning("Backfill sightings.normalized_mpn failed: %s", e)
             conn.rollback()
 
@@ -550,7 +551,7 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
                     break
             if total_offers:
                 logger.info("Backfilled normalized_mpn on %d offers", total_offers)
-        except Exception as e:
+        except (SQLAlchemyError, DBAPIError) as e:
             logger.warning("Backfill offers.normalized_mpn failed: %s", e)
             conn.rollback()
 
@@ -563,7 +564,7 @@ def _backfill_sighting_vendor_normalized() -> None:
         # Check column exists first
         try:
             conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings LIMIT 0"))
-        except Exception:
+        except (SQLAlchemyError, DBAPIError):
             conn.rollback()
             return  # Column not yet created
 
@@ -956,7 +957,7 @@ def seed_api_sources() -> None:
                 src.monthly_quota = quota
 
         db.commit()
-    except Exception as e:
+    except (SQLAlchemyError, DBAPIError) as e:
         logger.warning("API source seed error: %s", e)
         db.rollback()
     finally:

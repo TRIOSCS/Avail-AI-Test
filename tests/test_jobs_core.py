@@ -750,8 +750,10 @@ def test_inbox_scan_safe_scan_timeout_commit_exception(scheduler_db, test_user):
     commit_count = [0]
 
     def _fail_recovery_commit():
+        from sqlalchemy.exc import OperationalError
+
         commit_count[0] += 1
-        raise Exception("commit during timeout recovery failed")
+        raise OperationalError("commit", {}, Exception("commit during timeout recovery failed"))
 
     with (
         patch("app.jobs.email_jobs._scan_user_inbox", new_callable=AsyncMock) as mock_scan,

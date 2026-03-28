@@ -742,6 +742,8 @@ class TestProcessInboundFieldUpdates:
 class TestVendorContactFlushConflict:
     def test_flush_conflict_returns_none(self, db_session, test_user):
         """Line 162-165: flush conflict during new contact creation rolls back and returns None."""
+        import sqlalchemy.exc
+
         card = _make_card(db_session, "FlushCo", "flushco.com")
         db_session.commit()
 
@@ -761,7 +763,7 @@ class TestVendorContactFlushConflict:
                     from app.models import VendorContact as VC
 
                     if isinstance(obj, VC):
-                        raise Exception("Duplicate key constraint")
+                        raise sqlalchemy.exc.IntegrityError("insert", {}, Exception("Duplicate key constraint"))
             return original_flush(*args, **kwargs)
 
         with (
@@ -792,6 +794,8 @@ class TestVendorContactFlushConflict:
 class TestActivityLogFlushError:
     def test_activity_flush_error_still_returns_contact(self, db_session, test_user):
         """Lines 187-189: ActivityLog flush error is caught; contact is still returned."""
+        import sqlalchemy.exc
+
         card = _make_card(db_session, "ActFlush", "actflush.com")
         db_session.commit()
 
@@ -804,7 +808,7 @@ class TestActivityLogFlushError:
             flush_count += 1
             # First flush creates VendorContact, second flush creates ActivityLog
             if flush_count == 2:
-                raise Exception("Activity flush error")
+                raise sqlalchemy.exc.OperationalError("flush", {}, Exception("Activity flush error"))
             return original_flush(*args, **kwargs)
 
         with (
@@ -837,13 +841,15 @@ class TestActivityLogFlushError:
 class TestPipelineEventFlushError:
     def test_flush_error_returns_none(self, db_session, test_user):
         """Lines 270-273: pipeline event flush error returns None."""
+        import sqlalchemy.exc
+
         card = _make_card(db_session, "PipeFlush", "pipeflush.com")
         db_session.commit()
 
         original_flush = db_session.flush
 
         def bad_flush(*args, **kwargs):
-            raise Exception("Flush error")
+            raise sqlalchemy.exc.OperationalError("flush", {}, Exception("Flush error"))
 
         db_session.flush = bad_flush
         al = log_pipeline_event(
@@ -999,6 +1005,8 @@ class TestComputeScoresFlushErrors:
 
     def test_batch_flush_error(self, db_session, test_user):
         """Lines 497-504: error during batch flush increments skipped count."""
+        import sqlalchemy.exc
+
         card = _make_card(db_session, "FlushErr", "flusherr.com")
         for i in range(501):
             _make_contact(db_session, card, f"c{i}@flusherr.com", full_name=f"Contact {i}")
@@ -1011,7 +1019,7 @@ class TestComputeScoresFlushErrors:
             flush_counter["count"] += 1
             # The first flush is the batch flush after 500 contacts
             if flush_counter["count"] == 1:
-                raise Exception("Batch flush error")
+                raise sqlalchemy.exc.OperationalError("flush", {}, Exception("Batch flush error"))
             return original_flush(*args, **kwargs)
 
         db_session.flush = selective_flush
@@ -1023,6 +1031,8 @@ class TestComputeScoresFlushErrors:
 
     def test_final_flush_error(self, db_session, test_user):
         """Lines 510-513: error during final flush increments skipped count."""
+        import sqlalchemy.exc
+
         card = _make_card(db_session, "FinalFlush", "finalflush.com")
         for i in range(3):
             _make_contact(db_session, card, f"ff{i}@finalflush.com", full_name=f"FF {i}")
@@ -1031,7 +1041,7 @@ class TestComputeScoresFlushErrors:
         original_flush = db_session.flush
 
         def always_fail_flush(*args, **kwargs):
-            raise Exception("Final flush error")
+            raise sqlalchemy.exc.OperationalError("flush", {}, Exception("Final flush error"))
 
         # Replace flush to always fail - the final flush should trigger lines 510-513
         db_session.flush = always_fail_flush
@@ -1046,6 +1056,8 @@ class TestComputeScoresFlushErrors:
 
     def test_commit_error(self, db_session, test_user):
         """Lines 517-519: error during commit rolls back."""
+        import sqlalchemy.exc
+
         card = _make_card(db_session, "CommitErr", "commiterr.com")
         _make_contact(db_session, card, "ce@commiterr.com", full_name="CE")
         db_session.commit()
@@ -1053,7 +1065,7 @@ class TestComputeScoresFlushErrors:
         original_commit = db_session.commit
 
         def fail_commit(*args, **kwargs):
-            raise Exception("Commit error")
+            raise sqlalchemy.exc.OperationalError("commit", {}, Exception("Commit error"))
 
         db_session.commit = fail_commit
         result = compute_all_contact_scores(db_session)

@@ -105,7 +105,7 @@ class NcSessionManager:
             )
             is_auth = resp.status_code == 200 and "true" in resp.text.lower()
             return is_auth
-        except Exception as e:
+        except (requests.RequestException, OSError) as e:
             logger.warning("NC session health check failed: {}", e)
             return False
 
@@ -157,7 +157,7 @@ class NcSessionManager:
                 logger.error("NC login: failed (status={})", resp.status_code)
             return self.is_logged_in
 
-        except Exception as e:
+        except (requests.RequestException, OSError, ValueError, KeyError) as e:
             logger.error("NC login: exception: {}", e)
             self.is_logged_in = False
             return False
@@ -209,7 +209,7 @@ class NcSessionManager:
                 logger.error("NC login: failed (browser)")
             return self.is_logged_in
 
-        except Exception as e:
+        except (OSError, TimeoutError, ValueError) as e:
             logger.error("NC login (browser): exception: {}", e)
             self.is_logged_in = False
             return False
@@ -226,7 +226,7 @@ class NcSessionManager:
         """Close HTTP session and browser if running."""
         try:
             self.session.close()
-        except Exception:
+        except OSError:
             pass
         self.is_logged_in = False
 
@@ -237,7 +237,7 @@ class NcSessionManager:
                 await self._context.close()
             if self._playwright:
                 await self._playwright.stop()
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             logger.warning("NC session browser stop error: {}", e)
         finally:
             self._context = None

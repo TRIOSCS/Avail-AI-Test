@@ -156,7 +156,7 @@ async def _job_refresh_insights():
             logger.error("MPN insight refresh failed: {}", e)
 
     except Exception as e:
-        logger.error("refresh_active_insights job failed: {}", e)
+        logger.exception("refresh_active_insights job failed: {}", e)
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
@@ -195,7 +195,7 @@ async def _job_expire_stale():
         total = db.query(KnowledgeEntry).count()
         logger.info("Knowledge entries: {} total, {} expired", total, expired_count)
     except Exception as e:
-        logger.error("expire_stale job failed: {}", e)
+        logger.exception("expire_stale job failed: {}", e)
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()

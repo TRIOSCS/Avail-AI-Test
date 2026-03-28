@@ -7,6 +7,8 @@ Depends on: app.database, app.models, app.email_service, app.services.webhook_se
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+import httpx
+import sqlalchemy.exc
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
@@ -65,8 +67,12 @@ async def _job_auto_archive():
         if archived_count:
             db.commit()
             logger.info(f"Auto-archived {archived_count} stale requisition(s)")
+    except (sqlalchemy.exc.OperationalError, sqlalchemy.exc.IntegrityError) as e:
+        logger.error(f"Auto-archive DB error: {e}")
+        db.rollback()
+        raise
     except Exception as e:
-        logger.error(f"Auto-archive error: {e}")
+        logger.exception(f"Auto-archive unexpected error: {e}")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
@@ -95,8 +101,11 @@ async def _job_token_refresh():
 
             if needs_refresh:
                 users_to_refresh.append(user.id)
+    except sqlalchemy.exc.OperationalError as e:
+        logger.error(f"Token refresh job DB error: {e}")
+        raise
     except Exception as e:
-        logger.error(f"Token refresh job error: {e}")
+        logger.exception(f"Token refresh job error: {e}")
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         selector_db.close()
@@ -123,7 +132,7 @@ async def _job_token_refresh():
                         return
                 await refresh_user_token(user, task_db)
             except Exception as e:
-                logger.error(f"Token refresh error for user {user_id}: {e}")
+                logger.exception(f"Token refresh error for user {user_id}: {e}")
                 task_db.rollback()
                 try:
                     user = task_db.get(User, user_id)
@@ -171,8 +180,11 @@ async def _job_inbox_scan():
             if should_scan:
                 # Detach user data we need so we can close this session
                 users_to_scan.append(user.id)
+    except sqlalchemy.exc.OperationalError as e:
+        logger.error(f"Inbox scan DB error: {e}")
+        raise
     except Exception as e:
-        logger.error(f"Inbox scan job error: {e}")
+        logger.exception(f"Inbox scan job error: {e}")
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
@@ -196,18 +208,18 @@ async def _job_inbox_scan():
                     if user:
                         user.m365_error_reason = "Inbox scan timed out"
                         scan_db.commit()
-                except Exception:
+                except sqlalchemy.exc.SQLAlchemyError:
                     scan_db.rollback()
                     logger.warning("Inbox scan timeout commit failed", exc_info=True)
             except Exception as e:
-                logger.error(f"Inbox scan error for user {user_id}: {e}")
+                logger.exception(f"Inbox scan error for user {user_id}: {e}")
                 scan_db.rollback()
                 try:
                     user = scan_db.get(User, user_id)
                     if user:
                         user.m365_error_reason = str(e)[:255]
                         scan_db.commit()
-                except Exception:
+                except sqlalchemy.exc.SQLAlchemyError:
                     scan_db.rollback()
             finally:
                 scan_db.close()
@@ -232,14 +244,14 @@ async def _job_batch_results():
         logger.error("Batch results processing timed out (120s)")
         raise  # Re-raise so _traced_job / Sentry can capture
     except Exception as e:
-        logger.error(f"Batch results processing error: {e}")
+        logger.exception(f"Batch results processing error: {e}")
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         # process_batch_results handles its own commit/rollback per batch;
         # rollback here only cleans up any uncommitted leftovers safely
         try:
             db.rollback()
-        except Exception:
+        except sqlalchemy.exc.SQLAlchemyError:
             logger.debug("Batch results cleanup rollback", exc_info=True)
         db.close()
 
@@ -261,7 +273,7 @@ async def _job_batch_parse_signatures():
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     except Exception as e:
-        logger.error(f"Signature batch parse error: {e}")
+        logger.exception(f"Signature batch parse error: {e}")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
@@ -284,7 +296,7 @@ async def _job_poll_signature_batch():
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     except Exception as e:
-        logger.error(f"Signature batch poll error: {e}")
+        logger.exception(f"Signature batch poll error: {e}")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
@@ -305,8 +317,12 @@ async def _job_webhook_subscriptions():
 
         await renew_expiring_subscriptions(db)
         await ensure_all_users_subscribed(db)
+    except (httpx.HTTPError, httpx.TimeoutException) as e:
+        logger.error(f"Webhook subscription HTTP error: {e}")
+        db.rollback()
+        raise
     except Exception as e:
-        logger.error(f"Webhook subscription error: {e}")
+        logger.exception(f"Webhook subscription error: {e}")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:

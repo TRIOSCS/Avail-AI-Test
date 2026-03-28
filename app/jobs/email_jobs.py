@@ -16,6 +16,8 @@ import re
 from collections.abc import Callable
 from datetime import datetime, timedelta, timezone
 
+import httpx
+import sqlalchemy.exc
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
@@ -106,7 +108,7 @@ async def _job_contacts_sync():
             if should_sync:
                 user_ids.append(user.id)
     except Exception as e:
-        logger.error(f"Contacts sync job error: {e}")
+        logger.exception(f"Contacts sync job error: {e}")
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
@@ -140,7 +142,7 @@ async def _job_ownership_sweep():
 
         await run_ownership_sweep(db)
     except Exception as e:
-        logger.error(f"Ownership sweep error: {e}")
+        logger.exception(f"Ownership sweep error: {e}")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
@@ -158,7 +160,7 @@ async def _job_site_ownership_sweep():
 
         await asyncio.get_running_loop().run_in_executor(None, run_site_ownership_sweep, db)
     except Exception as e:
-        logger.error(f"Site ownership sweep error: {e}")
+        logger.exception(f"Site ownership sweep error: {e}")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
@@ -185,7 +187,7 @@ async def _job_contact_scoring():
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     except Exception as e:
-        logger.error(f"Contact scoring error: {e}")
+        logger.exception(f"Contact scoring error: {e}")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
@@ -267,7 +269,7 @@ async def _job_contact_status_compute():
         db.commit()
         logger.info(f"Contact status compute: {updated} contacts updated out of {len(contacts)}")
     except Exception as e:
-        logger.error(f"Contact status compute error: {e}")
+        logger.exception(f"Contact status compute error: {e}")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
@@ -292,7 +294,7 @@ async def _job_email_health_update():
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     except Exception as e:
-        logger.error(f"Email health update error: {e}")
+        logger.exception(f"Email health update error: {e}")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
@@ -312,7 +314,7 @@ async def _job_calendar_scan():
         users = db.query(User).filter(User.refresh_token.isnot(None)).all()
         users_to_scan = [u for u in users if u.access_token and u.m365_connected]
     except Exception as e:
-        logger.error(f"Calendar scan user query error: {e}")
+        logger.exception(f"Calendar scan user query error: {e}")
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
@@ -339,7 +341,7 @@ async def _job_calendar_scan():
                 logger.warning(f"Calendar scan TIMEOUT for user {user_id}")
                 scan_db.rollback()
             except Exception as e:
-                logger.error(f"Calendar scan error for user {user_id}: {e}")
+                logger.exception(f"Calendar scan error for user {user_id}: {e}")
                 scan_db.rollback()
             finally:
                 scan_db.close()
@@ -364,7 +366,7 @@ async def _job_email_reverification():
             result.get("invalidated", 0),
         )
     except Exception as e:
-        logger.error(f"Email re-verification error: {e}")
+        logger.exception(f"Email re-verification error: {e}")
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
@@ -400,8 +402,10 @@ async def _scan_user_inbox(user, db):
         if new_responses:
             logger.info(f"Inbox scan [{user.email}]: {len(new_responses)} new responses")
         poll_succeeded = True
+    except (httpx.HTTPError, httpx.TimeoutException) as e:
+        logger.error(f"Inbox poll HTTP error for {user.email}: {e}")
     except Exception as e:
-        logger.error(f"Inbox poll failed for {user.email}: {e}")
+        logger.exception(f"Inbox poll failed for {user.email}: {e}")
 
     # Use sequential sub-operations on a single session to avoid concurrent
     # access to the same SQLAlchemy Session object.
@@ -416,7 +420,7 @@ async def _scan_user_inbox(user, db):
         try:
             await fn()
         except Exception as e:
-            logger.error("Sub-op %s failed for %s: %s", name, user.email, e)
+            logger.exception("Sub-op %s failed for %s: %s", name, user.email, e)
             sub_op_failures.append(name)
 
     if sub_op_failures:
@@ -561,7 +565,7 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
             try:
                 db.flush()
                 card_map[norm] = card
-            except Exception as e:
+            except sqlalchemy.exc.IntegrityError as e:
                 logger.warning(f"VendorCard flush conflict for '{norm}': {e}")
                 db.rollback()
                 continue
@@ -577,7 +581,7 @@ async def _mine_vendor_contacts(user, db, is_backfill: bool = False):
         db.commit()
         if enriched:
             logger.info(f"Contact mining [{user.email}]: enriched {enriched} contacts")
-    except Exception as e:
+    except sqlalchemy.exc.SQLAlchemyError as e:
         logger.error(f"Contact mining commit failed for {user.email}: {e}")
         db.rollback()
 
@@ -634,7 +638,7 @@ async def _scan_outbound_rfqs(user, db, is_backfill: bool = False):
         db.commit()
         if updated:
             logger.info(f"Outbound scan [{user.email}]: {rfqs} RFQs, {updated} vendor cards updated")
-    except Exception as e:
+    except sqlalchemy.exc.SQLAlchemyError as e:
         logger.error(f"Outbound scan commit failed for {user.email}: {e}")
         db.rollback()
 
@@ -739,7 +743,7 @@ async def _sync_user_contacts(user, db):
             try:
                 db.flush()
                 sync_card_map[norm] = card
-            except Exception as e:
+            except sqlalchemy.exc.IntegrityError as e:
                 logger.warning(f"VendorCard flush conflict for '{norm}': {e}")
                 db.rollback()
                 continue
@@ -759,7 +763,7 @@ async def _sync_user_contacts(user, db):
         user.last_contacts_sync = datetime.now(timezone.utc)
         db.commit()
         logger.info(f"Contacts sync [{user.email}]: {len(contacts)} contacts, {enriched} new emails")
-    except Exception as e:
+    except sqlalchemy.exc.SQLAlchemyError as e:
         logger.error(f"Contacts sync commit failed: {e}")
         db.rollback()
 
@@ -789,7 +793,7 @@ async def _job_scan_sent_folders():
         users = db.query(User).filter(User.refresh_token.isnot(None)).all()
         users_to_scan = [u.id for u in users if u.access_token and u.m365_connected]
     except Exception as e:
-        logger.error(f"Sent folder scan user query error: {e}")
+        logger.exception(f"Sent folder scan user query error: {e}")
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
@@ -805,7 +809,7 @@ async def _job_scan_sent_folders():
             logger.warning(f"Sent folder scan TIMEOUT for user {user_id}")
             scan_db.rollback()
         except Exception as e:
-            logger.error(f"Sent folder scan error for user {user_id}: {e}")
+            logger.exception(f"Sent folder scan error for user {user_id}: {e}")
             scan_db.rollback()
         finally:
             scan_db.close()
@@ -953,7 +957,7 @@ async def scan_sent_folder(user, db):
             logger.info(
                 f"Sent folder scan [{user.email}]: {len(attachment_queue)} messages queued for attachment parsing"
             )
-    except Exception as e:
+    except sqlalchemy.exc.SQLAlchemyError as e:
         logger.error(f"Sent folder scan commit failed for {user.email}: {e}")
         db.rollback()
 
