@@ -466,7 +466,7 @@ class TestFollowUps:
 
 
 class TestSendFollowUp:
-    @patch("app.routers.rfq.GraphClient")
+    @patch("app.utils.graph_client.GraphClient")
     @patch("app.routers.rfq.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
     def test_send_follow_up_with_body(
         self,
@@ -491,7 +491,7 @@ class TestSendFollowUp:
         assert resp.status_code == 200
         assert resp.json()["ok"] is True
 
-    @patch("app.routers.rfq.GraphClient")
+    @patch("app.utils.graph_client.GraphClient")
     @patch("app.routers.rfq.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
     def test_send_follow_up_default_body(
         self,
@@ -518,7 +518,7 @@ class TestSendFollowUp:
 
 
 class TestSendFollowUpBatch:
-    @patch("app.routers.rfq.GraphClient")
+    @patch("app.utils.graph_client.GraphClient")
     @patch("app.routers.rfq.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
     def test_batch_send(
         self,
@@ -553,7 +553,7 @@ class TestSendFollowUpBatch:
         resp = client.post("/api/follow-ups/send-batch", json={"contact_ids": []})
         assert resp.status_code == 400
 
-    @patch("app.routers.rfq.GraphClient")
+    @patch("app.utils.graph_client.GraphClient")
     @patch("app.routers.rfq.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
     def test_batch_with_missing_contact(
         self,
@@ -579,7 +579,7 @@ class TestSendFollowUpBatch:
         data = resp.json()
         assert data["sent"] == 1
 
-    @patch("app.routers.rfq.GraphClient")
+    @patch("app.utils.graph_client.GraphClient")
     @patch("app.routers.rfq.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
     def test_batch_graph_error(
         self,

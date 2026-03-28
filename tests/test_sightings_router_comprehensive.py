@@ -350,7 +350,7 @@ class TestSightingsRefreshBranches:
     def test_refresh_with_search_failure(self, client, db_session):
         """Refresh falls back gracefully when search_requirement fails."""
         _, r, _ = _seed(db_session)
-        with patch("app.routers.sightings.search_requirement", new_callable=AsyncMock) as mock_search:
+        with patch("app.search_service.search_requirement", new_callable=AsyncMock) as mock_search:
             mock_search.side_effect = Exception("Search API down")
             resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")
             assert resp.status_code == 200
@@ -384,7 +384,7 @@ class TestSightingsRefreshBranches:
             if call_count == 2:
                 raise Exception("fail")
 
-        with patch("app.routers.sightings.search_requirement", side_effect=_mock_search):
+        with patch("app.search_service.search_requirement", side_effect=_mock_search):
             resp = client.post(
                 "/v2/partials/sightings/batch-refresh",
                 data={"requirement_ids": json.dumps([r.id, r2.id])},
@@ -581,8 +581,8 @@ class TestSendInquiry:
         db_session.commit()
 
         with (
-            patch("app.routers.sightings.send_batch_rfq", new_callable=AsyncMock) as mock_send,
-            patch("app.routers.sightings.auto_progress_status", return_value=True),
+            patch("app.email_service.send_batch_rfq", new_callable=AsyncMock) as mock_send,
+            patch("app.services.sourcing_auto_progress.auto_progress_status", return_value=True),
             patch("app.routers.sightings.broker") as mock_broker,
         ):
             mock_send.return_value = [{"vendor": "Good Vendor", "status": "sent"}]
@@ -602,7 +602,7 @@ class TestSendInquiry:
         """Send inquiry with email service failure."""
         _, r, _ = _seed(db_session)
         with (
-            patch("app.routers.sightings.send_batch_rfq", new_callable=AsyncMock) as mock_send,
+            patch("app.email_service.send_batch_rfq", new_callable=AsyncMock) as mock_send,
             patch("app.routers.sightings.broker") as mock_broker,
         ):
             mock_send.side_effect = Exception("SMTP error")

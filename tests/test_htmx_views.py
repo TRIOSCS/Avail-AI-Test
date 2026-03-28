@@ -333,7 +333,8 @@ class TestGlobalSearch:
         assert resp.status_code == 200
 
     def test_ai_search_endpoint(self, client: TestClient):
-        with patch("app.services.global_search_service.ai_search", new_callable=AsyncMock, return_value=[]):
+        mock_result = {"best_match": None, "groups": {}, "total_count": 0}
+        with patch("app.services.global_search_service.ai_search", new_callable=AsyncMock, return_value=mock_result):
             resp = client.post("/v2/partials/search/ai", data={"q": "test search"})
             assert resp.status_code == 200
 
@@ -847,9 +848,7 @@ class TestRequisitionImport:
 
     def test_import_parse_with_text(self, client: TestClient):
         mock_result = {"requirements": [{"primary_mpn": "LM317T", "target_qty": 100}], "name": "AI Name"}
-        with patch(
-            "app.services.freeform_parser_service.parse_freeform_rfq", new_callable=AsyncMock, return_value=mock_result
-        ):
+        with patch("app.routers.htmx_views.parse_freeform_rfq", new_callable=AsyncMock, return_value=mock_result):
             resp = client.post(
                 "/v2/partials/requisitions/import-parse",
                 data={"name": "", "raw_text": "LM317T 100pcs"},
@@ -862,9 +861,7 @@ class TestRequisitionImport:
             "name": "AI Name",
             "customer_name": "AI Customer",
         }
-        with patch(
-            "app.services.freeform_parser_service.parse_freeform_rfq", new_callable=AsyncMock, return_value=mock_result
-        ):
+        with patch("app.routers.htmx_views.parse_freeform_rfq", new_callable=AsyncMock, return_value=mock_result):
             resp = client.post(
                 "/v2/partials/requisitions/import-parse?format=json",
                 data={"name": "", "raw_text": "LM317T 100pcs"},
@@ -1178,7 +1175,7 @@ class TestVendorTabs:
     def test_tab_sightings(self, client: TestClient, db_session: Session):
         vc = _make_vendor_card(db_session)
         db_session.commit()
-        resp = client.get(f"/v2/partials/vendors/{vc.id}/tab/sightings")
+        resp = client.get(f"/v2/partials/vendors/{vc.id}/tab/overview")
         assert resp.status_code == 200
 
     def test_tab_offers(self, client: TestClient, db_session: Session):
@@ -1397,8 +1394,9 @@ class TestSettings:
         resp = client.get("/v2/partials/settings/sources")
         assert resp.status_code == 200
 
-    def test_settings_system_admin(self, client: TestClient):
-        # test_user is overridden as admin via conftest
+    def test_settings_system_admin(self, client: TestClient, test_user: User, db_session: Session):
+        test_user.role = "admin"
+        db_session.commit()
         with patch("app.services.admin_service.get_all_config", return_value={}):
             resp = client.get("/v2/partials/settings/system")
             assert resp.status_code == 200
@@ -1411,7 +1409,9 @@ class TestSettings:
         resp = client.post("/api/user/toggle-8x8")
         assert resp.status_code == 200
 
-    def test_settings_data_ops(self, client: TestClient):
+    def test_settings_data_ops(self, client: TestClient, test_user: User, db_session: Session):
+        test_user.role = "admin"
+        db_session.commit()
         with patch("app.vendor_utils.find_vendor_dedup_candidates", return_value=[]):
             with patch("app.company_utils.find_company_dedup_candidates", return_value=[]):
                 resp = client.get("/v2/partials/settings/data-ops")
@@ -1511,11 +1511,11 @@ class TestOfferEndpoints:
 
     def test_review_offer(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_requisition(db_session, test_user)
-        offer = _make_offer(db_session, req, test_user, status=OfferStatus.NEEDS_REVIEW)
+        offer = _make_offer(db_session, req, test_user, status=OfferStatus.PENDING_REVIEW)
         db_session.commit()
         resp = client.post(
             f"/v2/partials/requisitions/{req.id}/offers/{offer.id}/review",
-            data={"action": "accept"},
+            data={"action": "approve"},
         )
         assert resp.status_code == 200
 
@@ -1788,7 +1788,7 @@ class TestPartHeader:
         req = _make_requisition(db_session, test_user)
         item = _make_requirement(db_session, req)
         db_session.commit()
-        resp = client.get(f"/v2/partials/parts/{item.id}/header/edit/mpn")
+        resp = client.get(f"/v2/partials/parts/{item.id}/header/edit/brand")
         assert resp.status_code == 200
 
     def test_header_save(self, client: TestClient, db_session: Session, test_user: User):
@@ -1797,7 +1797,7 @@ class TestPartHeader:
         db_session.commit()
         resp = client.patch(
             f"/v2/partials/parts/{item.id}/header",
-            data={"field": "mpn", "value": "NE555P"},
+            data={"field": "brand", "value": "Texas Instruments"},
         )
         assert resp.status_code == 200
 
@@ -1916,7 +1916,7 @@ class TestPartArchive:
         db_session.commit()
         resp = client.post(
             "/v2/partials/parts/bulk-archive",
-            data={"ids": str(item.id)},
+            json={"requirement_ids": [item.id], "requisition_ids": []},
         )
         assert resp.status_code == 200
 
@@ -1926,7 +1926,7 @@ class TestPartArchive:
         db_session.commit()
         resp = client.post(
             "/v2/partials/parts/bulk-unarchive",
-            data={"ids": str(item.id)},
+            json={"requirement_ids": [item.id], "requisition_ids": []},
         )
         assert resp.status_code == 200
 
@@ -1947,9 +1947,8 @@ class TestKnowledge:
         resp = client.post(
             "/v2/partials/knowledge",
             data={
-                "title": "Test Knowledge",
-                "body": "Some knowledge content",
-                "category": "general",
+                "content": "Some knowledge content",
+                "entry_type": "note",
             },
         )
         assert resp.status_code == 200
@@ -1967,24 +1966,28 @@ class TestAdminEndpoints:
         resp = client.get("/v2/partials/admin/api-health")
         assert resp.status_code == 200
 
-    def test_vendor_merge(self, client: TestClient, db_session: Session):
+    def test_vendor_merge(self, client: TestClient, db_session: Session, test_user: User):
+        test_user.role = "admin"
+        db_session.commit()
         v1 = _make_vendor_card(db_session, normalized_name="vendor_a", display_name="Vendor A")
         v2 = _make_vendor_card(db_session, normalized_name="vendor_b", display_name="Vendor B")
         db_session.commit()
-        with patch("app.services.merge_service.merge_vendors") as mock_merge:
-            mock_merge.return_value = {"merged": True}
+        with patch("app.services.vendor_merge_service.merge_vendor_cards") as mock_merge:
+            mock_merge.return_value = {"kept_name": "Vendor A", "reassigned": 0}
             resp = client.post(
                 "/v2/partials/admin/vendor-merge",
                 data={"keep_id": str(v1.id), "remove_id": str(v2.id)},
             )
             assert resp.status_code == 200
 
-    def test_company_merge(self, client: TestClient, db_session: Session):
+    def test_company_merge(self, client: TestClient, db_session: Session, test_user: User):
+        test_user.role = "admin"
+        db_session.commit()
         c1 = _make_company(db_session, name="Company A")
         c2 = _make_company(db_session, name="Company B")
         db_session.commit()
-        with patch("app.services.merge_service.merge_companies") as mock_merge:
-            mock_merge.return_value = {"merged": True}
+        with patch("app.services.company_merge_service.merge_companies") as mock_merge:
+            mock_merge.return_value = {"kept_name": "Company A"}
             resp = client.post(
                 "/v2/partials/admin/company-merge",
                 data={"keep_id": str(c1.id), "remove_id": str(c2.id)},

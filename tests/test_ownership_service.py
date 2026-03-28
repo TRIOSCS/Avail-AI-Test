@@ -986,8 +986,8 @@ class TestSendWarningAlert:
         mock_gc.post_json = AsyncMock()
 
         with (
-            patch("app.services.ownership_service.get_valid_token", AsyncMock(return_value="token-123")),
-            patch("app.services.ownership_service.GraphClient", return_value=mock_gc),
+            patch("app.scheduler.get_valid_token", AsyncMock(return_value="token-123")),
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
             patch("app.services.ownership_service.settings") as mock_settings,
         ):
             mock_settings.app_url = "http://localhost:8000"
@@ -1020,7 +1020,7 @@ class TestSendWarningAlert:
         db_session.commit()
 
         with (
-            patch("app.services.ownership_service.get_valid_token", AsyncMock(return_value=None)),
+            patch("app.scheduler.get_valid_token", AsyncMock(return_value=None)),
             patch("app.services.ownership_service.settings") as mock_settings,
         ):
             mock_settings.app_url = "http://localhost:8000"
@@ -1042,8 +1042,8 @@ class TestSendWarningAlert:
         mock_gc.post_json = AsyncMock(side_effect=RuntimeError("Graph API error"))
 
         with (
-            patch("app.services.ownership_service.get_valid_token", AsyncMock(return_value="token-123")),
-            patch("app.services.ownership_service.GraphClient", return_value=mock_gc),
+            patch("app.scheduler.get_valid_token", AsyncMock(return_value="token-123")),
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
             patch("app.services.ownership_service.settings") as mock_settings,
         ):
             mock_settings.app_url = "http://localhost:8000"
@@ -1089,8 +1089,8 @@ class TestSendManagerDigestEmail:
 
         with (
             patch("app.services.ownership_service.settings") as mock_settings,
-            patch("app.services.ownership_service.get_valid_token", AsyncMock(return_value="token-123")),
-            patch("app.services.ownership_service.GraphClient", return_value=mock_gc),
+            patch("app.scheduler.get_valid_token", AsyncMock(return_value="token-123")),
+            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
         ):
             mock_settings.customer_inactivity_days = 30
             mock_settings.strategic_inactivity_days = 90

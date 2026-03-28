@@ -242,7 +242,7 @@ class TestEnrichMaterial:
 
 
 class TestDeleteMaterial:
-    @patch("app.routers.materials.log_audit")
+    @patch("app.services.audit_service.log_audit")
     def test_delete(self, mock_audit, client: TestClient, db_session: Session, test_material_card: MaterialCard):
         resp = client.delete(f"/api/materials/{test_material_card.id}")
         assert resp.status_code == 200
@@ -256,7 +256,7 @@ class TestDeleteMaterial:
         resp = client.delete("/api/materials/99999")
         assert resp.status_code == 404
 
-    @patch("app.routers.materials.log_audit")
+    @patch("app.services.audit_service.log_audit")
     def test_delete_already_deleted(self, mock_audit, client: TestClient, db_session: Session):
         card = MaterialCard(
             normalized_mpn="deldel",
@@ -273,7 +273,7 @@ class TestDeleteMaterial:
 
 
 class TestRestoreMaterial:
-    @patch("app.routers.materials.log_audit")
+    @patch("app.services.audit_service.log_audit")
     def test_restore(self, mock_audit, client: TestClient, db_session: Session):
         card = MaterialCard(
             normalized_mpn="restme",
@@ -292,7 +292,7 @@ class TestRestoreMaterial:
         resp = client.post("/api/materials/99999/restore")
         assert resp.status_code == 404
 
-    @patch("app.routers.materials.log_audit")
+    @patch("app.services.audit_service.log_audit")
     def test_restore_not_deleted(self, mock_audit, client: TestClient, test_material_card: MaterialCard):
         resp = client.post(f"/api/materials/{test_material_card.id}/restore")
         assert resp.status_code == 400
@@ -364,7 +364,7 @@ class TestQuickSearch:
         resp = client.post("/api/quick-search", json={"mpn": "X"})
         assert resp.status_code == 400
 
-    @patch("app.routers.materials.quick_search_mpn")
+    @patch("app.search_service.quick_search_mpn")
     def test_success(self, mock_qs, client: TestClient):
         mock_qs.return_value = {"results": [], "material_card_id": 1}
         resp = client.post("/api/quick-search", json={"mpn": "LM317T"})
@@ -407,8 +407,8 @@ class TestImportStockList:
         )
         assert resp.status_code == 400
 
-    @patch("app.routers.materials.parse_tabular_file")
-    @patch("app.routers.materials.normalize_stock_row")
+    @patch("app.file_utils.parse_tabular_file")
+    @patch("app.file_utils.normalize_stock_row")
     @patch("app.routers.materials.record_price_snapshot")
     @patch("app.routers.materials.get_credential_cached", return_value=None)
     def test_import_success(
@@ -434,8 +434,8 @@ class TestImportStockList:
         assert data["imported_rows"] == 1
         assert data["vendor_name"] == "Test Vendor"
 
-    @patch("app.routers.materials.parse_tabular_file")
-    @patch("app.routers.materials.normalize_stock_row")
+    @patch("app.file_utils.parse_tabular_file")
+    @patch("app.file_utils.normalize_stock_row")
     @patch("app.routers.materials.record_price_snapshot")
     @patch("app.routers.materials.get_credential_cached", return_value=None)
     def test_import_updates_existing_mvh(
@@ -484,8 +484,8 @@ class TestImportStockList:
         assert mvh.times_seen == 2
         assert mvh.last_qty == 200
 
-    @patch("app.routers.materials.parse_tabular_file")
-    @patch("app.routers.materials.normalize_stock_row", return_value=None)
+    @patch("app.file_utils.parse_tabular_file")
+    @patch("app.file_utils.normalize_stock_row", return_value=None)
     @patch("app.routers.materials.get_credential_cached", return_value=None)
     def test_import_skips_bad_rows(
         self,

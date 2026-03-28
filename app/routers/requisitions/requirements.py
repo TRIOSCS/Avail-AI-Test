@@ -20,7 +20,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ...constants import TaskStatus
-from ...database import get_db
+from ...database import SessionLocal, get_db
 from ...dependencies import get_req_for_user, require_buyer, require_user
 from ...models import (
     ChangeLog,
@@ -44,6 +44,9 @@ from ...schemas.requisitions import (
     SightingUnavailableIn,
 )
 from ...schemas.sourcing_leads import LeadDetailOut, LeadFeedbackIn, LeadOut, LeadStatusUpdateIn
+from ...search_service import resolve_material_card
+from ...services.ics_worker.queue_manager import enqueue_for_ics_search
+from ...services.nc_worker.queue_manager import enqueue_for_nc_search
 from ...services.sourcing_leads import (
     append_lead_feedback,
     attach_lead_metadata_to_results,
@@ -210,10 +213,6 @@ def _attach_lead_data(requirements: list[Requirement], results: dict, db: Sessio
 
 def _enqueue_ics_nc_batch(requirement_ids: list[int]):
     """Queue requirements for ICS and NC browser-based searches (background task)."""
-    from ...database import SessionLocal
-    from ...services.ics_worker.queue_manager import enqueue_for_ics_search
-    from ...services.nc_worker.queue_manager import enqueue_for_nc_search
-
     bg_db = SessionLocal()
     try:
         for rid in requirement_ids:
@@ -382,8 +381,6 @@ async def add_requirements(
             if key and key not in seen_keys:
                 seen_keys.add(key)
                 deduped_subs.append(s)
-        from ...search_service import resolve_material_card
-
         mat_card = None
         try:
             nested = db.begin_nested()
@@ -439,9 +436,6 @@ async def add_requirements(
 
     # NC enqueue
     def _nc_enqueue_batch(requirement_ids: list[int]):
-        from ...database import SessionLocal
-        from ...services.nc_worker.queue_manager import enqueue_for_nc_search
-
         bg_db = SessionLocal()
         try:
             for rid in requirement_ids:
@@ -454,9 +448,6 @@ async def add_requirements(
 
     # ICS enqueue
     def _ics_enqueue_batch(requirement_ids: list[int]):
-        from ...database import SessionLocal
-        from ...services.ics_worker.queue_manager import enqueue_for_ics_search
-
         bg_db = SessionLocal()
         try:
             for rid in requirement_ids:
@@ -473,7 +464,6 @@ async def add_requirements(
     def _bg_full_search(requirement_ids: list[int]):
         import asyncio
 
-        from ...database import SessionLocal
         from ...search_service import search_requirement as do_search
 
         bg_db = SessionLocal()
@@ -597,8 +587,6 @@ async def upload_requirements(
         target_price_raw = row.get("target_price") or row.get("price") or ""
         target_price = normalize_price(target_price_raw)
 
-        from ...search_service import resolve_material_card
-
         mat_card = resolve_material_card(mpn, db)
 
         r = Requirement(
@@ -643,9 +631,6 @@ async def upload_requirements(
 
     # NC enqueue for uploaded requirements
     def _nc_enqueue_uploaded(requisition_id: int, count: int):
-        from ...database import SessionLocal
-        from ...services.nc_worker.queue_manager import enqueue_for_nc_search
-
         bg_db = SessionLocal()
         try:
             for r_item in (
@@ -715,8 +700,6 @@ async def update_requirement(
     if data.primary_mpn is not None:
         r.primary_mpn = normalize_mpn(data.primary_mpn) or data.primary_mpn.strip()
         r.normalized_mpn = normalize_mpn_key(data.primary_mpn)
-        from ...search_service import resolve_material_card
-
         try:
             nested = db.begin_nested()
             mat_card = resolve_material_card(data.primary_mpn, db, r.manufacturer or "")
@@ -1215,7 +1198,6 @@ async def import_stock_list(
     rows = parse_tabular_file(content, fname)
 
     from ...file_utils import normalize_stock_row
-    from ...search_service import resolve_material_card
     from ...utils.normalization import normalize_condition as norm_cond
     from ...utils.normalization import normalize_date_code, normalize_lead_time
     from ...utils.normalization import normalize_packaging as norm_pkg

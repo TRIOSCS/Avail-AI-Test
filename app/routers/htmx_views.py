@@ -533,9 +533,11 @@ async def requisition_import_parse(
             from fastapi.responses import JSONResponse
 
             return JSONResponse({"error": "No data provided", "requirements": []})
-        ctx = _base_ctx(request, user, "requisitions")
-        ctx["error"] = "No data provided. Paste text or upload a file."
-        return templates.TemplateResponse("htmx/partials/requisitions/unified_modal.html", ctx)
+        return HTMLResponse(
+            '<div class="p-4 text-center text-sm text-rose-600 bg-rose-50 rounded-lg border border-rose-200">'
+            "No data provided. Paste text or upload a file."
+            "</div>"
+        )
 
     # AI parse
     result = await parse_freeform_rfq(text)
@@ -622,9 +624,11 @@ async def requisition_import_save(
         idx += 1
 
     if not requirements:
-        ctx = _base_ctx(request, user, "requisitions")
-        ctx["error"] = "No valid parts to save."
-        return templates.TemplateResponse("htmx/partials/requisitions/unified_modal.html", ctx)
+        return HTMLResponse(
+            '<div class="p-4 text-center text-sm text-rose-600 bg-rose-50 rounded-lg border border-rose-200">'
+            "No valid parts to save."
+            "</div>"
+        )
 
     # Create requisition
     site_id = int(customer_site_id) if customer_site_id.strip() else None
