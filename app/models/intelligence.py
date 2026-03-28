@@ -375,23 +375,3 @@ class ActivityLog(Base):
             postgresql_where=Column("requirement_id").isnot(None),
         ),
     )
-
-
-class ReactivationSignal(Base):
-    """Tracks churn risk and reactivation opportunities for companies."""
-
-    __tablename__ = "reactivation_signals"
-    id = Column(Integer, primary_key=True)
-    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
-    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
-    signal_type = Column(String(30), nullable=False)  # churn_risk | reactivation_opportunity
-    reason = Column(Text)
-    dismissed_at = Column(DateTime)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
-    company = relationship("Company", foreign_keys=[company_id])
-
-    __table_args__ = (
-        Index("ix_reactivation_company", "company_id"),
-        Index("ix_reactivation_type", "signal_type"),
-    )

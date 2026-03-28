@@ -76,8 +76,6 @@ class TroubleTicket(Base):
     admin_notes = Column(Text)
     resolved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     source = Column(String(20))  # 'report_button' | 'ticket_form'
-    legacy_error_report_id = Column(Integer)  # traceability to old error_reports
-
     # Agent testing context (migration 053)
     similarity_score = Column(Float)
     tested_area = Column(String(50))
