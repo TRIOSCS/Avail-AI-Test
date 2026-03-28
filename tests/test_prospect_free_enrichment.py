@@ -156,7 +156,7 @@ class TestEnrichFromSamGov:
         mock_http = MagicMock()
         mock_http.get = AsyncMock(return_value=mock_resp)
 
-        with patch("app.services.prospect_free_enrichment.http", mock_http):
+        with patch("app.http_client.http", mock_http):
             result = asyncio.get_event_loop().run_until_complete(enrich_from_sam_gov(prospect))
 
         assert result is not None
@@ -178,7 +178,7 @@ class TestEnrichFromSamGov:
         mock_http = MagicMock()
         mock_http.get = AsyncMock(return_value=mock_resp)
 
-        with patch("app.services.prospect_free_enrichment.http", mock_http):
+        with patch("app.http_client.http", mock_http):
             result = asyncio.get_event_loop().run_until_complete(enrich_from_sam_gov(prospect))
         assert result is None
 
@@ -191,7 +191,7 @@ class TestEnrichFromSamGov:
         mock_http = MagicMock()
         mock_http.get = AsyncMock(return_value=mock_resp)
 
-        with patch("app.services.prospect_free_enrichment.http", mock_http):
+        with patch("app.http_client.http", mock_http):
             result = asyncio.get_event_loop().run_until_complete(enrich_from_sam_gov(prospect))
         assert result is None
 
@@ -200,7 +200,7 @@ class TestEnrichFromSamGov:
         mock_http = MagicMock()
         mock_http.get = AsyncMock(side_effect=ConnectionError("DNS failure"))
 
-        with patch("app.services.prospect_free_enrichment.http", mock_http):
+        with patch("app.http_client.http", mock_http):
             result = asyncio.get_event_loop().run_until_complete(enrich_from_sam_gov(prospect))
         assert result is None
 
@@ -228,7 +228,7 @@ class TestEnrichFromSamGov:
         mock_http = MagicMock()
         mock_http.get = AsyncMock(return_value=mock_resp)
 
-        with patch("app.services.prospect_free_enrichment.http", mock_http):
+        with patch("app.http_client.http", mock_http):
             result = asyncio.get_event_loop().run_until_complete(enrich_from_sam_gov(prospect))
 
         assert len(result["naics_codes"]) == 1
@@ -260,7 +260,7 @@ class TestEnrichFromGoogleNews:
         mock_http = MagicMock()
         mock_http.get = AsyncMock(return_value=mock_resp)
 
-        with patch("app.services.prospect_free_enrichment.http", mock_http):
+        with patch("app.http_client.http", mock_http):
             result = asyncio.get_event_loop().run_until_complete(enrich_from_google_news(prospect))
 
         assert len(result) == 2
@@ -275,7 +275,7 @@ class TestEnrichFromGoogleNews:
         mock_http = MagicMock()
         mock_http.get = AsyncMock(return_value=mock_resp)
 
-        with patch("app.services.prospect_free_enrichment.http", mock_http):
+        with patch("app.http_client.http", mock_http):
             result = asyncio.get_event_loop().run_until_complete(enrich_from_google_news(prospect))
         assert result == []
 
@@ -291,7 +291,7 @@ class TestEnrichFromGoogleNews:
         mock_http = MagicMock()
         mock_http.get = AsyncMock(return_value=mock_resp)
 
-        with patch("app.services.prospect_free_enrichment.http", mock_http):
+        with patch("app.http_client.http", mock_http):
             result = asyncio.get_event_loop().run_until_complete(enrich_from_google_news(prospect, max_items=3))
         assert len(result) == 3
 
@@ -307,7 +307,7 @@ class TestEnrichFromGoogleNews:
         mock_http = MagicMock()
         mock_http.get = AsyncMock(return_value=mock_resp)
 
-        with patch("app.services.prospect_free_enrichment.http", mock_http):
+        with patch("app.http_client.http", mock_http):
             result = asyncio.get_event_loop().run_until_complete(enrich_from_google_news(prospect))
         assert result == []
 
@@ -316,7 +316,7 @@ class TestEnrichFromGoogleNews:
         mock_http = MagicMock()
         mock_http.get = AsyncMock(side_effect=Exception("Network error"))
 
-        with patch("app.services.prospect_free_enrichment.http", mock_http):
+        with patch("app.http_client.http", mock_http):
             result = asyncio.get_event_loop().run_until_complete(enrich_from_google_news(prospect))
         assert result == []
 
@@ -441,7 +441,7 @@ class TestRunFreeEnrichment:
         mock_session.close = MagicMock()
 
         with patch(
-            "app.services.prospect_free_enrichment.SessionLocal",
+            "app.database.SessionLocal",
             return_value=mock_session,
         ):
             result = asyncio.get_event_loop().run_until_complete(run_free_enrichment(123))
@@ -477,7 +477,9 @@ class TestRunFreeEnrichment:
         prospect = _make_prospect(
             db_session,
             name="Dedup Corp",
-            readiness_signals={"events": [{"type": "funding", "description": "Dedup Corp raises $100M in Series"}]},
+            readiness_signals={
+                "events": [{"type": "funding", "description": "Dedup Corp raises $100M in Series C funding round"}]
+            },
         )
         db_session.commit()
 
@@ -535,7 +537,7 @@ class TestRunFreeEnrichmentBatch:
         mock_session.close = MagicMock()
 
         with patch(
-            "app.services.prospect_free_enrichment.SessionLocal",
+            "app.database.SessionLocal",
             return_value=mock_session,
         ):
             with patch(
@@ -561,7 +563,7 @@ class TestRunFreeEnrichmentBatch:
         mock_session.close = MagicMock()
 
         with patch(
-            "app.services.prospect_free_enrichment.SessionLocal",
+            "app.database.SessionLocal",
             return_value=mock_session,
         ):
             with patch(
@@ -585,7 +587,7 @@ class TestRunFreeEnrichmentBatch:
         mock_session.close = MagicMock()
 
         with patch(
-            "app.services.prospect_free_enrichment.SessionLocal",
+            "app.database.SessionLocal",
             return_value=mock_session,
         ):
             with patch(
@@ -608,7 +610,7 @@ class TestRunFreeEnrichmentBatch:
         mock_session.close = MagicMock()
 
         with patch(
-            "app.services.prospect_free_enrichment.SessionLocal",
+            "app.database.SessionLocal",
             return_value=mock_session,
         ):
             result = asyncio.get_event_loop().run_until_complete(run_free_enrichment_batch())

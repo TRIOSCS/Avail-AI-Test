@@ -761,7 +761,7 @@ class TestBoostConfidenceInternal:
             name="SIGHT-REQ",
             customer_name="Test",
             status="active",
-            created_by=1,
+            created_by=None,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
@@ -808,7 +808,7 @@ class TestBoostConfidenceInternal:
             name="MULTI-REQ",
             customer_name="T",
             status="active",
-            created_by=1,
+            created_by=None,
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(req)
@@ -890,7 +890,7 @@ class TestNexarBulkValidate:
 
         with (
             patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.NexarConnector", return_value=mock_connector),
+            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
         ):
             result = await nexar_bulk_validate(db_session, limit=100)
 
@@ -918,7 +918,7 @@ class TestNexarBulkValidate:
 
         with (
             patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.NexarConnector", return_value=mock_connector),
+            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
             patch("app.services.enrichment._apply_enrichment_to_card") as mock_apply,
         ):
             result = await nexar_bulk_validate(db_session, limit=100)
@@ -942,7 +942,7 @@ class TestNexarBulkValidate:
 
         with (
             patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.NexarConnector", return_value=mock_connector),
+            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
         ):
             result = await nexar_bulk_validate(db_session, limit=100)
 
@@ -964,7 +964,7 @@ class TestNexarBulkValidate:
 
         with (
             patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.NexarConnector", return_value=mock_connector),
+            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
         ):
             result = await nexar_bulk_validate(db_session, limit=100)
 
@@ -988,7 +988,7 @@ class TestNexarBulkValidate:
 
         with (
             patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.NexarConnector", return_value=mock_connector),
+            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
         ):
             result = await nexar_bulk_validate(db_session, limit=100)
 
@@ -1040,7 +1040,7 @@ class TestNexarBackfillUntagged:
 
         with (
             patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.NexarConnector", return_value=mock_connector),
+            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
             patch("app.services.enrichment._apply_enrichment_to_card") as mock_apply,
         ):
             result = await nexar_backfill_untagged(db_session, limit=100)
@@ -1062,7 +1062,7 @@ class TestNexarBackfillUntagged:
 
         with (
             patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.NexarConnector", return_value=mock_connector),
+            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
         ):
             result = await nexar_backfill_untagged(db_session, limit=100)
 
@@ -1082,7 +1082,7 @@ class TestNexarBackfillUntagged:
 
         with (
             patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.NexarConnector", return_value=mock_connector),
+            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
         ):
             result = await nexar_backfill_untagged(db_session, limit=100)
 
@@ -1104,7 +1104,7 @@ class TestNexarBackfillUntagged:
 
         with (
             patch("app.services.enrichment.get_credential_cached", return_value="fake-key"),
-            patch("app.services.enrichment.NexarConnector", return_value=mock_connector),
+            patch("app.connectors.sources.NexarConnector", return_value=mock_connector),
         ):
             result = await nexar_backfill_untagged(db_session, limit=100)
 

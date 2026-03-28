@@ -9,78 +9,13 @@ from datetime import datetime, timezone
 import pytest
 import sqlalchemy
 
-from app.models import NcClassificationCache, NcSearchQueue, NcWorkerStatus
+from app.models import NcSearchQueue, NcWorkerStatus
 from app.services.nc_worker.queue_manager import recover_stale_searches
-
-
-def test_nc_classification_cache_import():
-    """NcClassificationCache model can be imported."""
-    assert NcClassificationCache.__tablename__ == "nc_classification_cache"
 
 
 def test_nc_worker_status_import():
     """NcWorkerStatus model can be imported."""
     assert NcWorkerStatus.__tablename__ == "nc_worker_status"
-
-
-def test_classification_cache_create(db_session):
-    """Can create a classification cache entry."""
-    entry = NcClassificationCache(
-        normalized_mpn="STM32F103C8T6",
-        manufacturer="STMicroelectronics",
-        commodity_class="semiconductor",
-        gate_decision="search",
-        gate_reason="MCU IC — good for NC",
-    )
-    db_session.add(entry)
-    db_session.commit()
-    db_session.refresh(entry)
-
-    assert entry.id is not None
-    assert entry.gate_decision == "search"
-    assert entry.commodity_class == "semiconductor"
-
-
-def test_classification_cache_unique_constraint(db_session):
-    """Can't cache the same (normalized_mpn, manufacturer) twice."""
-    entry1 = NcClassificationCache(
-        normalized_mpn="LM317T",
-        manufacturer="Texas Instruments",
-        commodity_class="semiconductor",
-        gate_decision="search",
-    )
-    db_session.add(entry1)
-    db_session.commit()
-
-    entry2 = NcClassificationCache(
-        normalized_mpn="LM317T",
-        manufacturer="Texas Instruments",
-        commodity_class="passive",
-        gate_decision="skip",
-    )
-    db_session.add(entry2)
-    with pytest.raises(sqlalchemy.exc.IntegrityError):
-        db_session.commit()
-    db_session.rollback()
-
-
-def test_classification_cache_different_mfr_allowed(db_session):
-    """Same MPN with different manufacturer is allowed."""
-    entry1 = NcClassificationCache(
-        normalized_mpn="LM317T",
-        manufacturer="Texas Instruments",
-        commodity_class="semiconductor",
-        gate_decision="search",
-    )
-    entry2 = NcClassificationCache(
-        normalized_mpn="LM317T",
-        manufacturer="ON Semiconductor",
-        commodity_class="semiconductor",
-        gate_decision="search",
-    )
-    db_session.add_all([entry1, entry2])
-    db_session.commit()
-    assert entry1.id != entry2.id
 
 
 def test_worker_status_create(db_session):

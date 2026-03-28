@@ -15,11 +15,13 @@ from unittest.mock import AsyncMock, patch
 import pytest
 
 from app.services.ai_email_parser import (
-    _clean_email_body,
     _normalize_quotes,
     parse_email,
     should_auto_apply,
     should_flag_review,
+)
+from app.services.ai_email_parser import (
+    clean_email_body as _clean_email_body,
 )
 
 # ── Helpers ────────────────────────────────────────────────────────────

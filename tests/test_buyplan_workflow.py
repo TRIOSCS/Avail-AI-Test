@@ -856,7 +856,7 @@ class TestHelpers:
         _make_line(db_session, plan, buyer_id=test_user.id)
         db_session.refresh(plan)
 
-        with patch("app.services.buyplan_workflow.on_buy_plan_assigned") as mock_task:
+        with patch("app.services.task_service.on_buy_plan_assigned") as mock_task:
             _generate_buyer_tasks(plan, db_session)
             assert mock_task.called
 
@@ -867,7 +867,7 @@ class TestHelpers:
         _make_line(db_session, plan, buyer_id=None)
         db_session.refresh(plan)
 
-        with patch("app.services.buyplan_workflow.on_buy_plan_assigned") as mock_task:
+        with patch("app.services.task_service.on_buy_plan_assigned") as mock_task:
             _generate_buyer_tasks(plan, db_session)
             mock_task.assert_not_called()
 
@@ -880,7 +880,7 @@ class TestHelpers:
         db_session.refresh(plan)
 
         with patch(
-            "app.services.buyplan_workflow.on_buy_plan_assigned",
+            "app.services.task_service.on_buy_plan_assigned",
             side_effect=Exception("task service down"),
         ):
             # Should not raise
@@ -1149,7 +1149,7 @@ class TestVerifyPOSent:
 
         assert results[0]["reason"] == "no_buyer"
 
-    @patch("app.services.buyplan_workflow.get_valid_token", new_callable=AsyncMock, return_value=None)
+    @patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value=None)
     def test_skip_no_token(
         self, mock_token, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
@@ -1165,8 +1165,8 @@ class TestVerifyPOSent:
 
         assert results[0]["reason"] == "no_token"
 
-    @patch("app.services.buyplan_workflow.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.services.buyplan_workflow.GraphClient")
+    @patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
+    @patch("app.utils.graph_client.GraphClient")
     def test_po_found(
         self, MockGC, mock_token, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
@@ -1196,8 +1196,8 @@ class TestVerifyPOSent:
         assert results[0]["found"] is True
         assert results[0]["message_count"] == 1
 
-    @patch("app.services.buyplan_workflow.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.services.buyplan_workflow.GraphClient")
+    @patch("app.scheduler.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
+    @patch("app.utils.graph_client.GraphClient")
     def test_po_not_found(
         self, MockGC, mock_token, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
@@ -1223,7 +1223,7 @@ class TestVerifyPOSent:
 
         assert results[0]["found"] is False
 
-    @patch("app.services.buyplan_workflow.get_valid_token", new_callable=AsyncMock, side_effect=Exception("API down"))
+    @patch("app.scheduler.get_valid_token", new_callable=AsyncMock, side_effect=Exception("API down"))
     def test_graph_api_error(
         self, mock_token, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
@@ -1289,8 +1289,8 @@ class TestVerifyPOSentV3:
 
         assert results["PO-NB"]["reason"] == "no_buyer"
 
-    @patch("app.services.buyplan_workflow.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.services.buyplan_workflow.GraphClient")
+    @patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
+    @patch("app.utils.graph_client.GraphClient")
     def test_v3_verified(
         self,
         MockGC,
@@ -1336,8 +1336,8 @@ class TestVerifyPOSentV3:
         assert results["PO-V3"]["verified"] is True
         assert results["PO-V3"]["recipient"] == "vendor@test.com"
 
-    @patch("app.services.buyplan_workflow.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.services.buyplan_workflow.GraphClient")
+    @patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
+    @patch("app.utils.graph_client.GraphClient")
     def test_v3_not_found(
         self,
         MockGC,
@@ -1371,19 +1371,30 @@ class TestVerifyPOSentV3:
         self, db_session: Session, test_user: User, test_quote: Quote, test_requisition: Requisition
     ):
         plan = _make_plan(db_session, test_user, test_quote, test_requisition, status=BuyPlanStatus.ACTIVE.value)
-        _make_line(db_session, plan, po_number="PO-BNF", buyer_id=99999, status=BuyPlanLineStatus.PENDING_VERIFY.value)
+        _make_line(
+            db_session, plan, po_number="PO-BNF", buyer_id=test_user.id, status=BuyPlanLineStatus.PENDING_VERIFY.value
+        )
         db_session.refresh(plan)
+
+        # Mock db.get(User, buyer_id) to return None so the code hits the "buyer_not_found" path
+        original_get = db_session.get
+
+        def mock_get(model, ident, **kwargs):
+            if model is User:
+                return None
+            return original_get(model, ident, **kwargs)
 
         loop = asyncio.new_event_loop()
         try:
-            results = loop.run_until_complete(verify_po_sent_v3(plan, db_session))
+            with patch.object(db_session, "get", side_effect=mock_get):
+                results = loop.run_until_complete(verify_po_sent_v3(plan, db_session))
         finally:
             loop.close()
 
         assert results["PO-BNF"]["reason"] == "buyer_not_found"
 
     @patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token")
-    @patch("app.services.buyplan_workflow.GraphClient")
+    @patch("app.utils.graph_client.GraphClient")
     def test_v3_graph_error(
         self,
         MockGC,

@@ -548,7 +548,7 @@ class TestCaptureRfqResponseFact:
             ],
             "confidence": 0.95,
         }
-        entries = capture_rfq_response_fact(db_session, parsed=parsed, vendor_name="Arrow", requisition_id=1)
+        entries = capture_rfq_response_fact(db_session, parsed=parsed, vendor_name="Arrow")
         assert len(entries) == 1
         assert "Arrow" in entries[0].content
         assert "LM317T" in entries[0].content
@@ -812,7 +812,7 @@ class TestGenerateInsights:
             ]
         }
 
-        with patch("app.services.knowledge_service.claude_structured", new_callable=AsyncMock) as mock_ai:
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_ai:
             mock_ai.return_value = mock_result
             entries = await generate_insights(db_session, requisition_id=req.id)
             assert len(entries) == 2
@@ -834,7 +834,7 @@ class TestGenerateInsights:
         )
         old = create_entry(
             db_session,
-            user_id=0,
+            user_id=None,
             entry_type="ai_insight",
             content="Old insight",
             source="ai_generated",
@@ -848,11 +848,13 @@ class TestGenerateInsights:
             ]
         }
 
-        with patch("app.services.knowledge_service.claude_structured", new_callable=AsyncMock) as mock_ai:
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_ai:
             mock_ai.return_value = mock_result
             entries = await generate_insights(db_session, requisition_id=req.id)
             assert len(entries) == 1
-            assert db_session.get(KnowledgeEntry, old_id) is None
+            # Verify old insight was deleted (check by content since SQLite may reuse IDs)
+            remaining = db_session.get(KnowledgeEntry, old_id)
+            assert remaining is None or remaining.content != "Old insight"
 
     @pytest.mark.asyncio
     async def test_claude_unavailable_returns_empty(self, db_session, test_user):
@@ -868,7 +870,7 @@ class TestGenerateInsights:
             requisition_id=req.id,
         )
 
-        with patch("app.services.knowledge_service.claude_structured", new_callable=AsyncMock) as mock_ai:
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_ai:
             mock_ai.side_effect = ClaudeUnavailableError("Not configured")
             result = await generate_insights(db_session, requisition_id=req.id)
             assert result == []
@@ -887,7 +889,7 @@ class TestGenerateInsights:
             requisition_id=req.id,
         )
 
-        with patch("app.services.knowledge_service.claude_structured", new_callable=AsyncMock) as mock_ai:
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_ai:
             mock_ai.side_effect = ClaudeError("API error")
             result = await generate_insights(db_session, requisition_id=req.id)
             assert result == []
@@ -904,7 +906,7 @@ class TestGenerateInsights:
             requisition_id=req.id,
         )
 
-        with patch("app.services.knowledge_service.claude_structured", new_callable=AsyncMock) as mock_ai:
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_ai:
             mock_ai.return_value = {}
             result = await generate_insights(db_session, requisition_id=req.id)
             assert result == []
@@ -925,7 +927,7 @@ class TestGenerateInsights:
             "insights": [{"content": f"Insight {i}", "confidence": 0.8, "based_on_expired": False} for i in range(10)]
         }
 
-        with patch("app.services.knowledge_service.claude_structured", new_callable=AsyncMock) as mock_ai:
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_ai:
             mock_ai.return_value = mock_result
             entries = await generate_insights(db_session, requisition_id=req.id)
             assert len(entries) == 5
@@ -954,7 +956,7 @@ class TestGenerateMpnInsights:
             ]
         }
 
-        with patch("app.services.knowledge_service.claude_structured", new_callable=AsyncMock) as mock_ai:
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as mock_ai:
             mock_ai.return_value = mock_result
             entries = await generate_mpn_insights(db_session, mpn="LM317T")
             assert len(entries) == 1
@@ -965,7 +967,7 @@ class TestGenerateMpnInsights:
         from app.utils.claude_errors import ClaudeUnavailableError
 
         create_entry(db_session, user_id=test_user.id, entry_type="fact", content="fact", source="manual", mpn="X")
-        with patch("app.services.knowledge_service.claude_structured", new_callable=AsyncMock) as m:
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as m:
             m.side_effect = ClaudeUnavailableError("err")
             assert await generate_mpn_insights(db_session, mpn="X") == []
 
@@ -991,7 +993,7 @@ class TestGenerateVendorInsights:
                 {"content": "Vendor insight", "confidence": 0.8, "based_on_expired": False},
             ]
         }
-        with patch("app.services.knowledge_service.claude_structured", new_callable=AsyncMock) as m:
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as m:
             m.return_value = mock_result
             entries = await generate_vendor_insights(db_session, vendor_card_id=test_vendor_card.id)
             assert len(entries) == 1
@@ -1009,7 +1011,7 @@ class TestGenerateVendorInsights:
             source="manual",
             vendor_card_id=test_vendor_card.id,
         )
-        with patch("app.services.knowledge_service.claude_structured", new_callable=AsyncMock) as m:
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as m:
             m.side_effect = ClaudeError("API error")
             assert await generate_vendor_insights(db_session, vendor_card_id=test_vendor_card.id) == []
 
@@ -1029,7 +1031,7 @@ class TestGeneratePipelineInsights:
                 {"content": "Pipeline insight", "confidence": 0.8, "based_on_expired": False},
             ]
         }
-        with patch("app.services.knowledge_service.claude_structured", new_callable=AsyncMock) as m:
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as m:
             m.return_value = mock_result
             entries = await generate_pipeline_insights(db_session)
             assert len(entries) == 1
@@ -1041,7 +1043,7 @@ class TestGeneratePipelineInsights:
 
         _make_requisition(db_session, status="active")
         db_session.commit()
-        with patch("app.services.knowledge_service.claude_structured", new_callable=AsyncMock) as m:
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as m:
             m.side_effect = ClaudeUnavailableError("err")
             assert await generate_pipeline_insights(db_session) == []
 
@@ -1067,7 +1069,7 @@ class TestGenerateCompanyInsights:
                 {"content": "Company insight", "confidence": 0.8, "based_on_expired": False},
             ]
         }
-        with patch("app.services.knowledge_service.claude_structured", new_callable=AsyncMock) as m:
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as m:
             m.return_value = mock_result
             entries = await generate_company_insights(db_session, company_id=test_company.id)
             assert len(entries) == 1
@@ -1083,7 +1085,7 @@ class TestGenerateCompanyInsights:
             source="manual",
             company_id=test_company.id,
         )
-        with patch("app.services.knowledge_service.claude_structured", new_callable=AsyncMock) as m:
+        with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock) as m:
             m.return_value = None
             assert await generate_company_insights(db_session, company_id=test_company.id) == []
 
@@ -1098,7 +1100,7 @@ class TestCachedInsightGetters:
         req = _make_requisition(db_session)
         create_entry(
             db_session,
-            user_id=0,
+            user_id=None,
             entry_type="ai_insight",
             content="Cached insight",
             source="ai_generated",
@@ -1113,7 +1115,7 @@ class TestCachedInsightGetters:
     def test_get_cached_mpn_insights(self, db_session, test_user):
         create_entry(
             db_session,
-            user_id=0,
+            user_id=None,
             entry_type="ai_insight",
             content="MPN cached",
             source="ai_generated",
@@ -1126,7 +1128,7 @@ class TestCachedInsightGetters:
         req = _make_requisition(db_session)
         create_entry(
             db_session,
-            user_id=0,
+            user_id=None,
             entry_type="ai_insight",
             content="Req-bound insight",
             source="ai_generated",
@@ -1139,7 +1141,7 @@ class TestCachedInsightGetters:
     def test_get_cached_vendor_insights(self, db_session, test_vendor_card):
         create_entry(
             db_session,
-            user_id=0,
+            user_id=None,
             entry_type="ai_insight",
             content="Vendor cached",
             source="ai_generated",
@@ -1151,7 +1153,7 @@ class TestCachedInsightGetters:
     def test_get_cached_pipeline_insights(self, db_session):
         create_entry(
             db_session,
-            user_id=0,
+            user_id=None,
             entry_type="ai_insight",
             content="Pipeline cached",
             source="ai_generated",
@@ -1163,7 +1165,7 @@ class TestCachedInsightGetters:
     def test_get_cached_company_insights(self, db_session, test_company):
         create_entry(
             db_session,
-            user_id=0,
+            user_id=None,
             entry_type="ai_insight",
             content="Company cached",
             source="ai_generated",

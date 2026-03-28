@@ -345,7 +345,7 @@ class TestRunHealthChecks:
         mock_session.rollback = MagicMock()
         mock_session.close = MagicMock()
 
-        with patch("app.services.health_monitor.SessionLocal", return_value=mock_session):
+        with patch("app.database.SessionLocal", return_value=mock_session):
             with patch("app.services.health_monitor.ping_source", new_callable=AsyncMock) as mock_ping:
                 mock_ping.return_value = {"success": True, "elapsed_ms": 50, "error": None}
                 result = asyncio.get_event_loop().run_until_complete(run_health_checks("ping"))
@@ -363,7 +363,7 @@ class TestRunHealthChecks:
         mock_session.commit = MagicMock()
         mock_session.close = MagicMock()
 
-        with patch("app.services.health_monitor.SessionLocal", return_value=mock_session):
+        with patch("app.database.SessionLocal", return_value=mock_session):
             with patch("app.services.health_monitor.deep_test_source", new_callable=AsyncMock) as mock_deep:
                 mock_deep.return_value = {"success": False, "results_count": 0, "elapsed_ms": 0, "error": "fail"}
                 result = asyncio.get_event_loop().run_until_complete(run_health_checks("deep"))
@@ -377,7 +377,7 @@ class TestRunHealthChecks:
         mock_session.commit = MagicMock()
         mock_session.close = MagicMock()
 
-        with patch("app.services.health_monitor.SessionLocal", return_value=mock_session):
+        with patch("app.database.SessionLocal", return_value=mock_session):
             result = asyncio.get_event_loop().run_until_complete(run_health_checks("ping"))
 
         assert result["total"] == 0
@@ -393,7 +393,7 @@ class TestRunHealthChecks:
         mock_session.commit = MagicMock()
         mock_session.close = MagicMock()
 
-        with patch("app.services.health_monitor.SessionLocal", return_value=mock_session):
+        with patch("app.database.SessionLocal", return_value=mock_session):
             with patch("app.services.health_monitor.ping_source", new_callable=AsyncMock) as mock_ping:
                 mock_ping.side_effect = Exception("unexpected crash")
                 result = asyncio.get_event_loop().run_until_complete(run_health_checks("ping"))
@@ -407,7 +407,7 @@ class TestRunHealthChecks:
         mock_session.rollback = MagicMock()
         mock_session.close = MagicMock()
 
-        with patch("app.services.health_monitor.SessionLocal", return_value=mock_session):
+        with patch("app.database.SessionLocal", return_value=mock_session):
             result = asyncio.get_event_loop().run_until_complete(run_health_checks("ping"))
 
         mock_session.rollback.assert_called_once()
@@ -425,7 +425,7 @@ class TestGetConnector:
         mock_conn = MagicMock()
 
         with patch(
-            "app.services.health_monitor._get_connector_for_source",
+            "app.routers.sources._get_connector_for_source",
             return_value=mock_conn,
         ):
             result = _get_connector(source, db_session)
@@ -437,7 +437,7 @@ class TestGetConnector:
         source = _make_source(db_session)
 
         with patch(
-            "app.services.health_monitor._get_connector_for_source",
+            "app.routers.sources._get_connector_for_source",
             side_effect=ValueError("no config"),
         ):
             result = _get_connector(source, db_session)

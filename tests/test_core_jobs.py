@@ -106,7 +106,7 @@ class TestJobAutoArchive:
         db_session.add(req)
         db_session.commit()
 
-        with patch("app.jobs.core_jobs.SessionLocal", return_value=db_session):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await _job_auto_archive.__wrapped__()
 
         db_session.refresh(req)
@@ -128,7 +128,7 @@ class TestJobAutoArchive:
         db_session.add(req)
         db_session.commit()
 
-        with patch("app.jobs.core_jobs.SessionLocal", return_value=db_session):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await _job_auto_archive.__wrapped__()
 
         db_session.refresh(req)
@@ -150,7 +150,7 @@ class TestJobAutoArchive:
         db_session.add(req)
         db_session.commit()
 
-        with patch("app.jobs.core_jobs.SessionLocal", return_value=db_session):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await _job_auto_archive.__wrapped__()
 
         db_session.refresh(req)
@@ -173,7 +173,7 @@ class TestJobAutoArchive:
             db_session.add(req)
         db_session.commit()
 
-        with patch("app.jobs.core_jobs.SessionLocal", return_value=db_session):
+        with patch("app.database.SessionLocal", return_value=db_session), patch.object(db_session, "close"):
             await _job_auto_archive.__wrapped__()
 
         stale = db_session.query(Requisition).filter(Requisition.status == RequisitionStatus.ARCHIVED).count()
@@ -187,7 +187,7 @@ class TestJobAutoArchive:
         mock_db = MagicMock()
         mock_db.query.side_effect = RuntimeError("DB connection lost")
 
-        with patch("app.jobs.core_jobs.SessionLocal", return_value=mock_db):
+        with patch("app.database.SessionLocal", return_value=mock_db):
             with pytest.raises(RuntimeError, match="DB connection lost"):
                 await _job_auto_archive.__wrapped__()
         mock_db.rollback.assert_called_once()
@@ -217,8 +217,9 @@ class TestJobTokenRefresh:
         mock_redis.set.return_value = True  # acquired lock
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=db_session),
-            patch("app.jobs.core_jobs.refresh_user_token", mock_refresh),
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.utils.token_manager.refresh_user_token", mock_refresh),
             patch("app.cache.intel_cache._get_redis", return_value=mock_redis),
         ):
             await _job_token_refresh.__wrapped__()
@@ -236,8 +237,9 @@ class TestJobTokenRefresh:
         mock_refresh = AsyncMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=db_session),
-            patch("app.jobs.core_jobs.refresh_user_token", mock_refresh),
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.utils.token_manager.refresh_user_token", mock_refresh),
         ):
             await _job_token_refresh.__wrapped__()
 
@@ -256,8 +258,9 @@ class TestJobTokenRefresh:
         mock_refresh = AsyncMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=db_session),
-            patch("app.jobs.core_jobs.refresh_user_token", mock_refresh),
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.utils.token_manager.refresh_user_token", mock_refresh),
         ):
             await _job_token_refresh.__wrapped__()
 
@@ -278,8 +281,9 @@ class TestJobTokenRefresh:
         mock_redis.set.return_value = True
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=db_session),
-            patch("app.jobs.core_jobs.refresh_user_token", mock_refresh),
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.utils.token_manager.refresh_user_token", mock_refresh),
             patch("app.cache.intel_cache._get_redis", return_value=mock_redis),
         ):
             await _job_token_refresh.__wrapped__()
@@ -301,8 +305,9 @@ class TestJobTokenRefresh:
         mock_redis.set.return_value = False  # lock NOT acquired
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=db_session),
-            patch("app.jobs.core_jobs.refresh_user_token", mock_refresh),
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.utils.token_manager.refresh_user_token", mock_refresh),
             patch("app.cache.intel_cache._get_redis", return_value=mock_redis),
         ):
             await _job_token_refresh.__wrapped__()
@@ -324,8 +329,9 @@ class TestJobTokenRefresh:
         mock_redis.set.return_value = True
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=db_session),
-            patch("app.jobs.core_jobs.refresh_user_token", mock_refresh),
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.utils.token_manager.refresh_user_token", mock_refresh),
             patch("app.cache.intel_cache._get_redis", return_value=mock_redis),
         ):
             await _job_token_refresh.__wrapped__()
@@ -346,8 +352,9 @@ class TestJobTokenRefresh:
         mock_refresh = AsyncMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=db_session),
-            patch("app.jobs.core_jobs.refresh_user_token", mock_refresh),
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.utils.token_manager.refresh_user_token", mock_refresh),
             patch("app.cache.intel_cache._get_redis", return_value=None),
         ):
             await _job_token_refresh.__wrapped__()
@@ -362,7 +369,7 @@ class TestJobTokenRefresh:
         mock_db = MagicMock()
         mock_db.query.side_effect = RuntimeError("selector DB error")
 
-        with patch("app.jobs.core_jobs.SessionLocal", return_value=mock_db):
+        with patch("app.database.SessionLocal", return_value=mock_db):
             with pytest.raises(RuntimeError, match="selector DB error"):
                 await _job_token_refresh.__wrapped__()
         mock_db.close.assert_called_once()
@@ -390,8 +397,9 @@ class TestJobInboxScan:
         mock_scan = AsyncMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=db_session),
-            patch("app.jobs.core_jobs._scan_user_inbox", mock_scan),
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.jobs.email_jobs._scan_user_inbox", mock_scan),
         ):
             await _job_inbox_scan.__wrapped__()
 
@@ -410,8 +418,9 @@ class TestJobInboxScan:
         mock_scan = AsyncMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=db_session),
-            patch("app.jobs.core_jobs._scan_user_inbox", mock_scan),
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.jobs.email_jobs._scan_user_inbox", mock_scan),
         ):
             await _job_inbox_scan.__wrapped__()
 
@@ -430,8 +439,9 @@ class TestJobInboxScan:
         mock_scan = AsyncMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=db_session),
-            patch("app.jobs.core_jobs._scan_user_inbox", mock_scan),
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.jobs.email_jobs._scan_user_inbox", mock_scan),
         ):
             await _job_inbox_scan.__wrapped__()
 
@@ -451,8 +461,9 @@ class TestJobInboxScan:
         mock_scan = AsyncMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=db_session),
-            patch("app.jobs.core_jobs._scan_user_inbox", mock_scan),
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.jobs.email_jobs._scan_user_inbox", mock_scan),
         ):
             await _job_inbox_scan.__wrapped__()
 
@@ -473,8 +484,9 @@ class TestJobInboxScan:
             await asyncio.sleep(999)
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=db_session),
-            patch("app.jobs.core_jobs._scan_user_inbox", slow_scan),
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.jobs.email_jobs._scan_user_inbox", slow_scan),
             patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()),
         ):
             await _job_inbox_scan.__wrapped__()
@@ -496,8 +508,9 @@ class TestJobInboxScan:
         mock_scan = AsyncMock(side_effect=RuntimeError("Graph API error"))
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=db_session),
-            patch("app.jobs.core_jobs._scan_user_inbox", mock_scan),
+            patch("app.database.SessionLocal", return_value=db_session),
+            patch.object(db_session, "close"),
+            patch("app.jobs.email_jobs._scan_user_inbox", mock_scan),
         ):
             await _job_inbox_scan.__wrapped__()
 
@@ -512,7 +525,7 @@ class TestJobInboxScan:
         mock_db = MagicMock()
         mock_db.query.side_effect = RuntimeError("selector error")
 
-        with patch("app.jobs.core_jobs.SessionLocal", return_value=mock_db):
+        with patch("app.database.SessionLocal", return_value=mock_db):
             with pytest.raises(RuntimeError, match="selector error"):
                 await _job_inbox_scan.__wrapped__()
 
@@ -534,7 +547,7 @@ class TestJobBatchResults:
         mock_process = AsyncMock(return_value=5)
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=mock_db),
+            patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.email_service.process_batch_results", mock_process),
             patch("asyncio.wait_for", mock_process),
         ):
@@ -550,7 +563,7 @@ class TestJobBatchResults:
         mock_db = MagicMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=mock_db),
+            patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.email_service.process_batch_results", AsyncMock()),
             patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()),
         ):
@@ -567,7 +580,7 @@ class TestJobBatchResults:
         mock_db = MagicMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=mock_db),
+            patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.email_service.process_batch_results", AsyncMock()),
             patch("asyncio.wait_for", side_effect=ValueError("bad data")),
         ):
@@ -594,7 +607,7 @@ class TestJobBatchParseSignatures:
         mock_parse = AsyncMock(return_value="sig-batch-123")
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=mock_db),
+            patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.services.signature_parser.batch_parse_signatures", mock_parse),
             patch("asyncio.wait_for", mock_parse),
         ):
@@ -609,7 +622,7 @@ class TestJobBatchParseSignatures:
         mock_db = MagicMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=mock_db),
+            patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.services.signature_parser.batch_parse_signatures", AsyncMock()),
             patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()),
         ):
@@ -625,7 +638,7 @@ class TestJobBatchParseSignatures:
         mock_db = MagicMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=mock_db),
+            patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.services.signature_parser.batch_parse_signatures", AsyncMock()),
             patch("asyncio.wait_for", side_effect=RuntimeError("parse error")),
         ):
@@ -646,7 +659,7 @@ class TestJobPollSignatureBatch:
         mock_poll = AsyncMock(return_value={"applied": 5, "errors": 0})
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=mock_db),
+            patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.services.signature_parser.process_signature_batch_results", mock_poll),
             patch("asyncio.wait_for", mock_poll),
         ):
@@ -661,7 +674,7 @@ class TestJobPollSignatureBatch:
         mock_db = MagicMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=mock_db),
+            patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.services.signature_parser.process_signature_batch_results", AsyncMock()),
             patch("asyncio.wait_for", side_effect=asyncio.TimeoutError()),
         ):
@@ -677,7 +690,7 @@ class TestJobPollSignatureBatch:
         mock_db = MagicMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=mock_db),
+            patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.services.signature_parser.process_signature_batch_results", AsyncMock()),
             patch("asyncio.wait_for", side_effect=RuntimeError("poll error")),
         ):
@@ -705,7 +718,7 @@ class TestJobWebhookSubscriptions:
         mock_ensure = AsyncMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=mock_db),
+            patch("app.database.SessionLocal", return_value=mock_db),
             patch("app.services.webhook_service.renew_expiring_subscriptions", mock_renew),
             patch("app.services.webhook_service.ensure_all_users_subscribed", mock_ensure),
         ):
@@ -723,7 +736,7 @@ class TestJobWebhookSubscriptions:
         mock_db = MagicMock()
 
         with (
-            patch("app.jobs.core_jobs.SessionLocal", return_value=mock_db),
+            patch("app.database.SessionLocal", return_value=mock_db),
             patch(
                 "app.services.webhook_service.renew_expiring_subscriptions",
                 AsyncMock(side_effect=RuntimeError("webhook error")),
