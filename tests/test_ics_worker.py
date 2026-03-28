@@ -116,7 +116,7 @@ class TestMainLoop:
         mock_session.stop = AsyncMock()
 
         with (
-            patch("app.services.ics_worker.worker.SessionLocal", return_value=db_session),
+            patch("app.database.SessionLocal", return_value=db_session),
             patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
             patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
             patch("app.services.ics_worker.worker.IcsConfig", create=True),
@@ -144,7 +144,7 @@ class TestMainLoop:
         mock_session.login = AsyncMock(return_value=False)
 
         with (
-            patch("app.services.ics_worker.worker.SessionLocal", return_value=db_session),
+            patch("app.database.SessionLocal", return_value=db_session),
             patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
             patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
             patch("app.services.ics_worker.worker.IcsConfig", create=True),
@@ -177,7 +177,7 @@ class TestMainLoop:
             worker_mod._shutdown_requested = True
 
             with (
-                patch("app.services.ics_worker.worker.SessionLocal", return_value=db_session),
+                patch("app.database.SessionLocal", return_value=db_session),
                 patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
                 patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
                 patch("app.services.ics_worker.worker.IcsConfig", create=True),
@@ -222,7 +222,7 @@ class TestMainLoop:
             worker_mod._shutdown_requested = False
 
             with (
-                patch("app.services.ics_worker.worker.SessionLocal", return_value=db_session),
+                patch("app.database.SessionLocal", return_value=db_session),
                 patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
                 patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
                 patch("app.services.ics_worker.worker.IcsConfig", create=True),
@@ -271,7 +271,7 @@ class TestMainLoop:
             worker_mod._shutdown_requested = False
 
             with (
-                patch("app.services.ics_worker.worker.SessionLocal", return_value=db_session),
+                patch("app.database.SessionLocal", return_value=db_session),
                 patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
                 patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
                 patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
@@ -323,7 +323,7 @@ class TestMainLoop:
             worker_mod._shutdown_requested = False
 
             with (
-                patch("app.services.ics_worker.worker.SessionLocal", return_value=db_session),
+                patch("app.database.SessionLocal", return_value=db_session),
                 patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
                 patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
                 patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
@@ -375,7 +375,7 @@ class TestMainLoop:
             worker_mod._shutdown_requested = False
 
             with (
-                patch("app.services.ics_worker.worker.SessionLocal", return_value=db_session),
+                patch("app.database.SessionLocal", return_value=db_session),
                 patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
                 patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
                 patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
@@ -445,7 +445,7 @@ class TestMainLoop:
             worker_mod._shutdown_requested = False
 
             with (
-                patch("app.services.ics_worker.worker.SessionLocal", return_value=db_session),
+                patch("app.database.SessionLocal", return_value=db_session),
                 patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
                 patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
                 patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
@@ -521,7 +521,7 @@ class TestMainLoop:
             worker_mod._shutdown_requested = False
 
             with (
-                patch("app.services.ics_worker.worker.SessionLocal", return_value=db_session),
+                patch("app.database.SessionLocal", return_value=db_session),
                 patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
                 patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
                 patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
@@ -577,7 +577,7 @@ class TestMainLoop:
             worker_mod._shutdown_requested = False
 
             with (
-                patch("app.services.ics_worker.worker.SessionLocal", return_value=db_session),
+                patch("app.database.SessionLocal", return_value=db_session),
                 patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
                 patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
                 patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
@@ -645,7 +645,7 @@ class TestMainLoop:
             worker_mod._shutdown_requested = False
 
             with (
-                patch("app.services.ics_worker.worker.SessionLocal", return_value=db_session),
+                patch("app.database.SessionLocal", return_value=db_session),
                 patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
                 patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
                 patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
@@ -720,7 +720,7 @@ class TestMainLoop:
             worker_mod._shutdown_requested = False
 
             with (
-                patch("app.services.ics_worker.worker.SessionLocal", return_value=db_session),
+                patch("app.database.SessionLocal", return_value=db_session),
                 patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
                 patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
                 patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
@@ -797,7 +797,7 @@ class TestMainLoop:
             worker_mod._shutdown_requested = False
 
             with (
-                patch("app.services.ics_worker.worker.SessionLocal", return_value=db_session),
+                patch("app.database.SessionLocal", return_value=db_session),
                 patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
                 patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
                 patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),

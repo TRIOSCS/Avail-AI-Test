@@ -474,7 +474,7 @@ class TestFetchThreadsTier4VendorCard:
             instance = MockGC.return_value
             instance.get_all_pages = AsyncMock(side_effect=mock_get_all_pages)
 
-            with patch("app.services.email_threads.normalize_vendor_name", return_value="arrow electronics"):
+            with patch("app.vendor_utils.normalize_vendor_name", return_value="arrow electronics"):
                 threads = await fetch_threads_for_requirement(
                     requirement.id, "fake-token", db_session, user_id=test_user.id
                 )
