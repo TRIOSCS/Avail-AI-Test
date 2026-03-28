@@ -127,11 +127,6 @@ class CompanyUpdate(BaseModel):
         return result
 
 
-class CompanyOut(BaseModel):
-    id: int
-    name: str
-
-
 # ── Customer Sites ───────────────────────────────────────────────────
 
 
@@ -259,11 +254,6 @@ class SiteUpdate(BaseModel):
         if result is None:
             raise ValueError(f"Could not parse phone number: {v}")
         return result
-
-
-class SiteOut(BaseModel):
-    id: int
-    site_name: str
 
 
 # ── Site Contacts ────────────────────────────────────────────────────

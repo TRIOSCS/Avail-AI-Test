@@ -85,11 +85,6 @@ class RequisitionUpdate(BaseModel):
         return _validate_deadline(v)
 
 
-class RequisitionArchiveOut(BaseModel):
-    ok: bool = True
-    status: str
-
-
 # ── Requirements ─────────────────────────────────────────────────────
 
 

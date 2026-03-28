@@ -20,30 +20,6 @@ class PaginatedResponse(BaseModel):
     offset: int = 0
 
 
-class OkResponse(BaseModel):
-    ok: bool = True
-
-
-# ── Search / Sightings ─────────────────────────────────────────────────
-
-
-class SightingItem(BaseModel):
-    """Single search-result row returned by search_requirement / quick_search.
-
-    Includes unified scoring fields added in phase-4 task-5.
-    """
-
-    id: int | None = None
-    vendor_name: str = ""
-    mpn_matched: str = ""
-    source_type: str = ""
-    score: float = 0
-    source_badge: str = ""
-    confidence_pct: int = 0
-    confidence_color: str = "red"
-    reasoning: str | None = None
-
-
 # ── Requisitions ────────────────────────────────────────────────────────
 
 
@@ -60,15 +36,6 @@ class RequisitionListItem(BaseModel):
 
 class RequisitionListResponse(PaginatedResponse):
     requisitions: list[RequisitionListItem] = Field(default_factory=list)
-
-
-class RequirementListItem(BaseModel):
-    id: int
-    primary_mpn: str
-    target_qty: int | None = None
-    target_price: float | None = None
-    substitutes: list[str] = Field(default_factory=list)
-    sighting_count: int = 0
 
 
 # ── Vendors ─────────────────────────────────────────────────────────────
@@ -131,23 +98,7 @@ class VendorDetailResponse(BaseModel):
     updated_at: str | None = None
 
 
-# ── Companies ───────────────────────────────────────────────────────────
-
-
-class CompanyListItem(BaseModel):
-    id: int
-    name: str
-    site_count: int = 0
-    sites: list[dict] = Field(default_factory=list)
-
-
 # ── Offers ──────────────────────────────────────────────────────────────
-
-
-class OfferGroupItem(BaseModel):
-    requirement_id: int
-    mpn: str = ""
-    offers: list[dict] = Field(default_factory=list)
 
 
 class OfferListResponse(BaseModel):
@@ -194,34 +145,6 @@ class QuoteDetailResponse(BaseModel):
     days_until_expiry: int | None = None
 
 
-class QuoteSummaryResponse(BaseModel):
-    """Lightweight quote-tab projection for inline requisition view.
-
-    Always populated — never blank. Shows quote status, buy plan linkage, selected
-    offers, and risk flags to drive CTAs.
-    """
-
-    requisition_id: int
-    has_quote: bool = False
-    has_buy_plan: bool = False
-    selected_offer_count: int = 0
-    total_offer_count: int = 0
-    risk_flags: list[dict] = Field(default_factory=list)
-    # Quote fields (present when has_quote=True)
-    quote_id: int | None = None
-    quote_number: str | None = None
-    quote_status: str | None = None
-    quote_revision: int | None = None
-    line_count: int | None = None
-    subtotal: float | None = None
-    total_margin_pct: float | None = None
-    quote_updated_at: str | None = None
-    # Buy plan fields (present when has_buy_plan=True)
-    buy_plan_id: int | None = None
-    buy_plan_status: str | None = None
-    buy_plan_line_count: int | None = None
-
-
 # ── Buy Plans ───────────────────────────────────────────────────────────
 
 
@@ -238,11 +161,6 @@ class BuyPlanListItem(BaseModel):
 
 class VendorScorecardListResponse(PaginatedResponse):
     vendors: list[dict] = Field(default_factory=list)
-
-
-class BuyerLeaderboardResponse(BaseModel):
-    month: str = ""
-    entries: list[dict] = Field(default_factory=list)
 
 
 # ── Sources ─────────────────────────────────────────────────────────────

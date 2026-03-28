@@ -65,10 +65,3 @@ class KnowledgeEntryResponse(BaseModel, extra="allow"):
     created_at: datetime
     updated_at: datetime
     answers: list[KnowledgeEntryResponse] = []
-
-
-class InsightsResponse(BaseModel, extra="allow"):
-    requisition_id: int
-    insights: list[KnowledgeEntryResponse] = []
-    generated_at: datetime | None = None
-    has_expired: bool = False

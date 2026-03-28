@@ -32,10 +32,3 @@ class EntityTagResponse(BaseModel, extra="allow"):
     is_visible: bool
     first_seen_at: datetime | None = None
     last_seen_at: datetime | None = None
-
-
-class EntityTagSummary(BaseModel, extra="allow"):
-    tag_name: str
-    tag_type: str
-    count: float
-    is_visible: bool

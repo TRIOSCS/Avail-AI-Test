@@ -23,10 +23,6 @@ class SendProactive(BaseModel):
     email_html: str | None = None  # AI-drafted or user-edited HTML body
 
 
-class PrepareProactive(BaseModel):
-    match_ids: list[int]
-
-
 class DoNotOfferItem(BaseModel):
     mpn: str
     company_id: int

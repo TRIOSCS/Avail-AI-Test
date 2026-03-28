@@ -65,18 +65,6 @@ class ProspectAccountRead(ProspectAccountBase):
     updated_at: datetime | None = None
 
 
-class ProspectAccountList(BaseModel):
-    """Paginated list response with pool stats."""
-
-    model_config = ConfigDict(extra="allow")
-
-    items: list[ProspectAccountRead]
-    total: int
-    page: int
-    per_page: int
-    stats: "PoolStats"
-
-
 class PoolStats(BaseModel):
     """Summary statistics for the prospect pool."""
 
