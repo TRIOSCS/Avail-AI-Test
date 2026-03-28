@@ -117,13 +117,13 @@ class TestMainLoop:
 
         with (
             patch("app.database.SessionLocal", return_value=db_session),
-            patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
-            patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
-            patch("app.services.ics_worker.worker.IcsConfig", create=True),
-            patch("app.services.ics_worker.worker.SearchScheduler", create=True),
-            patch("app.services.ics_worker.worker.CircuitBreaker", create=True),
-            patch("app.services.ics_worker.worker.process_ai_gate", create=True),
-            patch("app.services.ics_worker.worker.get_next_queued_item", create=True),
+            patch("app.services.ics_worker.queue_manager.recover_stale_searches"),
+            patch("app.services.ics_worker.session_manager.IcsSessionManager", return_value=mock_session),
+            patch("app.services.ics_worker.config.IcsConfig"),
+            patch("app.services.ics_worker.scheduler.SearchScheduler"),
+            patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
+            patch("app.services.ics_worker.ai_gate.process_ai_gate"),
+            patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
         ):
             from app.services.ics_worker.worker import main
 
@@ -145,13 +145,13 @@ class TestMainLoop:
 
         with (
             patch("app.database.SessionLocal", return_value=db_session),
-            patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
-            patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
-            patch("app.services.ics_worker.worker.IcsConfig", create=True),
-            patch("app.services.ics_worker.worker.SearchScheduler", create=True),
-            patch("app.services.ics_worker.worker.CircuitBreaker", create=True),
-            patch("app.services.ics_worker.worker.process_ai_gate", create=True),
-            patch("app.services.ics_worker.worker.get_next_queued_item", create=True),
+            patch("app.services.ics_worker.queue_manager.recover_stale_searches"),
+            patch("app.services.ics_worker.session_manager.IcsSessionManager", return_value=mock_session),
+            patch("app.services.ics_worker.config.IcsConfig"),
+            patch("app.services.ics_worker.scheduler.SearchScheduler"),
+            patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
+            patch("app.services.ics_worker.ai_gate.process_ai_gate"),
+            patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
         ):
             from app.services.ics_worker.worker import main
 
@@ -178,13 +178,13 @@ class TestMainLoop:
 
             with (
                 patch("app.database.SessionLocal", return_value=db_session),
-                patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
-                patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
-                patch("app.services.ics_worker.worker.IcsConfig", create=True),
-                patch("app.services.ics_worker.worker.SearchScheduler", create=True),
-                patch("app.services.ics_worker.worker.CircuitBreaker", create=True),
-                patch("app.services.ics_worker.worker.process_ai_gate", create=True),
-                patch("app.services.ics_worker.worker.get_next_queued_item", create=True),
+                patch("app.services.ics_worker.queue_manager.recover_stale_searches"),
+                patch("app.services.ics_worker.session_manager.IcsSessionManager", return_value=mock_session),
+                patch("app.services.ics_worker.config.IcsConfig"),
+                patch("app.services.ics_worker.scheduler.SearchScheduler"),
+                patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
+                patch("app.services.ics_worker.ai_gate.process_ai_gate"),
+                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
             ):
                 from app.services.ics_worker.worker import main
 
@@ -223,13 +223,13 @@ class TestMainLoop:
 
             with (
                 patch("app.database.SessionLocal", return_value=db_session),
-                patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
-                patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
-                patch("app.services.ics_worker.worker.IcsConfig", create=True),
-                patch("app.services.ics_worker.worker.SearchScheduler", return_value=mock_scheduler, create=True),
-                patch("app.services.ics_worker.worker.CircuitBreaker", create=True),
-                patch("app.services.ics_worker.worker.process_ai_gate", create=True),
-                patch("app.services.ics_worker.worker.get_next_queued_item", create=True),
+                patch("app.services.ics_worker.queue_manager.recover_stale_searches"),
+                patch("app.services.ics_worker.session_manager.IcsSessionManager", return_value=mock_session),
+                patch("app.services.ics_worker.config.IcsConfig"),
+                patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
+                patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
+                patch("app.services.ics_worker.ai_gate.process_ai_gate"),
+                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -272,13 +272,13 @@ class TestMainLoop:
 
             with (
                 patch("app.database.SessionLocal", return_value=db_session),
-                patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
-                patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
-                patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
-                patch("app.services.ics_worker.worker.SearchScheduler", return_value=mock_scheduler, create=True),
-                patch("app.services.ics_worker.worker.CircuitBreaker", create=True),
-                patch("app.services.ics_worker.worker.process_ai_gate", create=True),
-                patch("app.services.ics_worker.worker.get_next_queued_item", create=True),
+                patch("app.services.ics_worker.queue_manager.recover_stale_searches"),
+                patch("app.services.ics_worker.session_manager.IcsSessionManager", return_value=mock_session),
+                patch("app.services.ics_worker.config.IcsConfig", return_value=mock_config),
+                patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
+                patch("app.services.ics_worker.circuit_breaker.CircuitBreaker"),
+                patch("app.services.ics_worker.ai_gate.process_ai_gate"),
+                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -324,13 +324,13 @@ class TestMainLoop:
 
             with (
                 patch("app.database.SessionLocal", return_value=db_session),
-                patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
-                patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
-                patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
-                patch("app.services.ics_worker.worker.SearchScheduler", return_value=mock_scheduler, create=True),
-                patch("app.services.ics_worker.worker.CircuitBreaker", return_value=mock_breaker, create=True),
-                patch("app.services.ics_worker.worker.process_ai_gate", create=True),
-                patch("app.services.ics_worker.worker.get_next_queued_item", create=True),
+                patch("app.services.ics_worker.queue_manager.recover_stale_searches"),
+                patch("app.services.ics_worker.session_manager.IcsSessionManager", return_value=mock_session),
+                patch("app.services.ics_worker.config.IcsConfig", return_value=mock_config),
+                patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
+                patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
+                patch("app.services.ics_worker.ai_gate.process_ai_gate"),
+                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -376,13 +376,13 @@ class TestMainLoop:
 
             with (
                 patch("app.database.SessionLocal", return_value=db_session),
-                patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
-                patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
-                patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
-                patch("app.services.ics_worker.worker.SearchScheduler", return_value=mock_scheduler, create=True),
-                patch("app.services.ics_worker.worker.CircuitBreaker", return_value=mock_breaker, create=True),
-                patch("app.services.ics_worker.worker.process_ai_gate", new_callable=AsyncMock, create=True),
-                patch("app.services.ics_worker.worker.get_next_queued_item", return_value=None, create=True),
+                patch("app.services.ics_worker.queue_manager.recover_stale_searches"),
+                patch("app.services.ics_worker.session_manager.IcsSessionManager", return_value=mock_session),
+                patch("app.services.ics_worker.config.IcsConfig", return_value=mock_config),
+                patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
+                patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
+                patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
+                patch("app.services.ics_worker.queue_manager.get_next_queued_item", return_value=None),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -446,23 +446,23 @@ class TestMainLoop:
 
             with (
                 patch("app.database.SessionLocal", return_value=db_session),
-                patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
-                patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
-                patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
-                patch("app.services.ics_worker.worker.SearchScheduler", return_value=mock_scheduler, create=True),
-                patch("app.services.ics_worker.worker.CircuitBreaker", return_value=mock_breaker, create=True),
-                patch("app.services.ics_worker.worker.process_ai_gate", new_callable=AsyncMock, create=True),
-                patch("app.services.ics_worker.worker.get_next_queued_item", side_effect=get_next, create=True),
-                patch("app.services.ics_worker.worker.mark_status", create=True),
-                patch("app.services.ics_worker.worker.mark_completed", create=True) as mock_complete,
+                patch("app.services.ics_worker.queue_manager.recover_stale_searches"),
+                patch("app.services.ics_worker.session_manager.IcsSessionManager", return_value=mock_session),
+                patch("app.services.ics_worker.config.IcsConfig", return_value=mock_config),
+                patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
+                patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
+                patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
+                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.mark_status"),
+                patch("app.services.ics_worker.queue_manager.mark_completed") as mock_complete,
                 patch(
-                    "app.services.ics_worker.worker.search_part",
+                    "app.services.ics_worker.search_engine.search_part",
                     new_callable=AsyncMock,
                     return_value=search_result,
                     create=True,
                 ),
-                patch("app.services.ics_worker.worker.parse_results_html", return_value=parsed_sightings, create=True),
-                patch("app.services.ics_worker.worker.save_ics_sightings", return_value=1, create=True),
+                patch("app.services.ics_worker.result_parser.parse_results_html", return_value=parsed_sightings),
+                patch("app.services.ics_worker.sighting_writer.save_ics_sightings", return_value=1),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -522,14 +522,14 @@ class TestMainLoop:
 
             with (
                 patch("app.database.SessionLocal", return_value=db_session),
-                patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
-                patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
-                patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
-                patch("app.services.ics_worker.worker.SearchScheduler", return_value=mock_scheduler, create=True),
-                patch("app.services.ics_worker.worker.CircuitBreaker", return_value=mock_breaker, create=True),
-                patch("app.services.ics_worker.worker.process_ai_gate", new_callable=AsyncMock, create=True),
-                patch("app.services.ics_worker.worker.get_next_queued_item", side_effect=get_next, create=True),
-                patch("app.services.ics_worker.worker.mark_status", create=True) as mock_mark,
+                patch("app.services.ics_worker.queue_manager.recover_stale_searches"),
+                patch("app.services.ics_worker.session_manager.IcsSessionManager", return_value=mock_session),
+                patch("app.services.ics_worker.config.IcsConfig", return_value=mock_config),
+                patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
+                patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
+                patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
+                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.mark_status") as mock_mark,
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -578,13 +578,13 @@ class TestMainLoop:
 
             with (
                 patch("app.database.SessionLocal", return_value=db_session),
-                patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
-                patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
-                patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
-                patch("app.services.ics_worker.worker.SearchScheduler", return_value=mock_scheduler, create=True),
-                patch("app.services.ics_worker.worker.CircuitBreaker", return_value=mock_breaker, create=True),
-                patch("app.services.ics_worker.worker.process_ai_gate", new_callable=AsyncMock, create=True),
-                patch("app.services.ics_worker.worker.get_next_queued_item", create=True),
+                patch("app.services.ics_worker.queue_manager.recover_stale_searches"),
+                patch("app.services.ics_worker.session_manager.IcsSessionManager", return_value=mock_session),
+                patch("app.services.ics_worker.config.IcsConfig", return_value=mock_config),
+                patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
+                patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
+                patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
+                patch("app.services.ics_worker.queue_manager.get_next_queued_item"),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
@@ -646,16 +646,16 @@ class TestMainLoop:
 
             with (
                 patch("app.database.SessionLocal", return_value=db_session),
-                patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
-                patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
-                patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
-                patch("app.services.ics_worker.worker.SearchScheduler", return_value=mock_scheduler, create=True),
-                patch("app.services.ics_worker.worker.CircuitBreaker", return_value=mock_breaker, create=True),
-                patch("app.services.ics_worker.worker.process_ai_gate", new_callable=AsyncMock, create=True),
-                patch("app.services.ics_worker.worker.get_next_queued_item", side_effect=get_next, create=True),
-                patch("app.services.ics_worker.worker.mark_status", create=True) as mock_mark,
+                patch("app.services.ics_worker.queue_manager.recover_stale_searches"),
+                patch("app.services.ics_worker.session_manager.IcsSessionManager", return_value=mock_session),
+                patch("app.services.ics_worker.config.IcsConfig", return_value=mock_config),
+                patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
+                patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
+                patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
+                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.mark_status") as mock_mark,
                 patch(
-                    "app.services.ics_worker.worker.search_part",
+                    "app.services.ics_worker.search_engine.search_part",
                     new_callable=AsyncMock,
                     return_value={"html": "", "duration_ms": 100},
                     create=True,
@@ -721,16 +721,16 @@ class TestMainLoop:
 
             with (
                 patch("app.database.SessionLocal", return_value=db_session),
-                patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
-                patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
-                patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
-                patch("app.services.ics_worker.worker.SearchScheduler", return_value=mock_scheduler, create=True),
-                patch("app.services.ics_worker.worker.CircuitBreaker", return_value=mock_breaker, create=True),
-                patch("app.services.ics_worker.worker.process_ai_gate", new_callable=AsyncMock, create=True),
-                patch("app.services.ics_worker.worker.get_next_queued_item", side_effect=get_next, create=True),
-                patch("app.services.ics_worker.worker.mark_status", create=True) as mock_mark,
+                patch("app.services.ics_worker.queue_manager.recover_stale_searches"),
+                patch("app.services.ics_worker.session_manager.IcsSessionManager", return_value=mock_session),
+                patch("app.services.ics_worker.config.IcsConfig", return_value=mock_config),
+                patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
+                patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
+                patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
+                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.mark_status") as mock_mark,
                 patch(
-                    "app.services.ics_worker.worker.search_part",
+                    "app.services.ics_worker.search_engine.search_part",
                     new_callable=AsyncMock,
                     side_effect=Exception("Network timeout"),
                     create=True,
@@ -798,23 +798,23 @@ class TestMainLoop:
 
             with (
                 patch("app.database.SessionLocal", return_value=db_session),
-                patch("app.services.ics_worker.worker.recover_stale_searches", create=True),
-                patch("app.services.ics_worker.worker.IcsSessionManager", return_value=mock_session, create=True),
-                patch("app.services.ics_worker.worker.IcsConfig", return_value=mock_config, create=True),
-                patch("app.services.ics_worker.worker.SearchScheduler", return_value=mock_scheduler, create=True),
-                patch("app.services.ics_worker.worker.CircuitBreaker", return_value=mock_breaker, create=True),
-                patch("app.services.ics_worker.worker.process_ai_gate", new_callable=AsyncMock, create=True),
-                patch("app.services.ics_worker.worker.get_next_queued_item", side_effect=get_next, create=True),
-                patch("app.services.ics_worker.worker.mark_status", create=True),
-                patch("app.services.ics_worker.worker.mark_completed", create=True),
+                patch("app.services.ics_worker.queue_manager.recover_stale_searches"),
+                patch("app.services.ics_worker.session_manager.IcsSessionManager", return_value=mock_session),
+                patch("app.services.ics_worker.config.IcsConfig", return_value=mock_config),
+                patch("app.services.ics_worker.scheduler.SearchScheduler", return_value=mock_scheduler),
+                patch("app.services.ics_worker.circuit_breaker.CircuitBreaker", return_value=mock_breaker),
+                patch("app.services.ics_worker.ai_gate.process_ai_gate", new_callable=AsyncMock),
+                patch("app.services.ics_worker.queue_manager.get_next_queued_item", side_effect=get_next),
+                patch("app.services.ics_worker.queue_manager.mark_status"),
+                patch("app.services.ics_worker.queue_manager.mark_completed"),
                 patch(
-                    "app.services.ics_worker.worker.search_part",
+                    "app.services.ics_worker.search_engine.search_part",
                     new_callable=AsyncMock,
                     return_value={"html": "<html></html>", "duration_ms": 200},
                     create=True,
                 ),
-                patch("app.services.ics_worker.worker.parse_results_html", return_value=[], create=True),
-                patch("app.services.ics_worker.worker.save_ics_sightings", return_value=0, create=True),
+                patch("app.services.ics_worker.result_parser.parse_results_html", return_value=[]),
+                patch("app.services.ics_worker.sighting_writer.save_ics_sightings", return_value=0),
                 patch("asyncio.sleep", side_effect=mock_sleep),
             ):
                 from app.services.ics_worker.worker import main
