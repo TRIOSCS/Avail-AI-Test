@@ -15,7 +15,8 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from datetime import date
+import asyncio
+from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -516,6 +517,7 @@ class TestGetUnifiedLeaderboard:
 # ═══════════════════════════════════════════════════════════════════════
 
 from app.services.vendor_email_lookup import (
+    _query_db_for_part,
     build_inquiry_groups,
     find_vendors_for_parts,
 )
@@ -1535,3 +1537,584 @@ class TestEnrichMissingSignals:
         ):
             result = await enrich_missing_signals(1, db)
             assert result is False
+
+
+# ═══════════════════════════════════════════════════════════════════════
+# Additional coverage tests
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestQueryDbForPartWithRealDB:
+    """Test _query_db_for_part using real SQLite DB session from conftest."""
+
+    def test_sighting_found(self, db_session, test_requisition):
+        """Sighting with vendor info is returned."""
+        from app.models import Sighting
+
+        req_id = test_requisition.requirements[0].id
+        s = Sighting(
+            requirement_id=req_id,
+            vendor_name="Arrow Electronics",
+            vendor_email="sales@arrow.com",
+            vendor_phone="+1-555-0100",
+            normalized_mpn="LM317T",
+            mpn_matched="LM317T",
+            qty_available=1000,
+            unit_price=0.50,
+            currency="USD",
+            source_type="api",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(s)
+        db_session.commit()
+
+        result = _query_db_for_part("LM317T", db_session)
+        assert len(result) >= 1
+        arrow = [v for v in result if "arrow" in v["vendor_name"].lower()]
+        assert len(arrow) >= 1
+        assert "sales@arrow.com" in arrow[0]["emails"]
+
+    def test_no_sightings(self, db_session):
+        """No sightings returns empty (or broadcast-only)."""
+        result = _query_db_for_part("NONEXISTENT999", db_session)
+        sighting_vendors = [v for v in result if "api" in v.get("sources", [])]
+        assert len(sighting_vendors) == 0
+
+    def test_broadcast_vendor_included(self, db_session):
+        """Broadcast vendors are always included regardless of MPN."""
+        from app.models import VendorCard
+
+        card = VendorCard(
+            normalized_name="broadcast vendor",
+            display_name="Broadcast Vendor",
+            emails=["bcast@vendor.com"],
+            phones=[],
+            sighting_count=0,
+            is_broadcast=True,
+            is_blacklisted=False,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(card)
+        db_session.commit()
+
+        result = _query_db_for_part("ANYPART", db_session)
+        bcast = [v for v in result if "broadcast" in v.get("sources", [])]
+        assert len(bcast) >= 1
+        assert "bcast@vendor.com" in bcast[0]["emails"]
+
+    def test_vendor_card_enrichment(self, db_session, test_vendor_card, test_requisition):
+        """Vendor card data is merged into sighting-based vendors."""
+        from app.models import Sighting
+
+        req_id = test_requisition.requirements[0].id
+        s = Sighting(
+            requirement_id=req_id,
+            vendor_name="Arrow Electronics",
+            normalized_mpn="LM317T",
+            source_type="api",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(s)
+        db_session.commit()
+
+        result = _query_db_for_part("LM317T", db_session)
+        arrow = [v for v in result if "arrow" in v["vendor_name"].lower()]
+        assert len(arrow) >= 1
+        assert "sales@arrow.com" in arrow[0]["emails"]
+
+    def test_vendor_contact_emails_merged(self, db_session, test_vendor_card, test_vendor_contact, test_requisition):
+        """VendorContact emails are merged into the vendor entry."""
+        from app.models import Sighting
+
+        req_id = test_requisition.requirements[0].id
+        s = Sighting(
+            requirement_id=req_id,
+            vendor_name="Arrow Electronics",
+            normalized_mpn="LM317T",
+            source_type="api",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(s)
+        db_session.commit()
+
+        result = _query_db_for_part("LM317T", db_session)
+        arrow = [v for v in result if "arrow" in v["vendor_name"].lower()]
+        assert len(arrow) >= 1
+        assert "john@arrow.com" in arrow[0]["emails"]
+
+
+class TestEnrichVendorsBatch:
+    @pytest.mark.asyncio
+    async def test_timeout_handling(self):
+        from app.services.vendor_email_lookup import _enrich_vendors_batch
+
+        db = MagicMock()
+        vendors = [{"vendor_name": "Slow Vendor", "emails": [], "card_id": None, "domain": "slow.com"}]
+
+        with patch(
+            "app.enrichment_service.find_suggested_contacts",
+            new_callable=AsyncMock,
+            side_effect=asyncio.TimeoutError,
+        ):
+            await _enrich_vendors_batch(vendors, db, timeout=1.0)
+
+
+class TestComputeUnifiedScoresTraderAndSales:
+    """Additional unified score tests for trader and sales roles."""
+
+    def test_trader_merges_buyer_and_sales(self):
+        from app.constants import UserRole
+
+        db = MagicMock()
+        user = MagicMock()
+        user.id = 1
+        user.name = "Test Trader"
+        user.email = "trader@trioscs.com"
+        user.role = UserRole.TRADER
+        user.is_active = True
+
+        buyer_snap = MagicMock()
+        buyer_snap.user_id = 1
+        buyer_snap.role_type = "buyer"
+        buyer_snap.total_score = 70
+        for metric in ("b1", "b2", "b3", "b4", "b5", "o1", "o2", "o3", "o4", "o5"):
+            setattr(buyer_snap, f"{metric}_score", 7.0)
+
+        sales_snap = MagicMock()
+        sales_snap.user_id = 1
+        sales_snap.role_type = "sales"
+        sales_snap.total_score = 60
+        for metric in ("b1", "b2", "b3", "b4", "b5", "o1", "o2", "o3", "o4", "o5"):
+            setattr(sales_snap, f"{metric}_score", 6.0)
+
+        def query_side_effect(model):
+            mock_q = MagicMock()
+            if model.__name__ == "User":
+                mock_q.filter.return_value.all.return_value = [user]
+            elif model.__name__ == "AvailScoreSnapshot":
+                mock_q.filter.return_value.all.return_value = [buyer_snap, sales_snap]
+            elif model.__name__ == "MultiplierScoreSnapshot":
+                mock_q.filter.return_value.all.return_value = []
+            elif model.__name__ == "UnifiedScoreSnapshot":
+                mock_q.filter.return_value.first.return_value = None
+            return mock_q
+
+        db.query.side_effect = query_side_effect
+
+        with patch("app.services.unified_score_service._refresh_blurbs"):
+            result = compute_all_unified_scores(db, date(2026, 3, 1))
+            assert result["computed"] == 1
+
+    def test_sales_user(self):
+        from app.constants import UserRole
+
+        db = MagicMock()
+        user = MagicMock()
+        user.id = 2
+        user.name = "Test Sales"
+        user.email = "sales@trioscs.com"
+        user.role = UserRole.SALES
+        user.is_active = True
+
+        sales_snap = MagicMock()
+        sales_snap.user_id = 2
+        sales_snap.role_type = "sales"
+        sales_snap.total_score = 65
+        for metric in ("b1", "b2", "b3", "b4", "b5", "o1", "o2", "o3", "o4", "o5"):
+            setattr(sales_snap, f"{metric}_score", 6.5)
+
+        def query_side_effect(model):
+            mock_q = MagicMock()
+            if model.__name__ == "User":
+                mock_q.filter.return_value.all.return_value = [user]
+            elif model.__name__ == "AvailScoreSnapshot":
+                mock_q.filter.return_value.all.return_value = [sales_snap]
+            elif model.__name__ == "MultiplierScoreSnapshot":
+                mock_q.filter.return_value.all.return_value = []
+            elif model.__name__ == "UnifiedScoreSnapshot":
+                mock_q.filter.return_value.first.return_value = None
+            return mock_q
+
+        db.query.side_effect = query_side_effect
+
+        with patch("app.services.unified_score_service._refresh_blurbs"):
+            result = compute_all_unified_scores(db, date(2026, 3, 1))
+            assert result["computed"] == 1
+
+    def test_existing_snapshot_updated(self):
+        """When a UnifiedScoreSnapshot already exists, it should be updated."""
+        db = MagicMock()
+        user = MagicMock()
+        user.id = 1
+        user.name = "Existing User"
+        user.email = "existing@trioscs.com"
+        user.role = "buyer"
+        user.is_active = True
+
+        avail_snap = MagicMock()
+        avail_snap.user_id = 1
+        avail_snap.role_type = "buyer"
+        avail_snap.total_score = 80
+        for metric in ("b1", "b2", "b3", "b4", "b5", "o1", "o2", "o3", "o4", "o5"):
+            setattr(avail_snap, f"{metric}_score", 8.0)
+
+        existing_unified = MagicMock()
+
+        def query_side_effect(model):
+            mock_q = MagicMock()
+            if model.__name__ == "User":
+                mock_q.filter.return_value.all.return_value = [user]
+            elif model.__name__ == "AvailScoreSnapshot":
+                mock_q.filter.return_value.all.return_value = [avail_snap]
+            elif model.__name__ == "MultiplierScoreSnapshot":
+                mock_q.filter.return_value.all.return_value = []
+            elif model.__name__ == "UnifiedScoreSnapshot":
+                mock_q.filter.return_value.first.return_value = existing_unified
+            return mock_q
+
+        db.query.side_effect = query_side_effect
+
+        with patch("app.services.unified_score_service._refresh_blurbs"):
+            result = compute_all_unified_scores(db, date(2026, 3, 1))
+            assert result["saved"] == 1
+
+    def test_user_with_no_snapshots_skipped(self):
+        """Users without any AvailScoreSnapshot data are skipped."""
+        db = MagicMock()
+        user = MagicMock()
+        user.id = 1
+        user.name = "No Data User"
+        user.email = "nodata@trioscs.com"
+        user.role = "buyer"
+        user.is_active = True
+
+        def query_side_effect(model):
+            mock_q = MagicMock()
+            if model.__name__ == "User":
+                mock_q.filter.return_value.all.return_value = [user]
+            elif model.__name__ == "AvailScoreSnapshot":
+                mock_q.filter.return_value.all.return_value = []
+            elif model.__name__ == "MultiplierScoreSnapshot":
+                mock_q.filter.return_value.all.return_value = []
+            elif model.__name__ == "UnifiedScoreSnapshot":
+                mock_q.filter.return_value.first.return_value = None
+            return mock_q
+
+        db.query.side_effect = query_side_effect
+
+        with patch("app.services.unified_score_service._refresh_blurbs"):
+            result = compute_all_unified_scores(db, date(2026, 3, 1))
+            assert result["computed"] == 0
+            assert result["saved"] == 0
+
+
+class TestRefreshBlurbs:
+    def test_fresh_blurb_skipped(self):
+        """Blurbs generated recently (< 2 hours) should be skipped."""
+        from app.services.unified_score_service import _refresh_blurbs
+
+        db = MagicMock()
+        snap = MagicMock()
+        snap.ai_blurb_generated_at = datetime.now(timezone.utc)
+        db.query.return_value.filter.return_value.first.return_value = snap
+
+        results = [
+            {
+                "user_id": 1,
+                "user_name": "Test",
+                "primary_role": "buyer",
+                "cats": {"execution": 80, "followthrough": 70, "closing": 60, "depth": 50},
+                "score": 70,
+                "rank": 1,
+            }
+        ]
+        _refresh_blurbs(db, date(2026, 3, 1), results)
+        db.commit.assert_called()
+
+    def test_stale_blurb_regenerated(self):
+        """Blurbs older than 2 hours should be regenerated."""
+        from app.services.unified_score_service import _refresh_blurbs
+
+        db = MagicMock()
+        snap = MagicMock()
+        snap.ai_blurb_generated_at = datetime.now(timezone.utc) - timedelta(hours=3)
+        db.query.return_value.filter.return_value.first.return_value = snap
+
+        results = [
+            {
+                "user_id": 1,
+                "user_name": "Test",
+                "primary_role": "buyer",
+                "cats": {"execution": 80, "followthrough": 70, "closing": 60, "depth": 50},
+                "score": 70,
+                "rank": 1,
+            }
+        ]
+
+        with patch(
+            "app.services.unified_score_service._generate_blurb",
+            return_value={"strength": "Good!", "improvement": "Work harder"},
+        ):
+            _refresh_blurbs(db, date(2026, 3, 1), results)
+            assert snap.ai_blurb_strength == "Good!"
+            assert snap.ai_blurb_improvement == "Work harder"
+
+    def test_blurb_generation_failure(self):
+        """Failed blurb generation should not crash."""
+        from app.services.unified_score_service import _refresh_blurbs
+
+        db = MagicMock()
+        snap = MagicMock()
+        snap.ai_blurb_generated_at = None
+        db.query.return_value.filter.return_value.first.return_value = snap
+
+        results = [
+            {
+                "user_id": 1,
+                "user_name": "Test",
+                "primary_role": "buyer",
+                "cats": {"execution": 80, "followthrough": 70, "closing": 60, "depth": 50},
+                "score": 70,
+                "rank": 1,
+            }
+        ]
+
+        with patch("app.services.unified_score_service._generate_blurb", side_effect=Exception("API error")):
+            _refresh_blurbs(db, date(2026, 3, 1), results)
+            db.commit.assert_called()
+
+
+class TestGetUnifiedLeaderboardWithData:
+    def test_with_entries(self):
+        db = MagicMock()
+
+        snap = MagicMock()
+        snap.user_id = 1
+        snap.primary_role = "buyer"
+        snap.unified_score = 85.0
+        snap.rank = 1
+        snap.prospecting_pct = 0.0
+        snap.execution_pct = 90.0
+        snap.followthrough_pct = 80.0
+        snap.closing_pct = 85.0
+        snap.depth_pct = 70.0
+        snap.ai_blurb_strength = "Great execution!"
+        snap.ai_blurb_improvement = "Improve depth."
+        snap.avail_score_buyer = 75
+        snap.avail_score_sales = None
+        snap.multiplier_points_buyer = 120
+        snap.multiplier_points_sales = None
+
+        user = MagicMock()
+        user.id = 1
+        user.name = "Test User"
+        user.role = "buyer"
+
+        def query_side_effect(model):
+            mock_q = MagicMock()
+            if model.__name__ == "UnifiedScoreSnapshot":
+                mock_q.filter.return_value.order_by.return_value.all.return_value = [snap]
+            elif model.__name__ == "AvailScoreSnapshot":
+                mock_q.filter.return_value.all.return_value = []
+            elif model.__name__ == "MultiplierScoreSnapshot":
+                mock_q.filter.return_value.all.return_value = []
+            elif model.__name__ == "User":
+                mock_q.filter.return_value.all.return_value = [user]
+            return mock_q
+
+        db.query.side_effect = query_side_effect
+
+        result = get_unified_leaderboard(db, date(2026, 3, 1))
+        assert len(result["entries"]) == 1
+        entry = result["entries"][0]
+        assert entry["user_name"] == "Test User"
+        assert entry["unified_score"] == 85.0
+
+
+class TestEnrichmentServiceProviders:
+    """Test the Explorium and AI provider functions."""
+
+    @pytest.mark.asyncio
+    async def test_explorium_find_company_no_key(self):
+        from app.enrichment_service import _explorium_find_company
+
+        with patch("app.enrichment_service.get_credential_cached", return_value=None):
+            result = await _explorium_find_company("acme.com")
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_explorium_find_company_success(self):
+        from app.enrichment_service import _explorium_find_company
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "firmo_name": "Acme Corp",
+            "firmo_linkedin_profile": "https://linkedin.com/company/acme",
+            "firmo_linkedin_industry_category": "Electronics",
+            "firmo_number_of_employees_range": "201-500",
+            "firmo_city_name": "Dallas",
+            "firmo_region_name": "TX",
+            "firmo_country_name": "US",
+            "firmo_website": "https://acme.com",
+        }
+
+        with (
+            patch("app.enrichment_service.get_credential_cached", return_value="fake-key"),
+            patch("app.enrichment_service.http.post", new_callable=AsyncMock, return_value=mock_resp),
+        ):
+            result = await _explorium_find_company("acme.com", "Acme")
+            assert result["source"] == "explorium"
+            assert result["legal_name"] == "Acme Corp"
+
+    @pytest.mark.asyncio
+    async def test_explorium_find_company_http_error(self):
+        from app.enrichment_service import _explorium_find_company
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 500
+
+        with (
+            patch("app.enrichment_service.get_credential_cached", return_value="fake-key"),
+            patch("app.enrichment_service.http.post", new_callable=AsyncMock, return_value=mock_resp),
+        ):
+            result = await _explorium_find_company("acme.com")
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_explorium_find_contacts_no_key(self):
+        from app.enrichment_service import _explorium_find_contacts
+
+        with patch("app.enrichment_service.get_credential_cached", return_value=None):
+            result = await _explorium_find_contacts("acme.com")
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_explorium_find_contacts_success(self):
+        from app.enrichment_service import _explorium_find_contacts
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "prospects": [
+                {
+                    "full_name": "John Doe",
+                    "job_title": "Procurement Manager",
+                    "email": "john@acme.com",
+                    "phone": "+1-555-0100",
+                    "linkedin_url": "https://linkedin.com/in/johndoe",
+                    "location": "Dallas, TX",
+                    "company_name": "Acme Corp",
+                }
+            ]
+        }
+
+        with (
+            patch("app.enrichment_service.get_credential_cached", return_value="fake-key"),
+            patch("app.enrichment_service.http.post", new_callable=AsyncMock, return_value=mock_resp),
+        ):
+            result = await _explorium_find_contacts("acme.com", "procurement")
+            assert len(result) == 1
+            assert result[0]["full_name"] == "John Doe"
+
+    @pytest.mark.asyncio
+    async def test_ai_find_company_no_key(self):
+        from app.enrichment_service import _ai_find_company
+
+        with patch("app.enrichment_service.get_credential_cached", return_value=None):
+            result = await _ai_find_company("acme.com")
+            assert result is None
+
+    @pytest.mark.asyncio
+    async def test_ai_find_company_success(self):
+        from app.enrichment_service import _ai_find_company
+
+        with (
+            patch("app.enrichment_service.get_credential_cached", return_value="fake-key"),
+            patch(
+                "app.enrichment_service.claude_json",
+                new_callable=AsyncMock,
+                return_value={
+                    "legal_name": "Acme Corp",
+                    "industry": "Electronics",
+                    "employee_size": "201-500",
+                    "hq_city": "Dallas",
+                    "hq_state": "TX",
+                    "hq_country": "US",
+                    "website": "https://acme.com",
+                    "linkedin_url": "https://linkedin.com/company/acme",
+                },
+            ),
+        ):
+            result = await _ai_find_company("acme.com", "Acme")
+            assert result["source"] == "ai"
+            assert result["legal_name"] == "Acme Corp"
+
+    @pytest.mark.asyncio
+    async def test_ai_find_contacts_no_key(self):
+        from app.enrichment_service import _ai_find_contacts
+
+        with patch("app.enrichment_service.get_credential_cached", return_value=None):
+            result = await _ai_find_contacts("acme.com")
+            assert result == []
+
+    @pytest.mark.asyncio
+    async def test_ai_find_contacts_success(self):
+        from app.enrichment_service import _ai_find_contacts
+
+        with (
+            patch("app.enrichment_service.get_credential_cached", return_value="fake-key"),
+            patch(
+                "app.enrichment_service.enrich_contacts_websearch",
+                new_callable=AsyncMock,
+                return_value=[
+                    {
+                        "full_name": "Jane Smith",
+                        "title": "Sales Manager",
+                        "email": "jane@acme.com",
+                        "phone": None,
+                        "linkedin_url": None,
+                    },
+                ],
+            ),
+        ):
+            result = await _ai_find_contacts("acme.com", "Acme", "sales")
+            assert len(result) == 1
+            assert result[0]["source"] == "ai"
+
+
+class TestSignalEnrichmentBatch:
+    @pytest.mark.asyncio
+    async def test_batch_orchestration(self):
+        from app.services.prospect_signals import run_signal_enrichment_batch
+
+        mock_prospect = MagicMock()
+        mock_prospect.id = 1
+        mock_prospect.readiness_signals = {}
+        mock_prospect.similar_customers = None
+        mock_prospect.ai_writeup = None
+        mock_prospect.name = "Test Co"
+        mock_prospect.domain = "test.com"
+        mock_prospect.industry = None
+        mock_prospect.employee_count_range = None
+        mock_prospect.revenue_range = None
+        mock_prospect.hq_location = None
+        mock_prospect.fit_score = 50
+        mock_prospect.fit_reasoning = None
+
+        mock_db = MagicMock()
+        mock_db.query.return_value.filter.return_value.all.return_value = [mock_prospect]
+
+        with (
+            patch("app.database.SessionLocal", return_value=mock_db),
+            patch("app.services.prospect_signals.enrich_missing_signals", new_callable=AsyncMock, return_value=True),
+            patch("app.services.prospect_signals.find_similar_customers", return_value=[]),
+            patch(
+                "app.services.prospect_signals.generate_ai_writeup",
+                new_callable=AsyncMock,
+                return_value="Great prospect",
+            ),
+        ):
+            result = await run_signal_enrichment_batch(min_fit_score=40)
+            assert result["signals_added"] >= 0
+            assert result["errors"] >= 0

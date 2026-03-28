@@ -413,8 +413,15 @@ class TestScanSentFolder:
         mock_user.email = "buyer@test.com"
 
         mock_db = MagicMock()
-        # SyncState query returns None (no existing sync state)
-        mock_db.query.return_value.filter.return_value.filter.return_value.first.return_value = None
+        # SyncState query: .filter(...).first() returns None (no existing sync state)
+        # ActivityLog dedup: .filter(...).filter(...).first() returns None (no existing log)
+        # Use side_effect to handle multiple .query() calls differently
+        mock_query = MagicMock()
+        mock_filter = MagicMock()
+        mock_filter.first.return_value = None  # No SyncState, no existing ActivityLog
+        mock_filter.filter.return_value = mock_filter  # chained .filter()
+        mock_query.filter.return_value = mock_filter
+        mock_db.query.return_value = mock_query
 
         mock_gc = MagicMock()
         mock_gc.delta_query = AsyncMock(
@@ -438,8 +445,9 @@ class TestScanSentFolder:
         ):
             result = await scan_sent_folder(mock_user, mock_db)
 
-        # Should have added an ActivityLog
+        # Should have added entries (SyncState + ActivityLog)
         assert mock_db.add.called
+        assert len(result) == 1
 
     @pytest.mark.asyncio
     async def test_returns_empty_when_no_token(self):
@@ -482,13 +490,17 @@ class TestScanExcessBidResponses:
         mock_user = MagicMock()
         mock_user.id = 1
         mock_db = MagicMock()
+        # The query chain: db.query(BidSolicitation.id).filter(...).filter(...).filter(...).count()
         mock_db.query.return_value.filter.return_value.filter.return_value.filter.return_value.count.return_value = 0
 
         mock_settings = MagicMock()
         mock_settings.excess_bid_scan_enabled = True
         mock_settings.excess_bid_parse_lookback_days = 30
 
-        with patch("app.config.settings", mock_settings):
+        with (
+            patch("app.config.settings", mock_settings),
+            patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value=None)),
+        ):
             await _scan_excess_bid_responses(mock_user, mock_db)
 
     @pytest.mark.asyncio
@@ -715,11 +727,11 @@ class TestMineVendorContacts:
         )
 
         with (
-            patch("app.jobs.email_jobs.get_valid_token", AsyncMock(return_value="token")),
-            patch("app.jobs.email_jobs.EmailMiner", return_value=mock_miner),
-            patch("app.jobs.email_jobs.normalize_vendor_name", return_value="acme parts"),
-            patch("app.jobs.email_jobs.merge_emails_into_card", return_value=1),
-            patch("app.jobs.email_jobs.merge_phones_into_card"),
+            patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value="token")),
+            patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
+            patch("app.vendor_utils.normalize_vendor_name", return_value="acme parts"),
+            patch("app.vendor_utils.merge_emails_into_card", return_value=1),
+            patch("app.vendor_utils.merge_phones_into_card"),
         ):
             await _mine_vendor_contacts(mock_user, mock_db, is_backfill=False)
 
@@ -756,8 +768,8 @@ class TestScanOutboundRfqs:
         )
 
         with (
-            patch("app.jobs.email_jobs.get_valid_token", AsyncMock(return_value="token")),
-            patch("app.jobs.email_jobs.EmailMiner", return_value=mock_miner),
+            patch("app.utils.token_manager.get_valid_token", AsyncMock(return_value="token")),
+            patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner),
         ):
             await _scan_outbound_rfqs(mock_user, mock_db, is_backfill=False)
 

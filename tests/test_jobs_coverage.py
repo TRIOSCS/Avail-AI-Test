@@ -502,6 +502,166 @@ class TestJobRefreshInsights:
         mock_ks.generate_pipeline_insights.assert_called_once()
         mock_db.close.assert_called_once()
 
+    def test_pipeline_and_vendor_and_company_and_mpn_errors_handled(self):
+        """Errors in pipeline/vendor/company/MPN sections are caught and logged."""
+        mock_db = MagicMock()
+
+        # Reqs: empty (no failures there)
+        req_query = MagicMock()
+        req_query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+
+        # Vendor query raises
+        vendor_query = MagicMock()
+        vendor_query.filter.side_effect = Exception("Vendor query boom")
+
+        # Company query raises
+        company_query = MagicMock()
+        company_query.join.side_effect = Exception("Company query boom")
+
+        # MPN query raises
+        mpn_query = MagicMock()
+        mpn_query.filter.side_effect = Exception("MPN query boom")
+
+        call_count = [0]
+
+        def side_effect_query(model, *args):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return req_query
+            elif call_count[0] == 2:
+                return vendor_query
+            elif call_count[0] == 3:
+                return company_query
+            elif call_count[0] == 4:
+                return mpn_query
+            return MagicMock()
+
+        mock_db.query.side_effect = side_effect_query
+
+        mock_ks = _patch_knowledge_service()
+        mock_ks.generate_pipeline_insights = AsyncMock(side_effect=Exception("Pipeline boom"))
+
+        import sys
+
+        with (
+            patch("app.database.SessionLocal", return_value=mock_db),
+            patch.dict(sys.modules, {"app.services.knowledge_service": mock_ks}),
+        ):
+            from app.jobs.knowledge_jobs import _job_refresh_insights
+
+            # Should not raise — all section errors are caught
+            asyncio.run(_job_refresh_insights())
+
+        mock_db.close.assert_called_once()
+
+    def test_vendor_insight_individual_failure(self):
+        """Individual vendor insight failure is caught, others continue."""
+        mock_db = MagicMock()
+
+        req_query = MagicMock()
+        req_query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+
+        vendor_query = MagicMock()
+        vendor_query.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            (10,),
+            (11,),
+        ]
+
+        company_query = MagicMock()
+        company_query.join.return_value.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = []
+
+        mpn_query = MagicMock()
+        mpn_query.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = []
+
+        call_count = [0]
+
+        def side_effect_query(model, *args):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return req_query
+            elif call_count[0] == 2:
+                return vendor_query
+            elif call_count[0] == 3:
+                return company_query
+            elif call_count[0] == 4:
+                return mpn_query
+            return MagicMock()
+
+        mock_db.query.side_effect = side_effect_query
+
+        mock_ks = _patch_knowledge_service()
+        mock_ks.generate_pipeline_insights = AsyncMock(return_value=[])
+        # First vendor insight fails, second succeeds
+        mock_ks.generate_vendor_insights = AsyncMock(side_effect=[Exception("Vendor insight boom"), ["entry"]])
+
+        import sys
+
+        with (
+            patch("app.database.SessionLocal", return_value=mock_db),
+            patch.dict(sys.modules, {"app.services.knowledge_service": mock_ks}),
+        ):
+            from app.jobs.knowledge_jobs import _job_refresh_insights
+
+            asyncio.run(_job_refresh_insights())
+
+        assert mock_ks.generate_vendor_insights.call_count == 2
+        mock_db.close.assert_called_once()
+
+    def test_company_and_mpn_individual_failures(self):
+        """Individual company/MPN insight failures are caught."""
+        mock_db = MagicMock()
+
+        req_query = MagicMock()
+        req_query.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
+
+        vendor_query = MagicMock()
+        vendor_query.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = []
+
+        company_query = MagicMock()
+        company_query.join.return_value.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            (20,)
+        ]
+
+        mpn_query = MagicMock()
+        mpn_query.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            ("LM317T",)
+        ]
+
+        call_count = [0]
+
+        def side_effect_query(model, *args):
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return req_query
+            elif call_count[0] == 2:
+                return vendor_query
+            elif call_count[0] == 3:
+                return company_query
+            elif call_count[0] == 4:
+                return mpn_query
+            return MagicMock()
+
+        mock_db.query.side_effect = side_effect_query
+
+        mock_ks = _patch_knowledge_service()
+        mock_ks.generate_pipeline_insights = AsyncMock(return_value=[])
+        mock_ks.generate_company_insights = AsyncMock(side_effect=Exception("Company insight boom"))
+        mock_ks.generate_mpn_insights = AsyncMock(side_effect=Exception("MPN insight boom"))
+
+        import sys
+
+        with (
+            patch("app.database.SessionLocal", return_value=mock_db),
+            patch.dict(sys.modules, {"app.services.knowledge_service": mock_ks}),
+        ):
+            from app.jobs.knowledge_jobs import _job_refresh_insights
+
+            asyncio.run(_job_refresh_insights())
+
+        mock_ks.generate_company_insights.assert_called_once()
+        mock_ks.generate_mpn_insights.assert_called_once()
+        mock_db.close.assert_called_once()
+
 
 class TestJobExpireStale:
     def test_logs_expired_count(self):

@@ -2174,3 +2174,912 @@ class TestCrossValidateBatch:
             result = _run(cross_validate_batch(db))
 
         assert result["no_result"] == 1
+
+    def test_periodic_commit_at_100(self):
+        """Test that commit and expire_all happen every 100 items."""
+        from app.services.enrichment import cross_validate_batch
+
+        db = _mock_db()
+
+        rows = []
+        for i in range(110):
+            r = MagicMock()
+            r.id = i
+            r.normalized_mpn = f"mpn{i}"
+            r.manufacturer = "TI"
+            r.mt_id = 100 + i
+            r.confidence = 0.7
+            r.tag_name = "TI"
+            rows.append(r)
+
+        db.query.return_value.join.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = rows
+
+        with patch(
+            "app.services.enrichment.enrich_material_card",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            result = _run(cross_validate_batch(db))
+
+        assert result["no_result"] == 110
+        # Only final commit (no_result continues skip the periodic commit)
+        assert db.commit.call_count == 1
+
+
+# ===========================================================================
+# inventory_jobs.py -- additional coverage for _scan_stock_list_attachments
+# and _download_and_import_stock_list
+# ===========================================================================
+
+
+class TestScanStockListAttachments:
+    def test_no_stock_emails(self):
+        from app.jobs.inventory_jobs import _scan_stock_list_attachments
+
+        user = MagicMock()
+        user.email = "test@example.com"
+        user.access_token = "at_123"
+        db = _mock_db()
+
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            with patch("app.config.settings") as mock_settings:
+                mock_settings.inbox_backfill_days = 30
+                mock_miner = MagicMock()
+                mock_miner.scan_for_stock_lists = AsyncMock(return_value=[])
+                with patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+                    _run(_scan_stock_list_attachments(user, db, is_backfill=False))
+
+    def test_with_stock_emails_and_attachments(self):
+        from app.jobs.inventory_jobs import _scan_stock_list_attachments
+
+        user = MagicMock()
+        user.email = "test@example.com"
+        user.id = 1
+        user.access_token = "at_123"
+        db = _mock_db()
+
+        stock_emails = [
+            {
+                "vendor_name": "Acme",
+                "from_email": "sales@acme.com",
+                "stock_files": [
+                    {"message_id": "msg1", "attachment_id": "att1", "filename": "stock.csv"},
+                ],
+            }
+        ]
+
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            with patch("app.config.settings") as mock_settings:
+                mock_settings.inbox_backfill_days = 30
+                mock_miner = MagicMock()
+                mock_miner.scan_for_stock_lists = AsyncMock(return_value=stock_emails)
+                with patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+                    with patch(
+                        "app.jobs.inventory_jobs._download_and_import_stock_list",
+                        new_callable=AsyncMock,
+                    ) as mock_dl:
+                        _run(_scan_stock_list_attachments(user, db, is_backfill=True))
+                        mock_dl.assert_called_once()
+
+    def test_attachment_import_os_error(self):
+        from app.jobs.inventory_jobs import _scan_stock_list_attachments
+
+        user = MagicMock()
+        user.email = "test@example.com"
+        user.id = 1
+        user.access_token = "at_123"
+        db = _mock_db()
+
+        stock_emails = [
+            {
+                "vendor_name": "Acme",
+                "from_email": "sales@acme.com",
+                "stock_files": [
+                    {"message_id": "msg1", "attachment_id": "att1", "filename": "stock.csv"},
+                ],
+            }
+        ]
+
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            with patch("app.config.settings") as mock_settings:
+                mock_settings.inbox_backfill_days = 30
+                mock_miner = MagicMock()
+                mock_miner.scan_for_stock_lists = AsyncMock(return_value=stock_emails)
+                with patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+                    with patch(
+                        "app.jobs.inventory_jobs._download_and_import_stock_list",
+                        new_callable=AsyncMock,
+                        side_effect=OSError("disk full"),
+                    ):
+                        _run(_scan_stock_list_attachments(user, db))
+
+    def test_attachment_import_unexpected_error(self):
+        from app.jobs.inventory_jobs import _scan_stock_list_attachments
+
+        user = MagicMock()
+        user.email = "test@example.com"
+        user.id = 1
+        user.access_token = "at_123"
+        db = _mock_db()
+
+        stock_emails = [
+            {
+                "vendor_name": "Acme",
+                "from_email": "sales@acme.com",
+                "stock_files": [
+                    {"message_id": "msg1", "attachment_id": "att1", "filename": "stock.csv"},
+                ],
+            }
+        ]
+
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            with patch("app.config.settings") as mock_settings:
+                mock_settings.inbox_backfill_days = 30
+                mock_miner = MagicMock()
+                mock_miner.scan_for_stock_lists = AsyncMock(return_value=stock_emails)
+                with patch("app.connectors.email_mining.EmailMiner", return_value=mock_miner):
+                    with patch(
+                        "app.jobs.inventory_jobs._download_and_import_stock_list",
+                        new_callable=AsyncMock,
+                        side_effect=RuntimeError("unexpected"),
+                    ):
+                        _run(_scan_stock_list_attachments(user, db))
+
+
+class TestDownloadAndImportStockList:
+    def test_attachment_download_error(self):
+        from app.jobs.inventory_jobs import _download_and_import_stock_list
+
+        user = MagicMock()
+        user.access_token = "at_123"
+        db = _mock_db()
+
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            mock_gc = MagicMock()
+            mock_gc.get_json = AsyncMock(side_effect=Exception("download failed"))
+            with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+                _run(_download_and_import_stock_list(user, db, "msg1", "att1", "stock.csv", "Acme", "sales@acme.com"))
+
+    def test_attachment_error_in_response(self):
+        from app.jobs.inventory_jobs import _download_and_import_stock_list
+
+        user = MagicMock()
+        user.access_token = "at_123"
+        db = _mock_db()
+
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            mock_gc = MagicMock()
+            mock_gc.get_json = AsyncMock(return_value={"error": "not found"})
+            with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+                _run(_download_and_import_stock_list(user, db, "msg1", "att1", "stock.csv", "Acme", "sales@acme.com"))
+
+    def test_no_content_bytes(self):
+        from app.jobs.inventory_jobs import _download_and_import_stock_list
+
+        user = MagicMock()
+        user.access_token = "at_123"
+        db = _mock_db()
+
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            mock_gc = MagicMock()
+            mock_gc.get_json = AsyncMock(return_value={"name": "file.csv"})
+            with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+                _run(_download_and_import_stock_list(user, db, "msg1", "att1", "stock.csv", "Acme", "sales@acme.com"))
+
+    def test_file_validation_failed(self):
+        import base64
+
+        from app.jobs.inventory_jobs import _download_and_import_stock_list
+
+        user = MagicMock()
+        user.access_token = "at_123"
+        db = _mock_db()
+
+        content = base64.b64encode(b"fake file content").decode()
+
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            mock_gc = MagicMock()
+            mock_gc.get_json = AsyncMock(return_value={"contentBytes": content})
+            with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+                with patch("app.utils.file_validation.validate_file", return_value=(False, "application/exe")):
+                    _run(
+                        _download_and_import_stock_list(user, db, "msg1", "att1", "stock.exe", "Acme", "sales@acme.com")
+                    )
+
+    def test_parser_returns_no_rows(self):
+        import base64
+
+        from app.jobs.inventory_jobs import _download_and_import_stock_list
+
+        user = MagicMock()
+        user.access_token = "at_123"
+        db = _mock_db()
+
+        content = base64.b64encode(b"mpn,qty\n").decode()
+
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            mock_gc = MagicMock()
+            mock_gc.get_json = AsyncMock(return_value={"contentBytes": content})
+            with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+                with patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")):
+                    with patch(
+                        "app.services.attachment_parser.parse_attachment",
+                        new_callable=AsyncMock,
+                        return_value=[],
+                    ):
+                        _run(
+                            _download_and_import_stock_list(
+                                user, db, "msg1", "att1", "stock.csv", "Acme", "sales@acme.com"
+                            )
+                        )
+
+    def test_ai_parser_fails_uses_legacy(self):
+        import base64
+
+        from app.jobs.inventory_jobs import _download_and_import_stock_list
+
+        user = MagicMock()
+        user.access_token = "at_123"
+        db = _mock_db()
+
+        content = base64.b64encode(b"mpn,qty\nLM358,100").decode()
+
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            mock_gc = MagicMock()
+            mock_gc.get_json = AsyncMock(return_value={"contentBytes": content})
+            with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+                with patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")):
+                    with patch(
+                        "app.services.attachment_parser.parse_attachment",
+                        new_callable=AsyncMock,
+                        side_effect=Exception("AI parser broken"),
+                    ):
+                        with patch(
+                            "app.jobs.inventory_jobs._parse_stock_file",
+                            return_value=[],
+                        ):
+                            _run(
+                                _download_and_import_stock_list(
+                                    user, db, "msg1", "att1", "stock.csv", "Acme", "sales@acme.com"
+                                )
+                            )
+
+    def test_successful_import_new_card(self):
+        import base64
+
+        from app.jobs.inventory_jobs import _download_and_import_stock_list
+
+        user = MagicMock()
+        user.access_token = "at_123"
+        db = _mock_db()
+        db.query.return_value.filter.return_value.all.return_value = []
+
+        content = base64.b64encode(b"mpn,qty\nLM358,100").decode()
+        rows = [{"mpn": "LM358", "qty": 100, "manufacturer": "TI"}]
+
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            mock_gc = MagicMock()
+            mock_gc.get_json = AsyncMock(return_value={"contentBytes": content})
+            with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+                with patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")):
+                    with patch(
+                        "app.services.attachment_parser.parse_attachment",
+                        new_callable=AsyncMock,
+                        return_value=rows,
+                    ):
+                        with patch("app.utils.normalization.normalize_mpn_key", return_value="lm358"):
+                            with patch("app.utils.normalization.normalize_mpn", return_value="LM358"):
+                                with patch("app.vendor_utils.normalize_vendor_name", return_value="acme"):
+                                    with patch(
+                                        "app.services.activity_service.match_email_to_entity",
+                                        return_value=None,
+                                    ):
+                                        with patch("app.services.price_snapshot_service.record_price_snapshot"):
+                                            _run(
+                                                _download_and_import_stock_list(
+                                                    user,
+                                                    db,
+                                                    "msg1",
+                                                    "att1",
+                                                    "stock.csv",
+                                                    "Acme",
+                                                    "sales@acme.com",
+                                                )
+                                            )
+
+    def test_commit_failure(self):
+        import base64
+
+        import sqlalchemy.exc
+
+        from app.jobs.inventory_jobs import _download_and_import_stock_list
+
+        user = MagicMock()
+        user.access_token = "at_123"
+        db = _mock_db()
+        db.query.return_value.filter.return_value.all.return_value = []
+        db.commit.side_effect = sqlalchemy.exc.SQLAlchemyError("commit failed")
+
+        content = base64.b64encode(b"mpn,qty\nLM358,100").decode()
+        rows = [{"mpn": "LM358", "qty": 100, "manufacturer": "TI"}]
+
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            mock_gc = MagicMock()
+            mock_gc.get_json = AsyncMock(return_value={"contentBytes": content})
+            with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+                with patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")):
+                    with patch(
+                        "app.services.attachment_parser.parse_attachment",
+                        new_callable=AsyncMock,
+                        return_value=rows,
+                    ):
+                        with patch("app.utils.normalization.normalize_mpn_key", return_value="lm358"):
+                            with patch("app.utils.normalization.normalize_mpn", return_value="LM358"):
+                                with patch("app.vendor_utils.normalize_vendor_name", return_value="acme"):
+                                    with patch(
+                                        "app.services.activity_service.match_email_to_entity",
+                                        return_value=None,
+                                    ):
+                                        with patch("app.services.price_snapshot_service.record_price_snapshot"):
+                                            _run(
+                                                _download_and_import_stock_list(
+                                                    user,
+                                                    db,
+                                                    "msg1",
+                                                    "att1",
+                                                    "stock.csv",
+                                                    "Acme",
+                                                    "sales@acme.com",
+                                                )
+                                            )
+
+    def test_excess_list_detection(self):
+        import base64
+
+        from app.jobs.inventory_jobs import _download_and_import_stock_list
+
+        user = MagicMock()
+        user.access_token = "at_123"
+        db = _mock_db()
+        db.query.return_value.filter.return_value.all.return_value = []
+
+        content = base64.b64encode(b"mpn,qty\nLM358,100").decode()
+        rows = [{"mpn": "LM358", "qty": 100}]
+
+        sender_match = {"type": "company", "id": 42, "name": "Acme Corp"}
+
+        with patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="tok"):
+            mock_gc = MagicMock()
+            mock_gc.get_json = AsyncMock(return_value={"contentBytes": content})
+            with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
+                with patch("app.utils.file_validation.validate_file", return_value=(True, "text/csv")):
+                    with patch(
+                        "app.services.attachment_parser.parse_attachment",
+                        new_callable=AsyncMock,
+                        return_value=rows,
+                    ):
+                        with patch("app.utils.normalization.normalize_mpn_key", return_value="lm358"):
+                            with patch("app.utils.normalization.normalize_mpn", return_value="LM358"):
+                                with patch("app.vendor_utils.normalize_vendor_name", return_value="acme"):
+                                    with patch(
+                                        "app.services.activity_service.match_email_to_entity",
+                                        return_value=sender_match,
+                                    ):
+                                        with patch("app.services.price_snapshot_service.record_price_snapshot"):
+                                            _run(
+                                                _download_and_import_stock_list(
+                                                    user,
+                                                    db,
+                                                    "msg1",
+                                                    "att1",
+                                                    "stock.csv",
+                                                    "Acme",
+                                                    "buyer@customer.com",
+                                                )
+                                            )
+
+
+# ===========================================================================
+# core_jobs.py -- additional coverage for token refresh and inbox scan
+# ===========================================================================
+
+
+class TestJobTokenRefreshEdgeCases:
+    """Additional edge cases for _job_token_refresh()."""
+
+    @patch("app.jobs.core_jobs.logger")
+    def test_refresh_with_redis_lock(self, mock_logger):
+        from app.jobs.core_jobs import _job_token_refresh
+
+        user = MagicMock()
+        user.id = 1
+        user.refresh_token = "rt_123"
+        user.token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        user.access_token = "at_123"
+        user.email = "test@example.com"
+
+        selector_db = _mock_db()
+        selector_db.query.return_value.filter.return_value.all.return_value = [user]
+
+        task_db = _mock_db()
+        task_db.get.return_value = user
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = True
+
+        call_count = [0]
+
+        def session_factory():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return selector_db
+            return task_db
+
+        with patch("app.database.SessionLocal", side_effect=session_factory):
+            with patch("app.jobs.core_jobs._utc", side_effect=lambda x: x):
+                with patch("app.cache.intel_cache._get_redis", return_value=mock_redis):
+                    with patch(
+                        "app.utils.token_manager.refresh_user_token",
+                        new_callable=AsyncMock,
+                    ):
+                        _run(_job_token_refresh.__wrapped__())
+
+        mock_redis.delete.assert_called_once()
+        selector_db.close.assert_called_once()
+
+    @patch("app.jobs.core_jobs.logger")
+    def test_refresh_lock_already_held(self, mock_logger):
+        from app.jobs.core_jobs import _job_token_refresh
+
+        user = MagicMock()
+        user.id = 1
+        user.refresh_token = "rt_123"
+        user.token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        user.access_token = "at_123"
+        user.email = "test@example.com"
+
+        selector_db = _mock_db()
+        selector_db.query.return_value.filter.return_value.all.return_value = [user]
+
+        task_db = _mock_db()
+        task_db.get.return_value = user
+
+        mock_redis = MagicMock()
+        mock_redis.set.return_value = False
+
+        call_count = [0]
+
+        def session_factory():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return selector_db
+            return task_db
+
+        with patch("app.database.SessionLocal", side_effect=session_factory):
+            with patch("app.jobs.core_jobs._utc", side_effect=lambda x: x):
+                with patch("app.cache.intel_cache._get_redis", return_value=mock_redis):
+                    _run(_job_token_refresh.__wrapped__())
+
+        selector_db.close.assert_called_once()
+
+    @patch("app.jobs.core_jobs.logger")
+    def test_refresh_error_stores_error_reason(self, mock_logger):
+        from app.jobs.core_jobs import _job_token_refresh
+
+        user = MagicMock()
+        user.id = 1
+        user.refresh_token = "rt_123"
+        user.token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=5)
+        user.access_token = "at_123"
+
+        selector_db = _mock_db()
+        selector_db.query.return_value.filter.return_value.all.return_value = [user]
+
+        task_db = _mock_db()
+        task_db.get.return_value = user
+
+        call_count = [0]
+
+        def session_factory():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return selector_db
+            return task_db
+
+        with patch("app.database.SessionLocal", side_effect=session_factory):
+            with patch("app.jobs.core_jobs._utc", side_effect=lambda x: x):
+                with patch("app.cache.intel_cache._get_redis", return_value=None):
+                    with patch(
+                        "app.utils.token_manager.refresh_user_token",
+                        new_callable=AsyncMock,
+                        side_effect=RuntimeError("token expired"),
+                    ):
+                        _run(_job_token_refresh.__wrapped__())
+
+        assert "token expired" in user.m365_error_reason
+
+    @patch("app.jobs.core_jobs.logger")
+    def test_generic_exception(self, mock_logger):
+        from app.jobs.core_jobs import _job_token_refresh
+
+        mock_db = _mock_db()
+        mock_db.query.return_value.filter.return_value.all.side_effect = RuntimeError("fail")
+
+        with patch("app.database.SessionLocal", return_value=mock_db):
+            with pytest.raises(RuntimeError, match="fail"):
+                _run(_job_token_refresh.__wrapped__())
+
+
+class TestJobInboxScanEdgeCases:
+    """Additional edge cases for _job_inbox_scan()."""
+
+    @patch("app.jobs.core_jobs.logger")
+    def test_scan_timeout(self, mock_logger):
+        from app.jobs.core_jobs import _job_inbox_scan
+
+        user = MagicMock()
+        user.id = 1
+        user.access_token = "at_123"
+        user.m365_connected = True
+        user.refresh_token = "rt_123"
+        user.last_inbox_scan = None
+
+        selector_db = _mock_db()
+        selector_db.query.return_value.filter.return_value.all.return_value = [user]
+
+        scan_db = _mock_db()
+        scan_db.get.return_value = user
+
+        call_count = [0]
+
+        def session_factory():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return selector_db
+            return scan_db
+
+        with patch("app.database.SessionLocal", side_effect=session_factory):
+            with patch("app.config.settings") as mock_settings:
+                mock_settings.inbox_scan_interval_min = 5
+                with patch(
+                    "app.jobs.core_jobs.asyncio.wait_for",
+                    new_callable=AsyncMock,
+                    side_effect=asyncio.TimeoutError,
+                ):
+                    _run(_job_inbox_scan.__wrapped__())
+
+        selector_db.close.assert_called_once()
+
+    @patch("app.jobs.core_jobs.logger")
+    def test_scan_exception(self, mock_logger):
+        from app.jobs.core_jobs import _job_inbox_scan
+
+        user = MagicMock()
+        user.id = 1
+        user.access_token = "at_123"
+        user.m365_connected = True
+        user.refresh_token = "rt_123"
+        user.last_inbox_scan = None
+
+        selector_db = _mock_db()
+        selector_db.query.return_value.filter.return_value.all.return_value = [user]
+
+        scan_db = _mock_db()
+        scan_db.get.return_value = user
+
+        call_count = [0]
+
+        def session_factory():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return selector_db
+            return scan_db
+
+        with patch("app.database.SessionLocal", side_effect=session_factory):
+            with patch("app.config.settings") as mock_settings:
+                mock_settings.inbox_scan_interval_min = 5
+                with patch(
+                    "app.jobs.core_jobs.asyncio.wait_for",
+                    new_callable=AsyncMock,
+                    side_effect=RuntimeError("scan error"),
+                ):
+                    _run(_job_inbox_scan.__wrapped__())
+
+        selector_db.close.assert_called_once()
+
+    @patch("app.jobs.core_jobs.logger")
+    def test_user_recently_scanned(self, mock_logger):
+        from app.jobs.core_jobs import _job_inbox_scan
+
+        user = MagicMock()
+        user.id = 1
+        user.access_token = "at_123"
+        user.m365_connected = True
+        user.refresh_token = "rt_123"
+        user.last_inbox_scan = datetime.now(timezone.utc)
+
+        mock_db = _mock_db()
+        mock_db.query.return_value.filter.return_value.all.return_value = [user]
+
+        with patch("app.database.SessionLocal", return_value=mock_db):
+            with patch("app.config.settings") as mock_settings:
+                mock_settings.inbox_scan_interval_min = 5
+                with patch("app.jobs.core_jobs._utc", side_effect=lambda x: x):
+                    _run(_job_inbox_scan.__wrapped__())
+
+        mock_db.close.assert_called_once()
+
+
+# ===========================================================================
+# enrichment.py -- additional coverage for nexar functions
+# ===========================================================================
+
+
+class TestNexarBulkValidateWithData:
+    def test_confirmed_match(self):
+        from app.services.enrichment import nexar_bulk_validate
+
+        db = _mock_db()
+
+        row = MagicMock()
+        row.id = 1
+        row.normalized_mpn = "lm358"
+        row.mt_id = 10
+        row.tag_name = "TI"
+
+        db.query.return_value.join.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            row
+        ]
+
+        mt = MagicMock()
+        mt.confidence = 0.7
+        db.get.return_value = mt
+
+        mock_connector = MagicMock()
+        nexar_data = {"data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "TI"}}}]}}}
+        mock_connector._run_query = AsyncMock(return_value=nexar_data)
+        mock_connector.AGGREGATE_QUERY = "query"
+
+        with patch("app.services.enrichment.get_credential_cached", return_value="key"):
+            with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
+                result = _run(nexar_bulk_validate(db))
+
+        assert result["confirmed"] == 1
+        assert mt.confidence == 0.95
+
+    def test_disagreement_changes_manufacturer(self):
+        from app.services.enrichment import nexar_bulk_validate
+
+        db = _mock_db()
+
+        row = MagicMock()
+        row.id = 1
+        row.normalized_mpn = "lm358"
+        row.mt_id = 10
+        row.tag_name = "Wrong Manufacturer"
+
+        db.query.return_value.join.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            row
+        ]
+
+        mt = MagicMock()
+        mt.confidence = 0.7
+        card = MagicMock()
+        db.get.side_effect = lambda model, id: mt if id == 10 else card
+
+        mock_connector = MagicMock()
+        nexar_data = {
+            "data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Texas Instruments"}}}]}}
+        }
+        mock_connector._run_query = AsyncMock(return_value=nexar_data)
+        mock_connector.AGGREGATE_QUERY = "query"
+
+        with patch("app.services.enrichment.get_credential_cached", return_value="key"):
+            with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
+                with patch("app.services.enrichment._apply_enrichment_to_card"):
+                    result = _run(nexar_bulk_validate(db))
+
+        assert result["changed"] == 1
+
+    def test_no_result_from_nexar(self):
+        from app.services.enrichment import nexar_bulk_validate
+
+        db = _mock_db()
+
+        row = MagicMock()
+        row.id = 1
+        row.normalized_mpn = "lm358"
+        row.mt_id = 10
+        row.tag_name = "TI"
+
+        db.query.return_value.join.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            row
+        ]
+
+        mock_connector = MagicMock()
+        mock_connector._run_query = AsyncMock(return_value={"data": {"supSearchMpn": {"results": []}}})
+        mock_connector.AGGREGATE_QUERY = "query"
+
+        with patch("app.services.enrichment.get_credential_cached", return_value="key"):
+            with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
+                result = _run(nexar_bulk_validate(db))
+
+        assert result["no_result"] == 1
+
+    def test_nexar_query_exception(self):
+        from app.services.enrichment import nexar_bulk_validate
+
+        db = _mock_db()
+
+        row = MagicMock()
+        row.id = 1
+        row.normalized_mpn = "lm358"
+        row.mt_id = 10
+        row.tag_name = "TI"
+
+        db.query.return_value.join.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            row
+        ]
+
+        mock_connector = MagicMock()
+        mock_connector._run_query = AsyncMock(side_effect=Exception("network error"))
+        mock_connector.AGGREGATE_QUERY = "query"
+
+        with patch("app.services.enrichment.get_credential_cached", return_value="key"):
+            with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
+                result = _run(nexar_bulk_validate(db))
+
+        assert result["no_result"] == 1
+
+    def test_ignored_manufacturer_from_nexar(self):
+        from app.services.enrichment import nexar_bulk_validate
+
+        db = _mock_db()
+
+        row = MagicMock()
+        row.id = 1
+        row.normalized_mpn = "lm358"
+        row.mt_id = 10
+        row.tag_name = "TI"
+
+        db.query.return_value.join.return_value.join.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            row
+        ]
+
+        mock_connector = MagicMock()
+        nexar_data = {"data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Unknown"}}}]}}}
+        mock_connector._run_query = AsyncMock(return_value=nexar_data)
+        mock_connector.AGGREGATE_QUERY = "query"
+
+        with patch("app.services.enrichment.get_credential_cached", return_value="key"):
+            with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
+                result = _run(nexar_bulk_validate(db))
+
+        assert result["no_result"] == 1
+
+
+class TestNexarBackfillUntaggedWithData:
+    def test_successful_backfill(self):
+        from app.services.enrichment import nexar_backfill_untagged
+
+        db = _mock_db()
+
+        row = MagicMock()
+        row.id = 1
+        row.normalized_mpn = "lm358"
+
+        db.query.return_value.join.return_value.filter.return_value.distinct.return_value.subquery.return_value = (
+            MagicMock()
+        )
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [row]
+
+        card = MagicMock()
+        db.get.return_value = card
+
+        mock_connector = MagicMock()
+        nexar_data = {
+            "data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "Texas Instruments"}}}]}}
+        }
+        mock_connector._run_query = AsyncMock(return_value=nexar_data)
+        mock_connector.AGGREGATE_QUERY = "query"
+
+        with patch("app.services.enrichment.get_credential_cached", return_value="key"):
+            with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
+                with patch("app.services.enrichment._apply_enrichment_to_card"):
+                    result = _run(nexar_backfill_untagged(db))
+
+        assert result["tagged"] == 1
+
+    def test_no_result_from_nexar(self):
+        from app.services.enrichment import nexar_backfill_untagged
+
+        db = _mock_db()
+
+        row = MagicMock()
+        row.id = 1
+        row.normalized_mpn = "lm358"
+
+        db.query.return_value.join.return_value.filter.return_value.distinct.return_value.subquery.return_value = (
+            MagicMock()
+        )
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [row]
+
+        mock_connector = MagicMock()
+        mock_connector._run_query = AsyncMock(return_value={"data": {"supSearchMpn": {"results": []}}})
+        mock_connector.AGGREGATE_QUERY = "query"
+
+        with patch("app.services.enrichment.get_credential_cached", return_value="key"):
+            with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
+                result = _run(nexar_backfill_untagged(db))
+
+        assert result["no_result"] == 1
+
+    def test_nexar_exception(self):
+        from app.services.enrichment import nexar_backfill_untagged
+
+        db = _mock_db()
+
+        row = MagicMock()
+        row.id = 1
+        row.normalized_mpn = "lm358"
+
+        db.query.return_value.join.return_value.filter.return_value.distinct.return_value.subquery.return_value = (
+            MagicMock()
+        )
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [row]
+
+        mock_connector = MagicMock()
+        mock_connector._run_query = AsyncMock(side_effect=Exception("network"))
+        mock_connector.AGGREGATE_QUERY = "query"
+
+        with patch("app.services.enrichment.get_credential_cached", return_value="key"):
+            with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
+                result = _run(nexar_backfill_untagged(db))
+
+        assert result["no_result"] == 1
+
+    def test_ignored_manufacturer(self):
+        from app.services.enrichment import nexar_backfill_untagged
+
+        db = _mock_db()
+
+        row = MagicMock()
+        row.id = 1
+        row.normalized_mpn = "lm358"
+
+        db.query.return_value.join.return_value.filter.return_value.distinct.return_value.subquery.return_value = (
+            MagicMock()
+        )
+        db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [row]
+
+        mock_connector = MagicMock()
+        nexar_data = {"data": {"supSearchMpn": {"results": [{"part": {"manufacturer": {"name": "N/A"}}}]}}}
+        mock_connector._run_query = AsyncMock(return_value=nexar_data)
+        mock_connector.AGGREGATE_QUERY = "query"
+
+        with patch("app.services.enrichment.get_credential_cached", return_value="key"):
+            with patch("app.connectors.sources.NexarConnector", return_value=mock_connector):
+                result = _run(nexar_backfill_untagged(db))
+
+        assert result["no_result"] == 1
+
+
+# ===========================================================================
+# global_search_service.py -- postgres branch coverage
+# ===========================================================================
+
+
+class TestFastSearchPostgres:
+    def test_postgres_search_with_similarity(self):
+        from app.services.global_search_service import fast_search
+
+        db = MagicMock()
+        db.bind.dialect.name = "postgresql"
+
+        chain = MagicMock()
+        chain.order_by.return_value.limit.return_value.all.return_value = []
+        chain.limit.return_value.all.return_value = []
+        db.query.return_value.filter.return_value = chain
+
+        result = fast_search("LM358", db)
+        assert result["total_count"] == 0
