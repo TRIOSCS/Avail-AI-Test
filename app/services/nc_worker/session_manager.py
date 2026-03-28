@@ -8,7 +8,13 @@ Called by: worker loop
 Depends on: requests, beautifulsoup4, patchright (optional), config
 """
 
+from __future__ import annotations
+
 import os
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from patchright.async_api import Page
 
 import requests
 from bs4 import BeautifulSoup
@@ -38,7 +44,7 @@ class NcSessionManager:
         # Browser (lazy-started only when needed)
         self._playwright = None
         self._context = None
-        self._page = None
+        self._page: Page | None = None
         self._browser_started = False
         self.is_logged_in = False
 

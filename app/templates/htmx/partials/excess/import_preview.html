@@ -1,0 +1,70 @@
+{# import_preview.html — Preview of parsed excess inventory import.
+   Called by: routers/excess.py (partial_import_preview)
+   Depends on: excess/detail.html (import form)
+#}
+<div class="space-y-4">
+  <div class="flex items-center gap-3 text-sm">
+    <span class="font-medium text-emerald-600 dark:text-emerald-400">{{ valid_count }} valid rows</span>
+    {% if error_count %}
+      <span class="font-medium text-red-500">{{ error_count }} errors</span>
+    {% endif %}
+    <span class="text-gray-500">from {{ filename }}</span>
+  </div>
+
+  {% if errors %}
+  <div class="rounded-lg border border-red-200 bg-red-50 p-3 dark:border-red-800 dark:bg-red-950">
+    <ul class="list-disc pl-4 text-sm text-red-700 dark:text-red-300">
+      {% for e in errors %}
+        <li>{{ e }}</li>
+      {% endfor %}
+    </ul>
+  </div>
+  {% endif %}
+
+  {% if preview_rows %}
+  <div class="overflow-x-auto rounded-lg border border-gray-200 dark:border-gray-700">
+    <table class="min-w-full text-sm">
+      <thead class="bg-gray-50 dark:bg-gray-800">
+        <tr>
+          <th class="px-3 py-2 text-left font-medium">Part Number</th>
+          <th class="px-3 py-2 text-left font-medium">Manufacturer</th>
+          <th class="px-3 py-2 text-right font-medium">Qty</th>
+          <th class="px-3 py-2 text-left font-medium">Date Code</th>
+          <th class="px-3 py-2 text-left font-medium">Condition</th>
+          <th class="px-3 py-2 text-right font-medium">Asking Price</th>
+        </tr>
+      </thead>
+      <tbody class="divide-y divide-gray-100 dark:divide-gray-800">
+        {% for row in preview_rows %}
+        <tr>
+          <td class="px-3 py-2 font-mono">{{ row.part_number or '-' }}</td>
+          <td class="px-3 py-2">{{ row.manufacturer or '-' }}</td>
+          <td class="px-3 py-2 text-right">{{ row.quantity or '-' }}</td>
+          <td class="px-3 py-2">{{ row.date_code or '-' }}</td>
+          <td class="px-3 py-2">{{ row.condition or '-' }}</td>
+          <td class="px-3 py-2 text-right">{{ '${:,.2f}'.format(row.asking_price) if row.asking_price else '-' }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% if valid_count > preview_rows|length %}
+    <p class="text-xs text-gray-500">Showing {{ preview_rows|length }} of {{ valid_count }} valid rows</p>
+  {% endif %}
+  {% endif %}
+
+  {% if valid_count %}
+  <form hx-post="/api/excess-lists/{{ list_id }}/confirm-import"
+        hx-target="#import-area"
+        hx-swap="innerHTML">
+    <input type="hidden" name="rows_json" value="{{ all_valid_rows_json }}">
+    <div class="flex gap-2">
+      <button type="submit" class="btn btn-primary text-sm">Confirm Import ({{ valid_count }} rows)</button>
+      <button type="button" class="btn btn-ghost text-sm"
+              hx-get="/v2/partials/excess/{{ list_id }}/import-area-empty"
+              hx-target="#import-area"
+              hx-swap="innerHTML">Cancel</button>
+    </div>
+  </form>
+  {% endif %}
+</div>

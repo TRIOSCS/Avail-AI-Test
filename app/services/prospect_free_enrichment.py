@@ -193,6 +193,7 @@ async def run_free_enrichment(prospect_id: int, db: Session | None = None) -> di
     owns_session = db is None
     if owns_session:
         db = SessionLocal()
+    assert db is not None  # narrowed: either passed in or just created
     try:
         prospect = db.get(ProspectAccount, prospect_id)
         if not prospect:

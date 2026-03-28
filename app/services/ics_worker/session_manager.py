@@ -12,8 +12,14 @@ Called by: worker loop
 Depends on: patchright, human_behavior, config
 """
 
+from __future__ import annotations
+
 import asyncio
 import os
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from patchright.async_api import Page
 
 from loguru import logger
 
@@ -28,7 +34,7 @@ class IcsSessionManager:
         self.config = config
         self._playwright = None
         self._context = None
-        self._page = None
+        self._page: Page | None = None
         self.is_logged_in = False
 
     @property
