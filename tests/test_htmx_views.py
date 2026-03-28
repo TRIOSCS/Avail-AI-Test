@@ -851,7 +851,8 @@ class TestRequisitionImport:
         with patch("app.routers.htmx_views.parse_freeform_rfq", new_callable=AsyncMock, return_value=mock_result):
             resp = client.post(
                 "/v2/partials/requisitions/import-parse",
-                data={"name": "", "raw_text": "LM317T 100pcs"},
+                data={"name": "Import", "raw_text": "LM317T 100pcs"},
+                files={"file": ("", b"", "application/octet-stream")},
             )
             assert resp.status_code == 200
 
@@ -864,7 +865,8 @@ class TestRequisitionImport:
         with patch("app.routers.htmx_views.parse_freeform_rfq", new_callable=AsyncMock, return_value=mock_result):
             resp = client.post(
                 "/v2/partials/requisitions/import-parse?format=json",
-                data={"name": "", "raw_text": "LM317T 100pcs"},
+                data={"name": "Import", "raw_text": "LM317T 100pcs"},
+                files={"file": ("", b"", "application/octet-stream")},
             )
             assert resp.status_code == 200
             data = resp.json()

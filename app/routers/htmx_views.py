@@ -303,7 +303,7 @@ async def search_results_page(
     """Full search results page."""
     from app.services.global_search_service import fast_search
 
-    results = fast_search(q, db) if q else None
+    results = fast_search(q, db) if q else {"best_match": None, "groups": {}, "total_count": 0}
     return templates.TemplateResponse(
         "htmx/partials/search/full_results.html",
         {**_base_ctx(request, user), "results": results, "query": q},
