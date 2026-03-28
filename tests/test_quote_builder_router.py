@@ -14,7 +14,7 @@ from app.models import Quote, Requisition
 
 class TestQuoteBuilderData:
     def test_get_data_valid_req(self, client: TestClient, test_requisition: Requisition):
-        with patch("app.routers.quote_builder.get_req_for_user", return_value=test_requisition):
+        with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
             with patch("app.services.quote_builder_service.get_builder_data", return_value=[]):
                 with patch("app.services.quote_builder_service.apply_smart_defaults"):
                     resp = client.get(f"/v2/partials/quote-builder/{test_requisition.id}/data")
@@ -22,12 +22,12 @@ class TestQuoteBuilderData:
         assert "lines" in resp.json()
 
     def test_get_data_invalid_req(self, client: TestClient):
-        with patch("app.routers.quote_builder.get_req_for_user", return_value=None):
+        with patch("app.dependencies.get_req_for_user", return_value=None):
             resp = client.get("/v2/partials/quote-builder/99999/data")
         assert resp.status_code == 404
 
     def test_get_data_with_requirement_ids(self, client: TestClient, test_requisition: Requisition):
-        with patch("app.routers.quote_builder.get_req_for_user", return_value=test_requisition):
+        with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
             with patch("app.services.quote_builder_service.get_builder_data", return_value=[]) as mock_data:
                 with patch("app.services.quote_builder_service.apply_smart_defaults"):
                     resp = client.get(
@@ -42,7 +42,7 @@ class TestQuoteBuilderData:
 
 class TestQuoteBuilderMultiData:
     def test_multi_data_valid(self, client: TestClient, test_requisition: Requisition):
-        with patch("app.routers.quote_builder.get_req_for_user", return_value=test_requisition):
+        with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
             with patch("app.services.quote_builder_service.get_builder_data", return_value=[]):
                 with patch("app.services.quote_builder_service.apply_smart_defaults"):
                     resp = client.get(
@@ -62,20 +62,30 @@ class TestQuoteBuilderMultiData:
 
 
 class TestQuoteBuilderSave:
+    _VALID_LINE = {
+        "requirement_id": 1,
+        "mpn": "LM317T",
+        "manufacturer": "Texas Instruments",
+        "qty": 100,
+        "cost_price": 0.50,
+        "sell_price": 0.75,
+        "margin_pct": 33.3,
+    }
+
     def test_save_missing_customer_site(self, client: TestClient, test_requisition: Requisition):
         test_requisition.customer_site_id = None
-        with patch("app.routers.quote_builder.get_req_for_user", return_value=test_requisition):
+        with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
             resp = client.post(
                 f"/v2/partials/quote-builder/{test_requisition.id}/save",
-                json={"lines": [{"requirement_id": 1, "mpn": "LM317T", "qty": 100, "unit_sell": 0.75}]},
+                json={"lines": [self._VALID_LINE]},
             )
         assert resp.status_code == 400
 
     def test_save_req_not_found(self, client: TestClient):
-        with patch("app.routers.quote_builder.get_req_for_user", return_value=None):
+        with patch("app.dependencies.get_req_for_user", return_value=None):
             resp = client.post(
                 "/v2/partials/quote-builder/99999/save",
-                json={"lines": [{"requirement_id": 1, "mpn": "LM317T", "qty": 100, "unit_sell": 0.75}]},
+                json={"lines": [self._VALID_LINE]},
             )
         assert resp.status_code == 404
 
@@ -89,14 +99,14 @@ class TestQuoteBuilderSave:
         test_requisition.customer_site_id = test_customer_site.id
         db_session.flush()
         save_result = {"quote_id": 1, "quote_number": "Q-001"}
-        with patch("app.routers.quote_builder.get_req_for_user", return_value=test_requisition):
+        with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
             with patch(
                 "app.services.quote_builder_service.save_quote_from_builder",
                 return_value=save_result,
             ):
                 resp = client.post(
                     f"/v2/partials/quote-builder/{test_requisition.id}/save",
-                    json={"lines": [{"requirement_id": 1, "mpn": "LM317T", "qty": 100, "unit_sell": 0.75}]},
+                    json={"lines": [self._VALID_LINE]},
                 )
         assert resp.status_code == 200
         assert resp.json()["quote_number"] == "Q-001"

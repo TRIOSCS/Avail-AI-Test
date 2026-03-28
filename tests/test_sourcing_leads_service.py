@@ -322,6 +322,13 @@ class TestSyncLeads:
 class TestComputeVendorSafety:
     def test_with_good_vendor_card(self, db_session: Session):
         vc = _make_vendor_card(db_session)
+        # Add business footprint data so the vendor scores as low_risk
+        vc.hq_city = "Centennial"
+        vc.hq_country = "US"
+        vc.legal_name = "Arrow Electronics Inc."
+        vc.total_wins = 5
+        vc.relationship_months = 12
+        db_session.flush()
         score, flags, summary = _compute_vendor_safety(vc, contactability=80.0)
         assert score > 50
         assert "lower risk" in summary.lower() or "Lower risk" in summary

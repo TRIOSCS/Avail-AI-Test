@@ -10,6 +10,8 @@ Depends on: routers/requisitions.py, conftest fixtures
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+from tests.conftest import TestSessionLocal
+
 # ── Requisition CRUD ──────────────────────────────────────────────────
 
 
@@ -683,8 +685,8 @@ def test_dismiss_new_offers_not_found(client):
 # ── Upload Requirements ─────────────────────────────────────────────
 
 
-@patch("app.database.SessionLocal")
-def test_upload_requirements_csv(mock_sl, client, test_requisition):
+@patch("app.routers.requisitions.requirements.SessionLocal", TestSessionLocal)
+def test_upload_requirements_csv(client, test_requisition):
     """POST /api/requisitions/{id}/upload accepts a CSV of MPNs."""
     import io
 
@@ -1160,8 +1162,8 @@ def test_saved_sightings_with_historical_offers(client, db_session, test_requisi
         assert "historical_offers" in entry
 
 
-@patch("app.database.SessionLocal")
-def test_upload_requirements_with_substitutes(mock_sl, client, test_requisition):
+@patch("app.routers.requisitions.requirements.SessionLocal", TestSessionLocal)
+def test_upload_requirements_with_substitutes(client, test_requisition):
     """Upload CSV with substitutes column creates requirements with subs."""
     import io
 
@@ -1174,8 +1176,8 @@ def test_upload_requirements_with_substitutes(mock_sl, client, test_requisition)
     assert resp.json()["created"] >= 1
 
 
-@patch("app.database.SessionLocal")
-def test_upload_requirements_with_optional_columns(mock_sl, client, test_requisition):
+@patch("app.routers.requisitions.requirements.SessionLocal", TestSessionLocal)
+def test_upload_requirements_with_optional_columns(client, test_requisition):
     """Upload CSV with condition, packaging, date_codes, manufacturer, notes."""
     import io
 

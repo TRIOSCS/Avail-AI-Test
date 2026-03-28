@@ -1035,6 +1035,27 @@ async def list_requisition_leads(
     return get_requisition_leads(db, req_id, status_list)
 
 
+@router.get("/api/leads/queue", response_model=list[LeadOut])
+async def leads_queue(
+    status: str | None = None,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Cross-requisition buyer follow-up queue.
+
+    Filterable by buyer_status.
+    """
+    q = (
+        db.query(SourcingLead)
+        .join(Requisition, SourcingLead.requisition_id == Requisition.id)
+        .filter(Requisition.created_by == user.id)
+    )
+    if status and status != "all":
+        q = q.filter(SourcingLead.buyer_status == status)
+    q = q.order_by(SourcingLead.updated_at.desc())
+    return q.limit(200).all()
+
+
 @router.get("/api/leads/{lead_id}", response_model=LeadDetailOut)
 async def get_lead_detail(
     lead_id: int,
@@ -1125,27 +1146,6 @@ async def add_lead_feedback(
     if not updated:
         raise HTTPException(404, "Lead not found")
     return {"ok": True, "lead_id": updated.id, "status": updated.buyer_status}
-
-
-@router.get("/api/leads/queue", response_model=list[LeadOut])
-async def leads_queue(
-    status: str | None = None,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Cross-requisition buyer follow-up queue.
-
-    Filterable by buyer_status.
-    """
-    q = (
-        db.query(SourcingLead)
-        .join(Requisition, SourcingLead.requisition_id == Requisition.id)
-        .filter(Requisition.created_by == user.id)
-    )
-    if status and status != "all":
-        q = q.filter(SourcingLead.buyer_status == status)
-    q = q.order_by(SourcingLead.updated_at.desc())
-    return q.limit(200).all()
 
 
 # ── Mark sighting as unavailable ─────────────────────────────────────────

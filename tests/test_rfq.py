@@ -193,7 +193,7 @@ class TestSendRFQ:
     def test_send_rfq_updates_requirement_status(
         self, mock_token, mock_send, client: TestClient, db_session: Session, test_requisition: Requisition
     ):
-        with patch("app.routers.rfq.on_rfq_sent") as mock_status:
+        with patch("app.services.requirement_status.on_rfq_sent") as mock_status:
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/rfq",
                 json={
@@ -512,7 +512,8 @@ class TestSendFollowUp:
         resp = client.post(f"/api/follow-ups/{contact.id}/send", json={"body": ""})
         assert resp.status_code == 200
 
-    def test_send_follow_up_contact_not_found(self, client: TestClient):
+    @patch("app.routers.rfq.require_fresh_token", new_callable=AsyncMock, return_value="mock-token")
+    def test_send_follow_up_contact_not_found(self, mock_token, client: TestClient):
         resp = client.post("/api/follow-ups/99999/send", json={"body": "test"})
         assert resp.status_code == 404
 
@@ -802,7 +803,7 @@ class TestEnrichWithVendorCards:
             vendor_card_id=test_vendor_card.id,
             user_id=test_user.id,
             rating=4,
-            review_text="Good vendor",
+            comment="Good vendor",
         )
         db_session.add(review)
         db_session.flush()
