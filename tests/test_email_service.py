@@ -1201,7 +1201,7 @@ class TestSubmitParseBatch:
                 new_callable=AsyncMock,
                 return_value="batch-123",
             ),
-            patch("app.services.response_parser._clean_email_body", return_value="cleaned"),
+            patch("app.services.response_parser.clean_email_body", return_value="cleaned"),
             patch("app.services.response_parser.RESPONSE_PARSE_SCHEMA", {"type": "object"}),
             patch("app.services.response_parser.SYSTEM_PROMPT", "System prompt"),
         ):
@@ -1234,7 +1234,7 @@ class TestSubmitParseBatch:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("app.services.response_parser._clean_email_body", return_value="cleaned"),
+            patch("app.services.response_parser.clean_email_body", return_value="cleaned"),
             patch("app.services.response_parser.RESPONSE_PARSE_SCHEMA", {"type": "object"}),
             patch("app.services.response_parser.SYSTEM_PROMPT", "System prompt"),
             pytest.raises(RuntimeError, match="no batch_id"),

@@ -8,7 +8,7 @@ Depends on: app.dependencies, app.models.User, tests.conftest (db_session)
 """
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
@@ -336,8 +336,9 @@ class TestRequireFreshToken:
         assert "expired" in str(exc_info.value.detail).lower()
 
     @pytest.mark.asyncio
-    async def test_near_expiry_triggers_refresh(self, db_session: Session):
-        """Token within 15-min buffer should attempt refresh."""
+    async def test_near_expiry_returns_current_token(self, db_session: Session):
+        """Token within 15-min buffer but not expired returns current token (refresh is
+        background-only)."""
         user = _create_user(db_session)
         user.access_token = "old-token"
         user.token_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
@@ -345,28 +346,22 @@ class TestRequireFreshToken:
         db_session.commit()
         request = _make_request(session_data={"user_id": user.id})
 
-        with patch(
-            "app.scheduler.refresh_user_token", new_callable=AsyncMock, return_value="new-token"
-        ) as mock_refresh:
-            result = await require_fresh_token(request, db_session)
-
-        assert result == "new-token"
-        mock_refresh.assert_called_once()
+        result = await require_fresh_token(request, db_session)
+        # Within buffer but not expired — returns current token
+        assert result == "old-token"
 
     @pytest.mark.asyncio
-    async def test_refresh_failure_raises_401(self, db_session: Session):
-        """If refresh returns None, should raise 401."""
+    async def test_truly_expired_raises_401(self, db_session: Session):
+        """If token is truly expired (past expiry), should raise 401."""
         user = _create_user(db_session)
         user.access_token = "old-token"
-        user.token_expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+        user.token_expires_at = datetime.now(timezone.utc) - timedelta(minutes=1)
         user.refresh_token = "refresh-token-xyz"
         db_session.commit()
         request = _make_request(session_data={"user_id": user.id})
 
-        with patch("app.scheduler.refresh_user_token", new_callable=AsyncMock, return_value=None):
-            with pytest.raises(HTTPException) as exc_info:
-                await require_fresh_token(request, db_session)
-
+        with pytest.raises(HTTPException) as exc_info:
+            await require_fresh_token(request, db_session)
         assert exc_info.value.status_code == 401
 
     @pytest.mark.asyncio

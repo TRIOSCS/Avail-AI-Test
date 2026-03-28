@@ -482,11 +482,15 @@ class TestParseBidResponse:
         assert exc_info.value.status_code == 404
 
     def test_missing_line_item_raises_404(self, db_session: Session):
+        from unittest.mock import patch as mpatch
+
         company = _make_company(db_session)
         user = _make_user(db_session)
+        el = _make_excess_list(db_session, company, user)
+        eli = _make_line_item(db_session, el)
 
         solicitation = BidSolicitation(
-            excess_line_item_id=99999,
+            excess_line_item_id=eli.id,
             contact_id=1,
             sent_by=user.id,
             recipient_email="buyer@test.com",
@@ -496,13 +500,21 @@ class TestParseBidResponse:
         db_session.commit()
         db_session.refresh(solicitation)
 
-        with pytest.raises(HTTPException) as exc_info:
-            parse_bid_response(
-                db_session,
-                solicitation_id=solicitation.id,
-                unit_price=1.0,
-                quantity_wanted=10,
-            )
+        original_get = db_session.get
+
+        def _mock_get(model, ident, **kwargs):
+            if model.__name__ == "ExcessLineItem":
+                return None
+            return original_get(model, ident, **kwargs)
+
+        with mpatch.object(db_session, "get", side_effect=_mock_get):
+            with pytest.raises(HTTPException) as exc_info:
+                parse_bid_response(
+                    db_session,
+                    solicitation_id=solicitation.id,
+                    unit_price=1.0,
+                    quantity_wanted=10,
+                )
         assert exc_info.value.status_code == 404
 
 
