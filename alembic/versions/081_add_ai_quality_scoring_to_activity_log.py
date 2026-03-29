@@ -32,12 +32,19 @@ def upgrade():
     if not _column_exists("activity_log", "is_meaningful"):
         op.add_column("activity_log", sa.Column("is_meaningful", sa.Boolean(), nullable=True))
 
-    op.create_index(
-        "ix_activity_unscored",
-        "activity_log",
-        ["quality_assessed_at"],
-        postgresql_where=sa.text("quality_assessed_at IS NULL"),
-    )
+    # Guard index creation for idempotent re-runs
+    from sqlalchemy import inspect
+
+    bind = op.get_bind()
+    insp = inspect(bind)
+    existing_indexes = [idx["name"] for idx in insp.get_indexes("activity_log")]
+    if "ix_activity_unscored" not in existing_indexes:
+        op.create_index(
+            "ix_activity_unscored",
+            "activity_log",
+            ["quality_assessed_at"],
+            postgresql_where=sa.text("quality_assessed_at IS NULL"),
+        )
 
 
 def downgrade():

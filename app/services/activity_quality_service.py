@@ -73,6 +73,7 @@ async def score_activity(activity_id: int, db: Session) -> None:
     """Score a single ActivityLog entry with AI quality classification."""
     log = db.get(ActivityLog, activity_id)
     if not log:
+        logger.debug(f"Activity {activity_id} not found, skipping")
         return
 
     # Skip already-scored entries
@@ -97,12 +98,13 @@ async def score_activity(activity_id: int, db: Session) -> None:
         parts.append(f"Contact: {log.contact_name}")
 
     if not parts:
-        # Nothing to analyze — mark as assessed with defaults
+        # Nothing to analyze — mark as assessed to prevent infinite retry
         log.quality_score = 0.0
-        log.quality_classification = "auto_reply"
+        log.quality_classification = "no_data"
         log.is_meaningful = False
         log.summary = "No interaction details available"
         log.quality_assessed_at = datetime.now(timezone.utc)
+        db.flush()
         return
 
     prompt = "Classify this business interaction:\n\n" + "\n".join(parts)
@@ -119,13 +121,22 @@ async def score_activity(activity_id: int, db: Session) -> None:
     )
 
     if not result:
-        logger.warning(f"AI scoring failed for activity {activity_id}")
+        # Mark as assessed to prevent infinite retry — AI returned no usable result
+        log.quality_score = None
+        log.quality_classification = "scoring_failed"
+        log.is_meaningful = None
+        log.summary = None
+        log.quality_assessed_at = datetime.now(timezone.utc)
+        db.flush()
+        logger.error(f"AI scoring returned no result for activity {activity_id}, marked as assessed")
         return
 
     log.quality_score = float(result.get("quality_score", 0))
-    log.quality_classification = result.get("classification", "")[:30]
+    log.quality_classification = result.get("classification") or None
+    if log.quality_classification:
+        log.quality_classification = log.quality_classification[:30]
     log.is_meaningful = result.get("is_meaningful", False)
-    log.summary = (result.get("clean_summary") or "")[:500]
+    log.summary = (result.get("clean_summary") or "")[:500] or None
     log.quality_assessed_at = datetime.now(timezone.utc)
     db.flush()
 
@@ -135,7 +146,8 @@ async def score_activity(activity_id: int, db: Session) -> None:
 async def score_unscored_activities(db: Session, batch_size: int = 50) -> int:
     """Score all unscored non-email ActivityLog entries.
 
-    Returns count scored.
+    Returns count scored. Aborts early on auth/config errors to avoid burning API calls
+    on systemic failures.
     """
     unscored = (
         db.query(ActivityLog)
@@ -149,16 +161,32 @@ async def score_unscored_activities(db: Session, batch_size: int = 50) -> int:
         .all()
     )
 
+    if not unscored:
+        return 0
+
     scored = 0
+    errors = 0
     for log in unscored:
         try:
             await score_activity(log.id, db)
             scored += 1
-        except Exception:
+        except Exception as e:
+            err_name = type(e).__name__
+            # Abort on auth/config errors — no point trying remaining activities
+            if err_name in ("ClaudeAuthError", "ClaudeUnavailableError"):
+                logger.error(f"Quality scoring aborted — configuration error: {e}")
+                break
+            # Abort on rate limit — stop sending more requests
+            if err_name == "ClaudeRateLimitError":
+                logger.warning("Rate limited during quality scoring, stopping batch early")
+                break
+            errors += 1
             logger.exception(f"Failed to score activity {log.id}")
 
     if scored:
         db.commit()
-        logger.info(f"Quality scorer: {scored}/{len(unscored)} activities scored")
+
+    if scored or errors:
+        logger.info(f"Quality scorer: {scored} scored, {errors} errors out of {len(unscored)} unscored")
 
     return scored
