@@ -545,7 +545,22 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     b5_score = _tier(new_biz, [(8, 10), (6, 8), (4, 6), (2, 4), (1, 2)])
     b5_raw = f"{new_accounts} accts + {new_contacts} contacts + {prospect_companies} prospects"
 
-    behavior_total = b1_score + b2_score + b3_score + b4_score + b5_score
+    # ── B6: Interaction Quality ──
+    # Average quality_score of meaningful activities this month
+    avg_quality_raw = (
+        db.query(sqlfunc.avg(ActivityLog.quality_score))
+        .filter(
+            ActivityLog.user_id == user_id,
+            ActivityLog.is_meaningful.is_(True),
+            ActivityLog.quality_assessed_at.isnot(None),
+            ActivityLog.created_at >= start_dt,
+            ActivityLog.created_at <= end_dt,
+        )
+        .scalar()
+    ) or 0.0
+    b6 = _tier(avg_quality_raw, [(80, 10), (60, 8), (40, 6), (20, 4), (1, 2)])
+
+    behavior_total = b1_score + b2_score + b3_score + b4_score + b5_score + b6
 
     # ── O1: Win Rate ──
     won = (
@@ -664,6 +679,9 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
         "b5_score": b5_score,
         "b5_label": "New Business",
         "b5_raw": b5_raw,
+        "b6": b6,
+        "b6_label": "Interaction Quality",
+        "b6_raw": round(float(avg_quality_raw), 1),
         "behavior_total": behavior_total,
         "o1_score": o1_score,
         "o1_label": "Win Rate",

@@ -7,6 +7,7 @@ Depends on: app.models.intelligence, app.services.activity_quality_service
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
+from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.auth import User
@@ -117,6 +118,45 @@ class TestActivityQualityService:
             mock_claude.assert_not_called()
 
 
+class TestAvailScoreInteractionQuality:
+    """Test Interaction Quality sub-metric in Avail Score."""
+
+    def test_sales_score_includes_interaction_quality(self, db_session: Session, test_user: User):
+        """compute_sales_avail_score includes b6 interaction quality metric."""
+        from datetime import date
+
+        from app.services.avail_score_service import compute_sales_avail_score
+
+        test_user.role = "sales"
+        db_session.commit()
+
+        result = compute_sales_avail_score(db_session, test_user.id, date.today())
+
+        assert "b6" in result
+        assert "b6_label" in result
+        assert result["b6_label"] == "Interaction Quality"
+
+
+class TestPerformanceTab:
+    """Test Performance tab in CRM shell."""
+
+    def test_performance_route_returns_200(self, client: TestClient):
+        """GET /v2/partials/crm/performance returns 200."""
+        resp = client.get("/v2/partials/crm/performance")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+
+    def test_performance_shows_team_header(self, client: TestClient):
+        """Performance tab renders Team Performance header."""
+        resp = client.get("/v2/partials/crm/performance")
+        assert "Team Performance" in resp.text
+
+    def test_crm_shell_has_performance_tab(self, client: TestClient):
+        """CRM shell renders Performance tab button."""
+        resp = client.get("/v2/partials/crm/shell")
+        assert "Performance" in resp.text
+
+
 class TestQualityJobRegistration:
     """Test quality jobs are registered."""
 
@@ -125,3 +165,33 @@ class TestQualityJobRegistration:
         from app.jobs.quality_jobs import register_quality_jobs
 
         assert callable(register_quality_jobs)
+
+
+class TestActivityTimelineEnrichment:
+    """Test quality badges and summaries on activity timelines."""
+
+    def test_activity_tab_renders_ai_summary(self, client: TestClient, db_session: Session, test_user: User):
+        """Customer activity tab shows AI summary when available."""
+        from app.models.crm import Company
+
+        company = Company(name="Timeline Test Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+
+        log = ActivityLog(
+            user_id=test_user.id,
+            activity_type="phone_call",
+            channel="phone",
+            company_id=company.id,
+            quality_score=80.0,
+            quality_classification="conversation",
+            is_meaningful=True,
+            summary="Discussed component availability and pricing",
+            quality_assessed_at=datetime.now(timezone.utc),
+        )
+        db_session.add(log)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "Discussed component availability" in resp.text
