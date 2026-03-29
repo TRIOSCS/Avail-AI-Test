@@ -573,10 +573,6 @@ async def sightings_refresh(
         logger.warning("Search refresh failed for requirement %s", requirement_id, exc_info=True)
         refresh_failed = True
 
-    if not refresh_failed:
-        requirement.last_searched_at = now
-        db.commit()
-
     await broker.publish(
         f"user:{user.id}",
         "sighting-updated",
@@ -628,14 +624,10 @@ async def sightings_batch_refresh(
             continue
         try:
             await search_requirement(req_obj, db)
-            req_obj.last_searched_at = now
             success += 1
         except Exception:
             logger.warning("Batch refresh failed for requirement %s", rid, exc_info=True)
             failed += 1
-
-    if success:
-        db.commit()
 
     # Notify all connected clients that these requirements changed
     for rid in requirement_ids:
