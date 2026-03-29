@@ -280,6 +280,12 @@ export default {
 - Dark mode via `dark:` prefix
 - Component classes in `styles.css`
 
+**Toast System:**
+- `$store.toast` has properties: `message`, `type`, `show` (boolean)
+- Set properties directly: `$store.toast.message='msg'; $store.toast.type='success'; $store.toast.show=true`
+- Do NOT call `$store.toast.show()` as a function — it is a boolean, not a method
+- `_oob_toast()` in `sightings.py` returns OOB HTML that sets these properties
+
 ### Plugins & Extensions
 
 **Alpine.js Plugins (9 loaded):** focus, persist, intersect, collapse, morph, mask, sort, anchor, resize
@@ -347,6 +353,18 @@ npm run lint             # ESLint check
 - Vendor matching: use `fuzzy_score_vendor()` from `app/vendor_utils.py` (rapidfuzz wrapper)
 - MPN dedup: use `strip_packaging_suffixes()` from `app/services/search_worker_base/mpn_normalizer.py`
 - Never inline rapidfuzz or fuzzy matching logic
+- `search_requirement()` uses a separate write session — caller's ORM objects are stale after it returns. Call `db.expire(requirement)` before rendering templates.
+
+### MPN Normalization
+- `normalize_mpn()` uppercases, strips noise, returns `None` for MPNs < 3 chars
+- `@validates` on Requirement auto-uppercases `primary_mpn`, `customer_pn`, `oem_pn` on every save
+- CSS `uppercase` class on MPN display cells as belt-and-suspenders
+- Use `|sub_mpns` Jinja2 filter for displaying substitutes (handles both string and dict formats)
+
+### Substitutes Format
+- Canonical format: `[{"mpn": "ABC123", "manufacturer": "TI"}, ...]` (list of dicts)
+- Legacy rows may contain plain strings `["ABC123"]` — always handle both formats
+- Use `parse_substitute_mpns()` from `app/utils/normalization.py` for write paths
 
 ### Shared Constants
 - Junk email domains: use `JUNK_DOMAINS` from `app/shared_constants.py` (68 domains)
@@ -454,6 +472,10 @@ TESTING=1 PYTHONPATH=/root/availai pytest tests/ --cov=app --cov-report=term-mis
 - **Database:** In-memory SQLite (no real DB needed)
 - **Fixtures:** In `tests/conftest.py` — import `engine` from there
 
+### Focused Test Runs
+pytest.ini configures `-n auto` (xdist parallel). For single-file runs, disable with:
+`TESTING=1 PYTHONPATH=/root/availai pytest tests/test_foo.py -v --override-ini="addopts="`
+
 ### E2E Tests (Playwright)
 ```bash
 npx playwright test --project=workflows    # Workflow E2E tests
@@ -487,7 +509,9 @@ pytest tests/e2e/ --headed                 # Run with browser visible
    d. Test: upgrade → downgrade → upgrade
    e. Commit migration with model change
 
-5. **startup.py is for runtime operations ONLY:**
+5. **After creating a migration, ALWAYS run `alembic heads`** to verify a single head. If multiple heads: `alembic merge heads -m "merge_description"`. Data-only migrations (no schema changes) use `op.get_bind()` + raw SQL via `text()`.
+
+6. **startup.py is for runtime operations ONLY:**
    - FTS triggers (PostgreSQL-specific)
    - Seed data (system_config defaults)
    - ANALYZE on hot tables
