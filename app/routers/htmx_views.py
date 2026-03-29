@@ -1177,10 +1177,6 @@ async def requisition_search_all(
     ctx = _base_ctx(request, user, "requisitions")
     ctx["req"] = req
     ctx["requirements"] = requirements
-    ctx["req_visible_cols"] = user.requirements_column_prefs or _DEFAULT_REQ_COLUMNS
-    ctx["req_all_columns"] = [
-        {"key": k, "label": label, "default": k in _DEFAULT_REQ_COLUMNS} for k, label in _ALL_REQ_COLUMNS
-    ]
     ctx["search_triggered"] = True
     resp = templates.TemplateResponse("htmx/partials/requisitions/tabs/parts.html", ctx)
     return resp
@@ -1214,10 +1210,6 @@ async def requisition_tab(
         for r in requirements:
             r.sighting_count = len(r.sightings) if r.sightings else 0
         ctx["requirements"] = requirements
-        ctx["req_visible_cols"] = user.requirements_column_prefs or _DEFAULT_REQ_COLUMNS
-        ctx["req_all_columns"] = [
-            {"key": k, "label": label, "default": k in _DEFAULT_REQ_COLUMNS} for k, label in _ALL_REQ_COLUMNS
-        ]
         return templates.TemplateResponse("htmx/partials/requisitions/tabs/parts.html", ctx)
 
     elif tab == "offers":
@@ -1233,10 +1225,6 @@ async def requisition_tab(
         )
         ctx["offers"] = offers
         ctx["draft_quote"] = draft_quote
-        ctx["offer_visible_cols"] = user.offers_column_prefs or _DEFAULT_OFFER_COLUMNS
-        ctx["offer_all_columns"] = [
-            {"key": k, "label": label, "default": k in _DEFAULT_OFFER_COLUMNS} for k, label in _ALL_OFFER_COLUMNS
-        ]
         return templates.TemplateResponse("htmx/partials/requisitions/tabs/offers.html", ctx)
 
     elif tab == "quotes":
@@ -1306,40 +1294,6 @@ async def requisition_tab(
 
 
 # ── Column Prefs Save Endpoints ──────────────────────────────────────────────
-
-
-@router.post("/v2/partials/requisitions/{req_id}/req-column-prefs", response_class=HTMLResponse)
-async def save_req_column_prefs(
-    request: Request,
-    req_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Save user's visible requirement column preferences and re-render parts tab."""
-    form = await request.form()
-    cols = [c for c in form.getlist("columns") if c in dict(_ALL_REQ_COLUMNS)]
-    if not cols:
-        cols = list(_DEFAULT_REQ_COLUMNS)
-    user.requirements_column_prefs = cols
-    db.commit()
-    return await requisition_tab(request=request, req_id=req_id, tab="parts", user=user, db=db)
-
-
-@router.post("/v2/partials/requisitions/{req_id}/offer-column-prefs", response_class=HTMLResponse)
-async def save_offer_column_prefs(
-    request: Request,
-    req_id: int,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Save user's visible offer column preferences and re-render offers tab."""
-    form = await request.form()
-    cols = [c for c in form.getlist("columns") if c in dict(_ALL_OFFER_COLUMNS)]
-    if not cols:
-        cols = list(_DEFAULT_OFFER_COLUMNS)
-    user.offers_column_prefs = cols
-    db.commit()
-    return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
 
 # ── AI Parsing in Requisition Offers (Phase 3B) ───────────────────────
@@ -8666,113 +8620,6 @@ async def admin_data_ops(
     )
 
 
-# ── Requirements Tab Column Picker ───────────────────────────────────────────
-
-_ALL_REQ_COLUMNS = [
-    ("mpn", "MPN"),
-    ("brand", "Brand"),
-    ("qty", "Qty"),
-    ("target_price", "Target Price"),
-    ("customer_pn", "Customer PN"),
-    ("need_by_date", "Need-by Date"),
-    ("condition", "Condition"),
-    ("date_codes", "Date Codes"),
-    ("firmware", "Firmware"),
-    ("hardware_codes", "Hardware Codes"),
-    ("packaging", "Packaging"),
-    ("notes", "Notes"),
-    ("substitutes", "Substitutes"),
-    ("status", "Status"),
-    ("sightings", "Sightings"),
-]
-
-_DEFAULT_REQ_COLUMNS = [
-    "mpn",
-    "brand",
-    "qty",
-    "target_price",
-    "customer_pn",
-    "need_by_date",
-    "status",
-    "sightings",
-]
-
-# ── Offers Tab Column Picker ────────────────────────────────────────────────
-
-_ALL_OFFER_COLUMNS = [
-    ("vendor", "Vendor"),
-    ("mpn", "MPN"),
-    ("qty", "Qty"),
-    ("price", "Price"),
-    ("condition", "Condition"),
-    ("date_code", "Date Code"),
-    ("lead_time", "Lead Time"),
-    ("manufacturer", "Manufacturer"),
-    ("moq", "MOQ"),
-    ("spq", "SPQ"),
-    ("packaging", "Packaging"),
-    ("firmware", "Firmware"),
-    ("hardware_code", "Hardware Code"),
-    ("warranty", "Warranty"),
-    ("country", "Country"),
-    ("valid_until", "Valid Until"),
-    ("notes", "Notes"),
-    ("status", "Status"),
-]
-
-_DEFAULT_OFFER_COLUMNS = [
-    "vendor",
-    "mpn",
-    "qty",
-    "price",
-    "condition",
-    "date_code",
-    "lead_time",
-    "status",
-]
-
-# ── Parts Workspace (split-panel) ────────────────────────────────────────────
-
-# Default columns shown when user has no saved preference
-_DEFAULT_PARTS_COLUMNS = [
-    "mpn",
-    "brand",
-    "qty",
-    "target_price",
-    "status",
-    "requisition",
-    "customer",
-    "offers",
-    "best_price",
-    "owner",
-    "created",
-]
-
-# All available columns for the column picker
-_ALL_PARTS_COLUMNS = [
-    ("mpn", "MPN"),
-    ("brand", "Brand"),
-    ("qty", "Qty Needed"),
-    ("target_price", "Target Price"),
-    ("status", "Status"),
-    ("requisition", "Requisition"),
-    ("customer", "Customer"),
-    ("offers", "Offers"),
-    ("best_price", "Best Price"),
-    ("owner", "Owner"),
-    ("created", "Created"),
-    ("date_codes", "Date Codes"),
-    ("condition", "Condition"),
-    ("packaging", "Packaging"),
-    ("customer_pn", "Customer PN"),
-    ("substitutes", "Substitutes"),
-    ("firmware", "Firmware"),
-    ("hardware_codes", "HW Codes"),
-    ("need_by_date", "Need By"),
-    ("notes", "Notes"),
-]
-
-
 @router.get("/v2/partials/parts", response_class=HTMLResponse)
 async def parts_list_partial(
     request: Request,
@@ -8927,9 +8774,6 @@ async def parts_list_partial(
                 for raw_mpn in norm_to_mpns.get(card_norm, []):
                     sub_card_map[raw_mpn] = card_id
 
-    # User column prefs
-    visible_cols = user.parts_column_prefs or _DEFAULT_PARTS_COLUMNS
-
     # Team users for owner filter
     users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
 
@@ -8953,33 +8797,11 @@ async def parts_list_partial(
             "limit": limit,
             "total": total,
             "users": users_list,
-            "visible_cols": visible_cols,
-            "all_columns": _ALL_PARTS_COLUMNS,
             "user_role": user.role,
             "sub_card_map": sub_card_map,
         }
     )
     return templates.TemplateResponse("htmx/partials/parts/list.html", ctx)
-
-
-@router.post("/v2/partials/parts/column-prefs", response_class=HTMLResponse)
-async def save_column_prefs(
-    request: Request,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    """Save user's visible column preferences and return updated parts list."""
-    form = await request.form()
-    cols = [c for c in form.getlist("columns") if c in dict(_ALL_PARTS_COLUMNS)]
-    if not cols:
-        cols = _DEFAULT_PARTS_COLUMNS
-
-    user.parts_column_prefs = cols
-    db.commit()
-    logger.info("Column prefs saved for user {}: {}", user.email, cols)
-
-    # Re-render the parts list with new columns
-    return await parts_list_partial(request=request, user=user, db=db)
 
 
 @router.get("/v2/partials/parts/{requirement_id}/tab/offers", response_class=HTMLResponse)

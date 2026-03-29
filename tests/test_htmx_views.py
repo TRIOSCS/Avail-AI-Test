@@ -1047,38 +1047,6 @@ class TestSaveParsedOffers:
         assert "No offers to save" in resp.text
 
 
-class TestColumnPrefs:
-    """Test column preference save endpoints."""
-
-    def test_save_req_column_prefs(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        _make_requirement(db_session, req)
-        db_session.commit()
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/req-column-prefs",
-            data={"columns": ["mpn", "qty"]},
-        )
-        assert resp.status_code == 200
-
-    def test_save_req_column_prefs_empty_uses_defaults(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/req-column-prefs",
-            data={},
-        )
-        assert resp.status_code == 200
-
-    def test_save_offer_column_prefs(self, client: TestClient, db_session: Session, test_user: User):
-        req = _make_requisition(db_session, test_user)
-        db_session.commit()
-        resp = client.post(
-            f"/v2/partials/requisitions/{req.id}/offer-column-prefs",
-            data={"columns": ["vendor", "mpn"]},
-        )
-        assert resp.status_code == 200
-
-
 # ══════════════════════════════════════════════════════════════════════════
 # Quote Endpoints
 # ══════════════════════════════════════════════════════════════════════════
@@ -1720,13 +1688,6 @@ class TestPartsList:
         _make_requirement(db_session, req)
         db_session.commit()
         resp = client.get("/v2/partials/parts?sort=mpn&dir=asc")
-        assert resp.status_code == 200
-
-    def test_column_prefs(self, client: TestClient, db_session: Session, test_user: User):
-        resp = client.post(
-            "/v2/partials/parts/column-prefs",
-            data={"columns": ["mpn", "qty"]},
-        )
         assert resp.status_code == 200
 
 

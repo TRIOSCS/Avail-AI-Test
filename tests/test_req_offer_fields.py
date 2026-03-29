@@ -200,31 +200,6 @@ class TestOfferModel:
         assert offer.spq is None
 
 
-class TestUserColumnPrefs:
-    """Test column preference columns on User model."""
-
-    def test_requirements_column_prefs(self, db_session, test_user):
-        """User.requirements_column_prefs stores JSON array."""
-        test_user.requirements_column_prefs = ["mpn", "brand", "qty"]
-        db_session.commit()
-        db_session.refresh(test_user)
-
-        assert test_user.requirements_column_prefs == ["mpn", "brand", "qty"]
-
-    def test_offers_column_prefs(self, db_session, test_user):
-        """User.offers_column_prefs stores JSON array."""
-        test_user.offers_column_prefs = ["vendor", "mpn", "price"]
-        db_session.commit()
-        db_session.refresh(test_user)
-
-        assert test_user.offers_column_prefs == ["vendor", "mpn", "price"]
-
-    def test_prefs_default_none(self, db_session, test_user):
-        """Column prefs default to None."""
-        assert test_user.requirements_column_prefs is None
-        assert test_user.offers_column_prefs is None
-
-
 # ── HTMX Route Tests ─────────────────────────────────────────────────
 
 
@@ -339,76 +314,3 @@ class TestAddOfferWithNewFields:
         assert offer.warranty == "1 year"
         assert offer.country_of_origin == "US"
         assert offer.valid_until == date(2026, 12, 31)
-
-
-class TestColumnPrefsEndpoints:
-    """Test column preference save endpoints."""
-
-    def test_save_req_column_prefs(self, client, test_user, test_requisition, db_session):
-        """POST column-prefs saves to user.requirements_column_prefs."""
-        resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/req-column-prefs",
-            data={"columns": ["mpn", "brand", "qty"]},
-        )
-        assert resp.status_code == 200
-
-        db_session.refresh(test_user)
-        assert test_user.requirements_column_prefs == ["mpn", "brand", "qty"]
-
-    def test_save_offer_column_prefs(self, client, test_user, test_requisition, db_session):
-        """POST offers-column-prefs saves to user.offers_column_prefs."""
-        resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/offer-column-prefs",
-            data={"columns": ["vendor", "mpn", "price", "spq"]},
-        )
-        assert resp.status_code == 200
-
-        db_session.refresh(test_user)
-        assert test_user.offers_column_prefs == ["vendor", "mpn", "price", "spq"]
-
-    def test_invalid_columns_reset_to_default(self, client, test_user, test_requisition, db_session):
-        """Invalid column keys are filtered; empty list resets to default."""
-        resp = client.post(
-            f"/v2/partials/requisitions/{test_requisition.id}/req-column-prefs",
-            data={"columns": ["invalid_col", "not_real"]},
-        )
-        assert resp.status_code == 200
-
-        db_session.refresh(test_user)
-        # Should have reset to defaults since no valid columns
-        assert test_user.requirements_column_prefs == [
-            "mpn",
-            "brand",
-            "qty",
-            "target_price",
-            "customer_pn",
-            "need_by_date",
-            "status",
-            "sightings",
-        ]
-
-
-class TestPartsTabRendering:
-    """Test that parts tab renders with column picker context."""
-
-    def test_parts_tab_includes_column_data(self, client, test_requisition):
-        """GET parts tab returns HTML with column picker."""
-        resp = client.get(
-            f"/v2/partials/requisitions/{test_requisition.id}/tab/parts",
-        )
-        assert resp.status_code == 200
-        html = resp.text
-        assert 'data-col-key="mpn"' in html
-        assert 'data-col-key="customer_pn"' in html
-        assert 'data-col-key="need_by_date"' in html
-
-    def test_offers_tab_includes_column_data(self, client, test_requisition, test_offer):
-        """GET offers tab returns HTML with column picker."""
-        resp = client.get(
-            f"/v2/partials/requisitions/{test_requisition.id}/tab/offers",
-        )
-        assert resp.status_code == 200
-        html = resp.text
-        assert 'data-col-key="vendor"' in html
-        assert 'data-col-key="spq"' in html
-        assert 'data-col-key="manufacturer"' in html

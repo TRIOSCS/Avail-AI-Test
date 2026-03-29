@@ -1,8 +1,7 @@
-{# offers.html — Offers tab for requisition detail with action buttons and column picker.
-   Receives: offers (list of Offer objects), req (Requisition), draft_quote (Quote or None),
-             visible_offer_cols (list of str), all_offer_columns (list of tuples).
+{# offers.html — Offers tab for requisition detail with action buttons.
+   Receives: offers (list of Offer objects), req (Requisition), draft_quote (Quote or None).
    Called by: requisition tab route.
-   Depends on: brand palette, HTMX, Alpine.js, column_picker.html.
+   Depends on: brand palette, HTMX, Alpine.js.
 #}
 <div x-data="{ selectedOffers: [] }">
 

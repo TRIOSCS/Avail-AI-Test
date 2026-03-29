@@ -31,13 +31,6 @@ class User(Base):
     m365_last_healthy = Column(DateTime)
     commodity_tags = Column(JSON, default=list)
 
-    # Parts workspace — which columns the user wants visible in the split-panel view
-    parts_column_prefs = Column(JSON, default=list)
-
-    # Requisition detail — column visibility prefs for requirements and offers tables
-    requirements_column_prefs = Column(JSON)
-    offers_column_prefs = Column(JSON)
-
     # Mailbox settings (from Graph /me/mailboxSettings)
     timezone = Column(String(100))
     working_hours_start = Column(String(10))  # e.g. "08:00"
