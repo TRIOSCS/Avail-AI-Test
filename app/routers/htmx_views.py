@@ -3340,6 +3340,8 @@ async def vendors_list_partial(
     my_only: bool = False,
     limit: int = Query(30, ge=1, le=100),
     offset: int = Query(0, ge=0),
+    hx_target: str = Query("#main-content", alias="hx_target"),
+    push_url_base: str = Query("/v2/vendors", alias="push_url_base"),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -3390,6 +3392,8 @@ async def vendors_list_partial(
             "limit": limit,
             "offset": offset,
             "my_only": my_only,
+            "hx_target": hx_target,
+            "push_url_base": push_url_base,
         }
     )
     return templates.TemplateResponse("htmx/partials/vendors/list.html", ctx)
@@ -4082,12 +4086,32 @@ async def partials_companies_redirect(request: Request, path: str = ""):
     return RedirectResponse(url=new_url, status_code=301)
 
 
+STALENESS_OVERDUE_DAYS = 30
+STALENESS_DUE_SOON_DAYS = 14
+
+
+def _staleness_tier(last_activity_at):
+    """Compute staleness tier from last_activity_at timestamp."""
+    if last_activity_at is None:
+        return "new"
+    from datetime import datetime, timezone
+
+    days = (datetime.now(timezone.utc) - last_activity_at).days
+    if days >= STALENESS_OVERDUE_DAYS:
+        return "overdue"
+    if days >= STALENESS_DUE_SOON_DAYS:
+        return "due_soon"
+    return "recent"
+
+
 @router.get("/v2/partials/customers", response_class=HTMLResponse)
 async def companies_list_partial(
     request: Request,
     search: str = "",
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    hx_target: str = Query("#main-content", alias="hx_target"),
+    push_url_base: str = Query("/v2/customers", alias="push_url_base"),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -4099,10 +4123,15 @@ async def companies_list_partial(
         query = query.filter(sb.ilike_filter(Company.name))
 
     total = query.count()
-    companies = query.order_by(Company.name).offset(offset).limit(limit).all()
+    companies = query.order_by(Company.last_activity_at.asc().nullsfirst()).offset(offset).limit(limit).all()
+
+    for c in companies:
+        c.staleness = _staleness_tier(c.last_activity_at)
 
     ctx = _base_ctx(request, user, "customers")
     ctx.update({"companies": companies, "search": search, "total": total, "limit": limit, "offset": offset})
+    ctx["hx_target"] = hx_target
+    ctx["push_url_base"] = push_url_base
     return templates.TemplateResponse("htmx/partials/customers/list.html", ctx)
 
 
