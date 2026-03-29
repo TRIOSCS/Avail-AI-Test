@@ -57,12 +57,3 @@ class CircuitBreakerBase:
             "consecutive_failures": self.consecutive_failures,
             "empty_results_streak": self.empty_results_streak,
         }
-
-    def reset(self):
-        """Manually reset the circuit breaker (admin action)."""
-        self.is_open = False
-        self.trip_reason = ""
-        self.captcha_count = 0
-        self.consecutive_failures = 0
-        self.empty_results_streak = 0
-        logger.info("Circuit breaker manually reset")

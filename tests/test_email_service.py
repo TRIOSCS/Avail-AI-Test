@@ -902,13 +902,12 @@ class TestSendBatchRfq:
         assert contact.graph_message_id is None
 
     @pytest.mark.asyncio
-    async def test_group_without_body_skips_rephrase(self, db_session, test_user, test_requisition):
-        """Groups with no body skip rephrase but empty body is still sent."""
+    async def test_group_without_body_still_sends(self, db_session, test_user, test_requisition):
+        """Groups with empty body are still sent (rephrase removed in cost
+        reduction)."""
         mock_gc = AsyncMock()
         mock_gc.post_json.return_value = {}
         mock_gc.get_json.return_value = {"value": []}
-
-        mock_rephrase = AsyncMock(return_value="Rephrased")
 
         vendor_groups = [
             {
@@ -930,7 +929,6 @@ class TestSendBatchRfq:
         with (
             patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
             patch("app.email_service.get_credential_cached", return_value="fake-key"),
-            patch("app.services.ai_service.rephrase_rfq", mock_rephrase),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             results = await send_batch_rfq(
@@ -941,8 +939,8 @@ class TestSendBatchRfq:
                 vendor_groups=vendor_groups,
             )
 
-        # Only one rephrase call (for the group with body)
-        assert mock_rephrase.call_count == 1
+        # Both groups sent (no rephrase gating)
+        assert mock_gc.post_json.call_count == 2
 
 
 # ── parse_response_ai ────────────────────────────────────────────────
@@ -1203,7 +1201,7 @@ class TestSubmitParseBatch:
                 new_callable=AsyncMock,
                 return_value="batch-123",
             ),
-            patch("app.services.response_parser._clean_email_body", return_value="cleaned"),
+            patch("app.services.response_parser.clean_email_body", return_value="cleaned"),
             patch("app.services.response_parser.RESPONSE_PARSE_SCHEMA", {"type": "object"}),
             patch("app.services.response_parser.SYSTEM_PROMPT", "System prompt"),
         ):
@@ -1236,7 +1234,7 @@ class TestSubmitParseBatch:
                 new_callable=AsyncMock,
                 return_value=None,
             ),
-            patch("app.services.response_parser._clean_email_body", return_value="cleaned"),
+            patch("app.services.response_parser.clean_email_body", return_value="cleaned"),
             patch("app.services.response_parser.RESPONSE_PARSE_SCHEMA", {"type": "object"}),
             patch("app.services.response_parser.SYSTEM_PROMPT", "System prompt"),
             pytest.raises(RuntimeError, match="no batch_id"),

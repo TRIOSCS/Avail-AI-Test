@@ -35,7 +35,20 @@ from ..models import (
     VendorResponse,
 )
 from ..rate_limit import limiter
-from ..schemas.responses import SourceListResponse
+from ..schemas.responses import (
+    ApiTestResponse,
+    AttachmentParseResponse,
+    EmailMiningStatusResponse,
+    EngagementComputeResponse,
+    HealthSummaryResponse,
+    InboxScanResponse,
+    OutboundScanResponse,
+    SourceListResponse,
+    SystemAlertsResponse,
+    ToggleActiveResponse,
+    ToggleResponse,
+    VendorEngagementDetailResponse,
+)
 from ..schemas.sources import MiningOptions, SourceStatusToggle
 from ..services.credential_service import get_credential_cached
 from ..vendor_utils import normalize_vendor_name
@@ -425,7 +438,7 @@ async def list_api_sources(user: User = Depends(require_user), db: Session = Dep
     return {"sources": result}
 
 
-@router.post("/api/sources/{source_id}/test")
+@router.post("/api/sources/{source_id}/test", response_model=ApiTestResponse)
 @limiter.limit("5/minute")
 async def test_api_source(
     source_id: int, request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)
@@ -475,7 +488,7 @@ async def test_api_source(
     }
 
 
-@router.put("/api/sources/{source_id}/toggle")
+@router.put("/api/sources/{source_id}/toggle", response_model=ToggleResponse)
 async def toggle_api_source(
     source_id: int,
     payload: SourceStatusToggle,
@@ -501,7 +514,7 @@ async def toggle_api_source(
     return {"ok": True, "status": src.status}
 
 
-@router.put("/api/sources/{source_id}/activate")
+@router.put("/api/sources/{source_id}/activate", response_model=ToggleActiveResponse)
 async def toggle_source_active(
     source_id: int,
     user: User = Depends(require_settings_access),
@@ -516,7 +529,7 @@ async def toggle_source_active(
     return {"ok": True, "is_active": src.is_active}
 
 
-@router.get("/api/sources/health-summary")
+@router.get("/api/sources/health-summary", response_model=HealthSummaryResponse)
 async def health_summary(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -545,7 +558,7 @@ async def health_summary(
     }
 
 
-@router.get("/api/system/alerts")
+@router.get("/api/system/alerts", response_model=SystemAlertsResponse)
 async def system_alerts(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -584,7 +597,7 @@ async def system_alerts(
 # ══════════════════════════════════════════════════════════════════════
 
 
-@router.post("/api/email-mining/scan")
+@router.post("/api/email-mining/scan", response_model=InboxScanResponse)
 @limiter.limit("2/minute")
 async def scan_inbox_for_vendors(request: Request, user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Run email intelligence scan — mines inbox for vendor contacts and offers."""
@@ -650,7 +663,7 @@ async def scan_inbox_for_vendors(request: Request, user: User = Depends(require_
     }
 
 
-@router.get("/api/email-mining/status")
+@router.get("/api/email-mining/status", response_model=EmailMiningStatusResponse)
 async def email_mining_status(user: User = Depends(require_user), db: Session = Depends(get_db)):
     """Get current email mining status."""
     src = db.query(ApiSource).filter_by(name="email_mining").first()
@@ -662,7 +675,7 @@ async def email_mining_status(user: User = Depends(require_user), db: Session = 
     }
 
 
-@router.post("/api/email-mining/scan-outbound")
+@router.post("/api/email-mining/scan-outbound", response_model=OutboundScanResponse)
 @limiter.limit("2/minute")
 async def email_mining_scan_outbound(
     request: Request,
@@ -717,7 +730,7 @@ async def email_mining_scan_outbound(
     }
 
 
-@router.post("/api/email-mining/compute-engagement")
+@router.post("/api/email-mining/compute-engagement", response_model=EngagementComputeResponse)
 @limiter.limit("2/minute")
 async def email_mining_compute_engagement(
     request: Request,
@@ -734,7 +747,7 @@ async def email_mining_compute_engagement(
     }
 
 
-@router.get("/api/vendors/{vendor_id}/engagement")
+@router.get("/api/vendors/{vendor_id}/engagement", response_model=VendorEngagementDetailResponse)
 async def vendor_engagement_detail(
     vendor_id: int,
     user: User = Depends(require_user),
@@ -774,7 +787,7 @@ async def vendor_engagement_detail(
     }
 
 
-@router.post("/api/email-mining/parse-response-attachments/{response_id}")
+@router.post("/api/email-mining/parse-response-attachments/{response_id}", response_model=AttachmentParseResponse)
 async def parse_response_attachments(
     response_id: int,
     user: User = Depends(require_user),

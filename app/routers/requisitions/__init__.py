@@ -23,7 +23,7 @@ from ...search_service import (  # noqa: F401
     search_requirement,
     sighting_to_dict,
 )
-from ..rfq import _enrich_with_vendor_cards  # noqa: F401
+from ...vendor_utils import _enrich_with_vendor_cards  # noqa: F401
 from .attachments import router as attachments_router
 from .core import router as core_router
 from .requirements import router as requirements_router

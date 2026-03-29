@@ -13,7 +13,6 @@ from app.utils.file_validation import (
     decode_text,
     detect_encoding,
     file_fingerprint,
-    is_password_protected,
     validate_file,
 )
 
@@ -165,39 +164,6 @@ class TestGetExtension:
 
     def test_multiple_dots(self):
         assert _get_extension("report.2024.csv") == ".csv"
-
-
-# ── is_password_protected ──────────────────────────────────────────
-
-
-class TestIsPasswordProtected:
-    def test_normal_content_not_protected(self):
-        """Random bytes are not password-protected Excel."""
-        assert is_password_protected(b"not an excel file") is False
-
-    def test_empty_not_protected(self):
-        assert is_password_protected(b"") is False
-
-    def test_password_error_detected(self):
-        """When openpyxl raises with 'password' in message, returns True."""
-        from unittest.mock import patch
-
-        with patch("openpyxl.load_workbook", side_effect=Exception("File is password protected")):
-            assert is_password_protected(b"fake xlsx content") is True
-
-    def test_encrypted_error_detected(self):
-        """When openpyxl raises with 'encrypted' in message, returns True."""
-        from unittest.mock import patch
-
-        with patch("openpyxl.load_workbook", side_effect=Exception("File is encrypted")):
-            assert is_password_protected(b"fake xlsx content") is True
-
-    def test_other_error_not_password(self):
-        """Non-password errors are not treated as password protection."""
-        from unittest.mock import patch
-
-        with patch("openpyxl.load_workbook", side_effect=Exception("corrupted file")):
-            assert is_password_protected(b"fake xlsx content") is False
 
 
 # ── Additional coverage: validate_file edge cases ────────────────────

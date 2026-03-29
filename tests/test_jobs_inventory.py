@@ -1011,7 +1011,9 @@ def test_download_and_import_stock_list_final_commit_fails(scheduler_db, test_us
     mock_db.query.return_value.filter.return_value.all.return_value = []
     mock_db.flush = MagicMock()
     mock_db.add = MagicMock()
-    mock_db.commit = MagicMock(side_effect=Exception("final commit failed"))
+    from sqlalchemy.exc import OperationalError
+
+    mock_db.commit = MagicMock(side_effect=OperationalError("commit", {}, Exception("final commit failed")))
     mock_db.rollback = MagicMock()
 
     with (
@@ -1057,9 +1059,11 @@ def test_download_and_import_stock_list_card_flush_conflict(scheduler_db, test_u
     flush_count = [0]
 
     def _sometimes_failing_flush():
+        from sqlalchemy.exc import IntegrityError
+
         flush_count[0] += 1
         if flush_count[0] == 1:
-            raise Exception("unique constraint")
+            raise IntegrityError("insert", {}, Exception("unique constraint"))
         return original_flush()
 
     with (

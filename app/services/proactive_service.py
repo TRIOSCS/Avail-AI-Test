@@ -16,7 +16,13 @@ from loguru import logger
 from sqlalchemy import case, func
 from sqlalchemy.orm import Session, joinedload
 
-from ..constants import ProactiveMatchStatus
+from ..constants import (
+    OfferStatus,
+    ProactiveMatchStatus,
+    ProactiveOfferStatus,
+    QuoteStatus,
+    RequisitionStatus,
+)
 from ..models import (
     BuyPlan,
     CustomerSite,
@@ -54,7 +60,7 @@ def get_matches_for_user(
         query = query.filter(ProactiveMatch.status == status)
 
     # For new matches, only show last 7 days
-    if status == "new":
+    if status == ProactiveMatchStatus.NEW:
         seven_days_ago = datetime.now(timezone.utc) - timedelta(days=7)
         query = query.filter(ProactiveMatch.created_at >= seven_days_ago)
 
@@ -184,7 +190,7 @@ def get_match_count(db: Session, user_id: int) -> int:
         db.query(ProactiveMatch)
         .filter(
             ProactiveMatch.salesperson_id == user_id,
-            ProactiveMatch.status == "new",
+            ProactiveMatch.status == ProactiveMatchStatus.NEW,
         )
         .count()
     )
@@ -412,7 +418,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
         raise ValueError("Proactive offer not found")
     if po.salesperson_id != user.id:
         raise ValueError("Not your proactive offer")
-    if po.status == "converted":
+    if po.status == ProactiveOfferStatus.CONVERTED:
         raise ValueError("Already converted")
 
     site = db.get(CustomerSite, po.customer_site_id)
@@ -423,7 +429,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
     req = Requisition(
         name=f"Proactive — {company_name} — {date_str}",
         customer_site_id=po.customer_site_id,
-        status="won",
+        status=RequisitionStatus.WON,
         created_by=user.id,
     )
     db.add(req)
@@ -461,7 +467,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
             condition=item.get("condition"),
             entered_by_id=orig_offer.entered_by_id if orig_offer else user.id,
             source="proactive",
-            status="active",
+            status=OfferStatus.ACTIVE,
         )
         if orig_offer and orig_offer.vendor_card_id:
             new_offer.vendor_card_id = orig_offer.vendor_card_id
@@ -503,7 +509,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
         payment_terms=site.payment_terms if site else None,
         shipping_terms=site.shipping_terms if site else None,
         created_by_id=user.id,
-        status="won",
+        status=QuoteStatus.WON,
         result="won",
         result_at=datetime.now(timezone.utc),
         won_revenue=total_sell,
@@ -537,7 +543,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
         db.add(line)
 
     # Update proactive offer status
-    po.status = "converted"
+    po.status = ProactiveOfferStatus.CONVERTED
     po.converted_requisition_id = req.id
     po.converted_quote_id = quote.id
     po.converted_at = datetime.now(timezone.utc)
@@ -548,7 +554,7 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
         if match_id:
             match = db.get(ProactiveMatch, match_id)
             if match:
-                match.status = "converted"
+                match.status = ProactiveMatchStatus.CONVERTED
 
     db.commit()
 
@@ -580,21 +586,38 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
     row = (
         db.query(
             func.count(ProactiveOffer.id).label("sent"),
-            func.count(case((ProactiveOffer.status == "converted", 1))).label("converted"),
+            func.count(case((ProactiveOffer.status == ProactiveOfferStatus.CONVERTED, 1))).label("converted"),
             func.coalesce(
                 func.sum(
-                    case((ProactiveOffer.status == "converted", _capped(func.coalesce(ProactiveOffer.total_sell, 0))))
+                    case(
+                        (
+                            ProactiveOffer.status == ProactiveOfferStatus.CONVERTED,
+                            _capped(func.coalesce(ProactiveOffer.total_sell, 0)),
+                        )
+                    )
                 ),
                 0,
             ).label("converted_revenue"),
             func.coalesce(
                 func.sum(
-                    case((ProactiveOffer.status == "converted", _capped(func.coalesce(ProactiveOffer.total_cost, 0))))
+                    case(
+                        (
+                            ProactiveOffer.status == ProactiveOfferStatus.CONVERTED,
+                            _capped(func.coalesce(ProactiveOffer.total_cost, 0)),
+                        )
+                    )
                 ),
                 0,
             ).label("converted_cost"),
             func.coalesce(
-                func.sum(case((ProactiveOffer.status == "sent", _capped(func.coalesce(ProactiveOffer.total_sell, 0))))),
+                func.sum(
+                    case(
+                        (
+                            ProactiveOffer.status == ProactiveOfferStatus.SENT,
+                            _capped(func.coalesce(ProactiveOffer.total_sell, 0)),
+                        )
+                    )
+                ),
                 0,
             ).label("pending_revenue"),
             func.count(ProactiveOffer.converted_quote_id).label("quoted"),
@@ -643,11 +666,14 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
             db.query(
                 ProactiveOffer.salesperson_id,
                 func.count(ProactiveOffer.id).label("sent"),
-                func.count(case((ProactiveOffer.status == "converted", 1))).label("converted"),
+                func.count(case((ProactiveOffer.status == ProactiveOfferStatus.CONVERTED, 1))).label("converted"),
                 func.coalesce(
                     func.sum(
                         case(
-                            (ProactiveOffer.status == "converted", _capped(func.coalesce(ProactiveOffer.total_sell, 0)))
+                            (
+                                ProactiveOffer.status == ProactiveOfferStatus.CONVERTED,
+                                _capped(func.coalesce(ProactiveOffer.total_sell, 0)),
+                            )
                         )
                     ),
                     0,
@@ -655,14 +681,22 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
                 func.coalesce(
                     func.sum(
                         case(
-                            (ProactiveOffer.status == "converted", _capped(func.coalesce(ProactiveOffer.total_cost, 0)))
+                            (
+                                ProactiveOffer.status == ProactiveOfferStatus.CONVERTED,
+                                _capped(func.coalesce(ProactiveOffer.total_cost, 0)),
+                            )
                         )
                     ),
                     0,
                 ).label("cost"),
                 func.coalesce(
                     func.sum(
-                        case((ProactiveOffer.status == "sent", _capped(func.coalesce(ProactiveOffer.total_sell, 0))))
+                        case(
+                            (
+                                ProactiveOffer.status == ProactiveOfferStatus.SENT,
+                                _capped(func.coalesce(ProactiveOffer.total_sell, 0)),
+                            )
+                        )
                     ),
                     0,
                 ).label("pending"),

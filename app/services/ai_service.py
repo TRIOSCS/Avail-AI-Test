@@ -14,8 +14,10 @@ Design rules:
 """
 
 from loguru import logger
+from pydantic import ValidationError
 
 from app.cache.intel_cache import get_cached, set_cached
+from app.schemas.ai_responses import CompanyIntelligence, ContactSearchResult, EnrichedContact
 from app.utils.claude_client import claude_json
 from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 from app.utils.llm_router import routed_text
@@ -105,12 +107,25 @@ async def enrich_contacts_websearch(
         return []
 
     contacts = []
-    raw_contacts = []
+    raw_contacts: list = []
 
     if isinstance(result, dict):
-        raw_contacts = result.get("contacts", [])
+        # Validate with Pydantic model
+        try:
+            validated = ContactSearchResult.model_validate(result)
+            raw_contacts = [c.model_dump() for c in validated.contacts]
+        except ValidationError as e:
+            logger.warning("ContactSearchResult validation failed: %s", e)
+            raw_contacts = result.get("contacts", [])
     elif isinstance(result, list):
-        raw_contacts = result
+        # Validate individual contacts
+        for item in result:
+            try:
+                validated_contact = EnrichedContact.model_validate(item)
+                raw_contacts.append(validated_contact.model_dump())
+            except (ValidationError, Exception):
+                if isinstance(item, dict) and item.get("full_name"):
+                    raw_contacts.append(item)
 
     for c in raw_contacts[:limit]:
         if not isinstance(c, dict) or not c.get("full_name"):
@@ -186,7 +201,7 @@ async def company_intel(company_name: str, domain: str | None = None) -> dict | 
     Returns: {summary, revenue, employees, products, components_they_buy[],
               recent_news[], opportunity_signals[], sources[]}
     """
-    cache_key = f"intel:{company_name.lower().strip()}"
+    cache_key = f"intel:{company_name.lower().strip()}:{(domain or '').lower().strip()}"
     cached = get_cached(cache_key)
     if cached:
         return cached
@@ -220,6 +235,14 @@ async def company_intel(company_name: str, domain: str | None = None) -> dict | 
         return None
 
     if intel and isinstance(intel, dict):
+        # Validate with Pydantic model
+        try:
+            validated = CompanyIntelligence.model_validate(intel)
+            intel = validated.model_dump()
+        except ValidationError as e:
+            logger.warning("CompanyIntelligence validation failed: %s", e)
+            # Fall through with raw dict if validation fails
+
         set_cached(cache_key, intel, ttl_days=7)
         return intel
 
@@ -250,6 +273,7 @@ async def draft_rfq(
     """
     # If buyer provided their own draft, clean it up instead of generating from scratch
     if user_draft:
+        user_draft = user_draft[:12000]
         parts_str = "\n".join(
             f"- {p.get('mpn', '?')}: {p.get('qty', '?')} pcs"
             + (f" (target: ${p['target_price']})" if p.get("target_price") else "")

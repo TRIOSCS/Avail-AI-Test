@@ -13,6 +13,7 @@ import re as _re
 
 from loguru import logger
 from sqlalchemy import text as sqltext
+from sqlalchemy.exc import DBAPIError, SQLAlchemyError
 
 from .database import SessionLocal, engine
 
@@ -109,6 +110,8 @@ def _create_default_user_if_env_set() -> None:
         logger.info("Created default user %s with role %s", email, role)
     except Exception:
         logger.exception("Failed creating default user")
+        db.rollback()
+        raise
     finally:
         db.close()
 
@@ -141,6 +144,7 @@ def _seed_admin_user_if_env_set(db=None) -> None:
     except Exception:
         logger.exception("Failed creating admin user %s", email)
         db.rollback()
+        raise
     finally:
         if own_session:
             db.close()
@@ -167,6 +171,7 @@ def _seed_agent_user() -> None:
     except Exception:
         logger.exception("Failed seeding agent user")
         db.rollback()
+        raise
     finally:
         db.close()
 
@@ -177,7 +182,7 @@ def _exec(conn, stmt: str, params: dict | None = None) -> None:  # noqa: S603
     try:
         conn.execute(sqltext(stmt), params or {})
         conn.commit()
-    except Exception as e:
+    except (SQLAlchemyError, DBAPIError) as e:
         logger.warning("DDL failed: %s", e)
         conn.rollback()
 
@@ -382,7 +387,7 @@ def _seed_site_contacts(conn) -> None:
         )
         conn.commit()
         logger.info("Seeded site_contacts from existing customer_sites data")
-    except Exception as e:
+    except (SQLAlchemyError, DBAPIError) as e:
         logger.warning("Seed site_contacts failed: %s", e)
         conn.rollback()
 
@@ -424,7 +429,7 @@ def _backfill_normalized_mpn() -> None:
                     break
             if total_reqs:
                 logger.info("Backfilled normalized_mpn on %d requirements", total_reqs)
-        except Exception as e:
+        except (SQLAlchemyError, DBAPIError) as e:
             logger.warning("Backfill requirements.normalized_mpn failed: %s", e)
             conn.rollback()
 
@@ -478,7 +483,7 @@ def _backfill_normalized_mpn() -> None:
                 total_updated += len(batch)
             if total_updated:
                 logger.info("Backfilled normalized_mpn on %d material_cards", total_updated)
-        except Exception as e:
+        except (SQLAlchemyError, DBAPIError) as e:
             logger.warning("Backfill material_cards.normalized_mpn failed: %s", e)
             conn.rollback()
 
@@ -514,7 +519,7 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
                     break
             if total_sightings:
                 logger.info("Backfilled normalized_mpn on %d sightings", total_sightings)
-        except Exception as e:
+        except (SQLAlchemyError, DBAPIError) as e:
             logger.warning("Backfill sightings.normalized_mpn failed: %s", e)
             conn.rollback()
 
@@ -546,7 +551,7 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
                     break
             if total_offers:
                 logger.info("Backfilled normalized_mpn on %d offers", total_offers)
-        except Exception as e:
+        except (SQLAlchemyError, DBAPIError) as e:
             logger.warning("Backfill offers.normalized_mpn failed: %s", e)
             conn.rollback()
 
@@ -559,7 +564,7 @@ def _backfill_sighting_vendor_normalized() -> None:
         # Check column exists first
         try:
             conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings LIMIT 0"))
-        except Exception:
+        except (SQLAlchemyError, DBAPIError):
             conn.rollback()
             return  # Column not yet created
 
@@ -600,7 +605,10 @@ def _backfill_sighting_vendor_normalized() -> None:
 
 
 def _create_count_triggers(conn) -> None:
-    """Create triggers to keep companies.site_count and open_req_count in sync."""
+    """Create triggers to keep companies.site_count and open_req_count in sync.
+
+    NOTE: Status strings in PL/pgSQL below must stay in sync with RequisitionStatus in app/constants.py.
+    """
     # Trigger function: update site_count when customer_sites change
     _exec(
         conn,
@@ -831,6 +839,7 @@ def _seed_commodity_schemas() -> None:
     except Exception:
         logger.exception("Failed seeding commodity schemas")
         db.rollback()
+        raise
     finally:
         db.close()
 
@@ -948,7 +957,7 @@ def seed_api_sources() -> None:
                 src.monthly_quota = quota
 
         db.commit()
-    except Exception as e:
+    except (SQLAlchemyError, DBAPIError) as e:
         logger.warning("API source seed error: %s", e)
         db.rollback()
     finally:

@@ -9,7 +9,7 @@ Depends on: pydantic
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 # ── Base Wrappers ───────────────────────────────────────────────────────
 
@@ -20,34 +20,12 @@ class PaginatedResponse(BaseModel):
     offset: int = 0
 
 
-class OkResponse(BaseModel):
-    ok: bool = True
-
-
-# ── Search / Sightings ─────────────────────────────────────────────────
-
-
-class SightingItem(BaseModel):
-    """Single search-result row returned by search_requirement / quick_search.
-
-    Includes unified scoring fields added in phase-4 task-5.
-    """
-
-    id: int | None = None
-    vendor_name: str = ""
-    mpn_matched: str = ""
-    source_type: str = ""
-    score: float = 0
-    source_badge: str = ""
-    confidence_pct: int = 0
-    confidence_color: str = "red"
-    reasoning: str | None = None
-
-
 # ── Requisitions ────────────────────────────────────────────────────────
 
 
 class RequisitionListItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     id: int
     name: str
     status: str = ""
@@ -57,22 +35,15 @@ class RequisitionListItem(BaseModel):
 
 
 class RequisitionListResponse(PaginatedResponse):
-    requisitions: list[dict] = Field(default_factory=list)
-
-
-class RequirementListItem(BaseModel):
-    id: int
-    primary_mpn: str
-    target_qty: int | None = None
-    target_price: float | None = None
-    substitutes: list[str] = Field(default_factory=list)
-    sighting_count: int = 0
+    requisitions: list[RequisitionListItem] = Field(default_factory=list)
 
 
 # ── Vendors ─────────────────────────────────────────────────────────────
 
 
 class VendorListItem(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
     id: int
     display_name: str
     emails: list[str] = Field(default_factory=list)
@@ -82,7 +53,7 @@ class VendorListItem(BaseModel):
 
 
 class VendorListResponse(PaginatedResponse):
-    vendors: list[dict] = Field(default_factory=list)
+    vendors: list[VendorListItem] = Field(default_factory=list)
 
 
 class VendorDetailResponse(BaseModel):
@@ -127,23 +98,7 @@ class VendorDetailResponse(BaseModel):
     updated_at: str | None = None
 
 
-# ── Companies ───────────────────────────────────────────────────────────
-
-
-class CompanyListItem(BaseModel):
-    id: int
-    name: str
-    site_count: int = 0
-    sites: list[dict] = Field(default_factory=list)
-
-
 # ── Offers ──────────────────────────────────────────────────────────────
-
-
-class OfferGroupItem(BaseModel):
-    requirement_id: int
-    mpn: str = ""
-    offers: list[dict] = Field(default_factory=list)
 
 
 class OfferListResponse(BaseModel):
@@ -190,69 +145,11 @@ class QuoteDetailResponse(BaseModel):
     days_until_expiry: int | None = None
 
 
-class QuoteSummaryResponse(BaseModel):
-    """Lightweight quote-tab projection for inline requisition view.
-
-    Always populated — never blank. Shows quote status, buy plan linkage, selected
-    offers, and risk flags to drive CTAs.
-    """
-
-    requisition_id: int
-    has_quote: bool = False
-    has_buy_plan: bool = False
-    selected_offer_count: int = 0
-    total_offer_count: int = 0
-    risk_flags: list[dict] = Field(default_factory=list)
-    # Quote fields (present when has_quote=True)
-    quote_id: int | None = None
-    quote_number: str | None = None
-    quote_status: str | None = None
-    quote_revision: int | None = None
-    line_count: int | None = None
-    subtotal: float | None = None
-    total_margin_pct: float | None = None
-    quote_updated_at: str | None = None
-    # Buy plan fields (present when has_buy_plan=True)
-    buy_plan_id: int | None = None
-    buy_plan_status: str | None = None
-    buy_plan_line_count: int | None = None
-
-
-# ── Buy Plans ───────────────────────────────────────────────────────────
-
-
-class BuyPlanListItem(BaseModel):
-    id: int
-    status: str = ""
-    line_items: list[dict] = Field(default_factory=list)
-    total_cost: float = 0
-    total_revenue: float = 0
-
-
-# ── Performance ─────────────────────────────────────────────────────────
-
-
-class VendorScorecardListResponse(PaginatedResponse):
-    vendors: list[dict] = Field(default_factory=list)
-
-
-class BuyerLeaderboardResponse(BaseModel):
-    month: str = ""
-    entries: list[dict] = Field(default_factory=list)
-
-
 # ── Sources ─────────────────────────────────────────────────────────────
 
 
 class SourceListResponse(BaseModel):
     sources: list[dict] = Field(default_factory=list)
-
-
-# ── Enrichment ──────────────────────────────────────────────────────────
-
-
-class EnrichmentQueueResponse(PaginatedResponse):
-    items: list[dict] = Field(default_factory=list)
 
 
 # ── Vendor Sub-endpoints ────────────────────────────────────────────────
@@ -275,3 +172,249 @@ class VendorEmailMetricsResponse(BaseModel):
     last_contacted: str | None = None
     last_reply: str | None = None
     active_rfqs: int = 0
+
+
+# ── AI Endpoints ───────────────────────────────────────────────────────
+
+
+class SimpleOkResponse(BaseModel):
+    """Generic success response for delete/toggle actions."""
+
+    model_config = ConfigDict(extra="allow")
+
+    ok: bool = True
+
+
+class SimpleOkIdResponse(BaseModel):
+    """Success response with an entity ID."""
+
+    ok: bool = True
+    id: int = 0
+
+    model_config = ConfigDict(extra="allow")
+
+
+class AiFindContactsResponse(BaseModel):
+    """Response from AI contact finder."""
+
+    contacts: list[dict] = Field(default_factory=list)
+    total: int = 0
+    saved_ids: list[int] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class AiParseEmailResponse(BaseModel):
+    """Response from AI email parsing endpoint."""
+
+    parsed: bool = False
+    quotes: list[dict] = Field(default_factory=list)
+    overall_confidence: float = 0.0
+    email_type: str = "unclear"
+    vendor_notes: str | None = None
+    auto_apply: bool = False
+    needs_review: bool = False
+    reason: str = ""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class AiNormalizePartsResponse(BaseModel):
+    """Response from AI part normalization."""
+
+    parts: list[dict] = Field(default_factory=list)
+    count: int = 0
+
+    model_config = ConfigDict(extra="allow")
+
+
+class AiStandardizeResponse(BaseModel):
+    """Response from AI description standardization."""
+
+    description: str = ""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class CompanyIntelResponse(BaseModel):
+    """Response from company intelligence lookup."""
+
+    available: bool = False
+    intel: dict | None = None
+    reason: str = ""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class AiDraftRfqResponse(BaseModel):
+    """Response from AI RFQ draft generation."""
+
+    available: bool = False
+    body: str = ""
+    reason: str = ""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class AiIntakeParseResponse(BaseModel):
+    """Response from unified AI intake parser."""
+
+    parsed: bool = False
+    template: dict | None = None
+    reason: str = ""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class AiParseResponseResult(BaseModel):
+    """Response from AI vendor response re-parsing."""
+
+    parsed: bool = False
+    classification: str | None = None
+    confidence: float | None = None
+    auto_apply: bool = False
+    needs_review: bool = False
+    parts: list[dict] = Field(default_factory=list)
+    draft_offers: list[dict] = Field(default_factory=list)
+    vendor_notes: str | None = None
+    reason: str = ""
+
+    model_config = ConfigDict(extra="allow")
+
+
+# ── Sources Endpoints ──────────────────────────────────────────────────
+
+
+class ApiTestResponse(BaseModel):
+    """Response from source API connectivity test."""
+
+    source: str = ""
+    test_mpn: str = ""
+    status: str = ""
+    results_count: int = 0
+    elapsed_ms: float = 0
+    error: str | None = None
+    sample: list[dict] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ToggleResponse(BaseModel):
+    """Response from source toggle/activate actions."""
+
+    ok: bool = True
+    status: str = ""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class ToggleActiveResponse(BaseModel):
+    """Response from source activate toggle."""
+
+    ok: bool = True
+    is_active: bool = False
+
+    model_config = ConfigDict(extra="allow")
+
+
+class HealthSummaryResponse(BaseModel):
+    """Response from source health summary check."""
+
+    has_errors: bool = False
+    errored_sources: list[dict] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")
+
+
+class SystemAlertsResponse(BaseModel):
+    """Response from system alerts endpoint."""
+
+    alerts: list[dict] = Field(default_factory=list)
+    count: int = 0
+
+    model_config = ConfigDict(extra="allow")
+
+
+class InboxScanResponse(BaseModel):
+    """Response from email inbox mining scan."""
+
+    messages_scanned: int = 0
+    vendors_found: int = 0
+    offers_parsed: int = 0
+    contacts_enriched: int = 0
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EmailMiningStatusResponse(BaseModel):
+    """Response from email mining status check."""
+
+    enabled: bool = False
+    last_scan: str | None = None
+    total_scans: int = 0
+    total_vendors_found: int = 0
+
+    model_config = ConfigDict(extra="allow")
+
+
+class OutboundScanResponse(BaseModel):
+    """Response from outbound email mining scan."""
+
+    messages_scanned: int = 0
+    rfqs_detected: int = 0
+    vendors_contacted: int = 0
+    cards_updated: int = 0
+    used_delta: bool = False
+
+    model_config = ConfigDict(extra="allow")
+
+
+class EngagementComputeResponse(BaseModel):
+    """Response from engagement score recomputation."""
+
+    updated: int = 0
+    skipped: int = 0
+
+    model_config = ConfigDict(extra="allow")
+
+
+class VendorEngagementDetailResponse(BaseModel):
+    """Response from vendor engagement detail endpoint."""
+
+    vendor_id: int = 0
+    vendor_name: str = ""
+    vendor_score: float | None = None
+    advancement_score: float | None = None
+    is_new_vendor: bool = True
+    engagement_score: float | None = None
+    live_vendor_score: float | None = None
+    live_is_new_vendor: bool = True
+    raw_counts: dict = Field(default_factory=dict)
+    computed_at: str | None = None
+
+    model_config = ConfigDict(extra="allow")
+
+
+class AttachmentParseResponse(BaseModel):
+    """Response from response attachment parsing."""
+
+    attachments_found: int = 0
+    parseable: int = 0
+    rows_parsed: int = 0
+    sightings_created: int = 0
+
+    model_config = ConfigDict(extra="allow")
+
+
+# ── Command Center ─────────────────────────────────────────────────────
+
+
+class CommandCenterResponse(BaseModel):
+    """Response from command center actions endpoint."""
+
+    stale_rfqs: list[dict] = Field(default_factory=list)
+    pending_quotes: list[dict] = Field(default_factory=list)
+    pending_reviews: list[dict] = Field(default_factory=list)
+    today_responses: list[dict] = Field(default_factory=list)
+
+    model_config = ConfigDict(extra="allow")

@@ -37,7 +37,7 @@ class Requisition(Base):
     )
     id = Column(Integer, primary_key=True)
     name = Column(String(255), nullable=False)
-    customer_name = Column(String(255))  # Legacy — kept for migration
+    customer_name = Column(String(255))
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="SET NULL"))
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
     status = Column(String(50), default="active")
@@ -71,6 +71,23 @@ class Requisition(Base):
     offers = relationship("Offer", back_populates="requisition", cascade="all, delete-orphan")
     quotes = relationship("Quote", back_populates="requisition", cascade="all, delete-orphan")
 
+    @validates("opportunity_value")
+    def _validate_opportunity_value(self, _key, value):
+        if value is not None and value < 0:
+            raise ValueError("opportunity_value must be >= 0")
+        return value
+
+    @validates("status")
+    def _validate_status(self, _key, value):
+        from ..constants import RequisitionStatus
+
+        valid = {e.value for e in RequisitionStatus}
+        if value and value not in valid:
+            from loguru import logger
+
+            logger.warning("Unexpected requisition status: {}. Expected one of {}", value, valid)
+        return value
+
 
 class Requirement(Base):
     __tablename__ = "requirements"
@@ -93,6 +110,9 @@ class Requirement(Base):
     hardware_codes = Column(String(100))
     packaging = Column(String(100))
     condition = Column(String(50))
+    description = Column(Text)  # Free-text part description
+    package_type = Column(String(100))  # Physical package (QFP, BGA, SOIC, DIP, etc.)
+    revision = Column(String(100))  # Part revision / version level
     customer_pn = Column(String(255))  # Customer's internal part number
     need_by_date = Column(Date)  # When customer needs the parts
     sale_notes = Column(Text)
@@ -102,12 +122,27 @@ class Requirement(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="requirements")
-    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
     attachments = relationship("RequirementAttachment", back_populates="requirement", cascade="all, delete-orphan")
     sightings = relationship("Sighting", back_populates="requirement", cascade="all, delete-orphan")
     offers = relationship("Offer", back_populates="requirement", cascade="all, delete-orphan")
-    assigned_buyer = relationship("User", foreign_keys=[assigned_buyer_id])
-    vendor_summaries = relationship("VendorSightingSummary", back_populates="requirement")
+
+    @validates("target_qty")
+    def _validate_target_qty(self, _key, value):
+        if value is not None and value < 0:
+            raise ValueError("target_qty must be >= 0")
+        return value
+
+    @validates("target_price")
+    def _validate_target_price(self, _key, value):
+        if value is not None and value < 0:
+            raise ValueError("target_price must be >= 0")
+        return value
+
+    @validates("priority_score")
+    def _validate_priority_score(self, _key, value):
+        if value is not None and not (0 <= value <= 100):
+            raise ValueError("priority_score must be 0-100")
+        return value
 
     __table_args__ = (
         Index("ix_req_requisition", "requisition_id"),
@@ -176,13 +211,41 @@ class Sighting(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requirement = relationship("Requirement", back_populates="sightings")
-    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
-    source_company = relationship("Company", foreign_keys=[source_company_id])
 
     @validates("moq")
     def _coerce_moq(self, _key, value):
         if value is not None and value <= 0:
             return None
+        return value
+
+    @validates("qty_available")
+    def _validate_qty_available(self, _key, value):
+        if value is not None and value < 0:
+            raise ValueError("qty_available must be >= 0")
+        return value
+
+    @validates("unit_price")
+    def _validate_unit_price(self, _key, value):
+        if value is not None and value < 0:
+            raise ValueError("unit_price must be >= 0")
+        return value
+
+    @validates("confidence")
+    def _validate_confidence(self, _key, value):
+        if value is not None and value < 0.0:
+            raise ValueError("confidence must be >= 0.0")
+        return value
+
+    @validates("score")
+    def _validate_score(self, _key, value):
+        if value is not None and not (0.0 <= value <= 100.0):
+            raise ValueError("score must be 0.0-100.0")
+        return value
+
+    @validates("lead_time_days")
+    def _validate_lead_time_days(self, _key, value):
+        if value is not None and value < 0:
+            raise ValueError("lead_time_days must be >= 0")
         return value
 
     __table_args__ = (

@@ -8,7 +8,13 @@ Called by: worker loop
 Depends on: requests, beautifulsoup4, patchright (optional), config
 """
 
+from __future__ import annotations
+
 import os
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from patchright.async_api import Page
 
 import requests
 from bs4 import BeautifulSoup
@@ -38,7 +44,7 @@ class NcSessionManager:
         # Browser (lazy-started only when needed)
         self._playwright = None
         self._context = None
-        self._page = None
+        self._page: Page | None = None
         self._browser_started = False
         self.is_logged_in = False
 
@@ -99,7 +105,7 @@ class NcSessionManager:
             )
             is_auth = resp.status_code == 200 and "true" in resp.text.lower()
             return is_auth
-        except Exception as e:
+        except (requests.RequestException, OSError) as e:
             logger.warning("NC session health check failed: {}", e)
             return False
 
@@ -151,7 +157,7 @@ class NcSessionManager:
                 logger.error("NC login: failed (status={})", resp.status_code)
             return self.is_logged_in
 
-        except Exception as e:
+        except (requests.RequestException, OSError, ValueError, KeyError) as e:
             logger.error("NC login: exception: {}", e)
             self.is_logged_in = False
             return False
@@ -203,7 +209,7 @@ class NcSessionManager:
                 logger.error("NC login: failed (browser)")
             return self.is_logged_in
 
-        except Exception as e:
+        except (OSError, TimeoutError, ValueError) as e:
             logger.error("NC login (browser): exception: {}", e)
             self.is_logged_in = False
             return False
@@ -220,7 +226,7 @@ class NcSessionManager:
         """Close HTTP session and browser if running."""
         try:
             self.session.close()
-        except Exception:
+        except OSError:
             pass
         self.is_logged_in = False
 
@@ -231,7 +237,7 @@ class NcSessionManager:
                 await self._context.close()
             if self._playwright:
                 await self._playwright.stop()
-        except Exception as e:
+        except (OSError, RuntimeError) as e:
             logger.warning("NC session browser stop error: {}", e)
         finally:
             self._context = None

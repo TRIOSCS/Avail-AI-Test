@@ -127,7 +127,7 @@ async def submit_batch_backfill(db: Session, batch_size: int = 100) -> dict:  # 
 
     # Persist metadata so we can process results later.
     # Use per-batch file names to avoid cross-run clobbering.
-    meta_path = f"/tmp/ai_backfill_meta_{batch_ids[0] if batch_ids else 'none'}.json"
+    meta_path = f"{tempfile.gettempdir()}/ai_backfill_meta_{batch_ids[0] if batch_ids else 'none'}.json"
     with open(meta_path, "w") as f:
         json.dump(
             {
@@ -157,8 +157,9 @@ async def check_and_apply_batch_results(db: Session, meta_path: str | None = Non
     from app.utils.claude_errors import ClaudeError as _ClaudeErr
 
     if not meta_path:
-        candidates = sorted(Path("/tmp").glob("ai_backfill_meta_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-        meta_path = str(candidates[0]) if candidates else "/tmp/ai_backfill_meta.json"
+        _tmpdir = Path(tempfile.gettempdir())
+        candidates = sorted(_tmpdir.glob("ai_backfill_meta_*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+        meta_path = str(candidates[0]) if candidates else str(_tmpdir / "ai_backfill_meta.json")
     try:
         with open(meta_path) as f:
             meta = json.load(f)
@@ -451,7 +452,7 @@ async def apply_batch_results_chunked(batch_id: str) -> dict:
 
     # Step 2: Stream results to temp file (avoid loading into memory)
     logger.info(f"Downloading batch {batch_id} results to temp file...")
-    tmp_file = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False)
+    tmp_file = tempfile.NamedTemporaryFile(suffix=".jsonl", dir=tempfile.gettempdir(), delete=False)
     tmp_path = tmp_file.name
     tmp_file.close()
     try:

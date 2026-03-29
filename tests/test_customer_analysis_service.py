@@ -32,7 +32,7 @@ def company_with_reqs(db_session: Session):
     req = Requisition(
         name="TAG-REQ-001",
         customer_site_id=site.id,
-        status="open",
+        status="active",
         created_at=datetime.now(timezone.utc),
     )
     db_session.add(req)

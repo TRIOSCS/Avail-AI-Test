@@ -548,7 +548,7 @@ class TestQueueManager:
         req1 = Requisition(
             name="REQ-1",
             customer_name="Acme",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -595,7 +595,7 @@ class TestQueueManager:
         req2 = Requisition(
             name="REQ-2",
             customer_name="Beta Corp",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -636,7 +636,7 @@ class TestQueueManager:
         req1 = Requisition(
             name="REQ-D1",
             customer_name="X",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -667,7 +667,7 @@ class TestQueueManager:
         req2 = Requisition(
             name="REQ-D2",
             customer_name="Y",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -1231,7 +1231,9 @@ class TestSessionManager:
         cfg = NcConfig()
         session = NcSessionManager(cfg)
 
-        with patch.object(session.session, "get", side_effect=Exception("network error")):
+        import requests
+
+        with patch.object(session.session, "get", side_effect=requests.RequestException("network error")):
             result = session.check_session_health()
         assert result is False
 
@@ -1304,6 +1306,8 @@ class TestSessionManager:
 
     def test_login_exception(self):
         """Login() handles exceptions gracefully."""
+        import requests
+
         from app.services.nc_worker.session_manager import NcSessionManager
 
         cfg = NcConfig()
@@ -1312,7 +1316,7 @@ class TestSessionManager:
         cfg.NC_PASSWORD = "pass"
         session = NcSessionManager(cfg)
 
-        with patch.object(session.session, "get", side_effect=Exception("Connection refused")):
+        with patch.object(session.session, "get", side_effect=requests.RequestException("Connection refused")):
             result = session.login()
         assert result is False
         assert session.is_logged_in is False
@@ -1410,137 +1414,6 @@ class TestWorker:
             assert worker_mod._shutdown_requested is True
         finally:
             worker_mod._shutdown_requested = original
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# NC ADMIN ROUTER
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestNcAdmin:
-    def test_queue_stats(self, client, db_session):
-        resp = client.get("/api/nc/queue/stats")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "pending" in data
-        assert "queued" in data
-        assert "completed" in data
-        assert "remaining" in data
-
-    def test_queue_items(self, client, db_session, test_requisition):
-        req = test_requisition.requirements[0]
-        item = NcSearchQueue(
-            requirement_id=req.id,
-            requisition_id=test_requisition.id,
-            mpn="LM317T",
-            normalized_mpn="LM317T",
-            status="queued",
-        )
-        db_session.add(item)
-        db_session.commit()
-
-        resp = client.get("/api/nc/queue/items?status=queued")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert len(data) == 1
-        assert data[0]["mpn"] == "LM317T"
-
-    def test_queue_items_limit(self, client, db_session):
-        resp = client.get("/api/nc/queue/items?status=pending&limit=10")
-        assert resp.status_code == 200
-
-    def test_force_search(self, client, db_session, test_requisition):
-        req = test_requisition.requirements[0]
-        item = NcSearchQueue(
-            requirement_id=req.id,
-            requisition_id=test_requisition.id,
-            mpn="LM317T",
-            normalized_mpn="LM317T",
-            status="completed",
-        )
-        db_session.add(item)
-        db_session.commit()
-
-        resp = client.post(f"/api/nc/queue/{item.id}/force-search")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "queued"
-
-    def test_force_search_not_found(self, client, db_session):
-        resp = client.post("/api/nc/queue/99999/force-search")
-        assert resp.status_code == 404
-
-    def test_skip(self, client, db_session, test_requisition):
-        req = test_requisition.requirements[0]
-        item = NcSearchQueue(
-            requirement_id=req.id,
-            requisition_id=test_requisition.id,
-            mpn="LM317T",
-            normalized_mpn="LM317T",
-            status="queued",
-        )
-        db_session.add(item)
-        db_session.commit()
-
-        resp = client.post(f"/api/nc/queue/{item.id}/skip")
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "gated_out"
-
-    def test_skip_not_found(self, client, db_session):
-        resp = client.post("/api/nc/queue/99999/skip")
-        assert resp.status_code == 404
-
-    def test_worker_health_no_status(self, client, db_session):
-        """Worker health with no NcWorkerStatus row returns defaults."""
-        resp = client.get("/api/nc/worker/health")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["worker_status"] == "unknown"
-        assert data["searches_today"] == 0
-
-    def test_worker_health_running(self, client, db_session):
-        """Worker health shows running status."""
-        ws = NcWorkerStatus(
-            id=1,
-            is_running=True,
-            searches_today=5,
-            sightings_today=20,
-            last_heartbeat=datetime.now(timezone.utc),
-            last_search_at=datetime.now(timezone.utc),
-        )
-        db_session.add(ws)
-        db_session.commit()
-
-        resp = client.get("/api/nc/worker/health")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["worker_status"] == "running"
-        assert data["searches_today"] == 5
-
-    def test_worker_health_circuit_breaker_open(self, client, db_session):
-        """Worker health shows circuit_breaker_open status."""
-        ws = NcWorkerStatus(
-            id=1,
-            is_running=True,
-            circuit_breaker_open=True,
-            circuit_breaker_reason="Captcha",
-        )
-        db_session.add(ws)
-        db_session.commit()
-
-        resp = client.get("/api/nc/worker/health")
-        data = resp.json()
-        assert data["worker_status"] == "circuit_breaker_open"
-        assert data["circuit_breaker"]["is_open"] is True
-
-    def test_worker_health_stopped(self, client, db_session):
-        """Worker health shows stopped status."""
-        ws = NcWorkerStatus(id=1, is_running=False)
-        db_session.add(ws)
-        db_session.commit()
-
-        resp = client.get("/api/nc/worker/health")
-        data = resp.json()
-        assert data["worker_status"] == "stopped"
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -2391,18 +2264,6 @@ class TestCircuitBreakerGaps:
         assert "is_open" in info
         assert "trip_reason" in info
 
-    def test_reset(self):
-        """Reset() clears all state."""
-        breaker = CircuitBreaker()
-        breaker.is_open = True
-        breaker.trip_reason = "test"
-        breaker.captcha_count = 5
-        breaker.consecutive_failures = 3
-        breaker.empty_results_streak = 8
-        breaker.reset()
-        assert not breaker.is_open
-        assert breaker.trip_reason == ""
-
     def test_should_stop_returns_is_open(self):
         """should_stop() returns is_open value (line 93)."""
         breaker = CircuitBreaker()
@@ -3156,7 +3017,7 @@ class TestNcSessionManagerFull:
         sm = NcSessionManager(cfg)
         sm._browser_started = True
         sm._page = AsyncMock()
-        sm._page.goto = AsyncMock(side_effect=Exception("Browser crashed"))
+        sm._page.goto = AsyncMock(side_effect=TimeoutError("Browser crashed"))
 
         result = await sm.login_browser()
         assert result is False
@@ -3206,7 +3067,7 @@ class TestNcSessionManagerFull:
         sm = NcSessionManager(cfg)
         sm.is_logged_in = True
         sm.session = MagicMock()
-        sm.session.close = MagicMock(side_effect=Exception("close error"))
+        sm.session.close = MagicMock(side_effect=OSError("close error"))
 
         sm.stop()
         assert sm.is_logged_in is False
@@ -3238,7 +3099,7 @@ class TestNcSessionManagerFull:
         cfg = NcConfig()
         sm = NcSessionManager(cfg)
         sm._context = AsyncMock()
-        sm._context.close = AsyncMock(side_effect=Exception("Close error"))
+        sm._context.close = AsyncMock(side_effect=RuntimeError("Close error"))
         sm._playwright = AsyncMock()
         sm._browser_started = True
 

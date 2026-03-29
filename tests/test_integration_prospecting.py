@@ -186,7 +186,7 @@ class TestFullProspectingFlow:
         # Verify SiteContact records
         site = db_session.query(CustomerSite).filter_by(company_id=p.company_id).first()
         assert site is not None
-        assert site.site_name == "Contact Test Corp - HQ"
+        assert site.site_name == "HQ"
 
         site_contacts = db_session.query(SiteContact).filter_by(customer_site_id=site.id).all()
         assert len(site_contacts) == 2

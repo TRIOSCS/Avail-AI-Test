@@ -6,7 +6,6 @@ Contains common modules extracted from ics_worker and nc_worker:
 - queue_manager: parameterized search queue management
 - ai_gate: parameterized AI commodity classification gate
 - human_behavior: browser interaction simulation
-- monitoring: daily reports, Sentry alerts, HTML hash tracking (functions, not a class)
 - config: environment-based configuration factory
 - scheduler: search timing and break management
 """

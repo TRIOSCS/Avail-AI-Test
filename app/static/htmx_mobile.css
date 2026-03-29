@@ -1,144 +1,23 @@
 /*
   htmx_mobile.css — Mobile-specific styles for the HTMX + Alpine.js frontend.
-  Handles responsive table -> card transformations, touch-friendly targets,
-  mobile drawer behavior (slides from bottom), and full-screen modals.
+  Handles touch-friendly tap targets, mobile bottom nav, and drawer behavior.
   Called by: base.html (via <link>)
   Depends on: styles.css (base styles, CSS variables)
 */
 
 /* ============================================================
-   1. Responsive tables -> card layout below 768px
-   ============================================================ */
-@media (max-width: 768px) {
-    .responsive-table {
-        border: none;
-    }
-
-    .responsive-table thead {
-        display: none;
-    }
-
-    .responsive-table tbody {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-    }
-
-    .responsive-table tr {
-        display: block;
-        margin-bottom: 0;
-        border: 1px solid #D8DBE2;
-        border-radius: 8px;
-        padding: 12px;
-        background: #ffffff;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.06);
-    }
-
-    .responsive-table tr.clickable-row {
-        cursor: pointer;
-    }
-
-    .responsive-table tr.clickable-row:active {
-        background: #F8F9FA;
-        transform: scale(0.99);
-    }
-
-    .responsive-table td {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        padding: 4px 0;
-        border: none;
-        font-size: 13px;
-    }
-
-    .responsive-table td::before {
-        content: attr(data-label);
-        font-weight: 600;
-        color: #ADB3BF;
-        font-size: 12px;
-        flex-shrink: 0;
-        margin-right: 8px;
-    }
-
-    /* Hide checkbox column on mobile cards — use tap to select instead */
-    .responsive-table td.col-check {
-        display: none;
-    }
-
-    /* Empty state row should not be styled as a card */
-    .responsive-table tr:has(td[colspan]) {
-        border: none;
-        box-shadow: none;
-        padding: 2rem 0;
-    }
-
-    .responsive-table tr:has(td[colspan]) td::before {
-        display: none;
-    }
-}
-
-
-/* ============================================================
-   2. Touch-friendly tap targets (min 44px)
+   1. Touch-friendly tap targets (min 44px)
    ============================================================ */
 @media (max-width: 768px) {
     .btn,
-    .filter-btn,
-    .tab-btn,
-    .mobile-nav-item,
-    .toolbar input[type="search"],
-    .toolbar select {
+    .mobile-nav-item {
         min-height: 44px;
-    }
-
-    .toolbar input[type="search"],
-    .toolbar select {
-        font-size: 16px; /* Prevents iOS zoom on focus */
-        padding: 10px 12px;
-    }
-
-    .filter-btn,
-    .tab-btn {
-        padding: 8px 14px;
-        font-size: 13px;
-    }
-
-    .page-header {
-        flex-direction: column;
-        gap: 8px;
-        align-items: stretch;
-    }
-
-    .page-header .btn {
-        width: 100%;
-        text-align: center;
-    }
-
-    .toolbar {
-        flex-direction: column;
-        gap: 8px;
-    }
-
-    .quick-filters,
-    .tab-bar {
-        overflow-x: auto;
-        -webkit-overflow-scrolling: touch;
-        scrollbar-width: none;
-        flex-wrap: nowrap;
-        white-space: nowrap;
-        padding-bottom: 4px;
-    }
-
-    .quick-filters::-webkit-scrollbar,
-    .tab-bar::-webkit-scrollbar {
-        display: none;
     }
 }
 
 
 /* ============================================================
-   3. Mobile bottom nav — fixed position
+   2. Mobile bottom nav — fixed position
    ============================================================ */
 .mobile-nav {
     display: none;
@@ -192,65 +71,11 @@
         line-height: 1;
     }
 
-    .mobile-nav-badge {
-        position: absolute;
-        top: 2px;
-        right: 2px;
-        min-width: 16px;
-        height: 16px;
-        border-radius: 8px;
-        background: #ef4444;
-        color: #fff;
-        font-size: 9px;
-        font-weight: 700;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        padding: 0 4px;
-    }
-
-    /* Bottom padding for mobile handled by base.html inline style */
-
-    /* "More" overflow menu — slides up from bottom nav */
-    .mobile-more-menu {
-        position: absolute;
-        bottom: 100%;
-        right: 8px;
-        background: #ffffff;
-        border: 1px solid #D8DBE2;
-        border-radius: 12px;
-        box-shadow: 0 -4px 16px rgba(0, 0, 0, 0.1);
-        padding: 8px 0;
-        min-width: 180px;
-        z-index: 201;
-    }
-
-    .mobile-more-item {
-        display: flex;
-        align-items: center;
-        gap: 10px;
-        padding: 10px 16px;
-        min-height: 44px;
-        text-decoration: none;
-        color: #1e293b;
-        font-size: 14px;
-        font-weight: 500;
-        transition: background 0.1s;
-    }
-
-    .mobile-more-item:active {
-        background: #F8F9FA;
-    }
-
-    .mobile-more-item svg {
-        color: #ADB3BF;
-        flex-shrink: 0;
-    }
 }
 
 
 /* ============================================================
-   4. Drawer — slides from bottom on mobile
+   3. Drawer — slides from bottom on mobile
    ============================================================ */
 @media (max-width: 768px) {
     .drawer {
@@ -294,60 +119,10 @@
         -webkit-overflow-scrolling: touch;
     }
 
-    /* Back button in drawer header on mobile */
-    .drawer-back-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        border: none;
-        background: none;
-        color: #5F6878;
-        font-size: 13px;
-        font-weight: 500;
-        cursor: pointer;
-        padding: 4px 0;
-        min-height: 44px;
-    }
 }
 
 @media (min-width: 769px) {
-    .drawer-back-btn {
-        display: none;
-    }
-
     .drawer-header::before {
         display: none;
     }
-}
-
-
-/* ============================================================
-   5. Modal — full-screen on mobile
-   ============================================================ */
-@media (max-width: 768px) {
-    .modal-box {
-        width: 100%;
-        height: 100%;
-        max-width: 100%;
-        max-height: 100%;
-        border-radius: 0;
-        margin: 0;
-    }
-
-    .modal-backdrop {
-        align-items: stretch;
-        padding: 0;
-    }
-}
-
-
-/* ============================================================
-   6. Sidebar — hidden on all screens (bottom nav replaces it)
-   ============================================================ */
-.sidebar {
-    display: none !important;
-}
-
-.app-layout {
-    margin-left: 0 !important;
 }

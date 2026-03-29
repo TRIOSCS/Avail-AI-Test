@@ -240,8 +240,3 @@ class AIGate:
             len(pending) - len(uncached),
             len(uncached),
         )
-
-    def clear_classification_cache(self):
-        """Clear the in-memory classification cache (for testing)."""
-        with self._cache_lock:
-            self._classification_cache.clear()

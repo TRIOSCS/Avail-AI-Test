@@ -226,7 +226,7 @@ async def apply_triage_results(batch_id: str) -> dict:
         return {"error": "Batch ended but no results_url"}
 
     # Stream results to temp file
-    tmp_fd = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False)
+    tmp_fd = tempfile.NamedTemporaryFile(suffix=".jsonl", dir=tempfile.gettempdir(), delete=False)
     tmp_path = tmp_fd.name
     tmp_fd.close()
     try:

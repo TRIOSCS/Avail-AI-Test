@@ -48,7 +48,7 @@ jobs:
             unzip -o /tmp/release.zip -d /root/availai
 
             echo "=== Rebuilding ==="
-            docker compose build --no-cache app
+            docker compose build app
             docker compose up -d
 
             echo "=== Health check (waiting up to 60s) ==="
@@ -75,7 +75,7 @@ jobs:
             else
               echo "CRITICAL: Database restore failed"
             fi
-            docker compose build --no-cache app
+            docker compose build app
             docker compose up -d
             sleep 10
             if curl -sf http://localhost:8000/health > /dev/null 2>&1; then

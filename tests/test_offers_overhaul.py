@@ -691,7 +691,7 @@ class TestRequisitionUpdatedFields:
         """Requisition has updated_at and updated_by_id."""
         req = Requisition(
             name="REQ-UPD",
-            status="open",
+            status="active",
             created_by=test_user.id,
             updated_at=datetime.now(timezone.utc),
             updated_by_id=test_user.id,

@@ -17,6 +17,7 @@ from __future__ import annotations
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING
 
+import sqlalchemy.exc
 from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
@@ -159,7 +160,7 @@ def process_inbound_email_contact(
         db.add(vc)
         try:
             db.flush()
-        except Exception as e:
+        except sqlalchemy.exc.IntegrityError as e:
             logger.warning("VendorContact flush conflict for %s: %s", email_lower, e)
             db.rollback()
             return None
@@ -184,7 +185,7 @@ def process_inbound_email_contact(
 
     try:
         db.flush()
-    except Exception as e:
+    except sqlalchemy.exc.SQLAlchemyError as e:
         logger.warning("ActivityLog flush error: %s", e)
         db.rollback()
 
@@ -268,7 +269,7 @@ def log_pipeline_event(
 
     try:
         db.flush()
-    except Exception as e:
+    except sqlalchemy.exc.SQLAlchemyError as e:
         logger.warning("Pipeline event flush error: %s", e)
         db.rollback()
         return None
@@ -529,7 +530,7 @@ def compute_all_contact_scores(db: Session) -> dict:
             try:
                 db.flush()
                 batch = []
-            except Exception as e:
+            except sqlalchemy.exc.SQLAlchemyError as e:
                 logger.warning("Batch score flush error: %s", e)
                 db.rollback()
                 skipped += len(batch)
@@ -539,14 +540,14 @@ def compute_all_contact_scores(db: Session) -> dict:
     if batch:
         try:
             db.flush()
-        except Exception as e:
+        except sqlalchemy.exc.SQLAlchemyError as e:
             logger.warning("Final score flush error: %s", e)
             db.rollback()
             skipped += len(batch)
 
     try:
         db.commit()
-    except Exception as e:
+    except sqlalchemy.exc.SQLAlchemyError as e:
         logger.error("Score commit error: %s", e)
         db.rollback()
 

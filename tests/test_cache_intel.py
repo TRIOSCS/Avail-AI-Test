@@ -15,7 +15,6 @@ from app.cache.intel_cache import (
     _get_redis,
     cleanup_expired,
     get_cached,
-    invalidate,
     set_cached,
 )
 
@@ -178,57 +177,6 @@ class TestSetCached:
 
 
 # ═══════════════════════════════════════════════════════════════════════
-#  invalidate — Redis delete + PG delete
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestInvalidate:
-    @patch("app.cache.intel_cache.SessionLocal")
-    @patch("app.cache.intel_cache._get_redis")
-    def test_redis_delete(self, mock_get_redis, mock_session_local):
-        mock_redis = MagicMock()
-        mock_get_redis.return_value = mock_redis
-
-        mock_db = MagicMock()
-        mock_db.__enter__ = MagicMock(return_value=mock_db)
-        mock_db.__exit__ = MagicMock(return_value=False)
-        mock_session_local.return_value = mock_db
-
-        invalidate("company:acme")
-
-        mock_redis.delete.assert_called_once_with("intel:company:acme")
-        mock_db.execute.assert_called_once()
-
-    @patch("app.cache.intel_cache.SessionLocal")
-    @patch("app.cache.intel_cache._get_redis", return_value=None)
-    def test_pg_delete_when_no_redis(self, mock_redis, mock_session_local):
-        mock_db = MagicMock()
-        mock_db.__enter__ = MagicMock(return_value=mock_db)
-        mock_db.__exit__ = MagicMock(return_value=False)
-        mock_session_local.return_value = mock_db
-
-        invalidate("company:test")
-
-        mock_db.execute.assert_called_once()
-        mock_db.commit.assert_called_once()
-
-    @patch("app.cache.intel_cache.SessionLocal")
-    @patch("app.cache.intel_cache._get_redis")
-    def test_redis_error_still_tries_pg(self, mock_get_redis, mock_session_local):
-        mock_redis = MagicMock()
-        mock_redis.delete.side_effect = Exception("Redis error")
-        mock_get_redis.return_value = mock_redis
-
-        mock_db = MagicMock()
-        mock_db.__enter__ = MagicMock(return_value=mock_db)
-        mock_db.__exit__ = MagicMock(return_value=False)
-        mock_session_local.return_value = mock_db
-
-        invalidate("company:err")
-        mock_db.execute.assert_called_once()
-
-
-# ═══════════════════════════════════════════════════════════════════════
 #  cleanup_expired
 # ═══════════════════════════════════════════════════════════════════════
 
@@ -334,17 +282,3 @@ class TestGetRedisNonTesting:
             with patch("redis.from_url", return_value=mock_client):
                 result = _get_redis()
                 assert result is mock_client
-
-
-# ═══════════════════════════════════════════════════════════════════════
-#  invalidate — PG error path (lines 151-152)
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestInvalidatePgError:
-    @patch("app.cache.intel_cache.SessionLocal")
-    @patch("app.cache.intel_cache._get_redis", return_value=None)
-    def test_pg_error_logged_not_raised(self, mock_redis, mock_session_local):
-        """PG error during invalidate is caught silently."""
-        mock_session_local.side_effect = Exception("DB connection error")
-        invalidate("company:test")  # Should not raise

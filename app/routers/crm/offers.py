@@ -1,3 +1,4 @@
+import os
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
@@ -5,7 +6,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ...constants import OfferStatus, UserRole
+from ...constants import OfferStatus, RequisitionStatus, UserRole
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin
 from ...dependencies import require_buyer, require_user
@@ -32,6 +33,20 @@ from ...vendor_utils import normalize_vendor_name
 from ._helpers import _preload_last_quoted_prices, record_changes
 
 router = APIRouter()
+
+ALLOWED_OFFER_EXTENSIONS = {
+    ".pdf",
+    ".xlsx",
+    ".xls",
+    ".csv",
+    ".doc",
+    ".docx",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".txt",
+    ".zip",
+}
 
 
 # ── Offers ───────────────────────────────────────────────────────────────
@@ -360,7 +375,7 @@ async def create_offer(
     )
     db.add(offer)
     old_status = req.status
-    if req.status in ("active", "sourcing"):
+    if req.status in (RequisitionStatus.ACTIVE, RequisitionStatus.SOURCING):
         from ...services.requisition_state import transition as req_transition
 
         try:
@@ -369,7 +384,7 @@ async def create_offer(
             pass  # already in offers or later state
 
     # Phase 1: Auto-advance per-part sourcing status when offer is created
-    if offer.requirement_id and offer.status == "active":
+    if offer.requirement_id and offer.status == OfferStatus.ACTIVE:
         try:
             from app.services.requirement_status import on_offer_created
 
@@ -402,7 +417,9 @@ async def create_offer(
                 )
                 .first()
             )
-            offer_count = db.query(Offer).filter(Offer.requisition_id == req_id, Offer.status == "active").count()
+            offer_count = (
+                db.query(Offer).filter(Offer.requisition_id == req_id, Offer.status == OfferStatus.ACTIVE).count()
+            )
             new_subj = f"New offer: {offer.vendor_name} — {offer.mpn} (${offer.unit_price or 'TBD'}) · {offer_count} total offers"
             if existing_notif:
                 existing_notif.subject = new_subj
@@ -552,7 +569,7 @@ async def update_offer(
     offer.updated_by_id = user.id
 
     # CPH hook: record purchase history when offer status changes to 'won'
-    if old_dict.get("status") != "won" and offer.status == "won":
+    if old_dict.get("status") != OfferStatus.WON and offer.status == OfferStatus.WON:
         _record_offer_won_history(db, offer)
 
     db.commit()
@@ -653,7 +670,7 @@ async def mark_offer_sold(
         raise HTTPException(404, "Offer not found")
     if offer.entered_by_id != user.id and not _is_admin(user):
         raise HTTPException(403, "Only the offer creator or an admin can mark sold")
-    if offer.status == "sold":
+    if offer.status == OfferStatus.SOLD:
         return {"ok": True, "status": "sold", "message": "Already marked sold"}
     old_status = offer.status
     require_valid_transition("offer", offer.status, OfferStatus.SOLD)
@@ -712,6 +729,12 @@ async def upload_offer_attachment(
     content = await file.read()
     if len(content) > 10 * 1024 * 1024:
         raise HTTPException(400, "File too large (max 10 MB)")
+    ext = os.path.splitext(file.filename or "")[1].lower()
+    if ext not in ALLOWED_OFFER_EXTENSIONS:
+        raise HTTPException(
+            400,
+            f"File type '{ext}' not allowed. Accepted: {', '.join(sorted(ALLOWED_OFFER_EXTENSIONS))}",
+        )
     # Upload to OneDrive: AvailAI/Offers/{req_id}/{filename}
     from ...scheduler import get_valid_token
 

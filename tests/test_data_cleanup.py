@@ -12,7 +12,6 @@ from app.utils.normalization import (
     normalize_packaging,
 )
 from app.utils.normalization_helpers import (
-    clean_contact_name,
     fix_encoding,
     normalize_country,
     normalize_phone_e164,
@@ -47,49 +46,6 @@ class TestNormalizePhone:
 
     def test_ext_only(self):
         assert normalize_phone_e164("ext 123") is None
-
-
-# ── Contact name cleanup ────────────────────────────────────────────
-
-
-class TestCleanContactName:
-    def test_title_case(self):
-        name, is_person = clean_contact_name("JOHN DOE")
-        assert name == "John Doe"
-        assert is_person is True
-
-    def test_strip_extension(self):
-        name, is_person = clean_contact_name("Kay Jordan - Ext: 1025")
-        assert name == "Kay Jordan"
-        assert is_person is True
-
-    def test_department_detected(self):
-        name, is_person = clean_contact_name("MTE Sales")
-        assert is_person is False
-
-    def test_bare_sales(self):
-        name, is_person = clean_contact_name("Sales")
-        assert is_person is False
-
-    def test_real_name_with_sales_substring(self):
-        # "Salesperson" should not match "^sales\b" because of word boundary
-        name, is_person = clean_contact_name("Leslie Thompson")
-        assert name == "Leslie Thompson"
-        assert is_person is True
-
-    def test_casing_fix(self):
-        name, _ = clean_contact_name("LEslie thompson")
-        assert name == "Leslie Thompson"
-
-    def test_none(self):
-        name, is_person = clean_contact_name(None)
-        assert name == ""
-        assert is_person is False
-
-    def test_empty(self):
-        name, is_person = clean_contact_name("")
-        assert name == ""
-        assert is_person is False
 
 
 # ── Country normalization ────────────────────────────────────────────
@@ -314,29 +270,11 @@ class TestSchemaValidators:
         c = CompanyCreate(name="Acme", phone="(555) 123-4567")
         assert c.phone == "+15551234567"
 
-    def test_site_create_normalizes_country(self):
-        from app.schemas.crm import SiteCreate
-
-        s = SiteCreate(site_name="HQ", country="United States")
-        assert s.country == "US"
-
-    def test_site_create_normalizes_state(self):
-        from app.schemas.crm import SiteCreate
-
-        s = SiteCreate(site_name="HQ", state="California")
-        assert s.state == "CA"
-
     def test_offer_create_normalizes_mpn(self):
         from app.schemas.crm import OfferCreate
 
         o = OfferCreate(mpn="lm317t", vendor_name="Arrow")
         assert o.mpn == "LM317T"
-
-    def test_site_contact_normalizes_phone(self):
-        from app.schemas.crm import SiteContactCreate
-
-        c = SiteContactCreate(full_name="John Doe", phone="555-123-4567")
-        assert c.phone == "+15551234567"
 
     def test_none_fields_pass_through(self):
         from app.schemas.crm import CompanyUpdate
@@ -383,52 +321,3 @@ def test_create_site_contact_different_email_allowed(client, db_session):
     resp = client.post(f"/api/sites/{site.id}/contacts", json={"full_name": "Jane", "email": "jane@test.com"})
     assert resp.status_code == 200
     assert resp.json()["id"] != existing.id
-
-
-# ── Phone extraction from site_name ────────────────────────────────
-
-
-def test_site_create_extracts_phone_from_name():
-    """SiteCreate validator extracts phone from site_name."""
-    from app.schemas.crm import SiteCreate
-
-    site = SiteCreate(site_name="Main Office (415) 555-1234")
-    assert site.site_name == "Main Office"
-    assert site.contact_phone == "+14155551234"
-
-
-def test_site_create_phone_to_phone_2_when_phone_filled():
-    """Phone goes to contact_phone_2 when contact_phone already set."""
-    from app.schemas.crm import SiteCreate
-
-    site = SiteCreate(site_name="Branch (212) 555-9999", contact_phone="+18005551234")
-    assert site.site_name == "Branch"
-    assert site.contact_phone == "+18005551234"
-    assert site.contact_phone_2 == "+12125559999"
-
-
-def test_site_name_no_false_positive():
-    """Address-like numbers in site_name are not extracted as phones."""
-    from app.schemas.crm import SiteCreate
-
-    site = SiteCreate(site_name="12345 Industrial Blvd")
-    assert site.site_name == "12345 Industrial Blvd"
-    assert site.contact_phone is None
-
-
-def test_schema_rejects_unparseable_phone():
-    """Phone validators reject gibberish instead of storing raw."""
-    import pytest
-
-    from app.schemas.crm import SiteContactCreate
-
-    with pytest.raises(Exception):
-        SiteContactCreate(full_name="Test", phone="not a phone number")
-
-
-def test_schema_accepts_valid_phone():
-    """Valid phone numbers still pass through."""
-    from app.schemas.crm import SiteContactCreate
-
-    c = SiteContactCreate(full_name="Test", phone="(415) 555-1234")
-    assert c.phone == "+14155551234"

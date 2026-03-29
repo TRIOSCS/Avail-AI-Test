@@ -11,7 +11,7 @@ from datetime import date
 from enum import Enum
 from typing import Optional
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 
 class ReqStatus(str, Enum):
@@ -86,29 +86,6 @@ class BulkActionName(str, Enum):
     archive = "archive"
     assign = "assign"
     activate = "activate"
-
-
-class BulkActionForm(BaseModel):
-    """Form data for bulk actions on selected requisitions."""
-
-    ids: str  # comma-separated int list
-    owner_id: Optional[int] = None
-
-    @field_validator("ids")
-    @classmethod
-    def parse_ids(cls, v: str) -> str:
-        parts = [p.strip() for p in v.split(",") if p.strip()]
-        for p in parts:
-            if not p.isdigit():
-                raise ValueError(f"Invalid ID: {p}")
-        if not parts:
-            raise ValueError("No IDs provided")
-        if len(parts) > 200:
-            raise ValueError("Maximum 200 IDs per bulk action")
-        return v
-
-    def id_list(self) -> list[int]:
-        return [int(p.strip()) for p in self.ids.split(",") if p.strip()]
 
 
 class PaginationContext(BaseModel):

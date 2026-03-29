@@ -2048,11 +2048,6 @@ class TestEmailMiner:
         for social in ["linkedin.com", "facebook.com", "twitter.com"]:
             assert social not in websites
 
-    def test_is_offer_email(self):
-        miner = self._make_miner()
-        assert miner._is_offer_email("RFQ Response", "We have in stock, unit price $0.50")
-        assert not miner._is_offer_email("Meeting invite", "Please join the call")
-
     def test_extract_part_numbers(self):
         miner = self._make_miner()
         text = "We have LM317T and STM32F407VG in stock. Also ABC and STYLE."
@@ -2389,113 +2384,6 @@ class TestEmailMiner:
         result = await miner.scan_sent_items()
         assert result["rfqs_detected"] == 1
         mock_db.rollback.assert_called()
-
-    # ── deep_scan_inbox ──────────────────────────────────────────────
-
-    @pytest.mark.asyncio
-    async def test_deep_scan_basic(self):
-        miner = self._make_miner()
-        miner.gc.get_all_pages = AsyncMock(
-            return_value=[
-                {
-                    "id": "d1",
-                    "from": {"emailAddress": {"address": "sales@chipco.com", "name": "Chip Co"}},
-                    "subject": "Availability - LM317T from TI",
-                    "body": {"content": "Phone: +1 555 123 4567\nwww.chipco.com"},
-                    "receivedDateTime": "2026-01-15T10:00:00Z",
-                }
-            ]
-        )
-        with (
-            patch("app.services.specialty_detector.detect_brands_from_text", return_value=["TI"]),
-            patch("app.services.specialty_detector.detect_commodities_from_text", return_value=["Regulators"]),
-        ):
-            result = await miner.deep_scan_inbox()
-            assert result["contacts_found"] == 1
-            assert result["signatures_extracted"] == 1
-            assert "chipco.com" in result["per_domain"]
-
-    @pytest.mark.asyncio
-    async def test_deep_scan_skips_system_domains(self):
-        miner = self._make_miner()
-        miner.gc.get_all_pages = AsyncMock(
-            return_value=[
-                {
-                    "id": "d2",
-                    "from": {"emailAddress": {"address": "noreply@microsoft.com", "name": "MS"}},
-                    "subject": "Notification",
-                    "body": {"content": "System notification"},
-                }
-            ]
-        )
-        result = await miner.deep_scan_inbox()
-        assert result["contacts_found"] == 0
-
-    @pytest.mark.asyncio
-    async def test_deep_scan_skips_no_email(self):
-        miner = self._make_miner()
-        miner.gc.get_all_pages = AsyncMock(
-            return_value=[
-                {
-                    "id": "d3",
-                    "from": {"emailAddress": {"address": "", "name": ""}},
-                    "subject": "Test",
-                    "body": {"content": "body"},
-                }
-            ]
-        )
-        result = await miner.deep_scan_inbox()
-        assert result["contacts_found"] == 0
-
-    @pytest.mark.asyncio
-    async def test_deep_scan_skips_no_at_sign(self):
-        miner = self._make_miner()
-        miner.gc.get_all_pages = AsyncMock(
-            return_value=[
-                {
-                    "id": "d4",
-                    "from": {"emailAddress": {"address": "invalid", "name": "X"}},
-                    "subject": "Test",
-                    "body": {"content": "body"},
-                }
-            ]
-        )
-        result = await miner.deep_scan_inbox()
-        assert result["contacts_found"] == 0
-
-    @pytest.mark.asyncio
-    async def test_deep_scan_api_error(self):
-        miner = self._make_miner()
-        miner.gc.get_all_pages = AsyncMock(side_effect=Exception("API down"))
-        result = await miner.deep_scan_inbox()
-        assert result["messages_scanned"] == 0
-        assert result["per_domain"] == {}
-
-    @pytest.mark.asyncio
-    async def test_deep_scan_specialty_detector_error(self):
-        miner = self._make_miner()
-        miner.gc.get_all_pages = AsyncMock(
-            return_value=[
-                {
-                    "id": "d5",
-                    "from": {"emailAddress": {"address": "s@vendor.com", "name": "V"}},
-                    "subject": "Hi",
-                    "body": {"content": "body"},
-                }
-            ]
-        )
-        with patch("app.services.specialty_detector.detect_brands_from_text", side_effect=ImportError("no module")):
-            result = await miner.deep_scan_inbox()
-            assert result["contacts_found"] == 1
-
-    @pytest.mark.asyncio
-    async def test_deep_scan_commit_error(self):
-        mock_db = MagicMock()
-        mock_db.commit.side_effect = Exception("commit failed")
-        miner = self._make_miner(db=mock_db)
-        miner.gc.get_all_pages = AsyncMock(return_value=[])
-        result = await miner.deep_scan_inbox()
-        assert result["messages_scanned"] == 0
 
     # ── _search_messages ─────────────────────────────────────────────
 

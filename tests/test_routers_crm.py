@@ -28,7 +28,6 @@ from app.models import (
 )
 from app.routers.crm import (
     _preload_last_quoted_prices,
-    get_last_quoted_price,
     next_quote_number,
     quote_to_dict,
 )
@@ -181,47 +180,6 @@ def test_quote_creation_retries_on_integrity_error(
     assert "quote_number" in data
 
 
-# ── get_last_quoted_price ────────────────────────────────────────────────
-
-
-def test_get_last_quoted_price_found():
-    q = MagicMock()
-    q.line_items = [{"mpn": "LM317T", "sell_price": 2.50, "margin_pct": 15.0}]
-    q.quote_number = "Q-2026-0005"
-    q.sent_at = datetime(2026, 2, 1, tzinfo=timezone.utc)
-    q.created_at = datetime(2026, 1, 28, tzinfo=timezone.utc)
-    q.result = "won"
-    db = MagicMock()
-    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [q]
-
-    result = get_last_quoted_price("LM317T", db)
-    assert result is not None
-    assert result["sell_price"] == 2.50
-    assert result["quote_number"] == "Q-2026-0005"
-
-
-def test_get_last_quoted_price_case_insensitive():
-    q = MagicMock()
-    q.line_items = [{"mpn": "lm317t", "sell_price": 3.00, "margin_pct": 10.0}]
-    q.quote_number = "Q-2026-0010"
-    q.sent_at = datetime(2026, 2, 5, tzinfo=timezone.utc)
-    q.created_at = datetime(2026, 2, 4, tzinfo=timezone.utc)
-    q.result = "sent"
-    db = MagicMock()
-    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [q]
-
-    result = get_last_quoted_price("  LM317T  ", db)
-    assert result is not None
-    assert result["sell_price"] == 3.00
-
-
-def test_get_last_quoted_price_not_found():
-    db = MagicMock()
-    db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
-    result = get_last_quoted_price("NOEXIST", db)
-    assert result is None
-
-
 # ── Margin calculation (update_quote logic) ──────────────────────────────
 
 
@@ -357,7 +315,7 @@ class TestCompanyDetail:
             name="REQ-DETAIL-001",
             customer_name="Acme Electronics",
             customer_site_id=test_customer_site.id,
-            status="open",
+            status="active",
             created_by=test_user.id,
         )
         db_session.add(req)
@@ -1692,7 +1650,7 @@ class TestOffersAdditional:
         req2 = Requisition(
             name="REQ-OTHER",
             customer_name="Other Co",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -1966,31 +1924,13 @@ class TestQuotesAdditional:
         assert resp.status_code == 400
 
     def test_send_quote_invalid_email(self, client, db_session, test_requisition, test_company, test_user):
-        """Sending to an email without '@' raises 400."""
-        site = CustomerSite(
-            company_id=test_company.id,
-            site_name="Bad Email Site",
-            contact_email="notanemail",
-        )
-        db_session.add(site)
-        db_session.flush()
-        q = Quote(
-            requisition_id=test_requisition.id,
-            customer_site_id=site.id,
-            quote_number="Q-2026-BADE",
-            status="draft",
-            line_items=[],
-            subtotal=0,
-            total_cost=0,
-            total_margin_pct=0,
-            created_by_id=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(q)
-        db_session.commit()
-
-        resp = client.post(f"/api/quotes/{q.id}/send")
-        assert resp.status_code == 400
+        """Invalid email is caught by @validates at model level."""
+        with pytest.raises(ValueError, match="Invalid contact email"):
+            CustomerSite(
+                company_id=test_company.id,
+                site_name="Bad Email Site",
+                contact_email="notanemail",
+            )
 
     @patch("app.dependencies.require_fresh_token", new_callable=AsyncMock)
     @patch("app.utils.graph_client.GraphClient.post_json", new_callable=AsyncMock)
@@ -3152,7 +3092,7 @@ class TestHistoricalOffersSubstitutes:
         req2 = Requisition(
             name="REQ-SUB",
             customer_name="Sub Co",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -3493,7 +3433,7 @@ class TestCompanyTags:
         req = Requisition(
             name="TAG-REQ-001",
             customer_site_id=site.id,
-            status="open",
+            status="active",
         )
         db_session.add(req)
         db_session.flush()

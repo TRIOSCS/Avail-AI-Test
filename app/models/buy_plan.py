@@ -129,9 +129,6 @@ class BuyPlan(Base):
     approval_token = Column(String(100), unique=True)
     token_expires_at = Column(DateTime)
 
-    # ── Migration tracking
-    migrated_from_v1 = Column(Boolean, default=False)
-
     # ── Timestamps
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
@@ -146,8 +143,6 @@ class BuyPlan(Base):
     submitted_by = relationship("User", foreign_keys=[submitted_by_id])
     approved_by = relationship("User", foreign_keys=[approved_by_id])
     so_verified_by = relationship("User", foreign_keys=[so_verified_by_id])
-    cancelled_by = relationship("User", foreign_keys=[cancelled_by_id])
-    halted_by = relationship("User", foreign_keys=[halted_by_id])
     lines = relationship(
         "BuyPlanLine",
         back_populates="buy_plan",
@@ -231,7 +226,6 @@ class BuyPlanLine(Base):
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
     offer = relationship("Offer", foreign_keys=[offer_id])
     buyer = relationship("User", foreign_keys=[buyer_id])
-    po_verified_by = relationship("User", foreign_keys=[po_verified_by_id])
 
     __table_args__ = (
         Index("ix_bpl_buy_plan", "buy_plan_id"),

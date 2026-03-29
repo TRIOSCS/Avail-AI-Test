@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from .constants import VendorResponseStatus
+from .constants import PendingBatchStatus, VendorResponseStatus
 from .models import (
     ActivityLog,
     Contact,
@@ -90,23 +90,6 @@ async def send_batch_rfq(
 
     gc = GraphClient(token)
     results = []
-
-    # AI-rephrase each body so emails don't look like cookie-cutter spam
-    if get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
-        try:
-            from app.services.ai_service import rephrase_rfq
-
-            rephrase_tasks = [rephrase_rfq(g["body"]) for g in vendor_groups if g.get("body")]
-            rephrased = await asyncio.gather(*rephrase_tasks, return_exceptions=True)
-            idx = 0
-            for g in vendor_groups:
-                if g.get("body"):
-                    result = rephrased[idx]
-                    if isinstance(result, str) and result:
-                        g["body"] = result
-                    idx += 1
-        except Exception as e:
-            logger.warning(f"AI rephrase failed, using original bodies: {e}")
 
     # Build payloads and send all emails in parallel
     avail_token = f"[ref:{requisition_id}]"
@@ -815,15 +798,16 @@ async def _submit_parse_batch(
     db: Session,
 ) -> None:
     """Submit pending VendorResponses to Anthropic Batch API for parsing."""
-    from app.services.response_parser import RESPONSE_PARSE_SCHEMA, SYSTEM_PROMPT, _clean_email_body
+    from app.services.response_parser import RESPONSE_PARSE_SCHEMA, SYSTEM_PROMPT
     from app.utils.claude_client import claude_batch_submit
+    from app.utils.text_utils import clean_email_body
 
     requests = []
     request_map = {}  # custom_id -> vendor_response_id
 
     for vr in pending:
         cid = f"vr-{vr.id}"
-        body_truncated = _clean_email_body(vr.body or "")[:4000]
+        body_truncated = clean_email_body(vr.body or "")[:4000]
         prompt = f"Vendor: {vr.vendor_name}\nSubject: {vr.subject}\n\nVendor reply:\n{body_truncated}"
         requests.append(
             {
@@ -1190,6 +1174,26 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
         except Exception as e:
             logger.error("Failed to create offer for %s: %s", draft.get("mpn", "?"), e, exc_info=True)
 
+    # Publish SSE event so sightings page refreshes for affected requirements
+    if owner_id:
+        try:
+            import asyncio
+
+            from .services.sse_broker import broker
+
+            affected_req_ids = set(mpn_to_req_id.values())
+            loop = asyncio.get_event_loop()
+            for rid in affected_req_ids:
+                loop.create_task(
+                    broker.publish(
+                        f"user:{owner_id}",
+                        "sighting-updated",
+                        json.dumps({"requirement_id": rid}),
+                    )
+                )
+        except Exception:
+            logger.debug("SSE publish from auto-create offers skipped (no event loop)")
+
 
 async def process_batch_results(db: Session) -> int:
     """Poll for completed Anthropic batches and apply results.
@@ -1199,7 +1203,7 @@ async def process_batch_results(db: Session) -> int:
     from app.services.response_parser import _normalize_parsed_parts
     from app.utils.claude_client import claude_batch_results
 
-    pending_batches = db.query(PendingBatch).filter(PendingBatch.status == "processing").all()
+    pending_batches = db.query(PendingBatch).filter(PendingBatch.status == PendingBatchStatus.PROCESSING).all()
 
     if not pending_batches:
         return 0
@@ -1215,7 +1219,7 @@ async def process_batch_results(db: Session) -> int:
             if pb.submitted_at:
                 sa = pb.submitted_at if pb.submitted_at.tzinfo else pb.submitted_at.replace(tzinfo=timezone.utc)
                 if datetime.now(timezone.utc) - sa > timedelta(hours=24):
-                    pb.status = "failed"
+                    pb.status = PendingBatchStatus.FAILED
                     pb.error_message = f"Timed out after 24h: {e}"
                     db.commit()
             continue
@@ -1225,7 +1229,7 @@ async def process_batch_results(db: Session) -> int:
             if pb.submitted_at:
                 sa = pb.submitted_at if pb.submitted_at.tzinfo else pb.submitted_at.replace(tzinfo=timezone.utc)
                 if datetime.now(timezone.utc) - sa > timedelta(hours=24):
-                    pb.status = "failed"
+                    pb.status = PendingBatchStatus.FAILED
                     pb.error_message = "Batch did not complete within 24h"
                     db.commit()
             continue
@@ -1266,7 +1270,7 @@ async def process_batch_results(db: Session) -> int:
                 _apply_parsed_result(vr, legacy_parsed, db)
                 applied += 1
 
-        pb.status = "completed"
+        pb.status = PendingBatchStatus.COMPLETED
         pb.completed_at = datetime.now(timezone.utc)
         pb.result_count = applied
         total_applied += applied

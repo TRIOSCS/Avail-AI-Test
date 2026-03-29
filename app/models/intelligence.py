@@ -15,7 +15,7 @@ from sqlalchemy import (
     Text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from ..constants import ProactiveMatchStatus
 from .base import Base
@@ -58,16 +58,12 @@ class MaterialCard(Base):
         onupdate=lambda: datetime.now(timezone.utc),
     )
 
-    vendor_history = relationship(
-        "MaterialVendorHistory",
-        back_populates="material_card",
-        cascade="all, delete-orphan",
-    )
-    spec_facets = relationship(
-        "MaterialSpecFacet",
-        back_populates="material_card",
-        cascade="all, delete-orphan",
-    )
+    # --- Validators ---
+    @validates("search_count")
+    def _validate_search_count(self, _key, value):
+        if value is not None and value < 0:
+            raise ValueError(f"search_count must be >= 0, got {value}")
+        return value
 
 
 class MaterialVendorHistory(Base):
@@ -91,7 +87,7 @@ class MaterialVendorHistory(Base):
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    material_card = relationship("MaterialCard", back_populates="vendor_history")
+    material_card = relationship("MaterialCard")
 
     __table_args__ = (
         Index("ix_mvh_card_vendor", "material_card_id", "vendor_name", unique=True),
@@ -149,8 +145,6 @@ class ProactiveMatch(Base):
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
     requisition = relationship("Requisition", foreign_keys=[requisition_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
-    salesperson = relationship("User", foreign_keys=[salesperson_id])
-    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
 
     __table_args__ = (
         Index("ix_pm_offer", "offer_id"),
@@ -189,7 +183,6 @@ class ProactiveOffer(Base):
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
-    salesperson = relationship("User", foreign_keys=[salesperson_id])
 
     __table_args__ = (
         Index("ix_poff_site", "customer_site_id"),
@@ -292,7 +285,6 @@ class ActivityLog(Base):
     direction = Column(String(20))  # "inbound" | "outbound"
     event_type = Column(String(30))  # "email" | "call" | "note" | "meeting"
     summary = Column(String(500))
-    source_url = Column(String(500))
     details = Column(JSON)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -305,7 +297,6 @@ class ActivityLog(Base):
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
     quote = relationship("Quote", foreign_keys=[quote_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
-    site_contact = relationship("SiteContact", foreign_keys=[site_contact_id])
 
     __table_args__ = (
         Index(
@@ -367,24 +358,4 @@ class ActivityLog(Base):
             "created_at",
             postgresql_where=Column("requirement_id").isnot(None),
         ),
-    )
-
-
-class ReactivationSignal(Base):
-    """Tracks churn risk and reactivation opportunities for companies."""
-
-    __tablename__ = "reactivation_signals"
-    id = Column(Integer, primary_key=True)
-    company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
-    material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
-    signal_type = Column(String(30), nullable=False)  # churn_risk | reactivation_opportunity
-    reason = Column(Text)
-    dismissed_at = Column(DateTime)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-
-    company = relationship("Company", foreign_keys=[company_id])
-
-    __table_args__ = (
-        Index("ix_reactivation_company", "company_id"),
-        Index("ix_reactivation_type", "signal_type"),
     )

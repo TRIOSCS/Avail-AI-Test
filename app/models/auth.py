@@ -3,7 +3,7 @@
 from datetime import datetime, timezone
 
 from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from ..utils.encrypted_type import EncryptedText
 from .base import Base
@@ -29,7 +29,6 @@ class User(Base):
     m365_connected = Column(Boolean, default=False)
     m365_error_reason = Column(String(255))
     m365_last_healthy = Column(DateTime)
-    last_deep_email_scan = Column(DateTime)
     commodity_tags = Column(JSON, default=list)
 
     # Parts workspace — which columns the user wants visible in the split-panel view
@@ -53,3 +52,20 @@ class User(Base):
     requisitions = relationship("Requisition", back_populates="creator", foreign_keys="[Requisition.created_by]")
     contacts = relationship("Contact", back_populates="user")
     strategic_vendors = relationship("StrategicVendor", back_populates="user")
+
+    @validates("email")
+    def _validate_email(self, _key, value):
+        if value and "@" not in value:
+            raise ValueError(f"Invalid email: {value}")
+        return value
+
+    @validates("role")
+    def _validate_role(self, _key, value):
+        from ..constants import UserRole
+
+        valid = {e.value for e in UserRole}
+        if value and value not in valid:
+            from loguru import logger
+
+            logger.warning("Unexpected role: {}. Expected one of {}", value, valid)
+        return value

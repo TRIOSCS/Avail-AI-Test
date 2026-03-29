@@ -59,7 +59,7 @@ class MaterialSpecFacet(Base):
     value_numeric = Column(Float)
     value_unit = Column(String(20))
 
-    material_card = relationship("MaterialCard", back_populates="spec_facets")
+    material_card = relationship("MaterialCard")
 
     __table_args__ = (
         UniqueConstraint("material_card_id", "spec_key", name="uq_msf_card_spec"),

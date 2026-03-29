@@ -23,6 +23,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.config import settings
+from app.constants import ProspectAccountStatus
 from app.models.discovery_batch import DiscoveryBatch
 from app.models.prospect_account import ProspectAccount
 from app.services.prospect_scoring import calculate_fit_score, calculate_readiness_score
@@ -147,7 +148,7 @@ async def job_discover_prospects() -> dict:
             explorium_count = len(results)
             db.commit()
         except Exception as e:
-            logger.error("Explorium discovery failed: {}", e)
+            logger.exception("Explorium discovery failed: {}", e)
             db.rollback()
 
         # Email mining (always runs)
@@ -164,7 +165,7 @@ async def job_discover_prospects() -> dict:
             email_count = len(email_results)
             db.commit()
         except Exception as e:
-            logger.error("Email mining failed: {}", e)
+            logger.exception("Email mining failed: {}", e)
             db.rollback()
 
         # Update batch record
@@ -189,7 +190,7 @@ async def job_discover_prospects() -> dict:
         return summary
 
     except Exception as e:
-        logger.error("Discovery job failed: {}", e)
+        logger.exception("Discovery job failed: {}", e)
         db.rollback()
         return {"error": str(e)}
     finally:
@@ -212,7 +213,7 @@ async def job_enrich_pool() -> dict:
         logger.info("Pool enrichment complete: {}", result)
         return result
     except Exception as e:
-        logger.error("Pool enrichment failed: {}", e)
+        logger.exception("Pool enrichment failed: {}", e)
         return {"error": str(e)}
 
 
@@ -238,7 +239,7 @@ async def job_find_contacts() -> dict:
         )
         return result
     except Exception as e:
-        logger.error("Contact enrichment failed: {}", e)
+        logger.exception("Contact enrichment failed: {}", e)
         return {"error": str(e)}
 
 
@@ -256,7 +257,12 @@ async def job_refresh_scores() -> dict:
     db = None
     try:
         db = SessionLocal()
-        prospects = db.query(ProspectAccount).filter(ProspectAccount.status == "suggested").limit(5000).all()
+        prospects = (
+            db.query(ProspectAccount)
+            .filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED)
+            .limit(5000)
+            .all()
+        )
 
         refreshed = 0
         upgraded = 0
@@ -309,7 +315,7 @@ async def job_refresh_scores() -> dict:
         return summary
 
     except Exception as e:
-        logger.error("Score refresh failed: {}", e)
+        logger.exception("Score refresh failed: {}", e)
         if db:
             db.rollback()
         return {"error": str(e)}
@@ -340,7 +346,7 @@ async def job_expire_and_resurface() -> dict:
         candidates = (
             db.query(ProspectAccount)
             .filter(
-                ProspectAccount.status == "suggested",
+                ProspectAccount.status == ProspectAccountStatus.SUGGESTED,
                 ProspectAccount.created_at < expire_cutoff,
             )
             .all()
@@ -385,7 +391,7 @@ async def job_expire_and_resurface() -> dict:
                 isinstance(hiring, dict) and hiring.get("type")
             )
             if has_fresh_signals and (p.readiness_score or 0) >= 40:
-                p.status = "suggested"
+                p.status = ProspectAccountStatus.SUGGESTED
                 p.dismissed_by = None
                 p.dismissed_at = None
                 p.dismiss_reason = None
@@ -398,7 +404,7 @@ async def job_expire_and_resurface() -> dict:
         return summary
 
     except Exception as e:
-        logger.error("Expire/resurface failed: {}", e)
+        logger.exception("Expire/resurface failed: {}", e)
         if db:
             db.rollback()
         return {"error": str(e)}
@@ -435,7 +441,7 @@ async def job_pool_health_report() -> dict:
         # Region breakdown (suggested only)
         region_counts = dict(
             db.query(ProspectAccount.region, func.count(ProspectAccount.id))
-            .filter(ProspectAccount.status == "suggested")
+            .filter(ProspectAccount.status == ProspectAccountStatus.SUGGESTED)
             .group_by(ProspectAccount.region)
             .all()
         )
@@ -485,7 +491,7 @@ async def job_pool_health_report() -> dict:
         return report
 
     except Exception as e:
-        logger.error("Pool health report failed: {}", e)
+        logger.exception("Pool health report failed: {}", e)
         return {"error": str(e)}
     finally:
         if db:

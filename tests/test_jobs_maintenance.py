@@ -99,11 +99,12 @@ def test_reset_connector_errors(scheduler_db):
 
 
 def test_reset_connector_errors_exception(scheduler_db):
-    """_job_reset_connector_errors handles DB exceptions gracefully."""
+    """_job_reset_connector_errors rolls back and re-raises on DB exception."""
     with patch.object(scheduler_db, "query", side_effect=Exception("DB crashed")):
         from app.jobs.maintenance_jobs import _job_reset_connector_errors
 
-        asyncio.run(_job_reset_connector_errors())
+        with pytest.raises(Exception, match="DB crashed"):
+            asyncio.run(_job_reset_connector_errors())
 
 
 # ── _job_auto_attribute_activities() ──────────────────────────────────

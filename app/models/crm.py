@@ -2,8 +2,8 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
-from sqlalchemy.orm import relationship
+from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy.orm import relationship, validates
 
 from ..database import UTCDateTime
 from .base import Base
@@ -51,8 +51,8 @@ class Company(Base):
     material_tags_updated_at = Column(DateTime)
 
     # Denormalized counts (kept in sync by PostgreSQL triggers)
-    site_count = Column(Integer, default=0, server_default="0")
-    open_req_count = Column(Integer, default=0, server_default="0")
+    site_count = Column(Integer, default=0, server_default="0", nullable=False)
+    open_req_count = Column(Integer, default=0, server_default="0", nullable=False)
 
     # Record origin tracking
     source = Column(String(50), default="manual")
@@ -60,7 +60,6 @@ class Company(Base):
     # Salesforce import fields
     sf_account_id = Column(String(255), unique=True)
     import_priority = Column(String(20))  # "priority", "standard", "dismissed"
-    ownership_cooldown_until = Column(DateTime)
 
     # Deep enrichment tracking
     deep_enrichment_at = Column(DateTime)
@@ -78,6 +77,15 @@ class Company(Base):
 
     sites = relationship("CustomerSite", back_populates="company", cascade="all, delete-orphan")
     account_owner = relationship("User", foreign_keys=[account_owner_id])
+
+    @validates("currency")
+    def _validate_currency(self, _key, value):
+        if value is not None:
+            import re
+
+            if not re.fullmatch(r"[A-Z]{3}", value):
+                raise ValueError(f"Invalid ISO 4217 currency code: {value}")
+        return value
 
     __table_args__ = (
         Index("ix_companies_name", "name"),
@@ -140,6 +148,12 @@ class CustomerSite(Base):
     owner = relationship("User", foreign_keys=[owner_id])
     site_contacts = relationship("SiteContact", back_populates="customer_site", cascade="all, delete-orphan")
 
+    @validates("contact_email")
+    def _validate_contact_email(self, _key, value):
+        if value and "@" not in value:
+            raise ValueError(f"Invalid contact email: {value}")
+        return value
+
     __table_args__ = (
         Index("ix_cs_company", "company_id"),
         Index("ix_cs_owner", "owner_id"),
@@ -182,7 +196,14 @@ class SiteContact(Base):
 
     customer_site = relationship("CustomerSite", back_populates="site_contacts")
 
+    @validates("email")
+    def _validate_email(self, _key, value):
+        if value and "@" not in value:
+            raise ValueError(f"Invalid email: {value}")
+        return value
+
     __table_args__ = (
         Index("ix_site_contacts_site", "customer_site_id"),
         Index("ix_site_contacts_email", "email"),
+        UniqueConstraint("customer_site_id", "email", name="uq_site_contacts_site_email"),
     )

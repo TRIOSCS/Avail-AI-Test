@@ -52,8 +52,8 @@ class TestAgentAuth:
             "/api/health",
             headers={"x-agent-key": "test-agent-key-secret"},
         )
-        # Should not get 401 (may get 404 or 200 depending on route)
-        assert resp.status_code != 401
+        # Agent key should not cause auth rejection (route may 404 since /api/health doesn't exist)
+        assert resp.status_code not in (401, 403), f"Agent key auth should succeed, got {resp.status_code}"
 
     def test_wrong_agent_key_does_not_authenticate(self, raw_client: TestClient, agent_user: User):
         """Wrong agent key should not grant access to protected API endpoints."""

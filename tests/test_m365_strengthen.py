@@ -47,7 +47,7 @@ def test_scan_sent_folder(db_session, test_user):
     req = Requisition(
         name="REQ-SENT-001",
         customer_name="Test Co",
-        status="open",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )

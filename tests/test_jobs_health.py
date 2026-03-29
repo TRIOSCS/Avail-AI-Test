@@ -120,14 +120,15 @@ def test_job_cleanup_usage_log_deletes_old(scheduler_db):
 
 
 def test_job_cleanup_usage_log_handles_error():
-    """_job_cleanup_usage_log catches and rolls back on error."""
+    """_job_cleanup_usage_log rolls back and re-raises on error."""
     mock_db = MagicMock()
     mock_db.query.side_effect = Exception("DB error")
 
     with patch("app.database.SessionLocal", return_value=mock_db):
         from app.jobs.health_jobs import _job_cleanup_usage_log
 
-        asyncio.run(_job_cleanup_usage_log())
+        with pytest.raises(Exception, match="DB error"):
+            asyncio.run(_job_cleanup_usage_log())
 
     mock_db.rollback.assert_called_once()
     mock_db.close.assert_called_once()
@@ -172,11 +173,12 @@ def test_job_reset_monthly_usage(scheduler_db):
 
 
 def test_job_reset_monthly_usage_handles_error():
-    """_job_reset_monthly_usage catches and rolls back on error."""
+    """_job_reset_monthly_usage rolls back and re-raises on error."""
     mock_db = MagicMock()
     mock_db.query.return_value.update.side_effect = Exception("DB error")
 
     with patch("app.database.SessionLocal", return_value=mock_db):
         from app.jobs.health_jobs import _job_reset_monthly_usage
 
-        asyncio.run(_job_reset_monthly_usage())
+        with pytest.raises(Exception, match="DB error"):
+            asyncio.run(_job_reset_monthly_usage())

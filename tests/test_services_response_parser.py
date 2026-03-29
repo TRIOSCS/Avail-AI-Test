@@ -14,12 +14,14 @@ import pytest
 from app.services.response_parser import (
     CONFIDENCE_AUTO,
     CONFIDENCE_REVIEW,
-    _clean_email_body,
     _cross_validate,
     _normalize_parsed_parts,
     extract_draft_offers,
     should_auto_apply,
     should_flag_review,
+)
+from app.services.response_parser import (
+    clean_email_body as _clean_email_body,
 )
 
 # ── Confidence threshold tests ──────────────────────────────────────

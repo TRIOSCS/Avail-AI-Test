@@ -9,11 +9,14 @@ Depends on: conftest (client, db_session, test_user, sales_user)
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.models import ActivityLog
 
 # ── TT-026: Sales notification count endpoint ───────────────────────
 
 
+@pytest.mark.skip(reason="Routes /api/sales/notifications/* removed — sales router no longer mounted")
 class TestBellBadgeCount:
     """The badge should use /api/sales/notifications/count for ActivityLog-based
     counts."""

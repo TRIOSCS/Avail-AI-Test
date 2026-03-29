@@ -673,7 +673,7 @@ class TestComputeRequisitionScores:
         req = Requisition(
             name="EMPTY-REQ",
             customer_name="Test",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -697,7 +697,7 @@ class TestComputeRequisitionScores:
         req = Requisition(
             name="REQ-NOACTIVITY",
             customer_name="Test",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -725,7 +725,7 @@ class TestComputeRequisitionScores:
         req = Requisition(
             name="REQ-SIGHTINGS",
             customer_name="Test",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -766,7 +766,7 @@ class TestComputeRequisitionScores:
         req = Requisition(
             name="REQ-FULL",
             customer_name="Test",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -874,7 +874,7 @@ class TestComputeRequisitionScores:
         req = Requisition(
             name="REQ-MULTI",
             customer_name="Test",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -925,7 +925,7 @@ class TestComputeRequisitionScores:
         req = Requisition(
             name="REQ-STRUCT",
             customer_name="Test",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -970,7 +970,7 @@ class TestComputeRequisitionScores:
         req = Requisition(
             name="REQ-NULL-MPN",
             customer_name="Test",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -994,7 +994,7 @@ class TestComputeRequisitionScores:
         req = Requisition(
             name="REQ-COLOR",
             customer_name="Test",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -1018,7 +1018,7 @@ class TestComputeRequisitionScores:
         req = Requisition(
             name="REQ-RFQFILTER",
             customer_name="Test",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -1068,7 +1068,7 @@ class TestComputeRequisitionScores:
         req = Requisition(
             name="REQ-CHANNELS",
             customer_name="Test",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -1134,7 +1134,7 @@ class TestComputeRequisitionScores:
         req = Requisition(
             name="REQ-OFFERS",
             customer_name="Test",
-            status="open",
+            status="active",
             created_by=test_user.id,
             created_at=datetime.now(timezone.utc),
         )

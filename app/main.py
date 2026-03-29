@@ -56,7 +56,7 @@ async def lifespan(app):
         from sentry_sdk.integrations.loguru import LoguruIntegration
         from sentry_sdk.integrations.sqlalchemy import SqlalchemyIntegration
 
-        def _sentry_before_send(event, hint):
+        def _sentry_before_send(event, _hint):
             """Scrub sensitive data from Sentry events."""
             _SENSITIVE_HEADERS = {
                 "authorization",
@@ -481,39 +481,23 @@ from .routers.activity import router as activity_router
 from .routers.admin import router as admin_router
 from .routers.ai import router as ai_router
 from .routers.auth import router as auth_router
-from .routers.command_center import router as command_center_router
 from .routers.crm import router as crm_router
 from .routers.documents import router as documents_router
-from .routers.emails import router as emails_router
 from .routers.error_reports import router as error_reports_router
 from .routers.events import router as events_router
 from .routers.excess import router as excess_router
 from .routers.htmx_views import router as htmx_views_router
-from .routers.ics_admin import router as ics_admin_router
-from .routers.knowledge import insights_router as knowledge_insights_router
-from .routers.knowledge import router as knowledge_router
-from .routers.knowledge import sprinkles_router as knowledge_sprinkles_router
 from .routers.materials import router as materials_router
-from .routers.nc_admin import router as nc_admin_router
-from .routers.outreach import router as outreach_router
 from .routers.proactive import router as proactive_router
-from .routers.prospect_pool import router as prospect_pool_router
 from .routers.prospect_suggested import router as prospect_suggested_router
 from .routers.quote_builder import router as quote_builder_router
 from .routers.requisitions import router as reqs_router
 from .routers.requisitions2 import router as requisitions2_router
-from .routers.rfq import router as rfq_router
 from .routers.sightings import router as sightings_router
 from .routers.sources import router as sources_router
-from .routers.strategic import router as strategic_router
-from .routers.tagging_admin import router as tagging_admin_router
 from .routers.tags import router as tags_router
-from .routers.task import my_tasks_router
-from .routers.task import router as task_router
 from .routers.v13_features import router as v13_router
-from .routers.vendor_analytics import router as vendor_analytics_router
 from .routers.vendor_contacts import router as vendor_contacts_router
-from .routers.vendor_inquiry import router as vendor_inquiry_router
 from .routers.vendors_crud import router as vendors_crud_router
 
 # Core routers (always active)
@@ -521,37 +505,21 @@ app.include_router(auth_router)
 app.include_router(admin_router)
 app.include_router(ai_router)
 app.include_router(activity_router)
-app.include_router(command_center_router)
 app.include_router(crm_router)
 app.include_router(documents_router)
-app.include_router(emails_router)
 app.include_router(events_router)
 app.include_router(excess_router)
 app.include_router(error_reports_router)
-app.include_router(ics_admin_router)
-app.include_router(knowledge_router)
-app.include_router(knowledge_insights_router)
-app.include_router(knowledge_sprinkles_router)
 app.include_router(materials_router)
-app.include_router(nc_admin_router)
-app.include_router(outreach_router)
 app.include_router(proactive_router)
-app.include_router(prospect_pool_router)
 app.include_router(prospect_suggested_router)
 app.include_router(reqs_router)
 app.include_router(requisitions2_router)
-app.include_router(rfq_router)
 app.include_router(sightings_router)
 app.include_router(sources_router)
-app.include_router(strategic_router)
 app.include_router(tags_router)
-app.include_router(tagging_admin_router)
-app.include_router(task_router)
-app.include_router(my_tasks_router)
 app.include_router(v13_router)
-app.include_router(vendor_analytics_router)
 app.include_router(vendor_contacts_router)
-app.include_router(vendor_inquiry_router)
 app.include_router(vendors_crud_router)
 app.include_router(quote_builder_router)
 app.include_router(htmx_views_router)

@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
 
-from pydantic import BaseModel, ConfigDict, Field, field_validator
+from pydantic import BaseModel, Field, field_validator
 
 
 class TaskCreate(BaseModel):
@@ -50,32 +50,6 @@ class TaskComplete(BaseModel):
     completion_note: str = Field(..., min_length=1, description="How was this task resolved?")
 
 
-class TaskResponse(BaseModel):
-    model_config = ConfigDict(from_attributes=True)
-
-    id: int
-    requisition_id: int
-    title: str
-    description: str | None = None
-    task_type: str
-    status: str
-    priority: int
-    ai_priority_score: float | None = None
-    ai_risk_flag: str | None = None
-    assigned_to_id: int | None = None
-    assignee_name: str | None = None
-    created_by: int | None = None
-    creator_name: str | None = None
-    source: str
-    source_ref: str | None = None
-    completion_note: str | None = None
-    requisition_name: str | None = None
-    due_at: datetime | None = None
-    completed_at: datetime | None = None
-    created_at: datetime
-    updated_at: datetime
-
-
 class TaskStatusUpdate(BaseModel):
     """Quick status change from the task manager."""
 
@@ -88,9 +62,3 @@ class TaskStatusUpdate(BaseModel):
         if v not in ("todo", "in_progress", "done"):
             raise ValueError(f"Invalid status: {v}. Must be todo, in_progress, or done")
         return v
-
-
-class TaskSummary(BaseModel):
-    assigned_to_me: int = 0
-    waiting_on: int = 0
-    overdue: int = 0

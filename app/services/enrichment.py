@@ -109,8 +109,17 @@ async def _try_connector_config(config: dict, mpn: str) -> dict | None:
                     "confidence": config["confidence"],
                 }
         return None
-    except Exception:
-        logger.warning("Connector %s failed for %s", config["name"], mpn, exc_info=True)
+    except asyncio.TimeoutError:
+        logger.warning("Connector %s timed out for %s", config["name"], mpn)
+        return None
+    except Exception as exc:
+        err_str = str(exc).lower()
+        if "401" in err_str or "403" in err_str or "unauthorized" in err_str:
+            logger.error("Connector %s auth failure for %s — check API credentials", config["name"], mpn)
+        elif "429" in err_str or "rate" in err_str:
+            logger.warning("Connector %s rate limited for %s", config["name"], mpn)
+        else:
+            logger.warning("Connector %s failed for %s", config["name"], mpn, exc_info=True)
         return None
 
 

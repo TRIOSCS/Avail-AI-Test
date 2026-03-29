@@ -103,20 +103,27 @@ def test_auto_archive_skips_never_searched(scheduler_db, test_user):
 
 
 def test_auto_archive_only_archives_active_status(scheduler_db, test_user):
-    """Only requisitions with status='active' are archived."""
+    """Only requisitions with status='active' are archived; other statuses are
+    untouched."""
     already_archived = Requisition(
         name="ALREADY-ARCHIVED",
         status="archived",
         created_by=test_user.id,
         last_searched_at=datetime.now(timezone.utc) - timedelta(days=60),
     )
-    open_req = Requisition(
-        name="OPEN-001",
-        status="open",
+    active_stale = Requisition(
+        name="ACTIVE-STALE",
+        status="active",
         created_by=test_user.id,
         last_searched_at=datetime.now(timezone.utc) - timedelta(days=60),
     )
-    scheduler_db.add_all([already_archived, open_req])
+    draft_stale = Requisition(
+        name="DRAFT-STALE",
+        status="draft",
+        created_by=test_user.id,
+        last_searched_at=datetime.now(timezone.utc) - timedelta(days=60),
+    )
+    scheduler_db.add_all([already_archived, active_stale, draft_stale])
     scheduler_db.commit()
 
     from app.jobs.core_jobs import _job_auto_archive
@@ -124,9 +131,11 @@ def test_auto_archive_only_archives_active_status(scheduler_db, test_user):
     asyncio.run(_job_auto_archive())
 
     scheduler_db.refresh(already_archived)
-    scheduler_db.refresh(open_req)
+    scheduler_db.refresh(active_stale)
+    scheduler_db.refresh(draft_stale)
     assert already_archived.status == "archived"  # unchanged
-    assert open_req.status == "open"  # only "active" status is targeted
+    assert active_stale.status == "archived"  # stale active → archived
+    assert draft_stale.status == "draft"  # non-active status untouched
 
 
 def test_auto_archive_error_handling(scheduler_db):
@@ -741,8 +750,10 @@ def test_inbox_scan_safe_scan_timeout_commit_exception(scheduler_db, test_user):
     commit_count = [0]
 
     def _fail_recovery_commit():
+        from sqlalchemy.exc import OperationalError
+
         commit_count[0] += 1
-        raise Exception("commit during timeout recovery failed")
+        raise OperationalError("commit", {}, Exception("commit during timeout recovery failed"))
 
     with (
         patch("app.jobs.email_jobs._scan_user_inbox", new_callable=AsyncMock) as mock_scan,

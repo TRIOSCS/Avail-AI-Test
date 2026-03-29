@@ -28,7 +28,7 @@ def _make_requisition_and_requirement(db: Session, user_id: int) -> tuple[Requis
     req = Requisition(
         name="REQ-AGG-001",
         customer_name="Test Co",
-        status="open",
+        status="active",
         created_by=user_id,
         created_at=datetime.now(timezone.utc),
     )
@@ -111,7 +111,9 @@ class TestVendorGrouping:
         )
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=300):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 300, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert len(results) == 1
@@ -125,7 +127,9 @@ class TestVendorGrouping:
         _make_sighting(db_session, item.id, vendor_name="Mouser", unit_price=1.5)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 100, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert len(results) == 2
@@ -137,7 +141,9 @@ class TestVendorGrouping:
         _make_sighting(db_session, item.id, vendor_name="Arrow Electronics", is_unavailable=True)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=None):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": None, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert len(results) == 0
@@ -153,7 +159,9 @@ class TestPriceAggregation:
         _make_sighting(db_session, item.id, unit_price=3.0)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=200):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 200, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert len(results) == 1
@@ -166,7 +174,9 @@ class TestPriceAggregation:
         _make_sighting(db_session, item.id, unit_price=8.0)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=300):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 300, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].best_price == 2.0
@@ -176,7 +186,9 @@ class TestPriceAggregation:
         _make_sighting(db_session, item.id, unit_price=None)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 100, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].avg_price is None
@@ -187,19 +199,20 @@ class TestPriceAggregation:
 
 
 class TestQtyFallback:
-    def test_ai_failure_uses_sum_fallback(self, db_session: Session, test_user):
-        """When AI estimation fails (returns None), fall back to sum of non-null
-        qtys."""
+    def test_ai_failure_uses_max_fallback(self, db_session: Session, test_user):
+        """When AI estimation returns None qty, fall back to max of non-null qtys."""
         _req, item = _make_requisition_and_requirement(db_session, test_user.id)
         _make_sighting(db_session, item.id, qty_available=100)
         _make_sighting(db_session, item.id, qty_available=200)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=None):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": None, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
-        # Fallback: sum of non-null = 100 + 200 = 300
-        assert results[0].estimated_qty == 300
+        # Fallback: max of non-null = max(100, 200) = 200
+        assert results[0].estimated_qty == 200
 
     def test_ai_success_uses_ai_value(self, db_session: Session, test_user):
         _req, item = _make_requisition_and_requirement(db_session, test_user.id)
@@ -207,7 +220,9 @@ class TestQtyFallback:
         _make_sighting(db_session, item.id, qty_available=200)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=250):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 250, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].estimated_qty == 250
@@ -217,7 +232,9 @@ class TestQtyFallback:
         _make_sighting(db_session, item.id, qty_available=None)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=None):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": None, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].estimated_qty is None
@@ -232,7 +249,9 @@ class TestTierInSummary:
         _make_sighting(db_session, item.id, score=80)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 100, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].tier == "Excellent"
@@ -245,7 +264,9 @@ class TestTierInSummary:
         _make_sighting(db_session, item.id, score=75)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=200):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 200, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].score == 75.0
@@ -261,7 +282,9 @@ class TestUpsert:
         _make_sighting(db_session, item.id, unit_price=1.0, qty_available=100, score=50)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 100, "approximate": False}
+        ):
             first = rebuild_vendor_summaries(db_session, item.id)
         db_session.commit()
 
@@ -272,7 +295,9 @@ class TestUpsert:
         _make_sighting(db_session, item.id, unit_price=3.0, qty_available=200, score=90)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=300):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 300, "approximate": False}
+        ):
             second = rebuild_vendor_summaries(db_session, item.id)
         db_session.commit()
 
@@ -293,7 +318,9 @@ class TestUpsert:
         _make_sighting(db_session, item.id, vendor_name="Mouser")
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 100, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id, vendor_names=["Arrow Electronics"])
 
         assert len(results) == 1
@@ -319,7 +346,9 @@ class TestVendorPhoneLookup:
         _make_sighting(db_session, item.id, vendor_name="Arrow Electronics")
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 100, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].vendor_phone == "+1-555-0100"
@@ -329,7 +358,9 @@ class TestVendorPhoneLookup:
         _make_sighting(db_session, item.id, vendor_name="Unknown Vendor")
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 100, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].vendor_phone is None
@@ -346,7 +377,9 @@ class TestSourceTypes:
         _make_sighting(db_session, item.id, source_type="email")
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=300):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 300, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert set(results[0].source_types) == {"api", "email"}
@@ -396,7 +429,9 @@ class TestVendorSummaryNewColumns:
         _make_sighting_extended(db_session, item.id, created_at=newer)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=200):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 200, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert len(results) == 1
@@ -414,7 +449,9 @@ class TestVendorSummaryNewColumns:
         _make_sighting_extended(db_session, item.id, lead_time_days=None)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=300):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 300, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert len(results) == 1
@@ -427,7 +464,9 @@ class TestVendorSummaryNewColumns:
         _make_sighting_extended(db_session, item.id, moq=None)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=300):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 300, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert len(results) == 1
@@ -447,7 +486,9 @@ class TestVendorSummaryNewColumns:
         _make_sighting_extended(db_session, item.id, vendor_name="Arrow Electronics")
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 100, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert len(results) == 1
@@ -458,7 +499,9 @@ class TestVendorSummaryNewColumns:
         _make_sighting_extended(db_session, item.id, vendor_email="sales@arrow.com")
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 100, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].has_contact_info is True
@@ -477,7 +520,9 @@ class TestVendorSummaryNewColumns:
         _make_sighting_extended(db_session, item.id, vendor_name="Arrow Electronics")
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 100, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].has_contact_info is True
@@ -487,7 +532,9 @@ class TestVendorSummaryNewColumns:
         _make_sighting_extended(db_session, item.id, vendor_email=None, vendor_phone=None)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 100, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].has_contact_info is False
@@ -497,7 +544,9 @@ class TestVendorSummaryNewColumns:
         _make_sighting_extended(db_session, item.id, lead_time_days=None)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 100, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].best_lead_time_days is None
@@ -507,7 +556,9 @@ class TestVendorSummaryNewColumns:
         _make_sighting_extended(db_session, item.id, moq=None)
         db_session.commit()
 
-        with patch("app.services.sighting_aggregation._estimate_qty_with_ai", return_value=100):
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 100, "approximate": False}
+        ):
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].min_moq is None

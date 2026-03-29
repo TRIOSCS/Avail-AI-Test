@@ -15,7 +15,9 @@ Each part in a multi-part reply gets its own classification:
 import json
 
 from loguru import logger
+from pydantic import ValidationError
 
+from app.schemas.ai_responses import VendorResponseParsed
 from app.utils.claude_client import claude_structured
 from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 from app.utils.llm_router import routed_structured
@@ -30,6 +32,7 @@ from app.utils.normalization import (
     normalize_price,
     normalize_quantity,
 )
+from app.utils.text_utils import clean_email_body
 
 # ── Confidence thresholds ─────────────────────────────────────────────
 
@@ -130,7 +133,7 @@ async def parse_vendor_response(
         Parsed result dict with confidence score, or None on failure
     """
     # Truncate body to avoid token waste
-    body_truncated = _clean_email_body(email_body)[:4000]
+    body_truncated = clean_email_body(email_body)[:4000]
 
     context_str = ""
     if rfq_context:
@@ -160,6 +163,14 @@ async def parse_vendor_response(
     if not result:
         return None
 
+    # Validate with Pydantic model
+    try:
+        validated = VendorResponseParsed.model_validate(result)
+        result = validated.model_dump()
+    except ValidationError as e:
+        logger.warning("VendorResponseParsed validation failed: %s", e)
+        # Fall through with raw dict if validation fails — don't block parsing
+
     # Extended thinking retry: if confidence is in the ambiguous review band,
     # retry with Sonnet + thinking to attempt higher-confidence extraction
     confidence = result.get("confidence", 0)
@@ -179,7 +190,12 @@ async def parse_vendor_response(
             retry = None
         if retry and retry.get("confidence", 0) > confidence:
             logger.info(f"Extended thinking upgraded confidence: {confidence:.2f} → {retry['confidence']:.2f}")
-            result = retry
+            # Validate retry result too
+            try:
+                validated = VendorResponseParsed.model_validate(retry)
+                result = validated.model_dump()
+            except ValidationError:
+                result = retry
 
     # Post-process: normalize extracted values
     _normalize_parsed_parts(result)
@@ -239,27 +255,6 @@ def _cross_validate(result: dict, rfq_context: dict | list) -> None:
     for part in result.get("parts", []):
         mpn = part.get("mpn", "")
         part["mpn_matches_rfq"] = any(fuzzy_mpn_match(mpn, rfq_mpn) for rfq_mpn in rfq_mpns)
-
-
-def _clean_email_body(body: str) -> str:
-    """Strip HTML tags, excessive whitespace, and email signatures."""
-    import re
-
-    if not body:
-        return ""
-    # Remove HTML tags
-    text = re.sub(r"<[^>]+>", " ", body)
-    # Collapse whitespace
-    text = re.sub(r"\s+", " ", text).strip()
-    # Remove common email disclaimers (often very long)
-    disclaimer_patterns = [
-        r"(?i)this email and any attachments.*?(?=\n\n|\Z)",
-        r"(?i)confidentiality notice.*?(?=\n\n|\Z)",
-        r"(?i)DISCLAIMER.*?(?=\n\n|\Z)",
-    ]
-    for pat in disclaimer_patterns:
-        text = re.sub(pat, "", text)
-    return text.strip()
 
 
 def should_auto_apply(result: dict) -> bool:

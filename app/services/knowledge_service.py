@@ -23,6 +23,15 @@ EXPIRY_LEAD_TIME_FACT = 180
 EXPIRY_AI_INSIGHT = 30
 
 
+def _is_expired(expires_at: datetime | None, now: datetime) -> bool:
+    """Check if a timestamp is expired, handling naive/aware datetime comparison."""
+    if not expires_at:
+        return False
+    if expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+    return expires_at < now
+
+
 def create_entry(
     db: Session,
     *,
@@ -291,7 +300,7 @@ def capture_offer_fact(db: Session, *, offer, user_id: int | None = None) -> Kno
         content = "Offer — " + ", ".join(content_parts)
         entry = create_entry(
             db,
-            user_id=user_id or 0,
+            user_id=user_id,
             entry_type="fact",
             content=content,
             source="system",
@@ -343,7 +352,7 @@ def capture_rfq_response_fact(
             expiry_days = EXPIRY_PRICE_FACT if price else EXPIRY_LEAD_TIME_FACT
             entry = create_entry(
                 db,
-                user_id=0,  # system
+                user_id=None,  # system
                 entry_type="fact",
                 content=content,
                 source="email_parsed",
@@ -418,7 +427,7 @@ def build_context(db: Session, *, requisition_id: int) -> str:
     if direct:
         lines = []
         for e in direct:
-            prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
+            prefix = "[OUTDATED] " if _is_expired(e.expires_at, now) else ""
             lines.append(
                 "- {}{}: {} (source: {}, {})".format(
                     prefix, e.entry_type, e.content, e.source, e.created_at.strftime("%Y-%m-%d")
@@ -428,7 +437,9 @@ def build_context(db: Session, *, requisition_id: int) -> str:
 
     # 2. MPN knowledge from other reqs
     mpns = [
-        r.mpn for r in db.query(Requirement.mpn).filter(Requirement.requisition_id == requisition_id).all() if r.mpn
+        r.primary_mpn
+        for r in db.query(Requirement.primary_mpn).filter(Requirement.requisition_id == requisition_id).all()
+        if r.primary_mpn
     ]
     if mpns:
         mpn_entries = (
@@ -443,7 +454,7 @@ def build_context(db: Session, *, requisition_id: int) -> str:
         if mpn_entries:
             lines = []
             for e in mpn_entries:
-                prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
+                prefix = "[OUTDATED] " if _is_expired(e.expires_at, now) else ""
                 lines.append(
                     "- {}{}: {} (req #{}, {})".format(
                         prefix, e.mpn, e.content, e.requisition_id, e.created_at.strftime("%Y-%m-%d")
@@ -473,7 +484,7 @@ def build_context(db: Session, *, requisition_id: int) -> str:
         if vendor_entries:
             lines = []
             for e in vendor_entries:
-                prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
+                prefix = "[OUTDATED] " if _is_expired(e.expires_at, now) else ""
                 lines.append(
                     "- {}Vendor #{}: {} ({})".format(
                         prefix, e.vendor_card_id, e.content, e.created_at.strftime("%Y-%m-%d")
@@ -494,7 +505,7 @@ def build_context(db: Session, *, requisition_id: int) -> str:
         if company_entries:
             lines = []
             for e in company_entries:
-                prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
+                prefix = "[OUTDATED] " if _is_expired(e.expires_at, now) else ""
                 lines.append("- {}{} ({})".format(prefix, e.content, e.created_at.strftime("%Y-%m-%d")))
             sections.append("## Customer intelligence\n" + "\n".join(lines))
 
@@ -552,7 +563,7 @@ async def generate_insights(db: Session, requisition_id: int) -> list[KnowledgeE
     for insight in result["insights"][:5]:  # Cap at 5
         entry = create_entry(
             db,
-            user_id=0,  # system
+            user_id=None,  # system
             entry_type="ai_insight",
             content=insight["content"],
             source="ai_generated",
@@ -650,7 +661,7 @@ def build_mpn_context(db: Session, *, mpn: str) -> str:
     if entries:
         lines = []
         for e in entries:
-            prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
+            prefix = "[OUTDATED] " if _is_expired(e.expires_at, now) else ""
             lines.append(
                 "- {}{}: {} (source: {}, req #{}, {})".format(
                     prefix,
@@ -754,7 +765,7 @@ def build_vendor_context(db: Session, *, vendor_card_id: int) -> str:
     if entries:
         lines = []
         for e in entries:
-            prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
+            prefix = "[OUTDATED] " if _is_expired(e.expires_at, now) else ""
             lines.append("- {}{}: {} ({})".format(prefix, e.entry_type, e.content, e.created_at.strftime("%Y-%m-%d")))
         sections.append("## Knowledge entries\n" + "\n".join(lines))
 
@@ -893,7 +904,7 @@ def build_company_context(db: Session, *, company_id: int) -> str:
     if entries:
         lines = []
         for e in entries:
-            prefix = "[OUTDATED] " if e.expires_at and e.expires_at < now else ""
+            prefix = "[OUTDATED] " if _is_expired(e.expires_at, now) else ""
             lines.append("- {}{}: {} ({})".format(prefix, e.entry_type, e.content, e.created_at.strftime("%Y-%m-%d")))
         sections.append("## Knowledge entries\n" + "\n".join(lines))
 
@@ -988,7 +999,7 @@ async def generate_mpn_insights(db: Session, mpn: str) -> list[KnowledgeEntry]:
     for insight in result["insights"][:5]:
         entry = create_entry(
             db,
-            user_id=0,
+            user_id=None,
             entry_type="ai_insight",
             content=insight["content"],
             source="ai_generated",
@@ -1050,7 +1061,7 @@ async def generate_vendor_insights(db: Session, vendor_card_id: int) -> list[Kno
     for insight in result["insights"][:5]:
         entry = create_entry(
             db,
-            user_id=0,
+            user_id=None,
             entry_type="ai_insight",
             content=insight["content"],
             source="ai_generated",
@@ -1112,7 +1123,7 @@ async def generate_pipeline_insights(db: Session) -> list[KnowledgeEntry]:
     for insight in result["insights"][:5]:
         entry = create_entry(
             db,
-            user_id=0,
+            user_id=None,
             entry_type="ai_insight",
             content=insight["content"],
             source="ai_generated",
@@ -1174,7 +1185,7 @@ async def generate_company_insights(db: Session, company_id: int) -> list[Knowle
     for insight in result["insights"][:5]:
         entry = create_entry(
             db,
-            user_id=0,
+            user_id=None,
             entry_type="ai_insight",
             content=insight["content"],
             source="ai_generated",

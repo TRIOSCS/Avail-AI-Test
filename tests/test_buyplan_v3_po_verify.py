@@ -57,7 +57,7 @@ def _make_plan_with_lines(
     requisition = Requisition(
         name="REQ-PO-TEST",
         customer_name="Test Corp",
-        status="open",
+        status="active",
         created_by=buyer.id,
         created_at=datetime.now(timezone.utc),
     )

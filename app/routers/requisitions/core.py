@@ -42,26 +42,12 @@ from ...schemas.requisitions import (
     RequisitionUpdate,
 )
 from ...schemas.responses import RequisitionListResponse
+from ...services.sourcing_score import compute_sourcing_score_safe
 from ...utils.sql_helpers import escape_like
 
 router = APIRouter(tags=["requisitions"])
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
-
-
-def _compute_sourcing_score(req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt):
-    """Lightweight sourcing score for list views."""
-    from ...services.sourcing_score import compute_requisition_score_fast
-
-    return compute_requisition_score_fast(
-        req_count=req_cnt or 0,
-        sourced_count=sourced_cnt or 0,
-        rfq_sent_count=rfq_sent or 0,
-        reply_count=reply_cnt or 0,
-        offer_count=offer_cnt or 0,
-        call_count=call_cnt or 0,
-        email_count=email_act_cnt or 0,
-    )
 
 
 @router.get("/api/requisitions/counts")
@@ -70,14 +56,21 @@ async def requisition_counts(
     db: Session = Depends(get_db),
 ):
     """Lightweight counts for dashboard widgets — avoids the heavy list query."""
-    total = db.scalar(select(sqlfunc.count(Requisition.id)))
+    # Sales sees own reqs only; all other roles see everything
+    base_filter = []
+    if user.role == UserRole.SALES:
+        base_filter.append(Requisition.created_by == user.id)
+
+    total = db.scalar(select(sqlfunc.count(Requisition.id)).where(*base_filter))
     open_cnt = db.scalar(
         select(sqlfunc.count(Requisition.id)).where(
-            Requisition.status.in_([RequisitionStatus.ACTIVE, RequisitionStatus.SOURCING, RequisitionStatus.DRAFT])
+            *base_filter,
+            Requisition.status.in_([RequisitionStatus.ACTIVE, RequisitionStatus.SOURCING, RequisitionStatus.DRAFT]),
         )
     )
     archive_cnt = db.scalar(
         select(sqlfunc.count(Requisition.id)).where(
+            *base_filter,
             Requisition.status.in_(
                 [
                     RequisitionStatus.ARCHIVED,
@@ -85,7 +78,7 @@ async def requisition_counts(
                     RequisitionStatus.LOST,
                     RequisitionStatus.CANCELLED,
                 ]
-            )
+            ),
         )
     )
     return {"total": total or 0, "open": open_cnt or 0, "archive": archive_cnt or 0}
@@ -458,7 +451,9 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
             }
             for r, req_cnt, con_cnt, reply_cnt, latest_reply, has_new, latest_offer, sourced_cnt, rfq_sent, needs_rev, ttv, q_status, q_sent, q_total, q_won, offer_cnt, best_price, await_cnt, pm_cnt, call_cnt, email_act_cnt, latest_rfq_sent in rows
             for _sc, _sc_color, _sc_signals in [
-                _compute_sourcing_score(req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt)
+                compute_sourcing_score_safe(
+                    req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt
+                )
             ]
         ],
         "total": total,
@@ -528,7 +523,7 @@ async def create_requisition(
         customer_name=safe_customer,
         deadline=body.deadline,
         created_by=user.id,
-        status="draft",
+        status=RequisitionStatus.DRAFT,
     )
     db.add(req)
     db.commit()

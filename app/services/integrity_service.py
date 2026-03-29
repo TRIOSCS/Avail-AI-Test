@@ -136,95 +136,45 @@ def heal_orphaned_records(db: Session, batch_size: int = 500) -> dict:
 
     healed = {"requirements": 0, "sightings": 0, "offers": 0}
 
-    # --- Requirements ---
-    orphans = (
-        db.query(Requirement)
-        .filter(
-            Requirement.primary_mpn.isnot(None),
-            Requirement.primary_mpn != "",
-            Requirement.material_card_id.is_(None),
-        )
-        .limit(batch_size)
-        .all()
-    )
-    for r in orphans:
-        try:
-            card = resolve_material_card(r.primary_mpn, db)
-            if card:
-                r.material_card_id = card.id
-                healed["requirements"] += 1
-                log_audit(
-                    db,
-                    material_card_id=card.id,
-                    action="healed",
-                    entity_type="requirement",
-                    entity_id=r.id,
-                    normalized_mpn=card.normalized_mpn,
-                    created_by="scheduler",
-                )
-        except Exception as e:
-            logger.warning("INTEGRITY_HEAL_FAIL: requirement id=%s mpn=%s error=%s", r.id, r.primary_mpn, e)
-            db.rollback()
+    def _heal_batch(orphans, mpn_attr: str, entity_type: str) -> int:
+        count = 0
+        for record in orphans:
+            mpn = getattr(record, mpn_attr)
+            sp = db.begin_nested()
+            try:
+                card = resolve_material_card(mpn, db)
+                if card:
+                    record.material_card_id = card.id
+                    count += 1
+                    log_audit(
+                        db,
+                        material_card_id=card.id,
+                        action="healed",
+                        entity_type=entity_type,
+                        entity_id=record.id,
+                        normalized_mpn=card.normalized_mpn,
+                        created_by="scheduler",
+                    )
+                sp.commit()
+            except Exception as e:
+                logger.warning("INTEGRITY_HEAL_FAIL: %s id=%s mpn=%s error=%s", entity_type, record.id, mpn, e)
+                sp.rollback()
+        return count
 
-    # --- Sightings ---
-    orphans = (
-        db.query(Sighting)
-        .filter(
-            Sighting.mpn_matched.isnot(None),
-            Sighting.mpn_matched != "",
-            Sighting.material_card_id.is_(None),
+    entity_configs = [
+        (Requirement, "primary_mpn", "requirements"),
+        (Sighting, "mpn_matched", "sightings"),
+        (Offer, "mpn", "offers"),
+    ]
+    for model, mpn_attr, entity_type in entity_configs:
+        mpn_col = getattr(model, mpn_attr)
+        orphans = (
+            db.query(model)
+            .filter(mpn_col.isnot(None), mpn_col != "", model.material_card_id.is_(None))
+            .limit(batch_size)
+            .all()
         )
-        .limit(batch_size)
-        .all()
-    )
-    for s in orphans:
-        try:
-            card = resolve_material_card(s.mpn_matched, db)
-            if card:
-                s.material_card_id = card.id
-                healed["sightings"] += 1
-                log_audit(
-                    db,
-                    material_card_id=card.id,
-                    action="healed",
-                    entity_type="sighting",
-                    entity_id=s.id,
-                    normalized_mpn=card.normalized_mpn,
-                    created_by="scheduler",
-                )
-        except Exception as e:
-            logger.warning("INTEGRITY_HEAL_FAIL: sighting id=%s mpn=%s error=%s", s.id, s.mpn_matched, e)
-            db.rollback()
-
-    # --- Offers ---
-    orphans = (
-        db.query(Offer)
-        .filter(
-            Offer.mpn.isnot(None),
-            Offer.mpn != "",
-            Offer.material_card_id.is_(None),
-        )
-        .limit(batch_size)
-        .all()
-    )
-    for o in orphans:
-        try:
-            card = resolve_material_card(o.mpn, db)
-            if card:
-                o.material_card_id = card.id
-                healed["offers"] += 1
-                log_audit(
-                    db,
-                    material_card_id=card.id,
-                    action="healed",
-                    entity_type="offer",
-                    entity_id=o.id,
-                    normalized_mpn=card.normalized_mpn,
-                    created_by="scheduler",
-                )
-        except Exception as e:
-            logger.warning("INTEGRITY_HEAL_FAIL: offer id=%s mpn=%s error=%s", o.id, o.mpn, e)
-            db.rollback()
+        healed[entity_type] = _heal_batch(orphans, mpn_attr, entity_type)
 
     if any(v > 0 for v in healed.values()):
         db.commit()

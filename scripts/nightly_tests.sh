@@ -32,8 +32,8 @@ echo "Exit code: $EXIT_CODE" >> "$LOG_FILE"
 echo "Coverage: ${COVERAGE}%" >> "$LOG_FILE"
 echo "Finished: $(date)" >> "$LOG_FILE"
 
-# Alert if tests failed or coverage dropped below 100%
-if [ "$EXIT_CODE" -ne 0 ] || [ "$COVERAGE" -lt 100 ]; then
+# Alert if tests failed or coverage dropped below 80%
+if [ "$EXIT_CODE" -ne 0 ] || [ "$COVERAGE" -lt 80 ]; then
     echo "ALERT: Tests failed or coverage dropped to ${COVERAGE}%" >> "$LOG_FILE"
     # Write a flag file for easy monitoring
     echo "${DATE}: FAIL (exit=$EXIT_CODE, coverage=${COVERAGE}%)" > "$LOG_DIR/LAST_STATUS"

@@ -16,7 +16,7 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from .base import Base
 
@@ -91,14 +91,42 @@ class Offer(Base):
     reconfirm_count = Column(Integer, default=0)
     attribution_status = Column(String(20), default="active")  # active, expired, converted
 
+    # --- Validators ---
+    @validates("unit_price")
+    def _validate_unit_price(self, _key, value):
+        if value is not None and value < 0:
+            raise ValueError(f"unit_price must be >= 0, got {value}")
+        return value
+
+    @validates("parse_confidence")
+    def _validate_parse_confidence(self, _key, value):
+        if value is not None and not (0.0 <= value <= 1.0):
+            raise ValueError(f"parse_confidence must be 0.0-1.0, got {value}")
+        return value
+
+    @validates("status")
+    def _validate_status(self, _key, value):
+        from ..constants import OfferStatus
+
+        valid = {e.value for e in OfferStatus}
+        if value and value not in valid:
+            from loguru import logger
+
+            logger.warning("Unexpected offer status: {}. Expected one of {}", value, valid)
+        return value
+
+    @validates("qty_available")
+    def _validate_qty_available(self, _key, value):
+        if value is not None and value < 0:
+            raise ValueError(f"qty_available must be >= 0, got {value}")
+        return value
+
     requisition = relationship("Requisition", back_populates="offers")
     requirement = relationship("Requirement", back_populates="offers")
-    material_card = relationship("MaterialCard", foreign_keys=[material_card_id])
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
     entered_by = relationship("User", foreign_keys=[entered_by_id])
     updated_by = relationship("User", foreign_keys=[updated_by_id])
     approved_by = relationship("User", foreign_keys=[approved_by_id])
-    promoted_by = relationship("User", foreign_keys=[promoted_by_id])
     attachments = relationship("OfferAttachment", back_populates="offer", cascade="all, delete-orphan")
 
     __table_args__ = (
@@ -193,8 +221,6 @@ class VendorResponse(Base):
     message_id = Column(String(255), unique=True, index=True, nullable=True)
     graph_conversation_id = Column(String(500))
     scanned_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    match_method = Column(String(50))  # conversation_id, subject_token, email_exact, domain, unmatched
-    teams_alert_sent_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (

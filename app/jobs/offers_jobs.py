@@ -7,11 +7,12 @@ Depends on: app.database, app.models, app.services.proactive_matching, app.servi
 import asyncio
 from datetime import datetime, timedelta, timezone
 
+import sqlalchemy.exc
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
-from ..constants import OfferStatus
+from ..constants import OfferStatus, ProactiveMatchStatus, ProactiveOfferStatus
 from ..scheduler import _traced_job
 
 
@@ -86,14 +87,14 @@ async def _job_proactive_matching():
 
         # Summary log with total pending
         new_matches = scan_result.get("matches_created", 0)
-        total_pending = db.query(ProactiveMatch).filter(ProactiveMatch.status == "new").count()
+        total_pending = db.query(ProactiveMatch).filter(ProactiveMatch.status == ProactiveMatchStatus.NEW).count()
         logger.info(f"Proactive scan complete: {new_matches} new matches, {total_pending} pending")
     except asyncio.TimeoutError:
         logger.error("Proactive matching timed out after 300s")
         db.rollback()
         raise
     except Exception as e:
-        logger.error(f"Proactive matching error: {e}")
+        logger.exception(f"Proactive matching error: {e}")
         db.rollback()
         raise
     finally:
@@ -178,7 +179,7 @@ async def _job_performance_tracking():
         logger.error("Performance tracking timed out")
         db.rollback()
     except Exception as e:
-        logger.error(f"Performance tracking error: {e}")
+        logger.exception(f"Performance tracking error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -200,16 +201,19 @@ async def _job_proactive_offer_expiry():
         expired_count = (
             db.query(ProactiveOffer)
             .filter(
-                ProactiveOffer.status == "sent",
+                ProactiveOffer.status == ProactiveOfferStatus.SENT,
                 ProactiveOffer.sent_at < cutoff,
             )
-            .update({"status": "expired"}, synchronize_session="fetch")
+            .update({"status": ProactiveOfferStatus.EXPIRED}, synchronize_session="fetch")
         )
         if expired_count:
             db.commit()
             logger.info(f"Expired {expired_count} stale proactive offer(s)")
+    except sqlalchemy.exc.SQLAlchemyError as e:
+        logger.error(f"Proactive offer expiry DB error: {e}")
+        db.rollback()
     except Exception as e:
-        logger.error(f"Proactive offer expiry error: {e}")
+        logger.exception(f"Proactive offer expiry error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -240,8 +244,11 @@ async def _job_flag_stale_offers():
         if flagged:
             db.commit()
             logger.info(f"Flagged {flagged} offer(s) as stale (14d+)")
+    except sqlalchemy.exc.SQLAlchemyError as e:
+        logger.error(f"Offer stale flagging DB error: {e}")
+        db.rollback()
     except Exception as e:
-        logger.error(f"Offer stale flagging error: {e}")
+        logger.exception(f"Offer stale flagging error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -259,8 +266,11 @@ async def _job_expire_strategic_vendors():
         count = expire_stale(db)
         if count:
             logger.info(f"Expired {count} strategic vendor assignment(s)")
+    except sqlalchemy.exc.SQLAlchemyError as e:
+        logger.error(f"Strategic vendor expiry DB error: {e}")
+        db.rollback()
     except Exception as e:
-        logger.error(f"Strategic vendor expiry error: {e}")
+        logger.exception(f"Strategic vendor expiry error: {e}")
         db.rollback()
     finally:
         db.close()
@@ -312,8 +322,11 @@ async def _job_warn_strategic_expiring():
         db.commit()
         if expiring:
             logger.info(f"Warned about {len(expiring)} strategic vendor(s) expiring soon")
+    except sqlalchemy.exc.SQLAlchemyError as e:
+        logger.error(f"Strategic vendor warning DB error: {e}")
+        db.rollback()
     except Exception as e:
-        logger.error(f"Strategic vendor warning error: {e}")
+        logger.exception(f"Strategic vendor warning error: {e}")
         db.rollback()
     finally:
         db.close()

@@ -112,19 +112,6 @@ _delete_stmts = [t.delete() for t in _delete_order if t.name not in _PG_ONLY_TAB
 
 
 @pytest.fixture(autouse=True)
-def _reset_ai_gate_state():
-    """Clear AI gate module state between tests to prevent order-dependent failures."""
-    yield
-    for module_path in ("app.services.nc_worker", "app.services.ics_worker"):
-        try:
-            gate = __import__(f"{module_path}.ai_gate", fromlist=["ai_gate"])
-            gate.clear_classification_cache()
-            gate._last_api_failure = 0.0
-        except (ImportError, AttributeError):
-            pass
-
-
-@pytest.fixture(autouse=True)
 def db_session():
     """Yield a session, then DELETE all rows (fast) instead of drop/create tables."""
     session = TestSessionLocal()
@@ -194,7 +181,7 @@ def test_requisition(db_session: Session, test_user: User) -> Requisition:
     req = Requisition(
         name="REQ-TEST-001",
         customer_name="Acme Electronics",
-        status="open",
+        status="active",
         created_by=test_user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -240,7 +227,7 @@ def client(db_session: Session, test_user: User) -> TestClient:
     entirely.
     """
     from app.database import get_db
-    from app.dependencies import require_admin, require_buyer, require_fresh_token, require_sales, require_user
+    from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
     from app.main import app
 
     def _override_db():
@@ -255,12 +242,11 @@ def client(db_session: Session, test_user: User) -> TestClient:
     async def _override_fresh_token():
         return "mock-token"
 
-    overridden_deps = [get_db, require_user, require_admin, require_buyer, require_sales, require_fresh_token]
+    overridden_deps = [get_db, require_user, require_admin, require_buyer, require_fresh_token]
     app.dependency_overrides[get_db] = _override_db
     app.dependency_overrides[require_user] = _override_user
     app.dependency_overrides[require_admin] = _override_user
     app.dependency_overrides[require_buyer] = _override_buyer
-    app.dependency_overrides[require_sales] = _override_user
     app.dependency_overrides[require_fresh_token] = _override_fresh_token
 
     try:
@@ -269,23 +255,6 @@ def client(db_session: Session, test_user: User) -> TestClient:
     finally:
         for dep in overridden_deps:
             app.dependency_overrides.pop(dep, None)
-
-
-@pytest.fixture()
-def override_client(db_session: Session, test_user: User) -> TestClient:
-    """TestClient with properly scoped dependency overrides."""
-    from app.database import get_db
-    from app.dependencies import require_user
-    from app.main import app
-
-    app.dependency_overrides[get_db] = lambda: db_session
-    app.dependency_overrides[require_user] = lambda: test_user
-    try:
-        with TestClient(app) as c:
-            yield c
-    finally:
-        app.dependency_overrides.pop(get_db, None)
-        app.dependency_overrides.pop(require_user, None)
 
 
 @pytest.fixture()

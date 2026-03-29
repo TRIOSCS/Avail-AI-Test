@@ -207,15 +207,3 @@ def test_breaker_get_trip_info():
     info = breaker.get_trip_info()
     assert info["captcha_count"] == 1
     assert info["is_open"] is False
-
-
-def test_breaker_reset():
-    """Manual reset clears all state."""
-    breaker = CircuitBreaker()
-    breaker.is_open = True
-    breaker.trip_reason = "test"
-    breaker.captcha_count = 5
-    breaker.reset()
-    assert not breaker.is_open
-    assert breaker.trip_reason == ""
-    assert breaker.captcha_count == 0

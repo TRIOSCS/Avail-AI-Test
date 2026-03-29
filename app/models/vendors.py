@@ -13,10 +13,9 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
-    Text,
 )
 from sqlalchemy.dialects.postgresql import TSVECTOR
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from .base import Base
 
@@ -37,7 +36,6 @@ class VendorCard(Base):
     is_blacklisted = Column(Boolean, default=False)
     is_broadcast = Column(Boolean, default=False)  # Always include in stock inquiries
     source = Column(String(50))
-    raw_response = Column(Text)
 
     # Enrichment fields (shared structure with Company)
     linkedin_url = Column(String(500))
@@ -52,7 +50,6 @@ class VendorCard(Base):
     enrichment_source = Column(String(50))
 
     cancellation_rate = Column(Float)
-    rma_rate = Column(Float)
 
     # Engagement scoring (Email Mining v2 Upgrade 4)
     total_outreach = Column(Integer, default=0)
@@ -91,8 +88,6 @@ class VendorCard(Base):
 
     # Deep enrichment tracking
     deep_enrichment_at = Column(DateTime)
-    specialty_confidence = Column(Float)
-    email_history_scanned_at = Column(DateTime)
 
     # Full-text search (PostgreSQL tsvector, managed by trigger)
     search_vector = Column(TSVECTOR)
@@ -107,6 +102,25 @@ class VendorCard(Base):
     reviews = relationship("VendorReview", back_populates="vendor_card", cascade="all, delete-orphan")
     vendor_contacts = relationship("VendorContact", back_populates="vendor_card", cascade="all, delete-orphan")
     strategic_vendors = relationship("StrategicVendor", back_populates="vendor_card")
+
+    # --- Validators ---
+    @validates(
+        "response_rate",
+        "cancellation_rate",
+        "ghost_rate",
+        "overall_win_rate",
+        "quote_quality_rate",
+    )
+    def _validate_rate(self, _key, value):
+        if value is not None and not (0.0 <= value <= 1.0):
+            raise ValueError(f"Rate {_key} must be 0.0-1.0, got {value}")
+        return value
+
+    @validates("vendor_score", "advancement_score", "email_health_score")
+    def _validate_score(self, _key, value):
+        if value is not None and not (0 <= value <= 100):
+            raise ValueError(f"Score {_key} must be 0-100, got {value}")
+        return value
 
     __table_args__ = (
         Index("ix_vendor_cards_created_at", "created_at"),
@@ -152,6 +166,19 @@ class VendorContact(Base):
     ooo_return_date = Column(DateTime)
 
     vendor_card = relationship("VendorCard", back_populates="vendor_contacts")
+
+    # --- Validators ---
+    @validates("email")
+    def _validate_email(self, _key, value):
+        if value and "@" not in value:
+            raise ValueError(f"Invalid email: {value!r} (missing '@')")
+        return value
+
+    @validates("confidence")
+    def _validate_confidence(self, _key, value):
+        if value is not None and not (0 <= value <= 100):
+            raise ValueError(f"Confidence must be 0-100, got {value}")
+        return value
 
     __table_args__ = (
         Index("ix_vendor_contacts_card", "vendor_card_id"),

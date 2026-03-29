@@ -17,6 +17,7 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..constants import BidSolicitationStatus, BidStatus, ExcessLineItemStatus
 from ..models import Company, CustomerSite
 from ..models.excess import Bid, BidSolicitation, ExcessLineItem, ExcessList
 from ..models.intelligence import ProactiveMatch
@@ -510,17 +511,17 @@ def accept_bid(db: Session, bid_id: int, line_item_id: int, list_id: int) -> Bid
     if not bid or bid.excess_line_item_id != line_item_id:
         raise HTTPException(404, f"Bid {bid_id} not found on line item {line_item_id}")
 
-    bid.status = "accepted"
+    bid.status = BidStatus.ACCEPTED
 
     # Reject all other pending bids on the same line item
     db.query(Bid).filter(
         Bid.excess_line_item_id == line_item_id,
         Bid.id != bid_id,
-        Bid.status == "pending",
-    ).update({"status": "rejected"})
+        Bid.status == BidStatus.PENDING,
+    ).update({"status": BidStatus.REJECTED})
 
     # Award the line item
-    item.status = "awarded"
+    item.status = ExcessLineItemStatus.AWARDED
 
     _safe_commit(db, entity="bid acceptance")
     db.refresh(bid)
@@ -541,10 +542,13 @@ def get_excess_stats(db: Session) -> dict:
     """
     total_lists = db.query(func.count(ExcessList.id)).scalar() or 0
     total_line_items = db.query(func.count(ExcessLineItem.id)).scalar() or 0
-    pending_bids = db.query(func.count(Bid.id)).filter(Bid.status == "pending").scalar() or 0
+    pending_bids = db.query(func.count(Bid.id)).filter(Bid.status == BidStatus.PENDING).scalar() or 0
     total_bids = db.query(func.count(Bid.id)).scalar() or 0
     matched_items = db.query(func.count(ExcessLineItem.id)).filter(ExcessLineItem.demand_match_count > 0).scalar() or 0
-    awarded_items = db.query(func.count(ExcessLineItem.id)).filter(ExcessLineItem.status == "awarded").scalar() or 0
+    awarded_items = (
+        db.query(func.count(ExcessLineItem.id)).filter(ExcessLineItem.status == ExcessLineItemStatus.AWARDED).scalar()
+        or 0
+    )
 
     return {
         "total_lists": total_lists,
@@ -765,16 +769,18 @@ def _build_bundled_solicitation_html(
     table."""
     greeting = f"Hi {recipient_name}," if recipient_name else "Hello,"
     rows = ""
+    em_dash = "\u2014"
     for item in items:
+        asking = getattr(item, "asking_price", None)
+        price_cell = f"${item.asking_price}" if asking else em_dash
         rows += (
             "<tr>"
-            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{item.part_number or "\u2014"}</td>'
-            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{item.manufacturer or "\u2014"}</td>'
-            f'<td style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">{item.quantity or "\u2014"}</td>'
-            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{getattr(item, "condition", None) or "\u2014"}</td>'
-            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{getattr(item, "date_code", None) or "\u2014"}</td>'
-            f'<td style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">'
-            f"{'$' + str(item.asking_price) if getattr(item, 'asking_price', None) else '\u2014'}</td>"
+            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{item.part_number or em_dash}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{item.manufacturer or em_dash}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">{item.quantity or em_dash}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{getattr(item, "condition", None) or em_dash}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{getattr(item, "date_code", None) or em_dash}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">{price_cell}</td>'
             "</tr>"
         )
     return (
@@ -876,7 +882,7 @@ async def send_bid_solicitation(
                 recipient_email=recipient_email,
                 recipient_name=recipient_name,
                 body_preview=body_text[:500],
-                status="pending",
+                status=BidSolicitationStatus.PENDING,
             )
             db.add(solicitation)
             solicitations.append(solicitation)
@@ -912,11 +918,11 @@ async def send_bid_solicitation(
             now = datetime.now(timezone.utc)
             for s in solicitations:
                 s.graph_message_id = graph_msg_id
-                s.status = "sent"
+                s.status = BidSolicitationStatus.SENT
                 s.sent_at = now
         except Exception as exc:
             for s in solicitations:
-                s.status = "failed"
+                s.status = BidSolicitationStatus.FAILED
             logger.error(
                 "Failed to send bundled bid solicitation to {}: {}",
                 recipient_email,
@@ -938,7 +944,7 @@ async def send_bid_solicitation(
                 recipient_email=recipient_email,
                 recipient_name=recipient_name,
                 body_preview=body_text[:500],
-                status="pending",
+                status=BidSolicitationStatus.PENDING,
             )
             db.add(solicitation)
             db.flush()  # get solicitation.id
@@ -963,10 +969,10 @@ async def send_bid_solicitation(
                 )
                 sent_msg = await _find_sent_message(gc, email_subject)
                 solicitation.graph_message_id = sent_msg.get("id") if sent_msg else None
-                solicitation.status = "sent"
+                solicitation.status = BidSolicitationStatus.SENT
                 solicitation.sent_at = datetime.now(timezone.utc)
             except Exception as exc:
-                solicitation.status = "failed"
+                solicitation.status = BidSolicitationStatus.FAILED
                 logger.error(
                     "Failed to send bid solicitation {} to {}: {}",
                     solicitation.id,
@@ -1026,7 +1032,7 @@ def parse_bid_response(
     db.add(bid)
     db.flush()
 
-    solicitation.status = "responded"
+    solicitation.status = BidSolicitationStatus.RESPONDED
     solicitation.response_received_at = datetime.now(timezone.utc)
     solicitation.parsed_bid_id = bid.id
 
@@ -1120,7 +1126,7 @@ async def parse_bid_from_email(
         return None
 
     if data.get("declined"):
-        solicitation.status = "responded"
+        solicitation.status = BidSolicitationStatus.RESPONDED
         solicitation.response_received_at = datetime.now(timezone.utc)
         _safe_commit(db, entity="declined bid solicitation")
         logger.info("Solicitation {} marked as declined", solicitation_id)

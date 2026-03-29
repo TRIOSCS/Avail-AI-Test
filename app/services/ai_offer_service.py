@@ -13,6 +13,7 @@ Depends on: models (Offer, Requirement, Requisition, VendorCard, VendorContact,
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from ..constants import OfferStatus
 from ..models import (
     CustomerSite,
     Offer,
@@ -179,7 +180,7 @@ def save_parsed_offers(db: Session, requisition_id: int, response_id: int | None
             vendor_response_id=response_id,
             entered_by_id=user_id,
             notes=o.notes,
-            status="pending_review",
+            status=OfferStatus.PENDING_REVIEW,
         )
         db.add(offer)
         db.flush()
@@ -316,7 +317,7 @@ def save_freeform_offers(
             source="freeform_parsed",
             entered_by_id=user_id,
             notes=o.notes,
-            status="active",
+            status=OfferStatus.ACTIVE,
         )
         db.add(offer)
         db.flush()

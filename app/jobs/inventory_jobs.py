@@ -8,6 +8,7 @@ import asyncio
 import base64
 from datetime import datetime, timedelta, timezone
 
+import sqlalchemy.exc
 from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
@@ -54,12 +55,12 @@ async def _job_po_verification():
             try:
                 await verify_po_sent(plan, db)
             except Exception as e:
-                logger.error(f"PO verify error for plan {plan.id}: {e}")
+                logger.exception(f"PO verify error for plan {plan.id}: {e}")
 
         if plans_to_verify:
             await asyncio.gather(*[_safe_verify(p) for p in plans_to_verify])
     except Exception as e:
-        logger.error(f"PO verification scan error: {e}")
+        logger.exception(f"PO verification scan error: {e}")
         db.rollback()
         raise
     finally:
@@ -96,7 +97,7 @@ async def _job_stock_autocomplete():
             db.commit()
             logger.info(f"Stock sale auto-complete: {completed} plan(s) completed")
     except Exception as e:
-        logger.error(f"Stock sale auto-complete error: {e}")
+        logger.exception(f"Stock sale auto-complete error: {e}")
         db.rollback()
         raise
     finally:
@@ -135,8 +136,10 @@ async def _scan_stock_list_attachments(user, db, is_backfill: bool = False):
                     vendor_name=email_info.get("vendor_name", "Unknown"),
                     vendor_email=email_info.get("from_email", ""),
                 )
+            except (OSError, ValueError, KeyError) as e:
+                logger.warning(f"Stock list import failed [{att_info.get('filename')}]: {e}")
             except Exception as e:
-                logger.error(f"Stock list import failed [{att_info.get('filename')}]: {e}")
+                logger.exception(f"Stock list import unexpected error [{att_info.get('filename')}]: {e}")
 
 
 async def _download_and_import_stock_list(
@@ -275,7 +278,7 @@ async def _download_and_import_stock_list(
             try:
                 db.flush()
                 card_map[norm_key] = card
-            except Exception as e:
+            except sqlalchemy.exc.IntegrityError as e:
                 logger.warning(f"MaterialCard flush conflict for '{norm_key}': {e}")
                 db.rollback()
                 continue
@@ -330,7 +333,7 @@ async def _download_and_import_stock_list(
         db.commit()
         list_type = "excess list" if is_excess_list else "stock list"
         logger.info(f"Auto-imported {imported} parts from {list_type} {filename} ({vendor_name})")
-    except Exception as e:
+    except sqlalchemy.exc.SQLAlchemyError as e:
         logger.error(f"Stock list commit failed: {e}")
         db.rollback()
         return
@@ -468,8 +471,11 @@ async def _download_and_import_stock_list(
                     filename,
                     vendor_name,
                 )
-    except Exception as e:
+    except sqlalchemy.exc.SQLAlchemyError as e:
         logger.error(f"Auto-create sightings from stock list failed: {e}")
+        db.rollback()
+    except Exception as e:
+        logger.exception(f"Auto-create sightings from stock list failed: {e}")
         db.rollback()
 
     logger.debug("Teams stock match notification skipped (removed)")

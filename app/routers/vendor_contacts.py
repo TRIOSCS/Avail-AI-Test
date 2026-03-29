@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..cache.decorators import cached_endpoint
+from ..constants import ContactStatus
 from ..database import get_db
 from ..dependencies import require_buyer, require_user
 from ..models import Contact, User, VendorCard, VendorContact, VendorResponse
@@ -520,8 +521,10 @@ async def vendor_email_metrics(card_id: int, user: User = Depends(require_user),
         )
 
         total_sent = len(contacts)
-        total_replied = len([c for c in contacts if c.status in ("responded", "quoted", "declined")])
-        total_quoted = len([c for c in contacts if c.status == "quoted"])
+        total_replied = len(
+            [c for c in contacts if c.status in (ContactStatus.RESPONDED, ContactStatus.QUOTED, ContactStatus.DECLINED)]
+        )
+        total_quoted = len([c for c in contacts if c.status == ContactStatus.QUOTED])
 
         contact_by_id = {c.id: c for c in contacts}
         response_hours: list[float] = []

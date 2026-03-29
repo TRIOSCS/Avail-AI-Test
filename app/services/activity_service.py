@@ -392,13 +392,7 @@ def _update_last_activity(match: dict, db: Session, user_id: int | None = None):
                 {"last_activity_at": now}, synchronize_session=False
             )
         # Auto-claim disabled by design — ownership is always manual.
-        # Salesperson must explicitly claim accounts via the UI.
-        # Calling a company (via 8x8 or email) resets the inactivity clock
-        # but does NOT transfer ownership. See ownership_service.py for
-        # manual claim endpoint.
-        # if user_id:
-        #     from app.services.ownership_service import check_and_claim_open_account
-        #     check_and_claim_open_account(match["id"], user_id, db)
+        # See ownership_service.py for the manual claim endpoint.
     elif match["type"] == "vendor":
         db.query(VendorCard).filter(VendorCard.id == match["id"]).update(
             {"last_activity_at": now}, synchronize_session=False

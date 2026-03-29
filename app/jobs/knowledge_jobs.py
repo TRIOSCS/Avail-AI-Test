@@ -10,7 +10,6 @@ Depends on: services/knowledge_service.py
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
 from ..scheduler import _traced_job
@@ -32,19 +31,6 @@ def register_knowledge_jobs(scheduler, settings):
         id="knowledge_expire_stale",
         name="Mark expired knowledge entries",
     )
-    # No-ops (Teams removed) — kept disabled to avoid scheduler churn
-    # scheduler.add_job(
-    #     _job_deliver_question_batches,
-    #     IntervalTrigger(hours=1),
-    #     id="knowledge_deliver_batches",
-    #     name="Deliver batched Q&A questions to buyers",
-    # )
-    # scheduler.add_job(
-    #     _job_send_knowledge_digests,
-    #     IntervalTrigger(hours=1),
-    #     id="knowledge_send_digests",
-    #     name="Send daily knowledge digests",
-    # )
 
 
 @_traced_job
@@ -159,23 +145,11 @@ async def _job_refresh_insights():
             logger.error("MPN insight refresh failed: {}", e)
 
     except Exception as e:
-        logger.error("refresh_active_insights job failed: {}", e)
+        logger.exception("refresh_active_insights job failed: {}", e)
         db.rollback()
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()
-
-
-@_traced_job
-async def _job_deliver_question_batches():
-    """Deliver batched question cards to buyers (Teams removed — no-op)."""
-    logger.debug("Teams question batch delivery skipped (removed)")
-
-
-@_traced_job
-async def _job_send_knowledge_digests():
-    """Send daily knowledge digests (Teams removed — no-op)."""
-    logger.debug("Teams knowledge digest delivery skipped (removed)")
 
 
 @_traced_job
@@ -198,7 +172,7 @@ async def _job_expire_stale():
         total = db.query(KnowledgeEntry).count()
         logger.info("Knowledge entries: {} total, {} expired", total, expired_count)
     except Exception as e:
-        logger.error("expire_stale job failed: {}", e)
+        logger.exception("expire_stale job failed: {}", e)
         raise  # Re-raise so _traced_job / Sentry can capture
     finally:
         db.close()

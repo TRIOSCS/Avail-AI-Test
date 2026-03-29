@@ -16,6 +16,7 @@ import json
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
 from sqlalchemy import create_engine
 from sqlalchemy import text as sqltext
 from sqlalchemy.pool import StaticPool
@@ -117,7 +118,8 @@ class TestCreateDefaultUser:
 
     @patch("app.startup.SessionLocal")
     def test_handles_creation_error(self, mock_sl, db_session):
-        """Handles exception during user creation gracefully."""
+        """Creation error is logged and re-raised (M6: critical seed failures
+        propagate)."""
         from app.startup import _create_default_user_if_env_set
 
         mock_db = MagicMock()
@@ -132,7 +134,8 @@ class TestCreateDefaultUser:
             "DEFAULT_USER_PASSWORD": "secret",
         }
         with patch.dict(os.environ, env, clear=False):
-            _create_default_user_if_env_set()
+            with pytest.raises(RuntimeError, match="DB error"):
+                _create_default_user_if_env_set()
 
 
 class TestSeedVinodUser:
@@ -180,7 +183,7 @@ class TestSeedVinodUser:
 
     @patch("app.startup.SessionLocal")
     def test_seed_vinod_handles_error(self, mock_sl):
-        """Handles DB error gracefully (lines 112-114)."""
+        """DB error is rolled back and re-raised."""
         from app.startup import _seed_admin_user_if_env_set
 
         mock_db = MagicMock()
@@ -190,7 +193,8 @@ class TestSeedVinodUser:
         mock_db.close = MagicMock()
         mock_sl.return_value = mock_db
 
-        _seed_admin_user_if_env_set()
+        with pytest.raises(RuntimeError, match="DB error"):
+            _seed_admin_user_if_env_set()
         mock_db.rollback.assert_called_once()
         mock_db.close.assert_called_once()
 
@@ -294,13 +298,15 @@ class TestBackfillProactiveOfferQty:
     @patch("app.startup.engine")
     def test_handles_error_gracefully(self, mock_engine):
         """Catches and logs exceptions during backfill."""
+        from sqlalchemy.exc import OperationalError
+
         from app.startup import _backfill_proactive_offer_qty
 
         mock_conn = MagicMock()
         mock_conn.__enter__ = MagicMock(return_value=mock_conn)
         mock_conn.__exit__ = MagicMock(return_value=False)
         mock_engine.connect.return_value = mock_conn
-        mock_conn.execute.side_effect = RuntimeError("DB gone")
+        mock_conn.execute.side_effect = OperationalError("select", {}, Exception("DB gone"))
         mock_conn.rollback = MagicMock()
 
         _backfill_proactive_offer_qty()
@@ -716,6 +722,7 @@ class TestRunStartupMigrationsNonTesting:
                 patch("app.startup._backfill_fts") as m_bfts,
                 patch("app.startup._seed_system_config") as m_seed,
                 patch("app.startup._seed_site_contacts") as m_site,
+                patch("app.startup._seed_manufacturers"),
                 patch("app.startup._create_count_triggers") as m_ct,
                 patch("app.startup._backfill_company_counts") as m_bc,
                 patch("app.startup._analyze_hot_tables") as m_analyze,
@@ -723,8 +730,11 @@ class TestRunStartupMigrationsNonTesting:
                 patch("app.startup._backfill_sighting_offer_normalized_mpn") as m_so,
                 patch("app.startup._backfill_sighting_vendor_normalized") as m_sv,
                 patch("app.startup._backfill_proactive_offer_qty") as m_pq,
+                patch("app.startup._backfill_ticket_defaults"),
                 patch("app.startup._exec") as m_exec,
                 patch("app.startup._seed_admin_user_if_env_set") as m_vinod,
+                patch("app.startup._seed_agent_user"),
+                patch("app.startup._seed_commodity_schemas"),
             ):
                 run_startup_migrations()
                 m_fts.assert_called_once()

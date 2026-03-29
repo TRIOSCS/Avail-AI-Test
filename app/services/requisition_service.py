@@ -14,6 +14,7 @@ from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
+from ..constants import RequisitionStatus
 from ..models import Offer, Requirement, Requisition
 from ..utils.normalization import (
     normalize_condition,
@@ -92,7 +93,7 @@ def clone_requisition(
         name=f"{source_req.name} (clone)",
         customer_name=source_req.customer_name,
         customer_site_id=source_req.customer_site_id,
-        status="active",
+        status=RequisitionStatus.ACTIVE,
         cloned_from_id=source_req.id,
         created_by=user_id,
     )

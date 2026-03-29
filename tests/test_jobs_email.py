@@ -562,7 +562,9 @@ def test_mine_vendor_contacts_flush_conflict(scheduler_db, test_user):
     original_flush = scheduler_db.flush
 
     def _failing_flush():
-        raise Exception("unique constraint")
+        from sqlalchemy.exc import IntegrityError
+
+        raise IntegrityError("insert", {}, Exception("unique constraint"))
 
     with (
         patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="token"),
@@ -602,7 +604,9 @@ def test_mine_vendor_contacts_final_commit_error(scheduler_db, test_user):
     mock_db.query.return_value.filter.return_value.all.return_value = []
     mock_db.flush = MagicMock()
     mock_db.add = MagicMock()
-    mock_db.commit = MagicMock(side_effect=Exception("final commit failed"))
+    from sqlalchemy.exc import OperationalError as _OE
+
+    mock_db.commit = MagicMock(side_effect=_OE("commit", {}, Exception("final commit failed")))
     mock_db.rollback = MagicMock()
 
     mock_user = MagicMock()
@@ -796,7 +800,9 @@ def test_scan_outbound_rfqs_final_commit_error(scheduler_db, test_user, test_ven
 
     mock_db = MagicMock()
     mock_db.query.return_value.filter.return_value.all.return_value = [mock_card]
-    mock_db.commit = MagicMock(side_effect=Exception("final commit failed"))
+    from sqlalchemy.exc import OperationalError as _OE2
+
+    mock_db.commit = MagicMock(side_effect=_OE2("commit", {}, Exception("final commit failed")))
     mock_db.rollback = MagicMock()
 
     mock_user = MagicMock()
@@ -942,7 +948,9 @@ def test_sync_user_contacts_graph_error(scheduler_db, test_user):
     scheduler_db.commit()
 
     mock_gc = MagicMock()
-    mock_gc.delta_query = AsyncMock(side_effect=Exception("Graph API error"))
+    import httpx
+
+    mock_gc.delta_query = AsyncMock(side_effect=httpx.HTTPError("Graph API error"))
 
     with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
         from app.jobs.email_jobs import _sync_user_contacts
@@ -1125,7 +1133,9 @@ def test_sync_user_contacts_delta_expired_full_resync_fails(scheduler_db, test_u
 
     mock_gc = MagicMock()
     mock_gc.delta_query = AsyncMock(side_effect=GraphSyncStateExpired("token expired"))
-    mock_gc.get_all_pages = AsyncMock(side_effect=Exception("Full pull failed"))
+    import httpx
+
+    mock_gc.get_all_pages = AsyncMock(side_effect=httpx.HTTPError("Full pull failed"))
 
     with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
         from app.jobs.email_jobs import _sync_user_contacts
@@ -1158,7 +1168,9 @@ def test_sync_user_contacts_vendor_card_flush_conflict(scheduler_db, test_user):
         nonlocal flush_call_count
         flush_call_count += 1
         if flush_call_count == 2:
-            raise Exception("Uniqueness conflict")
+            from sqlalchemy.exc import IntegrityError
+
+            raise IntegrityError("insert", {}, Exception("Uniqueness conflict"))
         return original_flush(*args, **kwargs)
 
     with (
@@ -1182,7 +1194,9 @@ def test_sync_user_contacts_commit_error_final(scheduler_db, test_user):
     original_commit = scheduler_db.commit
 
     def failing_commit(*args, **kwargs):
-        raise Exception("Commit failed")
+        from sqlalchemy.exc import OperationalError
+
+        raise OperationalError("commit", {}, Exception("Commit failed"))
 
     with (
         patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
@@ -1243,34 +1257,6 @@ def test_site_ownership_sweep_error_handling(scheduler_db):
 
         with pytest.raises(Exception, match="Sweep failed"):
             asyncio.run(_job_site_ownership_sweep())
-
-
-# ── _compute_vendor_scores_job() ──────────────────────────────────────
-
-
-def test_compute_engagement_scores_job_delegates(db_session):
-    """Vendor scores job delegates to compute_all_vendor_scores."""
-    with patch(
-        "app.services.vendor_score.compute_all_vendor_scores",
-        new_callable=AsyncMock,
-    ) as mock_compute:
-        mock_compute.return_value = {"updated": 10, "skipped": 2}
-        from app.jobs.email_jobs import _compute_vendor_scores_job
-
-        asyncio.run(_compute_vendor_scores_job(db_session))
-        mock_compute.assert_called_once_with(db_session)
-
-
-def test_compute_engagement_scores_job_handles_error(db_session):
-    """Vendor scores job handles errors without propagating."""
-    with patch(
-        "app.services.vendor_score.compute_all_vendor_scores",
-        new_callable=AsyncMock,
-        side_effect=Exception("Scorer crashed"),
-    ):
-        from app.jobs.email_jobs import _compute_vendor_scores_job
-
-        asyncio.run(_compute_vendor_scores_job(db_session))
 
 
 # ── _job_contact_scoring() ────────────────────────────────────────────

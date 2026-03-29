@@ -406,9 +406,3 @@ class TestCountOfferMatches:
         miner = self._make_miner()
         count = miner._count_offer_matches("Meeting invitation", "Please join the call at 2pm.")
         assert count == 0
-
-    def test_is_offer_email_uses_count(self):
-        """_is_offer_email delegates to _count_offer_matches."""
-        miner = self._make_miner()
-        assert miner._is_offer_email("RFQ Response: Quotation", "in stock, unit price")
-        assert not miner._is_offer_email("Meeting", "Join the call")

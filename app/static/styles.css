@@ -2,101 +2,113 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ── Design System: Clean, high-contrast utility ──────────────────────
+   Font: Inter 300-700
+   Border color: unified #D5D8DF
+   Body text: #1e293b (slate-800), secondary: #4B5463 (brand-600)
+   Min interactive font: 11px, body: 13px, headings: 15px
+   ──────────────────────────────────────────────────────────────────── */
+
+@layer base {
+  body {
+    @apply text-[13px] text-slate-800 leading-relaxed antialiased;
+  }
+}
+
 @layer components {
-  /* Buttons */
+  /* ── Buttons ────────────────────────────────────────────────────── */
   .btn-primary {
     @apply bg-brand-500 text-white hover:bg-brand-600 px-4 py-2 text-sm font-medium rounded-lg transition-colors focus:ring-2 focus:ring-brand-500 focus:ring-offset-2 disabled:opacity-50 disabled:cursor-not-allowed;
   }
 
-  .btn-secondary {
-    @apply bg-white text-brand-600 border border-brand-300 hover:bg-brand-50 px-4 py-2 text-sm font-medium rounded-lg transition-colors;
-  }
-
-  .btn-danger {
-    @apply bg-rose-600 text-white hover:bg-rose-700 px-4 py-2 text-sm font-medium rounded-lg transition-colors;
-  }
-
-  .btn-sm {
-    @apply px-3 py-1.5 text-xs;
-  }
-
-  /* Status badges */
+  /* ── Status badges — unified system ─────────────────────────────── */
   .badge-success {
-    @apply bg-emerald-50 text-emerald-700 px-2 py-0.5 text-xs font-medium rounded-full;
+    @apply bg-emerald-50 text-emerald-700 px-2.5 py-0.5 text-[11px] font-semibold rounded-full;
   }
 
   .badge-warning {
-    @apply bg-amber-50 text-amber-700 px-2 py-0.5 text-xs font-medium rounded-full;
-  }
-
-  .badge-danger {
-    @apply bg-rose-50 text-rose-700 px-2 py-0.5 text-xs font-medium rounded-full;
+    @apply bg-amber-50 text-amber-700 px-2.5 py-0.5 text-[11px] font-semibold rounded-full;
   }
 
   .badge-info {
-    @apply bg-brand-100 text-brand-600 px-2 py-0.5 text-xs font-medium rounded-full;
+    @apply bg-brand-100 text-brand-700 px-2.5 py-0.5 text-[11px] font-semibold rounded-full;
   }
 
-  .badge-neutral {
-    @apply bg-gray-100 text-gray-600 px-2 py-0.5 text-xs font-medium rounded-full;
-  }
-
-  /* Refined cards */
-  .card {
-    @apply bg-white border-2 border-gray-200 rounded-xl shadow-sm;
-  }
-
-  .card-padded {
-    @apply bg-white border-2 border-gray-200 rounded-xl shadow-sm p-6;
-  }
-
-  /* Stronger borders on filter bars */
-  .filter-bar {
-    @apply bg-white rounded-xl shadow-sm border-2 border-gray-200 p-4;
-  }
-
-  /* Table wrapper — crisp contained look with horizontal scroll */
+  /* ── Table wrapper ──────────────────────────────────────────────── */
   .table-wrapper {
-    @apply bg-white rounded-xl shadow-sm border-2 border-gray-200 overflow-x-auto;
+    @apply bg-white rounded-xl shadow-sm border border-gray-200 overflow-x-auto;
   }
-
-  /* Custom scrollbar — brand-colored for horizontal table scroll */
-  .table-wrapper::-webkit-scrollbar {
-    height: 8px;
-  }
-
-  .table-wrapper::-webkit-scrollbar-track {
-    background: #F0F1F4;
-    border-radius: 4px;
-  }
-
-  .table-wrapper::-webkit-scrollbar-thumb {
-    background: #5F6878;
-    border-radius: 4px;
-  }
-
-  .table-wrapper::-webkit-scrollbar-thumb:hover {
-    background: #3A4252;
-  }
-
-  /* Firefox scrollbar */
-  .table-wrapper {
-    scrollbar-width: thin;
-    scrollbar-color: #5F6878 #F0F1F4;
-  }
-
 }
 
-/* ── Unified table styling — stronger dividers + alternating rows ── */
+/* ── Unified border color ─────────────────────────────────────────── */
+.border-gray-200 { border-color: #D5D8DF !important; }
+.border-gray-100 { border-color: #EDEEF1 !important; }
+hr { border-color: #D5D8DF; }
+
+/* ── Scrollbars — one global definition ───────────────────────────── */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: #EDEEF1;
+}
+::-webkit-scrollbar-thumb {
+  background: #ADB3BF;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #5F6878;
+}
+
+/* Table wrappers get a slightly more visible scrollbar */
+.table-wrapper::-webkit-scrollbar,
+.avail-scroll::-webkit-scrollbar,
+.top-scroll-bar::-webkit-scrollbar {
+  height: 8px;
+}
+.table-wrapper::-webkit-scrollbar-thumb,
+.avail-scroll::-webkit-scrollbar-thumb,
+.top-scroll-bar::-webkit-scrollbar-thumb {
+  background: #5F6878;
+  border-radius: 4px;
+}
+.table-wrapper::-webkit-scrollbar-thumb:hover,
+.avail-scroll::-webkit-scrollbar-thumb:hover,
+.top-scroll-bar::-webkit-scrollbar-thumb:hover {
+  background: #3A4252;
+}
+
+/* Firefox */
+.table-wrapper,
+.avail-scroll,
+.top-scroll-bar {
+  scrollbar-width: thin;
+  scrollbar-color: #5F6878 #EDEEF1;
+}
+
+.faceted-sidebar {
+  scrollbar-width: thin;
+  scrollbar-color: #D5D8DF transparent;
+}
+.faceted-sidebar::-webkit-scrollbar { width: 4px; }
+.faceted-sidebar::-webkit-scrollbar-track { background: transparent; }
+.faceted-sidebar::-webkit-scrollbar-thumb { background: #D5D8DF; border-radius: 2px; }
+
+.qb-list::-webkit-scrollbar { width: 4px; }
+.qb-list::-webkit-scrollbar-track { background: transparent; }
+.qb-list::-webkit-scrollbar-thumb { background: #D5D8DF; border-radius: 2px; }
+
+/* ── Data tables — unified styling ────────────────────────────────── */
 .responsive-table th,
 .data-table th {
   font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.1em;
+  font-weight: 700;
+  letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #5F6878;
-  background: #F8F9FA;
-  border-bottom: 2px solid #D8DBE2;
+  color: #4B5463;
+  background: #F4F5F7;
+  border-bottom: 2px solid #D5D8DF;
   padding: 12px 16px;
 }
 
@@ -104,7 +116,8 @@
 .data-table td {
   padding: 14px 16px;
   border-bottom: 1px solid #D5D8DF;
-  color: #374151;
+  color: #1e293b;
+  font-size: 13px;
 }
 
 .responsive-table tbody tr,
@@ -114,80 +127,84 @@
 
 .responsive-table tbody tr:nth-child(even) td,
 .data-table tbody tr:nth-child(even) td {
-  background: #fafbfc;
+  background: #F8F9FB;
 }
 
 .responsive-table tbody tr:hover td,
 .data-table tbody tr:hover td {
-  background: rgba(240, 244, 248, 0.8);
+  background: #EEF0F4;
 }
 
-/* ── Avail scroll container — always-visible blue scrollbar ────── */
-.avail-scroll {
-  overflow-x: scroll;
+/* ── Compact table — denser but still readable ────────────────────── */
+.compact-table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+  font-size: 13px;
 }
-.avail-scroll::-webkit-scrollbar {
-  height: 10px;
+.compact-table th {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: #4B5463;
+  background: #F4F5F7;
+  border-bottom: 2px solid #D5D8DF;
+  padding: 8px 10px;
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  white-space: nowrap;
+  user-select: none;
 }
-.avail-scroll::-webkit-scrollbar-track {
-  background: #EDEEF1;
-  border-radius: 5px;
+.compact-table td {
+  padding: 6px 10px;
+  border-bottom: 1px solid #EDEEF1;
+  color: #1e293b;
+  white-space: nowrap;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 12px;
 }
-.avail-scroll::-webkit-scrollbar-thumb {
-  background: #5F6878;
-  border-radius: 5px;
-  border: 2px solid #EDEEF1;
+.compact-table td.td-label {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 13px;
 }
-.avail-scroll::-webkit-scrollbar-thumb:hover {
-  background: #3A4252;
+.compact-table tbody tr {
+  transition: background-color 0.1s;
+  cursor: pointer;
 }
-
+.compact-table tbody tr:nth-child(even) td {
+  background: #F8F9FB;
+}
+.compact-table tbody tr:hover td {
+  background: #EEF0F4;
+}
+.compact-table tbody tr:nth-child(even):hover td {
+  background: #EEF0F4;
+}
+.compact-table tbody tr.row-selected td {
+  background: rgba(58, 66, 82, 0.12);
+  box-shadow: inset 2px 0 0 #5F6878;
+}
+.compact-table tbody tr:nth-child(even).row-selected td {
+  background: rgba(58, 66, 82, 0.12);
+  box-shadow: inset 2px 0 0 #5F6878;
+}
 
 /* Ensure tables don't collapse columns below readable widths */
 table {
   min-width: 100%;
 }
 
-/* ── Blue-tinted borders globally ──────────────────────────────── */
-/* Override gray borders with a subtle brand tint */
-.border-gray-200 { border-color: #D5D8DF !important; }
-.border-gray-100 { border-color: #F0F1F4 !important; }
-hr { border-color: #D5D8DF; }
-
-/* ── Faceted sidebar ───────────────────────────────────────────── */
-.faceted-sidebar {
-  scrollbar-width: thin;
-  scrollbar-color: #D8DBE2 transparent;
-}
-.faceted-sidebar::-webkit-scrollbar { width: 4px; }
-.faceted-sidebar::-webkit-scrollbar-track { background: transparent; }
-.faceted-sidebar::-webkit-scrollbar-thumb { background: #D8DBE2; border-radius: 2px; }
-
-/* ── Scrollbar at top of overflow containers ───────────────────── */
-/* Chrome/Safari: make all scrollbars brand-colored */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-::-webkit-scrollbar-track {
-  background: #EDEEF1;
-}
-::-webkit-scrollbar-thumb {
-  background: #8B919E;
-  border-radius: 4px;
-}
-::-webkit-scrollbar-thumb:hover {
-  background: #5F6878;
-}
-
-/* ── JetBrains Mono for data cells ─────────────────────────────── */
+/* ── JetBrains Mono for data cells ────────────────────────────────── */
 .font-data {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 12px;
   letter-spacing: -0.01em;
 }
 
-/* ── Top scrollbar — mirror scrollbar above table content ──────── */
+/* ── Top scrollbar — mirror scrollbar above table content ─────────── */
 .top-scroll-wrapper {
   display: flex;
   flex-direction: column;
@@ -198,27 +215,7 @@ hr { border-color: #D5D8DF; }
   overflow-x: auto;
   overflow-y: hidden;
   flex-shrink: 0;
-  height: 10px;
-}
-.top-scroll-bar::-webkit-scrollbar {
-  height: 10px;
-}
-.top-scroll-bar::-webkit-scrollbar-track {
-  background: #EDEEF1;
-  border-radius: 5px;
-}
-.top-scroll-bar::-webkit-scrollbar-thumb {
-  background: #5F6878;
-  border-radius: 5px;
-  border: 2px solid #EDEEF1;
-}
-.top-scroll-bar::-webkit-scrollbar-thumb:hover {
-  background: #3A4252;
-}
-/* Firefox */
-.top-scroll-bar {
-  scrollbar-width: thin;
-  scrollbar-color: #5F6878 #EDEEF1;
+  height: 8px;
 }
 .top-scroll-content {
   overflow-x: auto;
@@ -232,162 +229,63 @@ hr { border-color: #D5D8DF; }
   display: none;
 }
 
-/* ── Compact table — Bloomberg density ─────────────────────────── */
-.compact-table {
-  border-collapse: separate;
-  border-spacing: 0;
-  width: 100%;
-  font-size: 12px;
-}
-.compact-table th {
-  font-family: 'DM Sans', system-ui, sans-serif;
-  font-size: 10px;
-  font-weight: 600;
-  letter-spacing: 0.06em;
-  text-transform: uppercase;
-  color: #5F6878;
-  background: #F8F9FA;
-  border-bottom: 2px solid #D8DBE2;
-  padding: 6px 10px;
-  position: sticky;
-  top: 0;
-  z-index: 5;
-  white-space: nowrap;
-  user-select: none;
-}
-.compact-table td {
-  padding: 4px 10px;
-  border-bottom: 1px solid #e2e8f0;
-  color: #1e293b;
-  white-space: nowrap;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 12px;
-}
-.compact-table td.td-label {
-  font-family: 'DM Sans', system-ui, sans-serif;
-  font-size: 12px;
-}
-.compact-table tbody tr {
-  transition: background-color 0.1s;
-  cursor: pointer;
-}
-.compact-table tbody tr:hover td {
-  background: rgba(58, 66, 82, 0.06);
-}
-.compact-table tbody tr.row-selected td {
-  background: rgba(58, 66, 82, 0.12);
-  box-shadow: inset 2px 0 0 #5F6878;
-}
-.compact-table tbody tr:nth-child(even) td {
-  background: #fafbfd;
-}
-.compact-table tbody tr:nth-child(even):hover td {
-  background: rgba(58, 66, 82, 0.06);
-}
-.compact-table tbody tr:nth-child(even).row-selected td {
-  background: rgba(58, 66, 82, 0.12);
-  box-shadow: inset 2px 0 0 #5F6878;
+/* ── Avail scroll container ───────────────────────────────────────── */
+.avail-scroll {
+  overflow-x: scroll;
 }
 
-/* ── Badge tiers ───────────────────────────────────────────────── */
-/* Primary badges — status, high visibility */
+/* ── Badge tiers ──────────────────────────────────────────────────── */
 .badge-primary {
   display: inline-flex;
   align-items: center;
-  padding: 1px 8px;
-  font-size: 10px;
+  padding: 2px 8px;
+  font-size: 11px;
   font-weight: 600;
   letter-spacing: 0.03em;
   text-transform: uppercase;
-  border-radius: 3px;
-  font-family: 'DM Sans', system-ui, sans-serif;
+  border-radius: 4px;
+  font-family: 'Inter', system-ui, sans-serif;
 }
-/* Secondary badges — type, classification, low-key */
-.badge-secondary {
-  display: inline-flex;
-  align-items: center;
-  padding: 1px 6px;
-  font-size: 9px;
-  font-weight: 500;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-  border-radius: 2px;
-  color: #64748b;
-  background: #f1f5f9;
-  border: 1px solid #e2e8f0;
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-}
-
-/* ── Panel chrome — workspace panels ───────────────────────────── */
+/* ── Panel chrome — workspace panels ──────────────────────────────── */
 .panel-header {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 8px 12px;
-  background: #F8F9FA;
-  border-bottom: 2px solid #D8DBE2;
+  padding: 10px 14px;
+  background: #F4F5F7;
+  border-bottom: 2px solid #D5D8DF;
   flex-shrink: 0;
 }
 .panel-title {
-  font-family: 'DM Sans', system-ui, sans-serif;
-  font-size: 11px;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
-  color: #5F6878;
+  color: #4B5463;
 }
 
-/* ── Workspace tabs — compact, industrial ──────────────────────── */
+/* ── Workspace tabs ───────────────────────────────────────────────── */
 .ws-tab {
-  padding: 6px 14px;
-  font-size: 11px;
+  padding: 8px 14px;
+  font-size: 12px;
   font-weight: 600;
   color: #64748b;
   border-bottom: 2px solid transparent;
   transition: all 0.15s;
   white-space: nowrap;
-  font-family: 'DM Sans', system-ui, sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
 }
 .ws-tab:hover {
-  color: #5F6878;
+  color: #4B5463;
   background: rgba(58, 66, 82, 0.04);
 }
 .ws-tab-active {
-  color: #5F6878;
-  border-bottom-color: #5F6878;
+  color: #3A4252;
+  border-bottom-color: #3A4252;
 }
 
-/* ── Column picker dropdown ────────────────────────────────────── */
-.col-picker {
-  position: absolute;
-  right: 0;
-  top: 100%;
-  margin-top: 4px;
-  width: 200px;
-  background: white;
-  border: 1px solid #D5D8DF;
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgba(0,0,0,0.1);
-  z-index: 30;
-  padding: 8px;
-  max-height: 300px;
-  overflow-y: auto;
-}
-.col-picker label {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 3px 4px;
-  font-size: 11px;
-  color: #374151;
-  border-radius: 3px;
-  cursor: pointer;
-}
-.col-picker label:hover {
-  background: #F8F9FA;
-}
-
-/* Source progress chips */
+/* ── Source progress chips ────────────────────────────────────────── */
 .source-chip {
   @apply px-2.5 py-1 text-xs font-medium rounded-full border transition-all duration-300;
 }
@@ -397,10 +295,8 @@ hr { border-color: #D5D8DF; }
 .source-chip--brokerbin { @apply bg-sky-600; }
 .source-chip--digikey { @apply bg-orange-600; }
 .source-chip--mouser { @apply bg-teal-600; }
-.source-chip--ebay { @apply bg-yellow-600; }
 .source-chip--oemsecrets { @apply bg-fuchsia-600; }
 .source-chip--element14 { @apply bg-lime-600; }
-.source-chip--sourcengine { @apply bg-emerald-600; }
 .source-chip--empty { @apply bg-gray-200 text-gray-400 border-gray-200; }
 .source-chip--error { @apply bg-rose-100 text-rose-600 border-rose-200; }
 .source-chip--disabled { @apply bg-gray-100 text-gray-400 border-gray-200 opacity-50; }
@@ -415,7 +311,7 @@ hr { border-color: #D5D8DF; }
 .source-badge--oemsecrets { @apply bg-fuchsia-900/50 text-fuchsia-400 border-fuchsia-800; }
 .source-badge--element14 { @apply bg-lime-900/50 text-lime-400 border-lime-800; }
 
-/* Vendor card animation */
+/* ── Vendor card animation ────────────────────────────────────────── */
 @keyframes slideUp {
     from { opacity: 0; transform: translateY(12px); }
     to { opacity: 1; transform: translateY(0); }
@@ -452,15 +348,7 @@ hr { border-color: #D5D8DF; }
   }
 }
 
-/* ── Quote Builder ─────────────────────────────────────────── */
-@keyframes qbPanelSlide {
-  from { opacity: 0; transform: translateX(8px); }
-  to { opacity: 1; transform: translateX(0); }
-}
-.qb-panel-enter {
-  animation: qbPanelSlide 0.2s ease-out;
-}
-
+/* ── Quote Builder ────────────────────────────────────────────────── */
 @keyframes qbDecisionFlash {
   0% { background-color: rgba(16, 185, 129, 0.15); }
   100% { background-color: transparent; }
@@ -469,6 +357,58 @@ hr { border-color: #D5D8DF; }
   animation: qbDecisionFlash 0.8s ease-out;
 }
 
-.qb-list::-webkit-scrollbar { width: 4px; }
-.qb-list::-webkit-scrollbar-track { background: transparent; }
-.qb-list::-webkit-scrollbar-thumb { background: #D8DBE2; border-radius: 2px; }
+/* ── Sightings — loading & transition polish ─────────────────────── */
+.sightings-fade { transition: opacity 150ms ease; }
+.sightings-slide-down { animation: sightingsSlideDown 300ms ease; }
+.sightings-slide-up { animation: sightingsSlideUp 200ms ease; }
+
+@keyframes sightingsSlideDown {
+  from { opacity: 0; transform: translateY(-10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+@keyframes sightingsSlideUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Detail panel crossfade on HTMX swap */
+#sightings-detail {
+  transition: opacity 150ms ease;
+}
+#sightings-detail.htmx-swapping {
+  opacity: 0;
+}
+
+/* Skeleton shimmer for vendor loading */
+@keyframes shimmer {
+  0%   { background-position: -200px 0; }
+  100% { background-position: 200px 0; }
+}
+.sighting-skeleton {
+  background: linear-gradient(90deg, #f0f0f0 25%, #e0e0e0 50%, #f0f0f0 75%);
+  background-size: 200px 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+  border-radius: 4px;
+}
+
+/* Coverage bar refresh spinner overlay */
+.coverage-cell { position: relative; }
+.coverage-cell .refresh-spinner-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255,255,255,0.7);
+  border-radius: 4px;
+}
+
+/* ── Sightings — mobile card view (below 640px) ──────────────────── */
+@media (max-width: 639px) {
+  .sightings-table-wrapper table,
+  .sightings-table-wrapper thead { display: none; }
+  .sightings-card-list { display: flex !important; }
+}
+@media (min-width: 640px) {
+  .sightings-card-list { display: none !important; }
+}

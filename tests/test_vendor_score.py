@@ -66,7 +66,7 @@ def _make_offers(db, card_id, vendor_name, count):
     req = Requisition(
         name=f"REQ-{vendor_name}",
         customer_name="Test Customer",
-        status="open",
+        status="active",
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -112,7 +112,7 @@ def _make_offers_full(db, card_id, vendor_name, count):
     req = Requisition(
         name=f"REQ-{vendor_name}-{count}",
         customer_name="Test Customer",
-        status="open",
+        status="active",
         created_by=user.id,
         created_at=datetime.now(timezone.utc),
     )
@@ -307,7 +307,7 @@ class TestComputeSingleVendorScore:
         req = Requisition(
             name="REQ-fallback",
             customer_name="Test",
-            status="open",
+            status="active",
             created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )
@@ -458,7 +458,7 @@ class TestComputeAllVendorScores:
         req = Requisition(
             name="REQ-nmv",
             customer_name="Test",
-            status="open",
+            status="active",
             created_by=user.id,
             created_at=datetime.now(timezone.utc),
         )

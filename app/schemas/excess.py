@@ -77,17 +77,6 @@ class ExcessLineItemCreate(BaseModel):
         return _strip_not_blank(v, "part_number")
 
 
-class ExcessLineItemUpdate(BaseModel):
-    part_number: str | None = None
-    manufacturer: str | None = None
-    quantity: int | None = Field(default=None, ge=1)
-    date_code: str | None = None
-    condition: str | None = None
-    asking_price: float | None = Field(default=None, ge=0)
-    status: Literal["available", "bidding", "awarded", "withdrawn"] | None = None
-    notes: str | None = None
-
-
 class ExcessLineItemResponse(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
@@ -109,22 +98,6 @@ class ExcessLineItemResponse(BaseModel):
     updated_at: datetime | None = None
 
 
-class ExcessLineItemImportRow(BaseModel):
-    """Schema for CSV/Excel import — one row per line item."""
-
-    part_number: str
-    manufacturer: str | None = None
-    quantity: int = Field(default=1, ge=1)
-    date_code: str | None = None
-    condition: str | None = "New"
-    asking_price: float | None = Field(default=None, ge=0)
-
-    @field_validator("part_number")
-    @classmethod
-    def part_number_not_blank(cls, v: str) -> str:
-        return _strip_not_blank(v, "part_number")
-
-
 # ── Bid ──────────────────────────────────────────────────────────────
 
 
@@ -137,18 +110,6 @@ class BidCreateRequest(BaseModel):
     bidder_company_id: int | None = None
     bidder_vendor_card_id: int | None = None
     source: Literal["manual", "phone"] | None = "manual"
-    notes: str | None = None
-
-
-class BidCreate(BaseModel):
-    excess_line_item_id: int
-    unit_price: float = Field(ge=0)
-    quantity_wanted: int = Field(ge=1)
-    lead_time_days: int | None = Field(default=None, ge=0)
-    bidder_company_id: int | None = None
-    bidder_vendor_card_id: int | None = None
-    bidder_contact_id: int | None = None
-    source: Literal["manual", "email_parsed", "phone"] | None = "manual"
     notes: str | None = None
 
 
@@ -179,14 +140,6 @@ class BidResponse(BaseModel):
 
 
 # ── BidSolicitation ──────────────────────────────────────────────────
-
-
-class BidSolicitationCreate(BaseModel):
-    excess_line_item_id: int
-    contact_id: int
-    recipient_email: str
-    recipient_name: str | None = None
-    subject: str | None = None
 
 
 class BidSolicitationResponse(BaseModel):

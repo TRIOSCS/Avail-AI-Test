@@ -8,7 +8,7 @@
 {% if results is defined and results %}
   {% for mfr in results %}
   <div class="px-3 py-1.5 text-xs hover:bg-brand-50 cursor-pointer transition-colors"
-       @click="(function(name){ var drop = $el.closest('.absolute'); var cont = drop ? drop.closest('.relative') : null; var inp = cont ? cont.querySelector('input') : null; if(inp){ inp.value = name; inp.dispatchEvent(new Event('input', {bubbles:true})); } if(drop) drop.textContent = ''; })('{{ mfr.canonical_name }}')">
+       onclick="(function(el, name){ var drop = el.closest('.mfr-dropdown') || el.closest('.sub-mfr-dropdown'); var cont = drop ? drop.closest('.relative, td, [class*=w-]') : null; var inp = cont ? cont.querySelector('input') : null; if(!inp){ console.warn('Mfr picker: target input not found'); return; } inp.value = name; if(inp._x_model){ inp._x_model.set(name); } else { inp.dispatchEvent(new Event('input', {bubbles:true})); } inp.dispatchEvent(new Event('change', {bubbles:true})); if(drop) drop.textContent = ''; inp.blur(); })(this, {{ mfr.canonical_name|tojson }})">
     <span class="font-medium">{{ mfr.canonical_name }}</span>
     {% if mfr.aliases %}
     <span class="text-gray-400 ml-1">({{ mfr.aliases|join(', ') }})</span>
@@ -22,7 +22,7 @@
        hx-vals='{"name": "{{ q }}"}'
        hx-swap="outerHTML"
        data-loading-disable
-       @click="setTimeout(function(){ var drop = event.target.closest('.absolute'); var cont = drop ? drop.closest('.relative') : null; var inp = cont ? cont.querySelector('input') : null; if(inp){ inp.value = '{{ q }}'; inp.dispatchEvent(new Event('input', {bubbles:true})); } }, 100)">
+       onclick="var self=this, qVal={{ q|tojson }}; setTimeout(function(){ var drop = self.closest('.mfr-dropdown') || self.closest('.sub-mfr-dropdown'); var cont = drop ? drop.closest('.relative, td, [class*=w-]') : null; var inp = cont ? cont.querySelector('input') : null; if(!inp){ console.warn('Mfr picker: target input not found'); return; } inp.value = qVal; if(inp._x_model){ inp._x_model.set(qVal); } else { inp.dispatchEvent(new Event('input', {bubbles:true})); } inp.dispatchEvent(new Event('change', {bubbles:true})); if(drop) drop.textContent = ''; inp.blur(); }, 100)">
     + Add "{{ q }}" as new manufacturer
   </div>
 {% else %}

@@ -26,7 +26,6 @@ from .email_intelligence import EmailIntelligence  # noqa: F401
 # Enrichment
 from .enrichment import (  # noqa: F401
     EmailSignatureExtract,
-    EnrichmentCreditUsage,
     EnrichmentJob,
     EnrichmentQueue,
     IntelCache,
@@ -36,9 +35,6 @@ from .enrichment import (  # noqa: F401
 # Enrichment Pipeline State
 from .enrichment_run import EnrichmentRun  # noqa: F401
 
-# Error Reports / Trouble Tickets
-from .error_report import ErrorReport  # noqa: F401
-
 # Excess Inventory & Bid Collection
 from .excess import Bid, BidSolicitation, ExcessLineItem, ExcessList  # noqa: F401
 
@@ -46,7 +42,6 @@ from .excess import Bid, BidSolicitation, ExcessLineItem, ExcessList  # noqa: F4
 from .faceted_search import CommoditySpecSchema, MaterialSpecFacet  # noqa: F401
 
 # ICsource Search
-from .ics_classification_cache import IcsClassificationCache  # noqa: F401
 from .ics_search_log import IcsSearchLog  # noqa: F401
 from .ics_search_queue import IcsSearchQueue  # noqa: F401
 from .ics_worker_status import IcsWorkerStatus  # noqa: F401
@@ -60,20 +55,15 @@ from .intelligence import (  # noqa: F401
     ProactiveMatch,
     ProactiveOffer,
     ProactiveThrottle,
-    ReactivationSignal,
 )
 
 # Knowledge Ledger
 from .knowledge import KnowledgeConfig, KnowledgeEntry  # noqa: F401
 
 # NetComponents Search
-from .nc_classification_cache import NcClassificationCache  # noqa: F401
 from .nc_search_log import NcSearchLog  # noqa: F401
 from .nc_search_queue import NcSearchQueue  # noqa: F401
 from .nc_worker_status import NcWorkerStatus  # noqa: F401
-
-# Notifications
-from .notification import Notification  # noqa: F401
 
 # Offers, Contacts, Vendor Responses
 from .offers import Contact, Offer, OfferAttachment, VendorResponse  # noqa: F401
@@ -100,9 +90,6 @@ from .purchase_history import CustomerPartHistory  # noqa: F401
 
 # Quotes (V1 BuyPlan model removed — use BuyPlan from buy_plan module)
 from .quotes import Quote, QuoteLine  # noqa: F401
-
-# Risk Flags (structured deal intelligence)
-from .risk_flag import RiskFlag  # noqa: F401
 from .root_cause_group import RootCauseGroup  # noqa: F401
 
 # Core: Requisitions, Requirements & Attachments
@@ -127,12 +114,6 @@ from .tags import EntityTag, MaterialTag, Tag, TagThresholdConfig  # noqa: F401
 
 # Task Board (pipeline tasks per requisition)
 from .task import RequisitionTask  # noqa: F401
-
-# Teams alert config (per-user DM preferences)
-from .teams_alert_config import TeamsAlertConfig  # noqa: F401
-
-# Teams notification audit log
-from .teams_notification_log import TeamsNotificationLog  # noqa: F401
 from .trouble_ticket import TroubleTicket  # noqa: F401
 
 # Unified Score (cross-role leaderboard)

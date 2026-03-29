@@ -23,16 +23,6 @@ class CallInitiatedRequest(BaseModel):
 # ── Timeline filter / response schemas ────────────────────────────────
 
 
-class ActivityLogFilter(BaseModel):
-    """Query parameters for timeline endpoints."""
-
-    channel: list[str] | None = None
-    direction: str | None = None
-    event_type: str | None = None
-    date_from: datetime | None = None
-    date_to: datetime | None = None
-
-
 class ActivityLogRead(BaseModel):
     """Response model for a single activity log entry."""
 

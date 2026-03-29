@@ -556,7 +556,7 @@ class TestCompanyIntel:
             await company_intel("  ACME Corp  ")
 
         # get_cached should be called with lowered/stripped key
-        mock_get.assert_called_once_with("intel:acme corp")
+        mock_get.assert_called_once_with("intel:acme corp:")
 
     async def test_set_cached_with_7_day_ttl(self):
         """Cache entries use 7-day TTL."""

@@ -362,31 +362,3 @@ def score_unified(
         "confidence_color": "red",
         "components": {},
     }
-
-
-def score_requirement_priority(
-    urgency: str = "normal",
-    opportunity_value: float = 0,
-    sighting_count: int = 0,
-    days_since_created: float = 0,
-    vendors_contacted: int = 0,
-) -> float:
-    """Compute buyer priority score (0-100) for a requirement.
-
-    Weights: urgency 30%, customer value 20%, sighting scarcity 20%,
-    age 15%, contact progress 15%.
-
-    Called by: sightings router, priority refresh job
-    Depends on: nothing (pure function)
-    """
-    import math
-
-    urgency_map = {"critical": 100, "hot": 90, "urgent": 70, "normal": 30, "low": 10}
-    urgency_score = urgency_map.get(urgency, 30)
-    value_score = min(100, math.log10(max(opportunity_value, 1)) * 25) if opportunity_value > 0 else 20
-    scarcity_score = max(0, 100 - sighting_count * 5)
-    age_score = min(100, days_since_created * (100 / 30))
-    contact_score = max(0, 100 - vendors_contacted * 20)
-
-    total = urgency_score * 0.30 + value_score * 0.20 + scarcity_score * 0.20 + age_score * 0.15 + contact_score * 0.15
-    return round(min(100, max(0, total)), 1)
