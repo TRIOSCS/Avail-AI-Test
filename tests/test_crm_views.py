@@ -32,3 +32,17 @@ class TestCRMShell:
         """Shell renders #crm-tab-content container."""
         resp = client.get("/v2/partials/crm/shell")
         assert 'id="crm-tab-content"' in resp.text
+
+
+class TestCRMFullPage:
+    """Test CRM full-page route via v2_page dispatcher."""
+
+    def test_v2_crm_returns_200(self, client: TestClient):
+        """GET /v2/crm returns 200."""
+        resp = client.get("/v2/crm")
+        assert resp.status_code == 200
+
+    def test_v2_crm_loads_shell_partial(self, client: TestClient):
+        """GET /v2/crm loads the CRM shell partial."""
+        resp = client.get("/v2/crm")
+        assert resp.status_code == 200

@@ -166,6 +166,7 @@ def _base_ctx(request: Request, user: User, current_view: str = "") -> dict:
 @router.get("/v2/materials", response_class=HTMLResponse)
 @router.get("/v2/materials/{card_id:int}", response_class=HTMLResponse)
 @router.get("/v2/follow-ups", response_class=HTMLResponse)
+@router.get("/v2/crm", response_class=HTMLResponse)
 @router.get("/v2/sightings", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets", response_class=HTMLResponse)
 @router.get("/v2/trouble-tickets/{ticket_id:int}", response_class=HTMLResponse)
@@ -194,6 +195,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         current_view = "follow-ups"
     elif "/trouble-tickets" in path:
         current_view = "trouble-tickets"
+    elif "/crm" in path:
+        current_view = "crm"
     elif "/vendors" in path:
         current_view = "vendors"
     elif "/customers" in path:
@@ -213,6 +216,8 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
         partial_url = "/v2/partials/parts/workspace"
     elif current_view == "trouble-tickets":
         partial_url = "/v2/partials/trouble-tickets/workspace"
+    elif current_view == "crm":
+        partial_url = "/v2/partials/crm/shell"
     elif current_view == "sightings":
         partial_url = "/v2/partials/sightings/workspace"
     else:
