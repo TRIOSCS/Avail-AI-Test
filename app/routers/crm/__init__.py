@@ -25,6 +25,7 @@ from .companies import router as companies_router
 from .enrichment import router as enrichment_router
 from .offers import router as offers_router
 from .quotes import router as quotes_router
+from .views import router as views_router
 
 router = APIRouter()
 router.include_router(companies_router)
@@ -32,3 +33,4 @@ router.include_router(enrichment_router)
 router.include_router(offers_router)
 router.include_router(quotes_router)
 router.include_router(clone_router)
+router.include_router(views_router)

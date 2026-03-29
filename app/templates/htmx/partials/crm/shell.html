@@ -1,0 +1,39 @@
+{# shell.html — CRM tab bar with Customers/Vendors sub-tabs.
+   Receives: user (User), default_tab (str).
+   Called by: crm/views.py crm_shell route.
+   Depends on: Alpine.js, HTMX, brand palette.
+#}
+<div x-data="{ tab: '{{ default_tab }}' }">
+  {# Tab bar — Pattern C (Settings-style with bg-brand-50 fill) #}
+  <div class="flex gap-1 mb-4 border-b border-brand-200">
+    <button @click="tab = 'customers'"
+            :class="tab === 'customers' ? 'border-b-2 border-brand-500 text-brand-600 bg-brand-50' : 'text-gray-500 hover:text-brand-600 hover:bg-brand-50'"
+            class="px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
+            hx-get="/v2/partials/customers?hx_target=%23crm-tab-content&push_url_base=/v2/crm"
+            hx-target="#crm-tab-content"
+            hx-swap="innerHTML"
+            hx-trigger="{{ 'load, click once' if default_tab == 'customers' else 'click once' }}">
+      Customers
+    </button>
+    <button @click="tab = 'vendors'"
+            :class="tab === 'vendors' ? 'border-b-2 border-brand-500 text-brand-600 bg-brand-50' : 'text-gray-500 hover:text-brand-600 hover:bg-brand-50'"
+            class="px-4 py-2.5 text-sm font-medium rounded-t-lg transition-colors"
+            hx-get="/v2/partials/vendors?hx_target=%23crm-tab-content&push_url_base=/v2/crm"
+            hx-target="#crm-tab-content"
+            hx-swap="innerHTML"
+            hx-trigger="{{ 'load, click once' if default_tab == 'vendors' else 'click once' }}">
+      Vendors
+    </button>
+  </div>
+
+  {# Tab content — lazy-loaded by HTMX #}
+  <div id="crm-tab-content">
+    <div class="flex items-center justify-center py-12 text-gray-400 text-sm">
+      <svg class="animate-spin h-5 w-5 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+      </svg>
+      Loading...
+    </div>
+  </div>
+</div>
