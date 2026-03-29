@@ -131,9 +131,20 @@
         <div class="flex-1 min-w-0">
           <p class="text-sm text-gray-900">
             <span class="font-medium">{{ a.activity_type|replace('_', ' ')|title }}</span>
+            {% if a.quality_classification %}
+            <span class="ml-1.5 inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full
+              {% if a.is_meaningful %}bg-emerald-50 text-emerald-700
+              {% else %}bg-gray-100 text-gray-500{% endif %}">
+              {{ a.quality_classification|replace('_', ' ')|title }}
+            </span>
+            {% endif %}
             {% if a.contact_name %}<span class="text-gray-500"> — {{ a.contact_name }}</span>{% endif %}
           </p>
-          {% if a.notes %}<p class="text-xs text-gray-500 truncate">{{ a.notes }}</p>{% endif %}
+          {% if a.summary %}
+          <p class="text-xs text-gray-500 truncate">{{ a.summary }}</p>
+          {% elif a.notes %}
+          <p class="text-xs text-gray-500 truncate">{{ a.notes }}</p>
+          {% endif %}
         </div>
         <span class="text-xs text-gray-400 whitespace-nowrap">{{ a.created_at.strftime('%b %d, %H:%M') if a.created_at else "" }}</span>
       </div>
