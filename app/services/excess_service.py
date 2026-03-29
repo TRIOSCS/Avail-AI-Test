@@ -769,16 +769,18 @@ def _build_bundled_solicitation_html(
     table."""
     greeting = f"Hi {recipient_name}," if recipient_name else "Hello,"
     rows = ""
+    em_dash = "\u2014"
     for item in items:
+        asking = getattr(item, "asking_price", None)
+        price_cell = f"${item.asking_price}" if asking else em_dash
         rows += (
             "<tr>"
-            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{item.part_number or "\u2014"}</td>'
-            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{item.manufacturer or "\u2014"}</td>'
-            f'<td style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">{item.quantity or "\u2014"}</td>'
-            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{getattr(item, "condition", None) or "\u2014"}</td>'
-            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{getattr(item, "date_code", None) or "\u2014"}</td>'
-            f'<td style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">'
-            f"{'$' + str(item.asking_price) if getattr(item, 'asking_price', None) else '\u2014'}</td>"
+            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{item.part_number or em_dash}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{item.manufacturer or em_dash}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">{item.quantity or em_dash}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{getattr(item, "condition", None) or em_dash}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px;">{getattr(item, "date_code", None) or em_dash}</td>'
+            f'<td style="border: 1px solid #d1d5db; padding: 8px; text-align: right;">{price_cell}</td>'
             "</tr>"
         )
     return (
