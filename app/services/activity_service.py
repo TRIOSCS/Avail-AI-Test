@@ -664,17 +664,34 @@ def log_rfq_activity(
     requirement_id: int | None = None,
 ) -> ActivityLog:
     """Log an activity entry on the RFQ activity timeline."""
+    # Resolve company_id via requisition → customer_site → company
+    company_id = None
+    if rfq_id:
+        from ..models.crm import CustomerSite
+        from ..models.sourcing import Requisition
+
+        req = db.get(Requisition, rfq_id)
+        if req and req.customer_site_id:
+            site = db.get(CustomerSite, req.customer_site_id)
+            if site:
+                company_id = site.company_id
+
     record = ActivityLog(
         user_id=user_id,
         activity_type=activity_type,
         channel="system",
         requisition_id=rfq_id,
         requirement_id=requirement_id,
+        company_id=company_id,
         notes=description,
         details=metadata,
     )
     db.add(record)
     db.flush()
+
+    if company_id:
+        _update_last_activity({"type": "company", "id": company_id}, db)
+
     logger.info(f"RFQ activity logged: {activity_type} -> rfq {rfq_id}")
     return record
 
