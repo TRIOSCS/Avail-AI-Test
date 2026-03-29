@@ -377,10 +377,11 @@ async def add_requirements(
         seen_keys = {normalize_mpn_key(parsed.primary_mpn)}
         deduped_subs = []
         for s in parsed.substitutes:
-            key = normalize_mpn_key(s)
+            ns = normalize_mpn(s) or s.strip()
+            key = normalize_mpn_key(ns)
             if key and key not in seen_keys:
                 seen_keys.add(key)
-                deduped_subs.append(s)
+                deduped_subs.append({"mpn": ns, "manufacturer": ""})
         mat_card = None
         try:
             nested = db.begin_nested()
@@ -719,7 +720,7 @@ async def update_requirement(
             key = normalize_mpn_key(ns)
             if key and key not in seen_keys:
                 seen_keys.add(key)
-                deduped.append(ns)
+                deduped.append({"mpn": ns, "manufacturer": ""})
         r.substitutes = deduped[:20]
     if data.target_price is not None:
         r.target_price = data.target_price
