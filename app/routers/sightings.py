@@ -75,6 +75,22 @@ _SORT_COLUMNS = {
 }
 
 
+REFRESH_RATE_LIMIT_SECONDS = 300  # 5-minute cooldown between searches
+
+
+def _within_rate_limit(last_searched_at: datetime | None, now: datetime) -> bool:
+    """Return True if the requirement was searched within the rate-limit window.
+
+    Handles timezone-naive datetimes from SQLite (test environment).
+    """
+    if last_searched_at is None:
+        return False
+    ts = last_searched_at
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    return (now - ts).total_seconds() < REFRESH_RATE_LIMIT_SECONDS
+
+
 def _oob_toast(msg: str, level: str = "success") -> HTMLResponse:
     """Return an OOB swap div that triggers a toast notification via Alpine."""
     safe_msg = msg.replace("'", "\\'").replace('"', "&quot;")
@@ -539,12 +555,9 @@ async def sightings_refresh(
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
 
-    # Rate guard: skip if searched within 5 minutes
+    # Rate guard: skip if searched recently
     now = datetime.now(timezone.utc)
-    _last = requirement.last_searched_at
-    if _last is not None and _last.tzinfo is None:
-        _last = _last.replace(tzinfo=timezone.utc)
-    if _last and (now - _last).total_seconds() < 300:
+    if _within_rate_limit(requirement.last_searched_at, now):
         response = await sightings_detail(request, requirement_id, db, user)
         response.headers["HX-Trigger"] = (
             '{"showToast": {"message": "Already searched within the last 5 minutes.", "type": "info"}}'
@@ -609,11 +622,8 @@ async def sightings_batch_refresh(
         if not req_obj:
             failed += 1
             continue
-        # Skip if searched within 5 minutes
-        last = req_obj.last_searched_at
-        if last is not None and last.tzinfo is None:
-            last = last.replace(tzinfo=timezone.utc)
-        if last and (now - last).total_seconds() < 300:
+        # Skip if searched recently
+        if _within_rate_limit(req_obj.last_searched_at, now):
             skipped += 1
             continue
         try:
