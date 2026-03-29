@@ -14,17 +14,17 @@
   {# Tab bar: All Vendors / My Vendors #}
   <div class="flex gap-1 mb-4 border-b-2 border-gray-200">
     <a href="/v2/vendors"
-       hx-get="/v2/partials/vendors"
-       hx-target="#main-content"
-       hx-push-url="/v2/vendors"
+       hx-get="/v2/partials/vendors?hx_target={{ hx_target|default('#main-content')|urlencode }}&push_url_base={{ push_url_base|default('/v2/vendors')|urlencode }}"
+       hx-target="{{ hx_target|default('#main-content') }}"
+       hx-push-url="{{ push_url_base|default('/v2/vendors') }}"
        class="px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-[2px]
               {{ 'text-brand-600 border-brand-500' if not my_only else 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300' }}">
       All Vendors
     </a>
     <a href="/v2/vendors?my_only=1"
-       hx-get="/v2/partials/vendors?my_only=1"
-       hx-target="#main-content"
-       hx-push-url="/v2/vendors?my_only=1"
+       hx-get="/v2/partials/vendors?my_only=1&hx_target={{ hx_target|default('#main-content')|urlencode }}&push_url_base={{ push_url_base|default('/v2/vendors')|urlencode }}"
+       hx-target="{{ hx_target|default('#main-content') }}"
+       hx-push-url="{{ push_url_base|default('/v2/vendors') }}?my_only=1"
        class="px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-[2px]
               {{ 'text-brand-600 border-brand-500' if my_only else 'text-gray-500 border-transparent hover:text-gray-700 hover:border-gray-300' }}">
       My Vendors
@@ -38,7 +38,7 @@
       <div class="flex-1 min-w-[200px]">
         <input aria-label="Search vendors" type="text" name="q" value="{{ q }}" placeholder="Search vendors, brands, commodities..."
                hx-get="/v2/partials/vendors"
-               hx-target="#main-content"
+               hx-target="{{ hx_target|default('#main-content') }}"
                hx-swap="morph"
                hx-push-url="true"
                hx-include="#vendor-filters"
@@ -46,6 +46,8 @@
                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
       </div>
       {% if my_only %}<input type="hidden" name="my_only" value="1">{% endif %}
+      <input type="hidden" name="hx_target" value="{{ hx_target|default('#main-content') }}">
+      <input type="hidden" name="push_url_base" value="{{ push_url_base|default('/v2/vendors') }}">
       <input type="hidden" name="sort" value="{{ sort }}">
       <input type="hidden" name="dir" value="{{ dir }}">
       <input type="hidden" name="view" :value="view">
@@ -89,7 +91,7 @@
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
               {% if col_key %}
               <a hx-get="/v2/partials/vendors?sort={{ col_key }}&dir={{ 'asc' if sort == col_key and dir == 'desc' else 'desc' }}"
-                 hx-target="#main-content"
+                 hx-target="{{ hx_target|default('#main-content') }}"
                  hx-push-url="true"
                  hx-include="#vendor-filters"
                  class="cursor-pointer hover:text-brand-500 inline-flex items-center gap-1">
@@ -112,7 +114,7 @@
           {% for v in vendors %}
           <tr class="{{ 'bg-rose-50' if v.is_blacklisted else '' }} hover:bg-brand-50 cursor-pointer"
               hx-get="/v2/partials/vendors/{{ v.id }}"
-              hx-target="#main-content"
+              hx-target="{{ hx_target|default('#main-content') }}"
               hx-push-url="/v2/vendors/{{ v.id }}"
               preload="mouseover">
             <td class="px-4 py-3">
@@ -147,7 +149,7 @@
     <nav class="flex gap-1 items-center">
       {% if offset > 0 %}
       <a hx-get="/v2/partials/vendors?offset={{ offset - limit }}"
-         hx-target="#main-content"
+         hx-target="{{ hx_target|default('#main-content') }}"
          hx-include="#vendor-filters"
          preload="mouseover"
          class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
@@ -155,7 +157,7 @@
       <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
       {% if offset + limit < total %}
       <a hx-get="/v2/partials/vendors?offset={{ offset + limit }}"
-         hx-target="#main-content"
+         hx-target="{{ hx_target|default('#main-content') }}"
          hx-include="#vendor-filters"
          preload="mouseover"
          class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
