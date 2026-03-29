@@ -146,6 +146,10 @@ class Requirement(Base):
             raise ValueError("priority_score must be 0-100")
         return value
 
+    @validates("primary_mpn", "customer_pn", "oem_pn")
+    def _uppercase_mpn_fields(self, _key, value):
+        return value.upper().strip() if value else value
+
     __table_args__ = (
         Index("ix_req_requisition", "requisition_id"),
         Index("ix_req_primary_mpn", "primary_mpn"),
