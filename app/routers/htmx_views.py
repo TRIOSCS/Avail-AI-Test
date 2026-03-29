@@ -3346,6 +3346,7 @@ async def vendors_list_partial(
     db: Session = Depends(get_db),
 ):
     """Return vendor list as HTML partial with blacklisted toggle and sorting."""
+    hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/vendors")
     from ..models.strategic import StrategicVendor
 
     query = db.query(VendorCard)
@@ -4090,11 +4091,27 @@ STALENESS_OVERDUE_DAYS = 30
 STALENESS_DUE_SOON_DAYS = 14
 
 
-def _staleness_tier(last_activity_at):
+_ALLOWED_HX_TARGETS = {"#main-content", "#crm-tab-content"}
+_ALLOWED_PUSH_URL_BASES = {"/v2/vendors", "/v2/customers", "/v2/crm"}
+
+
+def _sanitize_hx_params(hx_target: str, push_url_base: str, default_push: str) -> tuple[str, str]:
+    """Validate hx_target and push_url_base against allowlists."""
+    if hx_target not in _ALLOWED_HX_TARGETS:
+        hx_target = "#main-content"
+    if push_url_base not in _ALLOWED_PUSH_URL_BASES:
+        push_url_base = default_push
+    return hx_target, push_url_base
+
+
+def _staleness_tier(last_activity_at: datetime | None) -> str:
     """Compute staleness tier from last_activity_at timestamp."""
     if last_activity_at is None:
         return "new"
-    days = (datetime.now(timezone.utc) - last_activity_at).days
+    ts = last_activity_at
+    if ts.tzinfo is None:
+        ts = ts.replace(tzinfo=timezone.utc)
+    days = (datetime.now(timezone.utc) - ts).days
     if days >= STALENESS_OVERDUE_DAYS:
         return "overdue"
     if days >= STALENESS_DUE_SOON_DAYS:
@@ -4114,6 +4131,7 @@ async def companies_list_partial(
     db: Session = Depends(get_db),
 ):
     """Return companies list as HTML partial."""
+    hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/customers")
     query = db.query(Company).filter(Company.is_active.is_(True)).options(joinedload(Company.account_owner))
 
     if search.strip():
@@ -4127,9 +4145,17 @@ async def companies_list_partial(
         c.staleness = _staleness_tier(c.last_activity_at)
 
     ctx = _base_ctx(request, user, "customers")
-    ctx.update({"companies": companies, "search": search, "total": total, "limit": limit, "offset": offset})
-    ctx["hx_target"] = hx_target
-    ctx["push_url_base"] = push_url_base
+    ctx.update(
+        {
+            "companies": companies,
+            "search": search,
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+            "hx_target": hx_target,
+            "push_url_base": push_url_base,
+        }
+    )
     return templates.TemplateResponse("htmx/partials/customers/list.html", ctx)
 
 

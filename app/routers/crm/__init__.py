@@ -2,12 +2,11 @@
 
 Sub-modules:
   companies.py  — Company CRUD, enrichment, typeahead
-  sites.py      — Customer sites + site contacts
   enrichment.py — Enrichment, suggested contacts, sync logs, users, customer import
   offers.py     — Offer CRUD, attachments, OneDrive, changelog
   quotes.py     — Quote CRUD, preview, send, pricing history
-  buy_plans.py    — Unified buy plan (submit/approve/verify/PO/complete)
   clone.py      — Requisition clone
+  views.py      — CRM shell (unified Customers/Vendors tab bar)
 """
 
 from fastapi import APIRouter

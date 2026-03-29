@@ -10,6 +10,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models.auth import User
+from app.models.crm import Company
 from tests.conftest import engine  # noqa: F401
 
 
@@ -89,7 +90,6 @@ class TestCustomerStaleness:
 
     def test_customer_list_has_staleness_dot(self, client: TestClient, db_session: Session, test_user: User):
         """Customer list renders staleness indicator dots."""
-        from app.models.crm import Company
 
         c = Company(name="Test Corp", is_active=True)
         db_session.add(c)
@@ -101,7 +101,6 @@ class TestCustomerStaleness:
 
     def test_overdue_company_shows_rose(self, client: TestClient, db_session: Session, test_user: User):
         """Company with 30+ day old activity shows rose indicator."""
-        from app.models.crm import Company
 
         c = Company(
             name="Stale Corp",
@@ -116,7 +115,6 @@ class TestCustomerStaleness:
 
     def test_new_company_shows_brand(self, client: TestClient, db_session: Session, test_user: User):
         """Company with no activity shows brand indicator."""
-        from app.models.crm import Company
 
         c = Company(name="New Corp", is_active=True, last_activity_at=None)
         db_session.add(c)
@@ -125,9 +123,36 @@ class TestCustomerStaleness:
         resp = client.get("/v2/partials/customers")
         assert "bg-brand-300" in resp.text
 
+    def test_due_soon_company_shows_amber(self, client: TestClient, db_session: Session, test_user: User):
+        """Company with 14-29 day old activity shows amber indicator."""
+
+        c = Company(
+            name="DueSoon Corp",
+            is_active=True,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=20),
+        )
+        db_session.add(c)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/customers")
+        assert "bg-amber-400" in resp.text
+
+    def test_recent_company_shows_emerald(self, client: TestClient, db_session: Session, test_user: User):
+        """Company with <14 day old activity shows emerald indicator."""
+
+        c = Company(
+            name="Recent Corp",
+            is_active=True,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=5),
+        )
+        db_session.add(c)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/customers")
+        assert "bg-emerald-400" in resp.text
+
     def test_default_sort_is_staleness(self, client: TestClient, db_session: Session, test_user: User):
         """Customer list sorts by staleness (nulls first, then oldest)."""
-        from app.models.crm import Company
 
         c_new = Company(name="AAA New", is_active=True, last_activity_at=None)
         c_old = Company(
