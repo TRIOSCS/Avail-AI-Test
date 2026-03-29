@@ -44,3 +44,13 @@ class TestActivityQualityColumns:
         db_session.add(log)
         db_session.flush()
         assert log.quality_assessed_at == now
+
+
+class TestQualityJobRegistration:
+    """Test quality jobs are registered."""
+
+    def test_register_quality_jobs_exists(self):
+        """register_quality_jobs function exists."""
+        from app.jobs.quality_jobs import register_quality_jobs
+
+        assert callable(register_quality_jobs)
