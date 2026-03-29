@@ -14,7 +14,7 @@ cryptography==46.0.5
 # Observability
 loguru==0.7.3
 prometheus-fastapi-instrumentator==7.1.0
-sentry-sdk[fastapi]==2.54.0
+sentry-sdk[fastapi]==2.55.0
 # Rate limiting
 slowapi==0.1.9
 # Fuzzy matching
