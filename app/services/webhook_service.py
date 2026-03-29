@@ -491,16 +491,22 @@ async def handle_teams_notification(payload: dict, db: Session, validated: list[
     from app.services.activity_service import _update_last_activity, match_email_to_entity
     from app.utils.graph_client import GraphClient
 
+    processed = 0
+    skipped = 0
+    errors = 0
+
     for notif in validated:
         user = notif["_user"]
 
         resource = notif.get("resource", "")
         change_type = notif.get("changeType")
         if change_type != "created":
+            skipped += 1
             continue
 
         token = await get_valid_token(user, db)
         if not token:
+            errors += 1
             continue
 
         gc = GraphClient(token)
@@ -513,15 +519,19 @@ async def handle_teams_notification(payload: dict, db: Session, validated: list[
             )
         except Exception as e:
             logger.error(f"Failed to fetch Teams message: {e}")
+            errors += 1
             continue
 
         message_id = msg.get("id")
         if not message_id:
+            logger.debug(f"Teams message missing ID for resource {resource}, skipping")
+            skipped += 1
             continue
 
         # Dedup via external_id
         existing = db.query(ActivityLog).filter(ActivityLog.external_id == message_id).first()
         if existing:
+            skipped += 1
             continue
 
         # Resolve sender email from Azure AD user ID
@@ -530,15 +540,19 @@ async def handle_teams_notification(payload: dict, db: Session, validated: list[
         sender_name = from_user.get("displayName", "")
 
         if not sender_id:
+            logger.debug(f"Teams message {message_id} has no sender user ID, skipping")
+            skipped += 1
             continue
 
         sender_email = await _resolve_teams_user_email(sender_id, gc)
         if not sender_email:
+            skipped += 1
             continue
 
         # Determine direction — skip our own outbound messages
         user_email = user.email.lower()
         if sender_email == user_email:
+            skipped += 1
             continue
 
         # Match to CRM entity
@@ -570,6 +584,7 @@ async def handle_teams_notification(payload: dict, db: Session, validated: list[
             subject=subject,
         )
         db.add(record)
+        processed += 1
 
         # Update last_activity_at
         if company_id:
@@ -577,6 +592,8 @@ async def handle_teams_notification(payload: dict, db: Session, validated: list[
         elif vendor_card_id:
             _update_last_activity({"type": "vendor", "id": vendor_card_id}, db)
 
+    if processed or errors:
+        logger.info(f"Teams batch: {processed} processed, {skipped} skipped, {errors} errors out of {len(validated)}")
     db.commit()
 
 
