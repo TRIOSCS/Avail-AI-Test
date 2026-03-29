@@ -150,7 +150,7 @@ def _sanitize_html_filter(value: str) -> str:
 templates.env.filters["sanitize_html"] = _sanitize_html_filter
 
 
-def _sub_mpns_filter(subs):
+def _sub_mpns_filter(subs: list | None) -> list[str]:
     """Extract clean uppercase MPN strings from substitutes.
 
     Handles both string-format and dict-format subs. Delegates to normalize_mpn() for
@@ -160,12 +160,20 @@ def _sub_mpns_filter(subs):
 
     if not subs:
         return []
+
     result = []
     for s in subs:
-        raw = s if isinstance(s, str) else (s.get("mpn") or "") if isinstance(s, dict) else ""
+        if isinstance(s, str):
+            raw = s
+        elif isinstance(s, dict):
+            raw = s.get("mpn") or ""
+        else:
+            raw = ""
+
         mpn = normalize_mpn(raw)
         if mpn:
             result.append(mpn)
+
     return result
 
 

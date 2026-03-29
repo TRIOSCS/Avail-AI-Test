@@ -66,6 +66,29 @@ from ...vendor_utils import normalize_vendor_name
 router = APIRouter(tags=["requisitions"])
 
 
+def _dedupe_substitutes(subs: list[str], primary_mpn: str) -> list[dict]:
+    """Deduplicate and normalize substitutes, store as dicts with mpn + manufacturer.
+
+    Args:
+        subs: List of raw substitute MPN strings
+        primary_mpn: Primary MPN to exclude from duplicates
+
+    Returns:
+        List of dicts with {"mpn": normalized_mpn, "manufacturer": ""}
+    """
+    seen_keys = {normalize_mpn_key(primary_mpn)}
+    deduped = []
+
+    for s in subs:
+        ns = normalize_mpn(s) or s.strip()
+        key = normalize_mpn_key(ns)
+        if key and key not in seen_keys:
+            seen_keys.add(key)
+            deduped.append({"mpn": ns, "manufacturer": ""})
+
+    return deduped
+
+
 def _annotate_buyer_outcomes(req: Requisition, results: dict, db: Session) -> None:
     """Annotate each lead with buyer outcome for quick triage progress.
 
@@ -374,14 +397,7 @@ async def add_requirements(
                 raise HTTPException(422, str(exc))
             skipped.append({"index": idx, "error": str(exc)})
             continue
-        seen_keys = {normalize_mpn_key(parsed.primary_mpn)}
-        deduped_subs = []
-        for s in parsed.substitutes:
-            ns = normalize_mpn(s) or s.strip()
-            key = normalize_mpn_key(ns)
-            if key and key not in seen_keys:
-                seen_keys.add(key)
-                deduped_subs.append({"mpn": ns, "manufacturer": ""})
+        deduped_subs = _dedupe_substitutes(parsed.substitutes, parsed.primary_mpn)
         mat_card = None
         try:
             nested = db.begin_nested()
@@ -713,14 +729,7 @@ async def update_requirement(
     if data.target_qty is not None:
         r.target_qty = data.target_qty
     if data.substitutes is not None:
-        seen_keys = {normalize_mpn_key(r.primary_mpn)}
-        deduped = []
-        for s in data.substitutes:
-            ns = normalize_mpn(s) or s.strip()
-            key = normalize_mpn_key(ns)
-            if key and key not in seen_keys:
-                seen_keys.add(key)
-                deduped.append({"mpn": ns, "manufacturer": ""})
+        deduped = _dedupe_substitutes(data.substitutes, r.primary_mpn)
         r.substitutes = deduped[:20]
     if data.target_price is not None:
         r.target_price = data.target_price
