@@ -120,6 +120,7 @@ class Requirement(Base):
     priority_score = Column(Float, nullable=True)  # AI-computed 0-100 for sort order
     assigned_buyer_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_searched_at = Column(DateTime)
 
     requisition = relationship("Requisition", back_populates="requirements")
     attachments = relationship("RequirementAttachment", back_populates="requirement", cascade="all, delete-orphan")
