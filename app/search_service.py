@@ -238,6 +238,10 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
 
         write_db.commit()
 
+        # Stamp per-requirement search timestamp
+        write_req.last_searched_at = now
+        write_db.commit()
+
         # Expunge sightings so they remain usable after session close
         for s in sightings:
             write_db.expunge(s)
