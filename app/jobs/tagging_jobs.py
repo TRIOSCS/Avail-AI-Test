@@ -38,10 +38,10 @@ def register_tagging_jobs(scheduler, settings):
         name="Mine sighting manufacturer data for untagged cards",
     )
 
-    # Claude Haiku AI classification — runs every 30 min, 500 cards per batch
+    # Claude Haiku AI classification — reduced from 30min to 4h (2026-03-26)
     scheduler.add_job(
         _job_ai_tagging,
-        IntervalTrigger(minutes=30),
+        IntervalTrigger(hours=4),
         id="ai_tagging",
         name="Classify untagged cards via Claude Haiku",
     )

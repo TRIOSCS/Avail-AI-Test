@@ -10,7 +10,6 @@ Depends on: services/knowledge_service.py
 from datetime import datetime, timedelta, timezone
 
 from apscheduler.triggers.cron import CronTrigger
-from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
 from ..scheduler import _traced_job
@@ -18,12 +17,14 @@ from ..scheduler import _traced_job
 
 def register_knowledge_jobs(scheduler, settings):
     """Register knowledge ledger background jobs."""
-    scheduler.add_job(
-        _job_refresh_insights,
-        IntervalTrigger(hours=6),
-        id="knowledge_refresh_insights",
-        name="Refresh AI insights for active requisitions",
-    )
+    # DISABLED (2026-03-26) — Knowledge insights not active in UI; heavy Anthropic
+    # API cost (~141 Sonnet calls w/ extended thinking every 6h).
+    # scheduler.add_job(
+    #     _job_refresh_insights,
+    #     IntervalTrigger(hours=6),
+    #     id="knowledge_refresh_insights",
+    #     name="Refresh AI insights for active requisitions",
+    # )
     scheduler.add_job(
         _job_expire_stale,
         CronTrigger(hour=3, minute=0),
