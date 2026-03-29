@@ -4,10 +4,11 @@ Called by: pytest
 Depends on: conftest.py fixtures, app models
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 from app.models.sourcing import Requirement, Requisition
+from app.models.vendor_sighting_summary import VendorSightingSummary
 
 
 class TestRequirementLastSearchedAt:
@@ -72,3 +73,75 @@ class TestSearchRequirementStamp:
 
         db_session.refresh(r)
         assert r.last_searched_at is not None
+
+
+def _seed_requirement(db_session, mpn="RATE-001", last_searched_at=None):
+    """Create a requisition + requirement for testing."""
+    req = Requisition(name="Rate Test RFQ", status="active", customer_name="Acme")
+    db_session.add(req)
+    db_session.flush()
+    r = Requirement(
+        requisition_id=req.id,
+        primary_mpn=mpn,
+        manufacturer="TestMfr",
+        target_qty=100,
+        sourcing_status="open",
+        last_searched_at=last_searched_at,
+    )
+    db_session.add(r)
+    db_session.flush()
+    # Add a vendor summary so detail panel renders
+    vs = VendorSightingSummary(
+        requirement_id=r.id,
+        vendor_name="Test Vendor",
+        estimated_qty=200,
+        listing_count=1,
+        score=50.0,
+        tier="Good",
+    )
+    db_session.add(vs)
+    db_session.commit()
+    return req, r
+
+
+class TestSingleRefreshRateGuard:
+    def test_refresh_returns_toast_when_recently_searched(self, client, db_session):
+        """Refresh within 5 minutes should return info toast, not re-search."""
+        now = datetime.now(timezone.utc)
+        _, r = _seed_requirement(db_session, last_searched_at=now)
+        resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")
+        assert resp.status_code == 200
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "Already searched" in trigger
+
+    def test_refresh_proceeds_when_not_recently_searched(self, client, db_session):
+        """Refresh after 5 minutes should proceed normally."""
+        old = datetime.now(timezone.utc) - timedelta(minutes=10)
+        _, r = _seed_requirement(db_session, last_searched_at=old)
+        resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")
+        assert resp.status_code == 200
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "Already searched" not in trigger
+
+    def test_refresh_proceeds_when_never_searched(self, client, db_session):
+        """First-time search should always proceed."""
+        _, r = _seed_requirement(db_session, last_searched_at=None)
+        resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")
+        assert resp.status_code == 200
+        trigger = resp.headers.get("HX-Trigger", "")
+        assert "Already searched" not in trigger
+
+
+class TestBatchRefreshRateGuard:
+    def test_batch_skips_recently_searched(self, client, db_session):
+        """Batch refresh should skip recently-searched requirements."""
+        now = datetime.now(timezone.utc)
+        _, r1 = _seed_requirement(db_session, mpn="BATCH-001", last_searched_at=now)
+        old = datetime.now(timezone.utc) - timedelta(minutes=10)
+        _, r2 = _seed_requirement(db_session, mpn="BATCH-002", last_searched_at=old)
+        resp = client.post(
+            "/v2/partials/sightings/batch-refresh",
+            data={"requirement_ids": f"[{r1.id}, {r2.id}]"},
+        )
+        assert resp.status_code == 200
+        assert "skipped" in resp.text.lower() or "fresh" in resp.text.lower()

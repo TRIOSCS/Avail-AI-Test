@@ -539,6 +539,18 @@ async def sightings_refresh(
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
 
+    # Rate guard: skip if searched within 5 minutes
+    now = datetime.now(timezone.utc)
+    _last = requirement.last_searched_at
+    if _last is not None and _last.tzinfo is None:
+        _last = _last.replace(tzinfo=timezone.utc)
+    if _last and (now - _last).total_seconds() < 300:
+        response = await sightings_detail(request, requirement_id, db, user)
+        response.headers["HX-Trigger"] = (
+            '{"showToast": {"message": "Already searched within the last 5 minutes.", "type": "info"}}'
+        )
+        return response
+
     refresh_failed = False
     try:
         from ..search_service import search_requirement
@@ -547,6 +559,10 @@ async def sightings_refresh(
     except Exception:
         logger.warning("Search refresh failed for requirement %s", requirement_id, exc_info=True)
         refresh_failed = True
+
+    if not refresh_failed:
+        requirement.last_searched_at = now
+        db.commit()
 
     await broker.publish(
         f"user:{user.id}",
@@ -586,17 +602,30 @@ async def sightings_batch_refresh(
 
     success = 0
     failed = 0
+    skipped = 0
+    now = datetime.now(timezone.utc)
     for rid in requirement_ids:
         req_obj = reqs_by_id.get(int(rid))
         if not req_obj:
             failed += 1
             continue
+        # Skip if searched within 5 minutes
+        last = req_obj.last_searched_at
+        if last is not None and last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        if last and (now - last).total_seconds() < 300:
+            skipped += 1
+            continue
         try:
             await search_requirement(req_obj, db)
+            req_obj.last_searched_at = now
             success += 1
         except Exception:
             logger.warning("Batch refresh failed for requirement %s", rid, exc_info=True)
             failed += 1
+
+    if success:
+        db.commit()
 
     # Notify all connected clients that these requirements changed
     for rid in requirement_ids:
@@ -606,10 +635,16 @@ async def sightings_batch_refresh(
             json.dumps({"requirement_id": int(rid)}),
         )
 
-    msg = f"Refreshed {success}/{success + failed} requirements."
+    parts = []
+    total = success + failed + skipped
+    parts.append(f"Searched {success}/{total} requirements.")
+    if skipped:
+        parts.append(f"{skipped} skipped (already fresh).")
     if failed:
-        msg += f" {failed} failed."
-    return _oob_toast(msg, "warning" if failed else "success")
+        parts.append(f"{failed} failed.")
+    msg = " ".join(parts)
+    level = "warning" if failed else ("info" if skipped and not success else "success")
+    return _oob_toast(msg, level)
 
 
 @router.post("/v2/partials/sightings/batch-assign", response_class=HTMLResponse)
