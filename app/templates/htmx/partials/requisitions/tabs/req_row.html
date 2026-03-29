@@ -13,7 +13,7 @@
            :value="{{ r.id }}"
            @change="$el.checked ? selectedReqIds.push({{ r.id }}) : selectedReqIds = selectedReqIds.filter(id => id !== {{ r.id }})">
   </td>
-  <td data-col-key="mpn" class="px-4 py-2.5 text-sm font-mono font-medium text-gray-900" x-show="!editing" x-cloak>
+  <td data-col-key="mpn" class="px-4 py-2.5 text-sm font-mono font-medium text-gray-900 uppercase" x-show="!editing" x-cloak>
     {{ r.primary_mpn or "—" }}
   </td>
   <td data-col-key="brand" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>{{ r.brand or "—" }}</td>
@@ -37,11 +37,16 @@
   <td data-col-key="hardware_codes" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>{{ r.hardware_codes or "—" }}</td>
   <td data-col-key="packaging" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>{{ r.packaging or "—" }}</td>
   <td data-col-key="notes" class="px-4 py-2.5 text-sm text-gray-500 max-w-[200px] truncate" x-show="!editing" x-cloak title="{{ r.notes or '' }}">{{ r.notes or "—" }}</td>
-  <td data-col-key="substitutes" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>
-    {% if r.substitutes %}
-      <span class="px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-amber-50 text-amber-600 border border-amber-200" title="{{ r.substitutes|join(', ') }}">+{{ r.substitutes|length }} sub{{ 's' if r.substitutes|length != 1 }}</span>
+  <td data-col-key="substitutes" class="px-4 py-2.5 text-sm" x-show="!editing" x-cloak>
+    {% set mpns = r.substitutes|sub_mpns %}
+    {% if mpns %}
+      <div class="flex flex-wrap gap-1">
+        {% for mpn in mpns %}
+        <span class="px-1.5 py-0.5 text-[10px] font-mono font-medium rounded bg-amber-50 text-amber-700 border border-amber-200">{{ mpn }}</span>
+        {% endfor %}
+      </div>
     {% else %}
-      —
+      <span class="text-gray-400">—</span>
     {% endif %}
   </td>
   <td data-col-key="status" class="px-4 py-2.5" x-show="!editing" x-cloak>
