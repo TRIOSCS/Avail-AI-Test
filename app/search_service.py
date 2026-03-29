@@ -236,9 +236,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         fresh_vendors = {s.vendor_name.lower() for s in sightings}
         history = _get_material_history(list(card_ids), fresh_vendors, write_db)
 
-        write_db.commit()
-
-        # Stamp per-requirement search timestamp
+        # Stamp per-requirement search timestamp and commit all changes
         write_req.last_searched_at = now
         write_db.commit()
 
