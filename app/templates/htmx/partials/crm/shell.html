@@ -12,7 +12,7 @@
             hx-get="/v2/partials/customers?hx_target=%23crm-tab-content&push_url_base=/v2/crm"
             hx-target="#crm-tab-content"
             hx-swap="innerHTML"
-            hx-trigger="{{ 'load, click once' if default_tab == 'customers' else 'click once' }}">
+            hx-trigger="{{ 'load, click' if default_tab == 'customers' else 'click' }}">
       Customers
     </button>
     <button @click="tab = 'vendors'"
@@ -21,7 +21,7 @@
             hx-get="/v2/partials/vendors?hx_target=%23crm-tab-content&push_url_base=/v2/crm"
             hx-target="#crm-tab-content"
             hx-swap="innerHTML"
-            hx-trigger="{{ 'load, click once' if default_tab == 'vendors' else 'click once' }}">
+            hx-trigger="{{ 'load, click' if default_tab == 'vendors' else 'click' }}">
       Vendors
     </button>
   </div>
