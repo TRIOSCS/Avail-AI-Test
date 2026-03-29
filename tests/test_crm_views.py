@@ -68,6 +68,22 @@ class TestVendorListEmbedding:
         assert 'hx-target="#main-content"' in resp.text
 
 
+class TestCustomerListEmbedding:
+    """Test customer list can be embedded in CRM shell."""
+
+    def test_customer_list_with_custom_target(self, client: TestClient):
+        """Customer list respects hx_target query parameter."""
+        resp = client.get("/v2/partials/customers?hx_target=%23crm-tab-content")
+        assert resp.status_code == 200
+        assert 'hx-target="#crm-tab-content"' in resp.text
+
+    def test_customer_list_default_target(self, client: TestClient):
+        """Customer list defaults to #main-content when no override."""
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        assert 'hx-target="#main-content"' in resp.text
+
+
 class TestCustomerStaleness:
     """Test staleness tier computation and display."""
 

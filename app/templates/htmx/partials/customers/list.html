@@ -12,15 +12,16 @@
   </div>
 
   {# Search bar #}
-  <div class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
+  <form id="customer-filters" class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
     <input type="hidden" name="hx_target" value="{{ hx_target|default('#main-content') }}">
     <input type="hidden" name="push_url_base" value="{{ push_url_base|default('/v2/customers') }}">
     <input aria-label="Search customers" type="text" name="search" value="{{ search }}" placeholder="Search customers..."
            hx-get="/v2/partials/customers" hx-target="{{ hx_target|default('#main-content') }}" hx-push-url="{{ push_url_base|default('/v2/customers') }}"
            hx-swap="morph"
+           hx-include="#customer-filters"
            hx-trigger="keyup changed delay:300ms"
            class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
-  </div>
+  </form>
 
   {# Table #}
   {% if companies %}
@@ -47,7 +48,7 @@
               preload="mouseover">
             <td class="px-2 py-3">
               {% set dot_colors = {"overdue": "bg-rose-500", "due_soon": "bg-amber-400", "recent": "bg-emerald-400", "new": "bg-brand-300"} %}
-              <span class="w-3 h-3 rounded-full {{ dot_colors.get(c.staleness, 'bg-gray-300') }} block" title="{{ c.staleness|replace('_', ' ')|title }}"></span>
+              <span class="w-3 h-3 rounded-full {{ dot_colors.get(c.staleness, 'bg-gray-300') }} block" role="img" aria-label="{{ c.staleness|replace('_', ' ')|title }}" title="{{ c.staleness|replace('_', ' ')|title }}"></span>
             </td>
             <td class="px-4 py-3">
               <div class="flex items-center">
@@ -103,14 +104,16 @@
   <div class="mt-4 flex justify-center">
     <nav class="flex gap-1 items-center">
       {% if offset > 0 %}
-      <a hx-get="/v2/partials/customers?offset={{ offset - limit }}&search={{ search }}&hx_target={{ hx_target|default('#main-content')|urlencode }}&push_url_base={{ push_url_base|default('/v2/customers')|urlencode }}"
+      <a hx-get="/v2/partials/customers?offset={{ offset - limit }}"
          hx-target="{{ hx_target|default('#main-content') }}"
+         hx-include="#customer-filters"
          class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Prev</a>
       {% endif %}
       <span class="px-3 py-1.5 text-sm text-gray-500">{{ offset + 1 }}&ndash;{{ [offset + limit, total]|min }} of {{ total }}</span>
       {% if offset + limit < total %}
-      <a hx-get="/v2/partials/customers?offset={{ offset + limit }}&search={{ search }}&hx_target={{ hx_target|default('#main-content')|urlencode }}&push_url_base={{ push_url_base|default('/v2/customers')|urlencode }}"
+      <a hx-get="/v2/partials/customers?offset={{ offset + limit }}"
          hx-target="{{ hx_target|default('#main-content') }}"
+         hx-include="#customer-filters"
          class="px-3 py-1.5 text-sm bg-white border border-gray-200 rounded-lg hover:bg-brand-50 cursor-pointer">Next</a>
       {% endif %}
     </nav>
