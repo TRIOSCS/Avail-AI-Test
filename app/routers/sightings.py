@@ -75,11 +75,14 @@ _SORT_COLUMNS = {
 }
 
 
-REFRESH_RATE_LIMIT_SECONDS = 300  # 5-minute cooldown between searches
+from typing import Final
+
+REFRESH_RATE_LIMIT_SECONDS: Final[int] = 300  # Per-requirement cooldown between manual searches
 
 
 def _within_rate_limit(last_searched_at: datetime | None, now: datetime) -> bool:
-    """Return True if the requirement was searched within the rate-limit window.
+    """Return True if the requirement was searched too recently (within cooldown
+    window).
 
     Handles timezone-naive datetimes from SQLite (test environment).
     """
@@ -88,6 +91,8 @@ def _within_rate_limit(last_searched_at: datetime | None, now: datetime) -> bool
     ts = last_searched_at
     if ts.tzinfo is None:
         ts = ts.replace(tzinfo=timezone.utc)
+    if now.tzinfo is None:
+        now = now.replace(tzinfo=timezone.utc)
     return (now - ts).total_seconds() < REFRESH_RATE_LIMIT_SECONDS
 
 
@@ -549,25 +554,27 @@ async def sightings_refresh(
 ):
     """Re-run search pipeline for a requirement.
 
-    Returns updated detail panel.
+    Returns info toast without re-searching if called within the cooldown window.
+    Otherwise returns updated detail panel.
     """
+    from ..search_service import search_requirement
+
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
 
-    # Rate guard: skip if searched recently
+    # Rate guard: return cached detail with info toast if searched recently
     now = datetime.now(timezone.utc)
+    cooldown_minutes = REFRESH_RATE_LIMIT_SECONDS // 60
     if _within_rate_limit(requirement.last_searched_at, now):
         response = await sightings_detail(request, requirement_id, db, user)
         response.headers["HX-Trigger"] = (
-            '{"showToast": {"message": "Already searched within the last 5 minutes.", "type": "info"}}'
+            f'{{"showToast": {{"message": "Already searched within the last {cooldown_minutes} minutes.", "type": "info"}}}}'
         )
         return response
 
     refresh_failed = False
     try:
-        from ..search_service import search_requirement
-
         await search_requirement(requirement, db)
     except Exception:
         logger.warning("Search refresh failed for requirement %s", requirement_id, exc_info=True)
@@ -593,12 +600,20 @@ async def sightings_batch_refresh(
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
-    """Refresh sightings for multiple requirements."""
+    """Refresh sightings for multiple requirements.
+
+    Skips requirements searched within the cooldown window.
+    """
     from ..search_service import search_requirement
 
     form = await request.form()
     req_ids_raw = form.get("requirement_ids", "[]")
-    requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+    try:
+        requirement_ids = json.loads(req_ids_raw) if isinstance(req_ids_raw, str) else []
+        if not isinstance(requirement_ids, list):
+            requirement_ids = []
+    except (json.JSONDecodeError, ValueError):
+        raise HTTPException(status_code=400, detail="Invalid requirement_ids format")
 
     if len(requirement_ids) > MAX_BATCH_SIZE:
         raise HTTPException(status_code=400, detail=f"Maximum {MAX_BATCH_SIZE} requirements per batch")
@@ -645,7 +660,12 @@ async def sightings_batch_refresh(
     if failed:
         parts.append(f"{failed} failed.")
     msg = " ".join(parts)
-    level = "warning" if failed else ("info" if skipped and not success else "success")
+    if failed:
+        level = "warning"
+    elif skipped and not success:
+        level = "info"
+    else:
+        level = "success"
     return _oob_toast(msg, level)
 
 
