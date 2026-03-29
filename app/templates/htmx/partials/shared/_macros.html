@@ -168,3 +168,38 @@ Usage:
   {% endif %}
 </div>
 {%- endmacro %}
+
+
+{# ── Search Button ───────────────────────────────────────────────── #}
+
+{% macro search_button(requirement, target="#sightings-detail", swap="innerHTML") %}
+{# Manual search trigger with timestamp and magnifier icon.
+   requirement: Requirement object (reads .id and .last_searched_at)
+   target: HTMX target selector (varies by page context)
+   swap: HTMX swap strategy
+#}
+<div class="flex items-center gap-2">
+  <button hx-post="/v2/partials/sightings/{{ requirement.id }}/refresh"
+          hx-target="{{ target }}"
+          hx-swap="{{ swap }}"
+          hx-indicator="#search-spinner-{{ requirement.id }}"
+          data-loading-disable
+          class="inline-flex items-center gap-1 px-2.5 py-1 rounded-lg border border-gray-200 text-xs font-medium text-gray-600 hover:bg-gray-50 transition-colors">
+    <svg id="search-spinner-{{ requirement.id }}" class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M21 21l-5.197-5.197m0 0A7.5 7.5 0 105.196 5.196a7.5 7.5 0 0010.607 10.607z"/>
+    </svg>
+    <span class="htmx-indicator">
+      <svg class="h-3.5 w-3.5 animate-spin" fill="none" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"></path>
+      </svg>
+    </span>
+    Search
+  </button>
+  {% if requirement.last_searched_at %}
+  <span class="text-[10px] text-gray-400">{{ requirement.last_searched_at|timeago }}</span>
+  {% else %}
+  <span class="text-[10px] text-gray-400 italic">Never searched</span>
+  {% endif %}
+</div>
+{%- endmacro %}
