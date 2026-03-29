@@ -102,3 +102,49 @@ class TestMPNUppercaseValidator:
         db_session.add(r)
         db_session.flush()
         assert r.primary_mpn == "ABC123"
+
+
+from app.template_env import _sub_mpns_filter
+
+
+class TestSubMpnsFilter:
+    def test_empty_input(self):
+        assert _sub_mpns_filter(None) == []
+        assert _sub_mpns_filter([]) == []
+
+    def test_string_subs(self):
+        result = _sub_mpns_filter(["ne5559", "esp32-wrover-e"])
+        assert result == ["NE5559", "ESP32-WROVER-E"]
+
+    def test_dict_subs(self):
+        result = _sub_mpns_filter(
+            [
+                {"mpn": "17p9905", "manufacturer": "TI"},
+                {"mpn": "SL9bt", "manufacturer": ""},
+            ]
+        )
+        assert result == ["17P9905", "SL9BT"]
+
+    def test_mixed_format(self):
+        result = _sub_mpns_filter(
+            [
+                "abc123",
+                {"mpn": "def456", "manufacturer": "Analog"},
+            ]
+        )
+        assert result == ["ABC123", "DEF456"]
+
+    def test_skips_empty_mpn(self):
+        result = _sub_mpns_filter(
+            [
+                {"mpn": "", "manufacturer": "TI"},
+                {"mpn": None, "manufacturer": ""},
+                "",
+            ]
+        )
+        assert result == []
+
+    def test_skips_short_mpn(self):
+        """normalize_mpn returns None for MPNs shorter than 3 chars."""
+        result = _sub_mpns_filter(["AB", {"mpn": "XY", "manufacturer": ""}])
+        assert result == []
