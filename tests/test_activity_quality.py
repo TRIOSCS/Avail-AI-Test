@@ -51,10 +51,8 @@ class TestActivityQualityColumns:
 class TestActivityQualityService:
     """Test AI quality scoring service."""
 
-    def test_score_activity_writes_quality_data(self, db_session: Session, test_user: User):
+    async def test_score_activity_writes_quality_data(self, db_session: Session, test_user: User):
         """score_activity writes quality fields back to ActivityLog."""
-        import asyncio
-
         from app.services.activity_quality_service import score_activity
 
         log = ActivityLog(
@@ -84,7 +82,7 @@ class TestActivityQualityService:
             new_callable=AsyncMock,
             return_value=mock_result,
         ):
-            asyncio.get_event_loop().run_until_complete(score_activity(log_id, db_session))
+            await score_activity(log_id, db_session)
 
         db_session.refresh(log)
         assert log.quality_score == 82.0
@@ -93,10 +91,8 @@ class TestActivityQualityService:
         assert log.quality_assessed_at is not None
         assert "LM317" in log.summary
 
-    def test_score_activity_skips_already_scored(self, db_session: Session, test_user: User):
+    async def test_score_activity_skips_already_scored(self, db_session: Session, test_user: User):
         """Already-scored activities are skipped."""
-        import asyncio
-
         from app.services.activity_quality_service import score_activity
 
         now = datetime.now(timezone.utc)
@@ -114,7 +110,7 @@ class TestActivityQualityService:
             "app.utils.claude_client.claude_structured",
             new_callable=AsyncMock,
         ) as mock_claude:
-            asyncio.get_event_loop().run_until_complete(score_activity(log.id, db_session))
+            await score_activity(log.id, db_session)
             mock_claude.assert_not_called()
 
 

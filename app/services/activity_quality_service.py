@@ -9,6 +9,7 @@ Depends on: app/utils/claude_client.py (claude_structured), app/models/intellige
 
 from datetime import datetime, timedelta, timezone
 
+import sqlalchemy as sa
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -153,7 +154,10 @@ async def score_unscored_activities(db: Session, batch_size: int = 50) -> int:
         db.query(ActivityLog)
         .filter(
             ActivityLog.quality_assessed_at.is_(None),
-            ActivityLog.event_type.notin_(["email"]),
+            sa.or_(
+                ActivityLog.event_type.is_(None),
+                ActivityLog.event_type.notin_(["email"]),
+            ),
             ActivityLog.created_at >= datetime.now(timezone.utc) - timedelta(days=7),
         )
         .order_by(ActivityLog.created_at.desc())
