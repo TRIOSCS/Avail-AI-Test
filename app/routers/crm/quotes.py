@@ -450,6 +450,13 @@ async def quote_result(
             subj = f"Quote won: {customer} — ${quote.subtotal or 0:,.0f}"
         else:
             subj = f"Quote lost: {customer} — {payload.reason or 'no reason'}"
+        # Resolve company_id for activity tracking
+        quote_company_id = None
+        if req and req.customer_site_id:
+            _site = db.get(CustomerSite, req.customer_site_id)
+            if _site:
+                quote_company_id = _site.company_id
+
         db.add(
             ActivityLog(
                 user_id=notify_user_id,
@@ -459,8 +466,14 @@ async def quote_result(
                 quote_id=quote.id,
                 contact_name=customer,
                 subject=subj,
+                company_id=quote_company_id,
             )
         )
+
+        if quote_company_id:
+            from app.services.activity_service import _update_last_activity
+
+            _update_last_activity({"type": "company", "id": quote_company_id}, db)
 
     db.commit()
     return {
