@@ -115,6 +115,9 @@ async def create_teams_subscription(user: User, db: Session) -> GraphSubscriptio
     from app.scheduler import get_valid_token
     from app.utils.graph_client import GraphClient
 
+    # Advisory lock to prevent duplicate subscription creation under concurrent calls
+    db.query(User).filter(User.id == user.id).with_for_update().first()
+
     # Check for existing active Teams subscription
     existing = (
         db.query(GraphSubscription)
@@ -453,10 +456,11 @@ async def handle_notification(payload: dict, db: Session, validated: list[dict] 
 
 
 _teams_user_email_cache: dict[str, str] = {}
+_TEAMS_CACHE_MAX = 500
 
 
 async def _resolve_teams_user_email(user_id_guid: str, gc) -> str | None:
-    """Resolve Azure AD user GUID to email address."""
+    """Resolve Azure AD user GUID to email address, with bounded cache."""
     if user_id_guid in _teams_user_email_cache:
         return _teams_user_email_cache[user_id_guid]
 
@@ -467,6 +471,8 @@ async def _resolve_teams_user_email(user_id_guid: str, gc) -> str | None:
         )
         email = user_data.get("mail") or user_data.get("userPrincipalName")
         if email:
+            if len(_teams_user_email_cache) >= _TEAMS_CACHE_MAX:
+                _teams_user_email_cache.clear()
             _teams_user_email_cache[user_id_guid] = email.lower()
             return email.lower()
     except Exception as e:
