@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     Column,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -286,6 +287,12 @@ class ActivityLog(Base):
     event_type = Column(String(30))  # "email" | "call" | "note" | "meeting"
     summary = Column(String(500))
     details = Column(JSON)
+
+    # AI Quality Scoring (Phase 2b)
+    quality_score = Column(Float)
+    quality_classification = Column(String(30))
+    quality_assessed_at = Column(DateTime)
+    is_meaningful = Column(Boolean)
 
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
