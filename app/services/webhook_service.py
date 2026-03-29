@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.constants import UserRole
-from app.models import GraphSubscription, User
+from app.models import ActivityLog, GraphSubscription, User
 
 # Graph webhook subscriptions for mail expire after max 3 days (4230 min)
 SUBSCRIPTION_LIFETIME_HOURS = 70  # ~3 days, renew before expiry
@@ -445,6 +445,133 @@ async def handle_notification(payload: dict, db: Session, validated: list[dict] 
                 logger.info(f"Webhook-triggered poll [{user.email}]: {len(new_responses)} new response(s)")
         except Exception as e:
             logger.error(f"Webhook-triggered poll failed for {user.email}: {e}")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  TEAMS NOTIFICATION HANDLER
+# ═══════════════════════════════════════════════════════════════════════
+
+
+_teams_user_email_cache: dict[str, str] = {}
+
+
+async def _resolve_teams_user_email(user_id_guid: str, gc) -> str | None:
+    """Resolve Azure AD user GUID to email address."""
+    if user_id_guid in _teams_user_email_cache:
+        return _teams_user_email_cache[user_id_guid]
+
+    try:
+        user_data = await gc.get_json(
+            f"/users/{user_id_guid}",
+            params={"$select": "mail,userPrincipalName"},
+        )
+        email = user_data.get("mail") or user_data.get("userPrincipalName")
+        if email:
+            _teams_user_email_cache[user_id_guid] = email.lower()
+            return email.lower()
+    except Exception as e:
+        logger.warning(f"Failed to resolve Teams user {user_id_guid}: {e}")
+
+    return None
+
+
+async def handle_teams_notification(payload: dict, db: Session, validated: list[dict]):
+    """Process Teams chat message notifications.
+
+    For each validated notification, fetch the full message, resolve the sender to a CRM
+    entity, and create an ActivityLog entry.
+    """
+    from app.scheduler import get_valid_token
+    from app.services.activity_service import _update_last_activity, match_email_to_entity
+    from app.utils.graph_client import GraphClient
+
+    for notif in validated:
+        user = notif["_user"]
+
+        resource = notif.get("resource", "")
+        change_type = notif.get("changeType")
+        if change_type != "created":
+            continue
+
+        token = await get_valid_token(user, db)
+        if not token:
+            continue
+
+        gc = GraphClient(token)
+
+        # Fetch full message
+        try:
+            msg = await gc.get_json(
+                f"/{resource}",
+                params={"$select": "id,body,from,createdDateTime,chatId"},
+            )
+        except Exception as e:
+            logger.error(f"Failed to fetch Teams message: {e}")
+            continue
+
+        message_id = msg.get("id")
+        if not message_id:
+            continue
+
+        # Dedup via external_id
+        existing = db.query(ActivityLog).filter(ActivityLog.external_id == message_id).first()
+        if existing:
+            continue
+
+        # Resolve sender email from Azure AD user ID
+        from_user = msg.get("from", {}).get("user", {})
+        sender_id = from_user.get("id")
+        sender_name = from_user.get("displayName", "")
+
+        if not sender_id:
+            continue
+
+        sender_email = await _resolve_teams_user_email(sender_id, gc)
+        if not sender_email:
+            continue
+
+        # Determine direction — skip our own outbound messages
+        user_email = user.email.lower()
+        if sender_email == user_email:
+            continue
+
+        # Match to CRM entity
+        match = match_email_to_entity(sender_email, db)
+        company_id = None
+        vendor_card_id = None
+        if match:
+            if match["type"] == "company":
+                company_id = match["id"]
+            elif match["type"] == "vendor":
+                vendor_card_id = match["id"]
+
+        # Extract subject from body preview
+        body_content = msg.get("body", {}).get("content", "")
+        subject = body_content[:100].strip() if body_content else "Teams message"
+
+        record = ActivityLog(
+            user_id=user.id,
+            activity_type="teams_message",
+            channel="teams",
+            event_type="message",
+            direction="inbound",
+            external_id=message_id,
+            auto_logged=True,
+            company_id=company_id,
+            vendor_card_id=vendor_card_id,
+            contact_email=sender_email,
+            contact_name=sender_name,
+            subject=subject,
+        )
+        db.add(record)
+
+        # Update last_activity_at
+        if company_id:
+            _update_last_activity({"type": "company", "id": company_id}, db)
+        elif vendor_card_id:
+            _update_last_activity({"type": "vendor", "id": vendor_card_id}, db)
+
+    db.commit()
 
 
 # ═══════════════════════════════════════════════════════════════════════

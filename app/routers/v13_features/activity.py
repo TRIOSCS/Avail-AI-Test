@@ -72,6 +72,42 @@ async def graph_webhook(
     return {"status": "accepted"}
 
 
+@router.post("/api/webhooks/teams")
+@limiter.limit("600/minute")
+async def teams_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Microsoft Graph Teams webhook endpoint.
+
+    Handles validation handshake and Teams chat message notifications.
+    """
+    if settings.mvp_mode:
+        raise HTTPException(404, "Teams tracking not available in MVP mode")
+
+    validation_token = request.query_params.get("validationToken")
+    if validation_token:
+        return PlainTextResponse(content=validation_token, status_code=200)
+
+    try:
+        raw = await request.json()
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(400, "Invalid JSON payload")
+
+    from app.services.webhook_service import handle_teams_notification, validate_notifications
+
+    validated = validate_notifications(raw, db)
+    if not validated:
+        raise HTTPException(403, "No valid notifications")
+
+    try:
+        await handle_teams_notification(raw, db, validated=validated)
+    except Exception:
+        logger.exception("Teams webhook notification processing failed")
+        raise HTTPException(500, "Processing failed")
+    return {"status": "accepted"}
+
+
 # ═══════════════════════════════════════════════════════════════════════
 #  ACTIVITY LOG
 # ═══════════════════════════════════════════════════════════════════════

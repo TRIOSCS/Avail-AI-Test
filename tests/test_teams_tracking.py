@@ -162,3 +162,34 @@ class TestTeamsSubscription:
         assert record is not None
         assert record.resource == "/me/chats/getAllMessages"
         assert record.user_id == test_user.id
+
+
+class TestTeamsWebhook:
+    """Test Teams webhook endpoint."""
+
+    def test_teams_webhook_validation_handshake(self, client):
+        """POST with validationToken returns the token as plain text."""
+        with patch("app.routers.v13_features.activity.settings") as mock_settings:
+            mock_settings.mvp_mode = False
+            resp = client.post(
+                "/api/webhooks/teams?validationToken=test-token-123",
+            )
+        assert resp.status_code == 200
+        assert resp.text == "test-token-123"
+
+    def test_teams_webhook_rejects_unknown_subscription(self, client):
+        """Notification with unknown subscriptionId is rejected."""
+        payload = {
+            "value": [
+                {
+                    "subscriptionId": "nonexistent-sub",
+                    "clientState": "wrong",
+                    "changeType": "created",
+                    "resource": "/chats/abc/messages/123",
+                }
+            ]
+        }
+        with patch("app.routers.v13_features.activity.settings") as mock_settings:
+            mock_settings.mvp_mode = False
+            resp = client.post("/api/webhooks/teams", json=payload)
+        assert resp.status_code == 403
