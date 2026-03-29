@@ -40,7 +40,7 @@
                hx-get="/v2/partials/vendors"
                hx-target="{{ hx_target|default('#main-content') }}"
                hx-swap="morph"
-               hx-push-url="true"
+               hx-push-url="{{ push_url_base|default('/v2/vendors') }}"
                hx-include="#vendor-filters"
                hx-trigger="input delay:300ms"
                class="w-full px-3 py-1.5 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-brand-500 focus:border-brand-500">
@@ -92,7 +92,7 @@
               {% if col_key %}
               <a hx-get="/v2/partials/vendors?sort={{ col_key }}&dir={{ 'asc' if sort == col_key and dir == 'desc' else 'desc' }}"
                  hx-target="{{ hx_target|default('#main-content') }}"
-                 hx-push-url="true"
+                 hx-push-url="{{ push_url_base|default('/v2/vendors') }}"
                  hx-include="#vendor-filters"
                  class="cursor-pointer hover:text-brand-500 inline-flex items-center gap-1">
                 {{ col_name }}

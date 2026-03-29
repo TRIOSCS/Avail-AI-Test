@@ -4094,8 +4094,6 @@ def _staleness_tier(last_activity_at):
     """Compute staleness tier from last_activity_at timestamp."""
     if last_activity_at is None:
         return "new"
-    from datetime import datetime, timezone
-
     days = (datetime.now(timezone.utc) - last_activity_at).days
     if days >= STALENESS_OVERDUE_DAYS:
         return "overdue"

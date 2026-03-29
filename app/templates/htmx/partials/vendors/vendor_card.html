@@ -8,7 +8,7 @@
 <div class="bg-white rounded-lg border border-brand-200 hover:border-brand-400
             hover:shadow-md transition-all cursor-pointer p-4 space-y-3"
      hx-get="/v2/partials/vendors/{{ v.id }}"
-     hx-target="#main-content"
+     hx-target="{{ hx_target|default('#main-content') }}"
      hx-push-url="/v2/vendors/{{ v.id }}">
 
   {# Row 1: Vendor name + strategic badge #}
