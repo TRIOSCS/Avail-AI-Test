@@ -12,7 +12,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session

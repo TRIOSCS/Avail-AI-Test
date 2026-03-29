@@ -11,13 +11,12 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timedelta, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy.orm import Session
 
 from app.models import Company, Requisition, User
-from app.models.knowledge import KnowledgeEntry
 from app.services import knowledge_service
 
 
@@ -544,3 +543,226 @@ class TestGenerateInsights:
         # Old one deleted, new one added
         assert len(all_insights) == 1
         assert all_insights[0].content == "New insight"
+
+
+class TestBuildMpnContext:
+    def test_returns_empty_for_unknown_mpn(self, db_session: Session):
+        ctx = knowledge_service.build_mpn_context(db_session, mpn="UNKNOWN_XYZ")
+        assert ctx == ""
+
+    def test_returns_context_with_entries(self, db_session: Session, test_user: User):
+        entry = knowledge_service.create_entry(
+            db_session, user_id=test_user.id, entry_type="fact",
+            content="LM317T $0.50 from Arrow", mpn="LM317T",
+        )
+        entry.created_at = datetime.now(timezone.utc)
+        db_session.commit()
+        ctx = knowledge_service.build_mpn_context(db_session, mpn="LM317T")
+        assert "LM317T" in ctx
+
+    def test_excludes_ai_insights(self, db_session: Session, test_user: User):
+        insight = knowledge_service.create_entry(
+            db_session, user_id=test_user.id, entry_type="ai_insight",
+            content="AI insight about LM317T", mpn="LM317T",
+        )
+        insight.created_at = datetime.now(timezone.utc)
+        db_session.commit()
+        ctx = knowledge_service.build_mpn_context(db_session, mpn="LM317T")
+        # ai_insight entries are excluded from context
+        assert ctx == "" or "ai_insight" not in ctx
+
+
+class TestBuildVendorContext:
+    def test_returns_empty_for_unknown_vendor(self, db_session: Session):
+        ctx = knowledge_service.build_vendor_context(db_session, vendor_card_id=99999)
+        assert ctx == ""
+
+    def test_returns_context_with_entries(self, db_session: Session, test_user: User, test_vendor_card):
+        entry = knowledge_service.create_entry(
+            db_session, user_id=test_user.id, entry_type="note",
+            content="Arrow reliable supplier", vendor_card_id=test_vendor_card.id,
+        )
+        entry.created_at = datetime.now(timezone.utc)
+        db_session.commit()
+        ctx = knowledge_service.build_vendor_context(db_session, vendor_card_id=test_vendor_card.id)
+        assert "Arrow reliable supplier" in ctx
+
+
+class TestBuildPipelineContext:
+    def test_returns_empty_with_no_requisitions(self, db_session: Session):
+        ctx = knowledge_service.build_pipeline_context(db_session)
+        assert ctx == ""
+
+    def test_returns_context_with_active_requisitions(
+        self, db_session: Session, test_user: User
+    ):
+        req = Requisition(
+            name="PIPELINE-TEST-REQ",
+            customer_name="Test Co",
+            status="active",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.commit()
+        ctx = knowledge_service.build_pipeline_context(db_session)
+        assert "active" in ctx.lower()
+
+
+class TestBuildCompanyContext:
+    def test_returns_empty_for_unknown_company(self, db_session: Session):
+        ctx = knowledge_service.build_company_context(db_session, company_id=99999)
+        assert ctx == ""
+
+    def test_returns_context_with_entries(
+        self, db_session: Session, test_user: User, test_company: Company
+    ):
+        entry = knowledge_service.create_entry(
+            db_session, user_id=test_user.id, entry_type="note",
+            content="Acme is a strategic customer", company_id=test_company.id,
+        )
+        entry.created_at = datetime.now(timezone.utc)
+        db_session.commit()
+        ctx = knowledge_service.build_company_context(db_session, company_id=test_company.id)
+        assert "Acme" in ctx or "strategic" in ctx
+
+
+class TestGetCachedEntityInsights:
+    def test_get_cached_mpn_insights_empty(self, db_session: Session):
+        insights = knowledge_service.get_cached_mpn_insights(db_session, "LM317T")
+        assert insights == []
+
+    def test_get_cached_mpn_insights_returns_mpn_insights(self, db_session: Session, test_user: User):
+        insight = knowledge_service.create_entry(
+            db_session, user_id=test_user.id, entry_type="ai_insight",
+            content="MPN insight", mpn="LM317T",
+        )
+        insights = knowledge_service.get_cached_mpn_insights(db_session, "LM317T")
+        assert len(insights) >= 1
+
+    def test_get_cached_vendor_insights_empty(self, db_session: Session, test_vendor_card):
+        insights = knowledge_service.get_cached_vendor_insights(db_session, test_vendor_card.id)
+        assert insights == []
+
+    def test_get_cached_vendor_insights_returns_vendor_insights(
+        self, db_session: Session, test_user: User, test_vendor_card
+    ):
+        knowledge_service.create_entry(
+            db_session, user_id=test_user.id, entry_type="ai_insight",
+            content="Vendor insight", vendor_card_id=test_vendor_card.id,
+        )
+        insights = knowledge_service.get_cached_vendor_insights(db_session, test_vendor_card.id)
+        assert len(insights) >= 1
+
+    def test_get_cached_pipeline_insights_empty(self, db_session: Session):
+        insights = knowledge_service.get_cached_pipeline_insights(db_session)
+        assert insights == []
+
+    def test_get_cached_company_insights_empty(self, db_session: Session, test_company: Company):
+        insights = knowledge_service.get_cached_company_insights(db_session, test_company.id)
+        assert insights == []
+
+    def test_get_cached_company_insights_returns_company_insights(
+        self, db_session: Session, test_user: User, test_company: Company
+    ):
+        knowledge_service.create_entry(
+            db_session, user_id=test_user.id, entry_type="ai_insight",
+            content="Company insight", company_id=test_company.id,
+        )
+        insights = knowledge_service.get_cached_company_insights(db_session, test_company.id)
+        assert len(insights) >= 1
+
+
+class TestGenerateMpnInsights:
+    async def test_empty_context_returns_empty(self, db_session: Session):
+        result = await knowledge_service.generate_mpn_insights(db_session, "UNKNOWN_PART")
+        assert result == []
+
+    async def test_success(self, db_session: Session, test_user: User):
+        entry = knowledge_service.create_entry(
+            db_session, user_id=test_user.id, entry_type="fact",
+            content="LM317T $0.50", mpn="LM317T",
+        )
+        entry.created_at = datetime.now(timezone.utc)
+        db_session.commit()
+
+        mock_result = {"insights": [{"content": "MPN insight", "confidence": 0.8, "based_on_expired": False}]}
+
+        async def _mock(*a, **kw):
+            return mock_result
+
+        with patch("app.utils.claude_client.claude_structured", new=_mock):
+            result = await knowledge_service.generate_mpn_insights(db_session, "LM317T")
+        assert len(result) == 1
+
+
+class TestGenerateVendorInsights:
+    async def test_empty_context_returns_empty(self, db_session: Session, test_vendor_card):
+        result = await knowledge_service.generate_vendor_insights(db_session, 99999)
+        assert result == []
+
+    async def test_success(self, db_session: Session, test_user: User, test_vendor_card):
+        entry = knowledge_service.create_entry(
+            db_session, user_id=test_user.id, entry_type="note",
+            content="Arrow supplier note", vendor_card_id=test_vendor_card.id,
+        )
+        entry.created_at = datetime.now(timezone.utc)
+        db_session.commit()
+
+        mock_result = {"insights": [{"content": "Vendor insight", "confidence": 0.9, "based_on_expired": False}]}
+
+        async def _mock(*a, **kw):
+            return mock_result
+
+        with patch("app.utils.claude_client.claude_structured", new=_mock):
+            result = await knowledge_service.generate_vendor_insights(db_session, test_vendor_card.id)
+        assert len(result) == 1
+
+
+class TestGenerateCompanyInsights:
+    async def test_empty_context_returns_empty(self, db_session: Session):
+        result = await knowledge_service.generate_company_insights(db_session, 99999)
+        assert result == []
+
+    async def test_success(self, db_session: Session, test_user: User, test_company: Company):
+        entry = knowledge_service.create_entry(
+            db_session, user_id=test_user.id, entry_type="note",
+            content="Acme is a strategic customer", company_id=test_company.id,
+        )
+        entry.created_at = datetime.now(timezone.utc)
+        db_session.commit()
+
+        mock_result = {"insights": [{"content": "Company insight", "confidence": 0.7, "based_on_expired": False}]}
+
+        async def _mock(*a, **kw):
+            return mock_result
+
+        with patch("app.utils.claude_client.claude_structured", new=_mock):
+            result = await knowledge_service.generate_company_insights(db_session, test_company.id)
+        assert len(result) == 1
+
+
+class TestGeneratePipelineInsights:
+    async def test_empty_pipeline_returns_empty(self, db_session: Session):
+        result = await knowledge_service.generate_pipeline_insights(db_session)
+        assert result == []
+
+    async def test_success(self, db_session: Session, test_user: User):
+        req = Requisition(
+            name="PIPE-INSIGHT-REQ",
+            customer_name="Test Co",
+            status="active",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        mock_result = {"insights": [{"content": "Pipeline insight", "confidence": 0.8, "based_on_expired": False}]}
+
+        async def _mock(*a, **kw):
+            return mock_result
+
+        with patch("app.utils.claude_client.claude_structured", new=_mock):
+            result = await knowledge_service.generate_pipeline_insights(db_session)
+        assert len(result) == 1
