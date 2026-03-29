@@ -1,6 +1,6 @@
 {#
   mobile_nav.html — Fixed bottom navigation bar for all screen sizes.
-  10 primary nav items + "More" menu (Settings + Sign out only).
+  8 primary nav items + "More" menu (Settings + Sign out only).
   Called by: app/templates/base.html, htmx/base.html (via {% include %})
   Depends on: Alpine.js, HTMX, Tailwind
   Context vars: current_view (str), user_name (str), user_email (str)
@@ -11,7 +11,7 @@
        moreOpen: false,
        activeNav: '{{ current_view }}',
        urlToNav(url) {
-         const map = {'/v2/requisitions':'requisitions','/v2/sightings':'sightings','/v2/search':'search','/v2/buy-plans':'buy-plans','/v2/vendors':'vendors','/v2/customers':'customers','/v2/proactive':'proactive','/v2/my-vendors':'my-vendors','/v2/quotes':'quotes','/v2/prospecting':'prospecting','/v2/settings':'settings'};
+         const map = {'/v2/requisitions':'requisitions','/v2/sightings':'sightings','/v2/search':'search','/v2/buy-plans':'buy-plans','/v2/crm':'crm','/v2/customers':'crm','/v2/vendors':'crm','/v2/proactive':'proactive','/v2/quotes':'quotes','/v2/prospecting':'prospecting','/v2/settings':'settings'};
          for (const [prefix, id] of Object.entries(map)) { if (url.startsWith(prefix)) return id; }
          return this.activeNav;
        }
@@ -30,14 +30,10 @@
        'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'),
       ('buy-plans', 'Buy Plans', '/v2/buy-plans', '/v2/partials/buy-plans',
        'M3 3h2l.4 2M7 13h10l4-8H5.4M7 13L5.4 5M7 13l-2.293 2.293c-.63.63-.184 1.707.707 1.707H17m0 0a2 2 0 100 4 2 2 0 000-4zm-8 2a2 2 0 100 4 2 2 0 000-4z'),
-      ('vendors', 'Vendors', '/v2/vendors', '/v2/partials/vendors',
-       'M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16m14 0h2m-2 0h-5m-9 0H3m2 0h5M9 7h1m-1 4h1m4-4h1m-1 4h1m-5 10v-5a1 1 0 011-1h2a1 1 0 011 1v5m-4 0h4'),
-      ('customers', 'Customers', '/v2/customers', '/v2/partials/customers',
-       'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0z'),
+      ('crm', 'CRM', '/v2/crm', '/v2/partials/crm/shell',
+       'M18 18.72a9.094 9.094 0 003.741-.479 3 3 0 00-4.682-2.72m.94 3.198l.001.031c0 .225-.012.447-.037.666A11.944 11.944 0 0112 21c-2.17 0-4.207-.576-5.963-1.584A6.062 6.062 0 016 18.719m12 0a5.971 5.971 0 00-.941-3.197m0 0A5.995 5.995 0 0012 12.75a5.995 5.995 0 00-5.058 2.772m0 0a3 3 0 00-4.681 2.72 8.986 8.986 0 003.74.477m.94-3.197a5.971 5.971 0 00-.94 3.197M15 6.75a3 3 0 11-6 0 3 3 0 016 0zm6 3a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0zm-13.5 0a2.25 2.25 0 11-4.5 0 2.25 2.25 0 014.5 0z'),
       ('proactive', 'Proactive', '/v2/proactive', '/v2/partials/proactive',
        'M13 10V3L4 14h7v7l9-11h-7z'),
-      ('my-vendors', 'My Vendors', '/v2/my-vendors', '/v2/partials/my-vendors',
-       'M4.318 6.318a4.5 4.5 0 000 6.364L12 20.364l7.682-7.682a4.5 4.5 0 00-6.364-6.364L12 7.636l-1.318-1.318a4.5 4.5 0 00-6.364 0z'),
       ('quotes', 'Quotes', '/v2/quotes', '/v2/partials/quotes',
        'M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21l-7-5-7 5V5a2 2 0 012-2h10a2 2 0 012 2z'),
       ('prospecting', 'Prospect', '/v2/prospecting', '/v2/partials/prospecting',
