@@ -8,6 +8,11 @@
     @dblclick="editing = true">
 
   {# ── Display mode ────────────────────────────────────────── #}
+  <td class="px-2 py-2.5" x-show="!editing" x-cloak @dblclick.stop>
+    <input type="checkbox" class="rounded border-gray-300 text-brand-500 focus:ring-brand-500"
+           :value="{{ r.id }}"
+           @change="$el.checked ? selectedReqIds.push({{ r.id }}) : selectedReqIds = selectedReqIds.filter(id => id !== {{ r.id }})">
+  </td>
   <td data-col-key="mpn" class="px-4 py-2.5 text-sm font-mono font-medium text-gray-900" x-show="!editing" x-cloak>
     {{ r.primary_mpn or "—" }}
   </td>
@@ -51,9 +56,9 @@
       {{ (r.sourcing_status or 'open')|capitalize }}
     </span>
   </td>
-  <td data-col-key="sightings" class="px-4 py-2.5 text-sm text-right tabular-nums" x-show="!editing" x-cloak>
+  <td data-col-key="sightings" class="px-4 py-2.5 text-sm text-right" x-show="!editing" x-cloak>
     {% if r.sighting_count > 0 %}
-      <span class="inline-flex items-center gap-1 text-brand-600 font-medium">
+      <span class="inline-flex items-center gap-1 text-brand-600 font-medium tabular-nums">
         {{ r.sighting_count }}
         <svg class="h-3.5 w-3.5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
           <path stroke-linecap="round" stroke-linejoin="round" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"/>
@@ -61,7 +66,10 @@
         </svg>
       </span>
     {% else %}
-      <span class="text-gray-400">0</span>
+      <span class="text-gray-400 tabular-nums">0</span>
+    {% endif %}
+    {% if r.last_searched_at %}
+    <div class="text-[10px] text-gray-400">{{ r.last_searched_at|timeago }}</div>
     {% endif %}
   </td>
   <td class="px-4 py-2.5 text-center" x-show="!editing" x-cloak>
@@ -81,7 +89,7 @@
   </td>
 
   {# ── Edit mode (double-click) ───────────────────────────── #}
-  <td colspan="16" x-show="editing" x-cloak>
+  <td colspan="17" x-show="editing" x-cloak>
     <form hx-put="/v2/partials/requisitions/{{ req.id }}/requirements/{{ r.id }}"
           hx-target="#req-row-{{ r.id }}" hx-swap="outerHTML"
           data-loading-disable
