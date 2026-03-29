@@ -100,7 +100,10 @@ def _oob_toast(msg: str, level: str = "success") -> HTMLResponse:
     """Return an OOB swap div that triggers a toast notification via Alpine."""
     safe_msg = msg.replace("'", "\\'").replace('"', "&quot;")
     return HTMLResponse(
-        f'<div hx-swap-oob="true" id="toast-trigger" x-init="$store.toast.show(\'{safe_msg}\', \'{level}\')"></div>'
+        f'<div hx-swap-oob="true" id="toast-trigger"'
+        f" x-init=\"$store.toast.message='{safe_msg}';"
+        f"$store.toast.type='{level}';"
+        f'$store.toast.show=true"></div>'
     )
 
 
@@ -579,6 +582,10 @@ async def sightings_refresh(
     except Exception:
         logger.warning("Search refresh failed for requirement %s", requirement_id, exc_info=True)
         refresh_failed = True
+
+    # Expire stale cached object so sightings_detail picks up fresh data
+    # (search_requirement commits via its own write session)
+    db.expire(requirement)
 
     await broker.publish(
         f"user:{user.id}",
