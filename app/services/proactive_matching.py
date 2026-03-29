@@ -295,10 +295,16 @@ def _find_matches(
                 activity_type="proactive_match",
                 channel="system",
                 requisition_id=requisition_id,
+                company_id=cph.company_id,
                 contact_name=company.name,
                 subject=f"Proactive match: {mpn_upper} — {company.name} (score {score})",
             )
         )
+
+        if cph.company_id:
+            from .activity_service import _update_last_activity
+
+            _update_last_activity({"type": "company", "id": cph.company_id}, db)
 
     return matches
 
