@@ -4,6 +4,8 @@ Called by: pytest
 Depends on: app.services.activity_service, app.services.webhook_service
 """
 
+from unittest.mock import AsyncMock, patch
+
 from sqlalchemy.orm import Session
 
 from app.models.auth import User
@@ -133,3 +135,30 @@ class TestQuoteActivityCompanyId:
         db_session.flush()
 
         assert log.company_id == company.id
+
+
+class TestTeamsSubscription:
+    """Test Teams subscription creation."""
+
+    def test_create_teams_subscription_creates_record(self, db_session: Session, test_user: User):
+        """create_teams_subscription creates a GraphSubscription with teams resource."""
+        import asyncio
+
+        from app.services.webhook_service import create_teams_subscription
+
+        mock_result = {"id": "sub-teams-123", "resource": "/me/chats/getAllMessages"}
+
+        with patch("app.utils.graph_client.GraphClient") as MockGC:
+            instance = MockGC.return_value
+            instance.post_json = AsyncMock(return_value=mock_result)
+
+            with patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="fake-token",
+            ):
+                record = asyncio.get_event_loop().run_until_complete(create_teams_subscription(test_user, db_session))
+
+        assert record is not None
+        assert record.resource == "/me/chats/getAllMessages"
+        assert record.user_id == test_user.id

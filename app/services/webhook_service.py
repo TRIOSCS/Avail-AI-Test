@@ -110,6 +110,69 @@ async def create_mail_subscription(user: User, db: Session) -> GraphSubscription
     return record
 
 
+async def create_teams_subscription(user: User, db: Session) -> GraphSubscription | None:
+    """Create a Graph webhook subscription for Teams chat messages for this user."""
+    from app.scheduler import get_valid_token
+    from app.utils.graph_client import GraphClient
+
+    # Check for existing active Teams subscription
+    existing = (
+        db.query(GraphSubscription)
+        .filter(
+            GraphSubscription.user_id == user.id,
+            GraphSubscription.resource == "/me/chats/getAllMessages",
+            GraphSubscription.expiration_dt > datetime.now(timezone.utc),
+        )
+        .first()
+    )
+    if existing:
+        logger.debug(f"Active Teams subscription exists for {user.email}: {existing.subscription_id}")
+        return existing
+
+    token = await get_valid_token(user, db)
+    if not token:
+        logger.warning(f"No valid token for {user.email}, skipping Teams subscription")
+        return None
+
+    client_state = secrets.token_hex(16)
+    expiration = datetime.now(timezone.utc) + timedelta(hours=SUBSCRIPTION_LIFETIME_HOURS)
+
+    notification_url = f"{settings.app_url}/api/webhooks/teams"
+
+    payload = {
+        "changeType": "created",
+        "notificationUrl": notification_url,
+        "resource": "/me/chats/getAllMessages",
+        "expirationDateTime": expiration.strftime("%Y-%m-%dT%H:%M:%S.0000000Z"),
+        "clientState": client_state,
+    }
+
+    gc = GraphClient(token)
+    try:
+        result = await gc.post_json("/subscriptions", payload)
+    except Exception as e:
+        logger.error(f"Failed to create Teams subscription for {user.email}: {e}")
+        return None
+
+    sub_id = result.get("id")
+    if not sub_id:
+        logger.error(f"No subscription ID in Teams response for {user.email}: {result}")
+        return None
+
+    record = GraphSubscription(
+        user_id=user.id,
+        subscription_id=sub_id,
+        resource="/me/chats/getAllMessages",
+        change_type="created",
+        expiration_dt=expiration,
+        client_state=client_state,
+    )
+    db.add(record)
+    db.commit()
+    logger.info(f"Created Teams subscription {sub_id} for {user.email}")
+    return record
+
+
 async def renew_subscription(sub: GraphSubscription, db: Session) -> bool:
     """Renew a Graph subscription before it expires."""
     from app.scheduler import get_valid_token
@@ -156,7 +219,7 @@ async def renew_expiring_subscriptions(db: Session):
 
 
 async def ensure_all_users_subscribed(db: Session):
-    """Create subscriptions for any M365-connected user that doesn't have one."""
+    """Create mail and Teams subscriptions for any M365-connected user missing them."""
     users = (
         db.query(User)
         .filter(
@@ -167,16 +230,32 @@ async def ensure_all_users_subscribed(db: Session):
     )
 
     for user in users:
-        existing = (
+        # Mail subscription
+        mail_sub = (
             db.query(GraphSubscription)
             .filter(
                 GraphSubscription.user_id == user.id,
+                GraphSubscription.resource == "/me/messages",
                 GraphSubscription.expiration_dt > datetime.now(timezone.utc),
             )
             .first()
         )
-        if not existing:
+        if not mail_sub:
             await create_mail_subscription(user, db)
+
+        # Teams subscription (skip in MVP mode)
+        if not settings.mvp_mode:
+            teams_sub = (
+                db.query(GraphSubscription)
+                .filter(
+                    GraphSubscription.user_id == user.id,
+                    GraphSubscription.resource == "/me/chats/getAllMessages",
+                    GraphSubscription.expiration_dt > datetime.now(timezone.utc),
+                )
+                .first()
+            )
+            if not teams_sub:
+                await create_teams_subscription(user, db)
 
 
 # ═══════════════════════════════════════════════════════════════════════
