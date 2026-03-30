@@ -150,13 +150,12 @@
   <div x-data="{ selectedSiblings: [] }">
     {# Bulk actions bar #}
     <div x-show="selectedSiblings.length > 0" x-cloak
-         x-cloak
          class="flex items-center gap-3 mb-2 px-3 py-1.5 bg-brand-50 rounded-lg border border-brand-200 text-xs">
       <span class="text-gray-600" x-text="selectedSiblings.length + ' selected'"></span>
       <button type="button"
               class="px-2 py-0.5 text-xs font-medium rounded-md bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
               hx-post="/v2/partials/parts/bulk-archive"
-              :hx-vals="JSON.stringify({requirement_ids: selectedSiblings.join(',')})"
+              :hx-vals="JSON.stringify({requirement_ids: selectedSiblings})"
               hx-target="#part-detail"
               hx-swap="innerHTML"
               hx-confirm="Archive selected parts?"
