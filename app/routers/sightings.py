@@ -369,9 +369,6 @@ async def sightings_list(
         "groups": groups,
         "link_map": link_map,
         "user": user,
-        "all_buyers": _get_cached(
-            "all_buyers", 300, lambda: db.query(User.id, User.name).filter(User.is_active.is_(True)).all()
-        ),
     }
     return templates.TemplateResponse("htmx/partials/sightings/table.html", ctx)
 
@@ -597,10 +594,6 @@ async def sightings_detail(
         .all()
     )
 
-    all_buyers = _get_cached(
-        "all_buyers", 300, lambda: db.query(User.id, User.name).filter(User.is_active.is_(True)).all()
-    )
-
     # ── Available Status Transitions (Phase 4.3) ────────────────
     available_statuses = sorted(SOURCING_TRANSITIONS.get(status, set()))
 
@@ -621,7 +614,6 @@ async def sightings_detail(
         "material_card": material_card,
         "link_map": detail_link_map,
         "activities": activities,
-        "all_buyers": all_buyers,
         "user": user,
     }
     return templates.TemplateResponse("htmx/partials/sightings/detail.html", ctx)
