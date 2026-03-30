@@ -149,6 +149,11 @@ async def _enrich_batch(cards: list[MaterialCard], db: Session, stats: dict) -> 
 
     ai_parts = result["parts"]
 
+    if len(ai_parts) != len(cards):
+        logger.warning("Enrichment returned %d parts for %d cards — skipping batch", len(ai_parts), len(cards))
+        stats["errors"] += len(cards)
+        return
+
     for card, ai in zip(cards, ai_parts):
         try:
             _apply_enrichment_result(card, ai)

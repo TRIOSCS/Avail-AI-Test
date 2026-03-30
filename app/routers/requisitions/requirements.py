@@ -19,7 +19,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import TaskStatus
+from ...constants import OfferStatus, RequisitionStatus, TaskStatus
 from ...database import SessionLocal, get_db
 from ...dependencies import get_req_for_user, require_buyer, require_user
 from ...models import (
@@ -283,7 +283,7 @@ async def list_requirements(req_id: int, user: User = Depends(require_user), db:
             db.query(Offer.requirement_id, sqlfunc.count(Offer.id))
             .filter(
                 Offer.requirement_id.in_(req_ids),
-                Offer.status.in_(["active", "won"]),
+                Offer.status.in_([OfferStatus.ACTIVE, OfferStatus.WON]),
             )
             .group_by(Offer.requirement_id)
             .all()
@@ -296,7 +296,7 @@ async def list_requirements(req_id: int, user: User = Depends(require_user), db:
             db.query(Offer.requirement_id, sqlfunc.count(Offer.id))
             .filter(
                 Offer.requirement_id.in_(req_ids),
-                Offer.status.in_(["active", "won"]),
+                Offer.status.in_([OfferStatus.ACTIVE, OfferStatus.WON]),
                 Offer.selected_for_quote.is_(True),
             )
             .group_by(Offer.requirement_id)
@@ -527,7 +527,7 @@ async def add_requirements(
                     Requisition.customer_site_id == req.customer_site_id,
                     Requisition.id != req_id,
                     Requisition.created_at >= cutoff,
-                    Requisition.status.notin_(["archived"]),
+                    Requisition.status.notin_([RequisitionStatus.ARCHIVED]),
                 )
                 .all()
             )

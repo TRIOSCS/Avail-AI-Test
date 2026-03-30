@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ...cache.decorators import cached_endpoint, invalidate_prefix
 from ...config import settings
+from ...constants import RequisitionStatus
 from ...database import get_db
 from ...dependencies import require_user
 from ...models import Company, CustomerSite, Quote, Requisition, User
@@ -98,8 +99,10 @@ async def list_companies(
             stats_rows = (
                 db.query(
                     CustomerSite.company_id,
-                    sqlfunc.count(sa_case((Requisition.status == "won", 1))).label("won_count"),
-                    sqlfunc.count(sa_case((Requisition.status.in_(["won", "lost"]), 1))).label("decided_count"),
+                    sqlfunc.count(sa_case((Requisition.status == RequisitionStatus.WON, 1))).label("won_count"),
+                    sqlfunc.count(
+                        sa_case((Requisition.status.in_([RequisitionStatus.WON, RequisitionStatus.LOST]), 1))
+                    ).label("decided_count"),
                     sqlfunc.max(Requisition.created_at).label("last_req_date"),
                 )
                 .join(Requisition, Requisition.customer_site_id == CustomerSite.id)
@@ -310,7 +313,9 @@ async def get_company(
                     sqlfunc.count(Requisition.id),
                 )
                 .filter(
-                    Requisition.status.notin_(["archived", "won", "lost"]),
+                    Requisition.status.notin_(
+                        [RequisitionStatus.ARCHIVED, RequisitionStatus.WON, RequisitionStatus.LOST]
+                    ),
                     Requisition.customer_site_id.in_(site_ids),
                 )
                 .group_by(Requisition.customer_site_id)

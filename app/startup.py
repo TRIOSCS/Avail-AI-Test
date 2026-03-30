@@ -231,7 +231,8 @@ def _create_fts_triggers(conn) -> None:
                 setweight(to_tsvector('english', COALESCE(NEW.display_mpn, '')), 'A') ||
                 setweight(to_tsvector('english', COALESCE(NEW.normalized_mpn, '')), 'A') ||
                 setweight(to_tsvector('english', COALESCE(NEW.manufacturer, '')), 'B') ||
-                setweight(to_tsvector('english', COALESCE(NEW.description, '')), 'C');
+                setweight(to_tsvector('english', COALESCE(NEW.description, '')), 'C') ||
+                setweight(to_tsvector('english', COALESCE(NEW.category, '')), 'C');
             RETURN NEW;
         END;
         $$ LANGUAGE plpgsql;
@@ -275,7 +276,8 @@ def _backfill_fts(conn) -> None:
             setweight(to_tsvector('english', COALESCE(display_mpn, '')), 'A') ||
             setweight(to_tsvector('english', COALESCE(normalized_mpn, '')), 'A') ||
             setweight(to_tsvector('english', COALESCE(manufacturer, '')), 'B') ||
-            setweight(to_tsvector('english', COALESCE(description, '')), 'C')
+            setweight(to_tsvector('english', COALESCE(description, '')), 'C') ||
+            setweight(to_tsvector('english', COALESCE(category, '')), 'C')
         WHERE search_vector IS NULL
     """,
     )
