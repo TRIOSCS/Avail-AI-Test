@@ -871,11 +871,15 @@ def _backfill_material_cards() -> None:
         if unlinked == 0:
             return
 
-        reqs = db.query(Requirement).filter(Requirement.primary_mpn.isnot(None)).all()
+        reqs = (
+            db.query(Requirement)
+            .filter(Requirement.primary_mpn.isnot(None), Requirement.material_card_id.is_(None))
+            .all()
+        )
         linked = 0
         for r in reqs:
             card = resolve_material_card(r.primary_mpn, db, manufacturer=r.manufacturer or "")
-            if card and not r.material_card_id:
+            if card:
                 r.material_card_id = card.id
                 linked += 1
             for sub in r.substitutes or []:

@@ -8983,40 +8983,43 @@ async def parts_list_partial(
         for row in stats:
             offer_stats[row.requirement_id] = {"count": row.cnt, "best_price": row.best}
 
-    # Build sub MPN → material card ID mapping for click-through
-    from ..models.intelligence import MaterialCard
-    from ..utils.normalization import normalize_mpn_key
+    # Build raw MPN → material card ID mapping for click-through links
+    from collections import defaultdict
 
-    all_sub_mpns = []
+    from ..models.intelligence import MaterialCard
+    from ..utils.normalization import normalize_mpn, normalize_mpn_key
+
+    # Collect every MPN (primary + substitutes), normalized to uppercase
+    # to match template rendering (|sub_mpns filter uppercases)
+    all_mpns: list[str] = []
     for r in requirements:
         if r.primary_mpn:
-            all_sub_mpns.append(r.primary_mpn)
-        if r.substitutes:
-            for sub in r.substitutes:
-                mpn = sub["mpn"] if isinstance(sub, dict) else sub
-                all_sub_mpns.append(mpn)
+            display = normalize_mpn(r.primary_mpn) or r.primary_mpn.upper()
+            all_mpns.append(display)
+        for sub in r.substitutes or []:
+            raw = sub["mpn"] if isinstance(sub, dict) else sub
+            if raw:
+                display = normalize_mpn(raw) or raw.upper()
+                all_mpns.append(display)
 
-    sub_card_map = {}
-    if all_sub_mpns:
-        # Map normalized key → list of original MPNs (multiple raw MPNs can
-        # share one normalized key, e.g. "LM-317T" and "LM317T")
-        from collections import defaultdict
+    # Map normalized key → display MPNs, then look up material cards
+    sub_card_map: dict[str, int] = {}
+    norm_to_mpns: dict[str, list[str]] = defaultdict(list)
+    for mpn in all_mpns:
+        nk = normalize_mpn_key(mpn)
+        if nk:
+            norm_to_mpns[nk].append(mpn)
 
-        norm_to_mpns = defaultdict(list)
-        for mpn in all_sub_mpns:
-            nk = normalize_mpn_key(mpn)
-            if nk:
-                norm_to_mpns[nk].append(mpn)
-        if norm_to_mpns:
-            cards = (
-                db.query(MaterialCard.normalized_mpn, MaterialCard.id)
-                .filter(MaterialCard.normalized_mpn.in_(list(norm_to_mpns.keys())))
-                .filter(MaterialCard.deleted_at.is_(None))
-                .all()
-            )
-            for card_norm, card_id in cards:
-                for raw_mpn in norm_to_mpns.get(card_norm, []):
-                    sub_card_map[raw_mpn] = card_id
+    if norm_to_mpns:
+        cards = (
+            db.query(MaterialCard.normalized_mpn, MaterialCard.id)
+            .filter(MaterialCard.normalized_mpn.in_(norm_to_mpns.keys()))
+            .filter(MaterialCard.deleted_at.is_(None))
+            .all()
+        )
+        for card_norm, card_id in cards:
+            for display_mpn in norm_to_mpns[card_norm]:
+                sub_card_map[display_mpn] = card_id
 
     # Team users for owner filter
     users_list = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
