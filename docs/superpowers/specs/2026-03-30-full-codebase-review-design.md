@@ -55,7 +55,7 @@ mypy app/ 2>&1 | grep -oP '\[.*\]' | sort | uniq -c | sort -rn > /tmp/mypy_categ
 ```
 This tells us whether it's 80% `[attr-defined]` or scattered real bugs.
 
-### Phase 2: Agent Sweep (6 specialists, all parallel, READ-ONLY)
+### Phase 2: Agent Sweep (7 specialists, all parallel, READ-ONLY)
 
 All agents scan and report findings only. No fixes during this phase. Each agent outputs findings as:
 ```
@@ -146,9 +146,39 @@ Where severity is CRITICAL, HIGH, MEDIUM, or LOW.
 
 **Output:** Categorized list with counts and specific fix instructions per category.
 
+#### Agent 7: Docker & Infrastructure Reliability
+
+**Scope:** `docker-compose.yml`, `Dockerfile`, `deploy.sh`, `app/main.py` (lifespan/startup), `app/config.py`, `app/scheduler.py`, `app/database.py`
+
+**Problems to diagnose:**
+- **Stale code after deploy:** Verify `deploy.sh` always uses `--no-cache` and `--force-recreate`. Check for any code paths that bypass deploy.sh. Check Docker layer caching — are dependencies installed before code copy (proper layer ordering)? Is `.dockerignore` excluding `__pycache__`, `.git`, `node_modules` to prevent cache-busting?
+- **Random instability:** Container restart loops, OOM kills, zombie processes. Check for:
+  - Missing health checks or health checks that don't actually verify the app is ready
+  - Startup race conditions (app starts before DB is ready, Redis not connected)
+  - Missing `depends_on` with `condition: service_healthy` in docker-compose
+  - No graceful shutdown handling (SIGTERM not caught, connections not drained)
+  - Memory limits not set (container grows unbounded until OOM)
+  - Worker processes spawning without limits
+  - APScheduler jobs running during startup before app is fully initialized
+  - Database connection pool exhaustion (pool too small, connections not returned)
+  - Redis connection failures not handled gracefully (should degrade, not crash)
+  - Volume mount conflicts between containers
+  - Log files growing unbounded inside container (no rotation)
+
+**Search for:**
+- `Dockerfile`: Layer ordering (COPY requirements before code?), multi-stage builds, proper CMD/ENTRYPOINT
+- `docker-compose.yml`: Health checks on all services, restart policies, memory limits, `depends_on` conditions, volume configs
+- `deploy.sh`: Verify full pipeline (--no-cache, --force-recreate, health wait, log tail)
+- `app/main.py`: Lifespan startup/shutdown — proper connection cleanup, scheduler shutdown
+- `app/database.py`: Connection pool settings (pool_size, max_overflow, pool_recycle, pool_pre_ping)
+- `app/scheduler.py`: Graceful shutdown, job overlap prevention, startup timing
+- Background workers: Any threads/processes that don't get cleaned up on shutdown
+
+**Output:** Findings + specific fixes for each stability issue found.
+
 ### Phase 3: Fix (subagent-driven, max parallel)
 
-**Input:** Aggregated findings from all 6 agents + bandit + mypy categories.
+**Input:** Aggregated findings from all 7 agents + bandit + mypy categories.
 
 **Deduplication:** Multiple agents may flag the same file:line. Deduplicate by `(file_path, line_number)` — keep the highest-severity finding.
 
@@ -166,6 +196,7 @@ Where severity is CRITICAL, HIGH, MEDIUM, or LOW.
 - Frontend fixes (innerHTML, Alpine anti-patterns)
 - Architecture fixes (dead code, duplication, boundary violations)
 - Type-A mypy annotations (mechanical, high volume)
+- Docker & infrastructure fixes (Dockerfile, compose, deploy, startup)
 - Contested-files agent (multi-concern files, sequenced)
 
 Each fix agent: fix → run targeted tests → verify no regressions.
@@ -206,11 +237,11 @@ Generate audit report at `docs/audit-2026-03-30.md`:
 
 - Pre-sweep: 1 subagent for test infrastructure fixes
 - Phase 1: 4 parallel tool runs (bash)
-- Phase 2: 6 parallel read-only agents
-- Phase 3: 8+ parallel fix agents (one per finding group)
+- Phase 2: 7 parallel read-only agents
+- Phase 3: 9+ parallel fix agents (one per finding group)
 - Phase 4: sequential verification
 
-Total estimated agents: ~15
+Total estimated agents: ~17
 All phases use subagent-driven development with maximum parallelism.
 
 ---
