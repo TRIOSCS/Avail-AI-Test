@@ -320,6 +320,11 @@ async def delete_quote(
         raise HTTPException(404, "Quote not found")
     if quote.status != "draft":
         raise HTTPException(400, "Only draft quotes can be deleted")
+    from ...models.buy_plan import BuyPlan
+
+    buy_plans = db.query(BuyPlan).filter(BuyPlan.quote_id == quote.id).count()
+    if buy_plans > 0:
+        raise HTTPException(400, f"Cannot delete quote with {buy_plans} linked buy plans.")
     db.delete(quote)
     db.commit()
     return {"ok": True}

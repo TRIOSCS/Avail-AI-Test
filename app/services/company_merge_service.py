@@ -123,11 +123,18 @@ def merge_companies(keep_id: int, remove_id: int, db: Session) -> dict:
     db.expire(remove, ["sites"])
 
     # 8. Reassign company-level FKs
+    from ..models.excess import ExcessList
+    from ..models.intelligence import ProactiveDoNotOffer
+    from ..models.purchase_history import CustomerPartHistory
+
     reassigned = 0
     for model, col in [
         (ActivityLog, "company_id"),
         (EnrichmentQueue, "company_id"),
         (Sighting, "source_company_id"),
+        (CustomerPartHistory, "company_id"),
+        (ExcessList, "company_id"),
+        (ProactiveDoNotOffer, "company_id"),
     ]:
         try:
             count = (

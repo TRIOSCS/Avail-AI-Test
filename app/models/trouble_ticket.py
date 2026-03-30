@@ -22,7 +22,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from .base import Base
 
@@ -90,6 +90,15 @@ class TroubleTicket(Base):
     root_cause_group_id = Column(Integer, ForeignKey("root_cause_groups.id", ondelete="SET NULL"))
 
     root_cause_group = relationship("RootCauseGroup", foreign_keys=[root_cause_group_id])
+
+    @validates("status")
+    def _validate_status(self, _key, value):
+        from ..constants import TicketStatus
+
+        valid = {e.value for e in TicketStatus}
+        if value and value not in valid:
+            raise ValueError(f"Invalid ticket status: {value!r}. Valid: {valid}")
+        return value
 
     submitter = relationship("User", foreign_keys=[submitted_by])
     resolved_by = relationship("User", foreign_keys=[resolved_by_id])

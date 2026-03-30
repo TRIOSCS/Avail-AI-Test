@@ -16,7 +16,7 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from .base import Base
 
@@ -64,6 +64,15 @@ class Quote(Base):
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
     quote_lines = relationship("QuoteLine", back_populates="quote")
+
+    @validates("status")
+    def _validate_status(self, _key, value):
+        from ..constants import QuoteStatus
+
+        valid = {e.value for e in QuoteStatus}
+        if value and value not in valid:
+            raise ValueError(f"Invalid quote status: {value!r}. Valid: {valid}")
+        return value
 
     __table_args__ = (
         Index("ix_quotes_req", "requisition_id"),

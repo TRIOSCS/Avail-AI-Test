@@ -37,7 +37,7 @@ from sqlalchemy import (
     String,
     Text,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from ..constants import (
     AIFlagSeverity,
@@ -150,6 +150,13 @@ class BuyPlan(Base):
         order_by="BuyPlanLine.id",
     )
 
+    @validates("status")
+    def _validate_status(self, _key, value):
+        valid = {e.value for e in BuyPlanStatus}
+        if value and value not in valid:
+            raise ValueError(f"Invalid buy plan status: {value!r}. Valid: {valid}")
+        return value
+
     __table_args__ = (
         Index("ix_bpv3_status", "status"),
         Index("ix_bpv3_so_status", "so_status"),
@@ -226,6 +233,13 @@ class BuyPlanLine(Base):
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
     offer = relationship("Offer", foreign_keys=[offer_id])
     buyer = relationship("User", foreign_keys=[buyer_id])
+
+    @validates("status")
+    def _validate_status(self, _key, value):
+        valid = {e.value for e in BuyPlanLineStatus}
+        if value and value not in valid:
+            raise ValueError(f"Invalid buy plan line status: {value!r}. Valid: {valid}")
+        return value
 
     __table_args__ = (
         Index("ix_bpl_buy_plan", "buy_plan_id"),

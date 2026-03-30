@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from ..cache.decorators import cached_endpoint
 from ..database import get_db
 from ..dependencies import require_admin, require_user
-from ..models import Company, User, VendorCard, VendorReview
+from ..models import Company, Offer, User, VendorCard, VendorReview
 from ..models.strategic import StrategicVendor
 from ..models.vendors import VendorContact
 from ..schemas.responses import VendorDetailResponse, VendorListResponse
@@ -475,6 +475,9 @@ async def delete_vendor(card_id: int, user: User = Depends(require_admin), db: S
     card = db.get(VendorCard, card_id)
     if not card:
         raise HTTPException(404, "Vendor not found")
+    active_offers = db.query(Offer).filter(Offer.vendor_card_id == card.id).count()
+    if active_offers > 0:
+        raise HTTPException(400, f"Cannot delete vendor with {active_offers} active offers. Archive instead.")
     db.delete(card)
     db.commit()
     return {"ok": True}
