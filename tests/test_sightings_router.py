@@ -1168,3 +1168,46 @@ class TestPreviewInquiry:
         # Should contain "RFQ" and the ref token
         assert "RFQ" in resp.text
         assert "[ref:" in resp.text
+
+
+class TestSightingsSubsBadge:
+    def test_table_shows_sub_count_badge(self, client, db_session):
+        """Table row shows '+N subs' badge when requirement has substitutes."""
+        req = Requisition(name="Sub RFQ", status="active", customer_name="SubCo")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="HAS-SUBS-001",
+            manufacturer="Mfr",
+            target_qty=50,
+            sourcing_status="open",
+            substitutes=[
+                {"mpn": "SUB-A", "manufacturer": "M1"},
+                {"mpn": "SUB-B", "manufacturer": "M2"},
+            ],
+            substitutes_text="SUB-A SUB-B",
+        )
+        db_session.add(r)
+        db_session.flush()
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="V1",
+                listing_count=1,
+                score=50.0,
+            )
+        )
+        db_session.commit()
+
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert "+2 subs" in resp.text
+
+    def test_table_no_badge_without_subs(self, client, db_session):
+        """Table row does not show sub badge when no substitutes."""
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert "+0 subs" not in resp.text
+        assert "subs" not in resp.text or "Unsubscri" in resp.text  # no false positive

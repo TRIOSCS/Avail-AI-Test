@@ -150,7 +150,13 @@
                  :checked="$store.sightingSelection.has({{ r.id }})"
                  @change="$store.sightingSelection.toggle({{ r.id }})">
         </td>
-        <td class="px-3 py-2 font-mono font-medium text-gray-900">{{ r.primary_mpn }}</td>
+        <td class="px-3 py-2 font-mono font-medium text-gray-900">
+          {{ r.primary_mpn }}
+          {% set sub_count = r.substitutes|sub_mpns|length %}
+          {% if sub_count > 0 %}
+          <span class="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-50 text-amber-600 border border-amber-200">+{{ sub_count }} sub{{ 's' if sub_count != 1 }}</span>
+          {% endif %}
+        </td>
         <td class="px-3 py-2 text-right font-mono hidden sm:table-cell">{{ r.target_qty or '—' }}</td>
         <td class="px-3 py-2 text-gray-600 truncate max-w-[140px] hidden xl:table-cell">
           {{ r.requisition.customer_name or '—' }}
@@ -226,6 +232,10 @@
          @click="selectReq({{ r.id }}); htmx.ajax('GET', '/v2/partials/sightings/{{ r.id }}/detail', {target: '#sightings-detail', swap: 'innerHTML'})">
       <div class="flex items-center justify-between mb-1.5">
         <span class="font-mono font-semibold text-sm text-gray-900">{{ r.primary_mpn }}</span>
+          {% set sub_count = r.substitutes|sub_mpns|length %}
+          {% if sub_count > 0 %}
+          <span class="ml-1 px-1.5 py-0.5 text-[10px] font-medium rounded bg-amber-50 text-amber-600 border border-amber-200">+{{ sub_count }} sub{{ 's' if sub_count != 1 }}</span>
+          {% endif %}
         <span class="transition-colors duration-200">{{ m.status_badge(r.sourcing_status) }}</span>
       </div>
       <div class="flex items-center gap-3 text-xs text-gray-500">
