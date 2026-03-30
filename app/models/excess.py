@@ -27,7 +27,7 @@ from sqlalchemy import (
     Text,
     func,
 )
-from sqlalchemy.orm import relationship
+from sqlalchemy.orm import relationship, validates
 
 from .base import Base
 
@@ -52,6 +52,14 @@ class ExcessList(Base):
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
     owner = relationship("User", foreign_keys=[owner_id])
     line_items = relationship("ExcessLineItem", back_populates="excess_list", cascade="all, delete-orphan")
+
+    # --- Validators ---
+    @validates("status")
+    def _validate_status(self, _key, value):
+        valid = {"draft", "active", "bidding", "closed", "expired"}
+        if value and value not in valid:
+            raise ValueError(f"Invalid ExcessList status: {value!r}")
+        return value
 
     __table_args__ = (
         Index("ix_excess_lists_company", "company_id"),
@@ -82,6 +90,13 @@ class ExcessLineItem(Base):
     excess_list = relationship("ExcessList", back_populates="line_items")
     bids = relationship("Bid", back_populates="excess_line_item", cascade="all, delete-orphan")
     solicitations = relationship("BidSolicitation", back_populates="excess_line_item", cascade="all, delete-orphan")
+
+    # --- Validators ---
+    @validates("quantity")
+    def _validate_quantity(self, _key, value):
+        if value is not None and value <= 0:
+            raise ValueError("Quantity must be positive")
+        return value
 
     __table_args__ = (
         Index("ix_excess_line_items_list", "excess_list_id"),
@@ -145,6 +160,19 @@ class Bid(Base):
     bidder_company = relationship("Company", foreign_keys=[bidder_company_id])
     bidder_vendor_card = relationship("VendorCard", foreign_keys=[bidder_vendor_card_id])
     created_by_user = relationship("User", foreign_keys=[created_by])
+
+    # --- Validators ---
+    @validates("unit_price")
+    def _validate_unit_price(self, _key, value):
+        if value is not None and value < 0:
+            raise ValueError(f"unit_price must be >= 0, got {value}")
+        return value
+
+    @validates("quantity_wanted")
+    def _validate_quantity_wanted(self, _key, value):
+        if value is not None and value <= 0:
+            raise ValueError("quantity_wanted must be positive")
+        return value
 
     __table_args__ = (
         Index("ix_bids_line_item", "excess_line_item_id"),

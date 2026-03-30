@@ -147,6 +147,13 @@ class ProactiveMatch(Base):
     requisition = relationship("Requisition", foreign_keys=[requisition_id])
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
 
+    # --- Validators ---
+    @validates("match_score")
+    def _validate_match_score(self, _key, value):
+        if value is not None and not (0 <= value <= 100):
+            raise ValueError(f"match_score must be 0-100, got {value}")
+        return value
+
     __table_args__ = (
         Index("ix_pm_offer", "offer_id"),
         Index("ix_pm_req", "requisition_id"),

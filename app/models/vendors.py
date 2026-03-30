@@ -199,6 +199,13 @@ class VendorReview(Base):
     vendor_card = relationship("VendorCard", back_populates="reviews")
     user = relationship("User")
 
+    # --- Validators ---
+    @validates("rating")
+    def _validate_rating(self, _key, value):
+        if value is not None and not (1 <= value <= 5):
+            raise ValueError(f"Rating must be 1-5, got {value}")
+        return value
+
     __table_args__ = (
         Index("ix_review_vendor", "vendor_card_id"),
         Index("ix_review_user", "user_id"),

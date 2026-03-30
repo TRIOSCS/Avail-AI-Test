@@ -160,7 +160,17 @@
           this.selectedLead = 0;
           const target = document.getElementById('split-right-sourcing');
           if (target) {
-            target.innerHTML = '<div class="flex items-center justify-center h-full text-gray-400"><div class="text-center"><p class="text-sm">Select a lead to view details</p></div></div>';
+            target.textContent = '';
+            const wrapper = document.createElement('div');
+            wrapper.className = 'flex items-center justify-center h-full text-gray-400';
+            const inner = document.createElement('div');
+            inner.className = 'text-center';
+            const p = document.createElement('p');
+            p.className = 'text-sm';
+            p.textContent = 'Select a lead to view details';
+            inner.appendChild(p);
+            wrapper.appendChild(inner);
+            target.appendChild(wrapper);
           }
         },
 

@@ -212,7 +212,7 @@
             <td></td>
             <td colspan="{{ col_defs|length }}" class="!py-0.5 !pl-5">
               <div class="flex items-center gap-1 flex-wrap">
-                <span class="text-[9px] text-gray-400 uppercase tracking-wide">subs:</span>
+                <span class="text-[10px] font-semibold text-amber-600 uppercase tracking-wide">alt:</span>
                 {% for sub in req.substitutes %}
                 {% set sub_mpn = sub.mpn if sub is mapping else sub %}
                 {% set sub_mfr = sub.manufacturer if sub is mapping else '' %}
@@ -221,10 +221,10 @@
                    hx-target="#main-content"
                    hx-push-url="/v2/materials/{{ sub_card_map[sub_mpn] }}"
                    @click.stop
-                   class="px-1 py-0 text-[10px] font-mono text-gray-600 bg-gray-50 border border-gray-200 rounded hover:bg-gray-100 hover:text-gray-800 transition-colors cursor-pointer"
+                   class="px-1.5 py-0.5 text-[11px] font-mono font-semibold bg-amber-100 text-amber-800 border border-amber-300 rounded hover:bg-amber-200 transition-colors cursor-pointer"
                    title="{{ sub_mpn }}{% if sub_mfr %} — {{ sub_mfr }}{% endif %}">{{ sub_mpn }}</a>
                 {% else %}
-                <span class="px-1 py-0 text-[10px] font-mono text-gray-500 bg-gray-50 border border-gray-200 rounded"
+                <span class="px-1.5 py-0.5 text-[11px] font-mono font-semibold bg-amber-100 text-amber-800 border border-amber-300 rounded"
                       title="{{ sub_mpn }}{% if sub_mfr %} — {{ sub_mfr }}{% endif %}">{{ sub_mpn }}</span>
                 {% endif %}
                 {% endfor %}
@@ -315,21 +315,11 @@
       },
       clearSelection: function() { this.selectedIds = []; },
       _postJson: function(url, data) {
-        fetch(url, {
-          method: 'POST',
+        htmx.ajax('POST', url, {
+          target: '#parts-list',
+          swap: 'innerHTML',
           headers: {'Content-Type': 'application/json'},
-          body: JSON.stringify(data)
-        }).then(function(r) {
-          if (!r.ok) throw new Error('Request failed');
-          return r.text();
-        }).then(function(html) {
-          /* Response is server-rendered HTMX partial — safe to swap */
-          var target = document.getElementById('parts-list');
-          target.innerHTML = html;  /* nosec: trusted server response */
-          htmx.process(target);
-          /* Fire HTMX lifecycle events so listeners (scroll sync, clearPartIfGone) run */
-          htmx.trigger(target, 'htmx:afterSwap', {target: target});
-          htmx.trigger(target, 'htmx:afterSettle', {target: target});
+          values: data
         }).catch(function() {
           var t = Alpine.store('toast');
           t.message = 'Action failed. Please try again.';
