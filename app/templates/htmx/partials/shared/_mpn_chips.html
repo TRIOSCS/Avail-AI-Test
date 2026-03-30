@@ -1,15 +1,24 @@
-{# _mpn_chips.html — Shared macro rendering all MPNs as equal inline chips.
+{# _mpn_chips.html — Shared macro: equal inline chips with overflow toggle.
    Called by: parts/list.html, parts/header.html, requisitions/tabs/req_row.html,
               sightings/table.html, sightings/detail.html, sourcing/workspace.html,
               sourcing/results.html, parts/tabs/req_details.html
-   Depends on: |sub_mpns Jinja2 filter (template_env.py)
+   Depends on: |sub_mpns Jinja2 filter (template_env.py), Alpine.js 3.x
 #}
 
-{% macro mpn_chips(requirement, link_map=none) %}
-{# Render all MPNs (primary + substitutes) as identical brand-colored chips.
-   requirement: a Requirement model instance
-   link_map: optional dict mapping MPN string → material card ID for clickable chips
-#}
+{%- macro _chip(mpn, link_map) -%}
+  {%- set cls = "px-1.5 font-mono text-slate-800 bg-slate-100 rounded border border-slate-300" -%}
+  {%- if link_map and link_map.get(mpn) -%}
+    <a hx-get="/v2/partials/materials/{{ link_map[mpn] }}"
+       hx-target="#main-content"
+       hx-push-url="/v2/materials/{{ link_map[mpn] }}"
+       @click.stop
+       class="{{ cls }} hover:bg-slate-200 cursor-pointer">{{ mpn }}</a>
+  {%- else -%}
+    <span class="{{ cls }}">{{ mpn }}</span>
+  {%- endif -%}
+{%- endmacro -%}
+
+{% macro mpn_chips(requirement, link_map=none, max_visible=2) %}
 {% set all_mpns = [] %}
 {% if requirement.primary_mpn %}
   {% set _ = all_mpns.append(requirement.primary_mpn) %}
@@ -19,5 +28,27 @@
     {% set _ = all_mpns.append(mpn) %}
   {% endif %}
 {% endfor %}
-<span class="inline-flex items-center gap-1 whitespace-nowrap">{% for mpn in all_mpns %}{% if link_map and link_map.get(mpn) %}<a hx-get="/v2/partials/materials/{{ link_map[mpn] }}" hx-target="#main-content" hx-push-url="/v2/materials/{{ link_map[mpn] }}" @click.stop class="px-1.5 font-mono text-slate-800 bg-slate-100 rounded border border-slate-300 hover:bg-slate-200 cursor-pointer">{{ mpn }}</a>{% else %}<span class="px-1.5 font-mono text-slate-800 bg-slate-100 rounded border border-slate-300">{{ mpn }}</span>{% endif %}{% endfor %}{% if not all_mpns %}<span class="text-gray-400">—</span>{% endif %}</span>
+
+{% set overflow = all_mpns|length - max_visible %}
+
+{% if all_mpns|length > max_visible %}
+<span class="inline-flex items-center gap-1 flex-wrap" x-data="{ open: false }">
+  {%- for mpn in all_mpns -%}
+    {%- if loop.index > max_visible -%}<template x-if="open">{%- endif -%}
+    {{ _chip(mpn, link_map) }}
+    {%- if loop.index > max_visible -%}</template>{%- endif -%}
+  {%- endfor -%}
+  <button @click.stop="open = !open"
+          class="px-1.5 text-xs font-medium text-brand-600 hover:text-brand-800 cursor-pointer"
+          x-text="open ? 'less' : '+{{ overflow }}'"></button>
+</span>
+{% elif all_mpns %}
+<span class="inline-flex items-center gap-1 whitespace-nowrap">
+  {%- for mpn in all_mpns -%}
+    {{ _chip(mpn, link_map) }}
+  {%- endfor -%}
+</span>
+{% else %}
+<span class="text-gray-400">—</span>
+{% endif %}
 {% endmacro %}
