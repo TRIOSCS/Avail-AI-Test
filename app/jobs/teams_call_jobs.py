@@ -46,7 +46,7 @@ async def _job_sync_teams_calls():
             try:
                 since = datetime.fromisoformat(wm_row.value)
             except ValueError:
-                pass
+                logger.warning("Corrupted Teams call watermark: %r, falling back to 1-day lookback", wm_row.value)
 
         users = (
             db.query(User)
@@ -73,7 +73,7 @@ async def _job_sync_teams_calls():
                     max_items=100,
                 )
             except Exception as e:
-                logger.warning(f"Teams call records fetch failed for {user.email}: {e}")
+                logger.warning("Teams call records fetch failed for %s: %s", user.email, e)
                 continue
 
             for record in records:
@@ -90,20 +90,21 @@ async def _job_sync_teams_calls():
                     except (ValueError, TypeError):
                         pass
 
-                log_call_activity(
+                # Direction not available from /callRecords list — logged as "unknown"
+                # Full direction detection requires /callRecords/{id}/sessions sub-resource
+                result = log_call_activity(
                     user_id=user.id,
-                    direction="outbound",
-                    phone="",
+                    direction="unknown",
+                    phone="",  # Phone not available from callRecords list endpoint
                     duration_seconds=duration,
                     external_id=f"teams-call-{call_id}",
                     contact_name=None,
                     db=db,
                 )
-                total_logged += 1
+                if result:
+                    total_logged += 1
 
-        db.commit()
-
-        # Update watermark
+        # Update watermark in same transaction as activity records
         now_str = datetime.now(timezone.utc).isoformat()
         if wm_row:
             wm_row.value = now_str
@@ -112,10 +113,10 @@ async def _job_sync_teams_calls():
         db.commit()
 
         if total_logged:
-            logger.info(f"Teams call sync: logged {total_logged} records for {len(users)} users")
+            logger.info("Teams call sync: logged %d records for %d users", total_logged, len(users))
 
     except Exception as e:
-        logger.exception(f"Teams call records sync failed: {e}")
+        logger.exception("Teams call records sync failed: %s", e)
         db.rollback()
         raise
     finally:

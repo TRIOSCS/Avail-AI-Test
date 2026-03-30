@@ -1,8 +1,8 @@
-"""AVAIL v1.2.0 — Unified Enrichment Service.
+"""Unified Enrichment Service.
 
 Shared enrichment workflow for both vendor cards and customer companies. Supports
-Explorium (Vibe Prospecting) and AI (Claude + web search) as enrichment providers. AI
-runs last to fill any remaining gaps.
+Explorium (Vibe Prospecting), Apollo.io (company + contact enrichment), and AI (Claude +
+web search) as enrichment providers. AI runs last to fill remaining gaps.
 """
 
 import asyncio
@@ -490,18 +490,19 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
         "linkedin_url",
     ]
 
-    # ── Phase 1: Explorium ──
-    exp_result = await _explorium_find_company(domain, name)
-
-    sources = []
-    if exp_result and not isinstance(exp_result, Exception):  # pragma: no cover
-        for k, v in exp_result.items():
-            if v and not result.get(k):
+    def _merge(provider_data: dict | None, source_label: str) -> None:
+        """Merge provider results into result, tracking sources."""
+        if not provider_data:
+            return
+        for k, v in provider_data.items():
+            if k != "source" and v and not result.get(k):
                 result[k] = v
-        sources.append("explorium")
+        current = result.get("source") or ""
+        if source_label not in current:
+            result["source"] = f"{current}+{source_label}" if current else source_label
 
-    if sources:  # pragma: no cover
-        result["source"] = "+".join(sources)
+    # ── Phase 1: Explorium ──
+    _merge(await _explorium_find_company(domain, name), "explorium")
 
     # ── Phase 1b: Apollo enrichment (fills gaps from Phase 1) ──
     from .config import settings as _settings
@@ -509,28 +510,11 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
     if _settings.apollo_api_key:
         from .connectors.apollo import search_company as apollo_search
 
-        apollo_result = await apollo_search(domain, _settings.apollo_api_key)
-        if apollo_result:
-            for k, v in apollo_result.items():
-                if k != "source" and v and not result.get(k):
-                    result[k] = v
-            if "apollo" not in (result.get("source") or ""):
-                if result["source"]:
-                    result["source"] = result["source"] + "+apollo"
-                else:
-                    result["source"] = "apollo"
+        _merge(await apollo_search(domain, _settings.apollo_api_key), "apollo")
 
     # ── Phase 2: AI fills remaining gaps (conditional) ──
     if any(not result.get(f) for f in _enrichable):
-        ai = await _ai_find_company(domain, name)
-        if ai:
-            for k, v in ai.items():
-                if v and not result.get(k):
-                    result[k] = v
-            if not result["source"]:
-                result["source"] = "ai"
-            elif "ai" not in result["source"]:  # pragma: no cover
-                result["source"] = result["source"] + "+ai"
+        _merge(await _ai_find_company(domain, name), "ai")
 
     # Layer 2: output normalization
     normalized = normalize_company_output(result)

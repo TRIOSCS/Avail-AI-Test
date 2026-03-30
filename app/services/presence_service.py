@@ -1,7 +1,7 @@
-"""Teams presence detection service with bounded cache.
+"""Teams presence detection service with bounded LRU cache.
 
-Called by: vendor contact templates, customer contact templates
-Depends on: app/utils/graph_client.py
+Called by: not yet wired (planned for vendor/customer contact templates)
+Depends on: caller-supplied graph client (duck-typed, needs .get_json())
 """
 
 import time
@@ -30,19 +30,26 @@ async def get_presence(email: str, gc) -> str | None:
         )
         status = data.get("availability", "Offline")
 
+        # LRU eviction: remove oldest 20% when at capacity (avoid cache stampede)
         if len(_presence_cache) >= _CACHE_MAX:
-            _presence_cache.clear()
+            sorted_entries = sorted(_presence_cache.items(), key=lambda x: x[1][1])
+            for key, _ in sorted_entries[: _CACHE_MAX // 5]:
+                del _presence_cache[key]
         _presence_cache[email] = (status, now)
 
         return status
     except Exception as e:
-        logger.debug(f"Presence lookup failed for {email}: {e}")
+        err_msg = str(e)
+        if "401" in err_msg or "403" in err_msg:
+            logger.error("Presence API auth failure for %s — check Presence.Read.All permission: %s", email, e)
+        else:
+            logger.warning("Presence lookup failed for %s: %s", email, e)
         return None
 
 
 def presence_color(status: str | None) -> str:
     """Return Tailwind CSS class for presence status dot."""
-    if status in ("Available",):
+    if status == "Available":
         return "bg-emerald-400"
     if status in ("Away", "BeRightBack"):
         return "bg-amber-400"

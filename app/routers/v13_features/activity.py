@@ -119,7 +119,10 @@ async def acs_webhook(
     request: Request,
     db: Session = Depends(get_db),
 ):
-    """Azure Communication Services webhook — logs completed calls."""
+    """Azure Communication Services webhook — logs completed calls.
+
+    Validates that ACS is configured and checks for EventGrid validation events.
+    """
     if not settings.acs_connection_string:
         raise HTTPException(503, "ACS not configured")
 
@@ -127,6 +130,14 @@ async def acs_webhook(
         events = await request.json()
     except (ValueError, UnicodeDecodeError):
         raise HTTPException(400, "Invalid JSON")
+
+    # Handle EventGrid subscription validation handshake
+    if isinstance(events, list) and len(events) == 1:
+        first = events[0]
+        if first.get("eventType") == "Microsoft.EventGrid.SubscriptionValidationEvent":
+            validation_code = first.get("data", {}).get("validationCode")
+            if validation_code:
+                return {"validationResponse": validation_code}
 
     if isinstance(events, list):
         for event in events:
@@ -161,7 +172,10 @@ async def initiate_call_endpoint(
     if not settings.acs_connection_string:
         raise HTTPException(503, "Calling service not configured")
 
-    body = await request.json()
+    try:
+        body = await request.json()
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(400, "Invalid JSON")
     to_phone = body.get("to_phone")
     if not to_phone:
         raise HTTPException(422, "to_phone required")
