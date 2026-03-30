@@ -11,6 +11,36 @@
     </div>
   </div>
 
+  {# Today's Calls — overdue accounts for this salesperson #}
+  {% if todays_calls %}
+  <div class="bg-rose-50 border border-rose-200 rounded-lg p-4 mb-4">
+    <div class="flex items-center justify-between mb-3">
+      <h3 class="text-sm font-semibold text-rose-800">
+        Needs Attention
+        <span class="ml-1 text-xs font-normal text-rose-600">({{ todays_calls|length }} account{{ "s" if todays_calls|length != 1 else "" }} overdue)</span>
+      </h3>
+    </div>
+    <div class="space-y-2">
+      {% for c in todays_calls %}
+      <div class="flex items-center justify-between bg-white rounded-lg px-3 py-2 border border-rose-100 cursor-pointer hover:bg-rose-50 transition-colors"
+           hx-get="/v2/partials/customers/{{ c.id }}"
+           hx-target="{{ hx_target|default('#main-content') }}"
+           hx-push-url="{{ push_url_base|default('/v2/customers') }}/{{ c.id }}">
+        <div class="flex items-center gap-2">
+          {% set dot_colors = {"overdue": "bg-rose-500", "due_soon": "bg-amber-400", "recent": "bg-emerald-400", "new": "bg-brand-300"} %}
+          <span class="w-2.5 h-2.5 rounded-full {{ dot_colors.get(c.staleness, 'bg-rose-500') }} block"></span>
+          <span class="text-sm font-medium text-gray-900">{{ c.name }}</span>
+          {% if c.is_strategic %}
+          <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-violet-50 text-violet-700">Strategic</span>
+          {% endif %}
+        </div>
+        <span class="text-xs text-rose-600">{{ c.last_activity_at|timeago if c.last_activity_at else "Never contacted" }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
   {# Search bar #}
   <form id="customer-filters" class="bg-white rounded-lg shadow border border-gray-200 p-4 mb-6">
     <input type="hidden" name="hx_target" value="{{ hx_target|default('#main-content') }}">

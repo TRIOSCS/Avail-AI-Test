@@ -85,6 +85,101 @@ class TestCustomerListEmbedding:
         assert 'hx-target="#main-content"' in resp.text
 
 
+class TestTodaysCalls:
+    """Test Today's Calls section on customer list."""
+
+    def test_todays_calls_shows_overdue_accounts(self, client: TestClient, db_session: Session, test_user: User):
+        """Customer list shows Today's Calls for overdue accounts owned by user."""
+        test_user.role = "sales"
+        db_session.flush()
+
+        overdue = Company(
+            name="Overdue Corp",
+            is_active=True,
+            account_owner_id=test_user.id,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=35),
+        )
+        db_session.add(overdue)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        assert "Needs Attention" in resp.text
+        assert "Overdue Corp" in resp.text
+
+    def test_todays_calls_hidden_for_non_sales(self, client: TestClient, db_session: Session, test_user: User):
+        """Today's Calls section is hidden for non-sales users."""
+        # test_user defaults to "buyer" role
+        overdue = Company(
+            name="Hidden Corp",
+            is_active=True,
+            account_owner_id=test_user.id,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=35),
+        )
+        db_session.add(overdue)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        assert "Needs Attention" not in resp.text
+
+    def test_todays_calls_excludes_non_overdue(self, client: TestClient, db_session: Session, test_user: User):
+        """Today's Calls excludes accounts with recent activity."""
+        test_user.role = "sales"
+        db_session.flush()
+
+        recent = Company(
+            name="Recent Corp",
+            is_active=True,
+            account_owner_id=test_user.id,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=5),
+        )
+        db_session.add(recent)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        assert "Needs Attention" not in resp.text
+
+    def test_todays_calls_includes_never_contacted(self, client: TestClient, db_session: Session, test_user: User):
+        """Today's Calls includes accounts with no activity (never contacted)."""
+        test_user.role = "sales"
+        db_session.flush()
+
+        never = Company(
+            name="NeverContacted Corp",
+            is_active=True,
+            account_owner_id=test_user.id,
+            last_activity_at=None,
+        )
+        db_session.add(never)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        assert "Needs Attention" in resp.text
+        assert "NeverContacted Corp" in resp.text
+        assert "Never contacted" in resp.text
+
+    def test_todays_calls_excludes_other_owners(self, client: TestClient, db_session: Session, test_user: User):
+        """Today's Calls only shows accounts owned by the current user."""
+        test_user.role = "sales"
+        db_session.flush()
+
+        other = Company(
+            name="OtherOwner Corp",
+            is_active=True,
+            account_owner_id=None,
+            last_activity_at=datetime.now(timezone.utc) - timedelta(days=35),
+        )
+        db_session.add(other)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/customers")
+        assert resp.status_code == 200
+        assert "Needs Attention" not in resp.text
+
+
 class TestCustomerStaleness:
     """Test staleness tier computation and display."""
 

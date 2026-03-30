@@ -4660,6 +4660,15 @@ async def company_tab(
             .all()
         )
 
+        # Load email intelligence for email activities
+        email_external_ids = [a.external_id for a in activities if a.external_id and a.channel == "email"]
+        email_intel_map: dict = {}
+        if email_external_ids:
+            from ..models.email_intelligence import EmailIntelligence
+
+            ei_records = db.query(EmailIntelligence).filter(EmailIntelligence.message_id.in_(email_external_ids)).all()
+            email_intel_map = {ei.message_id: ei for ei in ei_records}
+
         ctx = _base_ctx(request, user, "customers")
         ctx.update(
             {
@@ -4668,6 +4677,7 @@ async def company_tab(
                 "quotes": quotes,
                 "activities": activities,
                 "req_map": req_map,
+                "email_intel_map": email_intel_map,
             }
         )
         return templates.TemplateResponse("htmx/partials/customers/tabs/activity_tab.html", ctx)
