@@ -475,13 +475,11 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
         # ── 4-tier reply matching ──
         matched_contact = None
         matched_req_id = requisition_id
-        match_method = "unmatched"
 
         # Tier 1: ConversationId (exact thread, global)
         if conv_id and conv_id in conv_id_map:
             matched_contact = conv_id_map[conv_id]
             matched_req_id = matched_contact.requisition_id
-            match_method = "conversation_id"
 
         # Tier 2: Subject [AVAIL-{id}] token
         if not matched_contact:
@@ -493,17 +491,14 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
                 if req_contact:
                     matched_contact = req_contact
                     matched_req_id = avail_req_id
-                    match_method = "subject_token"
                 else:
                     # Token found but no exact email match — still assign to req
                     matched_req_id = avail_req_id
-                    match_method = "subject_token_req_only"
 
         # Tier 3: Exact email match (USER-SCOPED)
         if not matched_contact and email_addr in email_map:
             matched_contact = email_map[email_addr]
             matched_req_id = matched_contact.requisition_id
-            match_method = "email_exact"
 
         # Tier 4: Domain match (USER-SCOPED)
         if not matched_contact and "@" in email_addr:
@@ -511,7 +506,6 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
             if sender_domain in domain_map:
                 matched_contact = domain_map[sender_domain]
                 matched_req_id = matched_contact.requisition_id
-                match_method = "domain"
 
         try:
             # Use savepoint so a single message failure doesn't poison the session
@@ -526,7 +520,6 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
                 message_id=msg_id,
                 graph_conversation_id=conv_id,
                 scanned_by_user_id=scanned_by_user_id,
-                match_method=match_method,
                 received_at=msg.get("receivedDateTime"),
                 status="matched" if matched_contact else "new",
                 created_at=datetime.now(timezone.utc),
@@ -567,7 +560,6 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
                     "confidence": vr.confidence,
                     "received_at": vr.received_at,
                     "message_id": msg_id,
-                    "match_method": match_method,
                     "matched_contact_id": matched_contact.id if matched_contact else None,
                     "matched_requisition_id": matched_req_id,
                 }

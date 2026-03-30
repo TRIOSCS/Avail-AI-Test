@@ -1378,7 +1378,6 @@ class TestPollInbox:
             )
 
         assert len(results) == 1
-        assert results[0]["match_method"] == "unmatched"
         assert results[0]["vendor_email"] == "vendor@parts.com"
 
         # Check VendorResponse was saved
@@ -1672,7 +1671,6 @@ class TestPollInbox:
             )
 
         assert len(results) == 1
-        assert results[0]["match_method"] == "conversation_id"
         assert results[0]["matched_contact_id"] == contact.id
         assert results[0]["matched_requisition_id"] == test_requisition.id
 
@@ -1713,7 +1711,6 @@ class TestPollInbox:
             )
 
         assert len(results) == 1
-        assert results[0]["match_method"] == "subject_token"
         assert results[0]["matched_contact_id"] == contact.id
 
     @pytest.mark.asyncio
@@ -1741,7 +1738,6 @@ class TestPollInbox:
             )
 
         assert len(results) == 1
-        assert results[0]["match_method"] == "subject_token_req_only"
         assert results[0]["matched_requisition_id"] == test_requisition.id
         assert results[0]["matched_contact_id"] is None
 
@@ -1783,7 +1779,6 @@ class TestPollInbox:
             )
 
         assert len(results) == 1
-        assert results[0]["match_method"] == "email_exact"
 
     @pytest.mark.asyncio
     async def test_tier4_domain_match(self, db_session, test_user, test_requisition):
@@ -1823,7 +1818,6 @@ class TestPollInbox:
             )
 
         assert len(results) == 1
-        assert results[0]["match_method"] == "domain"
 
     @pytest.mark.asyncio
     async def test_domain_match_skips_noise_domain(self, db_session, test_user, test_requisition):
@@ -2213,7 +2207,6 @@ class TestPollInbox:
 
         # Should be unmatched (email_exact and domain maps are user-scoped)
         assert len(results) == 1
-        assert results[0]["match_method"] == "unmatched"
 
 
 # ── process_batch_results ────────────────────────────────────────────
