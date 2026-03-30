@@ -1,11 +1,24 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
-  content: ['./app/templates/**/*.html', './app/static/styles.css'],
+  content: [
+    './app/templates/**/*.html',
+    './app/static/styles.css',
+    './app/static/htmx_app.js',
+  ],
   safelist: [
-    // Ensure all shades of colors used in dynamic/conditional templates
-    // are always included — prevents "class not in CSS" after deploy.
+    // Include all shades of every color used in the app — prevents purge
+    // issues when adding new shades in templates between deploys.
     { pattern: /^(bg|text|border)-(slate|gray|brand|amber|emerald|rose|blue|violet)-(50|100|200|300|400|500|600|700|800|900)$/ },
     { pattern: /^(bg|text|border)-(slate|gray|brand|amber|emerald|rose|blue|violet)-(50|100|200|300|400|500|600|700|800|900)$/, variants: ['hover'] },
+    // Common structural utilities that may be added dynamically
+    { pattern: /^(flex|inline-flex|grid|hidden|block|inline-block)$/ },
+    { pattern: /^(whitespace-nowrap|whitespace-normal|flex-wrap|flex-nowrap)$/ },
+    { pattern: /^(gap|px|py|p|m|mx|my|mt|mb|ml|mr)-/ },
+    { pattern: /^(rounded|rounded-md|rounded-lg|rounded-full)$/ },
+    { pattern: /^(font-mono|font-medium|font-semibold|font-bold)$/ },
+    { pattern: /^(text-\[.+\]|text-xs|text-sm|text-base|text-lg)$/ },
+    { pattern: /^(truncate|overflow-hidden|overflow-auto|overflow-x-auto)$/ },
+    { pattern: /^(cursor-pointer|transition-colors)$/ },
   ],
   theme: {
     extend: {
