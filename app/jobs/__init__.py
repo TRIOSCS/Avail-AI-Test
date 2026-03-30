@@ -22,6 +22,7 @@ def register_all_jobs(scheduler, settings):
     from .sourcing_refresh_jobs import register_sourcing_refresh_jobs
     from .tagging_jobs import register_tagging_jobs
     from .task_jobs import register_task_jobs
+    from .teams_call_jobs import register_teams_call_jobs
 
     register_core_jobs(scheduler, settings)
     register_email_jobs(scheduler, settings)
@@ -36,5 +37,6 @@ def register_all_jobs(scheduler, settings):
     register_eight_by_eight_jobs(scheduler, settings)
     register_task_jobs(scheduler, settings)
     register_quality_jobs(scheduler, settings)
+    register_teams_call_jobs(scheduler, settings)
     job_count = len(scheduler.get_jobs())
     logger.info(f"APScheduler configured with {job_count} jobs")
