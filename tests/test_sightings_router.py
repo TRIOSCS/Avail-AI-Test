@@ -698,7 +698,7 @@ class TestVendorOverlap:
     def test_overlap_excludes_inactive_requisitions(self, client, db_session):
         """Vendors on inactive requisitions are not counted in overlap."""
         active_req = Requisition(name="Active RFQ", status="active", customer_name="Active Corp")
-        inactive_req = Requisition(name="Inactive RFQ", status="closed", customer_name="Closed Corp")
+        inactive_req = Requisition(name="Inactive RFQ", status="archived", customer_name="Closed Corp")
         db_session.add_all([active_req, inactive_req])
         db_session.flush()
         r1 = Requirement(
