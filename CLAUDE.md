@@ -97,6 +97,35 @@ docker compose up app
 - Use Ruff for linting.
 - Use Alembic for database migrations. Always include rollback steps.
 
+## Standing Workflow Rules
+
+### Execution Model
+- Always use subagent-driven execution for multi-step tasks — never ask, never offer inline
+- Maximize parallel subagents for all independent work — never serialize what can parallelize
+- Run the full skill pipeline on every task: brainstorm → plan → TDD → execute → simplify → review → verify (this order is canonical)
+- Never skip a step because it seems "overkill" — use every available tool and skill aggressively
+- Fix ALL review findings immediately — never defer as "lower priority" or "MVP acceptable"
+
+### UI Guardrails
+- Never add, remove, or rearrange UI elements without explicit user approval
+- Follow existing codebase patterns — find a working example before creating new UI conventions
+
+### Code Anti-Patterns (never introduce — in addition to Coding Conventions section)
+- `innerHTML` → use `htmx.ajax()` or Alpine reactive binding
+- Pydantic `class Config` → use `model_config = ConfigDict()`
+- Alpine `_x_dataStack` → use `Alpine.store()`
+- `db.query(Model).get(id)` → use `db.get(Model, id)`
+
+### Linear Development
+- Memory references specific code (line numbers, function names)? Verify against current files before acting
+- App map files are orientation, not source of truth — always confirm against current code
+- App map files with `last_verified` older than 30 days: confirm model/route counts against current code before citing as fact
+- Never mix old patterns with new — if the codebase has moved to a new pattern, follow the new one
+
+### PR Reviews
+- Run ALL pr-review-toolkit agents on every PR: comment-analyzer, pr-test-analyzer, type-design-analyzer, silent-failure-hunter, code-simplifier, code-reviewer
+- Also run feature-dev:code-reviewer
+
 ## Project Structure
 
 ```
@@ -310,14 +339,6 @@ npm run lint             # ESLint check
 
 **Key gotcha:** Requisitions parts tab loads `app/templates/htmx/partials/parts/list.html`, NOT `requisitions/list.html`. Follow the router!
 
-## Key Request Flows
-
-**Search**: User submits part numbers → `search_service.search_requirement()` fires all connectors via `asyncio.gather()` → results deduped and scored by `scoring.py` (6 weighted factors) → material cards auto-upserted.
-
-**RFQ**: `email_service.send_batch_rfq()` sends via Graph API, tagged with `[AVAIL-{id}]` → scheduler polls inbox every 30min → `response_parser.py` uses Claude to extract structured data → confidence >=0.8 auto-creates Offer, 0.5-0.8 flags for review.
-
-**Proactive Matching**: Offers matched to customer purchase history → SQL scorecard (0-100) → batch prepare/send workflow → sent offers grouped by customer.
-
 ## Authentication & Authorization
 
 **OAuth2 via Azure AD:**
@@ -465,6 +486,13 @@ TESTING=1 PYTHONPATH=/root/availai pytest tests/ -v
 TESTING=1 PYTHONPATH=/root/availai pytest tests/ --cov=app --cov-report=term-missing --tb=no -q
 ```
 
+**Fast subset (skip slow tests):**
+```bash
+TESTING=1 PYTHONPATH=/root/availai pytest -m "not slow" -v
+```
+- Slowest tests are marked `@pytest.mark.slow` — skip with `-m "not slow"` for ~1:10 runtime
+- NEVER add `--cov` to iterative dev runs — only before PR
+
 ### Test Configuration
 - **Parallel execution:** pytest-xdist (`-n auto` in pytest.ini) for faster runs
 - **Timeout:** 30 seconds per test
@@ -535,6 +563,8 @@ docker compose logs -f app
 ```
 
 **What "deploy" means:** Commit + push + rebuild + verify logs. No questions asked.
+
+**IMPORTANT:** `deploy.sh` uses `--no-cache` on build (prevents stale cached layers) and `--force-recreate` on up (prevents reusing old containers). Never use bare `docker compose up -d --build` — it causes "code didn't update" bugs. For rebuild without commit: `./deploy.sh --no-commit`.
 
 ### Pre-Deploy Checklist
 - [ ] All tests pass: `TESTING=1 PYTHONPATH=/root/availai pytest tests/ -v`
@@ -618,39 +648,6 @@ CONTACTS_SYNC_ENABLED=true
 MICROSOFT_GRAPH_ENDPOINT=https://graph.microsoft.com/v1.0
 SMTP_FROM=noreply@yourdomain.com
 ```
-
----
-
-## File Rules
-
-- Every new file needs a header comment:
-  ```python
-  """
-  Brief description of what this file does.
-
-  Called by: [router/service/job that imports this]
-  Depends on: [key imports and external services]
-  """
-  ```
-
----
-
-## Session Rules
-
-End each development session with:
-1. **What changed:** List modified/added files
-2. **Git commands:** `git status`, `git diff` summary
-3. **What to test:** Which features or test suites to verify
-4. **Tech debt:** Any "pay later" items or known issues
-
----
-
-## Triggers
-
-- **"new feature"** → Make a plan first, don't just start coding
-- **"bug" or "error"** → Ask for full error message before trying to fix
-- **"refactor"** → Check what's stable first, plan the approach
-- **"quick" or "just"** → Warn about hidden complexity; small changes often have ripple effects
 
 ---
 
