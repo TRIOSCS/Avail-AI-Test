@@ -164,7 +164,7 @@ def test_header_shows_substitutes(client, db_session, test_user):
     # All MPNs rendered as equal inline text — no "Subs:" or "Alt:" labels
     assert "Subs:" not in html
     assert "Alt:" not in html
-    assert "text-brand-700" in html  # MPN styling
+    assert "text-slate-800" in html  # MPN chip styling
 
 
 def test_header_no_substitutes_shows_primary_as_chip(client, db_session, test_user):
@@ -175,7 +175,7 @@ def test_header_no_substitutes_shows_primary_as_chip(client, db_session, test_us
 
     resp = client.get(f"/v2/partials/parts/{part.id}/header")
     assert resp.status_code == 200
-    assert "text-brand-700" in resp.text  # MPN styling present
+    assert "text-slate-800" in resp.text  # MPN chip styling present
     assert part.primary_mpn in resp.text
 
 
