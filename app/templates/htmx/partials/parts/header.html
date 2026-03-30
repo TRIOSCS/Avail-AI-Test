@@ -49,6 +49,13 @@
           · {{ requirement.requisition.customer_name }}
         {% endif %}
       </p>
+      <p id="hdr-description"
+         hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/description"
+         hx-target="#hdr-description" hx-swap="outerHTML"
+         class="text-xs text-gray-500 mt-0.5 cursor-pointer hover:text-brand-500 truncate"
+         title="Click to edit description">
+        {{ requirement|part_description or '+ Add description' }}
+      </p>
     </div>
 
     {# Right: Status + Condition + Qty + Price #}

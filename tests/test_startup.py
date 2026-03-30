@@ -1057,3 +1057,98 @@ class TestBackfillSightingVendorNormalized:
             assert r1[0] == "acme"
             r2 = conn.execute(sqltext("SELECT vendor_name_normalized FROM sightings WHERE id = 2")).fetchone()
             assert r2[0] == "beta corp"
+
+
+class TestBackfillMaterialCards:
+    """_backfill_material_cards logic."""
+
+    @patch("app.startup.SessionLocal")
+    def test_links_unlinked_requirement(self, mock_sl, db_session):
+        """Requirement with primary_mpn but no material_card_id gets linked after
+        backfill."""
+        from app.startup import _backfill_material_cards
+
+        mock_sl.return_value = db_session
+
+        from app.models.sourcing import Requirement
+
+        req = Requirement(primary_mpn="LM317T", manufacturer="TI", material_card_id=None)
+        db_session.add(req)
+        db_session.commit()
+
+        fake_card = MagicMock()
+        fake_card.id = 42
+
+        with patch("app.startup.resolve_material_card", return_value=fake_card) as mock_resolve:
+            _backfill_material_cards()
+            mock_resolve.assert_called_once_with("LM317T", db_session, manufacturer="TI")
+
+        db_session.refresh(req)
+        assert req.material_card_id == 42
+
+    @patch("app.startup.SessionLocal")
+    def test_fast_exit_when_all_linked(self, mock_sl, db_session):
+        """When all requirements already have material_card_id, function returns
+        quickly."""
+        from app.startup import _backfill_material_cards
+
+        mock_sl.return_value = db_session
+
+        from app.models.sourcing import Requirement
+
+        req = Requirement(primary_mpn="LM317T", manufacturer="TI", material_card_id=99)
+        db_session.add(req)
+        db_session.commit()
+
+        with patch("app.startup.resolve_material_card") as mock_resolve:
+            _backfill_material_cards()
+            mock_resolve.assert_not_called()
+
+    @patch("app.startup.SessionLocal")
+    def test_handles_dict_format_substitutes(self, mock_sl, db_session):
+        """Requirement with dict-format substitutes gets cards resolved."""
+        from app.startup import _backfill_material_cards
+
+        mock_sl.return_value = db_session
+
+        from app.models.sourcing import Requirement
+
+        req = Requirement(
+            primary_mpn="LM317T",
+            manufacturer="TI",
+            material_card_id=None,
+            substitutes=[{"mpn": "LM337T", "manufacturer": "TI"}],
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        fake_card = MagicMock()
+        fake_card.id = 10
+
+        with patch("app.startup.resolve_material_card", return_value=fake_card) as mock_resolve:
+            _backfill_material_cards()
+            # Called once for primary_mpn ("LM317T") and once for substitute ("LM337T")
+            assert mock_resolve.call_count == 2
+            mock_resolve.assert_any_call("LM317T", db_session, manufacturer="TI")
+            mock_resolve.assert_any_call("LM337T", db_session)
+
+    @patch("app.startup.SessionLocal")
+    def test_exception_triggers_rollback(self, mock_sl):
+        """When resolve_material_card raises, rollback happens and no crash."""
+        from app.startup import _backfill_material_cards
+
+        mock_db = MagicMock()
+        mock_req = MagicMock()
+        mock_req.primary_mpn = "LM317T"
+        mock_req.manufacturer = "TI"
+        mock_req.substitutes = []
+        mock_db.query.return_value.filter.return_value.all.return_value = [mock_req]
+        mock_db.rollback = MagicMock()
+        mock_db.close = MagicMock()
+        mock_sl.return_value = mock_db
+
+        with patch("app.startup.resolve_material_card", side_effect=RuntimeError("DB exploded")):
+            _backfill_material_cards()
+
+        mock_db.rollback.assert_called_once()
+        mock_db.close.assert_called_once()

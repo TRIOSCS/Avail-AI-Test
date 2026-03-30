@@ -9171,6 +9171,7 @@ async def part_header(
 _PART_HEADER_EDITABLE = {
     "brand",
     "condition",
+    "description",
     "manufacturer",
     "target_qty",
     "target_price",
@@ -9268,6 +9269,24 @@ async def part_header_edit_cell(
             f"</div>"
         )
         return HTMLResponse(html)
+
+    if field == "description":
+        return HTMLResponse(
+            f'<div id="{cell_id}" class="w-full">'
+            f'<textarea name="value" rows="2" '
+            f'class="w-full text-xs px-1.5 py-0.5 rounded border border-brand-300 focus:ring-1 focus:ring-brand-500 resize-y" '
+            f"@keydown.escape=\"htmx.ajax('GET', '{cancel_url}', {{target: '#part-header-wrap', swap: 'innerHTML'}})\" "
+            f"autofocus>{safe_current}</textarea>"
+            f'<div class="flex items-center gap-2 mt-1">'
+            f'<button type="button" '
+            f"onclick=\"htmx.ajax('PATCH', '{save_url}', {{target: '#part-header-wrap', swap: 'innerHTML', "
+            f"values: {{field: '{field}', value: this.closest('div').parentElement.querySelector('textarea').value}}}})\" "
+            f'class="text-[10px] px-2 py-0.5 bg-brand-500 text-white rounded hover:bg-brand-600 font-medium">Save</button>'
+            f'<button type="button" '
+            f"onclick=\"htmx.ajax('GET', '{cancel_url}', {{target: '#part-header-wrap', swap: 'innerHTML'}})\" "
+            f'class="text-[10px] text-gray-500 hover:text-gray-700">Cancel</button>'
+            f"</div></div>",
+        )
 
     input_type = "number" if field in ("target_qty", "target_price") else "text"
     step = ' step="0.0001"' if field == "target_price" else ""
