@@ -726,3 +726,321 @@ class TestActivityStatus:
         data = resp.json()
         assert data["is_strategic"] is True
         assert data["inactivity_limit"] == 90
+
+
+# ── Direct async tests for rate-limited endpoints ─────────────────────
+# TestClient can't track coverage for @limiter.limit() wrapped routes.
+# Call the handler functions directly with mock starlette Requests.
+
+
+def _make_request(body: bytes = b"", query_string: bytes = b"") -> "Request":
+    """Build a minimal starlette Request for direct handler calls."""
+    import json as _json
+
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/test",
+        "query_string": query_string,
+        "headers": [(b"content-type", b"application/json")],
+        "app": MagicMock(),
+    }
+
+    body_bytes = body
+
+    async def receive():
+        return {"type": "http.request", "body": body_bytes}
+
+    return Request(scope, receive)
+
+
+class TestGraphWebhookDirect:
+    """Direct async calls to graph_webhook to capture coverage of rate-limited handler."""
+
+    async def test_payload_validate_and_accepted(self, db_session):
+        """Route body: parse payload, validate_notifications, handle_notification."""
+        import json
+
+        from fastapi import HTTPException
+
+        import app.routers.v13_features.activity as mod
+
+        body = json.dumps({"value": [{"id": "1"}]}).encode()
+        request = _make_request(body=body)
+
+        with patch("app.services.webhook_service.validate_notifications", return_value=[{"id": "1"}]):
+            with patch("app.services.webhook_service.handle_notification", new=AsyncMock(return_value=None)):
+                result = await mod.graph_webhook(request, db_session)
+        assert result == {"status": "accepted"}
+
+    async def test_no_valid_notifications_raises_403(self, db_session):
+        """validate_notifications returns empty -> 403."""
+        import json
+
+        from fastapi import HTTPException
+
+        import app.routers.v13_features.activity as mod
+
+        body = json.dumps({"value": []}).encode()
+        request = _make_request(body=body)
+
+        with patch("app.services.webhook_service.validate_notifications", return_value=[]):
+            with pytest.raises(HTTPException) as exc_info:
+                await mod.graph_webhook(request, db_session)
+        assert exc_info.value.status_code == 403
+
+    async def test_handle_notification_exception_raises_500(self, db_session):
+        """handle_notification raises -> 500."""
+        import json
+
+        from fastapi import HTTPException
+
+        import app.routers.v13_features.activity as mod
+
+        body = json.dumps({"value": [{"id": "x"}]}).encode()
+        request = _make_request(body=body)
+
+        with patch("app.services.webhook_service.validate_notifications", return_value=[{"id": "x"}]):
+            with patch(
+                "app.services.webhook_service.handle_notification",
+                new=AsyncMock(side_effect=RuntimeError("boom")),
+            ):
+                with pytest.raises(HTTPException) as exc_info:
+                    await mod.graph_webhook(request, db_session)
+        assert exc_info.value.status_code == 500
+
+    async def test_invalid_json_raises_400(self, db_session):
+        """Non-JSON body -> 400."""
+        from fastapi import HTTPException
+
+        import app.routers.v13_features.activity as mod
+
+        request = _make_request(body=b"not-json")
+        with pytest.raises(HTTPException) as exc_info:
+            await mod.graph_webhook(request, db_session)
+        assert exc_info.value.status_code == 400
+
+    async def test_validation_token_returns_plaintext(self, db_session):
+        """validationToken query param returns PlainTextResponse."""
+        import app.routers.v13_features.activity as mod
+
+        request = _make_request(query_string=b"validationToken=my-token")
+        result = await mod.graph_webhook(request, db_session)
+        assert result.body == b"my-token"
+
+
+class TestTeamsWebhookDirect:
+    """Direct async calls to teams_webhook."""
+
+    async def test_mvp_mode_raises_404(self, db_session, monkeypatch):
+        """MVP mode -> 404."""
+        from fastapi import HTTPException
+
+        import app.routers.v13_features.activity as mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "mvp_mode", True)
+        request = _make_request()
+        with pytest.raises(HTTPException) as exc_info:
+            await mod.teams_webhook(request, db_session)
+        assert exc_info.value.status_code == 404
+
+    async def test_validation_token(self, db_session, monkeypatch):
+        """validationToken query -> plain text."""
+        import app.routers.v13_features.activity as mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "mvp_mode", False)
+        request = _make_request(query_string=b"validationToken=teams-tkn")
+        result = await mod.teams_webhook(request, db_session)
+        assert result.body == b"teams-tkn"
+
+    async def test_no_valid_notifications_raises_403(self, db_session, monkeypatch):
+        """Empty validated list -> 403."""
+        import json
+
+        from fastapi import HTTPException
+
+        import app.routers.v13_features.activity as mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "mvp_mode", False)
+        request = _make_request(body=json.dumps({"value": []}).encode())
+        with patch("app.services.webhook_service.validate_notifications", return_value=[]):
+            with pytest.raises(HTTPException) as exc_info:
+                await mod.teams_webhook(request, db_session)
+        assert exc_info.value.status_code == 403
+
+    async def test_handler_exception_raises_500(self, db_session, monkeypatch):
+        """Teams handler exception -> 500."""
+        import json
+
+        from fastapi import HTTPException
+
+        import app.routers.v13_features.activity as mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "mvp_mode", False)
+        request = _make_request(body=json.dumps({"value": [{"id": "x"}]}).encode())
+        with patch("app.services.webhook_service.validate_notifications", return_value=[{"id": "x"}]):
+            with patch(
+                "app.services.webhook_service.handle_teams_notification",
+                new=AsyncMock(side_effect=RuntimeError("teams boom")),
+            ):
+                with pytest.raises(HTTPException) as exc_info:
+                    await mod.teams_webhook(request, db_session)
+        assert exc_info.value.status_code == 500
+
+    async def test_accepted(self, db_session, monkeypatch):
+        """Valid teams notification -> accepted."""
+        import json
+
+        import app.routers.v13_features.activity as mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "mvp_mode", False)
+        request = _make_request(body=json.dumps({"value": [{"id": "x"}]}).encode())
+        with patch("app.services.webhook_service.validate_notifications", return_value=[{"id": "x"}]):
+            with patch("app.services.webhook_service.handle_teams_notification", new=AsyncMock(return_value=None)):
+                result = await mod.teams_webhook(request, db_session)
+        assert result == {"status": "accepted"}
+
+
+class TestAcsWebhookDirect:
+    """Direct async calls to acs_webhook."""
+
+    async def test_not_configured_raises_503(self, db_session, monkeypatch):
+        """ACS not configured -> 503."""
+        from fastapi import HTTPException
+
+        import app.routers.v13_features.activity as mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "acs_connection_string", None)
+        request = _make_request()
+        with pytest.raises(HTTPException) as exc_info:
+            await mod.acs_webhook(request, db_session)
+        assert exc_info.value.status_code == 503
+
+    async def test_eventgrid_validation_handshake(self, db_session, monkeypatch):
+        """EventGrid handshake returns validationResponse."""
+        import json
+
+        import app.routers.v13_features.activity as mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        payload = [
+            {
+                "eventType": "Microsoft.EventGrid.SubscriptionValidationEvent",
+                "data": {"validationCode": "abc123"},
+            }
+        ]
+        request = _make_request(body=json.dumps(payload).encode())
+        result = await mod.acs_webhook(request, db_session)
+        assert result == {"validationResponse": "abc123"}
+
+    async def test_call_completed_with_data(self, db_session, monkeypatch):
+        """CallCompleted event logs the call."""
+        import json
+
+        import app.routers.v13_features.activity as mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        payload = [{"type": "Microsoft.Communication.CallCompleted", "data": {"foo": "bar"}}]
+        request = _make_request(body=json.dumps(payload).encode())
+
+        call_data = {
+            "direction": "inbound",
+            "to_phone": "+15551234567",
+            "duration_seconds": 90,
+            "call_connection_id": "conn-xyz",
+        }
+        with patch("app.services.acs_service.handle_call_completed", return_value=call_data):
+            with patch("app.services.activity_service.log_call_activity", return_value=MagicMock(id=1)):
+                result = await mod.acs_webhook(request, db_session)
+        assert result == {"status": "accepted"}
+
+    async def test_call_completed_no_call_data(self, db_session, monkeypatch):
+        """CallCompleted with no call_data skips logging."""
+        import json
+
+        import app.routers.v13_features.activity as mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        payload = [{"type": "Microsoft.Communication.CallCompleted", "data": {}}]
+        request = _make_request(body=json.dumps(payload).encode())
+
+        with patch("app.services.acs_service.handle_call_completed", return_value=None):
+            result = await mod.acs_webhook(request, db_session)
+        assert result == {"status": "accepted"}
+
+
+class TestInitiateCallDirect:
+    """Direct async calls to initiate_call_endpoint."""
+
+    async def test_not_configured_raises_503(self, test_user, monkeypatch):
+        """ACS not configured -> 503."""
+        from fastapi import HTTPException
+
+        import app.routers.v13_features.activity as mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "acs_connection_string", None)
+        request = _make_request()
+        with pytest.raises(HTTPException) as exc_info:
+            await mod.initiate_call_endpoint(request, test_user)
+        assert exc_info.value.status_code == 503
+
+    async def test_missing_to_phone_raises_422(self, test_user, monkeypatch):
+        """Missing to_phone -> 422."""
+        import json
+
+        from fastapi import HTTPException
+
+        import app.routers.v13_features.activity as mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        request = _make_request(body=json.dumps({}).encode())
+        with pytest.raises(HTTPException) as exc_info:
+            await mod.initiate_call_endpoint(request, test_user)
+        assert exc_info.value.status_code == 422
+
+    async def test_initiate_call_success(self, test_user, monkeypatch):
+        """Successful call initiation returns result dict."""
+        import json
+
+        import app.routers.v13_features.activity as mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_from_phone", "+15550000000")
+        monkeypatch.setattr(settings, "acs_callback_url", "https://example.com/acs")
+        mock_result = {"call_id": "xyz", "status": "initiated"}
+        request = _make_request(body=json.dumps({"to_phone": "+15551234567"}).encode())
+        with patch("app.services.acs_service.initiate_call", new=AsyncMock(return_value=mock_result)):
+            result = await mod.initiate_call_endpoint(request, test_user)
+        assert result["call_id"] == "xyz"
+
+    async def test_initiate_call_failure_raises_500(self, test_user, monkeypatch):
+        """initiate_call returns None -> 500."""
+        import json
+
+        from fastapi import HTTPException
+
+        import app.routers.v13_features.activity as mod
+        from app.config import settings
+
+        monkeypatch.setattr(settings, "acs_connection_string", "Endpoint=sb://test;")
+        monkeypatch.setattr(settings, "acs_from_phone", "+15550000000")
+        monkeypatch.setattr(settings, "acs_callback_url", None)
+        request = _make_request(body=json.dumps({"to_phone": "+15551234567"}).encode())
+        with patch("app.services.acs_service.initiate_call", new=AsyncMock(return_value=None)):
+            with pytest.raises(HTTPException) as exc_info:
+                await mod.initiate_call_endpoint(request, test_user)
+        assert exc_info.value.status_code == 500
