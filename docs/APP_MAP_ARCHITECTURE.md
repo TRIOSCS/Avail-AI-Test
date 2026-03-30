@@ -20,7 +20,7 @@ AvailAI is a production electronic component sourcing platform and CRM. Buyers s
 | **Jobs** | APScheduler |
 | **Proxy** | Caddy (auto HTTPS) |
 | **Monitoring** | Sentry, Loguru |
-| **Deploy** | Docker Compose (6 containers) |
+| **Deploy** | Docker Compose (6 containers), deploy.sh with build tag + CSS verification |
 
 ## Infrastructure (Docker Compose)
 
@@ -79,6 +79,7 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
 - **Tabs:** Each tab is a separate partial loaded on click
 - **Real-time:** SSE via `hx-ext="sse"` for notifications
 - **Build:** Vite bundles `htmx_app.js` + `styles.css` -> content-hashed dist/
+- **Tailwind safelist:** Broadened to cover all color families (slate, red, amber, emerald, etc.) + Python content scanning so dynamic classes survive tree-shaking
 
 ### Templates by Feature
 
@@ -98,8 +99,19 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
 | Emails | 4 | partials/emails/ |
 | Tickets | 4 | partials/tickets/ |
 | Settings | 5 | partials/settings/ |
-| Shared | 15 | partials/shared/ |
+| Shared | 16 | partials/shared/ |
 | Buy Plans | 3 | partials/buy_plans/ |
+
+### Shared Template Components
+
+| Component | File | Purpose |
+|-----------|------|---------|
+| `_mpn_chips.html` | partials/shared/ | Renders all MPNs (primary + substitutes) as equal inline pill chips with overflow toggle; clickable chips open material card modal when a `link_map` entry exists |
+| `status_badge` macro | partials/shared/_macros.html | Unified status badge rendering used by all pages (requisitions, sightings, parts, etc.) |
+
+### Inline Editing
+
+- **Part header descriptions:** AI-generated descriptions are inline-editable in the part header partial (`parts/header.html`). Users click to edit, submit via `hx-patch`, and the display swaps back.
 
 ## External Service Integration
 

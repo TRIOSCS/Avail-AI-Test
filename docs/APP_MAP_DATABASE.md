@@ -9,7 +9,7 @@
 - **Migrations:** Alembic (81+ migration files)
 - **Connection:** Pool size 20, max overflow 20, pool recycle 1800s
 - **Timeouts:** Statement 30s, lock 5s
-- **Extensions:** pg_stat_statements, Full-Text Search (TSVECTOR)
+- **Extensions:** pg_stat_statements, Full-Text Search (TSVECTOR), pg_trgm
 
 ## Table Overview by Domain
 
@@ -64,6 +64,7 @@
 | target_price | Numeric 12,4 | |
 | sourcing_status | String 20 | open -> sourcing -> offered -> quoted -> won -> lost |
 | substitutes | JSON | Alternative MPNs |
+| substitutes_text | Text, indexed (GIN) | Flattened substitute MPNs for ILIKE search (used by global search + parts list) |
 | assigned_buyer_id | FK -> users | |
 | **Relationships** | requisition, sightings, offers, attachments |
 
@@ -291,6 +292,8 @@
 | cross_references | JSONB | Alternative MPNs |
 | specs_structured | JSONB | Parametric data |
 | search_vector | TSVECTOR | Trigger-maintained FTS (weighted: MPN=A, manufacturer=B, description/category=C) |
+
+> **Startup backfill:** `_backfill_material_cards()` in `startup.py` runs at boot to ensure every MPN in requirements has a corresponding material card.
 
 > **Indexes & Triggers:**
 > - `trig_material_cards_search_vector` — PostgreSQL trigger maintains `search_vector` TSVECTOR on INSERT/UPDATE (weighted: display_mpn=A, manufacturer=B, description/category=C)

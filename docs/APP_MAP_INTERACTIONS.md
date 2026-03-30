@@ -99,7 +99,14 @@ search_service.py (orchestrator)
           (sightings_list, sightings_detail) builds a link_map dict
           (MPN string → MaterialCard.id) by querying MaterialCard with
           normalize_mpn_key(). This is passed to the template context
-          and consumed by the mpn_chips macro via its link_map parameter.
+          and consumed by the shared _mpn_chips.html macro via its
+          link_map parameter. All MPNs render as equal inline pills
+          with an overflow toggle; clicking a chip opens the material
+          card modal.
+    |
+    NOTE: Sightings filter shows all non-archived/cancelled requisitions
+          (not just active status), so sightings from completed or other
+          in-progress requisitions remain visible.
     |
     +---> sse_broker.py --> SSE push to browser ("search complete")
     |
@@ -294,7 +301,10 @@ Trigger: hourly job (_job_material_enrichment) OR Enrich button on material deta
     v
 tagging_jobs.py -> enrich_pending_cards() [scheduled]
   OR
-materials router -> enrich_material_cards() [user-triggered]
+materials router -> enrich_material_cards() [user-triggered, batch processing]
+    |
+    +---> Batch processing with zip length validation
+    |       (ensures MPN list and card list stay in sync)
     |
     v
 Claude Haiku (Anthropic API)
@@ -302,6 +312,12 @@ Claude Haiku (Anthropic API)
     +---> Classify card: description, category, lifecycle_status
     +---> DB: UPDATE material_cards (description, category, lifecycle_status)
     +---> search_vector trigger auto-updates TSVECTOR with new description/category
+
+Startup backfill:
+    _backfill_material_cards() in startup.py
+    +---> Runs at application boot
+    +---> Ensures every MPN in requirements has a material card
+    +---> Idempotent: skips MPNs that already have cards
 
 Env: MATERIAL_ENRICHMENT_ENABLED=true
 ```
@@ -334,14 +350,26 @@ Materials workspace search input
     v
 faceted_search_service.py
     |
-    +---> plainto_tsquery(query) on material_cards.search_vector (PostgreSQL FTS)
-    +---> ts_rank() for relevance ordering
-    +---> pg_trgm fuzzy match on display_mpn (typo-tolerant via ix_material_cards_trgm_mpn)
+    +---> Multi-word queries:
+    |       +---> plainto_tsquery(query) on material_cards.search_vector (PostgreSQL FTS)
+    |       +---> ts_rank() for relevance ordering
+    |       +---> pg_trgm fuzzy match on display_mpn (typo-tolerant via ix_material_cards_trgm_mpn)
+    |
+    +---> Single-token queries (likely MPN prefixes):
+    |       +---> ILIKE fallback for substring match on MPN fields
+    |
     +---> Facet filters: category, manufacturer, lifecycle_status, commodity specs
     +---> Returns ranked, filtered material cards
 
-NOTE: Replaces previous ILIKE-based search. Uses GIN-indexed TSVECTOR
-      with weighted fields (MPN=A, manufacturer=B, description/category=C).
+NOTE: Uses tsvector + trgm for multi-word queries, ILIKE fallback for
+      single tokens. GIN-indexed TSVECTOR with weighted fields
+      (MPN=A, manufacturer=B, description/category=C).
+
+Search coverage:
+    +---> global_search_service.py includes substitutes_text.ilike for
+    |     cross-MPN matching in global search
+    +---> requisition_list_service.py includes substitutes_text.ilike
+          for parts list filtering
 ```
 
 ---
@@ -500,10 +528,21 @@ BROWSER (HTMX + Alpine.js)
      Button -> Alpine @click="$dispatch('open-modal')"
      Modal -> hx-get loads content
      Close -> Alpine @close-modal.window
+     MPN chip click -> open-modal with material card detail URL
 
   8. Loading:
      <button data-loading-disable hx-indicator="#spinner">
          -> HTMX adds .htmx-request class during flight
+
+  9. Editable descriptions (parts header):
+     AI-generated description displayed -> click to edit
+     -> hx-patch inline update -> swap display back
+
+  10. Shared components:
+      _mpn_chips.html: equal inline pills for all MPNs (primary + subs)
+          with overflow toggle and modal material card click
+      status_badge macro (_macros.html): unified badge rendering
+          used across all pages (requisitions, sightings, parts, etc.)
 ```
 
 ---
@@ -553,3 +592,22 @@ BROWSER (HTMX + Alpine.js)
 | Materials | 6 | material_enrichment, materials_ai_search, faceted_search_service, excess_service |
 | Admin & Health | 6 | health_monitor, integrity_service, audit_service |
 | Misc | 14 | knowledge_service, document_service, sse_broker, webhook_service |
+
+---
+
+## Deploy Verification (deploy.sh)
+
+```
+deploy.sh
+    |
+    +---> Step 1: Commit & push
+    +---> Step 2: Build with --no-cache (build tag = git commit SHA)
+    +---> Step 3: Start with --force-recreate
+    +---> Step 4: Health checks (wait for app to respond)
+    +---> Step 5: Verify deployed build tag matches built commit
+    +---> Step 6: Verify CSS coverage
+    |       +---> Scan templates for Tailwind color classes
+    |       +---> Grep CSS bundle for each class
+    |       +---> Warn on any MISSING classes (safelist gap)
+    +---> Step 7: Tail logs for errors
+```
