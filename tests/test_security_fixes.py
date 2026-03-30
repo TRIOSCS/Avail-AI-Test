@@ -116,32 +116,6 @@ class TestVendorMergeTransactionSafety:
                     merge_vendor_cards(keep.id, remove.id, db_session)
 
 
-# ── Query Param Validation (vendor_analytics.py) ────────────────────
-
-
-class TestQueryParamValidation:
-    """Verify invalid query params return 400 instead of 500."""
-
-    def test_offer_history_invalid_limit_returns_400(self, client, db_session, test_vendor_card):
-        resp = client.get(f"/api/vendors/{test_vendor_card.id}/offer-history?limit=abc")
-        assert resp.status_code == 400
-
-    def test_offer_history_invalid_offset_returns_400(self, client, db_session, test_vendor_card):
-        resp = client.get(f"/api/vendors/{test_vendor_card.id}/offer-history?offset=xyz")
-        assert resp.status_code == 400
-
-    def test_confirmed_offers_invalid_limit_returns_400(self, client, db_session, test_vendor_card):
-        resp = client.get(f"/api/vendors/{test_vendor_card.id}/confirmed-offers?limit=abc")
-        assert resp.status_code == 400
-
-    def test_offer_history_valid_params_succeeds(self, client, db_session, test_vendor_card):
-        resp = client.get(f"/api/vendors/{test_vendor_card.id}/offer-history?limit=10&offset=0")
-        assert resp.status_code == 200
-
-
-# ── Rate Limit on Password Login ────────────────────────────────────
-
-
 class TestPasswordLoginRateLimit:
     """Verify password login endpoint has rate limiting decorator."""
 

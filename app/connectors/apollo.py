@@ -8,6 +8,12 @@ import httpx
 from loguru import logger
 
 APOLLO_BASE = "https://api.apollo.io/v1"
+_HEADERS_TEMPLATE = {"Content-Type": "application/json"}
+
+
+def _headers(api_key: str) -> dict:
+    """Build Apollo API request headers."""
+    return {**_HEADERS_TEMPLATE, "X-Api-Key": api_key}
 
 
 def _parse_company_response(data: dict) -> dict | None:
@@ -30,19 +36,17 @@ def _parse_company_response(data: dict) -> dict | None:
 
 def _parse_contacts_response(data: dict) -> list[dict]:
     """Parse Apollo people search response into normalized contacts."""
-    contacts = []
-    for person in data.get("people", []):
-        contacts.append(
-            {
-                "source": "apollo",
-                "full_name": person.get("name"),
-                "email": person.get("email"),
-                "phone": person.get("phone_number"),
-                "title": person.get("title"),
-                "linkedin_url": person.get("linkedin_url"),
-            }
-        )
-    return contacts
+    return [
+        {
+            "source": "apollo",
+            "full_name": person.get("name"),
+            "email": person.get("email"),
+            "phone": person.get("phone_number"),
+            "title": person.get("title"),
+            "linkedin_url": person.get("linkedin_url"),
+        }
+        for person in data.get("people", [])
+    ]
 
 
 async def search_company(domain: str, api_key: str) -> dict | None:
@@ -51,7 +55,7 @@ async def search_company(domain: str, api_key: str) -> dict | None:
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.get(
                 f"{APOLLO_BASE}/organizations/enrich",
-                headers={"X-Api-Key": api_key, "Content-Type": "application/json"},
+                headers=_headers(api_key),
                 params={"domain": domain},
             )
             if resp.status_code != 200:
@@ -69,7 +73,7 @@ async def search_contacts(domain: str, api_key: str, limit: int = 10) -> list[di
         async with httpx.AsyncClient(timeout=15) as client:
             resp = await client.post(
                 f"{APOLLO_BASE}/mixed_people/search",
-                headers={"X-Api-Key": api_key, "Content-Type": "application/json"},
+                headers=_headers(api_key),
                 json={
                     "organization_domains": [domain],
                     "page": 1,

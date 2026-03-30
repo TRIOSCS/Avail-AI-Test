@@ -286,7 +286,9 @@ def test_add_requirement_with_substitutes(client, db_session, test_user):
     assert resp.status_code == 200
     html = resp.text
     assert "STM32F407VG" in html
-    assert "+2 subs" in html
+    # Substitutes are now rendered inline instead of "+2 subs" badge
+    assert "STM32F407VI" in html
+    assert "STM32F407ZG" in html
 
     # Verify DB
     part = db_session.query(Requirement).filter(Requirement.requisition_id == requisition.id).first()

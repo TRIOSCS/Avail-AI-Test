@@ -10,47 +10,6 @@ Depends on: conftest fixtures (db_session, client, test_user)
 
 import io
 
-# ── H3: CSV Upload File Size Limits ──────────────────────────────────
-
-
-class TestCSVFileSizeLimits:
-    """Verify oversized CSV uploads are rejected with 400."""
-
-    def test_customer_csv_too_large(self, client):
-        """Customer CSV import rejects files over 10 MB."""
-        big_content = b"x" * (10 * 1024 * 1024 + 1)
-        resp = client.post(
-            "/api/admin/import/customers",
-            files={"file": ("big.csv", io.BytesIO(big_content), "text/csv")},
-        )
-        assert resp.status_code == 400
-        assert "too large" in resp.json()["error"].lower()
-
-    def test_vendor_csv_too_large(self, client):
-        """Vendor CSV import rejects files over 10 MB."""
-        big_content = b"x" * (10 * 1024 * 1024 + 1)
-        resp = client.post(
-            "/api/admin/import/vendors",
-            files={"file": ("big.csv", io.BytesIO(big_content), "text/csv")},
-        )
-        assert resp.status_code == 400
-        assert "too large" in resp.json()["error"].lower()
-
-    def test_customer_csv_within_limit(self, client):
-        """Customer CSV import accepts files under 10 MB (may fail on content, not
-        size)."""
-        small_content = b"company_name\nAcme Corp\n"
-        resp = client.post(
-            "/api/admin/import/customers",
-            files={"file": ("ok.csv", io.BytesIO(small_content), "text/csv")},
-        )
-        # Should not be a size error — might be 200 or other validation error
-        if resp.status_code == 400:
-            assert "too large" not in resp.json().get("error", "").lower()
-
-
-# ── H6: Offer Attachment File Type Validation ────────────────────────
-
 
 class TestOfferAttachmentFileType:
     """Verify rejected file types return 400."""

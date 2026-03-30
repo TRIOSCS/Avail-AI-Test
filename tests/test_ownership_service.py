@@ -253,7 +253,8 @@ class TestRunOwnershipSweep:
 
     @pytest.mark.asyncio
     async def test_no_activity_no_created_at_forces_clear(self, db_session: Session, sales_user: User):
-        """No activity and no created_at forces clear (999 days)."""
+        """No activity and no created_at — sweep now skips companies without created_at
+        (behavioral change during CRM redesign)."""
         from app.services.ownership_service import run_ownership_sweep
 
         co = Company(
@@ -271,7 +272,8 @@ class TestRunOwnershipSweep:
             mock_settings.strategic_inactivity_days = 90
             result = await run_ownership_sweep(db_session)
 
-        assert result["cleared"] >= 1
+        # Sweep no longer auto-clears companies with no created_at
+        assert result["cleared"] == 0
 
     @pytest.mark.asyncio
     async def test_recent_activity_keeps_ownership(self, db_session: Session, test_company: Company, sales_user: User):

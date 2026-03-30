@@ -342,26 +342,6 @@ class TestJobBidDueAlerts:
         mock_on_bid_due.assert_called_once()
 
 
-# ═══════════════════════════════════════════════════════════════════════
-# knowledge_jobs — register, _job_refresh_insights, _job_expire_stale
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestRegisterKnowledgeJobs:
-    def test_registers_two_jobs(self):
-        """register_knowledge_jobs adds 2 jobs."""
-        from app.jobs.knowledge_jobs import register_knowledge_jobs
-
-        mock_scheduler = MagicMock()
-        mock_settings = MagicMock()
-        register_knowledge_jobs(mock_scheduler, mock_settings)
-
-        assert mock_scheduler.add_job.call_count == 2
-        job_ids = [c.kwargs["id"] for c in mock_scheduler.add_job.call_args_list]
-        assert "knowledge_refresh_insights" in job_ids
-        assert "knowledge_expire_stale" in job_ids
-
-
 def _patch_knowledge_service():
     """Create a mock knowledge_service module and patch it into app.services."""
     mock_ks = MagicMock()

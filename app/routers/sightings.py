@@ -514,6 +514,20 @@ async def sightings_detail(
         .all()
     )
 
+    # ── Vendor Matched MPNs (substitute visibility) ──────────────
+    matched_rows = (
+        db.query(Sighting.vendor_name, Sighting.mpn_matched)
+        .filter(
+            Sighting.requirement_id == requirement_id,
+            Sighting.mpn_matched.isnot(None),
+        )
+        .distinct()
+        .all()
+    )
+    vendor_matched_mpns: dict[str, list[str]] = {}
+    for vendor_name, mpn in matched_rows:
+        vendor_matched_mpns.setdefault(vendor_name, []).append(mpn)
+
     activities = (
         db.query(ActivityLog)
         .filter(ActivityLog.requirement_id == requirement_id)
@@ -540,6 +554,7 @@ async def sightings_detail(
         "vendor_intel": vendor_intel,
         "ooo_map": ooo_map,
         "overlap_counts": overlap_counts,
+        "vendor_matched_mpns": vendor_matched_mpns,
         "suggested_action": suggested_action,
         "available_statuses": available_statuses,
         "material_card": material_card,

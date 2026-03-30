@@ -1255,3 +1255,131 @@ class TestSightingsDetailSubs:
         assert resp.status_code == 200
         # Should not contain sub pill markup
         assert "bg-amber-50 text-amber-700 border border-amber-200" not in resp.text
+
+
+class TestSightingsVendorMatchedMpns:
+    def test_vendor_row_shows_via_sub_tag(self, client, db_session):
+        """Vendor row shows 'via SUB-MPN' when vendor sighting matched a substitute."""
+        req = Requisition(name="Match RFQ", status="active", customer_name="MatchCo")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="MATCH-PRIMARY",
+            manufacturer="Mfr",
+            target_qty=50,
+            sourcing_status="open",
+            substitutes=[{"mpn": "MATCH-SUB-X", "manufacturer": "M1"}],
+            substitutes_text="MATCH-SUB-X",
+        )
+        db_session.add(r)
+        db_session.flush()
+        # Vendor sighting summary
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="SubVendor",
+                listing_count=1,
+                score=60.0,
+            )
+        )
+        # Raw sighting matched against a substitute MPN
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="SubVendor",
+                mpn_matched="MATCH-SUB-X",
+                qty_available=100,
+            )
+        )
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "via MATCH-SUB-X" in resp.text
+
+    def test_vendor_row_no_via_tag_for_primary(self, client, db_session):
+        """Vendor row does NOT show 'via' tag when sighting matched the primary MPN."""
+        req = Requisition(name="Primary RFQ", status="active", customer_name="PrimaryCo")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="PRI-ONLY",
+            manufacturer="Mfr",
+            target_qty=50,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.flush()
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="PriVendor",
+                listing_count=1,
+                score=60.0,
+            )
+        )
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="PriVendor",
+                mpn_matched="PRI-ONLY",
+                qty_available=100,
+            )
+        )
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "via PRI-ONLY" not in resp.text
+
+    def test_vendor_row_shows_multiple_via_tags(self, client, db_session):
+        """Vendor row shows multiple 'via' tags when vendor matched multiple subs."""
+        req = Requisition(name="Multi RFQ", status="active", customer_name="MultiCo")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="MULTI-PRI",
+            manufacturer="Mfr",
+            target_qty=50,
+            sourcing_status="open",
+            substitutes=[
+                {"mpn": "MULTI-SUB-1", "manufacturer": "M1"},
+                {"mpn": "MULTI-SUB-2", "manufacturer": "M2"},
+            ],
+            substitutes_text="MULTI-SUB-1 MULTI-SUB-2",
+        )
+        db_session.add(r)
+        db_session.flush()
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="MultiVendor",
+                listing_count=2,
+                score=70.0,
+            )
+        )
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="MultiVendor",
+                mpn_matched="MULTI-SUB-1",
+                qty_available=50,
+            )
+        )
+        db_session.add(
+            Sighting(
+                requirement_id=r.id,
+                vendor_name="MultiVendor",
+                mpn_matched="MULTI-SUB-2",
+                qty_available=75,
+            )
+        )
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "via MULTI-SUB-1" in resp.text
+        assert "via MULTI-SUB-2" in resp.text

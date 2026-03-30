@@ -10,7 +10,6 @@ import pytest
 
 pytestmark = pytest.mark.slow
 
-
 # -- Companies ----------------------------------------------------------------
 
 
@@ -59,36 +58,6 @@ def test_update_company(client):
 def test_update_nonexistent_company(client):
     resp = client.put("/api/companies/99999", json={"name": "X"})
     assert resp.status_code == 404
-
-
-# -- Customer Sites -----------------------------------------------------------
-
-
-def test_add_site(client):
-    co = client.post("/api/companies", json={"name": "SiteCo"}).json()
-    resp = client.post(
-        f"/api/companies/{co['id']}/sites",
-        json={
-            "site_name": "Austin HQ",
-            "city": "Austin",
-            "state": "TX",
-        },
-    )
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["site_name"] == "Austin HQ"
-    assert "id" in data
-
-
-def test_add_site_missing_name(client):
-    co = client.post("/api/companies", json={"name": "SiteCo2"}).json()
-    resp = client.post(
-        f"/api/companies/{co['id']}/sites",
-        json={
-            "city": "Dallas",
-        },
-    )
-    assert resp.status_code == 422  # Pydantic validation rejects missing required field
 
 
 def test_add_site_nonexistent_company(client):

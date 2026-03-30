@@ -36,12 +36,10 @@ from app.services.excess_service import (
     list_solicitations,
     parse_bid_from_email,
     parse_bid_response,
-    send_bid_solicitation,
 )
 from tests.conftest import engine
 
 _ = engine
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -751,154 +749,6 @@ class TestParseBidFromEmail:
 
         assert bid is not None
         assert float(bid.unit_price) == 2.00
-
-
-# ---------------------------------------------------------------------------
-# send_bid_solicitation
-# ---------------------------------------------------------------------------
-
-
-class TestSendBidSolicitation:
-    @pytest.mark.asyncio
-    async def test_bundled_mode(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-        item1 = _make_line_item(db_session, el, part_number="LM317T")
-        item2 = _make_line_item(db_session, el, part_number="NE555P")
-
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(return_value=None)
-        mock_gc.get_json = AsyncMock(
-            return_value={"value": [{"id": "msg1", "conversationId": "conv1", "subject": "test"}]}
-        )
-
-        with (
-            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-            patch("asyncio.sleep", new_callable=AsyncMock),
-        ):
-            results = await send_bid_solicitation(
-                db_session,
-                list_id=el.id,
-                line_item_ids=[item1.id, item2.id],
-                recipient_email="buyer@test.com",
-                recipient_name="John",
-                contact_id=1,
-                user_id=user.id,
-                token="fake-token",
-                bundled=True,
-            )
-
-        assert len(results) == 2
-        assert all(s.status == "sent" for s in results)
-        mock_gc.post_json.assert_called_once()
-
-    @pytest.mark.asyncio
-    async def test_split_mode(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-        item1 = _make_line_item(db_session, el, part_number="LM317T")
-
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(return_value=None)
-        mock_gc.get_json = AsyncMock(return_value={"value": [{"id": "msg1", "subject": "test"}]})
-
-        with (
-            patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
-            patch("asyncio.sleep", new_callable=AsyncMock),
-        ):
-            results = await send_bid_solicitation(
-                db_session,
-                list_id=el.id,
-                line_item_ids=[item1.id],
-                recipient_email="buyer@test.com",
-                recipient_name=None,
-                contact_id=1,
-                user_id=user.id,
-                token="fake-token",
-                bundled=False,
-            )
-
-        assert len(results) == 1
-        assert results[0].status == "sent"
-
-    @pytest.mark.asyncio
-    async def test_bundled_mode_send_failure(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-        item1 = _make_line_item(db_session, el)
-
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(side_effect=RuntimeError("Graph API error"))
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-            results = await send_bid_solicitation(
-                db_session,
-                list_id=el.id,
-                line_item_ids=[item1.id],
-                recipient_email="buyer@test.com",
-                recipient_name="John",
-                contact_id=1,
-                user_id=user.id,
-                token="fake-token",
-                bundled=True,
-            )
-
-        assert len(results) == 1
-        assert results[0].status == "failed"
-
-    @pytest.mark.asyncio
-    async def test_split_mode_send_failure(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-        item1 = _make_line_item(db_session, el)
-
-        mock_gc = MagicMock()
-        mock_gc.post_json = AsyncMock(side_effect=RuntimeError("Graph API error"))
-
-        with patch("app.utils.graph_client.GraphClient", return_value=mock_gc):
-            results = await send_bid_solicitation(
-                db_session,
-                list_id=el.id,
-                line_item_ids=[item1.id],
-                recipient_email="buyer@test.com",
-                recipient_name=None,
-                contact_id=1,
-                user_id=user.id,
-                token="fake-token",
-                bundled=False,
-            )
-
-        assert len(results) == 1
-        assert results[0].status == "failed"
-
-    @pytest.mark.asyncio
-    async def test_invalid_line_item_raises_404(self, db_session: Session):
-        company = _make_company(db_session)
-        user = _make_user(db_session)
-        el = _make_excess_list(db_session, company, user)
-
-        with pytest.raises(HTTPException) as exc_info:
-            await send_bid_solicitation(
-                db_session,
-                list_id=el.id,
-                line_item_ids=[99999],
-                recipient_email="buyer@test.com",
-                recipient_name=None,
-                contact_id=1,
-                user_id=user.id,
-                token="fake-token",
-                bundled=True,
-            )
-        assert exc_info.value.status_code == 404
-
-
-# ---------------------------------------------------------------------------
-# create_proactive_matches_for_excess
-# ---------------------------------------------------------------------------
 
 
 class TestCreateProactiveMatchesForExcess:

@@ -21,10 +21,11 @@ if [ "$NO_COMMIT" = false ]; then
     fi
 fi
 
-# Step 2: Rebuild app with build commit arg (Docker caching enabled)
-BUILD_COMMIT=$(git rev-parse --short HEAD)
-echo "==> Rebuilding app container (commit: $BUILD_COMMIT)..."
-docker compose build --build-arg BUILD_COMMIT="$BUILD_COMMIT" app
+# Step 2: Rebuild app with unique build arg to bust Docker cache
+# Append timestamp so --no-commit deploys also invalidate COPY layers
+BUILD_COMMIT="$(git rev-parse --short HEAD)-$(date +%s)"
+echo "==> Rebuilding app container (build tag: $BUILD_COMMIT)..."
+docker compose build --no-cache --build-arg BUILD_COMMIT="$BUILD_COMMIT" app
 
 # Step 3: Recreate only the app container with the new image
 echo "==> Restarting app..."
@@ -52,16 +53,16 @@ if [ "$STATUS" != "healthy" ]; then
     exit 1
 fi
 
-# Step 5: Verify deployed commit matches local HEAD
+# Step 5: Verify deployed build tag matches what we just built
 echo ""
-echo "==> Verifying deployed build commit..."
+echo "==> Verifying deployed build tag..."
 DEPLOYED_COMMIT=$(docker compose exec app printenv BUILD_COMMIT 2>/dev/null | tr -d '[:space:]' || echo "UNKNOWN")
 
 if [ "$DEPLOYED_COMMIT" != "$BUILD_COMMIT" ]; then
-    echo "==> MISMATCH: deployed commit ($DEPLOYED_COMMIT) does NOT match local HEAD ($BUILD_COMMIT)"
+    echo "==> MISMATCH: deployed ($DEPLOYED_COMMIT) does NOT match build ($BUILD_COMMIT)"
     exit 1
 fi
-echo "==> MATCH: deployed commit ($DEPLOYED_COMMIT) matches local HEAD ($BUILD_COMMIT)"
+echo "==> MATCH: deployed build tag ($DEPLOYED_COMMIT)"
 
 # Step 6: Show recent logs to confirm the right code is running
 echo ""

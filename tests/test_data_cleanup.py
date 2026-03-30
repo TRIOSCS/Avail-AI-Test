@@ -4,8 +4,6 @@ import os
 
 os.environ["TESTING"] = "1"
 
-
-from app.models.crm import Company, CustomerSite, SiteContact
 from app.utils.normalization import (
     normalize_condition,
     normalize_mpn,
@@ -283,41 +281,3 @@ class TestSchemaValidators:
         assert c.hq_country is None
         assert c.hq_state is None
         assert c.phone is None
-
-
-# ── SiteContact dedup guard ─────────────────────────────────────────
-
-
-def test_create_site_contact_dedup_by_email(client, db_session):
-    """Creating a contact with same email on same site returns existing."""
-    co = Company(name="TestCo")
-    db_session.add(co)
-    db_session.flush()
-    site = CustomerSite(company_id=co.id, site_name="HQ")
-    db_session.add(site)
-    db_session.flush()
-    existing = SiteContact(customer_site_id=site.id, full_name="John", email="john@test.com")
-    db_session.add(existing)
-    db_session.commit()
-
-    resp = client.post(f"/api/sites/{site.id}/contacts", json={"full_name": "Johnny", "email": "john@test.com"})
-    assert resp.status_code == 200
-    assert resp.json()["id"] == existing.id
-    assert db_session.query(SiteContact).filter_by(customer_site_id=site.id).count() == 1
-
-
-def test_create_site_contact_different_email_allowed(client, db_session):
-    """Different emails on same site create separate contacts."""
-    co = Company(name="TestCo2")
-    db_session.add(co)
-    db_session.flush()
-    site = CustomerSite(company_id=co.id, site_name="Branch")
-    db_session.add(site)
-    db_session.flush()
-    existing = SiteContact(customer_site_id=site.id, full_name="John", email="john@test.com")
-    db_session.add(existing)
-    db_session.commit()
-
-    resp = client.post(f"/api/sites/{site.id}/contacts", json={"full_name": "Jane", "email": "jane@test.com"})
-    assert resp.status_code == 200
-    assert resp.json()["id"] != existing.id

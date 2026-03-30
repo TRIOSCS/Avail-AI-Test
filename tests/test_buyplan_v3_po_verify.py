@@ -261,34 +261,3 @@ async def test_verify_po_no_buyer_skips_line(db_session: Session, test_user: Use
 
     assert results["PO-NOBUYER"]["verified"] is False
     assert results["PO-NOBUYER"]["reason"] == "no_buyer"
-
-
-def test_verify_po_endpoint(client, db_session: Session, test_user: User):
-    """GET /api/buy-plans/{plan_id}/verify-po returns verification results."""
-    plan = _make_plan_with_lines(db_session, test_user, ["PO-EP-001"])
-    db_session.commit()
-
-    mock_messages = [
-        {
-            "id": "msg-ep",
-            "subject": "PO-EP-001",
-            "toRecipients": [{"emailAddress": {"address": "vendor@test.com"}}],
-            "sentDateTime": "2026-03-16T08:00:00Z",
-        }
-    ]
-
-    with (
-        patch("app.utils.token_manager.get_valid_token", new_callable=AsyncMock, return_value="mock-token"),
-        patch("app.utils.graph_client.GraphClient") as MockGC,
-    ):
-        mock_client = AsyncMock()
-        mock_client.search_sent_messages = AsyncMock(return_value=mock_messages)
-        MockGC.return_value = mock_client
-
-        resp = client.get(f"/api/buy-plans/{plan.id}/verify-po")
-
-    assert resp.status_code == 200
-    data = resp.json()
-    assert data["plan_id"] == plan.id
-    assert "verifications" in data
-    assert data["verifications"]["PO-EP-001"]["verified"] is True

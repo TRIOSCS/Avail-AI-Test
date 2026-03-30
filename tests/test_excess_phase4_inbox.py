@@ -76,7 +76,6 @@ class TestScanExcessBidResponses:
             sent_by=user.id,
             recipient_email="buyer@test.com",
             subject="Bid Request [EXCESS-BID-1]",
-            body_preview="Please bid",
             status="sent",
             sent_at=datetime.now(timezone.utc) - timedelta(hours=1),
         )

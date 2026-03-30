@@ -42,6 +42,11 @@
             Also on {{ overlap - 1 }} other req{{ 's' if overlap - 1 != 1 }}
           </span>
           {% endif %}
+          {% set matched = vendor_matched_mpns.get(s.vendor_name, []) if vendor_matched_mpns is defined else [] %}
+          {% set sub_matches = matched|reject("equalto", requirement.primary_mpn)|list %}
+          {% for mpn in sub_matches %}
+          <span class="inline-flex px-1 py-0.5 text-[9px] font-mono rounded bg-amber-50 text-amber-600 border border-amber-100">via {{ mpn }}</span>
+          {% endfor %}
         </div>
         {# Inline metrics: response rate + best price with freshness #}
         <div class="flex items-center gap-3 mt-0.5 text-[11px] text-gray-400">

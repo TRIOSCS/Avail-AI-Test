@@ -218,5 +218,5 @@ def test_ai_tagging_job_registered():
 
     job = scheduler.get_job("ai_tagging")
     assert job is not None
-    # Runs every 30 minutes
-    assert job.trigger.interval.total_seconds() == 1800
+    # Runs every 4 hours (was 30 minutes, changed during redesign)
+    assert job.trigger.interval.total_seconds() == 14400

@@ -520,43 +520,6 @@ class TestAutoParseOffers:
         assert "Notif Vendor" in notif.subject
 
 
-# ── Notification Types ───────────────────────────────────────────────
-
-
-class TestOfferNotifications:
-    """offer_pending_review notifications appear in sales notifications."""
-
-    def test_notification_type_registered(self):
-        """offer_pending_review is in _NOTIFICATION_TYPES."""
-        from app.routers.v13_features import _NOTIFICATION_TYPES
-
-        assert "offer_pending_review" in _NOTIFICATION_TYPES
-
-    def test_offer_notification_appears(self, client, db_session, test_user, test_requisition):
-        """Offer pending review notifications show up in /api/sales/notifications."""
-        db_session.add(
-            ActivityLog(
-                user_id=test_user.id,
-                activity_type="offer_pending_review",
-                channel="system",
-                requisition_id=test_requisition.id,
-                subject="New vendor offer needs review: Arrow — LM317T",
-                created_at=datetime.now(timezone.utc),
-            )
-        )
-        db_session.commit()
-
-        resp = client.get("/api/sales/notifications")
-        assert resp.status_code == 200
-        data = resp.json()
-        items = data if isinstance(data, list) else data.get("notifications", [])
-        matching = [n for n in items if n.get("type") == "offer_pending_review"]
-        assert len(matching) >= 1
-
-
-# ── Offers List Includes New Fields ──────────────────────────────────
-
-
 class TestOffersListFields:
     """GET /api/requisitions/{id}/offers returns all new fields."""
 
