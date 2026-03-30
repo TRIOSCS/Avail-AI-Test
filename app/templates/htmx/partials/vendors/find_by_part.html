@@ -49,8 +49,21 @@
               hx-target="{{ hx_target|default('#main-content') }}"
               hx-push-url="{{ push_url_base|default('/v2/vendors') }}/{{ r.vendor_id }}"
               {% endif %}>
-            <td class="px-4 py-2.5 text-sm font-medium text-gray-900">{{ r.vendor_name }}</td>
-            <td class="px-4 py-2.5 text-sm text-right text-gray-500 tabular-nums">{{ r.times_seen }}</td>
+            <td class="px-4 py-2.5 text-sm font-medium text-gray-900">
+              {{ r.vendor_name }}
+              {% if r.is_affinity %}
+              <span class="ml-1.5 inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-violet-50 text-violet-700">
+                Vendor Match
+              </span>
+              {% endif %}
+            </td>
+            <td class="px-4 py-2.5 text-sm text-right text-gray-500 tabular-nums">
+              {% if r.is_affinity %}
+              <span class="text-violet-600">{{ "%.0f%%"|format(r.affinity_confidence * 100) }}</span>
+              {% else %}
+              {{ r.times_seen }}
+              {% endif %}
+            </td>
             <td class="px-4 py-2.5 text-sm text-right tabular-nums {{ 'text-emerald-700 font-medium' if r.last_price else 'text-gray-500' }}">
               {{ "$%.4f"|format(r.last_price) if r.last_price else "—" }}
             </td>

@@ -3453,8 +3453,39 @@ async def find_by_part_partial(
                     "last_seen": mvh.last_seen,
                     "win_rate": vc.overall_win_rate if vc else None,
                     "avg_response_hours": vc.avg_response_hours if vc else None,
+                    "is_affinity": False,
                 }
             )
+
+    # If few MVH results, try vendor affinity matching
+    if norm_mpn and len(results) < 10:
+        try:
+            from app.services.vendor_affinity_service import find_vendor_affinity
+
+            affinity_matches = find_vendor_affinity(norm_mpn, db)
+
+            # Add affinity matches that aren't already in results
+            existing_vendors = {r["vendor_name"].lower() for r in results}
+            for match in affinity_matches:
+                vname = match.get("vendor_name", "")
+                if vname.lower() not in existing_vendors:
+                    results.append(
+                        {
+                            "vendor_name": vname,
+                            "vendor_id": match.get("vendor_id"),
+                            "times_seen": 0,
+                            "last_price": None,
+                            "last_qty": None,
+                            "last_seen": None,
+                            "win_rate": None,
+                            "avg_response_hours": None,
+                            "is_affinity": True,
+                            "affinity_confidence": match.get("confidence", 0),
+                            "affinity_reasoning": match.get("reasoning", ""),
+                        }
+                    )
+        except Exception:
+            logger.warning(f"Vendor affinity lookup failed for {norm_mpn}", exc_info=True)
 
     ctx = _base_ctx(request, user, "vendors")
     ctx.update(
@@ -4220,6 +4251,30 @@ async def companies_list_partial(
     for c in companies:
         c.staleness = _staleness_tier(c.last_activity_at)
 
+    # Today's Calls — overdue accounts owned by this user (sales/trader only)
+    todays_calls: list[Company] = []
+    if user.role in ("sales", "trader"):
+        call_threshold = datetime.now(timezone.utc) - timedelta(days=STALENESS_OVERDUE_DAYS)
+        todays_calls = (
+            db.query(Company)
+            .filter(
+                Company.is_active.is_(True),
+                Company.account_owner_id == user.id,
+                or_(
+                    Company.last_activity_at < call_threshold,
+                    Company.last_activity_at.is_(None),
+                ),
+            )
+            .order_by(
+                Company.is_strategic.desc().nullslast(),
+                Company.last_activity_at.asc().nullsfirst(),
+            )
+            .limit(10)
+            .all()
+        )
+        for c in todays_calls:
+            c.staleness = _staleness_tier(c.last_activity_at)
+
     ctx = _base_ctx(request, user, "customers")
     ctx.update(
         {
@@ -4230,6 +4285,7 @@ async def companies_list_partial(
             "offset": offset,
             "hx_target": hx_target,
             "push_url_base": push_url_base,
+            "todays_calls": todays_calls,
         }
     )
     return templates.TemplateResponse("htmx/partials/customers/list.html", ctx)

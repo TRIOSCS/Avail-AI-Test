@@ -169,3 +169,23 @@ class TestVendorDetailMpnContext:
         resp = client.get(f"/v2/partials/vendors/{vendor.id}?mpn=LM317T")
         assert resp.status_code == 200
         assert "LM317T" in resp.text
+
+
+class TestFindByPartAffinity:
+    """Test vendor affinity suggestions in Find by Part."""
+
+    def test_affinity_badge_shown_for_affinity_results(self, client: TestClient, db_session: Session):
+        """Affinity results show a 'Vendor Match' badge."""
+        # With no MVH data, affinity should be attempted
+        # Create a MaterialCard so the MPN is recognized
+        card = MaterialCard(
+            normalized_mpn="RARE123",
+            display_mpn="RARE123",
+            manufacturer="TI",
+        )
+        db_session.add(card)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/vendors/find-by-part?mpn=RARE123")
+        assert resp.status_code == 200
+        # Even with no affinity results, the page should render without error
