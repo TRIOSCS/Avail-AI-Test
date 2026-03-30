@@ -672,7 +672,14 @@ Alpine.data('unifiedReqModal', () => ({
     },
     async standardizeDescription(part) {
         const raw = (part.description || '').trim();
-        if (!raw || raw.length < 3) return;
+        if (!raw || raw.length < 3) {
+            // No user description — auto-generate from MPN if available
+            const mpn = (part.primary_mpn || '').trim();
+            if (mpn.length >= 3) {
+                await this.generateDescription(part);
+            }
+            return;
+        }
         try {
             const resp = await fetch('/api/ai/standardize-description', {
                 method: 'POST',
@@ -689,6 +696,29 @@ Alpine.data('unifiedReqModal', () => ({
             }
         } catch (e) {
             console.warn('Description standardize failed:', e);
+        }
+    },
+    async generateDescription(part) {
+        const mpn = (part.primary_mpn || '').trim();
+        if (!mpn || mpn.length < 3) return;
+        try {
+            const resp = await fetch('/api/ai/generate-description', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    mpn: mpn,
+                    manufacturer: part.manufacturer || '',
+                    existing_description: part.description || '',
+                }),
+            });
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data.description && data.confidence >= 0.75) {
+                    part.description = data.description;
+                }
+            }
+        } catch (e) {
+            console.warn('Description generate failed:', e);
         }
     },
     async parseWithAI() {

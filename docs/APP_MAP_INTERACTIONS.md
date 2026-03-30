@@ -44,7 +44,7 @@ htmx_views.py (router)
     |
     +---> material_card_service.py
     |       +---> DB: UPSERT material_cards (dedup by normalized_mpn)
-    |               +---> DB: UPDATE requirements.material_card_id (link)
+    |               +---> DB: UPDATE requirements.material_card_id = primary_card_id (link)
     |
     +---> activity_service.py --> DB: INSERT activity_log
 ```
@@ -84,6 +84,8 @@ search_service.py (orchestrator)
     |       +---> evidence_tiers.py (assign T1-T7)
     |
     +---> DB: UPSERT sightings (dedup by requirement + vendor + mpn)
+    |
+    +---> DB: UPDATE requirements.material_card_id = primary_card_id (link req to card)
     |
     +---> material_card_service.py --> DB: UPSERT material_vendor_history
     |
@@ -284,6 +286,64 @@ tagging_ai.py (orchestrator)
     +---> DB: UPDATE vendor_cards.brand_tags, companies.commodity_tags
 ```
 
+## Material Enrichment Pipeline
+
+```
+Trigger: hourly job (_job_material_enrichment) OR Enrich button on material detail
+    |
+    v
+tagging_jobs.py -> enrich_pending_cards() [scheduled]
+  OR
+materials router -> enrich_material_cards() [user-triggered]
+    |
+    v
+Claude Haiku (Anthropic API)
+    |
+    +---> Classify card: description, category, lifecycle_status
+    +---> DB: UPDATE material_cards (description, category, lifecycle_status)
+    +---> search_vector trigger auto-updates TSVECTOR with new description/category
+
+Env: MATERIAL_ENRICHMENT_ENABLED=true
+```
+
+## Cross-Reference Caching
+
+```
+GET /find_crosses (material detail page)
+    |
+    v
+find_crosses() endpoint
+    |
+    +---> DB: SELECT material_cards.cross_references
+    |       |
+    |       +--- non-empty AND refresh!=True -> return cached cross_references (skip AI)
+    |       +--- empty OR refresh=True -> call AI for cross-references
+    |               +---> Claude API -> discover alternative MPNs
+    |               +---> DB: UPDATE material_cards.cross_references (cache result)
+    |
+    +---> Return cross-references to template
+```
+
+---
+
+## Faceted Search (Full-Text Search)
+
+```
+Materials workspace search input
+    |
+    v
+faceted_search_service.py
+    |
+    +---> plainto_tsquery(query) on material_cards.search_vector (PostgreSQL FTS)
+    +---> ts_rank() for relevance ordering
+    +---> pg_trgm fuzzy match on display_mpn (typo-tolerant via ix_material_cards_trgm_mpn)
+    +---> Facet filters: category, manufacturer, lifecycle_status, commodity specs
+    +---> Returns ranked, filtered material cards
+
+NOTE: Replaces previous ILIKE-based search. Uses GIN-indexed TSVECTOR
+      with weighted fields (MPN=A, manufacturer=B, description/category=C).
+```
+
 ---
 
 ## Scoring System Hierarchy
@@ -374,6 +434,7 @@ APScheduler (scheduler.py)
     |
     +---> tagging_jobs.py (hourly)
     |       +---> Claude batch classify -> material_tags, entity_tags
+    |       +---> _job_material_enrichment -> enrich_pending_cards() (Claude Haiku)
     |
     +---> sourcing_refresh_jobs.py (4 hours)
     |       +---> Re-search stale requirements through all connectors
@@ -489,6 +550,6 @@ BROWSER (HTMX + Alpine.js)
 | CRM & Data | 20+ | company_merge, vendor_merge, auto_dedup, enrichment |
 | Vendor Mgmt | 8 | vendor_analysis, vendor_affinity, vendor_scorecard |
 | Buy Plans | 6 | buyplan_builder, buyplan_workflow, buyplan_scoring |
-| Materials | 5 | material_enrichment, materials_ai_search, excess_service |
+| Materials | 6 | material_enrichment, materials_ai_search, faceted_search_service, excess_service |
 | Admin & Health | 6 | health_monitor, integrity_service, audit_service |
 | Misc | 14 | knowledge_service, document_service, sse_broker, webhook_service |

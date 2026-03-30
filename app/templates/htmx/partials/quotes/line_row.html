@@ -8,7 +8,7 @@
     x-data="{ editing: false }"
     @dblclick="editing = true">
   {# MPN cell — in edit mode, expands to show full inline form #}
-  <td class="px-4 py-3 text-sm font-mono font-medium text-gray-900" :colspan="editing ? 7 : 1">
+  <td class="px-4 py-3 text-sm font-mono font-medium text-gray-900" :colspan="editing ? 8 : 1">
     <template x-if="!editing" x-cloak>
       <span>{{ line.mpn }}</span>
     </template>
@@ -51,6 +51,7 @@
       </form>
     </template>
   </td>
+  <td class="px-4 py-3 text-sm text-gray-500 truncate max-w-[200px]" x-show="!editing" x-cloak title="{{ line.description or '' }}">{{ line.description or '-' }}</td>
   <td class="px-4 py-3 text-sm text-gray-600" x-show="!editing" x-cloak>{{ line.manufacturer or '-' }}</td>
   <td class="px-4 py-3 text-sm text-gray-600 text-right" x-show="!editing" x-cloak>{{ '{:,}'.format(line.qty) if line.qty else '-' }}</td>
   <td class="px-4 py-3 text-sm text-gray-600 text-right" x-show="!editing" x-cloak>${{ '{:,.4f}'.format(line.cost_price|float) if line.cost_price else '-' }}</td>

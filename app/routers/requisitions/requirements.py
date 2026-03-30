@@ -422,6 +422,7 @@ async def add_requirements(
             hardware_codes=parsed.hardware_codes or "",
             packaging=normalize_packaging(parsed.packaging) if parsed.packaging else None,
             notes=parsed.notes or "",
+            description=parsed.description or "",
         )
         db.add(r)
         created.append(r)
@@ -500,6 +501,11 @@ async def add_requirements(
         background_tasks.add_task(_ics_enqueue_batch, [r.id for r in created])
         if not os.environ.get("TESTING"):
             background_tasks.add_task(_bg_full_search, [r.id for r in created])
+
+        # Auto-generate verified descriptions for parts missing them
+        from ...services.description_service import backfill_descriptions
+
+        background_tasks.add_task(backfill_descriptions, [r.id for r in created])
 
     # Duplicate detection
     duplicates = []

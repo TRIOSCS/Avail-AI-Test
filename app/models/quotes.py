@@ -91,6 +91,7 @@ class QuoteLine(Base):
     material_card_id = Column(Integer, ForeignKey("material_cards.id", ondelete="SET NULL"))
     offer_id = Column(Integer, ForeignKey("offers.id", ondelete="SET NULL"))
     mpn = Column(String(255), nullable=False)
+    description = Column(String(500), nullable=True)
     manufacturer = Column(String(255))
     qty = Column(Integer)
     cost_price = Column(Numeric(12, 4))

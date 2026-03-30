@@ -158,6 +158,7 @@
 | offer_id | FK -> offers | |
 | material_card_id | FK -> material_cards | |
 | mpn | String 255 | |
+| description | String 500 | AI-verified part description |
 | qty | Integer | |
 | cost_price | Numeric 12,4 | |
 | sell_price | Numeric 12,4 | |
@@ -282,12 +283,19 @@
 | normalized_mpn | String 255, unique | Dedup key |
 | display_mpn | String 255 | |
 | manufacturer | String 255, indexed | |
+| description | Text | AI-enriched part description |
+| category | String 255 | AI-enriched commodity category |
 | lifecycle_status | String 50 | active\|nrfnd\|eol\|obsolete\|ltb |
 | package_type | String 100 | QFP-64\|BGA-256\|0603 |
 | rohs_status | String 50 | compliant\|non-compliant\|exempt |
 | cross_references | JSONB | Alternative MPNs |
 | specs_structured | JSONB | Parametric data |
-| search_vector | TSVECTOR | Full-text search |
+| search_vector | TSVECTOR | Trigger-maintained FTS (weighted: MPN=A, manufacturer=B, description/category=C) |
+
+> **Indexes & Triggers:**
+> - `trig_material_cards_search_vector` — PostgreSQL trigger maintains `search_vector` TSVECTOR on INSERT/UPDATE (weighted: display_mpn=A, manufacturer=B, description/category=C)
+> - `ix_material_cards_search_vector` — GIN index for fast full-text search via `plainto_tsquery()` + `ts_rank()`
+> - `ix_material_cards_trgm_mpn` — pg_trgm GIN index on `display_mpn` for typo-tolerant search
 
 **`material_vendor_history`** — Which vendors sell which parts (deduplicated)
 
@@ -306,7 +314,7 @@
 - Status: draft -> active -> bidding -> closed -> expired
 
 **`excess_line_items`** — Individual parts in an excess list
-- part_number, manufacturer, quantity, asking_price, demand_match_count
+- part_number, description, manufacturer, quantity, asking_price, demand_match_count
 
 **`bids`** — Vendor bids on excess items
 - bidder_company_id, bidder_vendor_card_id, unit_price, quantity_wanted, status

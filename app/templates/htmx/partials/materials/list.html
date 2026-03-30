@@ -21,6 +21,7 @@
       <thead>
         <tr>
           <th class="text-left">MPN</th>
+          <th class="text-left">Description</th>
           <th class="text-left">Manufacturer</th>
           <th class="text-left">Category</th>
           <th class="text-left">Lifecycle</th>
@@ -47,6 +48,7 @@
             </div>
             {% endif %}
           </td>
+          <td class="td-label text-gray-500 truncate max-w-[200px]" title="{{ m.description or '' }}">{{ m.description or "--" }}</td>
           <td class="td-label text-gray-600">{{ m.manufacturer or "--" }}</td>
           <td class="td-label text-gray-600">{{ m.category or "--" }}</td>
           <td>

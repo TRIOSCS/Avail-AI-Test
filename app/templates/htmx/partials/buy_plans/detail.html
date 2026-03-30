@@ -247,6 +247,7 @@
         <thead class="bg-gray-50">
           <tr>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Part</th>
+            <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Description</th>
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Vendor</th>
             <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
             <th class="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Unit Cost</th>
@@ -260,6 +261,10 @@
             {# Part (MPN) #}
             <td class="px-4 py-3 text-sm font-mono font-medium text-gray-900">
               {{ line.requirement.primary_mpn if line.requirement else '-' }}
+            </td>
+            {# Description #}
+            <td class="px-4 py-3 text-sm text-gray-500 truncate max-w-[200px]" title="{{ line.requirement.description if line.requirement and line.requirement.description else '' }}">
+              {{ line.requirement.description if line.requirement else '-' }}
             </td>
             {# Vendor + buyer below #}
             <td class="px-4 py-3">

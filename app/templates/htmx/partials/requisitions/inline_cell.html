@@ -4,11 +4,12 @@
 
    Receives: req, field (str), users (list, for owner), context ('row'|'header'|'tab').
    Called by: GET /v2/partials/requisitions/{id}/edit/{field}
-   Depends on: HTMX, Alpine.js, brand palette.
+   Depends on: HTMX, Alpine.js, brand palette, _macros.html (req_status_badge).
 
    Escape key: restores original cell content client-side (no network request).
    Uses _cancelled flag on the form to prevent @blur from submitting after Escape.
 #}
+{% from "htmx/partials/shared/_macros.html" import req_status_badge %}
 
 {% if context == "tab" %}
   {% set target_id = "this" %}
@@ -24,20 +25,8 @@
     <span class="{{ 'text-2xl font-bold text-gray-900' if context == 'header' else 'font-medium text-gray-900 truncate' if context == 'tab' else '' }}">{{ req.name or '—' }}</span>
   {% endset %}
 {% elif field == 'status' %}
-  {# Status badge colours matching req_row.html / detail_header.html #}
-  {% set status_colors = {
-    'draft': 'bg-gray-100 text-gray-700',
-    'active': 'bg-blue-100 text-blue-700',
-    'sourcing': 'bg-purple-100 text-purple-700',
-    'offers': 'bg-yellow-100 text-yellow-700',
-    'quoting': 'bg-orange-100 text-orange-700',
-    'quoted': 'bg-amber-100 text-amber-700',
-    'won': 'bg-green-100 text-green-700',
-    'lost': 'bg-red-100 text-red-700',
-    'archived': 'bg-gray-100 text-gray-500'
-  } %}
   {% set orig_display %}
-    <span class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium {{ status_colors.get(req.status, 'bg-gray-100 text-gray-700') }}">{{ (req.status or 'draft')|capitalize }}</span>
+    {{ req_status_badge(req.status or 'draft') }}
   {% endset %}
 {% elif field == 'urgency' %}
   {% set urgency_colors = {

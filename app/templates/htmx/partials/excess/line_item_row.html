@@ -23,6 +23,7 @@
     <p class="text-[10px] text-gray-400 font-mono mt-0.5">&rarr; {{ item.normalized_part_number }}</p>
     {% endif %}
   </td>
+  <td class="px-4 py-3 text-sm text-gray-500 truncate max-w-[200px]" title="{{ item.description or '' }}">{{ item.description or "\u2014" }}</td>
   <td class="px-4 py-3 text-sm text-gray-600">{{ item.manufacturer or "\u2014" }}</td>
   <td class="px-4 py-3 text-sm text-gray-600 text-right tabular-nums">{{ "{:,}".format(item.quantity) }}</td>
   <td class="px-4 py-3 text-sm text-gray-600">{{ item.condition or "\u2014" }}</td>

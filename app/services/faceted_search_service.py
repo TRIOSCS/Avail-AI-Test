@@ -160,16 +160,29 @@ def search_materials_faceted(
     _fts_applied = False
     if q:
         sb = SearchBuilder(q)
-        # Use PostgreSQL FTS when available, fall back to ILIKE for SQLite (tests)
-        if db.bind and db.bind.dialect.name == "postgresql":
+        is_pg = db.bind and db.bind.dialect.name == "postgresql"
+        # Short/single-token queries (likely MPN prefixes) → ILIKE for substring match
+        # Multi-word natural language queries → FTS for relevance ranking
+        use_fts = is_pg and " " in q.strip()
+        if use_fts:
+            from sqlalchemy import or_
+
             ts_query = func.plainto_tsquery("english", q)
-            query = query.filter(MaterialCard.search_vector.op("@@")(ts_query))
+            # Combine FTS with ILIKE on MPN fields (FTS misses partial MPN matches)
+            query = query.filter(
+                or_(
+                    MaterialCard.search_vector.op("@@")(ts_query),
+                    MaterialCard.display_mpn.ilike(f"%{sb.safe}%"),
+                    MaterialCard.normalized_mpn.ilike(f"%{sb.safe}%"),
+                )
+            )
             query = query.order_by(
                 func.ts_rank(MaterialCard.search_vector, ts_query).desc(),
                 MaterialCard.search_count.desc(),
             )
             _fts_applied = True
         else:
+            # Single-token or SQLite: substring match on all fields
             query = query.filter(
                 sb.ilike_filter(
                     MaterialCard.normalized_mpn,

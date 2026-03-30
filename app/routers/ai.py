@@ -408,6 +408,76 @@ async def ai_standardize_description(
     return {"description": result or payload.description.upper()}
 
 
+class GenerateDescriptionRequest(PydanticBaseModel):
+    """Generate a verified part description from distributor cross-referencing."""
+
+    mpn: str
+    manufacturer: str = ""
+    existing_description: str = ""
+
+
+@router.post("/api/ai/generate-description")
+@limiter.limit("20/minute")
+async def ai_generate_description(
+    payload: GenerateDescriptionRequest,
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Generate a verified part description using 3-point cross-referencing.
+
+    Queries DigiKey, Mouser, Element14, OEMSecrets, and existing sightings DB, then uses
+    AI to synthesize a standardized description from verified data. Returns the
+    description plus confidence score and source count.
+    """
+    if not payload.mpn.strip():
+        raise HTTPException(400, "MPN is required")
+
+    from ..services.description_service import generate_verified_description
+
+    result = await generate_verified_description(
+        payload.mpn.strip(),
+        payload.manufacturer.strip(),
+        payload.existing_description.strip(),
+    )
+    return result
+
+
+@router.post("/api/ai/generate-description/{requirement_id}")
+@limiter.limit("20/minute")
+async def ai_generate_description_for_requirement(
+    requirement_id: int,
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Generate and save a verified description for an existing requirement."""
+    from ..models import Requirement
+    from ..services.description_service import generate_verified_description
+
+    req = db.get(Requirement, requirement_id)
+    if not req:
+        raise HTTPException(404, "Requirement not found")
+
+    result = await generate_verified_description(
+        req.primary_mpn,
+        req.manufacturer or "",
+        req.description or "",
+    )
+
+    if result["description"] and result["confidence"] >= 0.75:
+        req.description = result["description"]
+        # Also update linked MaterialCard if empty
+        if req.material_card_id:
+            from ..models.intelligence import MaterialCard
+
+            card = db.get(MaterialCard, req.material_card_id)
+            if card and not card.description:
+                card.description = result["description"]
+        db.commit()
+
+    return result
+
+
 # ── Feature 2b: Parse Vendor Reply → Structured Offer (Anthropic) ────────
 
 

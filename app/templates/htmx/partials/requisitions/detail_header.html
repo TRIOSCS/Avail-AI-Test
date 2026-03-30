@@ -4,7 +4,7 @@
    Called by: detail.html (include), requisition_inline_save (context=header).
    Depends on: inline_cell.html, brand palette, Alpine.js.
 #}
-{% from "htmx/partials/shared/_macros.html" import status_badge, urgency_badge %}
+{% from "htmx/partials/shared/_macros.html" import req_status_badge, urgency_badge %}
 
 <div id="req-header" class="bg-white rounded-lg shadow border border-gray-200 p-6 mb-6">
   <div class="flex items-start justify-between">
@@ -66,16 +66,6 @@
       </a>
 
       {# Inline-editable status badge #}
-      {% set req_status_map = {
-        "active": "bg-emerald-50 text-emerald-600 border-emerald-200",
-        "open": "bg-sky-50 text-sky-600 border-sky-200",
-        "draft": "bg-slate-50 text-slate-500 border-slate-200",
-        "sourcing": "bg-sky-50 text-sky-600 border-sky-200",
-        "won": "bg-emerald-50 text-emerald-700 border-emerald-300",
-        "lost": "bg-rose-50 text-rose-500 border-rose-200",
-        "archived": "bg-gray-50 text-gray-500 border-gray-200",
-        "awarded": "bg-emerald-50 text-emerald-600 border-emerald-200"
-      } %}
       <span id="req-status-{{ req.id }}"
             class="cursor-pointer hover:ring-2 hover:ring-brand-300 rounded transition"
             hx-get="/v2/partials/requisitions/{{ req.id }}/edit/status?context=header"
@@ -83,7 +73,7 @@
             hx-swap="innerHTML"
             hx-trigger="click"
             title="Click to change status">
-        {{ status_badge(req.status, status_map=req_status_map) }}
+        {{ req_status_badge(req.status) }}
       </span>
 
       {# Inline-editable urgency badge #}

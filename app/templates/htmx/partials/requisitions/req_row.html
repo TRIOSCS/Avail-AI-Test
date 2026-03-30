@@ -3,20 +3,7 @@
    Called by: requisitions/list.html loop, create endpoint (prepend), inline save (row swap).
    Depends on: brand palette, Alpine.js (selectedIds), HTMX.
 #}
-{% from "htmx/partials/shared/_macros.html" import status_badge, urgency_badge %}
-
-{# Custom status map: sourcing and awarded differ from defaults #}
-{% set req_status_map = {
-  "active": "bg-emerald-50 text-emerald-600 border-emerald-200",
-  "draft": "bg-slate-50 text-slate-500 border-slate-200",
-  "sourcing": "bg-sky-50 text-sky-600 border-sky-200",
-  "won": "bg-emerald-50 text-emerald-700 border-emerald-300",
-  "lost": "bg-rose-50 text-rose-500 border-rose-200",
-  "archived": "bg-gray-50 text-gray-500 border-gray-200",
-  "awarded": "bg-emerald-50 text-emerald-600 border-emerald-200",
-  "open": "bg-sky-50 text-sky-600 border-sky-200",
-  "cancelled": "bg-gray-50 text-gray-400 border-gray-200"
-} %}
+{% from "htmx/partials/shared/_macros.html" import req_status_badge, urgency_badge %}
 
 {# Reusable cell macros — some are inline-editable (dblclick) #}
 {% macro cell_name() %}
@@ -88,7 +75,7 @@
       hx-trigger="dblclick"
       @click.stop
       title="Double-click to change status">
-    {{ status_badge(req.status, status_map=req_status_map) }}
+    {{ req_status_badge(req.status) }}
   </td>
 {% endmacro %}
 

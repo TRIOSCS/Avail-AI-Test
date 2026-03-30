@@ -1,8 +1,9 @@
 {# _macros.html — Shared Jinja2 component macros for AvailAI.
 
 Usage:
-  {% from "htmx/partials/shared/_macros.html" import status_badge, urgency_badge, risk_badge %}
+  {% from "htmx/partials/shared/_macros.html" import status_badge, req_status_badge, urgency_badge, risk_badge %}
   {{ status_badge(req.status) }}
+  {{ req_status_badge(req.status) }}
   {{ urgency_badge(req.urgency) }}
   {{ risk_badge(lead.risk_level) }}
   {{ btn_primary("Save", {"hx-post": "/api/save", "hx-target": "#main"}) }}
@@ -72,6 +73,31 @@ Usage:
 <span class="inline-flex px-1.5 text-xs font-medium rounded border {{ colors.get(value, 'bg-gray-50 text-gray-500 border-gray-200') }}">
   {{ value|replace('_', ' ')|capitalize }}
 </span>
+{%- endmacro %}
+
+
+{# ── Requisition Status Badge ─────────────────────────────────────── #}
+{# Wraps status_badge with requisition-specific color overrides.
+   Use this for Requisition.status (not Requirement.sourcing_status).
+   Sourcing shows as sky (not amber) to distinguish from requirement-level sourcing.
+   Usage:
+     {% from "htmx/partials/shared/_macros.html" import req_status_badge %}
+     {{ req_status_badge(req.status) }}
+#}
+
+{% macro req_status_badge(value) %}
+{%- set req_map = {
+  "active": "bg-emerald-50 text-emerald-600 border-emerald-200",
+  "open": "bg-sky-50 text-sky-600 border-sky-200",
+  "draft": "bg-slate-50 text-slate-500 border-slate-200",
+  "sourcing": "bg-sky-50 text-sky-600 border-sky-200",
+  "won": "bg-emerald-50 text-emerald-700 border-emerald-300",
+  "lost": "bg-rose-50 text-rose-500 border-rose-200",
+  "archived": "bg-gray-50 text-gray-500 border-gray-200",
+  "awarded": "bg-emerald-50 text-emerald-600 border-emerald-200",
+  "cancelled": "bg-gray-50 text-gray-400 border-gray-200"
+} -%}
+{{ status_badge(value, status_map=req_map) }}
 {%- endmacro %}
 
 

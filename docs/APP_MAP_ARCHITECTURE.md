@@ -31,7 +31,7 @@ AvailAI is a production electronic component sourcing platform and CRM. Buyers s
 | **redis** | Cache + coordination | 768 MB |
 | **caddy** | Reverse proxy, HTTPS | 512 MB |
 | **db-backup** | pg_dump every 6 hours | 256 MB |
-| **enrichment-worker** | (disabled) | — |
+| **enrichment-worker** | Material card enrichment (Claude Haiku) | 512 MB |
 
 ## Request Flow — Browser to Database
 
@@ -136,6 +136,7 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
 | health_check | 5 min | DB, Redis, API connector health |
 | backup | 6 hours | pg_dump |
 | tagging_auto | Hourly | AI-classify parts by commodity/brand |
+| material_enrichment | Hourly | Enrich pending material cards (Claude Haiku: description, category, lifecycle_status) |
 | task_reminder | 2 hours | Notify overdue tasks |
 | teams_sync | 6 hours | Sync Teams call history |
 | prospecting_refresh | Daily | Web search for new prospects |

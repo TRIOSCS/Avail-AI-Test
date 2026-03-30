@@ -1,11 +1,11 @@
 {
   "htmx_app.js": {
-    "file": "assets/htmx_app-CBiYSVkj.js",
+    "file": "assets/htmx_app-B4DIWtEF.js",
     "name": "htmx_app",
     "src": "htmx_app.js",
     "isEntry": true,
     "css": [
-      "assets/styles-CE0e3rj4.css",
+      "assets/styles-BU4HyLWI.css",
       "assets/htmx_mobile-Bfcq2ZW3.css"
     ]
   },
@@ -15,7 +15,7 @@
     "isEntry": true
   },
   "styles.css": {
-    "file": "assets/styles-CE0e3rj4.css",
+    "file": "assets/styles-BU4HyLWI.css",
     "src": "styles.css",
     "isEntry": true
   }

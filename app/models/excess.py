@@ -76,6 +76,7 @@ class ExcessLineItem(Base):
     excess_list_id = Column(Integer, ForeignKey("excess_lists.id", ondelete="CASCADE"), nullable=False)
     part_number = Column(String(100), nullable=False, index=True)
     normalized_part_number = Column(String(100), nullable=True, index=True)
+    description = Column(String(500), nullable=True)
     manufacturer = Column(String(255), nullable=True)
     quantity = Column(Integer, nullable=False)
     date_code = Column(String(50), nullable=True)
