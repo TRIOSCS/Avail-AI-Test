@@ -59,7 +59,11 @@ async def proactive_match_count(
     """Count of new proactive matches for nav badge."""
     from ..services.proactive_service import get_match_count
 
-    return {"count": get_match_count(db, user.id)}
+    @cached_endpoint(prefix="proactive_count", ttl_hours=0.01)  # ~36-second TTL
+    def _fetch(user, db):
+        return {"count": get_match_count(db, user.id)}
+
+    return _fetch(user=user, db=db)
 
 
 @router.post("/api/proactive/dismiss")

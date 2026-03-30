@@ -40,52 +40,58 @@ def seed_from_existing_manufacturers(db: Session) -> dict:
         .filter(MaterialTag.tag.has(tag_type="brand"))
         .subquery()
     )
-    cards = (
-        db.query(MaterialCard)
-        .filter(
-            MaterialCard.manufacturer.isnot(None),
-            MaterialCard.manufacturer != "",
-            ~MaterialCard.id.in_(db.query(already_tagged.c.material_card_id)),
-        )
-        .all()
+    base_query = db.query(MaterialCard).filter(
+        MaterialCard.manufacturer.isnot(None),
+        MaterialCard.manufacturer != "",
+        ~MaterialCard.id.in_(db.query(already_tagged.c.material_card_id)),
     )
 
     total_seeded = 0
-    brands_created = set()
+    brands_created: set[str] = set()
+    batch_size = 500
+    last_id = 0
 
-    for card in cards:
-        result = classify_material_card(card.normalized_mpn, card.manufacturer, card.category)
+    while True:
+        cards = base_query.filter(MaterialCard.id > last_id).order_by(MaterialCard.id).limit(batch_size).all()
+        if not cards:
+            break
 
-        tags_to_apply = []
-        if result.get("brand"):
-            brand_tag = get_or_create_brand_tag(result["brand"]["name"], db)
-            if brand_tag.id is None:  # pragma: no cover
-                db.flush()
-            brands_created.add(brand_tag.name)
-            tags_to_apply.append(
-                {
-                    "tag_id": brand_tag.id,
-                    "source": result["brand"]["source"],
-                    "confidence": result["brand"]["confidence"],
-                }
-            )
+        for card in cards:
+            last_id = card.id
+            result = classify_material_card(card.normalized_mpn, card.manufacturer, card.category)
 
-        if result.get("commodity"):
-            commodity_tag = get_or_create_commodity_tag(result["commodity"]["name"], db)
-            if commodity_tag:
+            tags_to_apply = []
+            if result.get("brand"):
+                brand_tag = get_or_create_brand_tag(result["brand"]["name"], db)
+                if brand_tag.id is None:  # pragma: no cover
+                    db.flush()
+                brands_created.add(brand_tag.name)
                 tags_to_apply.append(
                     {
-                        "tag_id": commodity_tag.id,
-                        "source": result["commodity"]["source"],
-                        "confidence": result["commodity"]["confidence"],
+                        "tag_id": brand_tag.id,
+                        "source": result["brand"]["source"],
+                        "confidence": result["brand"]["confidence"],
                     }
                 )
 
-        if tags_to_apply:
-            tag_material_card(card.id, tags_to_apply, db)
-            total_seeded += 1
+            if result.get("commodity"):
+                commodity_tag = get_or_create_commodity_tag(result["commodity"]["name"], db)
+                if commodity_tag:
+                    tags_to_apply.append(
+                        {
+                            "tag_id": commodity_tag.id,
+                            "source": result["commodity"]["source"],
+                            "confidence": result["commodity"]["confidence"],
+                        }
+                    )
 
-    db.commit()
+            if tags_to_apply:
+                tag_material_card(card.id, tags_to_apply, db)
+                total_seeded += 1
+
+        db.commit()
+        logger.info(f"Seed batch: {total_seeded} seeded so far, last_id={last_id}")
+
     logger.info(f"Seeded {total_seeded} cards from existing manufacturers, {len(brands_created)} unique brands")
 
     return {"total_seeded": total_seeded, "unique_brands_created": len(brands_created)}

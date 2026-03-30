@@ -18,7 +18,7 @@ class Company(Base):
     website = Column(String(500))
     industry = Column(String(255))
     notes = Column(Text)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, index=True)
 
     # Enrichment fields (shared structure with VendorCard)
     domain = Column(String(255), index=True)
@@ -32,9 +32,9 @@ class Company(Base):
     enrichment_source = Column(String(50))  # "explorium", "apollo", "manual"
 
     # v1.3.0: Customer ownership fields
-    is_strategic = Column(Boolean, default=False)
+    is_strategic = Column(Boolean, default=False, index=True)
     ownership_cleared_at = Column(DateTime)
-    last_activity_at = Column(UTCDateTime)
+    last_activity_at = Column(UTCDateTime, index=True)
     account_owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
 
     # v1.4.0: Account management fields
@@ -131,7 +131,7 @@ class CustomerSite(Base):
     carrier_account = Column(String(100))  # Customer shipping account number
 
     notes = Column(Text)
-    is_active = Column(Boolean, default=True)
+    is_active = Column(Boolean, default=True, index=True)
 
     # v2.10: Prospecting pool fields
     last_activity_at = Column(UTCDateTime)

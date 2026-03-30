@@ -103,22 +103,27 @@ def check_vendor_history_duplicates(db: Session) -> int:
 
     E.g. card 42 has vendor_name="ARROW" and vendor_name="Arrow" — these should be a
     single record.
+
+    Uses SQL GROUP BY with UPPER() to find duplicates server-side, avoiding loading all
+    rows into memory.
     """
-    from ..vendor_utils import normalize_vendor_name
+    # Find (card_id, upper(vendor_name)) groups with more than one row — these are
+    # case-insensitive duplicates that should be merged.
+    dupes = (
+        db.query(
+            MaterialVendorHistory.material_card_id,
+            func.upper(MaterialVendorHistory.vendor_name).label("norm_vendor"),
+            func.count().label("cnt"),
+        )
+        .group_by(
+            MaterialVendorHistory.material_card_id,
+            func.upper(MaterialVendorHistory.vendor_name),
+        )
+        .having(func.count() > 1)
+        .all()
+    )
 
-    # Pull all vendor histories grouped by card
-    all_vh = db.query(
-        MaterialVendorHistory.material_card_id,
-        MaterialVendorHistory.vendor_name,
-    ).all()
-
-    # Group by (card_id, normalized_vendor_name)
-    groups: dict[tuple, int] = {}
-    for card_id, vendor_name in all_vh:
-        key = (card_id, normalize_vendor_name(vendor_name))
-        groups[key] = groups.get(key, 0) + 1
-
-    return sum(1 for count in groups.values() if count > 1)
+    return len(dupes)
 
 
 # ── Self-Healing Re-Linker ───────────────────────────────────────────
