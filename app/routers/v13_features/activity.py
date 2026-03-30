@@ -184,6 +184,7 @@ async def initiate_call_endpoint(
 
     result = await initiate_call(
         to_phone=to_phone,
+        from_phone=settings.acs_from_phone,
         callback_url=settings.acs_callback_url or f"{settings.app_url}/api/webhooks/acs",
         connection_string=settings.acs_connection_string,
     )

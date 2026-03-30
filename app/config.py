@@ -201,6 +201,7 @@ class Settings(BaseSettings):
 
     # --- Azure Communication Services ---
     acs_connection_string: str = ""
+    acs_from_phone: str = ""  # ACS-provisioned phone number for caller ID (E.164 format)
     acs_callback_url: str = ""
 
     # --- MVP Mode ---
