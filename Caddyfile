@@ -33,21 +33,24 @@ app.availai.net {
 	@sw path /static/sw.js
 	handle @sw {
 		header Cache-Control "no-cache, must-revalidate"
-		import backend
+		root * /srv
+		file_server
 	}
 
 	# Vite-hashed assets (fingerprinted filenames) — immutable long cache
 	@hashed path /static/assets/*
 	handle @hashed {
 		header Cache-Control "public, max-age=31536000, immutable"
-		import backend
+		root * /srv
+		file_server
 	}
 
 	# All other static files — short cache so updates propagate
 	@static path /static/*
 	handle @static {
 		header Cache-Control "public, max-age=3600"
-		import backend
+		root * /srv
+		file_server
 	}
 
 	# Safe read-only GET endpoints — 30s browser cache reduces redundant
