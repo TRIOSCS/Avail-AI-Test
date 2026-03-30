@@ -13,7 +13,7 @@
 <div class="border-b border-gray-100 pb-3 mb-3 sightings-slide-down">
   <div class="flex items-start justify-between">
     <div>
-      {{ mpn_chips(requirement) }}
+      {{ mpn_chips(requirement, link_map=link_map) }}
       {% if requirement.manufacturer %}
       <p class="text-xs text-gray-500 mt-1">{{ requirement.manufacturer }}</p>
       {% endif %}

@@ -144,7 +144,7 @@
       {% set cov_pct = [cov_pct, 100]|min %}
       <tr class="group cursor-pointer {{ 'bg-rose-50/30' if is_hot else '' }}"
           :class="selectedReqId == {{ r.id }} ? 'row-selected' : ''"
-          @click="selectReq({{ r.id }}); htmx.ajax('GET', '/v2/partials/sightings/{{ r.id }}/detail', {target: '#sightings-detail', swap: 'innerHTML'})"
+          @click="selectReq({{ r.id }}); htmx.ajax('GET', '/v2/partials/sightings/{{ r.id }}/detail', {target: '#sightings-detail', swap: 'innerHTML'}); htmx.ajax('POST', '/v2/partials/sightings/{{ r.id }}/refresh', {target: '#sightings-refresh-sink', swap: 'innerHTML'})"
           data-req-id="{{ r.id }}">
         <td class="px-2 py-2" @click.stop>
           <input aria-label="Select requirement {{ r.primary_mpn }}" type="checkbox" class="req-checkbox rounded border-gray-300" value="{{ r.id }}"
@@ -152,7 +152,7 @@
                  @change="$store.sightingSelection.toggle({{ r.id }})">
         </td>
         <td class="px-3 py-2">
-          {{ mpn_chips(r) }}
+          {{ mpn_chips(r, link_map=link_map) }}
         </td>
         <td class="px-3 py-2 text-right font-mono hidden sm:table-cell">{{ r.target_qty or '—' }}</td>
         <td class="px-3 py-2 text-gray-600 truncate max-w-[140px] hidden xl:table-cell">
@@ -226,9 +226,9 @@
     {% set cov_pct = [cov_pct, 100]|min %}
     <div class="bg-white border border-gray-200 rounded-lg p-3 sightings-slide-up cursor-pointer"
          :class="selectedReqId == {{ r.id }} ? 'ring-2 ring-brand-300' : ''"
-         @click="selectReq({{ r.id }}); htmx.ajax('GET', '/v2/partials/sightings/{{ r.id }}/detail', {target: '#sightings-detail', swap: 'innerHTML'})">
+         @click="selectReq({{ r.id }}); htmx.ajax('GET', '/v2/partials/sightings/{{ r.id }}/detail', {target: '#sightings-detail', swap: 'innerHTML'}); htmx.ajax('POST', '/v2/partials/sightings/{{ r.id }}/refresh', {target: '#sightings-refresh-sink', swap: 'innerHTML'})">
       <div class="flex items-center justify-between mb-1.5">
-        <div class="flex-1 min-w-0">{{ mpn_chips(r) }}</div>
+        <div class="flex-1 min-w-0">{{ mpn_chips(r, link_map=link_map) }}</div>
         <span class="transition-colors duration-200 ml-2 flex-shrink-0">{{ m.status_badge(r.sourcing_status) }}</span>
       </div>
       <div class="flex items-center gap-3 text-xs text-gray-500">

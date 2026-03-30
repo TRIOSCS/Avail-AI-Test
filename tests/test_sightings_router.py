@@ -1202,15 +1202,17 @@ class TestSightingsSubsBadge:
 
         resp = client.get("/v2/partials/sightings")
         assert resp.status_code == 200
-        assert "+2 subs" in resp.text
+        # mpn_chips renders each substitute as its own chip
+        assert "SUB-A" in resp.text
+        assert "SUB-B" in resp.text
 
     def test_table_no_badge_without_subs(self, client, db_session):
-        """Table row does not show sub badge when no substitutes."""
+        """Table row does not show extra MPN chips when no substitutes."""
         _seed_data(db_session)
         resp = client.get("/v2/partials/sightings")
         assert resp.status_code == 200
-        assert "+0 subs" not in resp.text
-        assert "subs" not in resp.text or "Unsubscri" in resp.text  # no false positive
+        # Primary MPN should appear, but no substitute chips
+        assert "SUB-" not in resp.text
 
 
 class TestSightingsDetailSubs:
@@ -1383,3 +1385,74 @@ class TestSightingsVendorMatchedMpns:
         assert resp.status_code == 200
         assert "via MULTI-SUB-1" in resp.text
         assert "via MULTI-SUB-2" in resp.text
+
+
+class TestMPNClickableLinks:
+    """MPN chips link to material card detail pages when a card exists."""
+
+    def test_table_mpn_links_to_material_card(self, client, db_session):
+        """Table MPN chips render as <a> links when MaterialCard exists."""
+        req = Requisition(name="Link RFQ", status="active", customer_name="LinkCo")
+        db_session.add(req)
+        db_session.flush()
+        card = MaterialCard(
+            normalized_mpn="link001",
+            display_mpn="LINK-001",
+            manufacturer="TestMfr",
+        )
+        db_session.add(card)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="LINK-001",
+            normalized_mpn="link001",
+            manufacturer="TestMfr",
+            target_qty=50,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.flush()
+        db_session.add(VendorSightingSummary(requirement_id=r.id, vendor_name="V1", listing_count=1, score=50.0))
+        db_session.commit()
+
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert f'hx-push-url="/v2/materials/{card.id}"' in resp.text
+
+    def test_table_mpn_no_link_without_card(self, client, db_session):
+        """Table MPN chips are plain <span> when no MaterialCard exists."""
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings")
+        assert resp.status_code == 200
+        assert "TEST-MPN-001" in resp.text
+        # Should be a span, not a link
+        assert 'hx-push-url="/v2/materials/' not in resp.text
+
+    def test_detail_mpn_links_to_material_card(self, client, db_session):
+        """Detail panel MPN chips render as <a> links when MaterialCard exists."""
+        req = Requisition(name="Detail Link RFQ", status="active", customer_name="DLCo")
+        db_session.add(req)
+        db_session.flush()
+        card = MaterialCard(
+            normalized_mpn="detlink001",
+            display_mpn="DET-LINK-001",
+            manufacturer="TestMfr",
+        )
+        db_session.add(card)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="DET-LINK-001",
+            normalized_mpn="detlink001",
+            manufacturer="TestMfr",
+            target_qty=50,
+            sourcing_status="open",
+        )
+        db_session.add(r)
+        db_session.flush()
+        db_session.add(VendorSightingSummary(requirement_id=r.id, vendor_name="V1", listing_count=1, score=50.0))
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert f'hx-push-url="/v2/materials/{card.id}"' in resp.text

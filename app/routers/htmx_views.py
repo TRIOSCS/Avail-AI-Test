@@ -959,6 +959,7 @@ async def requisition_detail_partial(
 @router.post("/v2/partials/requisitions/create", response_class=HTMLResponse)
 async def requisition_create(
     request: Request,
+    background_tasks: BackgroundTasks,
     name: str = Form(...),
     customer_name: str = Form(""),
     deadline: str = Form(""),
@@ -1014,6 +1015,32 @@ async def requisition_create(
     db.commit()
     db.refresh(req)
     logger.info("Created requisition {} with {} parts from text", req.id, part_count)
+
+    # Auto-search: fire background search for all new requirements
+    import os
+
+    if part_count and not os.environ.get("TESTING"):
+        requirement_ids = [r.id for r in db.query(Requirement).filter(Requirement.requisition_id == req.id).all()]
+
+        def _bg_search_all(req_ids: list[int]):
+            import asyncio
+
+            from app.database import SessionLocal
+            from app.search_service import search_requirement as do_search
+
+            bg_db = SessionLocal()
+            try:
+                for rid in req_ids:
+                    try:
+                        req_obj = bg_db.get(Requirement, rid)
+                        if req_obj:
+                            asyncio.run(do_search(req_obj, bg_db))
+                    except Exception:
+                        logger.warning("Auto-search failed for requirement %s", rid, exc_info=True)
+            finally:
+                bg_db.close()
+
+        background_tasks.add_task(_bg_search_all, requirement_ids)
 
     # Attach counts for the row partial
     req.req_count = part_count
