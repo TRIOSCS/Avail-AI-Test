@@ -17,6 +17,7 @@
     {% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips %}
     {{ mpn_chips(r) }}
   </td>
+  <td data-col-key="description" class="px-4 py-2.5 text-sm text-gray-500 max-w-[200px] truncate" x-show="!editing" x-cloak title="{{ r.description or '' }}">{{ r.description or "—" }}</td>
   <td data-col-key="brand" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>{{ r.brand or "—" }}</td>
   <td data-col-key="qty" class="px-4 py-2.5 text-sm text-gray-500 text-right tabular-nums" x-show="!editing" x-cloak>
     {{ "{:,}".format(r.target_qty) if r.target_qty else "—" }}
@@ -40,13 +41,13 @@
   <td data-col-key="notes" class="px-4 py-2.5 text-sm text-gray-500 max-w-[200px] truncate" x-show="!editing" x-cloak title="{{ r.notes or '' }}">{{ r.notes or "—" }}</td>
   <td data-col-key="status" class="px-4 py-2.5" x-show="!editing" x-cloak>
     {% set st_colors = {
-      "open": "bg-brand-100 text-brand-600",
-      "sourcing": "bg-brand-100 text-brand-600",
-      "offered": "bg-emerald-50 text-emerald-700",
-      "quoted": "bg-amber-50 text-amber-700",
-      "awarded": "bg-emerald-50 text-emerald-700"
+      "open": "bg-sky-50 text-sky-600 border-sky-200",
+      "sourcing": "bg-sky-50 text-sky-600 border-sky-200",
+      "offered": "bg-emerald-50 text-emerald-600 border-emerald-200",
+      "quoted": "bg-amber-50 text-amber-600 border-amber-200",
+      "awarded": "bg-emerald-50 text-emerald-600 border-emerald-200"
     } %}
-    <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full {{ st_colors.get(r.sourcing_status, 'bg-gray-100 text-gray-600') }}">
+    <span class="inline-flex px-1.5 text-xs font-medium rounded border {{ st_colors.get(r.sourcing_status, 'bg-gray-50 text-gray-500 border-gray-200') }}">
       {{ (r.sourcing_status or 'open')|capitalize }}
     </span>
   </td>
@@ -83,7 +84,7 @@
   </td>
 
   {# ── Edit mode (double-click) ───────────────────────────── #}
-  <td colspan="16" x-show="editing" x-cloak>
+  <td colspan="17" x-show="editing" x-cloak>
     <form hx-put="/v2/partials/requisitions/{{ req.id }}/requirements/{{ r.id }}"
           hx-target="#req-row-{{ r.id }}" hx-swap="outerHTML"
           data-loading-disable

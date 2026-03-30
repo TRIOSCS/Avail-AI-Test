@@ -2,7 +2,8 @@
    Called by: GET /v2/partials/sightings (sightings router)
    Depends on: _macros.html, pagination.html
    Context: requirements, total, page, total_pages, stat_counts, top_vendors,
-            stale_req_ids, groups, status, q, sort, dir, group_by, assigned
+            stale_req_ids, groups, status, q, sort, dir, group_by,
+            link_map, heatmap_req_ids, coverage_map, dashboard_counters
 #}
 
 {% import "htmx/partials/shared/_macros.html" as m %}
@@ -111,6 +112,7 @@
                  class="rounded border-gray-300">
         </th>
         <th class="px-3 py-2 text-left">Part Numbers</th>
+        <th class="px-3 py-2 text-left hidden sm:table-cell">Description</th>
         <th class="px-3 py-2 text-right w-[60px] hidden sm:table-cell">Qty</th>
         <th class="px-3 py-2 text-left hidden xl:table-cell">Customer</th>
         <th class="px-3 py-2 text-left w-[80px] hidden xl:table-cell">Sales</th>
@@ -138,6 +140,7 @@
         <td class="px-3 py-2">
           {{ mpn_chips(r, link_map=link_map) }}
         </td>
+        <td class="px-3 py-2 text-sm text-gray-500 truncate max-w-[180px] hidden sm:table-cell" title="{{ r.description or '' }}">{{ r.description or '—' }}</td>
         <td class="px-3 py-2 text-right font-mono hidden sm:table-cell">{{ r.target_qty or '—' }}</td>
         <td class="px-3 py-2 text-gray-600 truncate max-w-[140px] hidden xl:table-cell">
           {{ r.requisition.customer_name or '—' }}
