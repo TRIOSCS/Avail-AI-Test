@@ -37,22 +37,6 @@
       </a>
     </div>
     <div>
-      <span class="text-gray-400">Buyer:</span>
-      <select hx-patch="/v2/partials/sightings/{{ requirement.id }}/assign"
-              hx-target="#sightings-detail"
-              hx-swap="innerHTML"
-              data-loading-disable
-              name="assigned_buyer_id"
-              class="inline-block border-0 border-b border-dashed border-gray-300 bg-transparent text-xs text-gray-700 p-0 pr-4 focus:ring-0 cursor-pointer hover:border-brand-400">
-        <option value="">Unassigned</option>
-        {% for b in all_buyers %}
-        <option value="{{ b.id }}" {{ 'selected' if requirement.assigned_buyer_id == b.id }}>
-          {{ b.name }}
-        </option>
-        {% endfor %}
-      </select>
-    </div>
-    <div>
       <span class="text-gray-400">Status:</span>
       {% set status_styles = {
         'open': 'text-gray-700',

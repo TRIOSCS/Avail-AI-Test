@@ -67,17 +67,17 @@
 
       {# Inline-editable status badge #}
       {% set req_status_map = {
-        "active": "bg-emerald-50 text-emerald-700",
-        "open": "bg-emerald-50 text-emerald-700",
-        "draft": "bg-brand-100 text-brand-600",
-        "sourcing": "bg-brand-100 text-brand-600",
-        "won": "bg-emerald-50 text-emerald-700",
-        "lost": "bg-rose-50 text-rose-700",
-        "archived": "bg-gray-100 text-gray-600",
-        "awarded": "bg-emerald-50 text-emerald-700"
+        "active": "bg-emerald-50 text-emerald-600 border-emerald-200",
+        "open": "bg-sky-50 text-sky-600 border-sky-200",
+        "draft": "bg-slate-50 text-slate-500 border-slate-200",
+        "sourcing": "bg-sky-50 text-sky-600 border-sky-200",
+        "won": "bg-emerald-50 text-emerald-700 border-emerald-300",
+        "lost": "bg-rose-50 text-rose-500 border-rose-200",
+        "archived": "bg-gray-50 text-gray-500 border-gray-200",
+        "awarded": "bg-emerald-50 text-emerald-600 border-emerald-200"
       } %}
       <span id="req-status-{{ req.id }}"
-            class="cursor-pointer hover:ring-2 hover:ring-brand-300 rounded-full transition"
+            class="cursor-pointer hover:ring-2 hover:ring-brand-300 rounded transition"
             hx-get="/v2/partials/requisitions/{{ req.id }}/edit/status?context=header"
             hx-target="this"
             hx-swap="innerHTML"
@@ -93,7 +93,7 @@
             hx-swap="innerHTML"
             hx-trigger="click"
             title="Click to change urgency"
-            class="cursor-pointer hover:ring-2 hover:ring-brand-300 rounded-full transition">
+            class="cursor-pointer hover:ring-2 hover:ring-brand-300 rounded transition">
         {{ urgency_badge(req.urgency) }}
       </span>
     </div>

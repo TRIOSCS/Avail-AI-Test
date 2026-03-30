@@ -378,19 +378,12 @@ class TestDashboardCounters:
         assert resp.status_code == 200
         assert "pending" in resp.text.lower()
 
-    def test_unassigned_count(self, client, db_session):
-        """Requirements with no assigned buyer counted."""
-        _seed_data(db_session)
-        resp = client.get("/v2/partials/sightings")
-        assert resp.status_code == 200
-        assert "unassigned" in resp.text.lower()
-
     def test_counters_present_in_response(self, client, db_session):
-        """All 4 dashboard counters appear in the HTML."""
+        """Dashboard counters appear in the HTML (no buyer assignment)."""
         _seed_data(db_session)
         resp = client.get("/v2/partials/sightings")
         text = resp.text.lower()
-        for label in ["urgent", "stale", "pending", "unassigned"]:
+        for label in ["urgent", "stale", "pending"]:
             assert label in text, f"Dashboard counter '{label}' missing from response"
 
 
