@@ -21,7 +21,8 @@ GRAPH_SCOPES = (
     "openid profile email offline_access "
     "Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read "
     "Files.ReadWrite Chat.ReadWrite Calendars.Read "
-    "ChannelMessage.Send Team.ReadBasic.All Channel.ReadBasic.All"
+    "ChannelMessage.Send Team.ReadBasic.All Channel.ReadBasic.All "
+    "Presence.Read.All CallRecords.Read"
 )
 
 
@@ -194,6 +195,13 @@ class Settings(BaseSettings):
     eight_by_eight_timezone: str = "America/Los_Angeles"
     eight_by_eight_enabled: bool = False
     eight_by_eight_poll_interval_minutes: int = 30
+
+    # --- Apollo Enrichment ---
+    apollo_api_key: str = ""
+
+    # --- Azure Communication Services ---
+    acs_connection_string: str = ""
+    acs_callback_url: str = ""
 
     # --- MVP Mode ---
     # When True, disables: Dashboard/Analytics, Enrichment, Teams, Task Manager
