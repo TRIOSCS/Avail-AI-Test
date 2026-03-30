@@ -8,11 +8,9 @@
 {%- macro _chip(mpn, link_map) -%}
   {%- set cls = "px-1.5 font-mono text-slate-800 bg-slate-100 rounded border border-slate-300" -%}
   {%- if link_map and link_map.get(mpn) -%}
-    <a hx-get="/v2/partials/materials/{{ link_map[mpn] }}"
-       hx-target="#main-content"
-       hx-push-url="/v2/materials/{{ link_map[mpn] }}"
-       @click.stop
-       class="{{ cls }} hover:bg-slate-200 cursor-pointer">{{ mpn }}</a>
+    <a @click.stop="$dispatch('open-modal', {wide: true, url: '/v2/partials/materials/{{ link_map[mpn] }}'})"
+       class="{{ cls }} hover:bg-slate-200 cursor-pointer"
+       title="View material card">{{ mpn }}</a>
   {%- else -%}
     <span class="{{ cls }}">{{ mpn }}</span>
   {%- endif -%}
