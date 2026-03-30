@@ -223,14 +223,21 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
 
         # 3. Material card upsert (errors won't break search)
         card_ids = set()
+        primary_card_id = None
         for pn in pns:
             try:
                 card = _upsert_material_card(pn, sightings, write_db, now)
                 if card:
                     card_ids.add(card.id)
+                    if pn == pns[0] and not primary_card_id:
+                        primary_card_id = card.id
             except Exception as e:
                 logger.error("MATERIAL_CARD_UPSERT_FAIL: mpn=%s error=%s", pn, e)
                 write_db.rollback()
+
+        # Link requirement to its primary material card
+        if primary_card_id and not write_req.material_card_id:
+            write_req.material_card_id = primary_card_id
 
         # 3b. Fire background enrichment for cards without manufacturer
         await _schedule_background_enrichment(card_ids, write_db)

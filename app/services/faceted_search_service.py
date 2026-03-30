@@ -157,16 +157,27 @@ def search_materials_faceted(
     if commodity:
         query = query.filter(func.lower(func.trim(MaterialCard.category)) == commodity.lower().strip())
 
+    _fts_applied = False
     if q:
         sb = SearchBuilder(q)
-        query = query.filter(
-            sb.ilike_filter(
-                MaterialCard.normalized_mpn,
-                MaterialCard.display_mpn,
-                MaterialCard.manufacturer,
-                MaterialCard.description,
+        # Use PostgreSQL FTS when available, fall back to ILIKE for SQLite (tests)
+        if db.bind and db.bind.dialect.name == "postgresql":
+            ts_query = func.plainto_tsquery("english", q)
+            query = query.filter(MaterialCard.search_vector.op("@@")(ts_query))
+            query = query.order_by(
+                func.ts_rank(MaterialCard.search_vector, ts_query).desc(),
+                MaterialCard.search_count.desc(),
             )
-        )
+            _fts_applied = True
+        else:
+            query = query.filter(
+                sb.ilike_filter(
+                    MaterialCard.normalized_mpn,
+                    MaterialCard.display_mpn,
+                    MaterialCard.manufacturer,
+                    MaterialCard.description,
+                )
+            )
 
     if manufacturers:
         query = query.filter(MaterialCard.manufacturer.in_(manufacturers))
@@ -208,12 +219,11 @@ def search_materials_faceted(
                 )
 
     total = db.query(func.count()).select_from(query.subquery()).scalar()
-    materials = (
-        query.order_by(MaterialCard.search_count.desc(), MaterialCard.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
+
+    if not _fts_applied:
+        query = query.order_by(MaterialCard.search_count.desc(), MaterialCard.created_at.desc())
+
+    materials = query.offset(offset).limit(limit).all()
     return materials, total
 
 

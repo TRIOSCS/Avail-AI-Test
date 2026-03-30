@@ -8588,22 +8588,26 @@ async def enrich_material(
 ):
     """Trigger AI enrichment for a material card."""
     from ..models.intelligence import MaterialCard
+    from ..services.material_enrichment_service import enrich_material_cards
 
     mc = db.query(MaterialCard).filter(MaterialCard.id == material_id).first()
     if not mc:
         raise HTTPException(404, "Material not found")
 
-    # Placeholder enrichment — in production this would call AI service
-    return templates.TemplateResponse(
-        "htmx/partials/materials/enrich_result.html",
-        {"request": request, "material": mc},
-    )
+    try:
+        await enrich_material_cards([material_id], db)
+        db.refresh(mc)
+    except Exception as e:
+        logger.warning("Enrichment failed for material %d: %s", material_id, e)
+
+    return await material_detail_partial(request, material_id, user, db)
 
 
 @router.post("/v2/partials/materials/{material_id}/find-crosses", response_class=HTMLResponse)
 async def find_crosses(
     request: Request,
     material_id: int,
+    refresh: bool = Form(False),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -8619,6 +8623,13 @@ async def find_crosses(
     mc = db.get(MaterialCard, material_id)
     if not mc:
         raise HTTPException(404, "Material not found")
+
+    # Return cached results if available (skip on explicit refresh)
+    if mc.cross_references and not refresh:
+        return templates.TemplateResponse(
+            "htmx/partials/materials/crosses_section.html",
+            {"request": request, "card": mc},
+        )
 
     mpn = mc.display_mpn or mc.normalized_mpn
     mfg = mc.manufacturer or "unknown"
@@ -8978,6 +8989,8 @@ async def parts_list_partial(
 
     all_sub_mpns = []
     for r in requirements:
+        if r.primary_mpn:
+            all_sub_mpns.append(r.primary_mpn)
         if r.substitutes:
             for sub in r.substitutes:
                 mpn = sub["mpn"] if isinstance(sub, dict) else sub

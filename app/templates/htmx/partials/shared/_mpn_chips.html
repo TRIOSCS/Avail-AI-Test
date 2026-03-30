@@ -32,15 +32,18 @@
 {% set overflow = all_mpns|length - max_visible %}
 
 {% if all_mpns|length > max_visible %}
-<span class="inline-flex items-center gap-1 flex-wrap" x-data="{ open: false }">
-  {%- for mpn in all_mpns -%}
-    {%- if loop.index > max_visible -%}<template x-if="open">{%- endif -%}
+<span class="inline-flex items-center gap-1 whitespace-nowrap" x-data="{ open: false }">
+  {%- for mpn in all_mpns[:max_visible] -%}
     {{ _chip(mpn, link_map) }}
-    {%- if loop.index > max_visible -%}</template>{%- endif -%}
   {%- endfor -%}
-  <button @click.stop="open = !open"
-          class="px-1.5 text-xs font-medium text-brand-600 hover:text-brand-800 cursor-pointer"
-          x-text="open ? 'less' : '+{{ overflow }}'"></button>
+  <span x-show="open" x-cloak class="inline-flex items-center gap-1 flex-wrap">
+    {%- for mpn in all_mpns[max_visible:] -%}
+      {{ _chip(mpn, link_map) }}
+    {%- endfor -%}
+  </span>
+  <button type="button" @click.stop="open = !open"
+          class="px-1.5 text-xs font-medium text-brand-600 hover:text-brand-800 cursor-pointer whitespace-nowrap"
+          x-text="open ? '&#8722;less' : '+{{ overflow }}'"></button>
 </span>
 {% elif all_mpns %}
 <span class="inline-flex items-center gap-1 whitespace-nowrap">
