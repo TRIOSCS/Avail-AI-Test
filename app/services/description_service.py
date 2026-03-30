@@ -1,12 +1,12 @@
-"""AI-verified part description generator — 3-point cross-reference verification.
+"""AI-verified part description generator — DB-only 3-point cross-reference.
 
-Generates standardized part descriptions by querying multiple distributor APIs
-(DigiKey, Mouser, Element14, OEMSecrets, Nexar) and cross-referencing at least
-3 sources to achieve 98% confidence. Falls back to AI synthesis when fewer
-sources are available, with explicit confidence scoring.
+Generates standardized part descriptions by mining existing data already in the
+database: MaterialCard enrichment, sighting raw_data from prior searches. Does
+NOT call external distributor APIs — the full search background task already
+fetches that data. This service only synthesizes what we already have.
 
 Called by: background task in requirements.add_requirements, on-demand API endpoint
-Depends on: connectors (digikey, mouser, element14, oemsecrets), claude_client, models
+Depends on: claude_client, models (Sighting, MaterialCard)
 """
 
 import asyncio
@@ -19,103 +19,83 @@ from app.models import Requirement
 from app.models.intelligence import MaterialCard
 
 
-async def _fetch_descriptions_from_sources(mpn: str, manufacturer: str) -> list[dict[str, Any]]:
-    """Query distributor APIs for part descriptions.
+def _collect_db_descriptions(mpn: str, manufacturer: str) -> list[dict[str, Any]]:
+    """Collect part descriptions from data already in the database.
 
-    Returns list of {source, description}.
+    Sources checked (zero API calls):
+    1. MaterialCard.description — AI-enriched by material_enrichment_service
+    2. Sighting.raw_data.description — populated by connector searches
+    3. Requirement.description — user-entered on other requisitions for same MPN
     """
     results: list[dict[str, Any]] = []
+    seen_descriptions: set[str] = set()
+    norm_mpn = mpn.upper().strip()
 
-    async def _try_digikey():
-        try:
-            from app.connectors.digikey import search as dk_search
+    db = SessionLocal()
+    try:
+        from sqlalchemy import select
 
-            hits = await dk_search(mpn)
-            for h in hits:
-                desc = h.get("description", "")
-                if desc and len(desc) >= 5:
-                    results.append({"source": "digikey", "description": desc, "mpn": h.get("mpn", "")})
-                    return
-        except Exception:
-            logger.debug("DigiKey description lookup failed for %s", mpn)
+        from app.models.sourcing import Sighting
 
-    async def _try_mouser():
-        try:
-            from app.connectors.mouser import search as mouser_search
+        # Source 1: MaterialCard enrichment (highest quality — AI-verified)
+        card = db.execute(
+            select(MaterialCard.description, MaterialCard.enrichment_source)
+            .where(MaterialCard.normalized_mpn == norm_mpn)
+            .where(MaterialCard.description.isnot(None))
+            .where(MaterialCard.description != "")
+            .limit(1)
+        ).first()
+        if card and card[0] and len(card[0].strip()) >= 5:
+            desc = card[0].strip()
+            seen_descriptions.add(desc.upper())
+            results.append(
+                {
+                    "source": f"material_card:{card[1] or 'enriched'}",
+                    "description": desc,
+                }
+            )
 
-            hits = await mouser_search(mpn)
-            for h in hits:
-                desc = h.get("description", "")
-                if desc and len(desc) >= 5:
-                    results.append({"source": "mouser", "description": desc, "mpn": h.get("mpn", "")})
-                    return
-        except Exception:
-            logger.debug("Mouser description lookup failed for %s", mpn)
+        # Source 2: Sighting raw_data — descriptions from DigiKey, Mouser, etc.
+        # already stored from prior search_requirement() calls
+        rows = db.execute(
+            select(Sighting.raw_data, Sighting.source_type)
+            .where(Sighting.normalized_mpn == norm_mpn)
+            .where(Sighting.raw_data.isnot(None))
+            .order_by(Sighting.created_at.desc())
+            .limit(20)
+        ).all()
+        for row in rows:
+            raw = row[0] or {}
+            desc = (raw.get("description") or "").strip()
+            source = row[1] or "sighting"
+            if desc and len(desc) >= 5 and desc.upper() not in seen_descriptions:
+                seen_descriptions.add(desc.upper())
+                results.append({"source": source, "description": desc})
+                if len(results) >= 5:
+                    break
 
-    async def _try_element14():
-        try:
-            from app.connectors.element14 import search as e14_search
+        # Source 3: Other requirements for same MPN (user-entered descriptions)
+        req_rows = db.execute(
+            select(Requirement.description)
+            .where(Requirement.normalized_mpn == norm_mpn)
+            .where(Requirement.description.isnot(None))
+            .where(Requirement.description != "")
+            .order_by(Requirement.created_at.desc())
+            .limit(3)
+        ).all()
+        for req_row in req_rows:
+            desc = (req_row[0] or "").strip()
+            if desc and len(desc) >= 5 and desc.upper() not in seen_descriptions:
+                seen_descriptions.add(desc.upper())
+                results.append({"source": "user_input", "description": desc})
+                if len(results) >= 5:
+                    break
 
-            hits = await e14_search(mpn)
-            for h in hits:
-                desc = h.get("description", "")
-                if desc and len(desc) >= 5:
-                    results.append({"source": "element14", "description": desc, "mpn": h.get("mpn", "")})
-                    return
-        except Exception:
-            logger.debug("Element14 description lookup failed for %s", mpn)
+    except Exception:
+        logger.warning("DB description collection failed for %s", mpn, exc_info=True)
+    finally:
+        db.close()
 
-    async def _try_oemsecrets():
-        try:
-            from app.connectors.oemsecrets import search as oem_search
-
-            hits = await oem_search(mpn)
-            for h in hits:
-                desc = h.get("description", "")
-                if desc and len(desc) >= 5:
-                    results.append({"source": "oemsecrets", "description": desc, "mpn": h.get("mpn", "")})
-                    return
-        except Exception:
-            logger.debug("OEMSecrets description lookup failed for %s", mpn)
-
-    async def _try_sightings_db(mpn: str, manufacturer: str):
-        """Pull descriptions from existing sightings raw_data in the database."""
-        try:
-            from sqlalchemy import select
-
-            db = SessionLocal()
-            try:
-                from app.models.sourcing import Sighting
-
-                rows = db.execute(
-                    select(Sighting.raw_data, Sighting.source_type)
-                    .where(Sighting.normalized_mpn == mpn.upper().strip())
-                    .where(Sighting.raw_data.isnot(None))
-                    .order_by(Sighting.created_at.desc())
-                    .limit(10)
-                ).all()
-                for row in rows:
-                    raw = row[0] or {}
-                    desc = raw.get("description", "")
-                    source = row[1] or "sighting"
-                    if desc and len(desc) >= 5:
-                        results.append({"source": f"db:{source}", "description": desc, "mpn": mpn})
-                        if len([r for r in results if r["source"].startswith("db:")]) >= 2:
-                            return
-            finally:
-                db.close()
-        except Exception:
-            logger.debug("Sighting DB description lookup failed for %s", mpn)
-
-    # Run all lookups concurrently
-    await asyncio.gather(
-        _try_digikey(),
-        _try_mouser(),
-        _try_element14(),
-        _try_oemsecrets(),
-        _try_sightings_db(mpn, manufacturer),
-        return_exceptions=True,
-    )
     return results
 
 
@@ -124,22 +104,33 @@ async def generate_verified_description(
     manufacturer: str,
     existing_description: str = "",
 ) -> dict[str, Any]:
-    """Generate a verified part description using 3-point cross-referencing.
+    """Generate a verified part description using DB-only 3-point cross-referencing.
+
+    Does NOT call external APIs. Only uses data already in the database from
+    prior searches and enrichment jobs.
 
     Returns:
         {
             "description": "IC MCU 32-BIT 168MHZ 1MB FLASH LQFP-100",
             "confidence": 0.98,
             "sources_used": 3,
-            "sources": ["digikey", "mouser", "element14"],
+            "sources": ["material_card:claude_haiku", "digikey", "mouser"],
             "verified": True
         }
     """
-    sources = await _fetch_descriptions_from_sources(mpn, manufacturer)
+    sources = await asyncio.to_thread(_collect_db_descriptions, mpn, manufacturer)
     source_names = [s["source"] for s in sources]
     num_sources = len(sources)
 
-    if num_sources == 0 and not existing_description:
+    # Include existing description as an additional source if provided
+    if existing_description and len(existing_description.strip()) >= 5:
+        already_seen = {s["description"].upper() for s in sources}
+        if existing_description.upper().strip() not in already_seen:
+            sources.append({"source": "user_input", "description": existing_description})
+            source_names.append("user_input")
+            num_sources = len(sources)
+
+    if num_sources == 0:
         return {
             "description": "",
             "confidence": 0.0,
@@ -148,16 +139,7 @@ async def generate_verified_description(
             "verified": False,
         }
 
-    # Build the AI prompt for cross-referencing and standardization
-    from app.utils.claude_client import claude_text
-
-    source_block = ""
-    for s in sources:
-        source_block += f"  - [{s['source']}]: {s['description']}\n"
-    if existing_description:
-        source_block += f"  - [user_input]: {existing_description}\n"
-
-    # Determine confidence based on source count
+    # Determine confidence based on distinct source count
     if num_sources >= 3:
         base_confidence = 0.98
     elif num_sources == 2:
@@ -167,9 +149,16 @@ async def generate_verified_description(
     else:
         base_confidence = 0.50
 
+    # Build the AI prompt for cross-referencing and standardization
+    from app.utils.claude_client import claude_text
+
+    source_block = ""
+    for s in sources:
+        source_block += f"  - [{s['source']}]: {s['description']}\n"
+
     prompt = (
         f"You are verifying an electronic component description by cross-referencing "
-        f"multiple distributor sources.\n\n"
+        f"multiple data sources already in our database.\n\n"
         f"MPN: {mpn}\n"
         f"Manufacturer: {manufacturer}\n\n"
         f"Descriptions from {num_sources} source(s):\n{source_block}\n"
@@ -178,7 +167,8 @@ async def generate_verified_description(
         f"  Category → Subcategory → Key Specs → Package\n"
         f"  Example: IC MCU 32-BIT 168MHZ 1MB FLASH LQFP-100\n\n"
         f"RULES:\n"
-        f"- ONLY include facts that appear in at least {'2 of the sources above' if num_sources >= 2 else 'the source above'}\n"
+        f"- ONLY include facts that appear in at least "
+        f"{'2 of the sources above' if num_sources >= 2 else 'the source above'}\n"
         f"- If sources conflict on a spec, OMIT that spec rather than guess\n"
         f"- Do NOT hallucinate specs not present in any source\n"
         f"- Category first (IC, CONNECTOR, RESISTOR, CAPACITOR, DIODE, etc.)\n"
@@ -204,13 +194,12 @@ async def generate_verified_description(
 
 
 def backfill_descriptions(requirement_ids: list[int]) -> None:
-    """Background task: auto-generate descriptions for requirements missing them.
+    """Background task: generate descriptions for requirements missing them.
 
-    Called as a BackgroundTask after requirement creation.
-    Only generates for requirements that have no description set.
-    Also updates the linked MaterialCard description if empty.
+    Called as a BackgroundTask after requirement creation. Runs AFTER the full
+    search completes so sighting raw_data is available. Only uses DB data —
+    no external API calls.
     """
-    import asyncio
     import os
 
     if os.environ.get("TESTING"):
@@ -260,7 +249,11 @@ def backfill_descriptions(requirement_ids: list[int]) -> None:
                         result.get("sources_used", 0),
                     )
             except Exception:
-                logger.warning("Description generation failed for requirement %s", rid, exc_info=True)
+                logger.warning(
+                    "Description generation failed for requirement %s",
+                    rid,
+                    exc_info=True,
+                )
                 db.rollback()
     finally:
         db.close()

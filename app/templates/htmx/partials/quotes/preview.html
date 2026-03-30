@@ -55,7 +55,7 @@
         {% for line in quote.quote_lines %}
         <tr>
           <td class="px-3 py-2 text-sm font-mono text-gray-900">{{ line.mpn or '—' }}</td>
-          <td class="px-3 py-2 text-sm text-gray-500">{{ line.description or '—' }}</td>
+          <td class="px-3 py-2 text-sm text-gray-500">{{ line|part_description or '—' }}</td>
           <td class="px-3 py-2 text-sm text-gray-500">{{ line.manufacturer or '—' }}</td>
           <td class="px-3 py-2 text-sm text-right text-gray-900">{{ "{:,}".format(line.qty) if line.qty else '—' }}</td>
           <td class="px-3 py-2 text-sm text-right text-gray-900">{{ "$%.4f"|format(line.sell_price) if line.sell_price else '—' }}</td>

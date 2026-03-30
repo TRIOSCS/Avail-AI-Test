@@ -17,7 +17,8 @@
     {% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips %}
     {{ mpn_chips(r) }}
   </td>
-  <td data-col-key="description" class="px-4 py-2.5 text-sm text-gray-500 max-w-[200px] truncate" x-show="!editing" x-cloak title="{{ r.description or '' }}">{{ r.description or "—" }}</td>
+  {% set desc = r|part_description %}
+  <td data-col-key="description" class="px-4 py-2.5 text-sm text-gray-500 max-w-[200px] truncate" x-show="!editing" x-cloak title="{{ desc }}">{{ desc or "—" }}</td>
   <td data-col-key="brand" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>{{ r.brand or "—" }}</td>
   <td data-col-key="qty" class="px-4 py-2.5 text-sm text-gray-500 text-right tabular-nums" x-show="!editing" x-cloak>
     {{ "{:,}".format(r.target_qty) if r.target_qty else "—" }}

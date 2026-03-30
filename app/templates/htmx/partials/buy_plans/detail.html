@@ -262,9 +262,10 @@
             <td class="px-4 py-3 text-sm font-mono font-medium text-gray-900">
               {{ line.requirement.primary_mpn if line.requirement else '-' }}
             </td>
-            {# Description #}
-            <td class="px-4 py-3 text-sm text-gray-500 truncate max-w-[200px]" title="{{ line.requirement.description if line.requirement and line.requirement.description else '' }}">
-              {{ line.requirement.description if line.requirement else '-' }}
+            {# Description — from MaterialCard (source of truth) #}
+            {% set desc = line.requirement|part_description if line.requirement else '' %}
+            <td class="px-4 py-3 text-sm text-gray-500 truncate max-w-[200px]" title="{{ desc }}">
+              {{ desc or '-' }}
             </td>
             {# Vendor + buyer below #}
             <td class="px-4 py-3">

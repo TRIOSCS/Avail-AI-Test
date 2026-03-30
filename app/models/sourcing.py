@@ -124,6 +124,7 @@ class Requirement(Base):
     last_searched_at = Column(UTCDateTime)
 
     requisition = relationship("Requisition", back_populates="requirements")
+    material_card = relationship("MaterialCard", foreign_keys=[material_card_id], lazy="joined")
     attachments = relationship("RequirementAttachment", back_populates="requirement", cascade="all, delete-orphan")
     sightings = relationship("Sighting", back_populates="requirement", cascade="all, delete-orphan")
     offers = relationship("Offer", back_populates="requirement", cascade="all, delete-orphan")

@@ -1410,7 +1410,8 @@ class TestMPNClickableLinks:
 
         resp = client.get("/v2/partials/sightings")
         assert resp.status_code == 200
-        assert f'hx-push-url="/v2/materials/{card.id}"' in resp.text
+        assert "open-modal" in resp.text
+        assert f"/v2/partials/materials/{card.id}" in resp.text
 
     def test_table_mpn_no_link_without_card(self, client, db_session):
         """Table MPN chips are plain <span> when no MaterialCard exists."""
@@ -1418,11 +1419,12 @@ class TestMPNClickableLinks:
         resp = client.get("/v2/partials/sightings")
         assert resp.status_code == 200
         assert "TEST-MPN-001" in resp.text
-        # Should be a span, not a link
-        assert 'hx-push-url="/v2/materials/' not in resp.text
+        # Should be a span, not a button with open-modal
+        assert "/v2/partials/materials/" not in resp.text
 
     def test_detail_mpn_links_to_material_card(self, client, db_session):
-        """Detail panel MPN chips render as <a> links when MaterialCard exists."""
+        """Detail panel MPN chips render as clickable buttons when MaterialCard
+        exists."""
         req = Requisition(name="Detail Link RFQ", status="active", customer_name="DLCo")
         db_session.add(req)
         db_session.flush()
@@ -1448,4 +1450,4 @@ class TestMPNClickableLinks:
 
         resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
         assert resp.status_code == 200
-        assert f'hx-push-url="/v2/materials/{card.id}"' in resp.text
+        assert f"/v2/partials/materials/{card.id}" in resp.text

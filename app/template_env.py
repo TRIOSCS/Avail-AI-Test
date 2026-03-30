@@ -178,3 +178,26 @@ def _sub_mpns_filter(subs: list | None) -> list[str]:
 
 
 templates.env.filters["sub_mpns"] = _sub_mpns_filter
+
+
+def _part_description(obj) -> str:
+    """Return part description from MaterialCard (source of truth) with fallback.
+
+    Checks material_card.description first, then the object's own description field.
+    Works with Requirement, QuoteLine, ExcessLineItem, or any object with a
+    material_card relationship or description attribute.
+    """
+    # MaterialCard is the canonical source of truth
+    card = getattr(obj, "material_card", None)
+    if card:
+        card_desc = getattr(card, "description", None)
+        if card_desc and len(card_desc.strip()) >= 3:
+            return card_desc.strip()
+    # Fallback to the object's own description field
+    own_desc = getattr(obj, "description", None)
+    if own_desc and len(own_desc.strip()) >= 3:
+        return own_desc.strip()
+    return ""
+
+
+templates.env.filters["part_description"] = _part_description

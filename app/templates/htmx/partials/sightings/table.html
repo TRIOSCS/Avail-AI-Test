@@ -140,7 +140,8 @@
         <td class="px-3 py-2">
           {{ mpn_chips(r, link_map=link_map) }}
         </td>
-        <td class="px-3 py-2 text-sm text-gray-500 truncate max-w-[180px] hidden sm:table-cell" title="{{ r.description or '' }}">{{ r.description or '—' }}</td>
+        {% set desc = r|part_description %}
+        <td class="px-3 py-2 text-sm text-gray-500 truncate max-w-[180px] hidden sm:table-cell" title="{{ desc }}">{{ desc or '—' }}</td>
         <td class="px-3 py-2 text-right font-mono hidden sm:table-cell">{{ r.target_qty or '—' }}</td>
         <td class="px-3 py-2 text-gray-600 truncate max-w-[140px] hidden xl:table-cell">
           {{ r.requisition.customer_name or '—' }}

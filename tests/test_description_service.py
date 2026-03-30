@@ -19,8 +19,7 @@ os.environ["TESTING"] = "1"
 async def test_generate_description_no_sources_no_existing():
     """Returns empty with 0 confidence when no sources and no existing description."""
     with patch(
-        "app.services.description_service._fetch_descriptions_from_sources",
-        new_callable=AsyncMock,
+        "app.services.description_service._collect_db_descriptions",
         return_value=[],
     ):
         from app.services.description_service import generate_verified_description
@@ -35,14 +34,13 @@ async def test_generate_description_no_sources_no_existing():
 async def test_generate_description_three_sources_verified():
     """With 3+ sources, confidence should be 0.98 and verified=True."""
     mock_sources = [
-        {"source": "digikey", "description": "IC MCU 32BIT 168MHZ 1MB LQFP100", "mpn": "STM32F4"},
-        {"source": "mouser", "description": "IC MCU 32-BIT 168MHZ 1MB FLASH LQFP-100", "mpn": "STM32F4"},
-        {"source": "element14", "description": "MCU 32BIT ARM 168MHZ 1MB FLASH", "mpn": "STM32F4"},
+        {"source": "digikey", "description": "IC MCU 32BIT 168MHZ 1MB LQFP100"},
+        {"source": "mouser", "description": "IC MCU 32-BIT 168MHZ 1MB FLASH LQFP-100"},
+        {"source": "element14", "description": "MCU 32BIT ARM 168MHZ 1MB FLASH"},
     ]
     with (
         patch(
-            "app.services.description_service._fetch_descriptions_from_sources",
-            new_callable=AsyncMock,
+            "app.services.description_service._collect_db_descriptions",
             return_value=mock_sources,
         ),
         patch(
@@ -64,13 +62,12 @@ async def test_generate_description_three_sources_verified():
 async def test_generate_description_two_sources():
     """With 2 sources, confidence should be 0.90."""
     mock_sources = [
-        {"source": "digikey", "description": "CAPACITOR MLCC 100NF 50V 0402", "mpn": "CL05B104KO5"},
-        {"source": "mouser", "description": "CAP MLCC 100NF 50V X7R 0402", "mpn": "CL05B104KO5"},
+        {"source": "digikey", "description": "CAPACITOR MLCC 100NF 50V 0402"},
+        {"source": "mouser", "description": "CAP MLCC 100NF 50V X7R 0402"},
     ]
     with (
         patch(
-            "app.services.description_service._fetch_descriptions_from_sources",
-            new_callable=AsyncMock,
+            "app.services.description_service._collect_db_descriptions",
             return_value=mock_sources,
         ),
         patch(
@@ -91,12 +88,11 @@ async def test_generate_description_two_sources():
 async def test_generate_description_one_source():
     """With 1 source, confidence should be 0.75."""
     mock_sources = [
-        {"source": "oemsecrets", "description": "RES SMD 10K OHM 1% 0402", "mpn": "RC0402FR"},
+        {"source": "oemsecrets", "description": "RES SMD 10K OHM 1% 0402"},
     ]
     with (
         patch(
-            "app.services.description_service._fetch_descriptions_from_sources",
-            new_callable=AsyncMock,
+            "app.services.description_service._collect_db_descriptions",
             return_value=mock_sources,
         ),
         patch(
@@ -114,11 +110,10 @@ async def test_generate_description_one_source():
 
 @pytest.mark.asyncio
 async def test_generate_description_uses_existing_when_no_sources():
-    """When no distributor sources but user provided description, AI standardizes it."""
+    """When no DB sources but user provided description, AI standardizes it."""
     with (
         patch(
-            "app.services.description_service._fetch_descriptions_from_sources",
-            new_callable=AsyncMock,
+            "app.services.description_service._collect_db_descriptions",
             return_value=[],
         ),
         patch(
@@ -130,7 +125,7 @@ async def test_generate_description_uses_existing_when_no_sources():
         from app.services.description_service import generate_verified_description
 
         result = await generate_verified_description("STM32F407", "ST", existing_description="microcontroller arm")
-    assert result["confidence"] == 0.50
+    assert result["confidence"] == 0.75
     assert result["description"] == "IC MCU ARM CORTEX-M4"
 
 

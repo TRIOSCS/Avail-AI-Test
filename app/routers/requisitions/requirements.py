@@ -496,16 +496,20 @@ async def add_requirements(
         finally:
             bg_db.close()
 
+        # After search populates sighting raw_data, generate descriptions
+        # from that DB data (no additional API calls)
+        try:
+            from ...services.description_service import backfill_descriptions
+
+            backfill_descriptions(requirement_ids)
+        except Exception:
+            logger.warning("Description backfill failed", exc_info=True)
+
     if created:
         background_tasks.add_task(_nc_enqueue_batch, [r.id for r in created])
         background_tasks.add_task(_ics_enqueue_batch, [r.id for r in created])
         if not os.environ.get("TESTING"):
             background_tasks.add_task(_bg_full_search, [r.id for r in created])
-
-        # Auto-generate verified descriptions for parts missing them
-        from ...services.description_service import backfill_descriptions
-
-        background_tasks.add_task(backfill_descriptions, [r.id for r in created])
 
     # Duplicate detection
     duplicates = []

@@ -176,7 +176,8 @@
                   {% if col_key == 'mpn' %}
                     {{ mpn_chips(req, sub_card_map) }}
                   {% elif col_key == 'description' %}
-                    <span class="text-xs text-gray-500 truncate max-w-[200px] block" title="{{ req.description or '' }}">{{ req.description or '—' }}</span>
+                    {% set desc = req|part_description %}
+                    <span class="text-xs text-gray-500 truncate max-w-[200px] block" title="{{ desc }}">{{ desc or '—' }}</span>
                   {% elif col_key == 'brand' %}
                     {{ req.brand or '—' }}
                   {% elif col_key == 'requisition' %}
