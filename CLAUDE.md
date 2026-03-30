@@ -1,7 +1,7 @@
 # CLAUDE.md — AvailAI Documentation
 
 **PROJECT:** AvailAI — Electronic component sourcing platform and CRM for Trio Supply Chain Solutions
-**VERSION:** 3.1.0 (source of truth: `app/config.py` → `APP_VERSION`)
+**VERSION:** See `app/config.py` → `APP_VERSION`
 **STACK:** FastAPI + SQLAlchemy 2.0 + PostgreSQL 16 + HTMX 2.x + Alpine.js 3.x + Jinja2 + Tailwind CSS
 **DEPLOY:** Docker Compose (app, db, redis, caddy, enrichment-worker [disabled], db-backup) on DigitalOcean
 **LEVEL:** Intermediate
@@ -25,18 +25,18 @@ AvailAI is an **electronic component sourcing engine** that automates vendor dis
 |-------|-----------|---------|
 | **Runtime** | Python 3.11+ | Backend runtime |
 | **Framework** | FastAPI 0.100+ | API and HTMX route server |
-| **Database** | PostgreSQL 16 | Primary data store (109+ migrations) |
+| **Database** | PostgreSQL 16 | Primary data store (see `alembic/versions/`) |
 | **Cache** | Redis (optional) | Endpoint caching, scheduler coordination |
-| **ORM** | SQLAlchemy 2.0 | Type-safe database access, 73 models |
+| **ORM** | SQLAlchemy 2.0 | Type-safe database access (see `app/models/`) |
 | **Frontend** | HTMX 2.x + Alpine.js 3.x | Progressive enhancement, no SPA |
-| **Templates** | Jinja2 | Server-side rendering (188 templates) |
+| **Templates** | Jinja2 | Server-side rendering (see `app/templates/`) |
 | **Styling** | Tailwind CSS + custom | Responsive, dark-mode ready |
 | **Build** | Vite 6.x | Frontend asset bundling |
 | **Auth** | Azure AD OAuth2 | Microsoft Graph API integration |
 | **AI** | Anthropic Claude API | Email parsing, query enrichment |
-| **Scheduling** | APScheduler | Background jobs (14 modules) |
+| **Scheduling** | APScheduler | Background jobs (see `app/jobs/`) |
 | **Linting** | Ruff + mypy + pre-commit | Code quality enforcement |
-| **Testing** | pytest + Playwright | 8,553 tests, E2E coverage |
+| **Testing** | pytest + Playwright | Comprehensive test suite, E2E coverage |
 
 ---
 
@@ -118,9 +118,9 @@ docker compose up app
 
 ### Linear Development
 - Memory references specific code (line numbers, function names)? Verify against current files before acting
-- App map files are orientation, not source of truth — always confirm against current code
-- App map files with `last_verified` older than 30 days: confirm model/route counts against current code before citing as fact
+- Plans or specs with line numbers? Verify those lines are still correct before editing
 - Never mix old patterns with new — if the codebase has moved to a new pattern, follow the new one
+- Always read the actual codebase before making changes — never rely on cached assumptions
 
 ### PR Reviews
 - Run ALL pr-review-toolkit agents on every PR: comment-analyzer, pr-test-analyzer, type-design-analyzer, silent-failure-hunter, code-simplifier, code-reviewer
@@ -130,14 +130,14 @@ docker compose up app
 
 ```
 app/
-├── main.py                    # FastAPI app, 34 routers, middleware stack, lifespan
+├── main.py                    # FastAPI app, router registration, middleware stack, lifespan
 ├── config.py                  # Pydantic Settings (env vars, APP_VERSION, MVP_MODE)
 ├── database.py                # SQLAlchemy engine, SessionLocal, UTCDateTime type
 ├── dependencies.py            # Auth middleware: require_user, require_admin, require_buyer, require_fresh_token
-├── constants.py               # StrEnum status enums (19 enums) — ALWAYS use, never raw strings
-├── shared_constants.py        # JUNK_DOMAINS (68), JUNK_EMAIL_PREFIXES (17)
+├── constants.py               # StrEnum status enums — ALWAYS use, never raw strings
+├── shared_constants.py        # JUNK_DOMAINS, JUNK_EMAIL_PREFIXES
 ├── startup.py                 # Runtime operations: triggers, seeds, ANALYZE (NO DDL)
-├── scheduler.py               # APScheduler coordinator with 14 job modules
+├── scheduler.py               # APScheduler coordinator (see app/jobs/)
 ├── scoring.py                 # Sighting/lead/vendor scoring (6-factor weighted algorithm)
 ├── vendor_utils.py            # fuzzy_score_vendor() — vendor matching utility
 ├── search_service.py          # Requirement search orchestrator (all 10 sources)
@@ -145,9 +145,9 @@ app/
 ├── enrichment_service.py      # Customer/vendor enrichment orchestrator
 ├── rate_limit.py              # Slowapi rate limiting configuration
 │
-├── models/                    # SQLAlchemy ORM models (73 models, 19 domain modules)
-├── schemas/                   # Pydantic request/response schemas (26 files)
-├── routers/                   # API route handlers (34 routers, 200+ endpoints)
+├── models/                    # SQLAlchemy ORM models
+├── schemas/                   # Pydantic request/response schemas
+├── routers/                   # API route handlers (see main.py for registration)
 │   ├── auth.py                # /auth/* — Azure AD OAuth2 flow
 │   ├── htmx_views.py          # /v2/* — Main HTMX frontend (page + partial routes)
 │   ├── ai.py                  # /api/ai/* — AI features (parsing, enrichment)
@@ -156,9 +156,9 @@ app/
 │   ├── excess.py              # Excess inventory management
 │   ├── materials.py           # Material card storage and retrieval
 │   ├── proactive.py           # Vendor offer matching to purchase history
-│   └── ...                    # 25+ more routers (vendors, contacts, activity, etc.)
+│   └── ...                    # Additional routers (vendors, contacts, activity, etc.)
 │
-├── services/                  # Business logic (120+ service files, decoupled from HTTP)
+├── services/                  # Business logic (decoupled from HTTP)
 │   ├── search_worker_base/    # Search connector base + MPN normalizer
 │   ├── ics_worker/            # ICS (In-stock capability) search worker
 │   ├── nc_worker/             # NC (Normally closable) search worker
@@ -166,7 +166,7 @@ app/
 │   └── ...                    # AI, enrichment, proactive, tagging, scoring
 │
 ├── connectors/                # External API integrations (DigiKey, Mouser, Nexar, etc.)
-├── jobs/                      # APScheduler job definitions (14 job modules)
+├── jobs/                      # APScheduler job definitions
 │   ├── inbox_monitor.py       # Check for RFQ replies every 30min
 │   ├── requirement_refresh.py # Re-search stale requirements
 │   └── ...
@@ -180,10 +180,10 @@ app/
 │   ├── normalization.py       # MPN/part number normalization
 │   └── ...
 │
-├── templates/                 # Jinja2 templates (188 files)
+├── templates/                 # Jinja2 templates
 │   ├── base.html              # App shell (topbar, mobile nav, modal, toast)
 │   ├── htmx/base_page.html    # Lazy-loader: spinner → hx-get partial
-│   ├── htmx/partials/         # 158 HTMX partials (29 subdirectories)
+│   ├── htmx/partials/         # HTMX partials
 │   └── documents/             # PDF templates (quote_report, rfq_summary)
 │
 ├── static/                    # Frontend assets
@@ -192,7 +192,7 @@ app/
 │   ├── htmx_mobile.css        # Mobile-specific overrides
 │   └── dist/                  # Vite build output (minified, content-hashed)
 │
-├── migrations/                # Alembic migration files (109 revisions)
+├── migrations/                # Alembic migration files
 └── logs/                      # Loguru output (structured, request_id context)
 
 tests/
@@ -317,8 +317,8 @@ export default {
 
 ### Plugins & Extensions
 
-**Alpine.js Plugins (9 loaded):** focus, persist, intersect, collapse, morph, mask, sort, anchor, resize
-**HTMX Extensions (14 active):** alpine-morph, preload, sse, loading-states, multi-swap, and more
+**Alpine.js Plugins:** See `htmx_app.js` for current plugin list
+**HTMX Extensions:** See `htmx_app.js` and `base.html` for current extension list
 
 ### Build & Deployment
 
@@ -388,8 +388,8 @@ npm run lint             # ESLint check
 - Use `parse_substitute_mpns()` from `app/utils/normalization.py` for write paths
 
 ### Shared Constants
-- Junk email domains: use `JUNK_DOMAINS` from `app/shared_constants.py` (68 domains)
-- Junk email prefixes: use `JUNK_EMAIL_PREFIXES` from `app/shared_constants.py` (17 prefixes)
+- Junk email domains: use `JUNK_DOMAINS` from `app/shared_constants.py`
+- Junk email prefixes: use `JUNK_EMAIL_PREFIXES` from `app/shared_constants.py`
 - Don't duplicate; import and reuse
 
 ### Caching
@@ -469,7 +469,7 @@ alembic history                                   # Show all revisions
 
 ## Testing
 
-### Strategy: Tiered Approach (8,553 tests total)
+### Strategy: Tiered Approach
 
 **During development: Run only changed module tests**
 ```bash
@@ -522,7 +522,7 @@ pytest tests/e2e/ --headed                 # Run with browser visible
 ### Database Backup & Restore
 - **Automated:** db-backup service runs `pg_dump` every 6 hours
 - **Manual restore:** `scripts/restore.sh`
-- **Current production:** Migration 048+
+- **Current production:** Run `alembic current` to check
 
 ## Database & Migration Rules
 
@@ -694,7 +694,6 @@ docker compose up -d --build     # Rebuild from scratch
 
 ---
 
-**Last Updated:** 2026-03-23
 **Maintained by:** Development team
 **Questions?** Check existing tests (`tests/`) or browse `app/services/` for similar patterns.
 
