@@ -10,7 +10,7 @@ Depends on: app/routers/excess.py, app/services/excess_service.py, conftest.py
 
 import os
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -507,3 +507,134 @@ class TestApiConfirmImport:
         )
         assert resp.status_code == 200
         assert "imported" in resp.json()
+
+
+# ── Send Solicitations API ─────────────────────────────────────────────
+
+
+class TestApiSendSolicitations:
+    def test_send_solicitation_mocked(self, client, db_session, test_user):
+        co = _make_company(db_session)
+        el = _make_excess_list(db_session, co.id, test_user.id)
+        item = _make_line_item(db_session, el.id)
+
+        with patch("app.routers.excess.send_bid_solicitation", new_callable=AsyncMock) as mock_send:
+            mock_send.return_value = []
+            resp = client.post(
+                f"/api/excess-lists/{el.id}/solicitations",
+                json={
+                    "line_item_ids": [item.id],
+                    "recipient_email": "buyer@test.com",
+                    "contact_id": 0,
+                },
+            )
+        assert resp.status_code == 201
+        assert resp.json()["total"] == 0
+
+
+# ── Parse Bid Response ─────────────────────────────────────────────────
+
+
+class TestApiParseBidResponse:
+    def test_parse_bid_response(self, client, db_session, test_user):
+        with patch("app.routers.excess.parse_bid_response") as mock_parse:
+            # Return a fake bid object
+            mock_bid = MagicMock()
+            mock_bid.id = 1
+            mock_bid.excess_line_item_id = 1
+            mock_bid.bidder_company_id = None
+            mock_bid.bidder_vendor_card_id = None
+            mock_bid.bidder_contact_id = None
+            mock_bid.unit_price = 0.45
+            mock_bid.quantity_wanted = 100
+            mock_bid.lead_time_days = 7
+            mock_bid.status = "pending"
+            mock_bid.source = "email_parsed"
+            mock_bid.notes = "From email"
+            mock_bid.created_by = test_user.id
+            mock_bid.created_at = datetime.now(timezone.utc)
+            mock_bid.updated_at = None
+            mock_parse.return_value = mock_bid
+
+            resp = client.post(
+                "/api/excess-solicitations/1/parse-response",
+                json={
+                    "unit_price": 0.45,
+                    "quantity_wanted": 100,
+                    "lead_time_days": 7,
+                    "notes": "From email",
+                },
+            )
+        assert resp.status_code == 200
+
+
+# ── HTMX Partials ────────────────────────────────────────────────────
+
+
+class TestHtmxPartials:
+    def test_partial_excess_list(self, client, db_session, test_user):
+        """GET /v2/partials/excess renders excess list partial."""
+        resp = client.get("/v2/partials/excess")
+        assert resp.status_code == 200
+
+    def test_partial_excess_create_form(self, client, db_session, test_user):
+        """GET /v2/partials/excess/create-form renders create modal."""
+        resp = client.get("/v2/partials/excess/create-form")
+        assert resp.status_code == 200
+
+    def test_partial_excess_detail(self, client, db_session, test_user):
+        """GET /v2/partials/excess/{list_id} renders detail partial."""
+        co = _make_company(db_session)
+        el = _make_excess_list(db_session, co.id, test_user.id)
+        resp = client.get(f"/v2/partials/excess/{el.id}")
+        assert resp.status_code == 200
+
+    def test_partial_add_line_item_form(self, client, db_session, test_user):
+        """GET /v2/partials/excess/{list_id}/add-line-item-form renders modal."""
+        co = _make_company(db_session)
+        el = _make_excess_list(db_session, co.id, test_user.id)
+        resp = client.get(f"/v2/partials/excess/{el.id}/add-line-item-form")
+        assert resp.status_code == 200
+
+    def test_partial_solicit_form(self, client, db_session, test_user):
+        """GET /v2/partials/excess/{list_id}/solicit-form renders solicitation modal."""
+        co = _make_company(db_session)
+        el = _make_excess_list(db_session, co.id, test_user.id)
+        item = _make_line_item(db_session, el.id)
+        resp = client.get(f"/v2/partials/excess/{el.id}/solicit-form?item_ids={item.id}")
+        assert resp.status_code == 200
+
+    def test_partial_bid_form(self, client, db_session, test_user):
+        """GET /v2/partials/excess/{list_id}/line-items/{item_id}/bid-form."""
+        co = _make_company(db_session)
+        el = _make_excess_list(db_session, co.id, test_user.id)
+        item = _make_line_item(db_session, el.id)
+        resp = client.get(f"/v2/partials/excess/{el.id}/line-items/{item.id}/bid-form")
+        assert resp.status_code == 200
+
+    def test_partial_bid_list(self, client, db_session, test_user):
+        """GET /v2/partials/excess/{list_id}/line-items/{item_id}/bids."""
+        co = _make_company(db_session)
+        el = _make_excess_list(db_session, co.id, test_user.id)
+        item = _make_line_item(db_session, el.id)
+        resp = client.get(f"/v2/partials/excess/{el.id}/line-items/{item.id}/bids")
+        assert resp.status_code == 200
+
+    def test_htmx_proactive_matches(self, client, db_session, test_user):
+        """POST /v2/partials/excess/{list_id}/proactive-matches."""
+        co = _make_company(db_session)
+        el = _make_excess_list(db_session, co.id, test_user.id)
+        with patch("app.routers.excess.create_proactive_matches_for_excess") as mock_match:
+            mock_match.return_value = {"matches_created": 2}
+            resp = client.post(f"/v2/partials/excess/{el.id}/proactive-matches")
+        assert resp.status_code == 200
+
+    def test_htmx_solicit_missing_fields(self, client, db_session, test_user):
+        """POST /v2/partials/excess/{list_id}/solicit with empty fields → 400."""
+        co = _make_company(db_session)
+        el = _make_excess_list(db_session, co.id, test_user.id)
+        resp = client.post(
+            f"/v2/partials/excess/{el.id}/solicit",
+            data={"item_ids": [], "recipient_email": ""},
+        )
+        assert resp.status_code == 400

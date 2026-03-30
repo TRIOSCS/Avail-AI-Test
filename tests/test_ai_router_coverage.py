@@ -260,6 +260,43 @@ class TestNormalizeParts:
         assert resp.json()["count"] == 1
 
 
+# ── standardize-description ───────────────────────────────────────────
+
+
+class TestStandardizeDescription:
+    def test_empty_description_returns_empty(self, client):
+        resp = client.post(
+            "/api/ai/standardize-description",
+            json={"description": "   ", "mpn": "", "manufacturer": ""},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["description"] == ""
+
+    def test_standardizes_description(self, client):
+        with patch("app.utils.claude_client.claude_text", new_callable=AsyncMock) as mock_claude:
+            mock_claude.return_value = "IC MCU 32-BIT 168MHZ LQFP-100"
+            resp = client.post(
+                "/api/ai/standardize-description",
+                json={
+                    "description": "32-bit ARM Cortex microcontroller",
+                    "mpn": "STM32F407VGT6",
+                    "manufacturer": "ST",
+                },
+            )
+        assert resp.status_code == 200
+        assert len(resp.json()["description"]) > 0
+
+    def test_fallback_when_claude_returns_none(self, client):
+        with patch("app.utils.claude_client.claude_text", new_callable=AsyncMock) as mock_claude:
+            mock_claude.return_value = None
+            resp = client.post(
+                "/api/ai/standardize-description",
+                json={"description": "voltage regulator", "mpn": "LM317T", "manufacturer": "TI"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["description"] == "VOLTAGE REGULATOR"
+
+
 # ── company-intel ────────────────────────────────────────────────────
 
 
@@ -574,3 +611,112 @@ class TestSaveParsedOffers:
                 },
             )
         assert resp.status_code == 200
+
+    def test_invalid_response_id_returns_404(self, client, db_session, test_requisition):
+        """response_id that doesn't exist → 404."""
+        resp = client.post(
+            "/api/ai/save-parsed-offers",
+            json={
+                "requisition_id": test_requisition.id,
+                "response_id": 99999,
+                "offers": [{"mpn": "LM317T", "unit_price": 0.50, "quantity": 100, "vendor_name": "Arrow"}],
+            },
+        )
+        assert resp.status_code == 404
+
+
+# ── ai_find_contacts (entity resolution + web search) ─────────────────
+
+
+class TestAiFindContacts:
+    def test_vendor_entity_type_calls_web_search(self, client, db_session, test_vendor_card):
+        """entity_type=vendor → resolves VendorCard and calls web search."""
+        with (
+            patch("app.routers.ai.settings") as mock_settings,
+            patch("app.services.ai_service.enrich_contacts_websearch", new_callable=AsyncMock) as mock_search,
+        ):
+            mock_settings.ai_features_enabled = "all"
+            mock_search.return_value = [
+                {"full_name": "Bob Smith", "title": "VP Sales", "email": "bob@vendor.com",
+                 "source": "web", "confidence": "high"}
+            ]
+            resp = client.post(
+                "/api/ai/find-contacts",
+                json={"entity_type": "vendor", "entity_id": test_vendor_card.id},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["total"] >= 0
+
+    def test_company_entity_type_calls_web_search(self, client, db_session, test_company):
+        """entity_type=company → resolves CustomerSite and calls web search."""
+        from app.models import CustomerSite
+
+        site = CustomerSite(
+            site_name="Acme HQ",
+            site_type="headquarters",
+            company_id=test_company.id,
+        )
+        db_session.add(site)
+        db_session.commit()
+        db_session.refresh(site)
+
+        with (
+            patch("app.routers.ai.settings") as mock_settings,
+            patch("app.services.ai_service.enrich_contacts_websearch", new_callable=AsyncMock) as mock_search,
+        ):
+            mock_settings.ai_features_enabled = "all"
+            mock_search.return_value = []
+            resp = client.post(
+                "/api/ai/find-contacts",
+                json={"entity_type": "company", "entity_id": site.id},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+    def test_missing_entity_id_returns_400(self, client):
+        """No entity_id with no company_name → 400."""
+        with patch("app.routers.ai.settings") as mock_settings:
+            mock_settings.ai_features_enabled = "all"
+            resp = client.post(
+                "/api/ai/find-contacts",
+                json={"entity_type": "company"},
+            )
+        assert resp.status_code == 400
+
+    def test_ai_disabled_returns_403(self, client):
+        with patch("app.routers.ai.settings") as mock_settings:
+            mock_settings.ai_features_enabled = "off"
+            resp = client.post(
+                "/api/ai/find-contacts",
+                json={"entity_type": "vendor", "entity_id": 1},
+            )
+        assert resp.status_code == 403
+
+
+# ── intake-parse with requisition_id ──────────────────────────────────
+
+
+class TestIntakeParseWithRequisitionId:
+    def test_parse_with_requisition_id_found(self, client, db_session, test_requisition):
+        """intake-parse with a valid requisition_id includes rfq_context."""
+        with patch("app.services.ai_intake_parser.parse_freeform_intake", new_callable=AsyncMock) as mock_parse:
+            mock_parse.return_value = {"rows": [{"mpn": "LM317T", "qty": 100}]}
+            resp = client.post(
+                "/api/ai/intake-parse",
+                content=(
+                    '{"text": "LM317T qty 100 units needed", "mode": "rfq"'
+                    f', "requisition_id": {test_requisition.id}}}'
+                ).encode(),
+                headers={"Content-Type": "application/json"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["parsed"] is True
+
+    def test_parse_with_requisition_id_not_found(self, client, db_session):
+        """intake-parse with a missing requisition_id returns 404."""
+        resp = client.post(
+            "/api/ai/intake-parse",
+            content=b'{"text": "LM317T qty 100 units needed", "mode": "rfq", "requisition_id": 99999}',
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 404

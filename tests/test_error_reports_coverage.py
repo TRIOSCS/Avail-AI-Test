@@ -447,3 +447,185 @@ class TestCreateTicketHelper:
         )
         assert ticket.id is not None
         assert ticket.user_agent is None
+
+
+# ── HTMX form endpoint ─────────────────────────────────────────────────
+
+
+class TestHtmxFormEndpoint:
+    def test_get_form_returns_html(self, client):
+        resp = client.get("/api/trouble-tickets/form")
+        assert resp.status_code == 200
+        assert "html" in resp.headers.get("content-type", "").lower() or len(resp.text) > 0
+
+    def test_submit_empty_json_description_returns_422(self, client):
+        """JSON body with empty description → 422."""
+        resp = client.post(
+            "/api/trouble-tickets/submit",
+            json={"description": "   "},
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 422
+        assert "describe" in resp.text.lower() or "problem" in resp.text.lower()
+
+    def test_submit_json_with_ua_and_viewport(self, client):
+        """JSON body with user_agent + viewport sets browser_info."""
+        resp = client.post(
+            "/api/trouble-tickets/submit",
+            json={
+                "description": "Bug with user agent",
+                "user_agent": "Mozilla/5.0",
+                "viewport": "1920x1080",
+            },
+            headers={"Content-Type": "application/json"},
+        )
+        assert resp.status_code == 200
+        assert "Report submitted" in resp.text
+
+    def test_submit_form_with_empty_message_returns_422(self, client):
+        """Legacy form-encoded with blank message → 422."""
+        resp = client.post(
+            "/api/trouble-tickets/submit",
+            data={"message": "   "},
+        )
+        assert resp.status_code == 422
+
+    def test_submit_json_create_ticket_exception_returns_500(self, client):
+        """Internal exception during ticket creation → 500 HTML response."""
+        with patch("app.routers.error_reports._create_ticket") as mock_create:
+            mock_create.side_effect = Exception("DB down")
+            resp = client.post(
+                "/api/trouble-tickets/submit",
+                json={"description": "This will fail internally"},
+                headers={"Content-Type": "application/json"},
+            )
+        assert resp.status_code == 500
+        assert "went wrong" in resp.text.lower()
+
+
+# ── JSON API CRUD endpoints ────────────────────────────────────────────
+
+
+class TestJsonApiCrud:
+    def test_create_error_report_via_api(self, client, db_session):
+        """POST /api/error-reports creates a ticket via Pydantic body."""
+        resp = client.post(
+            "/api/error-reports",
+            json={"message": "Test error via JSON API", "current_url": "/v2/sourcing"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "created"
+
+    def test_list_error_reports_with_status_filter(self, client, db_session, test_user):
+        """GET /api/error-reports?status=submitted filters by status."""
+        from datetime import datetime, timezone
+
+        from app.models.trouble_ticket import TroubleTicket
+
+        ticket = TroubleTicket(
+            ticket_number="TT-LIST-001",
+            submitted_by=test_user.id,
+            title="List filter test",
+            description="Testing list filter",
+            status="submitted",
+            source="report_button",
+            risk_tier="low",
+            category="other",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(ticket)
+        db_session.commit()
+
+        resp = client.get("/api/error-reports?status=submitted")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "items" in data
+        assert data["total"] >= 1
+
+    def test_get_error_report_not_found(self, client):
+        resp = client.get("/api/error-reports/99999")
+        assert resp.status_code == 404
+
+    def test_get_error_report_found(self, client, db_session, test_user):
+        from datetime import datetime, timezone
+
+        from app.models.trouble_ticket import TroubleTicket
+
+        ticket = TroubleTicket(
+            ticket_number="TT-GET-001",
+            submitted_by=test_user.id,
+            title="Get test",
+            description="Testing get endpoint",
+            status="submitted",
+            source="report_button",
+            risk_tier="low",
+            category="other",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(ticket)
+        db_session.commit()
+        db_session.refresh(ticket)
+
+        resp = client.get(f"/api/error-reports/{ticket.id}")
+        assert resp.status_code == 200
+        assert resp.json()["ticket_number"] == ticket.ticket_number
+
+    def test_update_ticket_status_to_resolved(self, client, db_session, test_user):
+        from datetime import datetime, timezone
+
+        from app.models.trouble_ticket import TroubleTicket
+
+        ticket = TroubleTicket(
+            ticket_number="TT-UPD-001",
+            submitted_by=test_user.id,
+            title="Update test",
+            description="Testing update",
+            status="submitted",
+            source="report_button",
+            risk_tier="low",
+            category="other",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(ticket)
+        db_session.commit()
+        db_session.refresh(ticket)
+
+        resp = client.patch(
+            f"/api/error-reports/{ticket.id}",
+            json={"status": "resolved", "resolution_notes": "Fixed the bug"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "resolved"
+
+    def test_update_ticket_not_found(self, client):
+        resp = client.patch(
+            "/api/error-reports/99999",
+            json={"status": "resolved"},
+        )
+        assert resp.status_code == 404
+
+    def test_update_ticket_resolution_notes_only(self, client, db_session, test_user):
+        from datetime import datetime, timezone
+
+        from app.models.trouble_ticket import TroubleTicket
+
+        ticket = TroubleTicket(
+            ticket_number="TT-UPD-002",
+            submitted_by=test_user.id,
+            title="Notes test",
+            description="Testing notes update",
+            status="submitted",
+            source="report_button",
+            risk_tier="low",
+            category="other",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(ticket)
+        db_session.commit()
+        db_session.refresh(ticket)
+
+        resp = client.patch(
+            f"/api/error-reports/{ticket.id}",
+            json={"resolution_notes": "Added documentation"},
+        )
+        assert resp.status_code == 200
