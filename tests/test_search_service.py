@@ -222,6 +222,33 @@ class TestGetAllPns:
         result = get_all_pns(req)
         assert result == ["LM317T"]
 
+    def test_dict_format_substitutes(self, db_session):
+        """Dict-format subs extract mpn field instead of str(dict)."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn, mpn="LM317T")
+        req.substitutes = [
+            {"mpn": "LM7805", "manufacturer": "TI"},
+            {"mpn": "LM7812", "manufacturer": "ON Semi"},
+        ]
+        result = get_all_pns(req)
+        assert "LM317T" in result
+        assert "LM7805" in result
+        assert "LM7812" in result
+        assert len(result) == 3
+
+    def test_mixed_format_substitutes(self, db_session):
+        """Mix of string and dict-format substitutes both work."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn, mpn="LM317T")
+        req.substitutes = [
+            "LM7805",
+            {"mpn": "LM7812", "manufacturer": "ON Semi"},
+        ]
+        result = get_all_pns(req)
+        assert len(result) == 3
+
 
 # ── sighting_to_dict ─────────────────────────────────────────────────────
 

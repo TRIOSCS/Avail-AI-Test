@@ -17,9 +17,8 @@
   {# Header bar: MPN + count + Re-search #}
   <div class="flex items-center justify-between px-3 py-2 border-b border-brand-200 bg-white flex-shrink-0">
     <div class="flex items-center gap-3">
-      <h1 class="text-lg font-bold text-gray-900">
-        <span class="font-mono">{{ requirement.primary_mpn }}</span>
-      </h1>
+      {% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips %}
+      <div>{{ mpn_chips(requirement) }}</div>
       <span class="text-xs text-gray-500">
         {{ requirement.brand or '' }}{% if requirement.brand %} · {% endif %}{{ total }} lead{{ 's' if total != 1 }}
       </span>

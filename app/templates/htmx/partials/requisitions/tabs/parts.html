@@ -209,7 +209,7 @@
             <input type="checkbox" class="rounded border-gray-300 text-brand-500 focus:ring-brand-500"
                    @change="selectedReqIds = $el.checked ? [{% for r in requirements %}{{ r.id }}{{ ',' if not loop.last }}{% endfor %}] : []">
           </th>
-          <th data-col-key="mpn" class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">MPN</th>
+          <th data-col-key="mpn" class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Part Numbers</th>
           <th data-col-key="brand" class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Brand</th>
           <th data-col-key="qty" class="px-4 py-2.5 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Qty</th>
           <th data-col-key="customer_pn" class="px-4 py-2.5 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Customer PN</th>

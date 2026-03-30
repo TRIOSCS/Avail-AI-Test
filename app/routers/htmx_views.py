@@ -365,6 +365,7 @@ async def requisitions_list_partial(
                 or_(
                     Requirement.primary_mpn.ilike(safe),
                     Requirement.customer_pn.ilike(safe),
+                    Requirement.substitutes_text.ilike(safe),
                 ),
             )
         )

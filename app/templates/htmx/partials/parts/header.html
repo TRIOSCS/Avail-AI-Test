@@ -16,10 +16,22 @@
 <div class="px-3 py-2 border-b border-gray-200 bg-white flex-shrink-0">
   <div class="flex items-center justify-between gap-4">
 
-    {# Left: MPN + Brand + Requisition context #}
+    {# Left: MPN chips + Brand + Requisition context #}
+    {% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips %}
     <div class="min-w-0">
-      <div class="flex items-baseline gap-2">
-        <span class="text-lg font-bold text-gray-900 truncate">{{ requirement.primary_mpn or '—' }}</span>
+      <div class="flex items-center gap-2">
+        {# All MPNs as equal chips — click to edit substitutes #}
+        <div id="hdr-substitutes"
+             hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/substitutes"
+             hx-target="#hdr-substitutes" hx-swap="outerHTML"
+             class="cursor-pointer"
+             title="Click to edit part numbers">
+          {% if requirement.primary_mpn or requirement.substitutes %}
+            {{ mpn_chips(requirement) }}
+          {% else %}
+            <span class="text-[10px] text-gray-400 cursor-pointer hover:text-brand-500 transition-colors">+ Add part numbers</span>
+          {% endif %}
+        </div>
         {% if requirement.manufacturer %}
         <span class="text-sm text-gray-400">·</span>
         <span id="hdr-manufacturer"
@@ -38,23 +50,6 @@
               title="Click to edit brand">
           {{ requirement.brand or 'No brand' }}
         </span>
-      </div>
-      {# Approved substitutes — inline editable #}
-      <div id="hdr-substitutes" class="flex flex-wrap items-center gap-1 mt-0.5"
-           hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/substitutes"
-           hx-target="#hdr-substitutes" hx-swap="outerHTML"
-           title="Click to edit approved substitutes">
-        {% if requirement.substitutes %}
-          <span class="text-[10px] text-gray-400 uppercase tracking-wide mr-0.5">Subs:</span>
-          {% for sub in requirement.substitutes %}
-            {% set sub_mpn = sub.mpn if sub is mapping else sub %}
-            {% set sub_mfr = sub.manufacturer if sub is mapping else '' %}
-            <span class="inline-flex px-1 py-0 text-[10px] font-mono font-medium rounded bg-gray-50 text-gray-600 border border-gray-200 cursor-pointer hover:bg-gray-100 transition-colors"
-                  title="{{ sub_mfr }}">{{ sub_mpn }}{% if sub_mfr %} ({{ sub_mfr[:15] }}){% endif %}</span>
-          {% endfor %}
-        {% else %}
-          <span class="text-[10px] text-gray-400 cursor-pointer hover:text-brand-500 transition-colors">+ Add substitutes</span>
-        {% endif %}
       </div>
       <p class="text-xs text-gray-400 truncate mt-0.5">
         {{ requirement.requisition.name if requirement.requisition else '—' }}

@@ -14,16 +14,8 @@
            @change="$el.checked ? selectedReqIds.push({{ r.id }}) : selectedReqIds = selectedReqIds.filter(id => id !== {{ r.id }})">
   </td>
   <td data-col-key="mpn" class="px-4 py-2.5" x-show="!editing" x-cloak>
-    <div class="text-sm font-mono font-medium text-gray-900 uppercase">{{ r.primary_mpn or "—" }}</div>
-    {% set mpns = r.substitutes|sub_mpns %}
-    {% if mpns %}
-    <div class="flex flex-wrap gap-1 mt-1" style="background:yellow;padding:4px;">
-      <span style="color:red;font-weight:bold;font-size:14px;">SUBS:</span>
-      {% for mpn in mpns %}
-      <span style="background:red;color:white;padding:2px 8px;border-radius:4px;font-size:14px;font-weight:bold;">{{ mpn }}</span>
-      {% endfor %}
-    </div>
-    {% endif %}
+    {% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips %}
+    {{ mpn_chips(r) }}
   </td>
   <td data-col-key="brand" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>{{ r.brand or "—" }}</td>
   <td data-col-key="qty" class="px-4 py-2.5 text-sm text-gray-500 text-right tabular-nums" x-show="!editing" x-cloak>

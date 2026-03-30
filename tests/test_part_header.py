@@ -161,18 +161,22 @@ def test_header_shows_substitutes(client, db_session, test_user):
     html = resp.text
     assert "LM317AHVT" in html
     assert "LM317MDT" in html
-    assert "Subs:" in html
+    # All MPNs rendered as equal chips — no "Subs:" or "Alt:" labels
+    assert "Subs:" not in html
+    assert "Alt:" not in html
+    assert "bg-brand-50" in html  # chip styling
 
 
-def test_header_no_substitutes_shows_add_link(client, db_session, test_user):
-    """Header shows '+ Add substitutes' when none exist."""
+def test_header_no_substitutes_shows_primary_as_chip(client, db_session, test_user):
+    """Header shows primary MPN as chip even when no substitutes."""
     requisition = _make_requisition(db_session, test_user.id)
     part = _make_requirement(db_session, requisition.id, substitutes=[])
     db_session.commit()
 
     resp = client.get(f"/v2/partials/parts/{part.id}/header")
     assert resp.status_code == 200
-    assert "Add substitutes" in resp.text
+    assert "bg-brand-50" in resp.text  # chip styling present
+    assert part.primary_mpn in resp.text
 
 
 def test_edit_substitutes_returns_input(client, db_session, test_user):

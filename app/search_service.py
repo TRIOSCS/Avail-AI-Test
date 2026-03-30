@@ -163,7 +163,10 @@ def get_all_pns(req: Requirement) -> list[str]:
             pns.append(display)
             seen_keys.add(key)
     for sub in req.substitutes or []:
-        s = str(sub).strip() if sub else ""
+        if isinstance(sub, dict):
+            s = (sub.get("mpn") or "").strip()
+        else:
+            s = str(sub).strip() if sub else ""
         if not s:
             continue
         display = normalize_mpn(s) or s

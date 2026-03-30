@@ -175,14 +175,13 @@
                      class="h-3 w-3 rounded border-gray-300 text-brand-500"
                      @change="selectedSiblings = $el.checked ? [{% for p in sibling_parts %}{{ p.id }}{{ ',' if not loop.last }}{% endfor %}] : []">
             </th>
-            <th>MPN</th>
+            <th>Part Numbers</th>
             <th>Brand</th>
             <th>Mfr</th>
             <th>Status</th>
             <th>Qty</th>
             <th>Tgt $</th>
             <th>Cust PN</th>
-            <th>Subs</th>
             <th>Offers</th>
           </tr>
         </thead>
@@ -199,14 +198,16 @@
                      :checked="selectedSiblings.includes({{ part.id }})"
                      @change="$el.checked ? selectedSiblings.push({{ part.id }}) : selectedSiblings = selectedSiblings.filter(id => id !== {{ part.id }})">
             </td>
-            <td class="font-semibold">{{ part.primary_mpn or '—' }}</td>
+            <td>
+              {% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips %}
+              {{ mpn_chips(part) }}
+            </td>
             <td class="max-w-[100px] truncate" title="{{ part.brand or '' }}">{{ part.brand or '—' }}</td>
             <td class="max-w-[100px] truncate" title="{{ part.manufacturer or '' }}">{{ part.manufacturer or '—' }}</td>
             <td>{{ status_badge(part.sourcing_status or 'open') }}</td>
             <td>{{ part.target_qty or '—' }}</td>
             <td>{{ '$%.2f'|format(part.target_price) if part.target_price else '—' }}</td>
             <td class="max-w-[100px] truncate" title="{{ part.customer_pn or '' }}">{{ part.customer_pn or '—' }}</td>
-            <td>{{ (part.substitutes|length) if part.substitutes else '—' }}</td>
             {% set offer_count = part.offers|length %}
             {% set offer_prices = part.offers|map(attribute='unit_price')|reject('none')|list %}
             {% set best_price = offer_prices|min if offer_prices else none %}

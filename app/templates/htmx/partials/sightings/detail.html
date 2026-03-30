@@ -7,22 +7,15 @@
 #}
 
 {% import "htmx/partials/shared/_macros.html" as m %}
+{% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips %}
 
 {# ── Part Header ─────────────────────────────────────────────── #}
 <div class="border-b border-gray-100 pb-3 mb-3 sightings-slide-down">
   <div class="flex items-start justify-between">
     <div>
-      <h3 class="text-base font-semibold text-gray-900 font-mono">{{ requirement.primary_mpn }}</h3>
+      {{ mpn_chips(requirement) }}
       {% if requirement.manufacturer %}
-      <p class="text-xs text-gray-500">{{ requirement.manufacturer }}</p>
-      {% endif %}
-      {% set sub_mpns = requirement.substitutes|sub_mpns %}
-      {% if sub_mpns %}
-      <div class="flex flex-wrap gap-1 mt-1">
-        {% for mpn in sub_mpns %}
-        <span class="px-1.5 py-0.5 text-[10px] font-mono font-medium rounded bg-amber-50 text-amber-700 border border-amber-200">{{ mpn }}</span>
-        {% endfor %}
-      </div>
+      <p class="text-xs text-gray-500 mt-1">{{ requirement.manufacturer }}</p>
       {% endif %}
     </div>
     {{ m.search_button(requirement, target="#sightings-detail", swap="innerHTML") }}

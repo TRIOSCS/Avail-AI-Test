@@ -170,6 +170,7 @@ def fast_search(query: str, db: Session) -> dict:
         Requirement.primary_mpn.ilike(pattern)
         | Requirement.normalized_mpn.ilike(pattern)
         | Requirement.brand.ilike(pattern)
+        | Requirement.substitutes_text.ilike(pattern)
     )
     if use_pg:
         q = q.order_by(func.similarity(Requirement.primary_mpn, query).desc())
