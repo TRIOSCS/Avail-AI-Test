@@ -269,3 +269,46 @@ class TestCustomerStaleness:
         pos_old = html.index("ZZZ Old")
         pos_recent = html.index("MMM Recent")
         assert pos_new < pos_old < pos_recent
+
+
+class TestEmailIntelligenceInActivity:
+    """Test email intelligence data shown in activity tabs."""
+
+    def test_activity_tab_shows_email_classification(self, client: TestClient, db_session: Session, test_user: User):
+        """Activity tab shows email classification when available."""
+        from app.models.email_intelligence import EmailIntelligence
+        from app.models.intelligence import ActivityLog
+
+        company = Company(name="Email Intel Co", is_active=True)
+        db_session.add(company)
+        db_session.flush()
+
+        log = ActivityLog(
+            user_id=test_user.id,
+            activity_type="email_received",
+            channel="email",
+            company_id=company.id,
+            external_id="msg-123",
+            subject="Quote for STM32F407",
+            contact_name="John Vendor",
+        )
+        db_session.add(log)
+        db_session.flush()
+
+        ei = EmailIntelligence(
+            user_id=test_user.id,
+            message_id="msg-123",
+            classification="offer",
+            confidence=0.92,
+            has_pricing=True,
+            subject="Quote for STM32F407",
+            sender_email="john@vendor.com",
+            sender_domain="vendor.com",
+        )
+        db_session.add(ei)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
+        assert resp.status_code == 200
+        assert "Offer" in resp.text
+        assert ">$</span>" in resp.text

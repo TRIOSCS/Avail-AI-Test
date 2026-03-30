@@ -138,6 +138,24 @@
               {{ a.quality_classification|replace('_', ' ')|title }}
             </span>
             {% endif %}
+            {# Email intelligence badge #}
+            {% set ei = email_intel_map.get(a.external_id) if email_intel_map is defined and a.external_id %}
+            {% if ei %}
+            {% set ei_colors = {
+              'offer': 'bg-emerald-50 text-emerald-700',
+              'stock_list': 'bg-brand-100 text-brand-600',
+              'quote_reply': 'bg-amber-50 text-amber-700',
+              'ooo': 'bg-gray-100 text-gray-500',
+              'spam': 'bg-rose-50 text-rose-700',
+              'general': 'bg-gray-100 text-gray-500',
+            } %}
+            <span class="ml-1.5 inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ ei_colors.get(ei.classification, 'bg-gray-100 text-gray-500') }}">
+              {{ ei.classification|replace('_', ' ')|title }}
+            </span>
+            {% if ei.has_pricing %}
+            <span class="ml-1 inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-emerald-50 text-emerald-700">$</span>
+            {% endif %}
+            {% endif %}
             {% if a.contact_name %}<span class="text-gray-500"> — {{ a.contact_name }}</span>{% endif %}
           </p>
           {% if a.summary %}
