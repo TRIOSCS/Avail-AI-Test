@@ -662,7 +662,7 @@ def _create_count_triggers(conn) -> None:
                         SELECT COUNT(*) FROM requisitions r
                         JOIN customer_sites cs2 ON r.customer_site_id = cs2.id
                         WHERE cs2.company_id = v_company_id
-                          AND r.status NOT IN ('archived', 'won', 'lost')
+                          AND r.status NOT IN ('archived', 'won', 'lost', 'cancelled')
                     ) WHERE id = v_company_id;
                 END IF;
             END IF;
@@ -674,7 +674,7 @@ def _create_count_triggers(conn) -> None:
                         SELECT COUNT(*) FROM requisitions r
                         JOIN customer_sites cs2 ON r.customer_site_id = cs2.id
                         WHERE cs2.company_id = v_company_id
-                          AND r.status NOT IN ('archived', 'won', 'lost')
+                          AND r.status NOT IN ('archived', 'won', 'lost', 'cancelled')
                     ) WHERE id = v_company_id;
                 END IF;
             END IF;
@@ -719,13 +719,13 @@ def _backfill_company_counts(conn) -> None:
             SELECT COUNT(*) FROM requisitions r
             JOIN customer_sites cs ON r.customer_site_id = cs.id
             WHERE cs.company_id = c.id
-              AND r.status NOT IN ('archived', 'won', 'lost')
+              AND r.status NOT IN ('archived', 'won', 'lost', 'cancelled')
         )
         WHERE c.open_req_count != (
             SELECT COUNT(*) FROM requisitions r
             JOIN customer_sites cs ON r.customer_site_id = cs.id
             WHERE cs.company_id = c.id
-              AND r.status NOT IN ('archived', 'won', 'lost')
+              AND r.status NOT IN ('archived', 'won', 'lost', 'cancelled')
         )
     """,
     )

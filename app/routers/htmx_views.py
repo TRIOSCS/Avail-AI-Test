@@ -2724,13 +2724,19 @@ async def send_follow_up_htmx(
 
     from datetime import timezone as tz
 
-    contact.status = ContactStatus.SENT
-    contact.status_updated_at = datetime.now(tz.utc)
-    db.commit()
+    if email_sent or is_testing:
+        contact.status = ContactStatus.SENT
+        contact.status_updated_at = datetime.now(tz.utc)
+        db.commit()
 
-    mode = "via Graph API" if email_sent else "test mode"
+    mode = "via Graph API" if email_sent else ("test mode" if is_testing else "FAILED")
     logger.info(
-        "Follow-up sent for contact {} (vendor: {}, {}) by {}", contact_id, contact.vendor_name, mode, user.email
+        "Follow-up {} for contact {} (vendor: {}, {}) by {}",
+        "sent" if email_sent or is_testing else "FAILED",
+        contact_id,
+        contact.vendor_name,
+        mode,
+        user.email,
     )
 
     ctx = _base_ctx(request, user, "follow-ups")

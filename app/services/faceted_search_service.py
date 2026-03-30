@@ -181,7 +181,7 @@ def search_materials_faceted(
     _fts_applied = False
     if q:
         sb = SearchBuilder(q)
-        is_pg = db.bind and db.bind.dialect.name == "postgresql"
+        is_pg = db.get_bind().dialect.name == "postgresql"
         # Short/single-token queries (likely MPN prefixes) → ILIKE for substring match
         # Multi-word natural language queries → FTS for relevance ranking
         use_fts = is_pg and " " in q.strip()
