@@ -222,6 +222,7 @@ class VendorResponse(Base):
     graph_conversation_id = Column(String(500))
     scanned_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    match_method = Column(String(50), nullable=True)
 
     __table_args__ = (
         Index("ix_vr_classification", "classification"),

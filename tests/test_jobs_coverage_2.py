@@ -103,23 +103,23 @@ class TestJobProactiveMatching:
         mock_db = _mock_db()
         mock_db.query.return_value.filter.return_value.count.return_value = 5
 
+        scan_result = {"matches_created": 3, "scanned_offers": 10}
+        expired_count = 2
+
+        # run_in_executor is called twice: first result goes via wait_for, second awaited directly
+        run_exec_mock = AsyncMock(side_effect=[MagicMock(), expired_count])
+
         with patch("app.jobs.offers_jobs.asyncio.get_running_loop") as mock_loop_fn:
             mock_loop = MagicMock()
             mock_loop_fn.return_value = mock_loop
+            mock_loop.run_in_executor = run_exec_mock
 
-            # run_in_executor returns futures
-            scan_result = {"matches_created": 3, "scanned_offers": 10}
-            expired_count = 2
-
-            future_scan = asyncio.Future()
-            future_scan.set_result(scan_result)
-            future_expire = asyncio.Future()
-            future_expire.set_result(expired_count)
-
-            mock_loop.run_in_executor.side_effect = [future_scan, future_expire]
-
-            with patch("app.database.SessionLocal", return_value=mock_db):
-                _run(_job_proactive_matching.__wrapped__())
+            with patch(
+                "app.jobs.offers_jobs.asyncio.wait_for",
+                new=AsyncMock(return_value=scan_result),
+            ):
+                with patch("app.database.SessionLocal", return_value=mock_db):
+                    _run(_job_proactive_matching.__wrapped__())
 
         mock_db.close.assert_called_once()
 
