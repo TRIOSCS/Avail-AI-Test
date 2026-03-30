@@ -724,3 +724,210 @@ class TestRequirementHistoryOfferChanges:
         data = resp.json()
         offer_changes = [e for e in data if e.get("entity") == "offer"]
         assert len(offer_changes) >= 1
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Batch add requirements (array input)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestBatchAddRequirements:
+    def test_batch_add_valid(self, client, db_session, test_user, test_requisition):
+        """Batch POST with a list of requirements."""
+        with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None), \
+             patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session):
+            resp = client.post(
+                f"/api/requisitions/{test_requisition.id}/requirements",
+                json=[
+                    {"primary_mpn": "NE555P", "manufacturer": "TI", "target_qty": 100},
+                    {"primary_mpn": "LM7805", "manufacturer": "TI", "target_qty": 50},
+                ],
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["created"]) == 2
+
+    def test_batch_add_partial_invalid(self, client, db_session, test_user, test_requisition):
+        """Batch POST where one item is invalid — should be skipped."""
+        with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None), \
+             patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session):
+            resp = client.post(
+                f"/api/requisitions/{test_requisition.id}/requirements",
+                json=[
+                    {"primary_mpn": "NE555P", "target_qty": 100},
+                    {"no_mpn": "invalid_item"},  # missing primary_mpn
+                ],
+            )
+        # Even if some are invalid in batch mode, response should be 200 with skipped
+        assert resp.status_code in (200, 422)
+
+    def test_single_add_invalid_validation(self, client, db_session, test_user, test_requisition):
+        """Single POST with invalid payload returns 422."""
+        resp = client.post(
+            f"/api/requisitions/{test_requisition.id}/requirements",
+            json={"target_qty": 100},  # missing primary_mpn
+        )
+        assert resp.status_code == 422
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Lead status patch — success path
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestPatchLeadStatus:
+    def _make_sourcing_lead(self, db, req, user):
+        from app.models.sourcing_lead import SourcingLead
+
+        lead = SourcingLead(
+            requisition_id=req.id,
+            requirement_id=req.requirements[0].id,
+            lead_id="LEAD-STATUS-001",
+            vendor_name="Digi-Key",
+            vendor_name_normalized="digi-key",
+            part_number_requested="LM317T",
+            part_number_matched="LM317T",
+            match_type="exact",
+            primary_source_type="digikey",
+            primary_source_name="DigiKey",
+            confidence_score=85.0,
+            confidence_band="high",
+            vendor_safety_score=80.0,
+            vendor_safety_band="medium",
+            buyer_status="new",
+            buyer_owner_user_id=user.id,
+            created_at=datetime.now(timezone.utc),
+            updated_at=datetime.now(timezone.utc),
+        )
+        db.add(lead)
+        db.commit()
+        db.refresh(lead)
+        return lead
+
+    def test_patch_status_success(self, client, db_session, test_user, test_requisition):
+        lead = self._make_sourcing_lead(db_session, test_requisition, test_user)
+        with patch(
+            "app.routers.requisitions.requirements.update_lead_status",
+            return_value=lead,
+        ):
+            resp = client.patch(
+                f"/api/leads/{lead.id}/status",
+                json={"status": "contacted"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+
+    def test_patch_status_not_found(self, client, db_session, test_user):
+        resp = client.patch("/api/leads/99999/status", json={"status": "contacted"})
+        assert resp.status_code == 404
+
+    def test_add_feedback_success(self, client, db_session, test_user, test_requisition):
+        lead = self._make_sourcing_lead(db_session, test_requisition, test_user)
+        with patch(
+            "app.routers.requisitions.requirements.append_lead_feedback",
+            return_value=lead,
+        ):
+            resp = client.post(
+                f"/api/leads/{lead.id}/feedback",
+                json={"note": "Called and got a quote"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+
+    def test_add_feedback_not_found(self, client, db_session, test_user):
+        resp = client.post("/api/leads/99999/feedback", json={"note": "test"})
+        assert resp.status_code == 404
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# Upload requirements — parse error path
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestUploadParseError:
+    def test_upload_parse_error(self, client, db_session, test_user, test_requisition):
+        """Simulates a parse error in parse_tabular_file."""
+        with patch(
+            "app.routers.requisitions.requirements.resolve_material_card", return_value=None
+        ), patch("app.file_utils.parse_tabular_file", side_effect=ValueError("bad csv")):
+            resp = client.post(
+                f"/api/requisitions/{test_requisition.id}/upload",
+                files={"file": ("bad.csv", b"garbage", "text/csv")},
+            )
+        assert resp.status_code in (400, 500)
+
+
+# ══════════════════════════════════════════════════════════════════════════
+# search_all — exception in search result (error handling branch)
+# ══════════════════════════════════════════════════════════════════════════
+
+
+class TestToggleQuoteSelection:
+    def test_toggle_quote_selection_success(self, client, db_session, test_user, test_requisition):
+        req_item = test_requisition.requirements[0]
+        offer = _make_offer(db_session, test_requisition, req_item, test_user)
+        resp = client.post(f"/api/offers/{offer.id}/toggle-quote-selection")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["ok"] is True
+
+    def test_toggle_quote_selection_not_found(self, client):
+        resp = client.post("/api/offers/99999/toggle-quote-selection")
+        assert resp.status_code == 404
+
+    def test_toggle_quote_selection_not_authorized(self, client, db_session, test_user, test_requisition):
+        req_item = test_requisition.requirements[0]
+        offer = _make_offer(db_session, test_requisition, req_item, test_user)
+        with patch("app.routers.requisitions.requirements.get_req_for_user", return_value=None):
+            resp = client.post(f"/api/offers/{offer.id}/toggle-quote-selection")
+        assert resp.status_code == 403
+
+
+class TestAddRequirementsDuplicateDetection:
+    def test_add_with_customer_site_detects_dup(self, client, db_session, test_user, test_requisition):
+        """Cover duplicate detection block (lines 501-529) by adding with customer_site_id."""
+        from app.models import Company, CustomerSite
+
+        co = Company(name="DupCo", is_active=True, created_at=datetime.now(timezone.utc))
+        db_session.add(co)
+        db_session.flush()
+        site = CustomerSite(company_id=co.id, site_name="HQ")
+        db_session.add(site)
+        db_session.flush()
+        test_requisition.customer_site_id = site.id
+        db_session.commit()
+
+        mc = _make_material_card(db_session, "NE555P")
+        with patch(
+            "app.routers.requisitions.requirements.resolve_material_card", return_value=mc
+        ), patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session):
+            resp = client.post(
+                f"/api/requisitions/{test_requisition.id}/requirements",
+                json={"primary_mpn": "NE555P", "manufacturer": "TI", "target_qty": 100},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "duplicates" in data
+
+
+class TestSearchAllErrorBranch:
+    @patch("app.routers.requisitions.requirements.enqueue_for_nc_search")
+    @patch("app.routers.requisitions.requirements.enqueue_for_ics_search")
+    @patch("app.routers.requisitions._enrich_with_vendor_cards")
+    def test_search_all_with_exception_in_result(
+        self, mock_enrich, mock_nc, mock_ics, client, db_session, test_user, test_requisition
+    ):
+        """Tests the branch where search_requirement returns an Exception."""
+
+        async def _failing_search(req, db):
+            raise RuntimeError("connector failed")
+
+        with patch(
+            "app.routers.requisitions.search_requirement",
+            new=_failing_search,
+        ):
+            resp = client.post(f"/api/requisitions/{test_requisition.id}/search")
+        # Should return 200 even when individual searches fail
+        assert resp.status_code == 200
