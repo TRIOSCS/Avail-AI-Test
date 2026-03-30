@@ -32,6 +32,7 @@
     "@alpinejs/sort": "^3.15.8",
     "alpinejs": "^3.15.8",
     "autoprefixer": "^10.4.27",
+    "chart.js": "^4.5.1",
     "htmx-ext-alpine-morph": "^2.0.2",
     "htmx-ext-class-tools": "^2.0.3",
     "htmx-ext-debug": "^2.0.2",

@@ -7,7 +7,7 @@ Depends on: app/dependencies (require_user), app/templates
 from datetime import date
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from loguru import logger
 from sqlalchemy.orm import Session
 
@@ -108,3 +108,44 @@ async def crm_performance(
         "users_scores": users_scores,
     }
     return templates.TemplateResponse("htmx/partials/crm/performance_tab.html", ctx)
+
+
+@router.get("/api/crm/performance-metrics")
+async def performance_metrics_json(
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Return performance scores as JSON for Chart.js rendering."""
+    active_users = db.query(User).filter(User.is_active.is_(True)).order_by(User.name).all()
+
+    month_start = date.today().replace(day=1)
+    snapshots = db.query(AvailScoreSnapshot).filter(AvailScoreSnapshot.month == month_start).all()
+    snap_by_user = {s.user_id: s for s in snapshots}
+
+    names: list[str] = []
+    scores: list[float] = []
+    behaviors: list[float] = []
+    outcomes: list[float] = []
+
+    for u in active_users:
+        snap = snap_by_user.get(u.id)
+        if snap:
+            names.append(u.name or u.email)
+            scores.append(round(snap.total_score or 0, 1))
+            behaviors.append(round(snap.behavior_total or 0, 1))
+            outcomes.append(round(snap.outcome_total or 0, 1))
+        else:
+            score_data = _compute_user_score(db, u, month_start)
+            names.append(u.name or u.email)
+            scores.append(round(score_data.get("total_score", 0), 1))
+            behaviors.append(round(score_data.get("behavior_total", 0), 1))
+            outcomes.append(round(score_data.get("outcome_total", 0), 1))
+
+    return JSONResponse(
+        {
+            "names": names,
+            "scores": scores,
+            "behaviors": behaviors,
+            "outcomes": outcomes,
+        }
+    )

@@ -9,6 +9,69 @@
     <span class="text-xs text-gray-400">Updated daily</span>
   </div>
 
+  {# Charts #}
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4"></script>
+  <div class="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6"
+       x-data="performanceCharts()"
+       x-init="loadCharts()">
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+      <h3 class="text-sm font-semibold text-gray-900 mb-3">Overall Scores</h3>
+      <canvas x-ref="scoresChart" height="200"></canvas>
+    </div>
+    <div class="bg-white rounded-lg shadow border border-gray-200 p-4">
+      <h3 class="text-sm font-semibold text-gray-900 mb-3">Behaviors vs Outcomes</h3>
+      <canvas x-ref="stackedChart" height="200"></canvas>
+    </div>
+  </div>
+
+  <script>
+  function performanceCharts() {
+    return {
+      async loadCharts() {
+        const resp = await fetch('/api/crm/performance-metrics');
+        const data = await resp.json();
+        if (!data.names.length) return;
+
+        const colors = data.scores.map(s => s >= 70 ? '#059669' : s >= 40 ? '#d97706' : '#e11d48');
+
+        new Chart(this.$refs.scoresChart, {
+          type: 'bar',
+          data: {
+            labels: data.names,
+            datasets: [{
+              label: 'Overall Score',
+              data: data.scores,
+              backgroundColor: colors,
+              borderRadius: 4,
+            }]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { display: false } },
+            scales: { y: { beginAtZero: true, max: 100 } }
+          }
+        });
+
+        new Chart(this.$refs.stackedChart, {
+          type: 'bar',
+          data: {
+            labels: data.names,
+            datasets: [
+              { label: 'Behaviors', data: data.behaviors, backgroundColor: '#3b82f6', borderRadius: 4 },
+              { label: 'Outcomes', data: data.outcomes, backgroundColor: '#10b981', borderRadius: 4 },
+            ]
+          },
+          options: {
+            responsive: true,
+            plugins: { legend: { position: 'bottom' } },
+            scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }
+          }
+        });
+      }
+    }
+  }
+  </script>
+
   {% if users_scores %}
   <div class="bg-white rounded-lg shadow border border-gray-200 overflow-hidden">
     <div class="overflow-x-auto">
