@@ -1,6 +1,12 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: ['./app/templates/**/*.html', './app/static/styles.css'],
+  safelist: [
+    // Ensure all shades of colors used in dynamic/conditional templates
+    // are always included — prevents "class not in CSS" after deploy.
+    { pattern: /^(bg|text|border)-(slate|gray|brand|amber|emerald|rose|blue|violet)-(50|100|200|300|400|500|600|700|800|900)$/ },
+    { pattern: /^(bg|text|border)-(slate|gray|brand|amber|emerald|rose|blue|violet)-(50|100|200|300|400|500|600|700|800|900)$/, variants: ['hover'] },
+  ],
   theme: {
     extend: {
       fontFamily: {
