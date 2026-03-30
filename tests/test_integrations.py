@@ -189,3 +189,13 @@ class TestACSService:
         resp = client.post("/api/calls/initiate", json={"to_phone": "+15551234567"})
         # Will fail with config error since ACS not configured, but route exists
         assert resp.status_code != 404
+
+
+class TestTeamsCallRecordsJob:
+    """Test Teams call records sync job."""
+
+    def test_register_teams_call_jobs_exists(self):
+        """register_teams_call_jobs function exists."""
+        from app.jobs.teams_call_jobs import register_teams_call_jobs
+
+        assert callable(register_teams_call_jobs)

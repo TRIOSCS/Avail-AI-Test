@@ -450,8 +450,9 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
     """Enrich a business entity (vendor or customer) by domain.
 
     Phase 1: Explorium lookup.
+    Phase 1b: Apollo enrichment (fills gaps from Phase 1).
     Phase 2: AI + web search fills remaining gaps (conditional).
-    Merge priority: Explorium > AI.
+    Merge priority: Explorium > Apollo > AI.
     Results cached in IntelCache with 14-day TTL keyed by domain.
     """
     from .cache.intel_cache import get_cached, set_cached
@@ -501,6 +502,23 @@ async def enrich_entity(domain: str, name: str = "") -> dict:
 
     if sources:  # pragma: no cover
         result["source"] = "+".join(sources)
+
+    # ── Phase 1b: Apollo enrichment (fills gaps from Phase 1) ──
+    from .config import settings as _settings
+
+    if _settings.apollo_api_key:
+        from .connectors.apollo import search_company as apollo_search
+
+        apollo_result = await apollo_search(domain, _settings.apollo_api_key)
+        if apollo_result:
+            for k, v in apollo_result.items():
+                if k != "source" and v and not result.get(k):
+                    result[k] = v
+            if "apollo" not in (result.get("source") or ""):
+                if result["source"]:
+                    result["source"] = result["source"] + "+apollo"
+                else:
+                    result["source"] = "apollo"
 
     # ── Phase 2: AI fills remaining gaps (conditional) ──
     if any(not result.get(f) for f in _enrichable):
