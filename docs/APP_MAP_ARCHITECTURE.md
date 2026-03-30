@@ -14,7 +14,7 @@ AvailAI is a production electronic component sourcing platform and CRM. Buyers s
 | **Database** | PostgreSQL 16, SQLAlchemy 2.0, Alembic |
 | **Cache** | Redis 7 (fallback: PG JSONB) |
 | **Frontend** | Jinja2 + HTMX 2.0 + Alpine.js 3.15 + Tailwind CSS |
-| **Build** | Vite 6, PostCSS |
+| **Build** | Vite 6, PostCSS, Tailwind CSS (safelisted) |
 | **AI** | Anthropic Claude (email parsing, enrichment, tagging) |
 | **Auth** | Azure AD OAuth2, Microsoft Graph API |
 | **Jobs** | APScheduler |
