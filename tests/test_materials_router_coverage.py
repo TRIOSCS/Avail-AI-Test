@@ -1019,6 +1019,137 @@ class TestDirectHandlerCoverage:
 
         assert result["skipped_rows"] >= 0
 
+    async def test_import_stock_direct_with_vendor_website(self, db_session):
+        """Direct call: vendor_website causes domain extraction (line 433)."""
+        from app.routers.materials import import_stock_list_standalone
+
+        csv_content = b"mpn,qty\nDOMtest001,10\n"
+
+        mock_file = MagicMock()
+        mock_file.filename = "upload.csv"
+        mock_file.read = AsyncMock(return_value=csv_content)
+
+        mock_form = MagicMock()
+
+        def _form_get(key):
+            if key == "file":
+                return mock_file
+            if key == "vendor_name":
+                return "Domain Test Vendor"
+            if key == "vendor_website":
+                return "https://www.domainvendor.com/path"
+            return ""
+
+        mock_form.get = MagicMock(side_effect=_form_get)
+
+        req = MagicMock(spec=Request)
+        req.form = AsyncMock(return_value=mock_form)
+        user = MagicMock()
+
+        with patch("app.routers.materials.get_credential_cached", return_value=None):
+            result = await import_stock_list_standalone(req, user=user, db=db_session)
+
+        assert result["vendor_name"] == "Domain Test Vendor"
+
+    async def test_import_stock_direct_enrich_triggered(self, db_session):
+        """Direct call: new vendor + domain + API key → enrich_triggered=True."""
+        from app.routers.materials import import_stock_list_standalone
+
+        csv_content = b"mpn,qty\nEnRichtest001,5\n"
+
+        mock_file = MagicMock()
+        mock_file.filename = "upload.csv"
+        mock_file.read = AsyncMock(return_value=csv_content)
+
+        mock_form = MagicMock()
+
+        def _form_get(key):
+            if key == "file":
+                return mock_file
+            if key == "vendor_name":
+                return "Enrich Trigger Vendor"
+            if key == "vendor_website":
+                return "https://enrichvendor.com"
+            return ""
+
+        mock_form.get = MagicMock(side_effect=_form_get)
+
+        req = MagicMock(spec=Request)
+        req.form = AsyncMock(return_value=mock_form)
+        user = MagicMock()
+
+        with patch("app.routers.materials.get_credential_cached", return_value="fake-api-key"), \
+             patch("app.routers.materials.safe_background_task", new_callable=AsyncMock) as mock_bg, \
+             patch("app.routers.materials._background_enrich_vendor", return_value=AsyncMock()):
+            mock_bg.return_value = None
+            result = await import_stock_list_standalone(req, user=user, db=db_session)
+
+        assert result["enrich_triggered"] is True
+
+    async def test_import_stock_direct_existing_mvh_with_manufacturer(self, db_session):
+        """Direct call: existing MVH update with manufacturer field (line 500)."""
+        from app.routers.materials import import_stock_list_standalone
+        from app.vendor_utils import normalize_vendor_name
+
+        norm = normalize_vendor_name("Mfr Update Vendor")
+        vendor = VendorCard(
+            normalized_name=norm,
+            display_name="Mfr Update Vendor",
+            emails=[],
+            phones=[],
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(vendor)
+        db_session.flush()
+
+        card = MaterialCard(
+            normalized_mpn="mfrupd001",
+            display_mpn="MFRUPD001",
+            manufacturer="",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(card)
+        db_session.flush()
+
+        mvh = MaterialVendorHistory(
+            material_card_id=card.id,
+            vendor_name=norm,
+            vendor_name_normalized=norm,
+            source_type="stock_list",
+            source="stock_list",
+            times_seen=1,
+        )
+        db_session.add(mvh)
+        db_session.commit()
+
+        csv_content = b"mpn,qty,price,manufacturer\nMFRUPD001,100,0.50,NXP\n"
+
+        mock_file = MagicMock()
+        mock_file.filename = "upload.csv"
+        mock_file.read = AsyncMock(return_value=csv_content)
+
+        mock_form = MagicMock()
+
+        def _form_get(key):
+            if key == "file":
+                return mock_file
+            if key == "vendor_name":
+                return "Mfr Update Vendor"
+            return ""
+
+        mock_form.get = MagicMock(side_effect=_form_get)
+
+        req = MagicMock(spec=Request)
+        req.form = AsyncMock(return_value=mock_form)
+        user = MagicMock()
+
+        with patch("app.routers.materials.get_credential_cached", return_value=None):
+            result = await import_stock_list_standalone(req, user=user, db=db_session)
+
+        assert result["imported_rows"] >= 1
+        db_session.refresh(mvh)
+        assert mvh.last_manufacturer == "NXP"
+
     def test_list_materials_with_offer_stats(self, client, db_session, test_requisition):
         """Ensure offer_stats loop (line 141) is exercised via list endpoint."""
         from app.models import Offer
