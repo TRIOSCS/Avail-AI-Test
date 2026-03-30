@@ -146,7 +146,9 @@ async def sightings_list(
     if filters.q:
         safe_q = escape_like(filters.q)
         query = query.filter(
-            Requirement.primary_mpn.ilike(f"%{safe_q}%") | Requisition.customer_name.ilike(f"%{safe_q}%")
+            Requirement.primary_mpn.ilike(f"%{safe_q}%")
+            | Requisition.customer_name.ilike(f"%{safe_q}%")
+            | Requirement.substitutes_text.ilike(f"%{safe_q}%")
         )
 
     total = query.count()

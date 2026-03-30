@@ -151,6 +151,49 @@ class TestSightingsFilters:
         resp = client.get("/v2/partials/sightings?sort=invalid_col")
         assert resp.status_code == 200
 
+    def test_search_by_substitute_mpn(self, client, db_session):
+        """Search filter matches requirements by substitute MPN."""
+        req = Requisition(name="Sub RFQ", status="active", customer_name="SubCo")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="PRIMARY-001",
+            manufacturer="Mfr",
+            target_qty=50,
+            sourcing_status="open",
+            substitutes=[{"mpn": "ALT-SUB-777", "manufacturer": "AltMfr"}],
+            substitutes_text="ALT-SUB-777",
+        )
+        db_session.add(r)
+        db_session.flush()
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="V1",
+                listing_count=1,
+                score=50.0,
+            )
+        )
+        db_session.commit()
+
+        # Search by sub MPN should find this requirement
+        resp = client.get("/v2/partials/sightings?q=ALT-SUB-777")
+        assert resp.status_code == 200
+        assert "PRIMARY-001" in resp.text
+
+        # Search by primary MPN still works
+        resp = client.get("/v2/partials/sightings?q=PRIMARY-001")
+        assert resp.status_code == 200
+        assert "PRIMARY-001" in resp.text
+
+    def test_search_by_sub_no_false_positive(self, client, db_session):
+        """Sub search does not return unrelated requirements."""
+        _seed_data(db_session)
+        resp = client.get("/v2/partials/sightings?q=ALT-SUB-777")
+        assert resp.status_code == 200
+        assert "TEST-MPN-001" not in resp.text
+
 
 class TestSightingsRefresh:
     def test_returns_200(self, client, db_session):
