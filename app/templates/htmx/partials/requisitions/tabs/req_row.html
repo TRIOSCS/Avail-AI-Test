@@ -41,16 +41,8 @@
   <td data-col-key="packaging" class="px-4 py-2.5 text-sm text-gray-500" x-show="!editing" x-cloak>{{ r.packaging or "—" }}</td>
   <td data-col-key="notes" class="px-4 py-2.5 text-sm text-gray-500 max-w-[200px] truncate" x-show="!editing" x-cloak title="{{ r.notes or '' }}">{{ r.notes or "—" }}</td>
   <td data-col-key="status" class="px-4 py-2.5" x-show="!editing" x-cloak>
-    {% set st_colors = {
-      "open": "bg-sky-50 text-sky-600 border-sky-200",
-      "sourcing": "bg-sky-50 text-sky-600 border-sky-200",
-      "offered": "bg-emerald-50 text-emerald-600 border-emerald-200",
-      "quoted": "bg-amber-50 text-amber-600 border-amber-200",
-      "awarded": "bg-emerald-50 text-emerald-600 border-emerald-200"
-    } %}
-    <span class="inline-flex px-1.5 text-xs font-medium rounded border {{ st_colors.get(r.sourcing_status, 'bg-gray-50 text-gray-500 border-gray-200') }}">
-      {{ (r.sourcing_status or 'open')|capitalize }}
-    </span>
+    {% from "htmx/partials/shared/_macros.html" import status_badge %}
+    {{ status_badge(r.sourcing_status or 'open') }}
   </td>
   <td data-col-key="sightings" class="px-4 py-2.5 text-sm text-right" x-show="!editing" x-cloak>
     {% if r.sighting_count > 0 %}

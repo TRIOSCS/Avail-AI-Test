@@ -3,15 +3,7 @@
    Depends on: requirement (Requirement model with joined Requisition)
 #}
 
-{% set status_colors = {
-  'open': 'bg-blue-100 text-blue-700',
-  'sourcing': 'bg-amber-100 text-amber-700',
-  'offered': 'bg-emerald-100 text-emerald-700',
-  'quoted': 'bg-violet-100 text-violet-700',
-  'won': 'bg-emerald-200 text-emerald-800',
-  'lost': 'bg-gray-200 text-gray-600',
-  'archived': 'bg-gray-300 text-gray-600'
-} %}
+{% from "htmx/partials/shared/_macros.html" import status_badge %}
 
 <div class="px-3 py-2 border-b border-gray-200 bg-white flex-shrink-0">
   <div class="flex items-center justify-between gap-4">
@@ -66,10 +58,9 @@
       <span id="hdr-sourcing_status"
             hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/sourcing_status"
             hx-target="#hdr-sourcing_status" hx-swap="outerHTML"
-            class="px-2 py-0.5 text-xs font-medium rounded-full cursor-pointer hover:ring-1 hover:ring-brand-300
-                   {{ status_colors.get(requirement.sourcing_status, 'bg-gray-100 text-gray-600') }}"
+            class="cursor-pointer hover:ring-1 hover:ring-brand-300"
             title="Click to change status">
-        {{ (requirement.sourcing_status or 'open')|capitalize }}
+        {{ status_badge(requirement.sourcing_status or 'open') }}
       </span>
 
       {# Condition — inline editable #}

@@ -144,15 +144,13 @@
             {% for col_key in col_defs %}
               {% if col_key == 'status' %}
                 {# Editable cell — own <td> with inline edit attributes #}
-                {% set sc = {'open': 'bg-blue-600 text-white', 'sourcing': 'bg-amber-500 text-white', 'offered': 'bg-emerald-600 text-white', 'quoted': 'bg-violet-600 text-white', 'won': 'bg-emerald-700 text-white', 'lost': 'bg-gray-400 text-white', 'archived': 'bg-gray-300 text-gray-600'} %}
+                {% from "htmx/partials/shared/_macros.html" import status_badge %}
                 <td id="cell-sourcing_status-{{ req.id }}" @click.stop
                     hx-get="/v2/partials/parts/{{ req.id }}/cell/edit/sourcing_status"
                     hx-target="#cell-sourcing_status-{{ req.id }}" hx-swap="outerHTML"
                     class="cursor-pointer hover:bg-brand-50 transition-colors"
                     title="Click to edit status">
-                  <span class="badge-primary {{ sc.get(req.sourcing_status, 'bg-gray-400 text-white') }}">
-                    {{ req.sourcing_status or 'open' }}
-                  </span>
+                  {{ status_badge(req.sourcing_status or 'open') }}
                 </td>
               {% elif col_key == 'qty' %}
                 <td id="cell-target_qty-{{ req.id }}" @click.stop
