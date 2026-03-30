@@ -61,7 +61,7 @@ def _set_ai_cache(query: str, result: dict) -> None:
 
 def _is_postgres(db: Session) -> bool:
     """Check if the DB backend is PostgreSQL (vs SQLite in tests)."""
-    return db.bind.dialect.name == "postgresql"
+    return bool(db.bind) and db.bind.dialect.name == "postgresql"
 
 
 def _to_dict(obj, fields: list[str], entity_type: str) -> dict:

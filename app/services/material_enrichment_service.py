@@ -211,7 +211,7 @@ async def enrich_pending_cards(db: Session, *, limit: int = 300, batch_size: int
         return {"enriched": 0, "skipped": 0, "errors": 0, "pending": 0}
 
     result = await enrich_material_cards(card_ids, db, batch_size=batch_size)
-    result["pending"] = card_ids.__len__()
+    result["pending"] = len(card_ids)
     return result
 
 

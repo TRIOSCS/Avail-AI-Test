@@ -10,7 +10,7 @@ module.exports = {
     // All color shades used in the app — prevents purge issues when
     // adding new shades in templates between deploys.
     {
-      pattern: /^(bg|text|border)-(slate|gray|brand|amber|emerald|rose|blue|violet)-(50|100|200|300|400|500|600|700|800|900)$/,
+      pattern: /^(bg|text|border)-(slate|gray|brand|amber|emerald|rose|blue|violet|sky)-(50|100|200|300|400|500|600|700|800|900)$/,
       variants: ['hover'],
     },
   ],
