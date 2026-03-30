@@ -3400,6 +3400,65 @@ async def vendors_list_partial(
     return templates.TemplateResponse("htmx/partials/vendors/list.html", ctx)
 
 
+@router.get("/v2/partials/vendors/find-by-part", response_class=HTMLResponse)
+async def find_by_part_partial(
+    request: Request,
+    mpn: str = "",
+    hx_target: str = Query("#main-content", alias="hx_target"),
+    push_url_base: str = Query("/v2/vendors", alias="push_url_base"),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Search vendors by MPN via MaterialVendorHistory."""
+    from ..models.intelligence import MaterialCard, MaterialVendorHistory
+    from ..utils.normalization import normalize_mpn
+
+    hx_target, push_url_base = _sanitize_hx_params(hx_target, push_url_base, "/v2/vendors")
+
+    results = []
+    norm_mpn = normalize_mpn(mpn) if mpn.strip() else None
+
+    if norm_mpn:
+        rows = (
+            db.query(MaterialVendorHistory, VendorCard)
+            .join(MaterialCard, MaterialVendorHistory.material_card_id == MaterialCard.id)
+            .outerjoin(VendorCard, VendorCard.normalized_name == MaterialVendorHistory.vendor_name_normalized)
+            .filter(MaterialCard.normalized_mpn == norm_mpn)
+            .order_by(
+                MaterialVendorHistory.times_seen.desc(),
+                VendorCard.response_rate.desc().nullslast(),
+                VendorCard.total_pos.desc().nullslast(),
+                VendorCard.avg_response_hours.asc().nullslast(),
+            )
+            .limit(30)
+            .all()
+        )
+        for mvh, vc in rows:
+            results.append(
+                {
+                    "vendor_name": mvh.vendor_name,
+                    "vendor_id": vc.id if vc else None,
+                    "times_seen": mvh.times_seen or 0,
+                    "last_price": mvh.last_price,
+                    "last_qty": mvh.last_qty,
+                    "last_seen": mvh.last_seen,
+                    "win_rate": vc.overall_win_rate if vc else None,
+                    "avg_response_hours": vc.avg_response_hours if vc else None,
+                }
+            )
+
+    ctx = _base_ctx(request, user, "vendors")
+    ctx.update(
+        {
+            "mpn": mpn.strip().upper() if mpn.strip() else None,
+            "results": results,
+            "hx_target": hx_target,
+            "push_url_base": push_url_base,
+        }
+    )
+    return templates.TemplateResponse("htmx/partials/vendors/find_by_part.html", ctx)
+
+
 @router.get("/v2/partials/vendors/{vendor_id}", response_class=HTMLResponse)
 async def vendor_detail_partial(
     request: Request,
