@@ -21,17 +21,21 @@ if [ "$NO_COMMIT" = false ]; then
     fi
 fi
 
-# Step 2: Rebuild app with unique build arg to bust Docker cache
+# Step 2: Rebuild frontend assets (Tailwind CSS + JS bundle)
+echo "==> Building frontend assets..."
+npm run build
+
+# Step 3: Rebuild app with unique build arg to bust Docker cache
 # Append timestamp so --no-commit deploys also invalidate COPY layers
 BUILD_COMMIT="$(git rev-parse --short HEAD)-$(date +%s)"
 echo "==> Rebuilding app container (build tag: $BUILD_COMMIT)..."
 docker compose build --no-cache --build-arg BUILD_COMMIT="$BUILD_COMMIT" app
 
-# Step 3: Recreate only the app container with the new image
+# Step 4: Recreate only the app container with the new image
 echo "==> Restarting app..."
 docker compose up -d --force-recreate app
 
-# Step 4: Wait for health check to pass
+# Step 5: Wait for health check to pass
 echo "==> Waiting for app to become healthy..."
 TRIES=0
 MAX_TRIES=30
@@ -53,7 +57,7 @@ if [ "$STATUS" != "healthy" ]; then
     exit 1
 fi
 
-# Step 5: Verify deployed build tag matches what we just built
+# Step 6: Verify deployed build tag matches what we just built
 echo ""
 echo "==> Verifying deployed build tag..."
 DEPLOYED_COMMIT=$(docker compose exec app printenv BUILD_COMMIT 2>/dev/null | tr -d '[:space:]' || echo "UNKNOWN")
@@ -64,7 +68,7 @@ if [ "$DEPLOYED_COMMIT" != "$BUILD_COMMIT" ]; then
 fi
 echo "==> MATCH: deployed build tag ($DEPLOYED_COMMIT)"
 
-# Step 6: Show recent logs to confirm the right code is running
+# Step 7: Show recent logs to confirm the right code is running
 echo ""
 echo "==> Recent app logs:"
 docker compose logs --tail=20 app
