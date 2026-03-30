@@ -112,7 +112,10 @@ def get_req_for_user(db: Session, user: User, req_id: int, options=None) -> Requ
     q = db.query(Requisition).options(*load_opts).filter_by(id=req_id)
     if user.role == UserRole.SALES:
         q = q.filter_by(created_by=user.id)
-    return q.first()
+    req = q.first()
+    if not req:
+        raise HTTPException(status_code=404, detail="Requisition not found")
+    return req
 
 
 def get_quote_for_user(db: Session, user: User, quote_id: int, options=None) -> Quote:
@@ -126,7 +129,10 @@ def get_quote_for_user(db: Session, user: User, quote_id: int, options=None) -> 
     )
     if user.role == UserRole.SALES:
         q = q.filter(Requisition.created_by == user.id)
-    return q.first()
+    quote = q.first()
+    if not quote:
+        raise HTTPException(status_code=404, detail="Quote not found")
+    return quote
 
 
 # ── Token Management ──────────────────────────────────────────────────

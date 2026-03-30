@@ -133,8 +133,8 @@ class Settings(BaseSettings):
     inbox_backfill_days: int = 180
     contacts_sync_enabled: bool = True
 
-    # --- Admin (CSV env var, parsed to list by model_validator) ---
-    admin_emails: list[str] = []
+    # --- Admin (CSV env var, parsed to list[str] by model_validator) ---
+    admin_emails: str | list[str] = ""
 
     # --- RFQ ---
     follow_up_days: int = 3
@@ -160,9 +160,9 @@ class Settings(BaseSettings):
     proactive_min_margin_pct: float = 10.0
     proactive_match_expiry_days: int = 30
 
-    # --- Buy plan (CSV env vars, parsed to lists by model_validator) ---
-    stock_sale_vendor_names: list[str] = ["trio", "trio supply chain", "stock", "internal"]
-    stock_sale_notify_emails: list[str] = ["logistics@trioscs.com", "accounting@trioscs.com"]
+    # --- Buy plan (CSV env vars, parsed to list[str] by model_validator) ---
+    stock_sale_vendor_names: str | list[str] = "trio,trio supply chain,stock,internal"
+    stock_sale_notify_emails: str | list[str] = "logistics@trioscs.com,accounting@trioscs.com"
     buyplan_auto_complete_hour: int = 18
     buyplan_auto_complete_tz: str = "America/New_York"
     po_verify_interval_min: int = 30
@@ -186,8 +186,8 @@ class Settings(BaseSettings):
     contact_nudge_dormant_days: int = 30
     contact_nudge_cooling_days: int = 14
 
-    # --- Own company domains (CSV env var, parsed to frozenset by model_validator) ---
-    own_domains: frozenset[str] = frozenset({"trioscs.com"})
+    # --- Own company domains (CSV env var, parsed to frozenset[str] by model_validator) ---
+    own_domains: str | frozenset[str] = "trioscs.com"
 
     # --- 8x8 Work Analytics ---
     eight_by_eight_api_key: str = ""
@@ -253,18 +253,25 @@ class Settings(BaseSettings):
             raise ValueError("Confidence/threshold must be between 0.0 and 1.0")
         return v
 
-    @model_validator(mode="before")
-    @classmethod
-    def parse_csv_fields(cls, values: dict) -> dict:
-        """Parse CSV env-var strings into their proper collection types."""
-        for field in ("admin_emails", "stock_sale_vendor_names", "stock_sale_notify_emails"):
-            v = values.get(field)
-            if isinstance(v, str):
-                values[field] = _csv_to_list(v)
-        v = values.get("own_domains")
-        if isinstance(v, str):
-            values["own_domains"] = frozenset(d.strip().lower() for d in v.split(",") if d.strip())
-        return values
+    @model_validator(mode="after")
+    def parse_csv_fields(self) -> "Settings":
+        """Parse CSV env-var strings into their proper collection types.
+
+        Fields are declared as ``str | list[str]`` (or ``str | frozenset[str]``)
+        so pydantic-settings can load plain CSV strings from dotenv, while the
+        runtime type after this validator is always the collection type.
+        """
+        if isinstance(self.admin_emails, str):
+            object.__setattr__(self, "admin_emails", _csv_to_list(self.admin_emails))
+        if isinstance(self.stock_sale_vendor_names, str):
+            object.__setattr__(self, "stock_sale_vendor_names", _csv_to_list(self.stock_sale_vendor_names))
+        if isinstance(self.stock_sale_notify_emails, str):
+            object.__setattr__(self, "stock_sale_notify_emails", _csv_to_list(self.stock_sale_notify_emails))
+        if isinstance(self.own_domains, str):
+            object.__setattr__(
+                self, "own_domains", frozenset(d.strip().lower() for d in self.own_domains.split(",") if d.strip())
+            )
+        return self
 
 
 # Handle SESSION_SECRET → secret_key fallback before instantiation

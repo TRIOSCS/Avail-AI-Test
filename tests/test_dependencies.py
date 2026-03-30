@@ -11,6 +11,7 @@ from datetime import datetime, timedelta, timezone
 from unittest.mock import MagicMock
 
 import pytest
+from fastapi import HTTPException
 
 from app.dependencies import (
     get_req_for_user,
@@ -67,8 +68,9 @@ class TestGetReqForUser:
         assert req.id == test_requisition.id
 
     def test_nonexistent_req(self, db_session, test_user):
-        req = get_req_for_user(db_session, test_user, 99999)
-        assert req is None
+        with pytest.raises(HTTPException) as exc_info:
+            get_req_for_user(db_session, test_user, 99999)
+        assert exc_info.value.status_code == 404
 
 
 # ── require_fresh_token ─────────────────────────────────────────────

@@ -815,8 +815,8 @@ async def parse_response_attachments(
 
     try:
         att_data = await gc.get_json(f"/me/messages/{vr.message_id}/attachments")
-    except (ConnectionError, TimeoutError, OSError, RuntimeError) as e:
-        raise HTTPException(502, f"Graph API error: {str(e)[:200]}")
+    except (ConnectionError, TimeoutError, OSError, RuntimeError):
+        raise HTTPException(502, "Graph API error. Please try again.")
 
     attachments = att_data.get("value", []) if att_data else []
     parseable_exts = {".xlsx", ".xls", ".csv", ".tsv"}
@@ -860,9 +860,9 @@ async def parse_response_attachments(
 
     try:
         db.commit()
-    except SQLAlchemyError as e:
+    except SQLAlchemyError:
         db.rollback()
-        raise HTTPException(500, f"Save failed: {str(e)[:200]}")
+        raise HTTPException(500, "Save failed. Please try again.")
 
     return {
         "attachments_found": len(attachments),

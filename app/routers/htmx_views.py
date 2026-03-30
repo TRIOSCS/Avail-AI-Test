@@ -5510,7 +5510,8 @@ async def email_thread_viewer(
     except HTTPException:
         error = "M365 connection needs refresh — please reconnect in Settings"
     except (ConnectionError, TimeoutError, OSError, RuntimeError) as exc:
-        error = f"Could not load thread: {str(exc)[:100]}"
+        logger.error("Could not load thread: {}", exc)
+        error = "Could not load thread. Please try again."
 
     return templates.TemplateResponse(
         "htmx/partials/emails/thread_viewer.html",
@@ -5558,7 +5559,8 @@ async def send_email_reply(
     except HTTPException:
         error = "M365 connection needs refresh"
     except (ConnectionError, TimeoutError, OSError, RuntimeError) as exc:
-        error = f"Send failed: {str(exc)[:100]}"
+        logger.error("Email send failed: {}", exc)
+        error = "Send failed. Please try again or contact support."
 
     return templates.TemplateResponse(
         "htmx/partials/emails/reply_result.html",
@@ -5588,7 +5590,8 @@ async def email_thread_summary(
     except HTTPException:
         error = "M365 connection needs refresh"
     except (ConnectionError, TimeoutError, OSError, RuntimeError) as exc:
-        error = f"Summary failed: {str(exc)[:100]}"
+        logger.error("Summary failed: {}", exc)
+        error = "Summary failed. Please try again."
 
     return templates.TemplateResponse(
         "htmx/partials/emails/thread_summary.html",
@@ -7794,10 +7797,10 @@ async def add_prospect_domain(
             f'<div class="bg-emerald-50 border border-emerald-200 rounded p-2 text-sm text-emerald-700">'
             f"Prospect added: {domain} (ID {prospect.id})</div>"
         )
-    except (ImportError, ValueError, RuntimeError) as exc:
+    except (ImportError, ValueError, RuntimeError):
         return HTMLResponse(
-            f'<div class="bg-rose-50 border border-rose-200 rounded p-2 text-sm text-rose-700">'
-            f"Error: {str(exc)[:100]}</div>"
+            '<div class="bg-rose-50 border border-rose-200 rounded p-2 text-sm text-rose-700">'
+            "Error: Could not add prospect. Please try again.</div>"
         )
 
 
@@ -8396,7 +8399,7 @@ async def proactive_send_offer(
         raise HTTPException(400, str(e))
     except Exception as exc:
         logger.error("Proactive send failed: {}", exc)
-        raise HTTPException(500, f"Send failed: {str(exc)[:100]}")
+        raise HTTPException(500, "Send failed. Please try again or contact support.")
 
 
 # ── Sprint 8: Proactive Selling + Prospecting Completion (legacy routes kept for compat) ──
@@ -8466,7 +8469,7 @@ async def proactive_convert(
         )
     except (ImportError, RuntimeError, Exception) as exc:
         logger.error("Proactive conversion failed: {}", exc)
-        raise HTTPException(500, f"Conversion failed: {str(exc)[:100]}")
+        raise HTTPException(500, "Conversion failed. Please try again.")
 
 
 @router.get("/v2/partials/proactive/scorecard", response_class=HTMLResponse)
