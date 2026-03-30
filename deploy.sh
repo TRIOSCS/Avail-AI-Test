@@ -66,7 +66,35 @@ if [ "$DEPLOYED_COMMIT" != "$BUILD_COMMIT" ]; then
 fi
 echo "==> MATCH: deployed build tag ($DEPLOYED_COMMIT)"
 
-# Step 6: Show recent logs to confirm the right code is running
+# Step 6: Verify CSS covers all Tailwind classes used in templates
+echo ""
+echo "==> Verifying Tailwind CSS coverage..."
+CSS_FILE=$(docker compose exec app sh -c 'ls /app/app/static/dist/assets/styles-*.css' 2>/dev/null | tr -d '[:space:]')
+if [ -n "$CSS_FILE" ]; then
+    # Extract classes from templates, check each exists in CSS
+    MISSING=$(docker compose exec app sh -c '
+        grep -rohP "(?:bg|text|border|hover:bg|hover:text)-[a-z]+-\d+" /app/app/templates/ 2>/dev/null \
+        | sort -u \
+        | while read cls; do
+            base=$(echo "$cls" | sed "s/hover://")
+            if ! grep -q "$base" '"$CSS_FILE"'; then
+                echo "  MISSING: $cls"
+            fi
+        done
+    ')
+    if [ -n "$MISSING" ]; then
+        echo "==> WARNING: These Tailwind classes are used in templates but NOT in the CSS bundle:"
+        echo "$MISSING"
+        echo "==> The CSS was built from templates at Docker build time."
+        echo "==> If classes are missing, the Dockerfile Stage 1 may have stale template copies."
+    else
+        echo "==> All Tailwind color classes in templates are present in CSS bundle."
+    fi
+else
+    echo "==> WARNING: Could not find CSS bundle to verify."
+fi
+
+# Step 7: Show recent logs to confirm the right code is running
 echo ""
 echo "==> Recent app logs:"
 docker compose logs --tail=20 app
