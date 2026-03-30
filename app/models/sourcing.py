@@ -262,6 +262,7 @@ class Sighting(Base):
         Index("ix_sightings_req_vendor", "requirement_id", "vendor_name"),
         Index("ix_sightings_req_score", "requirement_id", score.desc()),
         Index("ix_sightings_material_card", "material_card_id"),
+        Index("ix_sightings_mpn_vendor_norm", "normalized_mpn", "vendor_name_normalized"),
     )
 
 

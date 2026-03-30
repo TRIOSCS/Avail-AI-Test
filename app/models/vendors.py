@@ -14,7 +14,7 @@ from sqlalchemy import (
     Numeric,
     String,
 )
-from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import relationship, validates
 
 from .base import Base
@@ -76,8 +76,8 @@ class VendorCard(Base):
     last_activity_at = Column(DateTime)
 
     # AI-generated material intelligence
-    brand_tags = Column(JSON, default=list)
-    commodity_tags = Column(JSON, default=list)
+    brand_tags = Column(JSONB, default=list)
+    commodity_tags = Column(JSONB, default=list)
     material_tags_updated_at = Column(DateTime)
 
     # Email health scoring (Phase 5)
