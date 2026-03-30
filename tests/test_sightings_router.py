@@ -1253,8 +1253,8 @@ class TestSightingsDetailSubs:
         _, r, _ = _seed_data(db_session)
         resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
         assert resp.status_code == 200
-        # Should not contain sub pill markup
-        assert "bg-amber-50 text-amber-700 border border-amber-200" not in resp.text
+        # No sub pill wrapper div should appear in the header section
+        assert "flex flex-wrap gap-1 mt-1" not in resp.text
 
 
 class TestSightingsVendorMatchedMpns:
