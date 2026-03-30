@@ -8983,33 +8983,26 @@ async def parts_list_partial(
         for row in stats:
             offer_stats[row.requirement_id] = {"count": row.cnt, "best_price": row.best}
 
-    # Build raw MPN → material card ID mapping for click-through links
-    from collections import defaultdict
-
+    # Build display-MPN → material card ID mapping for click-through links
     from ..models.intelligence import MaterialCard
     from ..utils.normalization import normalize_mpn, normalize_mpn_key
 
-    # Collect every MPN (primary + substitutes), normalized to uppercase
-    # to match template rendering (|sub_mpns filter uppercases)
-    all_mpns: list[str] = []
+    norm_to_mpns: dict[str, list[str]] = {}
     for r in requirements:
+        raw_mpns = []
         if r.primary_mpn:
-            display = normalize_mpn(r.primary_mpn) or r.primary_mpn.upper()
-            all_mpns.append(display)
+            raw_mpns.append(r.primary_mpn)
         for sub in r.substitutes or []:
             raw = sub["mpn"] if isinstance(sub, dict) else sub
             if raw:
-                display = normalize_mpn(raw) or raw.upper()
-                all_mpns.append(display)
+                raw_mpns.append(raw)
+        for raw in raw_mpns:
+            display = normalize_mpn(raw) or raw.upper()
+            nk = normalize_mpn_key(display)
+            if nk:
+                norm_to_mpns.setdefault(nk, []).append(display)
 
-    # Map normalized key → display MPNs, then look up material cards
     sub_card_map: dict[str, int] = {}
-    norm_to_mpns: dict[str, list[str]] = defaultdict(list)
-    for mpn in all_mpns:
-        nk = normalize_mpn_key(mpn)
-        if nk:
-            norm_to_mpns[nk].append(mpn)
-
     if norm_to_mpns:
         cards = (
             db.query(MaterialCard.normalized_mpn, MaterialCard.id)

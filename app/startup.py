@@ -859,23 +859,13 @@ def _backfill_material_cards() -> None:
 
     db = SessionLocal()
     try:
-        # Fast exit: skip if all requirements already have material cards
-        unlinked = (
-            db.query(Requirement)
-            .filter(
-                Requirement.primary_mpn.isnot(None),
-                Requirement.material_card_id.is_(None),
-            )
-            .count()
-        )
-        if unlinked == 0:
-            return
-
         reqs = (
             db.query(Requirement)
             .filter(Requirement.primary_mpn.isnot(None), Requirement.material_card_id.is_(None))
             .all()
         )
+        if not reqs:
+            return
         linked = 0
         for r in reqs:
             card = resolve_material_card(r.primary_mpn, db, manufacturer=r.manufacturer or "")

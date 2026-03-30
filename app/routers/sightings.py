@@ -12,7 +12,7 @@ Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
 import json
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any
+from typing import Any, Final
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Request
 from fastapi.responses import HTMLResponse
@@ -41,8 +41,8 @@ from ..vendor_utils import normalize_vendor_name
 
 router = APIRouter(tags=["sightings"])
 
-MAX_BATCH_SIZE = 50
-_EXCLUDED_REQ_STATUSES = [RequisitionStatus.ARCHIVED, RequisitionStatus.CANCELLED]
+MAX_BATCH_SIZE: Final[int] = 50
+_EXCLUDED_REQ_STATUSES: Final = (RequisitionStatus.ARCHIVED, RequisitionStatus.CANCELLED)
 
 _cache: dict[str, tuple[float, Any]] = {}
 
@@ -75,8 +75,6 @@ _SORT_COLUMNS = {
     "status": (Requirement.sourcing_status.asc(), Requirement.sourcing_status.desc()),
 }
 
-
-from typing import Final
 
 REFRESH_RATE_LIMIT_SECONDS: Final[int] = 300  # Per-requirement cooldown between manual searches
 

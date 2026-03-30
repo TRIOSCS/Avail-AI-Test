@@ -13,6 +13,59 @@ from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
 from app.utils.search_builder import SearchBuilder
 
 
+def _apply_facet_filters(
+    query,
+    db: Session,
+    commodity: str,
+    filters: dict,
+    *,
+    id_column=None,
+) -> object:
+    """Narrow *query* by facet filters (enum lists, numeric min/max).
+
+    Args:
+        id_column: The column to filter with ``.in_()``.
+                   Defaults to ``MaterialSpecFacet.material_card_id``.
+    """
+    if id_column is None:
+        id_column = MaterialSpecFacet.material_card_id
+
+    for key, values in filters.items():
+        if key.endswith("_min"):
+            spec_key = key[:-4]
+            query = query.filter(
+                id_column.in_(
+                    db.query(MaterialSpecFacet.material_card_id).filter(
+                        MaterialSpecFacet.category == commodity,
+                        MaterialSpecFacet.spec_key == spec_key,
+                        MaterialSpecFacet.value_numeric >= values,
+                    )
+                )
+            )
+        elif key.endswith("_max"):
+            spec_key = key[:-4]
+            query = query.filter(
+                id_column.in_(
+                    db.query(MaterialSpecFacet.material_card_id).filter(
+                        MaterialSpecFacet.category == commodity,
+                        MaterialSpecFacet.spec_key == spec_key,
+                        MaterialSpecFacet.value_numeric <= values,
+                    )
+                )
+            )
+        elif isinstance(values, list) and values:
+            query = query.filter(
+                id_column.in_(
+                    db.query(MaterialSpecFacet.material_card_id).filter(
+                        MaterialSpecFacet.category == commodity,
+                        MaterialSpecFacet.spec_key == key,
+                        MaterialSpecFacet.value_text.in_(values),
+                    )
+                )
+            )
+    return query
+
+
 def get_commodity_counts(db: Session) -> dict[str, int]:
     """Return {commodity_key: count} for all non-deleted material cards."""
     rows = (
@@ -45,39 +98,7 @@ def get_facet_counts(
 
     # Apply active filters to narrow the base set
     if active_filters:
-        for key, values in active_filters.items():
-            if key.endswith("_min"):
-                spec_key = key[:-4]
-                base_q = base_q.filter(
-                    MaterialSpecFacet.material_card_id.in_(
-                        db.query(MaterialSpecFacet.material_card_id).filter(
-                            MaterialSpecFacet.category == commodity,
-                            MaterialSpecFacet.spec_key == spec_key,
-                            MaterialSpecFacet.value_numeric >= values,
-                        )
-                    )
-                )
-            elif key.endswith("_max"):
-                spec_key = key[:-4]
-                base_q = base_q.filter(
-                    MaterialSpecFacet.material_card_id.in_(
-                        db.query(MaterialSpecFacet.material_card_id).filter(
-                            MaterialSpecFacet.category == commodity,
-                            MaterialSpecFacet.spec_key == spec_key,
-                            MaterialSpecFacet.value_numeric <= values,
-                        )
-                    )
-                )
-            elif isinstance(values, list) and values:
-                base_q = base_q.filter(
-                    MaterialSpecFacet.material_card_id.in_(
-                        db.query(MaterialSpecFacet.material_card_id).filter(
-                            MaterialSpecFacet.category == commodity,
-                            MaterialSpecFacet.spec_key == key,
-                            MaterialSpecFacet.value_text.in_(values),
-                        )
-                    )
-                )
+        base_q = _apply_facet_filters(base_q, db, commodity, active_filters)
 
     card_ids_subq = base_q.distinct().subquery()
 
@@ -197,39 +218,13 @@ def search_materials_faceted(
 
     if sub_filters and commodity:
         commodity_lower = commodity.lower().strip()
-        for key, values in sub_filters.items():
-            if key.endswith("_min"):
-                spec_key = key[:-4]  # Remove _min suffix
-                query = query.filter(
-                    MaterialCard.id.in_(
-                        db.query(MaterialSpecFacet.material_card_id).filter(
-                            MaterialSpecFacet.category == commodity_lower,
-                            MaterialSpecFacet.spec_key == spec_key,
-                            MaterialSpecFacet.value_numeric >= values,
-                        )
-                    )
-                )
-            elif key.endswith("_max"):
-                spec_key = key[:-4]
-                query = query.filter(
-                    MaterialCard.id.in_(
-                        db.query(MaterialSpecFacet.material_card_id).filter(
-                            MaterialSpecFacet.category == commodity_lower,
-                            MaterialSpecFacet.spec_key == spec_key,
-                            MaterialSpecFacet.value_numeric <= values,
-                        )
-                    )
-                )
-            elif isinstance(values, list) and values:
-                query = query.filter(
-                    MaterialCard.id.in_(
-                        db.query(MaterialSpecFacet.material_card_id).filter(
-                            MaterialSpecFacet.category == commodity_lower,
-                            MaterialSpecFacet.spec_key == key,
-                            MaterialSpecFacet.value_text.in_(values),
-                        )
-                    )
-                )
+        query = _apply_facet_filters(
+            query,
+            db,
+            commodity_lower,
+            sub_filters,
+            id_column=MaterialCard.id,
+        )
 
     total = db.query(func.count()).select_from(query.subquery()).scalar()
 
