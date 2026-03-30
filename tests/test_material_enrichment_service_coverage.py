@@ -30,7 +30,10 @@ from tests.conftest import TestSessionLocal, engine
 def _tables():
     Base.metadata.create_all(bind=engine)
     yield
+    # Recreate tables after each test so subsequent tests aren't affected.
+    # (Drop + recreate instead of drop-only to preserve the shared test schema.)
     Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
 
 
 @pytest.fixture

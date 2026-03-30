@@ -22,6 +22,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
+import app.services
 from app.scheduler import scheduler
 
 # ── Fixtures ───────────────────────────────────────────────────────────
@@ -399,6 +400,7 @@ class TestJobRefreshInsights:
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch.dict(sys.modules, {"app.services.knowledge_service": mock_ks}),
+            patch.object(app.services, "knowledge_service", mock_ks),
         ):
             from app.jobs.knowledge_jobs import _job_refresh_insights
 
@@ -440,6 +442,7 @@ class TestJobRefreshInsights:
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch.dict(sys.modules, {"app.services.knowledge_service": mock_ks}),
+            patch.object(app.services, "knowledge_service", mock_ks),
         ):
             from app.jobs.knowledge_jobs import _job_refresh_insights
 
@@ -474,6 +477,7 @@ class TestJobRefreshInsights:
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch.dict(sys.modules, {"app.services.knowledge_service": mock_ks}),
+            patch.object(app.services, "knowledge_service", mock_ks),
         ):
             from app.jobs.knowledge_jobs import _job_refresh_insights
 
@@ -526,6 +530,7 @@ class TestJobRefreshInsights:
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch.dict(sys.modules, {"app.services.knowledge_service": mock_ks}),
+            patch.object(app.services, "knowledge_service", mock_ks),
         ):
             from app.jobs.knowledge_jobs import _job_refresh_insights
 
@@ -579,6 +584,7 @@ class TestJobRefreshInsights:
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch.dict(sys.modules, {"app.services.knowledge_service": mock_ks}),
+            patch.object(app.services, "knowledge_service", mock_ks),
         ):
             from app.jobs.knowledge_jobs import _job_refresh_insights
 
@@ -633,6 +639,7 @@ class TestJobRefreshInsights:
         with (
             patch("app.database.SessionLocal", return_value=mock_db),
             patch.dict(sys.modules, {"app.services.knowledge_service": mock_ks}),
+            patch.object(app.services, "knowledge_service", mock_ks),
         ):
             from app.jobs.knowledge_jobs import _job_refresh_insights
 
