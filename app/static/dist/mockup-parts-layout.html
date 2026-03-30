@@ -1,0 +1,712 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AvailAI — Parts Layout Options</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=DM+Mono:wght@400;500&display=swap');
+
+  :root {
+    --brand-50: #eff6ff;
+    --brand-100: #dbeafe;
+    --brand-500: #3b82f6;
+    --brand-600: #2563eb;
+    --gray-50: #f9fafb;
+    --gray-100: #f3f4f6;
+    --gray-200: #e5e7eb;
+    --gray-300: #d1d5db;
+    --gray-400: #9ca3af;
+    --gray-500: #6b7280;
+    --gray-600: #4b5563;
+    --gray-700: #374151;
+    --gray-800: #1f2937;
+    --gray-900: #111827;
+    --emerald-50: #ecfdf5;
+    --emerald-600: #059669;
+    --emerald-700: #047857;
+    --amber-50: #fffbeb;
+    --amber-100: #fef3c7;
+    --amber-200: #fde68a;
+    --amber-600: #d97706;
+    --amber-700: #b45309;
+    --rose-50: #fff1f2;
+    --rose-600: #e11d48;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'DM Sans', sans-serif;
+    background: #f0f2f5;
+    color: var(--gray-800);
+    padding: 32px;
+    line-height: 1.5;
+  }
+
+  h1 {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--gray-900);
+    margin-bottom: 8px;
+    letter-spacing: -0.5px;
+  }
+
+  .subtitle {
+    font-size: 15px;
+    color: var(--gray-500);
+    margin-bottom: 32px;
+  }
+
+  .option-selector {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 32px;
+    position: sticky;
+    top: 16px;
+    z-index: 100;
+    background: #f0f2f5;
+    padding: 8px 0;
+  }
+
+  .option-btn {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 20px;
+    border: 2px solid var(--gray-200);
+    border-radius: 10px;
+    background: white;
+    font-family: inherit;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--gray-600);
+    cursor: pointer;
+    transition: all 0.2s;
+  }
+
+  .option-btn:hover {
+    border-color: var(--brand-500);
+    color: var(--brand-600);
+  }
+
+  .option-btn.active {
+    border-color: var(--brand-500);
+    background: var(--brand-50);
+    color: var(--brand-600);
+    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+  }
+
+  .option-label {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 24px;
+    height: 24px;
+    border-radius: 6px;
+    background: var(--gray-100);
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--gray-500);
+  }
+
+  .option-btn.active .option-label {
+    background: var(--brand-500);
+    color: white;
+  }
+
+  .mockup-section {
+    display: none;
+    animation: fadeIn 0.3s ease;
+  }
+
+  .mockup-section.active {
+    display: block;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; transform: translateY(8px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+
+  .section-header {
+    display: flex;
+    align-items: baseline;
+    gap: 12px;
+    margin-bottom: 16px;
+  }
+
+  .section-title {
+    font-size: 18px;
+    font-weight: 700;
+    color: var(--gray-900);
+  }
+
+  .section-desc {
+    font-size: 13px;
+    color: var(--gray-400);
+    font-style: italic;
+  }
+
+  .pros-cons {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 24px;
+  }
+
+  .pro, .con {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 13px;
+    color: var(--gray-600);
+    padding: 8px 12px;
+    border-radius: 8px;
+  }
+
+  .pro { background: var(--emerald-50); }
+  .con { background: var(--rose-50); }
+
+  .pro::before { content: "+"; color: var(--emerald-600); font-weight: 700; }
+  .con::before { content: "−"; color: var(--rose-600); font-weight: 700; }
+
+  /* ── Shared table styles (match AvailAI) ── */
+  .mock-panel {
+    background: white;
+    border: 1px solid var(--gray-200);
+    border-radius: 12px;
+    overflow: hidden;
+    margin-bottom: 40px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+  }
+
+  .mock-panel-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--gray-100);
+    background: var(--gray-50);
+  }
+
+  .mock-panel-title {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--gray-700);
+  }
+
+  .mock-panel-badge {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--gray-400);
+    background: var(--gray-100);
+    padding: 2px 8px;
+    border-radius: 10px;
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+
+  thead th {
+    padding: 8px 16px;
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--gray-400);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    text-align: left;
+    border-bottom: 1px solid var(--gray-200);
+    background: var(--gray-50);
+  }
+
+  thead th.right { text-align: right; }
+
+  tbody tr {
+    border-bottom: 1px solid var(--gray-100);
+    transition: background 0.15s;
+  }
+
+  tbody tr:hover { background: var(--brand-50); }
+  tbody tr:last-child { border-bottom: none; }
+
+  td {
+    padding: 10px 16px;
+    font-size: 13px;
+    color: var(--gray-600);
+    vertical-align: top;
+  }
+
+  td.right { text-align: right; }
+  td.mono { font-family: 'DM Mono', monospace; font-size: 13px; }
+
+  /* ── MPN chip — the core element ── */
+  .mpn-chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 3px 10px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    font-weight: 500;
+    border-radius: 6px;
+    white-space: nowrap;
+    letter-spacing: 0.02em;
+    cursor: default;
+    transition: all 0.15s;
+  }
+
+  .mpn-chip:hover {
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.08);
+  }
+
+  /* All chips same style — no primary/sub distinction */
+  .mpn-chip {
+    background: var(--brand-50);
+    color: var(--brand-600);
+    border: 1px solid #bfdbfe;
+  }
+
+  .mpn-chip:hover {
+    background: var(--brand-100);
+  }
+
+  .chip-row {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    align-items: center;
+  }
+
+  /* ── Status badges ── */
+  .status {
+    display: inline-flex;
+    padding: 2px 10px;
+    font-size: 11px;
+    font-weight: 600;
+    border-radius: 20px;
+  }
+
+  .status-open { background: var(--emerald-50); color: var(--emerald-700); }
+  .status-sourcing { background: var(--brand-100); color: var(--brand-600); }
+  .status-quoted { background: var(--amber-50); color: var(--amber-700); }
+
+  /* Sightings count */
+  .sighting-count {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--brand-600);
+    font-weight: 600;
+    font-size: 13px;
+  }
+
+  .sighting-zero { color: var(--gray-400); font-weight: 400; }
+
+  .price { color: var(--emerald-700); font-weight: 500; }
+  .muted { color: var(--gray-400); }
+
+  /* ── Option C: grouped rows ── */
+  .group-first td { padding-bottom: 4px; }
+  .group-child td {
+    padding-top: 2px;
+    padding-bottom: 2px;
+    border-bottom: none;
+  }
+  .group-child td:first-child {
+    padding-left: 32px;
+  }
+  .group-last td {
+    padding-top: 2px;
+    padding-bottom: 10px;
+  }
+
+  .group-connector {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    color: var(--gray-300);
+    font-size: 11px;
+  }
+
+  .group-connector::before {
+    content: "└";
+    font-family: monospace;
+    color: var(--gray-300);
+  }
+
+  /* ── Recommendation banner ── */
+  .rec-banner {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 12px 16px;
+    background: linear-gradient(135deg, #eff6ff 0%, #f0fdf4 100%);
+    border: 1px solid #bfdbfe;
+    border-radius: 10px;
+    margin-bottom: 24px;
+    font-size: 14px;
+    color: var(--gray-700);
+  }
+
+  .rec-star {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: var(--brand-500);
+    border-radius: 8px;
+    color: white;
+    font-size: 16px;
+    flex-shrink: 0;
+  }
+</style>
+</head>
+<body>
+
+<h1>Parts Display Redesign</h1>
+<p class="subtitle">All MPNs treated equally — no primary vs substitute distinction. Pick the layout that works best.</p>
+
+<div class="option-selector">
+  <button class="option-btn active" onclick="showOption('a')">
+    <span class="option-label">A</span>
+    Inline Chips
+  </button>
+  <button class="option-btn" onclick="showOption('b')">
+    <span class="option-label">B</span>
+    Stacked Lines
+  </button>
+  <button class="option-btn" onclick="showOption('c')">
+    <span class="option-label">C</span>
+    Grouped Rows
+  </button>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ OPTION A ═══ -->
+<div id="option-a" class="mockup-section active">
+  <div class="section-header">
+    <span class="section-title">Option A — Inline Chips</span>
+    <span class="section-desc">All MPNs as equal chips in one cell, single row per requirement</span>
+  </div>
+
+  <div class="rec-banner">
+    <span class="rec-star">★</span>
+    <span><strong>Recommended.</strong> Compact, scannable, and visually reinforces that all MPNs are equal. Works well for 1-4 MPNs per requirement.</span>
+  </div>
+
+  <div class="pros-cons">
+    <div class="pro">Most compact — no extra rows or vertical space</div>
+    <div class="con">Rows with 5+ MPNs will wrap and get taller</div>
+    <div class="pro">Instantly clear which MPNs belong to which requirement</div>
+    <div class="con">MPN column becomes wider than other columns</div>
+    <div class="pro">All MPNs visually identical — no hierarchy</div>
+    <div class="con">Less room for per-MPN metadata (sightings count per MPN)</div>
+  </div>
+
+  <div class="mock-panel">
+    <div class="mock-panel-header">
+      <span class="mock-panel-title">RFQ-2026-0047 — Acme Electronics</span>
+      <span class="mock-panel-badge">5 parts</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Part Numbers</th>
+          <th>Brand</th>
+          <th class="right">Qty</th>
+          <th class="right">Target</th>
+          <th>Status</th>
+          <th class="right">Sightings</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <div class="chip-row">
+              <span class="mpn-chip">STM32F407VGT6</span>
+              <span class="mpn-chip">STM32F405RGT6</span>
+              <span class="mpn-chip">STM32F427VGT6</span>
+            </div>
+          </td>
+          <td>STMicroelectronics</td>
+          <td class="right">25</td>
+          <td class="right price">$4.2500</td>
+          <td><span class="status status-sourcing">Sourcing</span></td>
+          <td class="right"><span class="sighting-count">12</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="chip-row">
+              <span class="mpn-chip">LM7805CT</span>
+            </div>
+          </td>
+          <td>Texas Instruments</td>
+          <td class="right">100</td>
+          <td class="right price">$0.3200</td>
+          <td><span class="status status-open">Open</span></td>
+          <td class="right"><span class="sighting-count">8</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="chip-row">
+              <span class="mpn-chip">ESP32-WROVER-E</span>
+              <span class="mpn-chip">ESP32-WROVER-B</span>
+            </div>
+          </td>
+          <td>Espressif</td>
+          <td class="right">50</td>
+          <td class="right muted">—</td>
+          <td><span class="status status-open">Open</span></td>
+          <td class="right"><span class="sighting-zero">0</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="chip-row">
+              <span class="mpn-chip">ADS1115IDGST</span>
+            </div>
+          </td>
+          <td>Texas Instruments</td>
+          <td class="right">200</td>
+          <td class="right price">$1.8000</td>
+          <td><span class="status status-quoted">Quoted</span></td>
+          <td class="right"><span class="sighting-count">23</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="chip-row">
+              <span class="mpn-chip">IRFZ44NPBF</span>
+              <span class="mpn-chip">IRF3205PBF</span>
+              <span class="mpn-chip">IRLZ44NPBF</span>
+              <span class="mpn-chip">STP55NF06L</span>
+            </div>
+          </td>
+          <td>Infineon / ST</td>
+          <td class="right">500</td>
+          <td class="right price">$0.1500</td>
+          <td><span class="status status-sourcing">Sourcing</span></td>
+          <td class="right"><span class="sighting-count">45</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ OPTION B ═══ -->
+<div id="option-b" class="mockup-section">
+  <div class="section-header">
+    <span class="section-title">Option B — Stacked Lines</span>
+    <span class="section-desc">Primary MPN as row text, other chips wrap below — two visual lines per requirement</span>
+  </div>
+
+  <div class="pros-cons">
+    <div class="pro">Primary MPN stands out as readable text</div>
+    <div class="con">Creates visual hierarchy — contradicts "all equal" goal</div>
+    <div class="pro">Familiar table feel — one main value per row</div>
+    <div class="con">Two-line rows feel inconsistent with single-MPN rows</div>
+  </div>
+
+  <div class="mock-panel">
+    <div class="mock-panel-header">
+      <span class="mock-panel-title">RFQ-2026-0047 — Acme Electronics</span>
+      <span class="mock-panel-badge">5 parts</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Part Numbers</th>
+          <th>Brand</th>
+          <th class="right">Qty</th>
+          <th class="right">Target</th>
+          <th>Status</th>
+          <th class="right">Sightings</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td>
+            <div class="mono" style="font-weight:500;color:var(--gray-900);margin-bottom:4px;">STM32F407VGT6</div>
+            <div class="chip-row">
+              <span class="mpn-chip">STM32F405RGT6</span>
+              <span class="mpn-chip">STM32F427VGT6</span>
+            </div>
+          </td>
+          <td>STMicroelectronics</td>
+          <td class="right">25</td>
+          <td class="right price">$4.2500</td>
+          <td><span class="status status-sourcing">Sourcing</span></td>
+          <td class="right"><span class="sighting-count">12</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="mono" style="font-weight:500;color:var(--gray-900);">LM7805CT</div>
+          </td>
+          <td>Texas Instruments</td>
+          <td class="right">100</td>
+          <td class="right price">$0.3200</td>
+          <td><span class="status status-open">Open</span></td>
+          <td class="right"><span class="sighting-count">8</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="mono" style="font-weight:500;color:var(--gray-900);margin-bottom:4px;">ESP32-WROVER-E</div>
+            <div class="chip-row">
+              <span class="mpn-chip">ESP32-WROVER-B</span>
+            </div>
+          </td>
+          <td>Espressif</td>
+          <td class="right">50</td>
+          <td class="right muted">—</td>
+          <td><span class="status status-open">Open</span></td>
+          <td class="right"><span class="sighting-zero">0</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="mono" style="font-weight:500;color:var(--gray-900);">ADS1115IDGST</div>
+          </td>
+          <td>Texas Instruments</td>
+          <td class="right">200</td>
+          <td class="right price">$1.8000</td>
+          <td><span class="status status-quoted">Quoted</span></td>
+          <td class="right"><span class="sighting-count">23</span></td>
+        </tr>
+        <tr>
+          <td>
+            <div class="mono" style="font-weight:500;color:var(--gray-900);margin-bottom:4px;">IRFZ44NPBF</div>
+            <div class="chip-row">
+              <span class="mpn-chip">IRF3205PBF</span>
+              <span class="mpn-chip">IRLZ44NPBF</span>
+              <span class="mpn-chip">STP55NF06L</span>
+            </div>
+          </td>
+          <td>Infineon / ST</td>
+          <td class="right">500</td>
+          <td class="right price">$0.1500</td>
+          <td><span class="status status-sourcing">Sourcing</span></td>
+          <td class="right"><span class="sighting-count">45</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════ OPTION C ═══ -->
+<div id="option-c" class="mockup-section">
+  <div class="section-header">
+    <span class="section-title">Option C — Grouped Rows</span>
+    <span class="section-desc">Each MPN gets its own row, visually grouped under the same requirement</span>
+  </div>
+
+  <div class="pros-cons">
+    <div class="pro">Each MPN has its own row — room for per-MPN sightings</div>
+    <div class="con">Takes 3x vertical space for a 3-MPN requirement</div>
+    <div class="pro">Clean, traditional table layout</div>
+    <div class="con">Harder to scan — which rows are one requirement?</div>
+    <div class="pro">Could show per-MPN search results separately</div>
+    <div class="con">Most complex to implement — grouping logic needed</div>
+  </div>
+
+  <div class="mock-panel">
+    <div class="mock-panel-header">
+      <span class="mock-panel-title">RFQ-2026-0047 — Acme Electronics</span>
+      <span class="mock-panel-badge">5 parts</span>
+    </div>
+    <table>
+      <thead>
+        <tr>
+          <th>Part Number</th>
+          <th>Brand</th>
+          <th class="right">Qty</th>
+          <th class="right">Target</th>
+          <th>Status</th>
+          <th class="right">Sightings</th>
+        </tr>
+      </thead>
+      <tbody>
+        <!-- Group 1 -->
+        <tr class="group-first">
+          <td><span class="mpn-chip">STM32F407VGT6</span></td>
+          <td rowspan="3" style="vertical-align:middle;">STMicroelectronics</td>
+          <td rowspan="3" class="right" style="vertical-align:middle;">25</td>
+          <td rowspan="3" class="right price" style="vertical-align:middle;">$4.2500</td>
+          <td rowspan="3" style="vertical-align:middle;"><span class="status status-sourcing">Sourcing</span></td>
+          <td class="right"><span class="sighting-count">7</span></td>
+        </tr>
+        <tr class="group-child">
+          <td><span class="group-connector"></span><span class="mpn-chip">STM32F405RGT6</span></td>
+          <td class="right"><span class="sighting-count">3</span></td>
+        </tr>
+        <tr class="group-last" style="border-bottom:2px solid var(--gray-200);">
+          <td><span class="group-connector"></span><span class="mpn-chip">STM32F427VGT6</span></td>
+          <td class="right"><span class="sighting-count">2</span></td>
+        </tr>
+        <!-- Group 2 -->
+        <tr>
+          <td><span class="mpn-chip">LM7805CT</span></td>
+          <td>Texas Instruments</td>
+          <td class="right">100</td>
+          <td class="right price">$0.3200</td>
+          <td><span class="status status-open">Open</span></td>
+          <td class="right"><span class="sighting-count">8</span></td>
+        </tr>
+        <!-- Group 3 -->
+        <tr class="group-first">
+          <td><span class="mpn-chip">ESP32-WROVER-E</span></td>
+          <td rowspan="2" style="vertical-align:middle;">Espressif</td>
+          <td rowspan="2" class="right" style="vertical-align:middle;">50</td>
+          <td rowspan="2" class="right muted" style="vertical-align:middle;">—</td>
+          <td rowspan="2" style="vertical-align:middle;"><span class="status status-open">Open</span></td>
+          <td class="right"><span class="sighting-zero">0</span></td>
+        </tr>
+        <tr class="group-last" style="border-bottom:2px solid var(--gray-200);">
+          <td><span class="group-connector"></span><span class="mpn-chip">ESP32-WROVER-B</span></td>
+          <td class="right"><span class="sighting-zero">0</span></td>
+        </tr>
+        <!-- Group 4 -->
+        <tr>
+          <td><span class="mpn-chip">ADS1115IDGST</span></td>
+          <td>Texas Instruments</td>
+          <td class="right">200</td>
+          <td class="right price">$1.8000</td>
+          <td><span class="status status-quoted">Quoted</span></td>
+          <td class="right"><span class="sighting-count">23</span></td>
+        </tr>
+        <!-- Group 5 -->
+        <tr class="group-first">
+          <td><span class="mpn-chip">IRFZ44NPBF</span></td>
+          <td rowspan="4" style="vertical-align:middle;">Infineon / ST</td>
+          <td rowspan="4" class="right" style="vertical-align:middle;">500</td>
+          <td rowspan="4" class="right price" style="vertical-align:middle;">$0.1500</td>
+          <td rowspan="4" style="vertical-align:middle;"><span class="status status-sourcing">Sourcing</span></td>
+          <td class="right"><span class="sighting-count">18</span></td>
+        </tr>
+        <tr class="group-child">
+          <td><span class="group-connector"></span><span class="mpn-chip">IRF3205PBF</span></td>
+          <td class="right"><span class="sighting-count">12</span></td>
+        </tr>
+        <tr class="group-child">
+          <td><span class="group-connector"></span><span class="mpn-chip">IRLZ44NPBF</span></td>
+          <td class="right"><span class="sighting-count">9</span></td>
+        </tr>
+        <tr class="group-last" style="border-bottom:2px solid var(--gray-200);">
+          <td><span class="group-connector"></span><span class="mpn-chip">STP55NF06L</span></td>
+          <td class="right"><span class="sighting-count">6</span></td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</div>
+
+<script>
+function showOption(id) {
+  document.querySelectorAll('.mockup-section').forEach(s => s.classList.remove('active'));
+  document.querySelectorAll('.option-btn').forEach(b => b.classList.remove('active'));
+  document.getElementById('option-' + id).classList.add('active');
+  document.querySelector('[onclick="showOption(\'' + id + '\')"]').classList.add('active');
+}
+</script>
+
+</body>
+</html>
