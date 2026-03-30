@@ -43,3 +43,6 @@ anthropic>=0.40.0
 nh3>=0.2.0
 # Safe XML parsing (XXE prevention)
 defusedxml>=0.7.0
+# Azure Communication Services (click-to-call)
+azure-communication-callautomation>=1.3.0
+azure-communication-identity>=1.5.0

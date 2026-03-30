@@ -270,6 +270,7 @@ if not os.environ.get("TESTING"):
             re.compile(r"/v2/partials/customers/lookup"),  # AI company lookup (read-only)
             re.compile(r"/api/webhooks/graph$"),  # Microsoft Graph mail webhook
             re.compile(r"/api/webhooks/teams$"),  # Microsoft Graph Teams webhook
+            re.compile(r"/api/webhooks/acs$"),  # Azure Communication Services webhook
         ],
     )
 

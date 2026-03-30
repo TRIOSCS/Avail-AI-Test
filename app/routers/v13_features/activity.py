@@ -109,6 +109,78 @@ async def teams_webhook(
 
 
 # ═══════════════════════════════════════════════════════════════════════
+#  ACS WEBHOOKS (Azure Communication Services)
+# ═══════════════════════════════════════════════════════════════════════
+
+
+@router.post("/api/webhooks/acs")
+@limiter.limit("120/minute")
+async def acs_webhook(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Azure Communication Services webhook — logs completed calls."""
+    if not settings.acs_connection_string:
+        raise HTTPException(503, "ACS not configured")
+
+    try:
+        events = await request.json()
+    except (ValueError, UnicodeDecodeError):
+        raise HTTPException(400, "Invalid JSON")
+
+    if isinstance(events, list):
+        for event in events:
+            event_type = event.get("type", "")
+            if "CallCompleted" in event_type or "CallDisconnected" in event_type:
+                from app.services.acs_service import handle_call_completed
+                from app.services.activity_service import log_call_activity
+
+                call_data = handle_call_completed(event.get("data", {}))
+                if call_data:
+                    log_call_activity(
+                        user_id=None,
+                        direction=call_data["direction"],
+                        phone=call_data["to_phone"],
+                        duration_seconds=call_data["duration_seconds"],
+                        external_id=call_data["call_connection_id"],
+                        contact_name=None,
+                        db=db,
+                    )
+        db.commit()
+
+    return {"status": "accepted"}
+
+
+@router.post("/api/calls/initiate")
+@limiter.limit("30/minute")
+async def initiate_call_endpoint(
+    request: Request,
+    user: User = Depends(require_user),
+):
+    """Initiate a PSTN call via ACS."""
+    if not settings.acs_connection_string:
+        raise HTTPException(503, "Calling service not configured")
+
+    body = await request.json()
+    to_phone = body.get("to_phone")
+    if not to_phone:
+        raise HTTPException(422, "to_phone required")
+
+    from app.services.acs_service import initiate_call
+
+    result = await initiate_call(
+        to_phone=to_phone,
+        callback_url=settings.acs_callback_url or f"{settings.app_url}/api/webhooks/acs",
+        connection_string=settings.acs_connection_string,
+    )
+
+    if not result:
+        raise HTTPException(500, "Failed to initiate call")
+
+    return result
+
+
+# ═══════════════════════════════════════════════════════════════════════
 #  ACTIVITY LOG
 # ═══════════════════════════════════════════════════════════════════════
 
