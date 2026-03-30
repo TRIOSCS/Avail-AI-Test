@@ -68,6 +68,7 @@ def run_startup_migrations() -> None:
     _backfill_sighting_vendor_normalized()
     _backfill_proactive_offer_qty()
     _backfill_ticket_defaults()
+    _backfill_material_cards()
     _seed_admin_user_if_env_set()
     _seed_agent_user()
     _seed_commodity_schemas()
@@ -840,6 +841,41 @@ def _seed_commodity_schemas() -> None:
         logger.exception("Failed seeding commodity schemas")
         db.rollback()
         raise
+    finally:
+        db.close()
+
+
+def _backfill_material_cards() -> None:
+    """Ensure every requirement MPN (primary + substitutes) has a material card.
+
+    Idempotent: resolve_material_card finds existing or creates new.
+    Also links requirements to their primary card if not yet linked.
+
+    Called by: run_startup_migrations
+    Depends on: Requirement model, resolve_material_card, SessionLocal
+    """
+    from .models.sourcing import Requirement
+    from .search_service import resolve_material_card
+
+    db = SessionLocal()
+    try:
+        reqs = db.query(Requirement).filter(Requirement.primary_mpn.isnot(None)).all()
+        linked = 0
+        for r in reqs:
+            card = resolve_material_card(r.primary_mpn, db, manufacturer=r.manufacturer or "")
+            if card and not r.material_card_id:
+                r.material_card_id = card.id
+                linked += 1
+            for sub in r.substitutes or []:
+                sub_mpn = sub.get("mpn") if isinstance(sub, dict) else sub
+                if sub_mpn:
+                    resolve_material_card(sub_mpn, db)
+        db.commit()
+        if linked:
+            logger.info("Backfilled %d requirement→material_card links", linked)
+    except Exception:
+        logger.exception("Failed backfilling material cards")
+        db.rollback()
     finally:
         db.close()
 
