@@ -257,7 +257,13 @@
         {% if recent_sightings %}
         <div class="bg-white rounded-xl shadow-sm border border-brand-200 overflow-hidden">
           <div class="px-5 py-3 bg-gray-50 border-b border-gray-200">
-            <h2 class="text-sm font-semibold text-gray-900">Recent Sightings</h2>
+            <h2 class="text-sm font-semibold text-gray-900">
+              {% if mpn_filter %}
+              Sightings for <span class="font-mono text-brand-600">{{ mpn_filter }}</span>
+              {% else %}
+              Recent Sightings
+              {% endif %}
+            </h2>
           </div>
           <table class="min-w-full divide-y divide-gray-200">
             <thead class="bg-gray-50">

@@ -9,7 +9,9 @@ from decimal import Decimal
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from app.models import User
 from app.models.intelligence import MaterialCard, MaterialVendorHistory
+from app.models.sourcing import Requirement, Requisition, Sighting
 from app.models.vendors import VendorCard
 from tests.conftest import engine  # noqa: F401
 
@@ -118,3 +120,52 @@ class TestFindByPart:
         resp = client.get("/v2/partials/vendors/find-by-part")
         assert resp.status_code == 200
         assert "Enter MPN" in resp.text
+
+
+class TestVendorDetailMpnContext:
+    """Test vendor detail shows MPN-specific sightings when mpn param passed."""
+
+    def test_vendor_detail_with_mpn_shows_filtered_header(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Vendor detail with ?mpn= shows 'Sightings for MPN' header."""
+        vendor = VendorCard(
+            normalized_name="mpn test vendor",
+            display_name="MPN Test Vendor",
+        )
+        db_session.add(vendor)
+        db_session.flush()
+
+        req = Requisition(
+            name="Test Req",
+            created_by=test_user.id,
+            status="active",
+        )
+        db_session.add(req)
+        db_session.flush()
+
+        requirement = Requirement(
+            requisition_id=req.id,
+            primary_mpn="LM317T",
+            normalized_mpn="LM317T",
+            manufacturer="TI",
+        )
+        db_session.add(requirement)
+        db_session.flush()
+
+        s1 = Sighting(
+            requirement_id=requirement.id,
+            vendor_name="MPN Test Vendor",
+            vendor_name_normalized="mpn test vendor",
+            mpn_matched="LM317T",
+            normalized_mpn="LM317T",
+            qty_available=100,
+            unit_price=Decimal("1.50"),
+            source_type="brokerbin",
+        )
+        db_session.add(s1)
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/vendors/{vendor.id}?mpn=LM317T")
+        assert resp.status_code == 200
+        assert "LM317T" in resp.text
