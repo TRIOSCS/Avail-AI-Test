@@ -19,24 +19,5 @@
     {% set _ = all_mpns.append(mpn) %}
   {% endif %}
 {% endfor %}
-<div class="flex flex-wrap items-center gap-1">
-  {% for mpn in all_mpns %}
-    {% if link_map and link_map.get(mpn) %}
-    <a hx-get="/v2/partials/materials/{{ link_map[mpn] }}"
-       hx-target="#main-content"
-       hx-push-url="/v2/materials/{{ link_map[mpn] }}"
-       @click.stop
-       class="inline-flex px-2.5 py-1 text-[12px] font-mono font-medium rounded-md
-              bg-brand-50 text-brand-700 border border-brand-200
-              hover:bg-brand-100 hover:shadow-sm transition-colors cursor-pointer">{{ mpn }}</a>
-    {% else %}
-    <span class="inline-flex px-2.5 py-1 text-[12px] font-mono font-medium rounded-md
-                 bg-brand-50 text-brand-700 border border-brand-200
-                 hover:bg-brand-100 hover:shadow-sm transition-colors">{{ mpn }}</span>
-    {% endif %}
-  {% endfor %}
-  {% if not all_mpns %}
-  <span class="text-sm text-gray-400">—</span>
-  {% endif %}
-</div>
+{% for mpn in all_mpns %}{% if link_map and link_map.get(mpn) %}<a hx-get="/v2/partials/materials/{{ link_map[mpn] }}" hx-target="#main-content" hx-push-url="/v2/materials/{{ link_map[mpn] }}" @click.stop class="font-mono text-brand-700 hover:text-brand-900 hover:underline cursor-pointer">{{ mpn }}</a>{% else %}<span class="font-mono text-brand-700">{{ mpn }}</span>{% endif %}{% if not loop.last %}<span class="text-gray-300 mx-0.5">·</span>{% endif %}{% endfor %}{% if not all_mpns %}<span class="text-gray-400">—</span>{% endif %}
 {% endmacro %}
