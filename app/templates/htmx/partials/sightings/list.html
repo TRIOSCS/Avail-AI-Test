@@ -179,5 +179,7 @@
     {# Detail content — loaded via HTMX when row selected #}
     <div x-show="selectedReqId" x-cloak id="sightings-detail" class="sightings-fade p-3"
          hx-indicator="#sightings-detail-skeleton"></div>
+    {# Hidden sink for background refresh — triggers search pipeline without blocking detail load #}
+    <div id="sightings-refresh-sink" class="hidden"></div>
   </div>
 </div>

@@ -25,7 +25,7 @@ from ..constants import OfferStatus, RequisitionStatus, SourcingStatus
 from ..database import get_db
 from ..dependencies import require_fresh_token, require_user
 from ..models import User
-from ..models.intelligence import ActivityLog
+from ..models.intelligence import ActivityLog, MaterialCard
 from ..models.offers import Offer
 from ..models.sourcing import Requirement, Requisition, Sighting
 from ..models.vendor_sighting_summary import VendorSightingSummary
@@ -307,6 +307,38 @@ async def sightings_list(
             if urgency in ("critical", "hot"):
                 heatmap_req_ids.add(r.id)
 
+    # ── MPN → MaterialCard link map ─────────────────────────────
+    link_map: dict[str, int] = {}
+    if requirements:
+        from ..utils.normalization import normalize_mpn_key
+
+        all_mpns: set[str] = set()
+        for r in requirements:
+            if r.primary_mpn:
+                all_mpns.add(r.primary_mpn.upper())
+            for sub in r.substitutes or []:
+                mpn = sub.get("mpn") if isinstance(sub, dict) else sub
+                if mpn:
+                    all_mpns.add(str(mpn).upper())
+        if all_mpns:
+            norm_to_display: dict[str, str] = {}
+            for mpn in all_mpns:
+                n = normalize_mpn_key(mpn)
+                if n:
+                    norm_to_display[n] = mpn
+            cards = (
+                db.query(MaterialCard.id, MaterialCard.normalized_mpn)
+                .filter(
+                    MaterialCard.normalized_mpn.in_(list(norm_to_display.keys())),
+                    MaterialCard.deleted_at.is_(None),
+                )
+                .all()
+            )
+            for card_id, norm in cards:
+                display = norm_to_display.get(norm)
+                if display:
+                    link_map[display] = card_id
+
     groups = None
     if filters.group_by in ("brand", "manufacturer"):
         groups: dict[str, list] = {}
@@ -335,6 +367,7 @@ async def sightings_list(
         "dashboard_counters": dashboard_counters,
         "heatmap_req_ids": heatmap_req_ids,
         "groups": groups,
+        "link_map": link_map,
         "user": user,
         "all_buyers": _get_cached(
             "all_buyers", 300, lambda: db.query(User.id, User.name).filter(User.is_active.is_(True)).all()
@@ -494,11 +527,39 @@ async def sightings_detail(
         suggested_action = None
 
     # ── MaterialCard Enrichment (Phase 3) ─────────────────────────
-    from ..models.intelligence import MaterialCard
-
     material_card = None
     if requirement.material_card_id:
         material_card = db.get(MaterialCard, requirement.material_card_id)
+
+    # ── MPN → MaterialCard link map for detail header ────────────
+    from ..utils.normalization import normalize_mpn_key as _norm_key
+
+    detail_link_map: dict[str, int] = {}
+    detail_mpns: set[str] = set()
+    if requirement.primary_mpn:
+        detail_mpns.add(requirement.primary_mpn.upper())
+    for sub in requirement.substitutes or []:
+        mpn = sub.get("mpn") if isinstance(sub, dict) else sub
+        if mpn:
+            detail_mpns.add(str(mpn).upper())
+    if detail_mpns:
+        norm_to_display: dict[str, str] = {}
+        for mpn in detail_mpns:
+            n = _norm_key(mpn)
+            if n:
+                norm_to_display[n] = mpn
+        detail_cards = (
+            db.query(MaterialCard.id, MaterialCard.normalized_mpn)
+            .filter(
+                MaterialCard.normalized_mpn.in_(list(norm_to_display.keys())),
+                MaterialCard.deleted_at.is_(None),
+            )
+            .all()
+        )
+        for card_id, norm in detail_cards:
+            display = norm_to_display.get(norm)
+            if display:
+                detail_link_map[display] = card_id
 
     # ── Cross-Requirement Vendor Overlap (Phase 4.7) ────────────
     overlap_counts: dict[str, int] = dict(
@@ -558,6 +619,7 @@ async def sightings_detail(
         "suggested_action": suggested_action,
         "available_statuses": available_statuses,
         "material_card": material_card,
+        "link_map": detail_link_map,
         "activities": activities,
         "all_buyers": all_buyers,
         "user": user,
