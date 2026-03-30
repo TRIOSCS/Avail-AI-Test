@@ -30,8 +30,11 @@ echo "==> Rebuilding app container (build tag: $BUILD_COMMIT)..."
 docker compose build --no-cache --build-arg BUILD_COMMIT="$BUILD_COMMIT" app
 
 # Step 3: Recreate only the app container with the new image
+# Clean up any orphaned rename containers from previous deploys
 echo "==> Restarting app..."
-docker compose up -d --force-recreate app
+docker compose down app 2>/dev/null || true
+docker container prune -f --filter "label=com.docker.compose.project=availai" 2>/dev/null || true
+docker compose up -d app
 
 # Step 4: Wait for health check to pass
 echo "==> Waiting for app to become healthy..."
