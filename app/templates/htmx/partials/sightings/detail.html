@@ -16,6 +16,14 @@
       {% if requirement.manufacturer %}
       <p class="text-xs text-gray-500">{{ requirement.manufacturer }}</p>
       {% endif %}
+      {% set sub_mpns = requirement.substitutes|sub_mpns %}
+      {% if sub_mpns %}
+      <div class="flex flex-wrap gap-1 mt-1">
+        {% for mpn in sub_mpns %}
+        <span class="px-1.5 py-0.5 text-[10px] font-mono font-medium rounded bg-amber-50 text-amber-700 border border-amber-200">{{ mpn }}</span>
+        {% endfor %}
+      </div>
+      {% endif %}
     </div>
     {{ m.search_button(requirement, target="#sightings-detail", swap="innerHTML") }}
   </div>

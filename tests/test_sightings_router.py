@@ -1211,3 +1211,47 @@ class TestSightingsSubsBadge:
         assert resp.status_code == 200
         assert "+0 subs" not in resp.text
         assert "subs" not in resp.text or "Unsubscri" in resp.text  # no false positive
+
+
+class TestSightingsDetailSubs:
+    def test_detail_shows_sub_pills(self, client, db_session):
+        """Detail panel shows substitute MPN pills below primary MPN."""
+        req = Requisition(name="Sub RFQ", status="active", customer_name="SubCo")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="DETAIL-PRIMARY",
+            manufacturer="Mfr",
+            target_qty=50,
+            sourcing_status="open",
+            substitutes=[
+                {"mpn": "DETAIL-SUB-A", "manufacturer": "M1"},
+                {"mpn": "DETAIL-SUB-B", "manufacturer": "M2"},
+            ],
+            substitutes_text="DETAIL-SUB-A DETAIL-SUB-B",
+        )
+        db_session.add(r)
+        db_session.flush()
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="V1",
+                listing_count=1,
+                score=50.0,
+            )
+        )
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        assert "DETAIL-SUB-A" in resp.text
+        assert "DETAIL-SUB-B" in resp.text
+
+    def test_detail_no_pills_without_subs(self, client, db_session):
+        """Detail panel has no sub pills when requirement has no substitutes."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        # Should not contain sub pill markup
+        assert "bg-amber-50 text-amber-700 border border-amber-200" not in resp.text
