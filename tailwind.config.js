@@ -4,6 +4,7 @@ module.exports = {
     './app/templates/**/*.html',
     './app/static/styles.css',
     './app/static/htmx_app.js',
+    './app/**/*.py',
   ],
   safelist: [
     // All color shades used in the app — prevents purge issues when

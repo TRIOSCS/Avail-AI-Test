@@ -6,11 +6,12 @@
 #}
 
 {%- macro _chip(mpn, link_map) -%}
-  {%- set cls = "px-1.5 font-mono text-slate-800 bg-slate-100 rounded border border-slate-300" -%}
+  {%- set cls = "px-1.5 py-0.5 font-mono text-slate-800 bg-slate-100 rounded border border-slate-300" -%}
   {%- if link_map and link_map.get(mpn) -%}
-    <a @click.stop="$dispatch('open-modal', {wide: true, url: '/v2/partials/materials/{{ link_map[mpn] }}'})"
+    <button type="button"
+       @click.stop="$dispatch('open-modal', {wide: true, url: '/v2/partials/materials/{{ link_map[mpn] }}'})"
        class="{{ cls }} hover:bg-slate-200 cursor-pointer"
-       title="View material card">{{ mpn }}</a>
+       aria-label="View material card for {{ mpn }}">{{ mpn }}</button>
   {%- else -%}
     <span class="{{ cls }}">{{ mpn }}</span>
   {%- endif -%}
@@ -41,6 +42,7 @@
   </span>
   <button type="button" @click.stop="open = !open"
           class="px-1.5 text-xs font-medium text-brand-600 hover:text-brand-800 cursor-pointer whitespace-nowrap"
+          :aria-expanded="open"
           x-text="open ? '&#8722;less' : '+{{ overflow }}'"></button>
 </span>
 {% elif all_mpns %}
