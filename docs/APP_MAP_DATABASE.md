@@ -85,6 +85,8 @@
 | is_authorized | Boolean | Authorized distributor? |
 | source_company_id | FK -> companies | |
 
+> **Router note:** `sightings_list()` and `sightings_detail()` in `app/routers/sightings.py` build a `link_map` dict (MPN string → MaterialCard.id) by querying `material_cards` with `normalize_mpn_key()`. The map is passed to the template context so the `mpn_chips` macro can link MPN chips to material card detail pages.
+
 **`contacts`** — RFQ emails sent to vendors
 | Column | Type | Notes |
 |--------|------|-------|

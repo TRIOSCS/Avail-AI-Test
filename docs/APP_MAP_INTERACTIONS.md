@@ -92,6 +92,13 @@ search_service.py (orchestrator)
     |
     +---> sighting_aggregation.py --> DB: UPSERT vendor_sighting_summary
     |
+    NOTE: Sightings page MPN chips link to material card detail pages
+          when a MaterialCard exists. The sightings router
+          (sightings_list, sightings_detail) builds a link_map dict
+          (MPN string → MaterialCard.id) by querying MaterialCard with
+          normalize_mpn_key(). This is passed to the template context
+          and consumed by the mpn_chips macro via its link_map parameter.
+    |
     +---> sse_broker.py --> SSE push to browser ("search complete")
     |
     +---> connector_status.py --> DB: UPDATE api_sources
@@ -396,6 +403,10 @@ APScheduler (scheduler.py)
 
 ```
 BROWSER (HTMX + Alpine.js)
+
+  0. Bottom navigation (mobile_nav.html):
+     Reqs | Sightings | Materials | Search | ...
+     "Materials" tab links to /v2/materials, loads /v2/partials/materials/workspace
 
   1. Page load:
      base_page.html -> hx-get="/v2/partials/X" on load
