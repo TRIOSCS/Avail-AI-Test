@@ -217,17 +217,20 @@ class TestCreateErrorReport:
 class TestSaveScreenshotHelper:
     def test_save_screenshot_none_input(self):
         from app.routers.error_reports import _save_screenshot
+
         result = _save_screenshot(1, "")
         assert result is None
 
     def test_save_screenshot_too_large(self):
         from app.routers.error_reports import MAX_SCREENSHOT_B64_SIZE, _save_screenshot
+
         too_large = "x" * (MAX_SCREENSHOT_B64_SIZE + 1)
         result = _save_screenshot(1, too_large)
         assert result is None
 
     def test_save_screenshot_with_data_uri_prefix(self, tmp_path):
         from app.routers.error_reports import _save_screenshot
+
         png_data = base64.b64encode(b"\x89PNG\r\nfake").decode()
         data_uri = f"data:image/png;base64,{png_data}"
         with patch("app.routers.error_reports.UPLOAD_DIR", str(tmp_path)):

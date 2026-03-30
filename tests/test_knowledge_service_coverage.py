@@ -58,9 +58,7 @@ class TestCreateEntry:
         )
         assert entry.id is not None
 
-    def test_creation_with_all_fields(
-        self, db_session: Session, test_user: User, requisition: Requisition
-    ):
+    def test_creation_with_all_fields(self, db_session: Session, test_user: User, requisition: Requisition):
         expiry = datetime.now(timezone.utc) + timedelta(days=90)
         entry = knowledge_service.create_entry(
             db_session,
@@ -102,12 +100,8 @@ class TestGetEntries:
         assert notes[0].entry_type == "note"
 
     def test_filter_by_mpn(self, db_session: Session, test_user: User):
-        knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="fact", content="F1", mpn="LM317T"
-        )
-        knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="fact", content="F2", mpn="STM32"
-        )
+        knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="fact", content="F1", mpn="LM317T")
+        knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="fact", content="F2", mpn="STM32")
         entries = knowledge_service.get_entries(db_session, mpn="LM317T")
         assert len(entries) == 1
 
@@ -115,27 +109,40 @@ class TestGetEntries:
         past = datetime.now(timezone.utc) - timedelta(days=1)
         future = datetime.now(timezone.utc) + timedelta(days=10)
         knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="fact", content="Expired",
-            expires_at=past, requisition_id=requisition.id
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
+            content="Expired",
+            expires_at=past,
+            requisition_id=requisition.id,
         )
         knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="fact", content="Active",
-            expires_at=future, requisition_id=requisition.id
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
+            content="Active",
+            expires_at=future,
+            requisition_id=requisition.id,
         )
         active = knowledge_service.get_entries(db_session, include_expired=False, requisition_id=requisition.id)
         assert len(active) == 1
         assert active[0].content == "Active"
 
-    def test_exclude_answers_from_listing(
-        self, db_session: Session, test_user: User, requisition: Requisition
-    ):
+    def test_exclude_answers_from_listing(self, db_session: Session, test_user: User, requisition: Requisition):
         q = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="question",
-            content="What's the lead time?", requisition_id=requisition.id
+            db_session,
+            user_id=test_user.id,
+            entry_type="question",
+            content="What's the lead time?",
+            requisition_id=requisition.id,
         )
         knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="answer",
-            content="2 weeks", parent_id=q.id, requisition_id=requisition.id
+            db_session,
+            user_id=test_user.id,
+            entry_type="answer",
+            content="2 weeks",
+            parent_id=q.id,
+            requisition_id=requisition.id,
         )
         # get_entries excludes entries with parent_id set
         entries = knowledge_service.get_entries(db_session, requisition_id=requisition.id)
@@ -143,16 +150,18 @@ class TestGetEntries:
 
     def test_filter_by_vendor_card_id(self, db_session: Session, test_user: User, test_vendor_card):
         knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="note", content="Vendor note",
-            vendor_card_id=test_vendor_card.id
+            db_session,
+            user_id=test_user.id,
+            entry_type="note",
+            content="Vendor note",
+            vendor_card_id=test_vendor_card.id,
         )
         entries = knowledge_service.get_entries(db_session, vendor_card_id=test_vendor_card.id)
         assert len(entries) == 1
 
     def test_filter_by_company_id(self, db_session: Session, test_user: User, test_company: Company):
         knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="note", content="Co note",
-            company_id=test_company.id
+            db_session, user_id=test_user.id, entry_type="note", content="Co note", company_id=test_company.id
         )
         entries = knowledge_service.get_entries(db_session, company_id=test_company.id)
         assert len(entries) == 1
@@ -160,8 +169,7 @@ class TestGetEntries:
     def test_pagination(self, db_session: Session, test_user: User, requisition: Requisition):
         for i in range(5):
             knowledge_service.create_entry(
-                db_session, user_id=test_user.id, entry_type="note", content=f"N{i}",
-                requisition_id=requisition.id
+                db_session, user_id=test_user.id, entry_type="note", content=f"N{i}", requisition_id=requisition.id
             )
         page1 = knowledge_service.get_entries(db_session, requisition_id=requisition.id, limit=2, offset=0)
         page2 = knowledge_service.get_entries(db_session, requisition_id=requisition.id, limit=2, offset=2)
@@ -172,9 +180,7 @@ class TestGetEntries:
 
 class TestGetEntry:
     def test_get_existing(self, db_session: Session, test_user: User):
-        entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="note", content="Test"
-        )
+        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="Test")
         fetched = knowledge_service.get_entry(db_session, entry.id)
         assert fetched is not None
         assert fetched.id == entry.id
@@ -186,9 +192,7 @@ class TestGetEntry:
 
 class TestUpdateEntry:
     def test_update_content(self, db_session: Session, test_user: User):
-        entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="note", content="Old"
-        )
+        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="Old")
         updated = knowledge_service.update_entry(db_session, entry.id, test_user.id, content="New content")
         assert updated.content == "New content"
 
@@ -199,9 +203,7 @@ class TestUpdateEntry:
 
 class TestDeleteEntry:
     def test_delete_existing(self, db_session: Session, test_user: User):
-        entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="note", content="Delete me"
-        )
+        entry = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="note", content="Delete me")
         result = knowledge_service.delete_entry(db_session, entry.id, test_user.id)
         assert result is True
 
@@ -227,9 +229,7 @@ class TestPostQuestion:
 
 class TestPostAnswer:
     def test_post_answer_resolves_question(self, db_session: Session, test_user: User):
-        q = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="question", content="Q?"
-        )
+        q = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="question", content="Q?")
         answer = knowledge_service.post_answer(
             db_session, user_id=test_user.id, question_id=q.id, content="Answer here"
         )
@@ -241,24 +241,18 @@ class TestPostAnswer:
         assert q.is_resolved is True
 
     def test_post_answer_to_non_question_returns_none(self, db_session: Session, test_user: User):
-        fact = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="fact", content="Fact"
-        )
+        fact = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="fact", content="Fact")
         result = knowledge_service.post_answer(
             db_session, user_id=test_user.id, question_id=fact.id, content="Not applicable"
         )
         assert result is None
 
     def test_post_answer_to_nonexistent_question(self, db_session: Session, test_user: User):
-        result = knowledge_service.post_answer(
-            db_session, user_id=test_user.id, question_id=99999, content="X"
-        )
+        result = knowledge_service.post_answer(db_session, user_id=test_user.id, question_id=99999, content="X")
         assert result is None
 
     def test_post_answer_custom_via(self, db_session: Session, test_user: User):
-        q = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="question", content="Q?"
-        )
+        q = knowledge_service.create_entry(db_session, user_id=test_user.id, entry_type="question", content="Q?")
         answer = knowledge_service.post_answer(
             db_session, user_id=test_user.id, question_id=q.id, content="Answer", answered_via="email"
         )
@@ -270,9 +264,7 @@ class TestCaptureQuoteFact:
         mock_quote = MagicMock()
         mock_quote.quote_number = "Q-001"
         mock_quote.requisition_id = requisition.id
-        mock_quote.line_items = [
-            {"mpn": "LM317T", "unit_sell": 1.50, "qty": 100, "vendor_name": "Arrow"}
-        ]
+        mock_quote.line_items = [{"mpn": "LM317T", "unit_sell": 1.50, "qty": 100, "vendor_name": "Arrow"}]
         entry = knowledge_service.capture_quote_fact(db_session, quote=mock_quote, user_id=test_user.id)
         assert entry is not None
         assert "LM317T" in entry.content
@@ -327,14 +319,10 @@ class TestCaptureOfferFact:
 
 
 class TestCaptureRfqResponseFact:
-    def test_captures_parts_with_price(
-        self, db_session: Session, requisition: Requisition
-    ):
+    def test_captures_parts_with_price(self, db_session: Session, requisition: Requisition):
         parsed = {
             "confidence": 0.9,
-            "parts": [
-                {"mpn": "LM317T", "status": "in stock", "unit_price": 0.50, "qty_available": 1000}
-            ],
+            "parts": [{"mpn": "LM317T", "status": "in stock", "unit_price": 0.50, "qty_available": 1000}],
         }
         entries = knowledge_service.capture_rfq_response_fact(
             db_session, parsed=parsed, vendor_name="Arrow", requisition_id=requisition.id
@@ -342,9 +330,7 @@ class TestCaptureRfqResponseFact:
         assert len(entries) == 1
         assert "LM317T" in entries[0].content
 
-    def test_captures_lead_time_only(
-        self, db_session: Session, requisition: Requisition
-    ):
+    def test_captures_lead_time_only(self, db_session: Session, requisition: Requisition):
         parsed = {
             "parts": [{"mpn": "STM32", "lead_time": "4 weeks"}],
         }
@@ -354,9 +340,7 @@ class TestCaptureRfqResponseFact:
         assert len(entries) == 1
 
     def test_handles_empty_parts(self, db_session: Session):
-        entries = knowledge_service.capture_rfq_response_fact(
-            db_session, parsed={"parts": []}, vendor_name="Arrow"
-        )
+        entries = knowledge_service.capture_rfq_response_fact(db_session, parsed={"parts": []}, vendor_name="Arrow")
         assert entries == []
 
 
@@ -387,8 +371,11 @@ class TestGetCachedInsights:
             db_session, user_id=test_user.id, entry_type="note", content="N", requisition_id=requisition.id
         )
         knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="ai_insight", content="AI insight here",
-            requisition_id=requisition.id
+            db_session,
+            user_id=test_user.id,
+            entry_type="ai_insight",
+            content="AI insight here",
+            requisition_id=requisition.id,
         )
         insights = knowledge_service.get_cached_insights(db_session, requisition.id)
         assert len(insights) == 1
@@ -404,11 +391,11 @@ class TestBuildContext:
         ctx = knowledge_service.build_context(db_session, requisition_id=99999)
         assert ctx == ""
 
-    def test_returns_context_with_direct_entries(
-        self, db_session: Session, test_user: User, requisition: Requisition
-    ):
+    def test_returns_context_with_direct_entries(self, db_session: Session, test_user: User, requisition: Requisition):
         entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="fact",
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
             content="LM317T $0.50 from Arrow",
             requisition_id=requisition.id,
         )
@@ -423,12 +410,12 @@ class TestBuildContext:
         ctx = knowledge_service.build_context(db_session, requisition_id=requisition.id)
         assert ctx == ""
 
-    def test_expired_entries_marked_outdated(
-        self, db_session: Session, test_user: User, requisition: Requisition
-    ):
+    def test_expired_entries_marked_outdated(self, db_session: Session, test_user: User, requisition: Requisition):
         past_expiry = datetime.now(timezone.utc) - timedelta(days=1)
         entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="fact",
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
             content="Old price fact",
             expires_at=past_expiry,
             requisition_id=requisition.id,
@@ -446,11 +433,11 @@ class TestGenerateInsights:
         result = await knowledge_service.generate_insights(db_session, requisition.id)
         assert result == []
 
-    async def test_generate_insights_success(
-        self, db_session: Session, test_user: User, requisition: Requisition
-    ):
+    async def test_generate_insights_success(self, db_session: Session, test_user: User, requisition: Requisition):
         entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="fact",
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
             content="LM317T at $0.50",
             requisition_id=requisition.id,
         )
@@ -458,9 +445,7 @@ class TestGenerateInsights:
         db_session.commit()
 
         mock_result = {
-            "insights": [
-                {"content": "LM317T price is competitive", "confidence": 0.9, "based_on_expired": False}
-            ]
+            "insights": [{"content": "LM317T price is competitive", "confidence": 0.9, "based_on_expired": False}]
         }
 
         async def _mock_claude(*a, **kw):
@@ -477,7 +462,9 @@ class TestGenerateInsights:
         from app.utils.claude_errors import ClaudeUnavailableError
 
         entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="fact",
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
             content="LM317T at $0.50",
             requisition_id=requisition.id,
         )
@@ -491,11 +478,11 @@ class TestGenerateInsights:
             result = await knowledge_service.generate_insights(db_session, requisition.id)
         assert result == []
 
-    async def test_generate_insights_empty_result(
-        self, db_session: Session, test_user: User, requisition: Requisition
-    ):
+    async def test_generate_insights_empty_result(self, db_session: Session, test_user: User, requisition: Requisition):
         entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="fact",
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
             content="LM317T at $0.50",
             requisition_id=requisition.id,
         )
@@ -509,29 +496,27 @@ class TestGenerateInsights:
             result = await knowledge_service.generate_insights(db_session, requisition.id)
         assert result == []
 
-    async def test_generate_insights_replaces_old(
-        self, db_session: Session, test_user: User, requisition: Requisition
-    ):
+    async def test_generate_insights_replaces_old(self, db_session: Session, test_user: User, requisition: Requisition):
         # Seed an old ai_insight
         knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="ai_insight",
+            db_session,
+            user_id=test_user.id,
+            entry_type="ai_insight",
             content="Old insight",
             requisition_id=requisition.id,
         )
         # Add a real entry to build context
         entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="fact",
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
             content="LM317T data",
             requisition_id=requisition.id,
         )
         entry.created_at = datetime.now(timezone.utc)
         db_session.commit()
 
-        mock_result = {
-            "insights": [
-                {"content": "New insight", "confidence": 0.85, "based_on_expired": False}
-            ]
-        }
+        mock_result = {"insights": [{"content": "New insight", "confidence": 0.85, "based_on_expired": False}]}
 
         async def _mock_claude(*a, **kw):
             return mock_result
@@ -552,8 +537,11 @@ class TestBuildMpnContext:
 
     def test_returns_context_with_entries(self, db_session: Session, test_user: User):
         entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="fact",
-            content="LM317T $0.50 from Arrow", mpn="LM317T",
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
+            content="LM317T $0.50 from Arrow",
+            mpn="LM317T",
         )
         entry.created_at = datetime.now(timezone.utc)
         db_session.commit()
@@ -562,8 +550,11 @@ class TestBuildMpnContext:
 
     def test_excludes_ai_insights(self, db_session: Session, test_user: User):
         insight = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="ai_insight",
-            content="AI insight about LM317T", mpn="LM317T",
+            db_session,
+            user_id=test_user.id,
+            entry_type="ai_insight",
+            content="AI insight about LM317T",
+            mpn="LM317T",
         )
         insight.created_at = datetime.now(timezone.utc)
         db_session.commit()
@@ -579,8 +570,11 @@ class TestBuildVendorContext:
 
     def test_returns_context_with_entries(self, db_session: Session, test_user: User, test_vendor_card):
         entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="note",
-            content="Arrow reliable supplier", vendor_card_id=test_vendor_card.id,
+            db_session,
+            user_id=test_user.id,
+            entry_type="note",
+            content="Arrow reliable supplier",
+            vendor_card_id=test_vendor_card.id,
         )
         entry.created_at = datetime.now(timezone.utc)
         db_session.commit()
@@ -593,9 +587,7 @@ class TestBuildPipelineContext:
         ctx = knowledge_service.build_pipeline_context(db_session)
         assert ctx == ""
 
-    def test_returns_context_with_active_requisitions(
-        self, db_session: Session, test_user: User
-    ):
+    def test_returns_context_with_active_requisitions(self, db_session: Session, test_user: User):
         req = Requisition(
             name="PIPELINE-TEST-REQ",
             customer_name="Test Co",
@@ -614,12 +606,13 @@ class TestBuildCompanyContext:
         ctx = knowledge_service.build_company_context(db_session, company_id=99999)
         assert ctx == ""
 
-    def test_returns_context_with_entries(
-        self, db_session: Session, test_user: User, test_company: Company
-    ):
+    def test_returns_context_with_entries(self, db_session: Session, test_user: User, test_company: Company):
         entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="note",
-            content="Acme is a strategic customer", company_id=test_company.id,
+            db_session,
+            user_id=test_user.id,
+            entry_type="note",
+            content="Acme is a strategic customer",
+            company_id=test_company.id,
         )
         entry.created_at = datetime.now(timezone.utc)
         db_session.commit()
@@ -634,8 +627,11 @@ class TestGetCachedEntityInsights:
 
     def test_get_cached_mpn_insights_returns_mpn_insights(self, db_session: Session, test_user: User):
         insight = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="ai_insight",
-            content="MPN insight", mpn="LM317T",
+            db_session,
+            user_id=test_user.id,
+            entry_type="ai_insight",
+            content="MPN insight",
+            mpn="LM317T",
         )
         insights = knowledge_service.get_cached_mpn_insights(db_session, "LM317T")
         assert len(insights) >= 1
@@ -648,8 +644,11 @@ class TestGetCachedEntityInsights:
         self, db_session: Session, test_user: User, test_vendor_card
     ):
         knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="ai_insight",
-            content="Vendor insight", vendor_card_id=test_vendor_card.id,
+            db_session,
+            user_id=test_user.id,
+            entry_type="ai_insight",
+            content="Vendor insight",
+            vendor_card_id=test_vendor_card.id,
         )
         insights = knowledge_service.get_cached_vendor_insights(db_session, test_vendor_card.id)
         assert len(insights) >= 1
@@ -666,8 +665,11 @@ class TestGetCachedEntityInsights:
         self, db_session: Session, test_user: User, test_company: Company
     ):
         knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="ai_insight",
-            content="Company insight", company_id=test_company.id,
+            db_session,
+            user_id=test_user.id,
+            entry_type="ai_insight",
+            content="Company insight",
+            company_id=test_company.id,
         )
         insights = knowledge_service.get_cached_company_insights(db_session, test_company.id)
         assert len(insights) >= 1
@@ -680,8 +682,11 @@ class TestGenerateMpnInsights:
 
     async def test_success(self, db_session: Session, test_user: User):
         entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="fact",
-            content="LM317T $0.50", mpn="LM317T",
+            db_session,
+            user_id=test_user.id,
+            entry_type="fact",
+            content="LM317T $0.50",
+            mpn="LM317T",
         )
         entry.created_at = datetime.now(timezone.utc)
         db_session.commit()
@@ -703,8 +708,11 @@ class TestGenerateVendorInsights:
 
     async def test_success(self, db_session: Session, test_user: User, test_vendor_card):
         entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="note",
-            content="Arrow supplier note", vendor_card_id=test_vendor_card.id,
+            db_session,
+            user_id=test_user.id,
+            entry_type="note",
+            content="Arrow supplier note",
+            vendor_card_id=test_vendor_card.id,
         )
         entry.created_at = datetime.now(timezone.utc)
         db_session.commit()
@@ -726,8 +734,11 @@ class TestGenerateCompanyInsights:
 
     async def test_success(self, db_session: Session, test_user: User, test_company: Company):
         entry = knowledge_service.create_entry(
-            db_session, user_id=test_user.id, entry_type="note",
-            content="Acme is a strategic customer", company_id=test_company.id,
+            db_session,
+            user_id=test_user.id,
+            entry_type="note",
+            content="Acme is a strategic customer",
+            company_id=test_company.id,
         )
         entry.created_at = datetime.now(timezone.utc)
         db_session.commit()

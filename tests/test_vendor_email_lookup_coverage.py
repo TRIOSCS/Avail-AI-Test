@@ -112,9 +112,7 @@ class TestQueryDbForPart:
         results = _query_db_for_part("LM317T", db_session)
         assert results == []
 
-    def test_finds_vendors_from_sightings(
-        self, db_session: Session, sighting_for_lm317t: Sighting
-    ):
+    def test_finds_vendors_from_sightings(self, db_session: Session, sighting_for_lm317t: Sighting):
         results = _query_db_for_part("LM317T", db_session)
         assert len(results) == 1
         vendor = results[0]
@@ -152,9 +150,7 @@ class TestQueryDbForPart:
         blacklisted = next((v for v in results if "Blacklisted" in v.get("vendor_name", "")), None)
         assert blacklisted is None
 
-    def test_vendor_contacts_merged(
-        self, db_session: Session, sighting_for_lm317t: Sighting, vendor_card: VendorCard
-    ):
+    def test_vendor_contacts_merged(self, db_session: Session, sighting_for_lm317t: Sighting, vendor_card: VendorCard):
         vc = VendorContact(
             vendor_card_id=vendor_card.id,
             full_name="John Sales",
@@ -168,16 +164,12 @@ class TestQueryDbForPart:
         if arrow:
             assert "john@arrow.com" in arrow["emails"] or "sales@arrow.com" in arrow["emails"]
 
-    def test_sources_converted_to_list(
-        self, db_session: Session, sighting_for_lm317t: Sighting
-    ):
+    def test_sources_converted_to_list(self, db_session: Session, sighting_for_lm317t: Sighting):
         results = _query_db_for_part("LM317T", db_session)
         for v in results:
             assert isinstance(v["sources"], list)
 
-    def test_sighting_updates_qty_and_price(
-        self, db_session: Session, requisition_with_req: tuple
-    ):
+    def test_sighting_updates_qty_and_price(self, db_session: Session, requisition_with_req: tuple):
         _, req_item = requisition_with_req
         s1 = Sighting(
             requirement_id=req_item.id,
@@ -216,19 +208,13 @@ class TestFindVendorsForParts:
         assert "UNKNOWN_MPN_XYZ" in results
         assert results["UNKNOWN_MPN_XYZ"] == []
 
-    async def test_single_mpn_with_sightings(
-        self, db_session: Session, sighting_for_lm317t: Sighting
-    ):
+    async def test_single_mpn_with_sightings(self, db_session: Session, sighting_for_lm317t: Sighting):
         results = await find_vendors_for_parts(["LM317T"], db_session, enrich_missing=False)
         assert "LM317T" in results
         assert len(results["LM317T"]) >= 1
 
-    async def test_multiple_mpns(
-        self, db_session: Session, sighting_for_lm317t: Sighting
-    ):
-        results = await find_vendors_for_parts(
-            ["LM317T", "STM32F4"], db_session, enrich_missing=False
-        )
+    async def test_multiple_mpns(self, db_session: Session, sighting_for_lm317t: Sighting):
+        results = await find_vendors_for_parts(["LM317T", "STM32F4"], db_session, enrich_missing=False)
         assert "LM317T" in results
         assert "STM32F4" in results
 
@@ -237,9 +223,7 @@ class TestFindVendorsForParts:
             await find_vendors_for_parts(["LM317T"], db_session, enrich_missing=False)
             mock_enrich.assert_not_called()
 
-    async def test_enrichment_triggered_for_missing_emails(
-        self, db_session: Session, requisition_with_req: tuple
-    ):
+    async def test_enrichment_triggered_for_missing_emails(self, db_session: Session, requisition_with_req: tuple):
         _, req_item = requisition_with_req
         # Create vendor with sighting but no email
         s = Sighting(
@@ -255,10 +239,7 @@ class TestFindVendorsForParts:
         async def _mock_enrich(*a, **kw):
             pass
 
-        with patch(
-            "app.services.vendor_email_lookup._enrich_vendors_batch",
-            new=_mock_enrich
-        ):
+        with patch("app.services.vendor_email_lookup._enrich_vendors_batch", new=_mock_enrich):
             results = await find_vendors_for_parts(
                 ["NOEMAIL_PART"], db_session, enrich_missing=True, enrich_timeout=1.0
             )
@@ -327,37 +308,26 @@ class TestBuildInquiryGroups:
         assert "+ 2 more" in groups[0]["subject"]
 
     def test_body_contains_part_numbers(self):
-        vendor_results = {
-            "LM317T": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}]
-        }
+        vendor_results = {"LM317T": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}]}
         parts = [{"mpn": "LM317T", "qty": 500}]
         groups = build_inquiry_groups(vendor_results, parts)
         assert "LM317T" in groups[0]["body"]
 
     def test_body_contains_sender_info(self):
-        vendor_results = {
-            "LM317T": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}]
-        }
+        vendor_results = {"LM317T": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}]}
         parts = [{"mpn": "LM317T", "qty": 500}]
-        groups = build_inquiry_groups(
-            vendor_results, parts,
-            company_name="Acme Corp", sender_name="Bob Smith"
-        )
+        groups = build_inquiry_groups(vendor_results, parts, company_name="Acme Corp", sender_name="Bob Smith")
         assert "Acme Corp" in groups[0]["body"]
         assert "Bob Smith" in groups[0]["body"]
 
     def test_qty_in_body(self):
-        vendor_results = {
-            "LM317T": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}]
-        }
+        vendor_results = {"LM317T": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}]}
         parts = [{"mpn": "LM317T", "qty": 750}]
         groups = build_inquiry_groups(vendor_results, parts)
         assert "750" in groups[0]["body"]
 
     def test_zero_qty_omitted_from_body(self):
-        vendor_results = {
-            "LM317T": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}]
-        }
+        vendor_results = {"LM317T": [{"vendor_name": "Arrow", "emails": ["sales@arrow.com"], "domain": "arrow.com"}]}
         parts = [{"mpn": "LM317T"}]  # no qty
         groups = build_inquiry_groups(vendor_results, parts)
         # Should still generate a group, just without qty display

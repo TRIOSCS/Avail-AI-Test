@@ -194,17 +194,14 @@ class TestFindAffinityVendorsL2:
         result = find_affinity_vendors_l2("UNKNOWN_MPN", db_session)
         assert result == []
 
-    def test_no_vendor_cards_linked_returns_empty(
-        self, db_session: Session, material_card: MaterialCard
-    ):
+    def test_no_vendor_cards_linked_returns_empty(self, db_session: Session, material_card: MaterialCard):
         from app.services.vendor_affinity_service import find_affinity_vendors_l2
 
         result = find_affinity_vendors_l2("lm317t", db_session)
         assert result == []
 
     def test_no_commodity_tags_returns_empty(
-        self, db_session: Session, material_card: MaterialCard,
-        sighting_with_vendor: Sighting, vendor_card: VendorCard
+        self, db_session: Session, material_card: MaterialCard, sighting_with_vendor: Sighting, vendor_card: VendorCard
     ):
         from app.services.vendor_affinity_service import find_affinity_vendors_l2
 
@@ -218,8 +215,7 @@ class TestFindAffinityVendorsL2:
         assert result == []  # Empty DB anyway
 
     def test_with_commodity_tags(
-        self, db_session: Session, material_card: MaterialCard,
-        sighting_with_vendor: Sighting, vendor_card: VendorCard
+        self, db_session: Session, material_card: MaterialCard, sighting_with_vendor: Sighting, vendor_card: VendorCard
     ):
         from app.services.vendor_affinity_service import find_affinity_vendors_l2
 
@@ -281,8 +277,7 @@ class TestFindAffinityVendorsL3:
         assert result == []
 
     def test_with_category_and_sightings(
-        self, db_session: Session, material_card: MaterialCard,
-        req_with_item: tuple, vendor_card: VendorCard
+        self, db_session: Session, material_card: MaterialCard, req_with_item: tuple, vendor_card: VendorCard
     ):
         from app.services.vendor_affinity_service import find_affinity_vendors_l3
 
@@ -312,9 +307,7 @@ class TestClassifyMpn:
         from app.services.vendor_affinity_service import _classify_mpn
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = MagicMock(
-            content=[MagicMock(text="Voltage Regulator")]
-        )
+        mock_client.messages.create.return_value = MagicMock(content=[MagicMock(text="Voltage Regulator")])
 
         with patch("anthropic.Anthropic", return_value=mock_client):
             result = _classify_mpn("LM317T", "Texas Instruments", "sk-fake")
@@ -333,9 +326,7 @@ class TestClassifyMpn:
         from app.services.vendor_affinity_service import _classify_mpn
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = MagicMock(
-            content=[MagicMock(text="Resistor")]
-        )
+        mock_client.messages.create.return_value = MagicMock(content=[MagicMock(text="Resistor")])
 
         with patch("anthropic.Anthropic", return_value=mock_client):
             result = _classify_mpn("RC0402", None, "sk-fake")
@@ -413,12 +404,8 @@ class TestFindVendorAffinity:
             with patch("app.services.vendor_affinity_service.find_affinity_vendors_l2") as mock_l2:
                 with patch("app.services.vendor_affinity_service.settings") as mock_settings:
                     mock_settings.anthropic_api_key = None
-                    mock_l1.return_value = [
-                        {"vendor_name": "Arrow", "level": 1, "mpn_count": 5, "manufacturer": "TI"}
-                    ]
-                    mock_l2.return_value = [
-                        {"vendor_name": "Arrow", "level": 2, "mpn_count": 3, "manufacturer": "TI"}
-                    ]
+                    mock_l1.return_value = [{"vendor_name": "Arrow", "level": 1, "mpn_count": 5, "manufacturer": "TI"}]
+                    mock_l2.return_value = [{"vendor_name": "Arrow", "level": 2, "mpn_count": 3, "manufacturer": "TI"}]
                     result = find_vendor_affinity("LM317T", db_session)
 
         # Arrow should appear only once, with highest confidence
@@ -429,8 +416,7 @@ class TestFindVendorAffinity:
         from app.services.vendor_affinity_service import find_vendor_affinity
 
         many_vendors = [
-            {"vendor_name": f"Vendor{i}", "level": 1, "mpn_count": 1, "manufacturer": "TI"}
-            for i in range(15)
+            {"vendor_name": f"Vendor{i}", "level": 1, "mpn_count": 1, "manufacturer": "TI"} for i in range(15)
         ]
         with patch("app.services.vendor_affinity_service.find_affinity_vendors_l1", return_value=many_vendors):
             with patch("app.services.vendor_affinity_service.find_affinity_vendors_l2", return_value=[]):
@@ -455,10 +441,7 @@ class TestFindVendorAffinity:
     def test_skips_l3_when_enough_matches(self, db_session: Session):
         from app.services.vendor_affinity_service import find_vendor_affinity
 
-        five_vendors = [
-            {"vendor_name": f"V{i}", "level": 1, "mpn_count": 1, "manufacturer": "TI"}
-            for i in range(5)
-        ]
+        five_vendors = [{"vendor_name": f"V{i}", "level": 1, "mpn_count": 1, "manufacturer": "TI"} for i in range(5)]
         with patch("app.services.vendor_affinity_service.find_affinity_vendors_l1", return_value=five_vendors):
             with patch("app.services.vendor_affinity_service.find_affinity_vendors_l2", return_value=[]):
                 with patch("app.services.vendor_affinity_service.find_affinity_vendors_l3") as mock_l3:

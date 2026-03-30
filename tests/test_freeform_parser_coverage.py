@@ -28,9 +28,7 @@ class TestParseFreeformRfq:
         mock_result = {
             "name": "Test RFQ",
             "customer_name": "Acme",
-            "requirements": [
-                {"primary_mpn": "LM317T", "target_qty": 500, "condition": "new"}
-            ],
+            "requirements": [{"primary_mpn": "LM317T", "target_qty": 500, "condition": "new"}],
         }
 
         async def _mock(*a, **kw):
@@ -46,9 +44,7 @@ class TestParseFreeformRfq:
     async def test_normalizes_qty_default_to_1(self):
         mock_result = {
             "name": "RFQ",
-            "requirements": [
-                {"primary_mpn": "STM32F4", "target_qty": None}
-            ],
+            "requirements": [{"primary_mpn": "STM32F4", "target_qty": None}],
         }
 
         async def _mock(*a, **kw):
@@ -62,9 +58,7 @@ class TestParseFreeformRfq:
     async def test_normalizes_price(self):
         mock_result = {
             "name": "RFQ",
-            "requirements": [
-                {"primary_mpn": "LM317T", "target_price": "1.50"}
-            ],
+            "requirements": [{"primary_mpn": "LM317T", "target_price": "1.50"}],
         }
 
         async def _mock(*a, **kw):
@@ -78,9 +72,7 @@ class TestParseFreeformRfq:
     async def test_normalizes_condition(self):
         mock_result = {
             "name": "RFQ",
-            "requirements": [
-                {"primary_mpn": "LM317T", "condition": "NEW"}
-            ],
+            "requirements": [{"primary_mpn": "LM317T", "condition": "NEW"}],
         }
 
         async def _mock(*a, **kw):
@@ -111,9 +103,7 @@ class TestParseFreeformRfq:
     async def test_normalizes_packaging(self):
         mock_result = {
             "name": "RFQ",
-            "requirements": [
-                {"primary_mpn": "LM317T", "packaging": "Tape and Reel"}
-            ],
+            "requirements": [{"primary_mpn": "LM317T", "packaging": "Tape and Reel"}],
         }
 
         async def _mock(*a, **kw):
@@ -127,9 +117,7 @@ class TestParseFreeformRfq:
     async def test_normalizes_date_codes(self):
         mock_result = {
             "name": "RFQ",
-            "requirements": [
-                {"primary_mpn": "LM317T", "date_codes": "2024+"}
-            ],
+            "requirements": [{"primary_mpn": "LM317T", "date_codes": "2024+"}],
         }
 
         async def _mock(*a, **kw):
@@ -143,9 +131,7 @@ class TestParseFreeformRfq:
     async def test_sets_empty_substitutes_when_none(self):
         mock_result = {
             "name": "RFQ",
-            "requirements": [
-                {"primary_mpn": "LM317T", "substitutes": None}
-            ],
+            "requirements": [{"primary_mpn": "LM317T", "substitutes": None}],
         }
 
         async def _mock(*a, **kw):

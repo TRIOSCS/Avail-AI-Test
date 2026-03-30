@@ -165,7 +165,9 @@ class TestProcessAIGate:
         item.manufacturer = "TI"
 
         db_mock = MagicMock()
-        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [item]
+        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            item
+        ]
 
         gate = AIGate(MockModel, "ICsource", "search_ics")
         # Pre-populate cache
@@ -187,7 +189,9 @@ class TestProcessAIGate:
         item.manufacturer = "Vishay"
 
         db_mock = MagicMock()
-        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [item]
+        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            item
+        ]
 
         gate = AIGate(MockModel, "ICsource", "search_ics")
         gate._classification_cache[("crcw0402100kfked", "vishay")] = ("passive", "skip", "standard resistor")
@@ -201,7 +205,9 @@ class TestProcessAIGate:
         item = _make_queue_item("LM317T")
 
         db_mock = MagicMock()
-        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [item]
+        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            item
+        ]
 
         gate = AIGate(MockModel, "ICsource", "search_ics")
 
@@ -218,7 +224,9 @@ class TestProcessAIGate:
         item = _make_queue_item("LM317T")
 
         db_mock = MagicMock()
-        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [item]
+        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            item
+        ]
 
         gate = AIGate(MockModel, "ICsource", "search_ics")
         classification = [
@@ -240,7 +248,9 @@ class TestProcessAIGate:
         item = _make_queue_item("CRCW0402100K")
 
         db_mock = MagicMock()
-        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [item]
+        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            item
+        ]
 
         gate = AIGate(MockModel, "ICsource", "search_ics")
         classification = [
@@ -259,7 +269,9 @@ class TestProcessAIGate:
         item = _make_queue_item("MISSING_MPN")
 
         db_mock = MagicMock()
-        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [item]
+        db_mock.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = [
+            item
+        ]
 
         gate = AIGate(MockModel, "ICsource", "search_ics")
         # Return empty classifications (no match for MISSING_MPN)
@@ -291,9 +303,7 @@ class TestProcessAIGate:
         gate = AIGate(MockModel, "ICsource", "search_ics")
         gate._classification_cache[("lm317t", "ti")] = ("semiconductor", "search", "voltage regulator IC")
 
-        uncached_result = [
-            {"mpn": "STM32F4", "search_ics": True, "commodity": "semiconductor", "reason": "MCU"}
-        ]
+        uncached_result = [{"mpn": "STM32F4", "search_ics": True, "commodity": "semiconductor", "reason": "MCU"}]
 
         with patch.object(gate, "classify_parts_batch", new=AsyncMock(return_value=uncached_result)):
             await gate.process_ai_gate(db_mock)

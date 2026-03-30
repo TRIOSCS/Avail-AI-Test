@@ -91,29 +91,34 @@ def vendor_card(db_session: Session) -> VendorCard:
 class TestUtilityFunctions:
     def test_normalize_mpn_basic(self):
         from app.services.sourcing_leads import normalize_mpn
+
         assert normalize_mpn("LM-317T") == "LM317T"
         assert normalize_mpn("lm317t") == "LM317T"
         assert normalize_mpn("LM 317T") == "LM317T"
 
     def test_normalize_mpn_empty(self):
         from app.services.sourcing_leads import normalize_mpn
+
         assert normalize_mpn("") == ""
         assert normalize_mpn(None) == ""
 
     def test_clamp_within_bounds(self):
         from app.services.sourcing_leads import _clamp
+
         assert _clamp(50.0) == 50.0
         assert _clamp(-10.0) == 0.0
         assert _clamp(110.0) == 100.0
 
     def test_confidence_band(self):
         from app.services.sourcing_leads import _confidence_band
+
         assert _confidence_band(80.0) == "high"
         assert _confidence_band(60.0) == "medium"
         assert _confidence_band(30.0) == "low"
 
     def test_safety_band(self):
         from app.services.sourcing_leads import _safety_band
+
         assert _safety_band(80.0) == "low_risk"
         assert _safety_band(60.0) == "medium_risk"
         assert _safety_band(30.0) == "high_risk"
@@ -121,64 +126,77 @@ class TestUtilityFunctions:
 
     def test_source_reliability_known_sources(self):
         from app.services.sourcing_leads import _source_reliability
+
         assert _source_reliability("digikey", None) >= 80
         assert _source_reliability("brokerbin", None) >= 60
         assert _source_reliability("ai", None) <= 50
 
     def test_source_reliability_with_tier(self):
         from app.services.sourcing_leads import _source_reliability
+
         r_t1 = _source_reliability("api", "T1")
         r_t7 = _source_reliability("api", "T7")
         assert r_t1 > r_t7
 
     def test_freshness_score_recent(self):
         from app.services.sourcing_leads import _freshness_score
+
         assert _freshness_score(datetime.now(timezone.utc)) == 95.0
 
     def test_freshness_score_old(self):
         from app.services.sourcing_leads import _freshness_score
+
         old = datetime.now(timezone.utc) - timedelta(days=60)
         assert _freshness_score(old) == 25.0
 
     def test_freshness_score_none(self):
         from app.services.sourcing_leads import _freshness_score
+
         assert _freshness_score(None) == 45.0
 
     def test_match_type_exact(self):
         from app.services.sourcing_leads import _match_type_for_parts
+
         assert _match_type_for_parts("LM317T", "LM317T") == "exact"
 
     def test_match_type_normalized(self):
         from app.services.sourcing_leads import _match_type_for_parts
+
         # "ABCDE" contains "ABC" so it's a normalized prefix match
         assert _match_type_for_parts("ABC", "ABCDE") == "normalized"
 
     def test_match_type_cross_ref(self):
         from app.services.sourcing_leads import _match_type_for_parts
+
         subs = [{"mpn": "LM7805"}]
         assert _match_type_for_parts("LM317T", "LM7805", substitutes=subs) == "cross_ref"
 
     def test_match_type_fuzzy(self):
         from app.services.sourcing_leads import _match_type_for_parts
+
         assert _match_type_for_parts("LM317T", "XYZ999") == "fuzzy"
 
     def test_suggested_next_action_low_safety(self):
         from app.services.sourcing_leads import _suggested_next_action
+
         result = _suggested_next_action(80.0, 40.0, 80.0)
         assert "Verify" in result
 
     def test_suggested_next_action_low_contactability(self):
         from app.services.sourcing_leads import _suggested_next_action
+
         result = _suggested_next_action(80.0, 80.0, 20.0)
         assert "contact" in result.lower()
 
     def test_suggested_next_action_high_confidence(self):
         from app.services.sourcing_leads import _suggested_next_action
+
         result = _suggested_next_action(80.0, 80.0, 80.0)
         assert "Contact now" in result
 
     def test_source_category_mapping(self):
         from app.services.sourcing_leads import _source_category
+
         assert _source_category("digikey") == "api"
         assert _source_category("brokerbin") == "marketplace"
         assert _source_category("ai") == "web_ai"
@@ -187,6 +205,7 @@ class TestUtilityFunctions:
 
     def test_signal_type_for_source(self):
         from app.services.sourcing_leads import _signal_type_for_source
+
         assert _signal_type_for_source("digikey") == "stock_listing"
         assert _signal_type_for_source("vendor_affinity") == "vendor_affinity"
         assert _signal_type_for_source("email_mining") == "email_signal"
@@ -194,12 +213,14 @@ class TestUtilityFunctions:
 
     def test_reliability_band(self):
         from app.services.sourcing_leads import _reliability_band
+
         assert _reliability_band(80) == "high"
         assert _reliability_band(60) == "medium"
         assert _reliability_band(30) == "low"
 
     def test_build_lead_risk_flags_all_flags(self):
         from app.services.sourcing_leads import _build_lead_risk_flags
+
         flags = _build_lead_risk_flags(30.0, 40.0, 30.0, 20.0)
         assert "lower_reliability_source" in flags
         assert "stale_signal" in flags
@@ -208,6 +229,7 @@ class TestUtilityFunctions:
 
     def test_build_lead_risk_flags_no_flags(self):
         from app.services.sourcing_leads import _build_lead_risk_flags
+
         flags = _build_lead_risk_flags(80.0, 80.0, 80.0, 80.0)
         assert flags == []
 
@@ -233,22 +255,26 @@ class TestUtilityFunctions:
 
     def test_normalize_phone(self):
         from app.services.sourcing_leads import _normalize_phone
+
         assert _normalize_phone("+1-555-0100") == "15550100"
         assert _normalize_phone(None) == ""
         assert _normalize_phone("") == ""
 
     def test_as_utc_none_returns_none(self):
         from app.services.sourcing_leads import _as_utc
+
         assert _as_utc(None) is None
 
     def test_as_utc_naive_gets_tzinfo(self):
         from app.services.sourcing_leads import _as_utc
+
         naive = datetime(2024, 1, 1, 12, 0, 0)
         result = _as_utc(naive)
         assert result.tzinfo is not None
 
     def test_as_utc_aware_converted(self):
         from app.services.sourcing_leads import _as_utc
+
         aware = datetime(2024, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
         result = _as_utc(aware)
         assert result.tzinfo is not None
@@ -257,16 +283,19 @@ class TestUtilityFunctions:
 class TestContactabilityScore:
     def test_with_email_and_phone(self, db_session: Session, basic_sighting: Sighting):
         from app.services.sourcing_leads import _contactability_score
+
         score = _contactability_score(basic_sighting, None)
         assert score >= 45  # email alone gives 45
 
     def test_with_vendor_card_emails(self, db_session: Session, basic_sighting: Sighting, vendor_card: VendorCard):
         from app.services.sourcing_leads import _contactability_score
+
         score = _contactability_score(basic_sighting, vendor_card)
         assert score >= 70
 
     def test_no_contact_info(self, db_session: Session, req_pair: tuple):
         from app.services.sourcing_leads import _contactability_score
+
         _, item = req_pair
         s = Sighting(
             requirement_id=item.id,
@@ -284,12 +313,14 @@ class TestContactabilityScore:
 class TestComputeVendorSafety:
     def test_no_vendor_card(self):
         from app.services.sourcing_leads import _compute_vendor_safety
+
         score, flags, summary = _compute_vendor_safety(None, 50.0)
         assert "no_internal_vendor_profile" in flags
         assert "unknown" in summary.lower() or score < 50
 
     def test_blacklisted_vendor(self, db_session: Session):
         from app.services.sourcing_leads import _compute_vendor_safety
+
         vc = VendorCard(
             normalized_name="blacklisted",
             display_name="Bad Vendor",
@@ -304,11 +335,13 @@ class TestComputeVendorSafety:
 
     def test_vendor_with_good_profile(self, db_session: Session, vendor_card: VendorCard):
         from app.services.sourcing_leads import _compute_vendor_safety
+
         score, flags, summary = _compute_vendor_safety(vendor_card, 70.0)
         assert score > 40
 
     def test_low_contactability_penalizes(self):
         from app.services.sourcing_leads import _compute_vendor_safety
+
         score_high, _, _ = _compute_vendor_safety(None, 80.0)
         score_low, flags_low, _ = _compute_vendor_safety(None, 20.0)
         assert "limited_verified_contact_channels" in flags_low
@@ -317,6 +350,7 @@ class TestComputeVendorSafety:
 class TestUpsertLeadFromSighting:
     def test_creates_new_lead(self, db_session: Session, req_pair: tuple, basic_sighting: Sighting):
         from app.services.sourcing_leads import upsert_lead_from_sighting
+
         _, item = req_pair
         lead = upsert_lead_from_sighting(db_session, item, basic_sighting)
         db_session.flush()
@@ -326,6 +360,7 @@ class TestUpsertLeadFromSighting:
 
     def test_upserts_existing_lead(self, db_session: Session, req_pair: tuple, basic_sighting: Sighting):
         from app.services.sourcing_leads import upsert_lead_from_sighting
+
         _, item = req_pair
         lead1 = upsert_lead_from_sighting(db_session, item, basic_sighting)
         db_session.flush()
@@ -337,6 +372,7 @@ class TestUpsertLeadFromSighting:
         self, db_session: Session, req_pair: tuple, basic_sighting: Sighting, vendor_card: VendorCard
     ):
         from app.services.sourcing_leads import upsert_lead_from_sighting
+
         _, item = req_pair
         lead = upsert_lead_from_sighting(db_session, item, basic_sighting)
         db_session.flush()
@@ -346,6 +382,7 @@ class TestUpsertLeadFromSighting:
         from unittest.mock import MagicMock
 
         from app.services.sourcing_leads import upsert_lead_from_sighting
+
         _, item = req_pair
         # Use a mock sighting to avoid DB NOT NULL constraint on vendor_name
         s = MagicMock(spec=Sighting)
@@ -374,12 +411,14 @@ class TestUpsertLeadFromSighting:
 class TestSyncLeadsForSightings:
     def test_empty_sightings_returns_zero(self, db_session: Session, req_pair: tuple):
         from app.services.sourcing_leads import sync_leads_for_sightings
+
         _, item = req_pair
         result = sync_leads_for_sightings(db_session, item, [])
         assert result == 0
 
     def test_sync_creates_leads(self, db_session: Session, req_pair: tuple, basic_sighting: Sighting):
         from app.services.sourcing_leads import sync_leads_for_sightings
+
         _, item = req_pair
         result = sync_leads_for_sightings(db_session, item, [basic_sighting])
         assert result == 1
@@ -388,6 +427,7 @@ class TestSyncLeadsForSightings:
         from unittest.mock import MagicMock
 
         from app.services.sourcing_leads import sync_leads_for_sightings
+
         _, item = req_pair
         # Mock sighting with no vendor_name to test filtering logic
         s = MagicMock(spec=Sighting)
@@ -397,6 +437,7 @@ class TestSyncLeadsForSightings:
 
     def test_multiple_sightings(self, db_session: Session, req_pair: tuple, basic_sighting: Sighting):
         from app.services.sourcing_leads import sync_leads_for_sightings
+
         _, item = req_pair
         s2 = Sighting(
             requirement_id=item.id,
@@ -416,31 +457,29 @@ class TestSyncLeadsForSightings:
 class TestGetRequisitionLeads:
     def test_empty_returns_empty_list(self, db_session: Session):
         from app.services.sourcing_leads import get_requisition_leads
+
         result = get_requisition_leads(db_session, 99999)
         assert result == []
 
-    def test_returns_leads_for_requisition(
-        self, db_session: Session, req_pair: tuple, basic_sighting: Sighting
-    ):
+    def test_returns_leads_for_requisition(self, db_session: Session, req_pair: tuple, basic_sighting: Sighting):
         from app.services.sourcing_leads import get_requisition_leads, sync_leads_for_sightings
+
         req, item = req_pair
         sync_leads_for_sightings(db_session, item, [basic_sighting])
         result = get_requisition_leads(db_session, req.id)
         assert len(result) == 1
 
-    def test_filters_by_status(
-        self, db_session: Session, req_pair: tuple, basic_sighting: Sighting
-    ):
+    def test_filters_by_status(self, db_session: Session, req_pair: tuple, basic_sighting: Sighting):
         from app.services.sourcing_leads import get_requisition_leads, sync_leads_for_sightings
+
         req, item = req_pair
         sync_leads_for_sightings(db_session, item, [basic_sighting])
         result = get_requisition_leads(db_session, req.id, statuses=["new"])
         assert all(r.buyer_status == "new" for r in result)
 
-    def test_invalid_status_ignored(
-        self, db_session: Session, req_pair: tuple, basic_sighting: Sighting
-    ):
+    def test_invalid_status_ignored(self, db_session: Session, req_pair: tuple, basic_sighting: Sighting):
         from app.services.sourcing_leads import get_requisition_leads, sync_leads_for_sightings
+
         req, item = req_pair
         sync_leads_for_sightings(db_session, item, [basic_sighting])
         # Invalid status should be filtered out, returning all leads
@@ -449,20 +488,18 @@ class TestGetRequisitionLeads:
 
 
 class TestUpdateLeadStatus:
-    def test_invalid_status_raises(
-        self, db_session: Session, req_pair: tuple, basic_sighting: Sighting
-    ):
+    def test_invalid_status_raises(self, db_session: Session, req_pair: tuple, basic_sighting: Sighting):
         from app.services.sourcing_leads import sync_leads_for_sightings, update_lead_status
+
         _, item = req_pair
         sync_leads_for_sightings(db_session, item, [basic_sighting])
         lead = db_session.query(SourcingLead).first()
         with pytest.raises(ValueError):
             update_lead_status(db_session, lead.id, "INVALID_STATUS")
 
-    def test_valid_status_update(
-        self, db_session: Session, req_pair: tuple, basic_sighting: Sighting
-    ):
+    def test_valid_status_update(self, db_session: Session, req_pair: tuple, basic_sighting: Sighting):
         from app.services.sourcing_leads import sync_leads_for_sightings, update_lead_status
+
         _, item = req_pair
         sync_leads_for_sightings(db_session, item, [basic_sighting])
         lead = db_session.query(SourcingLead).first()
@@ -471,6 +508,7 @@ class TestUpdateLeadStatus:
 
     def test_not_found_returns_none(self, db_session: Session):
         from app.services.sourcing_leads import update_lead_status
+
         result = update_lead_status(db_session, 99999, "contacted")
         assert result is None
 
@@ -478,6 +516,7 @@ class TestUpdateLeadStatus:
         self, db_session: Session, req_pair: tuple, basic_sighting: Sighting, vendor_card: VendorCard
     ):
         from app.services.sourcing_leads import sync_leads_for_sightings, update_lead_status
+
         _, item = req_pair
         sync_leads_for_sightings(db_session, item, [basic_sighting])
         lead = db_session.query(SourcingLead).first()
@@ -490,6 +529,7 @@ class TestUpdateLeadStatus:
         self, db_session: Session, req_pair: tuple, basic_sighting: Sighting, vendor_card: VendorCard
     ):
         from app.services.sourcing_leads import sync_leads_for_sightings, update_lead_status
+
         _, item = req_pair
         sync_leads_for_sightings(db_session, item, [basic_sighting])
         lead = db_session.query(SourcingLead).order_by(SourcingLead.id.desc()).first()
@@ -505,12 +545,12 @@ class TestUpdateLeadStatus:
 class TestAttachLeadMetadata:
     def test_empty_dict_no_op(self, db_session: Session):
         from app.services.sourcing_leads import attach_lead_metadata_to_results
+
         attach_lead_metadata_to_results(db_session, {})  # Should not raise
 
-    def test_attaches_metadata_to_matching_rows(
-        self, db_session: Session, req_pair: tuple, basic_sighting: Sighting
-    ):
+    def test_attaches_metadata_to_matching_rows(self, db_session: Session, req_pair: tuple, basic_sighting: Sighting):
         from app.services.sourcing_leads import attach_lead_metadata_to_results, sync_leads_for_sightings
+
         req, item = req_pair
         sync_leads_for_sightings(db_session, item, [basic_sighting])
 
@@ -520,10 +560,9 @@ class TestAttachLeadMetadata:
         assert "lead_id" in rows[0]
         assert "confidence_score" in rows[0]
 
-    def test_no_match_row_unchanged(
-        self, db_session: Session, req_pair: tuple, basic_sighting: Sighting
-    ):
+    def test_no_match_row_unchanged(self, db_session: Session, req_pair: tuple, basic_sighting: Sighting):
         from app.services.sourcing_leads import attach_lead_metadata_to_results, sync_leads_for_sightings
+
         req, item = req_pair
         sync_leads_for_sightings(db_session, item, [basic_sighting])
 

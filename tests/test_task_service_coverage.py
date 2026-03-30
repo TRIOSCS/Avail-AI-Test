@@ -232,9 +232,7 @@ class TestUpdateTask:
 
 
 class TestCompleteTask:
-    def test_complete_by_assignee(
-        self, db_session: Session, requisition: Requisition, test_user: User
-    ):
+    def test_complete_by_assignee(self, db_session: Session, requisition: Requisition, test_user: User):
         task = task_service.create_task(
             db_session,
             requisition_id=requisition.id,
@@ -387,9 +385,7 @@ class TestConvenienceHelpers:
         assert len(tasks) == 1
         assert "email_offer:99" == tasks[0].source_ref
 
-    def test_on_buy_plan_assigned(
-        self, db_session: Session, requisition: Requisition, test_user: User
-    ):
+    def test_on_buy_plan_assigned(self, db_session: Session, requisition: Requisition, test_user: User):
         task_service.on_buy_plan_assigned(db_session, requisition.id, test_user.id, "Arrow", "LM317T", 55)
         tasks = task_service.get_tasks(db_session, requisition.id)
         assert len(tasks) == 1
@@ -411,9 +407,7 @@ class TestTaskToResponse:
         assert resp["assignee_name"] is None
         assert resp["creator_name"] is None
 
-    def test_task_to_response_with_assignee(
-        self, db_session: Session, requisition: Requisition, test_user: User
-    ):
+    def test_task_to_response_with_assignee(self, db_session: Session, requisition: Requisition, test_user: User):
         task = task_service.create_task(
             db_session,
             requisition_id=requisition.id,
@@ -526,7 +520,9 @@ class TestComputeSimplePriority:
 class TestApplySimpleScoring:
     def test_applies_to_all_tasks(self, db_session: Session, requisition: Requisition):
         t1 = task_service.create_task(db_session, requisition_id=requisition.id, title="T1", source="system")
-        t2 = task_service.create_task(db_session, requisition_id=requisition.id, title="T2", priority=3, source="system")
+        t2 = task_service.create_task(
+            db_session, requisition_id=requisition.id, title="T2", priority=3, source="system"
+        )
         task_service.apply_simple_scoring(db_session, [t1, t2])
         assert t1.ai_priority_score is not None
         assert t2.ai_priority_score is not None

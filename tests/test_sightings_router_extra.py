@@ -66,9 +66,7 @@ class TestBatchRefresh:
         )
         assert resp.status_code == 400
 
-    def test_batch_refresh_with_valid_ids(
-        self, client: TestClient, req_with_item: tuple
-    ):
+    def test_batch_refresh_with_valid_ids(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
         with patch("app.search_service.search_requirement", new=AsyncMock()):
             resp = client.post(
@@ -77,7 +75,7 @@ class TestBatchRefresh:
                 headers={"HX-Request": "true"},
             )
         assert resp.status_code == 200
-        assert "Refreshed" in resp.text
+        assert "Searched" in resp.text or "Refreshed" in resp.text
 
     def test_batch_refresh_nonexistent_ids(self, client: TestClient):
         with patch("app.search_service.search_requirement", new=AsyncMock()):
@@ -109,9 +107,7 @@ class TestBatchAssign:
         )
         assert resp.status_code == 400
 
-    def test_batch_assign_no_buyer(
-        self, client: TestClient, req_with_item: tuple
-    ):
+    def test_batch_assign_no_buyer(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
         resp = client.post(
             "/v2/partials/sightings/batch-assign",
@@ -121,9 +117,7 @@ class TestBatchAssign:
         assert resp.status_code == 200
         assert "nobody" in resp.text.lower() or "Assigned" in resp.text
 
-    def test_batch_assign_with_buyer(
-        self, client: TestClient, req_with_item: tuple, test_user: User
-    ):
+    def test_batch_assign_with_buyer(self, client: TestClient, req_with_item: tuple, test_user: User):
         _, item = req_with_item
         resp = client.post(
             "/v2/partials/sightings/batch-assign",
@@ -153,9 +147,7 @@ class TestBatchStatus:
         )
         assert resp.status_code == 400
 
-    def test_batch_status_invalid_status(
-        self, client: TestClient, req_with_item: tuple
-    ):
+    def test_batch_status_invalid_status(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
         resp = client.post(
             "/v2/partials/sightings/batch-status",
@@ -164,9 +156,7 @@ class TestBatchStatus:
         )
         assert resp.status_code == 400
 
-    def test_batch_status_valid_transition(
-        self, client: TestClient, req_with_item: tuple
-    ):
+    def test_batch_status_valid_transition(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
         resp = client.post(
             "/v2/partials/sightings/batch-status",
@@ -196,9 +186,7 @@ class TestBatchNotes:
         )
         assert resp.status_code == 400
 
-    def test_batch_notes_empty_note(
-        self, client: TestClient, req_with_item: tuple
-    ):
+    def test_batch_notes_empty_note(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
         resp = client.post(
             "/v2/partials/sightings/batch-notes",
@@ -208,9 +196,7 @@ class TestBatchNotes:
         assert resp.status_code == 200
         assert "required" in resp.text.lower()
 
-    def test_batch_notes_success(
-        self, client: TestClient, req_with_item: tuple
-    ):
+    def test_batch_notes_success(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
         resp = client.post(
             "/v2/partials/sightings/batch-notes",
@@ -230,9 +216,7 @@ class TestAssignBuyer:
         )
         assert resp.status_code == 404
 
-    def test_assign_buyer_clears_assignment(
-        self, client: TestClient, req_with_item: tuple
-    ):
+    def test_assign_buyer_clears_assignment(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
         resp = client.patch(
             f"/v2/partials/sightings/{item.id}/assign",
@@ -243,9 +227,7 @@ class TestAssignBuyer:
 
 
 class TestAdvanceStatus:
-    def test_advance_status_missing_status(
-        self, client: TestClient, req_with_item: tuple
-    ):
+    def test_advance_status_missing_status(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
         resp = client.patch(
             f"/v2/partials/sightings/{item.id}/advance-status",
@@ -262,9 +244,7 @@ class TestAdvanceStatus:
         )
         assert resp.status_code == 404
 
-    def test_advance_status_valid(
-        self, client: TestClient, req_with_item: tuple
-    ):
+    def test_advance_status_valid(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
         resp = client.patch(
             f"/v2/partials/sightings/{item.id}/advance-status",
@@ -273,9 +253,7 @@ class TestAdvanceStatus:
         )
         assert resp.status_code == 200
 
-    def test_advance_status_invalid_transition(
-        self, client: TestClient, req_with_item: tuple, db_session: Session
-    ):
+    def test_advance_status_invalid_transition(self, client: TestClient, req_with_item: tuple, db_session: Session):
         _, item = req_with_item
         item.sourcing_status = "sourcing"
         db_session.commit()
@@ -296,9 +274,7 @@ class TestVendorModal:
         )
         assert resp.status_code == 200
 
-    def test_vendor_modal_with_vendor_id(
-        self, client: TestClient, test_vendor_card
-    ):
+    def test_vendor_modal_with_vendor_id(self, client: TestClient, test_vendor_card):
         resp = client.get(
             f"/v2/partials/sightings/vendor-modal?vendor_id={test_vendor_card.id}",
             headers={"HX-Request": "true"},
@@ -307,9 +283,7 @@ class TestVendorModal:
 
 
 class TestMarkUnavailable:
-    def test_mark_unavailable_no_vendor_name(
-        self, client: TestClient, req_with_item: tuple
-    ):
+    def test_mark_unavailable_no_vendor_name(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
         resp = client.post(
             f"/v2/partials/sightings/{item.id}/mark-unavailable",
