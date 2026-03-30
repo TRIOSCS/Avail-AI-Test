@@ -21,7 +21,14 @@ import pytest
 async def test_initiate_call_no_connection_string():
     from app.services.acs_service import initiate_call
 
-    result = await initiate_call("+15550001234", "https://cb.example.com/hook", "")
+    result = await initiate_call("+15550001234", "+15550009999", "https://cb.example.com/hook", "")
+    assert result is None
+
+
+async def test_initiate_call_no_from_phone():
+    from app.services.acs_service import initiate_call
+
+    result = await initiate_call("+15550001234", "", "https://cb.example.com/hook", "endpoint=abc")
     assert result is None
 
 
@@ -37,6 +44,7 @@ async def test_initiate_call_success():
     mock_acs_module = MagicMock()
     mock_acs_module.CallAutomationClient.from_connection_string.return_value = mock_client
     mock_acs_module.PhoneNumberIdentifier = MagicMock(side_effect=lambda phone: phone)
+    mock_acs_module.CallInvite = MagicMock()
 
     with patch.dict(
         "sys.modules",
@@ -44,6 +52,7 @@ async def test_initiate_call_success():
     ):
         result = await initiate_call(
             "+15550001234",
+            "+15550009999",
             "https://cb.example.com/hook",
             "endpoint=https://test.communication.azure.com;accesskey=abc123",
         )
@@ -60,6 +69,7 @@ async def test_initiate_call_import_error():
     with patch.dict("sys.modules", {"azure.communication.callautomation": None}):
         result = await initiate_call(
             "+15550001234",
+            "+15550009999",
             "https://cb.example.com/hook",
             "endpoint=https://test.communication.azure.com;accesskey=abc123",
         )
@@ -75,6 +85,7 @@ async def test_initiate_call_generic_exception():
         "service unavailable"
     )
     mock_acs_module.PhoneNumberIdentifier = MagicMock()
+    mock_acs_module.CallInvite = MagicMock()
 
     with patch.dict(
         "sys.modules",
@@ -82,6 +93,7 @@ async def test_initiate_call_generic_exception():
     ):
         result = await initiate_call(
             "+15550001234",
+            "+15550009999",
             "https://cb.example.com/hook",
             "endpoint=https://test.communication.azure.com;accesskey=abc123",
         )
@@ -110,7 +122,7 @@ def test_handle_call_completed_full_event():
 
 
 def test_handle_call_completed_empty_targets():
-    """Empty targets list causes IndexError — caught, returns None."""
+    """Empty targets list → to_phone is empty string."""
     from app.services.acs_service import handle_call_completed
 
     event = {
@@ -119,8 +131,9 @@ def test_handle_call_completed_empty_targets():
         "targets": [],
     }
     result = handle_call_completed(event)
-    # Empty list raises IndexError which is caught → returns None
-    assert result is None
+    assert result is not None
+    assert result["to_phone"] == ""
+    assert result["call_connection_id"] == "conn-001"
 
 
 def test_handle_call_completed_missing_keys():
