@@ -3364,8 +3364,17 @@ async def vendors_list_partial(
         query = query.filter(VendorCard.is_blacklisted.is_(False))
 
     if q.strip():
+        from sqlalchemy import Text, cast
+
         sb = SearchBuilder(q.strip())
-        query = query.filter(sb.ilike_filter(VendorCard.display_name, VendorCard.domain))
+        term = f"%{q.strip()}%"
+        query = query.filter(
+            or_(
+                sb.ilike_filter(VendorCard.display_name, VendorCard.domain),
+                cast(VendorCard.brand_tags, Text).ilike(term),
+                cast(VendorCard.commodity_tags, Text).ilike(term),
+            )
+        )
 
     total = query.count()
 
@@ -3463,6 +3472,7 @@ async def find_by_part_partial(
 async def vendor_detail_partial(
     request: Request,
     vendor_id: int,
+    mpn: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -3477,13 +3487,15 @@ async def vendor_detail_partial(
         .all()
     )
 
-    recent_sightings = (
-        db.query(Sighting)
-        .filter(Sighting.vendor_name_normalized == vendor.normalized_name)
-        .order_by(Sighting.created_at.desc().nullslast())
-        .limit(10)
-        .all()
-    )
+    sightings_query = db.query(Sighting).filter(Sighting.vendor_name_normalized == vendor.normalized_name)
+    if mpn.strip():
+        from app.utils.normalization import normalize_mpn
+
+        norm = normalize_mpn(mpn)
+        if norm:
+            sightings_query = sightings_query.filter(Sighting.normalized_mpn == norm)
+
+    recent_sightings = sightings_query.order_by(Sighting.created_at.desc().nullslast()).limit(10).all()
 
     # Load safety data from most recent SourcingLead
     safety_band = None
@@ -3511,6 +3523,7 @@ async def vendor_detail_partial(
             "safety_flags": safety_flags,
             "safety_score": None,
             "safety_available": False,
+            "mpn_filter": mpn.strip().upper() if mpn.strip() else None,
         }
     )
     return templates.TemplateResponse("htmx/partials/vendors/detail.html", ctx)
@@ -3521,6 +3534,7 @@ async def vendor_tab(
     request: Request,
     vendor_id: int,
     tab: str,
+    mpn: str = "",
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -3535,13 +3549,15 @@ async def vendor_tab(
     ctx["vendor"] = vendor
 
     if tab == "overview":
-        recent_sightings = (
-            db.query(Sighting)
-            .filter(Sighting.vendor_name_normalized == vendor.normalized_name)
-            .order_by(Sighting.created_at.desc().nullslast())
-            .limit(10)
-            .all()
-        )
+        sightings_query = db.query(Sighting).filter(Sighting.vendor_name_normalized == vendor.normalized_name)
+        if mpn.strip():
+            from app.utils.normalization import normalize_mpn
+
+            norm = normalize_mpn(mpn)
+            if norm:
+                sightings_query = sightings_query.filter(Sighting.normalized_mpn == norm)
+
+        recent_sightings = sightings_query.order_by(Sighting.created_at.desc().nullslast()).limit(10).all()
         # Safety data
         safety_band = None
         safety_summary = None
@@ -3576,6 +3592,7 @@ async def vendor_tab(
                 "safety_flags": safety_flags,
                 "safety_score": safety_score,
                 "safety_available": safety_available,
+                "mpn_filter": mpn.strip().upper() if mpn.strip() else None,
             }
         )
         # Re-use the inline overview from the detail template

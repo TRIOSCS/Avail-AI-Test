@@ -40,6 +40,38 @@ class TestJsonbTagColumns:
         assert v.commodity_tags == ["Microcontrollers", "Memory"]
 
 
+class TestEnhancedBrowseSearch:
+    """Test vendor browse search matches brand and commodity tags."""
+
+    def test_search_by_brand_tag(self, client: TestClient, db_session: Session):
+        """Searching 'TI' matches vendor with TI in brand_tags."""
+        v = VendorCard(
+            normalized_name="ti specialist",
+            display_name="TI Specialist Corp",
+            brand_tags=["TI", "NXP"],
+        )
+        db_session.add(v)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/vendors?q=TI")
+        assert resp.status_code == 200
+        assert "TI Specialist" in resp.text
+
+    def test_search_by_commodity_tag(self, client: TestClient, db_session: Session):
+        """Searching 'Memory' matches vendor with Memory in commodity_tags."""
+        v = VendorCard(
+            normalized_name="memory house",
+            display_name="Memory House Inc",
+            commodity_tags=["Memory", "Storage"],
+        )
+        db_session.add(v)
+        db_session.commit()
+
+        resp = client.get("/v2/partials/vendors?q=Memory")
+        assert resp.status_code == 200
+        assert "Memory House" in resp.text
+
+
 class TestFindByPart:
     """Test MPN-to-vendor lookup."""
 
