@@ -783,6 +783,242 @@ class TestDirectHandlerCoverage:
         resp = client.get("/api/materials?q=brandtest")
         assert resp.status_code == 200
 
+    async def test_import_stock_direct_no_file(self, db_session):
+        """Direct call: missing file → 400."""
+        from app.routers.materials import import_stock_list_standalone
+
+        mock_form = MagicMock()
+        mock_form.get = MagicMock(return_value=None)
+
+        req = MagicMock(spec=Request)
+        req.form = AsyncMock(return_value=mock_form)
+        user = MagicMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await import_stock_list_standalone(req, user=user, db=db_session)
+        assert exc.value.status_code == 400
+
+    async def test_import_stock_direct_bad_extension(self, db_session):
+        """Direct call: invalid file extension → 400."""
+        from app.routers.materials import import_stock_list_standalone
+
+        mock_file = MagicMock()
+        mock_file.filename = "upload.txt"
+
+        mock_form = MagicMock()
+        mock_form.get = MagicMock(side_effect=lambda key: mock_file if key == "file" else "Test Vendor")
+
+        req = MagicMock(spec=Request)
+        req.form = AsyncMock(return_value=mock_form)
+        user = MagicMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await import_stock_list_standalone(req, user=user, db=db_session)
+        assert exc.value.status_code == 400
+
+    async def test_import_stock_direct_no_vendor_name(self, db_session):
+        """Direct call: missing vendor_name → 400."""
+        from app.routers.materials import import_stock_list_standalone
+
+        mock_file = MagicMock()
+        mock_file.filename = "upload.csv"
+
+        mock_form = MagicMock()
+
+        def _form_get(key):
+            if key == "file":
+                return mock_file
+            return ""
+
+        mock_form.get = MagicMock(side_effect=_form_get)
+
+        req = MagicMock(spec=Request)
+        req.form = AsyncMock(return_value=mock_form)
+        user = MagicMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await import_stock_list_standalone(req, user=user, db=db_session)
+        assert exc.value.status_code == 400
+
+    async def test_import_stock_direct_vendor_name_too_long(self, db_session):
+        """Direct call: vendor_name > 255 chars → 400."""
+        from app.routers.materials import import_stock_list_standalone
+
+        mock_file = MagicMock()
+        mock_file.filename = "upload.csv"
+
+        mock_form = MagicMock()
+
+        def _form_get(key):
+            if key == "file":
+                return mock_file
+            return "A" * 300
+
+        mock_form.get = MagicMock(side_effect=_form_get)
+
+        req = MagicMock(spec=Request)
+        req.form = AsyncMock(return_value=mock_form)
+        user = MagicMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await import_stock_list_standalone(req, user=user, db=db_session)
+        assert exc.value.status_code == 400
+
+    async def test_import_stock_direct_file_too_large(self, db_session):
+        """Direct call: file > 10MB → 413."""
+        from app.routers.materials import import_stock_list_standalone
+
+        mock_file = MagicMock()
+        mock_file.filename = "upload.csv"
+        mock_file.read = AsyncMock(return_value=b"x" * 10_000_001)
+
+        mock_form = MagicMock()
+
+        def _form_get(key):
+            if key == "file":
+                return mock_file
+            return "Test Vendor"
+
+        mock_form.get = MagicMock(side_effect=_form_get)
+
+        req = MagicMock(spec=Request)
+        req.form = AsyncMock(return_value=mock_form)
+        user = MagicMock()
+
+        with pytest.raises(HTTPException) as exc:
+            await import_stock_list_standalone(req, user=user, db=db_session)
+        assert exc.value.status_code == 413
+
+    async def test_import_stock_direct_success(self, db_session):
+        """Direct call: valid CSV with one row → success."""
+        import csv
+        import io as _io
+
+        from app.routers.materials import import_stock_list_standalone
+
+        csv_content = b"mpn,qty,price,manufacturer\nDIRECTIMP001,100,0.75,TI\n"
+
+        mock_file = MagicMock()
+        mock_file.filename = "upload.csv"
+        mock_file.read = AsyncMock(return_value=csv_content)
+
+        mock_form = MagicMock()
+
+        def _form_get(key):
+            if key == "file":
+                return mock_file
+            if key == "vendor_name":
+                return "Direct Import Vendor"
+            return ""
+
+        mock_form.get = MagicMock(side_effect=_form_get)
+
+        req = MagicMock(spec=Request)
+        req.form = AsyncMock(return_value=mock_form)
+        user = MagicMock()
+        user.email = "test@test.com"
+
+        with patch("app.routers.materials.get_credential_cached", return_value=None):
+            result = await import_stock_list_standalone(req, user=user, db=db_session)
+
+        assert result["imported_rows"] >= 0
+        assert result["vendor_name"] == "Direct Import Vendor"
+
+    async def test_import_stock_direct_with_existing_mvh(self, db_session):
+        """Direct call: re-import same part+vendor updates MVH."""
+        from app.routers.materials import import_stock_list_standalone
+
+        # Pre-create vendor + card + MVH
+        from app.vendor_utils import normalize_vendor_name
+
+        norm = normalize_vendor_name("Mvh Test Vendor")
+        vendor = VendorCard(
+            normalized_name=norm,
+            display_name="Mvh Test Vendor",
+            emails=[],
+            phones=[],
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(vendor)
+        db_session.flush()
+
+        card = MaterialCard(
+            normalized_mpn="mvhtest001",
+            display_mpn="MVHTEST001",
+            manufacturer="TI",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(card)
+        db_session.flush()
+
+        mvh = MaterialVendorHistory(
+            material_card_id=card.id,
+            vendor_name=norm,
+            vendor_name_normalized=norm,
+            source_type="stock_list",
+            source="stock_list",
+            times_seen=2,
+        )
+        db_session.add(mvh)
+        db_session.commit()
+
+        csv_content = b"mpn,qty,price\nMVHTEST001,500,0.33\n"
+
+        mock_file = MagicMock()
+        mock_file.filename = "upload.csv"
+        mock_file.read = AsyncMock(return_value=csv_content)
+
+        mock_form = MagicMock()
+
+        def _form_get(key):
+            if key == "file":
+                return mock_file
+            if key == "vendor_name":
+                return "Mvh Test Vendor"
+            return ""
+
+        mock_form.get = MagicMock(side_effect=_form_get)
+
+        req = MagicMock(spec=Request)
+        req.form = AsyncMock(return_value=mock_form)
+        user = MagicMock()
+
+        with patch("app.routers.materials.get_credential_cached", return_value=None):
+            result = await import_stock_list_standalone(req, user=user, db=db_session)
+
+        assert result["imported_rows"] >= 1
+
+    async def test_import_stock_direct_skipped_rows(self, db_session):
+        """Direct call: rows that fail normalize_stock_row are counted as skipped."""
+        from app.routers.materials import import_stock_list_standalone
+
+        # CSV with no recognizable MPN column
+        csv_content = b"col1,col2\nfoo,bar\n"
+
+        mock_file = MagicMock()
+        mock_file.filename = "upload.csv"
+        mock_file.read = AsyncMock(return_value=csv_content)
+
+        mock_form = MagicMock()
+
+        def _form_get(key):
+            if key == "file":
+                return mock_file
+            if key == "vendor_name":
+                return "Skip Test Vendor"
+            return ""
+
+        mock_form.get = MagicMock(side_effect=_form_get)
+
+        req = MagicMock(spec=Request)
+        req.form = AsyncMock(return_value=mock_form)
+        user = MagicMock()
+
+        with patch("app.routers.materials.get_credential_cached", return_value=None):
+            result = await import_stock_list_standalone(req, user=user, db=db_session)
+
+        assert result["skipped_rows"] >= 0
+
     def test_list_materials_with_offer_stats(self, client, db_session, test_requisition):
         """Ensure offer_stats loop (line 141) is exercised via list endpoint."""
         from app.models import Offer
