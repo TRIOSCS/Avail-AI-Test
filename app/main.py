@@ -135,6 +135,10 @@ async def lifespan(app):
         from .http_client import close_clients
 
         await close_clients()
+
+        from .database import engine
+
+        engine.dispose()
         logger.info("Shutdown complete")
 
 
@@ -426,14 +430,23 @@ async def health(
     except Exception:
         db_ok = False
 
+    redis_ok = True
+    try:
+        r_pub = _get_redis()
+        if r_pub:
+            r_pub.ping()
+    except Exception:
+        redis_ok = False
+
     # "degraded" only when a required service is actively failing
-    degraded = not db_ok
+    degraded = not db_ok or not redis_ok
     status = "degraded" if degraded else "ok"
 
-    # Public response: minimal — just status, db check, and build commit
+    # Public response: minimal — just status, db check, redis, and build commit
     payload: dict = {
         "status": status,
         "db": "ok" if db_ok else "error",
+        "redis": "ok" if redis_ok else "error",
         "build_commit": os.environ.get("BUILD_COMMIT", "unknown"),
     }
 

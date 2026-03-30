@@ -26,8 +26,10 @@ GRAPH_SCOPES = (
 )
 
 
-def _csv_to_list(val: str, *, lower: bool = True) -> list[str]:
+def _csv_to_list(val: str | list[str], *, lower: bool = True) -> list[str]:
     """Split a comma-separated string into a cleaned list."""
+    if isinstance(val, list):
+        return [v.lower() for v in val] if lower else val
     items = [v.strip() for v in val.split(",") if v.strip()]
     return [v.lower() for v in items] if lower else items
 
@@ -131,8 +133,8 @@ class Settings(BaseSettings):
     inbox_backfill_days: int = 180
     contacts_sync_enabled: bool = True
 
-    # --- Admin (CSV string, parsed to list in model_post_init) ---
-    admin_emails: str = ""
+    # --- Admin (CSV env var, parsed to list by model_validator) ---
+    admin_emails: list[str] = []
 
     # --- RFQ ---
     follow_up_days: int = 3
@@ -158,9 +160,9 @@ class Settings(BaseSettings):
     proactive_min_margin_pct: float = 10.0
     proactive_match_expiry_days: int = 30
 
-    # --- Buy plan (CSV strings, parsed to lists in model_post_init) ---
-    stock_sale_vendor_names: str = "trio,trio supply chain,stock,internal"
-    stock_sale_notify_emails: str = "logistics@trioscs.com,accounting@trioscs.com"
+    # --- Buy plan (CSV env vars, parsed to lists by model_validator) ---
+    stock_sale_vendor_names: list[str] = ["trio", "trio supply chain", "stock", "internal"]
+    stock_sale_notify_emails: list[str] = ["logistics@trioscs.com", "accounting@trioscs.com"]
     buyplan_auto_complete_hour: int = 18
     buyplan_auto_complete_tz: str = "America/New_York"
     po_verify_interval_min: int = 30
@@ -184,8 +186,8 @@ class Settings(BaseSettings):
     contact_nudge_dormant_days: int = 30
     contact_nudge_cooling_days: int = 14
 
-    # --- Own company domains (CSV string, parsed to frozenset in model_post_init) ---
-    own_domains: str = "trioscs.com"
+    # --- Own company domains (CSV env var, parsed to frozenset by model_validator) ---
+    own_domains: frozenset[str] = frozenset({"trioscs.com"})
 
     # --- 8x8 Work Analytics ---
     eight_by_eight_api_key: str = ""
@@ -251,18 +253,18 @@ class Settings(BaseSettings):
             raise ValueError("Confidence/threshold must be between 0.0 and 1.0")
         return v
 
-    @model_validator(mode="after")
-    def parse_csv_fields(self) -> "Settings":
-        """Convert CSV string fields to their runtime list/frozenset types."""
-        # These are stored as str to avoid pydantic-settings JSON parsing issues
-        # with dotenv sources, but at runtime code expects list/frozenset.
-        object.__setattr__(self, "admin_emails", _csv_to_list(self.admin_emails))
-        object.__setattr__(self, "stock_sale_vendor_names", _csv_to_list(self.stock_sale_vendor_names))
-        object.__setattr__(self, "stock_sale_notify_emails", _csv_to_list(self.stock_sale_notify_emails))
-        object.__setattr__(
-            self, "own_domains", frozenset(d.strip().lower() for d in self.own_domains.split(",") if d.strip())
-        )
-        return self
+    @model_validator(mode="before")
+    @classmethod
+    def parse_csv_fields(cls, values: dict) -> dict:
+        """Parse CSV env-var strings into their proper collection types."""
+        for field in ("admin_emails", "stock_sale_vendor_names", "stock_sale_notify_emails"):
+            v = values.get(field)
+            if isinstance(v, str):
+                values[field] = _csv_to_list(v)
+        v = values.get("own_domains")
+        if isinstance(v, str):
+            values["own_domains"] = frozenset(d.strip().lower() for d in v.split(",") if d.strip())
+        return values
 
 
 # Handle SESSION_SECRET → secret_key fallback before instantiation
