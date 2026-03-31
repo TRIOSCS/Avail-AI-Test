@@ -3,7 +3,7 @@
 @tailwind utilities;
 
 /* ── Design System: Clean, high-contrast utility ──────────────────────
-   Font: Inter 300-700
+   Font: Aptos → Segoe UI → system-ui
    Border color: unified #D5D8DF
    Body text: #1e293b (slate-800), secondary: #4B5463 (brand-600)
    Min interactive font: 11px, body: 13px, headings: 15px
@@ -11,7 +11,7 @@
 
 @layer base {
   body {
-    @apply text-[13px] text-slate-800 leading-relaxed antialiased;
+    @apply text-[14px] text-gray-900 leading-normal antialiased;
   }
 }
 
@@ -40,10 +40,15 @@
   }
 }
 
+/* ── Part-number styling ─────────────────────────────────────────── */
+.font-mono {
+  font-variant-numeric: tabular-nums;
+}
+
 /* ── Unified border color ─────────────────────────────────────────── */
-.border-gray-200 { border-color: #D5D8DF !important; }
-.border-gray-100 { border-color: #EDEEF1 !important; }
-hr { border-color: #D5D8DF; }
+.border-gray-200 { border-color: #BFC4CE !important; }
+.border-gray-100 { border-color: #D5D8DF !important; }
+hr { border-color: #BFC4CE; }
 
 /* ── Scrollbars — one global definition ───────────────────────────── */
 ::-webkit-scrollbar {
@@ -58,6 +63,19 @@ hr { border-color: #D5D8DF; }
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
+  background: #5F6878;
+}
+
+/* Left panel — wider scrollbar so it doesn't clash with drag handle */
+#left-table-content::-webkit-scrollbar {
+  width: 12px;
+}
+#left-table-content::-webkit-scrollbar-thumb {
+  background: #8A92A1;
+  border-radius: 6px;
+  border: 2px solid #EDEEF1;
+}
+#left-table-content::-webkit-scrollbar-thumb:hover {
   background: #5F6878;
 }
 
@@ -108,14 +126,14 @@ hr { border-color: #D5D8DF; }
   text-transform: uppercase;
   color: #4B5463;
   background: #F4F5F7;
-  border-bottom: 2px solid #D5D8DF;
+  border-bottom: 2px solid #BFC4CE;
   padding: 12px 16px;
 }
 
 .responsive-table td,
 .data-table td {
   padding: 14px 16px;
-  border-bottom: 1px solid #D5D8DF;
+  border-bottom: 1px solid #BFC4CE;
   color: #1e293b;
   font-size: 13px;
 }
@@ -143,14 +161,14 @@ hr { border-color: #D5D8DF; }
   font-size: 13px;
 }
 .compact-table th {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
   font-size: 11px;
   font-weight: 700;
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: #4B5463;
   background: #F4F5F7;
-  border-bottom: 2px solid #D5D8DF;
+  border-bottom: 2px solid #BFC4CE;
   padding: 8px 10px;
   position: sticky;
   top: 0;
@@ -160,14 +178,14 @@ hr { border-color: #D5D8DF; }
 }
 .compact-table td {
   padding: 6px 10px;
-  border-bottom: 1px solid #EDEEF1;
+  border-bottom: 1px solid #BFC4CE;
   color: #1e293b;
   white-space: nowrap;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 12px;
 }
 .compact-table td.td-label {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
   font-size: 13px;
 }
 .compact-table tbody tr {
@@ -223,10 +241,9 @@ table {
   flex: 1;
   min-height: 0;
 }
-/* Hide the bottom scrollbar on the content since we have top one */
+/* Show a slim bottom scrollbar as fallback alongside the top one */
 .top-scroll-content::-webkit-scrollbar:horizontal {
-  height: 0;
-  display: none;
+  height: 6px;
 }
 
 /* ── Avail scroll container ───────────────────────────────────────── */
@@ -244,7 +261,7 @@ table {
   letter-spacing: 0.03em;
   text-transform: uppercase;
   border-radius: 4px;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
 }
 /* ── Panel chrome — workspace panels ──────────────────────────────── */
 .panel-header {
@@ -257,7 +274,7 @@ table {
   flex-shrink: 0;
 }
 .panel-title {
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.06em;
@@ -274,7 +291,7 @@ table {
   border-bottom: 2px solid transparent;
   transition: all 0.15s;
   white-space: nowrap;
-  font-family: 'Inter', system-ui, sans-serif;
+  font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
 }
 .ws-tab:hover {
   color: #4B5463;

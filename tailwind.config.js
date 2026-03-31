@@ -17,7 +17,7 @@ module.exports = {
   theme: {
     extend: {
       fontFamily: {
-        sans: ['Inter', 'system-ui', '-apple-system', 'sans-serif'],
+        sans: ['Aptos', 'Segoe UI', 'system-ui', '-apple-system', 'sans-serif'],
       },
       colors: {
         brand: {

@@ -47,6 +47,24 @@
     {% endfor %}
   </div>
 
+  {# ── Description (click-to-edit, full width) ─────────────── #}
+  <div class="mt-2">
+    <span class="text-xs text-gray-500">Description:</span>
+    {% if not is_archived %}
+    <div id="reqd-description"
+         class="cursor-pointer hover:bg-brand-50 rounded px-1 py-0.5 transition-colors mt-0.5"
+         hx-get="/v2/partials/parts/{{ requirement.id }}/header/edit/description?context=tab"
+         hx-target="#reqd-description"
+         hx-swap="innerHTML">
+      <span class="{{ 'text-sm text-gray-900' if requirement|part_description else 'text-gray-400 italic text-sm' }}">{{ requirement|part_description or '+ Add description' }}</span>
+    </div>
+    {% else %}
+    <div class="px-1 py-0.5 mt-0.5">
+      <span class="{{ 'text-sm text-gray-900' if requirement|part_description else 'text-gray-400' }}">{{ requirement|part_description or '—' }}</span>
+    </div>
+    {% endif %}
+  </div>
+
   <hr class="my-2">
 
   {# ── Requisition Info ────────────────────────────────────── #}

@@ -6,7 +6,7 @@
 #}
 
 {%- macro _chip(mpn, link_map) -%}
-  {%- set cls = "px-1.5 py-0.5 font-mono text-slate-800 bg-slate-100 rounded border border-slate-300" -%}
+  {%- set cls = "px-1.5 py-0.5 font-mono text-slate-800 bg-white rounded border border-slate-300" -%}
   {%- if link_map and link_map.get(mpn) -%}
     <button type="button"
        @click.stop="$dispatch('open-modal', {wide: true, url: '/v2/partials/materials/{{ link_map[mpn] }}'})"

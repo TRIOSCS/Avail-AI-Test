@@ -72,7 +72,13 @@ from ..rate_limit import limiter
 @router.get("/auth/callback")
 @limiter.limit("10/minute")
 async def callback(request: Request, code: str = "", state: str = "", db: Session = Depends(get_db)):
+    # Log Azure error responses so auth failures aren't silent
+    error = request.query_params.get("error", "")
+    error_desc = request.query_params.get("error_description", "")
+    if error:
+        logger.warning(f"Azure OAuth error: {error} — {error_desc}")
     if not code:
+        logger.warning(f"OAuth callback missing code param (query keys: {list(request.query_params.keys())})")
         return RedirectResponse("/")
     # Validate OAuth state (CSRF protection)
     expected_state = request.session.pop("oauth_state", None)

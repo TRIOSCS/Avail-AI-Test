@@ -22,7 +22,7 @@ GRAPH_SCOPES = (
     "Mail.Send Mail.ReadWrite Contacts.Read MailboxSettings.Read User.Read "
     "Files.ReadWrite Chat.ReadWrite Calendars.Read "
     "ChannelMessage.Send Team.ReadBasic.All Channel.ReadBasic.All "
-    "Presence.Read.All CallRecords.Read"
+    "Presence.Read.All"
 )
 
 
