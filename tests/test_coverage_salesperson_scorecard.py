@@ -5,6 +5,7 @@ Depends on: conftest.py fixtures, app.services.salesperson_scorecard
 """
 
 import os
+import uuid
 
 os.environ["TESTING"] = "1"
 
@@ -12,7 +13,22 @@ from datetime import date, datetime, timezone
 
 from sqlalchemy.orm import Session
 
-from app.models import User
+from app.models import (
+    ActivityLog,
+    Company,
+    Contact,
+    CustomerSite,
+    ProactiveOffer,
+    Requisition,
+    SiteContact,
+    StockListHash,
+    User,
+)
+from app.models.quotes import Quote
+
+
+def _uid() -> str:
+    return uuid.uuid4().hex[:8]
 
 
 class TestGetSalespersonScorecard:
@@ -250,3 +266,220 @@ class TestSalespersonMetricsSingle:
         assert result["new_accounts"] == 0
         assert result["won_revenue"] == 0.0
         assert result["boms_uploaded"] == 0
+
+
+class TestSalespersonMetricsWithData:
+    """Tests that trigger the batch loop body — create real DB records within date range."""
+
+    def _make_user(self, db_session: Session) -> User:
+        u = User(
+            email=f"sp-{_uid()}@trioscs.com",
+            name="SP User",
+            role="sales",
+            azure_id=f"azure-sp-{_uid()}",
+            is_active=True,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(u)
+        db_session.flush()
+        return u
+
+    def test_new_accounts_counted(self, db_session: Session):
+        from app.services.salesperson_scorecard import _salesperson_metrics_batch
+
+        user = self._make_user(db_session)
+        company = Company(
+            name=f"Acme-{_uid()}",
+            account_owner_id=user.id,
+            created_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
+        )
+        db_session.add(company)
+        db_session.commit()
+
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        result = _salesperson_metrics_batch(db_session, [user.id], start, end)
+        assert result[user.id]["new_accounts"] == 1
+
+    def test_new_contacts_counted(self, db_session: Session):
+        from app.services.salesperson_scorecard import _salesperson_metrics_batch
+
+        user = self._make_user(db_session)
+        company = Company(name=f"Co-{_uid()}", created_at=datetime.now(timezone.utc))
+        db_session.add(company)
+        db_session.flush()
+        site = CustomerSite(
+            company_id=company.id,
+            site_name=f"site-{_uid()}",
+            owner_id=user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(site)
+        db_session.flush()
+        contact = SiteContact(
+            customer_site_id=site.id,
+            full_name="Test Contact",
+            created_at=datetime(2026, 1, 10, tzinfo=timezone.utc),
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        result = _salesperson_metrics_batch(db_session, [user.id], start, end)
+        assert result[user.id]["new_contacts"] == 1
+
+    def test_calls_made_counted(self, db_session: Session):
+        from app.services.salesperson_scorecard import _salesperson_metrics_batch
+
+        user = self._make_user(db_session)
+        log = ActivityLog(
+            user_id=user.id,
+            activity_type="call_outbound",
+            channel="phone",
+            created_at=datetime(2026, 1, 5, tzinfo=timezone.utc),
+        )
+        db_session.add(log)
+        db_session.commit()
+
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        result = _salesperson_metrics_batch(db_session, [user.id], start, end)
+        assert result[user.id]["calls_made"] == 1
+
+    def test_emails_sent_counted(self, db_session: Session):
+        from app.services.salesperson_scorecard import _salesperson_metrics_batch
+
+        user = self._make_user(db_session)
+        req = Requisition(
+            name=f"REQ-{_uid()}",
+            status="open",
+            created_by=user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+        contact = Contact(
+            requisition_id=req.id,
+            user_id=user.id,
+            contact_type="email",
+            vendor_name="Test Vendor",
+            created_at=datetime(2026, 1, 8, tzinfo=timezone.utc),
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        result = _salesperson_metrics_batch(db_session, [user.id], start, end)
+        assert result[user.id]["emails_sent"] == 1
+
+    def test_requisitions_entered_counted(self, db_session: Session):
+        from app.services.salesperson_scorecard import _salesperson_metrics_batch
+
+        user = self._make_user(db_session)
+        req = Requisition(
+            name=f"REQ-{_uid()}",
+            status="open",
+            created_by=user.id,
+            created_at=datetime(2026, 1, 12, tzinfo=timezone.utc),
+        )
+        db_session.add(req)
+        db_session.commit()
+
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        result = _salesperson_metrics_batch(db_session, [user.id], start, end)
+        assert result[user.id]["requisitions_entered"] == 1
+
+    def test_quotes_sent_and_won_counted(self, db_session: Session):
+        from app.services.salesperson_scorecard import _salesperson_metrics_batch
+
+        user = self._make_user(db_session)
+        req = Requisition(
+            name=f"REQ-{_uid()}",
+            status="open",
+            created_by=user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+        quote = Quote(
+            requisition_id=req.id,
+            quote_number=f"Q-{_uid()}",
+            created_by_id=user.id,
+            sent_at=datetime(2026, 1, 20, tzinfo=timezone.utc),
+            result="won",
+            result_at=datetime(2026, 1, 25, tzinfo=timezone.utc),
+            won_revenue=5000.00,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(quote)
+        db_session.commit()
+
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        result = _salesperson_metrics_batch(db_session, [user.id], start, end)
+        assert result[user.id]["quotes_sent"] == 1
+        assert result[user.id]["orders_won"] == 1
+        assert result[user.id]["won_revenue"] == 5000.0
+
+    def test_proactive_sent_and_converted_counted(self, db_session: Session):
+        from app.services.salesperson_scorecard import _salesperson_metrics_batch
+
+        user = self._make_user(db_session)
+        offer = ProactiveOffer(
+            salesperson_id=user.id,
+            status="converted",
+            sent_at=datetime(2026, 1, 10, tzinfo=timezone.utc),
+            converted_at=datetime(2026, 1, 15, tzinfo=timezone.utc),
+            total_sell=2500.00,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(offer)
+        db_session.commit()
+
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        result = _salesperson_metrics_batch(db_session, [user.id], start, end)
+        assert result[user.id]["proactive_sent"] == 1
+        assert result[user.id]["proactive_converted"] == 1
+        assert result[user.id]["proactive_revenue"] == 2500.0
+
+    def test_boms_uploaded_counted(self, db_session: Session):
+        from app.services.salesperson_scorecard import _salesperson_metrics_batch
+
+        user = self._make_user(db_session)
+        slh = StockListHash(
+            user_id=user.id,
+            content_hash="a" * 64,
+            file_name="bom.xlsx",
+            row_count=50,
+            first_seen_at=datetime(2026, 1, 3, tzinfo=timezone.utc),
+            last_seen_at=datetime(2026, 1, 3, tzinfo=timezone.utc),
+        )
+        db_session.add(slh)
+        db_session.commit()
+
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        result = _salesperson_metrics_batch(db_session, [user.id], start, end)
+        assert result[user.id]["boms_uploaded"] == 1
+
+    def test_records_outside_range_not_counted(self, db_session: Session):
+        from app.services.salesperson_scorecard import _salesperson_metrics_batch
+
+        user = self._make_user(db_session)
+        # Company created in December 2025 — outside January 2026 range
+        company = Company(
+            name=f"OldCo-{_uid()}",
+            account_owner_id=user.id,
+            created_at=datetime(2025, 12, 15, tzinfo=timezone.utc),
+        )
+        db_session.add(company)
+        db_session.commit()
+
+        start = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        end = datetime(2026, 2, 1, tzinfo=timezone.utc)
+        result = _salesperson_metrics_batch(db_session, [user.id], start, end)
+        assert result[user.id]["new_accounts"] == 0

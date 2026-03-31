@@ -11,6 +11,7 @@ os.environ["TESTING"] = "1"
 
 from datetime import datetime, timedelta, timezone
 
+from sqlalchemy import text
 from sqlalchemy.orm import Session
 
 from app.models import Requirement, Requisition, User, VendorCard
@@ -309,6 +310,54 @@ class TestDeduplicateVendorNames:
 
         result = deduplicate_vendor_names(db_session)
         assert result == 0
+
+    def test_duplicate_vendors_merged(self, db_session: Session):
+        """Insert two VendorCards with the same normalized_name via raw SQL to bypass unique index."""
+        from app.services.self_repair_service import deduplicate_vendor_names
+
+        dup_name = f"dup-vendor-{_uid()}"
+        now_str = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        # Use raw SQL to bypass the SQLAlchemy unique constraint enforcement at ORM level.
+        # SQLite enforces the unique constraint at DB level too, but we DROP and recreate
+        # the index workaround is not needed — instead insert first row normally, then
+        # use raw INSERT with a conflict ignore after temporarily doing an UPDATE to make
+        # them share the same normalized_name.
+        # Approach: insert two with distinct names, then raw UPDATE one to match the other.
+        keeper = VendorCard(
+            normalized_name=f"{dup_name}-a",
+            display_name="Dup Vendor A",
+            sighting_count=10,
+            created_at=datetime.now(timezone.utc),
+        )
+        loser = VendorCard(
+            normalized_name=f"{dup_name}-b",
+            display_name="Dup Vendor B",
+            sighting_count=3,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add_all([keeper, loser])
+        db_session.flush()
+
+        keeper_id = keeper.id
+        loser_id = loser.id
+
+        # Drop the unique index so we can set both to the same normalized_name
+        db_session.execute(text("DROP INDEX IF EXISTS ix_vendor_cards_normalized_name"))
+        db_session.execute(
+            text("UPDATE vendor_cards SET normalized_name = :name WHERE id IN (:kid, :lid)").bindparams(
+                name=dup_name, kid=keeper_id, lid=loser_id
+            )
+        )
+        db_session.commit()
+
+        result = deduplicate_vendor_names(db_session)
+        assert result == 1
+
+        # Loser should be deleted
+        surviving = db_session.query(VendorCard).filter(VendorCard.normalized_name == dup_name).all()
+        assert len(surviving) == 1
+        assert surviving[0].id == keeper_id
+        assert surviving[0].sighting_count == 13  # 10 + 3
 
 
 class TestRunFullRepair:
