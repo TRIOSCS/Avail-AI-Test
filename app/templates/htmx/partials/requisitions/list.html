@@ -228,9 +228,9 @@
             </th>
             {# Role-based column order: sales sees quote/offer/deadline first, sourcing sees coverage/RFQs first #}
             {% if user_role == 'sales' %}
-              {% set columns = [('Name', 'name'), ('Customer', 'customer_name'), ('Status', 'status'), ('Offers', None), ('Parts', None), ('Urgency', 'urgency'), ('Owner', None), ('Created', 'created_at'), ('', None)] %}
+              {% set columns = [('Name', 'name'), ('Customer', 'customer_name'), ('Status', 'status'), ('Offers', 'offer_count'), ('Parts', 'req_count'), ('Urgency', 'urgency'), ('Deadline', 'deadline'), ('Updated', 'updated_at'), ('Created', 'created_at'), ('', None)] %}
             {% else %}
-              {% set columns = [('Name', 'name'), ('Customer', 'customer_name'), ('Owner', None), ('Parts', None), ('Offers', None), ('Status', 'status'), ('Urgency', 'urgency'), ('Created', 'created_at'), ('', None)] %}
+              {% set columns = [('Name', 'name'), ('Customer', 'customer_name'), ('Owner', None), ('Parts', 'req_count'), ('Offers', 'offer_count'), ('Status', 'status'), ('Urgency', 'urgency'), ('Deadline', 'deadline'), ('Updated', 'updated_at'), ('Created', 'created_at'), ('', None)] %}
             {% endif %}
             {% for col_name, col_key in columns %}
             <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">

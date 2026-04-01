@@ -400,13 +400,31 @@ async def requisitions_list_partial(
 
     total = query.count()
 
-    # Sorting
+    # Sorting — subqueries for computed columns (parts/offers count)
+    req_count_sub = (
+        select(sqlfunc.count(Requirement.id))
+        .where(Requirement.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("req_count_sort")
+    )
+    offer_count_sub = (
+        select(sqlfunc.count(Offer.id))
+        .where(Offer.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("offer_count_sort")
+    )
     sort_col_map = {
         "name": Requisition.name,
         "customer_name": Requisition.customer_name,
         "status": Requisition.status,
         "urgency": Requisition.urgency,
         "created_at": Requisition.created_at,
+        "deadline": Requisition.deadline,
+        "updated_at": Requisition.updated_at,
+        "req_count": req_count_sub,
+        "offer_count": offer_count_sub,
     }
     sort_col = sort_col_map.get(sort, Requisition.created_at)
     order = sort_col.desc() if dir == "desc" else sort_col.asc()
@@ -9200,11 +9218,17 @@ async def part_header_edit_cell(
 
     from markupsafe import escape
 
+    context = request.query_params.get("context", "header")
     current = getattr(req, field, "") or ""
     safe_current = escape(current)
     cell_id = f"hdr-{field}"
     cancel_url = f"/v2/partials/parts/{requirement_id}/header"
     save_url = f"/v2/partials/parts/{requirement_id}/header"
+    swap_target = "#part-header-wrap"
+    if context == "tab":
+        cell_id = f"reqd-{field}"
+        cancel_url = f"/v2/partials/parts/{requirement_id}/tab/req-details"
+        swap_target = "#part-detail"
 
     if field == "sourcing_status":
         statuses = ["open", "sourcing", "offered", "quoted", "won", "lost", "archived"]
@@ -9275,15 +9299,15 @@ async def part_header_edit_cell(
             f'<div id="{cell_id}" class="w-full">'
             f'<textarea name="value" rows="2" '
             f'class="w-full text-xs px-1.5 py-0.5 rounded border border-brand-300 focus:ring-1 focus:ring-brand-500 resize-y" '
-            f"@keydown.escape=\"htmx.ajax('GET', '{cancel_url}', {{target: '#part-header-wrap', swap: 'innerHTML'}})\" "
+            f"@keydown.escape=\"htmx.ajax('GET', '{cancel_url}', {{target: '{swap_target}', swap: 'innerHTML'}})\" "
             f"autofocus>{safe_current}</textarea>"
             f'<div class="flex items-center gap-2 mt-1">'
             f'<button type="button" '
-            f"onclick=\"htmx.ajax('PATCH', '{save_url}', {{target: '#part-header-wrap', swap: 'innerHTML', "
+            f"onclick=\"htmx.ajax('PATCH', '{save_url}', {{target: '{swap_target}', swap: 'innerHTML', "
             f"values: {{field: '{field}', value: this.closest('div').parentElement.querySelector('textarea').value}}}})\" "
             f'class="text-[10px] px-2 py-0.5 bg-brand-500 text-white rounded hover:bg-brand-600 font-medium">Save</button>'
             f'<button type="button" '
-            f"onclick=\"htmx.ajax('GET', '{cancel_url}', {{target: '#part-header-wrap', swap: 'innerHTML'}})\" "
+            f"onclick=\"htmx.ajax('GET', '{cancel_url}', {{target: '{swap_target}', swap: 'innerHTML'}})\" "
             f'class="text-[10px] text-gray-500 hover:text-gray-700">Cancel</button>'
             f"</div></div>",
         )
