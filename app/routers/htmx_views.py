@@ -17,7 +17,7 @@ from pathlib import Path
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
 from loguru import logger
-from sqlalchemy import desc, exists, or_, select
+from sqlalchemy import case, desc, exists, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
@@ -342,7 +342,7 @@ async def requisitions_list_partial(
     date_from: str = "",
     date_to: str = "",
     sort: str = "created_at",
-    dir: str = "desc",
+    sort_dir: str = Query("desc", alias="dir"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
@@ -400,7 +400,7 @@ async def requisitions_list_partial(
 
     total = query.count()
 
-    # Sorting — subqueries for computed columns (parts/offers count)
+    # Sorting — whitelist of sortable columns, including subqueries for computed counts
     req_count_sub = (
         select(sqlfunc.count(Requirement.id))
         .where(Requirement.requisition_id == Requisition.id)
@@ -415,19 +415,30 @@ async def requisitions_list_partial(
         .scalar_subquery()
         .label("offer_count_sort")
     )
+    # ASAP sorts before all dates (most urgent), NULLs sort last
+    deadline_sort = case(
+        (Requisition.deadline == "ASAP", "0000-00-00"),
+        (Requisition.deadline.is_(None), "9999-99-99"),
+        else_=Requisition.deadline,
+    )
     sort_col_map = {
         "name": Requisition.name,
         "customer_name": Requisition.customer_name,
         "status": Requisition.status,
         "urgency": Requisition.urgency,
         "created_at": Requisition.created_at,
-        "deadline": Requisition.deadline,
+        "deadline": deadline_sort,
         "updated_at": Requisition.updated_at,
         "req_count": req_count_sub,
         "offer_count": offer_count_sub,
     }
-    sort_col = sort_col_map.get(sort, Requisition.created_at)
-    order = sort_col.desc() if dir == "desc" else sort_col.asc()
+    sort_col = sort_col_map.get(sort)
+    if sort_col is None:
+        logger.warning("Unknown sort key '{}', falling back to created_at", sort)
+        sort_col = Requisition.created_at
+        sort = "created_at"
+    direction = sort_dir if sort_dir in ("asc", "desc") else "desc"
+    order = sort_col.desc().nullslast() if direction == "desc" else sort_col.asc().nullslast()
     reqs = query.order_by(order).offset(offset).limit(limit).all()
 
     # Attach counts + match reason when searching
@@ -482,7 +493,7 @@ async def requisitions_list_partial(
             "date_from": date_from,
             "date_to": date_to,
             "sort": sort,
-            "dir": dir,
+            "dir": direction,
             "total": total,
             "limit": limit,
             "offset": offset,

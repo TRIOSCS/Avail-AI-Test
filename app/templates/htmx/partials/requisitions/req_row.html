@@ -1,11 +1,11 @@
 {# req_row.html — Single requisition table row for the list view.
-   Receives: req (Requisition ORM object with req_count, offer_count, creator), user_role (str), user (User).
+   Receives: req (Requisition ORM object with req_count, offer_count, deadline, updated_at, creator), user_role (str), user (User). Uses |timeago filter.
    Called by: requisitions/list.html loop, create endpoint (prepend), inline save (row swap).
    Depends on: brand palette, Alpine.js (selectedIds), HTMX.
 #}
 {% from "htmx/partials/shared/_macros.html" import req_status_badge, urgency_badge %}
 
-{# Reusable cell macros — some are inline-editable (dblclick) #}
+{# Reusable cell macros — name/owner/status/urgency are inline-editable (dblclick); others are read-only #}
 {% macro cell_name() %}
   <td class="px-4 py-3 text-sm font-medium text-brand-500 group-hover:text-brand-600"
       hx-get="/v2/partials/requisitions/{{ req.id }}/edit/name?context=row"

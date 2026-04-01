@@ -423,6 +423,71 @@ class TestRequisitionsListPartial:
         resp = client.get("/v2/partials/requisitions?sort=created_at&dir=desc")
         assert resp.status_code == 200
 
+    def test_list_sort_by_req_count(self, client: TestClient, db_session: Session, test_user: User):
+        """Sort by parts count (correlated subquery)."""
+        r1 = _make_requisition(db_session, test_user, name="FEW-PARTS")
+        r2 = _make_requisition(db_session, test_user, name="MANY-PARTS")
+        _make_requirement(db_session, r1)
+        for i in range(3):
+            _make_requirement(db_session, r2, primary_mpn=f"MPN-{i}")
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions?sort=req_count&dir=desc")
+        assert resp.status_code == 200
+        assert resp.text.index("MANY-PARTS") < resp.text.index("FEW-PARTS")
+
+    def test_list_sort_by_offer_count(self, client: TestClient, db_session: Session, test_user: User):
+        """Sort by offers count (correlated subquery)."""
+        r1 = _make_requisition(db_session, test_user, name="NO-OFFERS")
+        r2 = _make_requisition(db_session, test_user, name="HAS-OFFERS")
+        _make_offer(db_session, r2, test_user)
+        _make_offer(db_session, r2, test_user, mpn="MPN-2")
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions?sort=offer_count&dir=desc")
+        assert resp.status_code == 200
+        assert resp.text.index("HAS-OFFERS") < resp.text.index("NO-OFFERS")
+
+    def test_list_sort_by_deadline(self, client: TestClient, db_session: Session, test_user: User):
+        """Sort by deadline — ASAP sorts before dates, NULLs last."""
+        _make_requisition(db_session, test_user, name="ASAP-REQ", deadline="ASAP")
+        _make_requisition(db_session, test_user, name="DATE-REQ", deadline="2026-12-31")
+        _make_requisition(db_session, test_user, name="NO-DEADLINE")
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions?sort=deadline&dir=asc")
+        assert resp.status_code == 200
+        # ASAP should appear before dated deadlines
+        assert resp.text.index("ASAP-REQ") < resp.text.index("DATE-REQ")
+
+    def test_list_sort_by_updated_at(self, client: TestClient, db_session: Session, test_user: User):
+        """Sort by updated_at — NULLs sort last."""
+        _make_requisition(db_session, test_user, name="UPDATED-REQ", updated_at=datetime.now(timezone.utc))
+        _make_requisition(db_session, test_user, name="NEVER-UPDATED")
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions?sort=updated_at&dir=desc")
+        assert resp.status_code == 200
+
+    def test_list_sort_invalid_key_falls_back(self, client: TestClient, db_session: Session, test_user: User):
+        """Invalid sort key falls back to created_at without crashing."""
+        _make_requisition(db_session, test_user)
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions?sort=bogus&dir=desc")
+        assert resp.status_code == 200
+
+    def test_list_sort_invalid_dir_defaults_to_desc(self, client: TestClient, db_session: Session, test_user: User):
+        """Invalid dir value defaults to desc without crashing."""
+        _make_requisition(db_session, test_user)
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions?sort=name&dir=bogus")
+        assert resp.status_code == 200
+
+    def test_list_deadline_asap_renders_amber(self, client: TestClient, db_session: Session, test_user: User):
+        """ASAP deadline renders with amber styling."""
+        _make_requisition(db_session, test_user, deadline="ASAP")
+        db_session.commit()
+        resp = client.get("/v2/partials/requisitions")
+        assert resp.status_code == 200
+        assert "text-amber-600" in resp.text
+        assert "ASAP" in resp.text
+
     def test_list_pagination(self, client: TestClient, db_session: Session, test_user: User):
         for i in range(5):
             _make_requisition(db_session, test_user, name=f"REQ-{i}")

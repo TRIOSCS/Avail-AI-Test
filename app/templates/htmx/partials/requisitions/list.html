@@ -1,6 +1,6 @@
 {# Requisitions list partial — full-width list page.
    Shows filterable, sortable list. Clicking a row navigates to detail view.
-   Receives: requisitions, q, status, owner, urgency, date_from, date_to, sort, dir, total, limit, offset, users, user_role.
+   Receives: requisitions, q, match_counts, status, owner, urgency, date_from, date_to, sort, dir, total, limit, offset, users, user_role.
    Called by: requisitions_list_partial route.
    Depends on: partials/requisitions/req_row.html, brand palette.
 #}
@@ -220,13 +220,13 @@
     {% if requisitions %}
     <div class="avail-scroll">
       <table class="min-w-[1400px] w-full divide-y divide-gray-200">
-        <thead class="bg-gray-50">
+        <thead class="bg-white">
           <tr>
             <th class="px-3 py-3 w-10">
               <input aria-label="Select all requisitions" type="checkbox" class="h-4 w-4 rounded border-gray-200 text-brand-500 focus:ring-brand-500"
                      @change="if($event.target.checked){document.querySelectorAll('#req-table-body input[type=checkbox]').forEach(c=>{c.checked=true;selectedIds.add(parseInt(c.value))})}else{selectedIds=new Set();document.querySelectorAll('#req-table-body input[type=checkbox]').forEach(c=>c.checked=false)}; selectedIds=new Set(selectedIds)">
             </th>
-            {# Role-based column order: sales sees quote/offer/deadline first, sourcing sees coverage/RFQs first #}
+            {# Role-based column order: sales omits Owner, puts Status before Parts; non-sales includes Owner and puts Parts/Offers before Status #}
             {% if user_role == 'sales' %}
               {% set columns = [('Name', 'name'), ('Customer', 'customer_name'), ('Status', 'status'), ('Offers', 'offer_count'), ('Parts', 'req_count'), ('Urgency', 'urgency'), ('Deadline', 'deadline'), ('Updated', 'updated_at'), ('Created', 'created_at'), ('', None)] %}
             {% else %}
