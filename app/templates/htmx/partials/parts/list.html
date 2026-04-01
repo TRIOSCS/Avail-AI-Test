@@ -196,10 +196,12 @@
                   {% elif col_key == 'specs' %}
                     {% set spec_count = [req.customer_pn, req.condition, req.date_codes, req.packaging, req.firmware, req.hardware_codes]|reject('none')|reject('equalto', '')|list|length %}
                     {% if spec_count > 0 %}
-                      <span class="inline-flex items-center px-1.5 py-0 text-[10px] font-semibold rounded
-                                   {{ 'bg-emerald-100 text-emerald-700' if spec_count == 6 else 'bg-brand-100 text-brand-700' }}"
-                            title="Cust PN, Condition, Date Codes, Packaging, Firmware, Hardware">{{ spec_count }}/6</span>
-                    {% else %}—{% endif %}
+                      <span class="inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-medium rounded-md border
+                                   {% if spec_count == 6 %}bg-emerald-50 text-emerald-600 border-emerald-200
+                                   {% elif spec_count >= 4 %}bg-sky-50 text-sky-600 border-sky-200
+                                   {% else %}bg-gray-50 text-gray-500 border-gray-200{% endif %}"
+                            title="Cust PN, Condition, Date Codes, Packaging, Firmware, Hardware">{{ spec_count }}<span class="text-[9px] opacity-60">/6</span></span>
+                    {% else %}<span class="text-gray-300">—</span>{% endif %}
                   {% elif col_key == 'need_by_date' %}
                     {{ req.need_by_date or '—' }}
                   {% endif %}

@@ -91,6 +91,22 @@
   </td>
 {% endmacro %}
 
+{% macro cell_deadline() %}
+  <td class="px-4 py-3 text-sm text-gray-500 whitespace-nowrap">
+    {% if req.deadline == 'ASAP' %}
+      <span class="text-amber-600 font-medium">ASAP</span>
+    {% elif req.deadline %}
+      {{ req.deadline }}
+    {% else %}
+      —
+    {% endif %}
+  </td>
+{% endmacro %}
+
+{% macro cell_updated() %}
+  <td class="px-4 py-3 text-sm text-gray-500" title="{{ req.updated_at.strftime('%b %d, %Y') if req.updated_at else '' }}">{{ req.updated_at|timeago if req.updated_at else "—" }}</td>
+{% endmacro %}
+
 {% macro cell_created() %}
   <td class="px-4 py-3 text-sm text-gray-500" title="{{ req.created_at.strftime('%b %d, %Y') if req.created_at else '' }}">{{ req.created_at|timeago if req.created_at else "—" }}</td>
 {% endmacro %}
@@ -171,8 +187,8 @@
   </td>
   {# Role-based column order #}
   {% if user_role == 'sales' %}
-    {{ cell_name() }}{{ cell_customer() }}{{ cell_status() }}{{ cell_offers() }}{{ cell_parts() }}{{ cell_urgency() }}{{ cell_owner() }}{{ cell_created() }}{{ cell_actions() }}
+    {{ cell_name() }}{{ cell_customer() }}{{ cell_status() }}{{ cell_offers() }}{{ cell_parts() }}{{ cell_urgency() }}{{ cell_deadline() }}{{ cell_updated() }}{{ cell_created() }}{{ cell_actions() }}
   {% else %}
-    {{ cell_name() }}{{ cell_customer() }}{{ cell_owner() }}{{ cell_parts() }}{{ cell_offers() }}{{ cell_status() }}{{ cell_urgency() }}{{ cell_created() }}{{ cell_actions() }}
+    {{ cell_name() }}{{ cell_customer() }}{{ cell_owner() }}{{ cell_parts() }}{{ cell_offers() }}{{ cell_status() }}{{ cell_urgency() }}{{ cell_deadline() }}{{ cell_updated() }}{{ cell_created() }}{{ cell_actions() }}
   {% endif %}
 </tr>

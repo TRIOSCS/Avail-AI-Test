@@ -83,7 +83,7 @@
              x-effect="if (selectedPartId) htmx.ajax('GET', '/v2/partials/parts/' + selectedPartId + '/header', {target: '#part-header-wrap', swap: 'innerHTML'})">
         </div>
         {# Tab bar #}
-        <div class="border-b-2 border-brand-200 bg-gray-50/80 px-2 flex-shrink-0">
+        <div class="border-b-2 border-brand-200 bg-white px-2 flex-shrink-0">
           <nav class="flex -mb-[2px]">
             {% for tab_key, tab_label in [('offers', 'Offers'), ('sourcing', 'Sightings'), ('notes', 'Sales Notes'), ('activity', 'Activity'), ('comms', 'Tasks'), ('req-details', 'REQ Detail')] %}
             <button @click="activeTab = '{{ tab_key }}'; htmx.ajax('GET', '/v2/partials/parts/' + selectedPartId + '/tab/{{ tab_key }}', {target: '#part-detail'})"

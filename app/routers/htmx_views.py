@@ -400,13 +400,31 @@ async def requisitions_list_partial(
 
     total = query.count()
 
-    # Sorting
+    # Sorting — subqueries for computed columns (parts/offers count)
+    req_count_sub = (
+        select(sqlfunc.count(Requirement.id))
+        .where(Requirement.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("req_count_sort")
+    )
+    offer_count_sub = (
+        select(sqlfunc.count(Offer.id))
+        .where(Offer.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("offer_count_sort")
+    )
     sort_col_map = {
         "name": Requisition.name,
         "customer_name": Requisition.customer_name,
         "status": Requisition.status,
         "urgency": Requisition.urgency,
         "created_at": Requisition.created_at,
+        "deadline": Requisition.deadline,
+        "updated_at": Requisition.updated_at,
+        "req_count": req_count_sub,
+        "offer_count": offer_count_sub,
     }
     sort_col = sort_col_map.get(sort, Requisition.created_at)
     order = sort_col.desc() if dir == "desc" else sort_col.asc()

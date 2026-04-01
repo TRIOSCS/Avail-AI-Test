@@ -124,16 +124,16 @@ hr { border-color: #BFC4CE; }
   font-weight: 700;
   letter-spacing: 0.08em;
   text-transform: uppercase;
-  color: #4B5463;
-  background: #F4F5F7;
-  border-bottom: 2px solid #BFC4CE;
+  color: #6B7280;
+  background: #fff;
+  border-bottom: 2px solid #E5E7EB;
   padding: 12px 16px;
 }
 
 .responsive-table td,
 .data-table td {
   padding: 14px 16px;
-  border-bottom: 1px solid #BFC4CE;
+  border-bottom: 1px solid #F0F1F4;
   color: #1e293b;
   font-size: 13px;
 }
@@ -143,14 +143,9 @@ hr { border-color: #BFC4CE; }
   transition: background-color 0.15s;
 }
 
-.responsive-table tbody tr:nth-child(even) td,
-.data-table tbody tr:nth-child(even) td {
-  background: #F8F9FB;
-}
-
 .responsive-table tbody tr:hover td,
 .data-table tbody tr:hover td {
-  background: #EEF0F4;
+  background: #F8FAFC;
 }
 
 /* ── Compact table — denser but still readable ────────────────────── */
@@ -163,12 +158,12 @@ hr { border-color: #BFC4CE; }
 .compact-table th {
   font-family: 'Aptos', 'Segoe UI', system-ui, sans-serif;
   font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
+  font-weight: 600;
+  letter-spacing: 0.05em;
   text-transform: uppercase;
-  color: #4B5463;
-  background: #F4F5F7;
-  border-bottom: 2px solid #BFC4CE;
+  color: #6B7280;
+  background: #fff;
+  border-bottom: 2px solid #E5E7EB;
   padding: 8px 10px;
   position: sticky;
   top: 0;
@@ -178,7 +173,7 @@ hr { border-color: #BFC4CE; }
 }
 .compact-table td {
   padding: 6px 10px;
-  border-bottom: 1px solid #BFC4CE;
+  border-bottom: 1px solid #F0F1F4;
   color: #1e293b;
   white-space: nowrap;
   font-family: 'JetBrains Mono', ui-monospace, monospace;
@@ -192,14 +187,8 @@ hr { border-color: #BFC4CE; }
   transition: background-color 0.1s;
   cursor: pointer;
 }
-.compact-table tbody tr:nth-child(even) td {
-  background: #F8F9FB;
-}
 .compact-table tbody tr:hover td {
-  background: #EEF0F4;
-}
-.compact-table tbody tr:nth-child(even):hover td {
-  background: #EEF0F4;
+  background: #F8FAFC;
 }
 .compact-table tbody tr.row-selected td {
   background: rgba(58, 66, 82, 0.12);
@@ -269,8 +258,8 @@ table {
   align-items: center;
   gap: 8px;
   padding: 10px 14px;
-  background: #F4F5F7;
-  border-bottom: 2px solid #D5D8DF;
+  background: #fff;
+  border-bottom: 1px solid #E5E7EB;
   flex-shrink: 0;
 }
 .panel-title {
