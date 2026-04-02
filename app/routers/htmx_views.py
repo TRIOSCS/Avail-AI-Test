@@ -13,6 +13,7 @@ import json
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from typing import Literal
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, Form, HTTPException, Query, Request, UploadFile
 from fastapi.responses import HTMLResponse
@@ -342,7 +343,7 @@ async def requisitions_list_partial(
     date_from: str = "",
     date_to: str = "",
     sort: str = "created_at",
-    sort_dir: str = Query("desc", alias="dir"),
+    sort_dir: Literal["asc", "desc"] = Query("desc", alias="dir"),
     limit: int = Query(50, ge=1, le=100),
     offset: int = Query(0, ge=0),
     user: User = Depends(require_user),
@@ -415,10 +416,9 @@ async def requisitions_list_partial(
         .scalar_subquery()
         .label("offer_count_sort")
     )
-    # ASAP sorts before all dates (most urgent), NULLs sort last
+    # ASAP sorts before all dates (most urgent); nullslast() handles NULLs
     deadline_sort = case(
         (Requisition.deadline == "ASAP", "0000-00-00"),
-        (Requisition.deadline.is_(None), "9999-99-99"),
         else_=Requisition.deadline,
     )
     sort_col_map = {
@@ -437,8 +437,8 @@ async def requisitions_list_partial(
         logger.warning("Unknown sort key '{}', falling back to created_at", sort)
         sort_col = Requisition.created_at
         sort = "created_at"
-    direction = sort_dir if sort_dir in ("asc", "desc") else "desc"
-    order = sort_col.desc().nullslast() if direction == "desc" else sort_col.asc().nullslast()
+    # nullslast: NULLs always sort to the bottom regardless of direction
+    order = sort_col.desc().nullslast() if sort_dir == "desc" else sort_col.asc().nullslast()
     reqs = query.order_by(order).offset(offset).limit(limit).all()
 
     # Attach counts + match reason when searching
@@ -493,7 +493,7 @@ async def requisitions_list_partial(
             "date_from": date_from,
             "date_to": date_to,
             "sort": sort,
-            "dir": direction,
+            "dir": sort_dir,
             "total": total,
             "limit": limit,
             "offset": offset,

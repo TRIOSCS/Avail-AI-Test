@@ -454,16 +454,18 @@ class TestRequisitionsListPartial:
         db_session.commit()
         resp = client.get("/v2/partials/requisitions?sort=deadline&dir=asc")
         assert resp.status_code == 200
-        # ASAP should appear before dated deadlines
+        # ASAP should appear before dated deadlines, NULLs last
         assert resp.text.index("ASAP-REQ") < resp.text.index("DATE-REQ")
+        assert resp.text.index("DATE-REQ") < resp.text.index("NO-DEADLINE")
 
     def test_list_sort_by_updated_at(self, client: TestClient, db_session: Session, test_user: User):
-        """Sort by updated_at — NULLs sort last."""
+        """Sort by updated_at — updated rows first, NULLs sort last."""
         _make_requisition(db_session, test_user, name="UPDATED-REQ", updated_at=datetime.now(timezone.utc))
         _make_requisition(db_session, test_user, name="NEVER-UPDATED")
         db_session.commit()
         resp = client.get("/v2/partials/requisitions?sort=updated_at&dir=desc")
         assert resp.status_code == 200
+        assert resp.text.index("UPDATED-REQ") < resp.text.index("NEVER-UPDATED")
 
     def test_list_sort_invalid_key_falls_back(self, client: TestClient, db_session: Session, test_user: User):
         """Invalid sort key falls back to created_at without crashing."""
@@ -472,12 +474,12 @@ class TestRequisitionsListPartial:
         resp = client.get("/v2/partials/requisitions?sort=bogus&dir=desc")
         assert resp.status_code == 200
 
-    def test_list_sort_invalid_dir_defaults_to_desc(self, client: TestClient, db_session: Session, test_user: User):
-        """Invalid dir value defaults to desc without crashing."""
+    def test_list_sort_invalid_dir_returns_422(self, client: TestClient, db_session: Session, test_user: User):
+        """Invalid dir value is rejected by FastAPI Literal validation."""
         _make_requisition(db_session, test_user)
         db_session.commit()
         resp = client.get("/v2/partials/requisitions?sort=name&dir=bogus")
-        assert resp.status_code == 200
+        assert resp.status_code == 422
 
     def test_list_deadline_asap_renders_amber(self, client: TestClient, db_session: Session, test_user: User):
         """ASAP deadline renders with amber styling."""
