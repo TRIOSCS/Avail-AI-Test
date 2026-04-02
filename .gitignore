@@ -22,6 +22,9 @@ node_modules/
 # Dev/test artifacts
 .coverage
 coverage.xml
+coverage.json
+*.cover
+*,cover
 test-results.xml
 test-results/
 playwright-report/
