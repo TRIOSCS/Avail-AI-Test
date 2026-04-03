@@ -106,13 +106,18 @@ class TestPerformanceTracking:
 
     def test_performance_tracking_happy_path(self, scheduler_db):
         """Performance tracking calls all scoring services."""
+        # Fix datetime to day > 7 to avoid grace-period double-call
+        fixed_now = datetime(2026, 4, 15, 12, 0, 0, tzinfo=timezone.utc)
         with (
+            patch("app.jobs.offers_jobs.datetime") as mock_dt,
             patch("app.services.vendor_scorecard.compute_all_vendor_scorecards") as mock_vs,
             patch("app.services.buyer_leaderboard.compute_buyer_leaderboard") as mock_bl,
             patch("app.services.avail_score_service.compute_all_avail_scores") as mock_as,
             patch("app.services.multiplier_score_service.compute_all_multiplier_scores") as mock_ms,
             patch("app.services.unified_score_service.compute_all_unified_scores") as mock_us,
         ):
+            mock_dt.now.return_value = fixed_now
+            mock_dt.side_effect = lambda *args, **kw: datetime(*args, **kw)
             mock_vs.return_value = {"updated": 10, "skipped_cold_start": 2}
             mock_bl.return_value = {"entries": 5}
             mock_as.return_value = {"buyers": 3, "sales": 2, "saved": 5}

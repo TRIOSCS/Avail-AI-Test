@@ -880,7 +880,7 @@ class TestLogBuyplanActivity:
         from app.services.buyplan_notifications import log_buyplan_activity
 
         user = _make_user(db_session)
-        plan = _make_plan(db_session, user.id, status="approved")
+        plan = _make_plan(db_session, user.id, status="active")
 
         log_buyplan_activity(db_session, user.id, plan, "buyplan_approved", "Manager approved")
         db_session.commit()
@@ -893,7 +893,7 @@ class TestLogBuyplanActivity:
         assert act.requisition_id == plan.requisition_id
         assert f"Buy Plan #{plan.id}: Manager approved" == act.subject
         assert f"plan_id={plan.id}" in act.notes
-        assert "status=approved" in act.notes
+        assert "status=active" in act.notes
 
     def test_no_detail(self, db_session):
         from app.services.buyplan_notifications import log_buyplan_activity

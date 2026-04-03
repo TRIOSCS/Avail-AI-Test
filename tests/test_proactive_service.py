@@ -898,7 +898,7 @@ class TestScorecardPOCounts:
         bp = BuyPlan(
             requisition_id=test_requisition.id,
             quote_id=test_quote.id,
-            status="approved",
+            status="active",
             submitted_by_id=test_user.id,
         )
         db_session.add(bp)
@@ -929,7 +929,7 @@ class TestScorecardPOCounts:
         bp = BuyPlan(
             requisition_id=test_requisition.id,
             quote_id=test_quote.id,
-            status="po_entered",
+            status="active",
             submitted_by_id=test_user.id,
         )
         db_session.add(bp)

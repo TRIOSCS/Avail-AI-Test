@@ -266,3 +266,169 @@ class TestSearchAllStatsMerge:
             resp = client.post(f"/api/requisitions/{req.id}/search")
         assert resp.status_code == 200
         # Coverage: line 194 (lead_cards.append in _attach_lead_data)
+
+
+# ── list_requirement_sightings — material_card_id + string substitutes ──
+
+
+class TestRequirementSightingsGaps:
+    """Cover requirements.py lines 1327-1342 via GET /api/requirements/{id}/sightings."""
+
+    def test_sightings_with_material_card_id(self, client: TestClient, db_session: Session, test_user: User):
+        """Requirement with material_card_id adds it to card_ids (line 1328)."""
+        from app.models.intelligence import MaterialCard
+
+        reqn = Requisition(
+            name="Sig Test",
+            status="active",
+            urgency="normal",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(reqn)
+        db_session.commit()
+        db_session.refresh(reqn)
+
+        card = MaterialCard(
+            display_mpn="LM317T",
+            normalized_mpn="lm317t",
+            manufacturer="TI",
+        )
+        db_session.add(card)
+        db_session.commit()
+        db_session.refresh(card)
+
+        req_item = Requirement(
+            requisition_id=reqn.id,
+            primary_mpn="LM317T",
+            target_qty=100,
+            material_card_id=card.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req_item)
+        db_session.commit()
+        db_session.refresh(req_item)
+
+        resp = client.get(f"/api/requirements/{req_item.id}/sightings")
+        assert resp.status_code == 200
+
+    def test_sightings_with_string_substitutes(self, client: TestClient, db_session: Session, test_user: User):
+        """String-format substitutes are processed into sub_keys (lines 1333-1335, 1337-1338)."""
+        from app.models.intelligence import MaterialCard
+
+        reqn = Requisition(
+            name="Sub Test",
+            status="active",
+            urgency="normal",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(reqn)
+        db_session.commit()
+        db_session.refresh(reqn)
+
+        # MaterialCard for the substitute so the db.query finds it (line 1337)
+        sub_card = MaterialCard(
+            display_mpn="NE555P",
+            normalized_mpn="ne555p",
+            manufacturer="TI",
+        )
+        db_session.add(sub_card)
+        db_session.commit()
+
+        req_item = Requirement(
+            requisition_id=reqn.id,
+            primary_mpn="NE555",
+            target_qty=50,
+            substitutes=["NE555P"],  # STRING format — exercises sub_str branch
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req_item)
+        db_session.commit()
+        db_session.refresh(req_item)
+
+        resp = client.get(f"/api/requirements/{req_item.id}/sightings")
+        assert resp.status_code == 200
+
+
+# ── list_requirement_offers — string substitutes + MaterialCard ──────────
+
+
+class TestRequirementOffersGaps:
+    """Cover requirements.py lines 1430-1435 via GET /api/requirements/{id}/offers."""
+
+    def test_offers_with_string_substitutes_and_material_card(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """String substitutes with matching MaterialCard are added to card_ids (lines 1431-1435)."""
+        from app.models.intelligence import MaterialCard
+
+        reqn = Requisition(
+            name="Offers Sub Test",
+            status="active",
+            urgency="normal",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(reqn)
+        db_session.commit()
+        db_session.refresh(reqn)
+
+        sub_card = MaterialCard(
+            display_mpn="LM358N",
+            normalized_mpn="lm358n",
+            manufacturer="TI",
+        )
+        db_session.add(sub_card)
+        db_session.commit()
+
+        req_item = Requirement(
+            requisition_id=reqn.id,
+            primary_mpn="LM358",
+            target_qty=200,
+            substitutes=["LM358N"],  # STRING format — exercises lines 1430-1435
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req_item)
+        db_session.commit()
+        db_session.refresh(req_item)
+
+        resp = client.get(f"/api/requirements/{req_item.id}/offers")
+        assert resp.status_code == 200
+
+
+# ── list_requirements — Contact record for requisition ───────────────────
+
+
+class TestListRequirementsContactGap:
+    """Cover requirements.py lines 329-331 (hours_since computation)."""
+
+    def test_list_requirements_with_recent_contact(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """Contact row for the requisition triggers hours_since computation (lines 329-331)."""
+        from app.models.offers import Contact
+
+        reqn = Requisition(
+            name="Contact Gap Test",
+            status="active",
+            urgency="normal",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(reqn)
+        db_session.commit()
+        db_session.refresh(reqn)
+
+        contact = Contact(
+            requisition_id=reqn.id,
+            user_id=test_user.id,
+            contact_type="email",
+            vendor_name="Test Co",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(contact)
+        db_session.commit()
+
+        resp = client.get(f"/api/requisitions/{reqn.id}/requirements")
+        assert resp.status_code == 200

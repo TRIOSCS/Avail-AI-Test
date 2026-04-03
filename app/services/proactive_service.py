@@ -644,7 +644,7 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
         db.query(func.count(BuyPlan.id))
         .filter(
             BuyPlan.quote_id.in_(db.query(po_subq.c.converted_quote_id)),
-            BuyPlan.status.in_(["approved", "po_entered"]),
+            BuyPlan.status.in_(["active", "completed"]),
         )
         .scalar()
     ) or 0
@@ -723,7 +723,7 @@ def get_scorecard(db: Session, salesperson_id: int | None = None) -> dict:
         po_by_sp = dict(
             db.query(ProactiveOffer.salesperson_id, func.count(BuyPlan.id))
             .join(BuyPlan, BuyPlan.quote_id == ProactiveOffer.converted_quote_id)
-            .filter(BuyPlan.status.in_(["approved", "po_entered"]))
+            .filter(BuyPlan.status.in_(["active", "completed"]))
             .group_by(ProactiveOffer.salesperson_id)
             .all()
         )
