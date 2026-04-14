@@ -654,6 +654,25 @@ class TestMouserConnector:
         assert result == []
 
     @pytest.mark.asyncio
+    async def test_do_search_invalid_part_number_still_raises(self):
+        """A catalog-vocabulary 'Invalid ...' error (e.g. 'Invalid part number') must
+        NOT be treated as an auth error.
+
+        It should raise so BaseConnector records the failure and the circuit breaker
+        observes it. This guards the auth-error matcher against the obvious 'invalid'
+        substring false-positive.
+        """
+        c = self._make_connector()
+        resp = _mock_response(
+            200,
+            {"Errors": [{"Message": "Invalid part number"}]},
+        )
+        with patch("app.connectors.mouser.http") as mock_http:
+            mock_http.post = AsyncMock(return_value=resp)
+            with pytest.raises(RuntimeError, match="Mouser API: Invalid part number"):
+                await c._do_search("LM317T")
+
+    @pytest.mark.asyncio
     async def test_do_search_429_returns_empty(self):
         """Mouser 429 (rate limit) returns empty, does not raise."""
         c = self._make_connector()

@@ -80,12 +80,15 @@ class MouserConnector(BaseConnector):
             # Auth errors (bad / revoked / missing API key) — return empty
             # instead of raising so BaseConnector._search_with_retry does
             # not burn ~8s per search on exponential backoff retries.
-            if (
-                "invalid" in msg_lower
-                or "identifier" in msg_lower
-                or "api key" in msg_lower
+            # Require "invalid" to co-occur with an auth noun so catalog
+            # errors like "Invalid part number" still raise and reach the
+            # circuit breaker instead of being silently swallowed.
+            is_auth_error = (
+                "api key" in msg_lower
                 or "unauthorized" in msg_lower
-            ):
+                or ("invalid" in msg_lower and ("identifier" in msg_lower or "key" in msg_lower))
+            )
+            if is_auth_error:
                 logger.warning(f"Mouser: auth error for {part_number}: {msg}")
                 return []
             logger.warning(f"Mouser API errors for {part_number}: {errors}")
