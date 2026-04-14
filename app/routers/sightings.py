@@ -9,6 +9,7 @@ Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
             scoring.py, search_service, email_service, template_env
 """
 
+import asyncio
 import json
 import time
 from datetime import datetime, timedelta, timezone
@@ -705,21 +706,36 @@ async def sightings_batch_refresh(
     failed = 0
     skipped = 0
     now = datetime.now(timezone.utc)
+
+    # Build the list of requirements that should actually be searched.
+    # Anything that is missing or within the rate-guard cooldown is
+    # accounted for up-front so we only spawn tasks for real work.
+    to_search: list[tuple[int, Requirement]] = []
     for rid in requirement_ids:
         req_obj = reqs_by_id.get(int(rid))
         if not req_obj:
             failed += 1
             continue
-        # Skip if searched recently
         if _within_rate_limit(req_obj.last_searched_at, now):
             skipped += 1
             continue
-        try:
-            await search_requirement(req_obj, db)
-            success += 1
-        except Exception:
-            logger.warning("Batch refresh failed for requirement %s", rid, exc_info=True)
-            failed += 1
+        to_search.append((int(rid), req_obj))
+
+    # Fan out. search_requirement() opens its own write session per
+    # call (see commit 55093bf1), so concurrent invocations are safe.
+    # return_exceptions=True ensures one failing search does not cancel
+    # the rest.
+    if to_search:
+        results = await asyncio.gather(
+            *(search_requirement(req_obj, db) for _, req_obj in to_search),
+            return_exceptions=True,
+        )
+        for (rid, _), outcome in zip(to_search, results):
+            if isinstance(outcome, Exception):
+                logger.warning("Batch refresh failed for requirement %s", rid, exc_info=outcome)
+                failed += 1
+            else:
+                success += 1
 
     # Notify all connected clients that these requirements changed
     for rid in requirement_ids:

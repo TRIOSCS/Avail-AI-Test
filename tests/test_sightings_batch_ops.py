@@ -59,7 +59,7 @@ def _make_req_and_requirement(db: Session, user_id: int, mpn: str = "LM317T"):
 
 
 def test_batch_refresh_empty_list(client, db_session):
-    """batch-refresh with empty requirement_ids returns 200 toast."""
+    """Batch-refresh with empty requirement_ids returns 200 toast."""
     resp = client.post(
         "/v2/partials/sightings/batch-refresh",
         data={"requirement_ids": "[]"},
@@ -68,7 +68,7 @@ def test_batch_refresh_empty_list(client, db_session):
 
 
 def test_batch_refresh_invalid_json_returns_400(client):
-    """batch-refresh with bad JSON returns 400."""
+    """Batch-refresh with bad JSON returns 400."""
     resp = client.post(
         "/v2/partials/sightings/batch-refresh",
         data={"requirement_ids": "not-json"},
@@ -77,7 +77,7 @@ def test_batch_refresh_invalid_json_returns_400(client):
 
 
 def test_batch_refresh_too_many_items(client):
-    """batch-refresh with > MAX_BATCH_SIZE items returns 400."""
+    """Batch-refresh with > MAX_BATCH_SIZE items returns 400."""
     too_many = json.dumps(list(range(1001)))
     resp = client.post(
         "/v2/partials/sightings/batch-refresh",
@@ -87,7 +87,7 @@ def test_batch_refresh_too_many_items(client):
 
 
 def test_batch_refresh_nonexistent_requirement(client, db_session):
-    """batch-refresh with a non-existent requirement ID counts as failed."""
+    """Batch-refresh with a non-existent requirement ID counts as failed."""
     with patch("app.search_service.search_requirement", new_callable=AsyncMock):
         resp = client.post(
             "/v2/partials/sightings/batch-refresh",
@@ -98,7 +98,7 @@ def test_batch_refresh_nonexistent_requirement(client, db_session):
 
 
 def test_batch_refresh_valid_requirement(client, db_session, test_user):
-    """batch-refresh calls search_requirement for a valid requirement."""
+    """Batch-refresh calls search_requirement for a valid requirement."""
     _, requirement = _make_req_and_requirement(db_session, test_user.id)
     db_session.commit()
 
@@ -115,11 +115,47 @@ def test_batch_refresh_valid_requirement(client, db_session, test_user):
     assert resp.status_code == 200
 
 
+def test_batch_refresh_runs_searches_in_parallel(client, db_session, test_user):
+    """Batch-refresh must run search_requirement calls concurrently.
+
+    With the serial loop, N requirements = N × wall_time. With gather, N requirements ≈
+    1 × wall_time. We verify this by giving each search a 0.2s sleep and asserting that
+    3 requirements complete in well under 0.6s.
+    """
+    import asyncio
+    import time
+
+    _, req1 = _make_req_and_requirement(db_session, test_user.id)
+    _, req2 = _make_req_and_requirement(db_session, test_user.id)
+    _, req3 = _make_req_and_requirement(db_session, test_user.id)
+    db_session.commit()
+
+    async def slow_search(req_obj, db):
+        await asyncio.sleep(0.2)
+        return None
+
+    with patch(
+        "app.search_service.search_requirement",
+        side_effect=slow_search,
+    ):
+        start = time.perf_counter()
+        resp = client.post(
+            "/v2/partials/sightings/batch-refresh",
+            data={"requirement_ids": json.dumps([req1.id, req2.id, req3.id])},
+        )
+        elapsed = time.perf_counter() - start
+
+    assert resp.status_code == 200
+    # Serial would be ≥0.6s. Parallel should be ~0.2s + overhead.
+    # Give generous headroom for CI jitter but stay under the serial floor.
+    assert elapsed < 0.5, f"batch-refresh still serial: {elapsed:.3f}s for 3 × 0.2s"
+
+
 # ── batch-assign ──────────────────────────────────────────────────
 
 
 def test_batch_assign_sets_buyer(client, db_session, test_user):
-    """batch-assign sets assigned_buyer_id on matched requirements."""
+    """Batch-assign sets assigned_buyer_id on matched requirements."""
 
     _, requirement = _make_req_and_requirement(db_session, test_user.id)
     db_session.commit()
@@ -138,7 +174,7 @@ def test_batch_assign_sets_buyer(client, db_session, test_user):
 
 
 def test_batch_assign_empty_list(client):
-    """batch-assign with empty list returns warning toast."""
+    """Batch-assign with empty list returns warning toast."""
     resp = client.post(
         "/v2/partials/sightings/batch-assign",
         data={"requirement_ids": "[]", "buyer_id": "1"},
@@ -148,7 +184,7 @@ def test_batch_assign_empty_list(client):
 
 
 def test_batch_assign_too_many(client):
-    """batch-assign with > MAX_BATCH_SIZE returns 400."""
+    """Batch-assign with > MAX_BATCH_SIZE returns 400."""
     resp = client.post(
         "/v2/partials/sightings/batch-assign",
         data={"requirement_ids": json.dumps(list(range(1001))), "buyer_id": "1"},
@@ -160,7 +196,7 @@ def test_batch_assign_too_many(client):
 
 
 def test_batch_status_empty_list(client):
-    """batch-status with empty list returns warning toast."""
+    """Batch-status with empty list returns warning toast."""
     resp = client.post(
         "/v2/partials/sightings/batch-status",
         data={"requirement_ids": "[]", "status": "sourcing"},
@@ -170,7 +206,7 @@ def test_batch_status_empty_list(client):
 
 
 def test_batch_status_invalid_status(client, db_session, test_user):
-    """batch-status with invalid status value returns 400."""
+    """Batch-status with invalid status value returns 400."""
     _, requirement = _make_req_and_requirement(db_session, test_user.id)
     db_session.commit()
 
@@ -185,7 +221,7 @@ def test_batch_status_invalid_status(client, db_session, test_user):
 
 
 def test_batch_status_valid_transition(client, db_session, test_user):
-    """batch-status updates status for valid transitions."""
+    """Batch-status updates status for valid transitions."""
 
     _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="BC547")
     requirement.sourcing_status = "open"
@@ -203,7 +239,7 @@ def test_batch_status_valid_transition(client, db_session, test_user):
 
 
 def test_batch_status_too_many(client):
-    """batch-status with > MAX_BATCH_SIZE returns 400."""
+    """Batch-status with > MAX_BATCH_SIZE returns 400."""
     resp = client.post(
         "/v2/partials/sightings/batch-status",
         data={"requirement_ids": json.dumps(list(range(1001))), "status": "sourcing"},
@@ -215,7 +251,7 @@ def test_batch_status_too_many(client):
 
 
 def test_batch_notes_empty_list(client):
-    """batch-notes with empty list returns warning toast."""
+    """Batch-notes with empty list returns warning toast."""
     resp = client.post(
         "/v2/partials/sightings/batch-notes",
         data={"requirement_ids": "[]", "notes": "Test note"},
@@ -225,7 +261,7 @@ def test_batch_notes_empty_list(client):
 
 
 def test_batch_notes_empty_notes(client, db_session, test_user):
-    """batch-notes with empty notes returns warning toast."""
+    """Batch-notes with empty notes returns warning toast."""
     _, requirement = _make_req_and_requirement(db_session, test_user.id)
     db_session.commit()
 
@@ -238,7 +274,7 @@ def test_batch_notes_empty_notes(client, db_session, test_user):
 
 
 def test_batch_notes_creates_activity(client, db_session, test_user):
-    """batch-notes creates ActivityLog entries for each requirement."""
+    """Batch-notes creates ActivityLog entries for each requirement."""
     from app.models import ActivityLog
 
     _, requirement = _make_req_and_requirement(db_session, test_user.id)
@@ -259,7 +295,7 @@ def test_batch_notes_creates_activity(client, db_session, test_user):
 
 
 def test_batch_notes_too_many(client):
-    """batch-notes with > MAX_BATCH_SIZE returns 400."""
+    """Batch-notes with > MAX_BATCH_SIZE returns 400."""
     resp = client.post(
         "/v2/partials/sightings/batch-notes",
         data={"requirement_ids": json.dumps(list(range(1001))), "notes": "note"},
@@ -271,7 +307,7 @@ def test_batch_notes_too_many(client):
 
 
 def test_mark_unavailable_no_vendor_name(client, db_session, test_user):
-    """mark-unavailable without vendor_name returns 400."""
+    """Mark-unavailable without vendor_name returns 400."""
     _, requirement = _make_req_and_requirement(db_session, test_user.id)
     db_session.commit()
 
@@ -283,7 +319,7 @@ def test_mark_unavailable_no_vendor_name(client, db_session, test_user):
 
 
 def test_mark_unavailable_marks_sightings(client, db_session, test_user):
-    """mark-unavailable sets is_unavailable=True for matching vendor sightings."""
+    """Mark-unavailable sets is_unavailable=True for matching vendor sightings."""
     from app.models.sourcing import Sighting
 
     req_obj, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="NE555")
@@ -320,7 +356,7 @@ def test_mark_unavailable_marks_sightings(client, db_session, test_user):
 
 
 def test_assign_buyer_not_found(client, db_session):
-    """assign-buyer for non-existent requirement returns 404."""
+    """Assign-buyer for non-existent requirement returns 404."""
     resp = client.patch(
         "/v2/partials/sightings/99999/assign",
         data={"assigned_buyer_id": "1"},
@@ -329,7 +365,7 @@ def test_assign_buyer_not_found(client, db_session):
 
 
 def test_assign_buyer_updates_requirement(client, db_session, test_user):
-    """assign-buyer updates assigned_buyer_id on the requirement."""
+    """Assign-buyer updates assigned_buyer_id on the requirement."""
 
     _, requirement = _make_req_and_requirement(db_session, test_user.id)
     db_session.commit()
@@ -354,7 +390,7 @@ def test_assign_buyer_updates_requirement(client, db_session, test_user):
 
 
 def test_log_activity_missing_notes(client, db_session, test_user):
-    """log-activity without notes returns 400."""
+    """Log-activity without notes returns 400."""
     _, requirement = _make_req_and_requirement(db_session, test_user.id)
     db_session.commit()
 
@@ -366,7 +402,7 @@ def test_log_activity_missing_notes(client, db_session, test_user):
 
 
 def test_log_activity_invalid_channel(client, db_session, test_user):
-    """log-activity with invalid channel returns 400."""
+    """Log-activity with invalid channel returns 400."""
     _, requirement = _make_req_and_requirement(db_session, test_user.id)
     db_session.commit()
 
@@ -378,7 +414,7 @@ def test_log_activity_invalid_channel(client, db_session, test_user):
 
 
 def test_log_activity_requirement_not_found(client):
-    """log-activity for missing requirement returns 404."""
+    """Log-activity for missing requirement returns 404."""
     resp = client.post(
         "/v2/partials/sightings/99999/log-activity",
         data={"notes": "Test note", "channel": "note"},
@@ -387,7 +423,7 @@ def test_log_activity_requirement_not_found(client):
 
 
 def test_log_activity_creates_record(client, db_session, test_user):
-    """log-activity creates ActivityLog record."""
+    """Log-activity creates ActivityLog record."""
     from app.models import ActivityLog
 
     _, requirement = _make_req_and_requirement(db_session, test_user.id)
@@ -408,13 +444,13 @@ def test_log_activity_creates_record(client, db_session, test_user):
 
 
 def test_vendor_modal_empty_ids(client):
-    """vendor-modal with empty requirement_ids returns 200 (empty modal)."""
+    """Vendor-modal with empty requirement_ids returns 200 (empty modal)."""
     resp = client.get("/v2/partials/sightings/vendor-modal?requirement_ids=")
     assert resp.status_code == 200
 
 
 def test_vendor_modal_with_valid_ids(client, db_session, test_user):
-    """vendor-modal with valid IDs returns 200."""
+    """Vendor-modal with valid IDs returns 200."""
     _, requirement = _make_req_and_requirement(db_session, test_user.id)
     db_session.commit()
 
@@ -426,7 +462,7 @@ def test_vendor_modal_with_valid_ids(client, db_session, test_user):
 
 
 def test_preview_inquiry_missing_params(client):
-    """preview-inquiry without requirement_ids or vendor_names returns 400."""
+    """Preview-inquiry without requirement_ids or vendor_names returns 400."""
     resp = client.post(
         "/v2/partials/sightings/preview-inquiry",
         data={},
@@ -435,7 +471,7 @@ def test_preview_inquiry_missing_params(client):
 
 
 def test_preview_inquiry_returns_preview(client, db_session, test_user):
-    """preview-inquiry returns rendered preview HTML."""
+    """Preview-inquiry returns rendered preview HTML."""
     _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="BC547")
     db_session.commit()
 
@@ -454,7 +490,7 @@ def test_preview_inquiry_returns_preview(client, db_session, test_user):
 
 
 def test_send_inquiry_missing_params(client):
-    """send-inquiry without all required fields returns 400."""
+    """Send-inquiry without all required fields returns 400."""
     resp = client.post(
         "/v2/partials/sightings/send-inquiry",
         data={"requirement_ids": [], "vendor_names": []},
@@ -463,7 +499,7 @@ def test_send_inquiry_missing_params(client):
 
 
 def test_send_inquiry_success(client, db_session, test_user):
-    """send-inquiry calls send_batch_rfq and returns success toast."""
+    """Send-inquiry calls send_batch_rfq and returns success toast."""
     _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="STM32F4")
     db_session.commit()
 
@@ -486,7 +522,7 @@ def test_send_inquiry_success(client, db_session, test_user):
 
 
 def test_send_inquiry_graph_failure_returns_warning(client, db_session, test_user):
-    """send-inquiry when Graph API fails returns warning toast."""
+    """Send-inquiry when Graph API fails returns warning toast."""
     _, requirement = _make_req_and_requirement(db_session, test_user.id, mpn="ATMEGA")
     db_session.commit()
 
