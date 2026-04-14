@@ -246,8 +246,16 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         fresh_vendors = {s.vendor_name.lower() for s in sightings}
         history = _get_material_history(list(card_ids), fresh_vendors, write_db)
 
-        # Stamp per-requirement search timestamp and commit all changes
-        write_req.last_searched_at = now
+        # Stamp per-requirement search timestamp only when the search
+        # actually succeeded. "Success" means at least one connector
+        # returned status=ok — i.e. there was a real response from an
+        # upstream API (even if it had zero matches). If every connector
+        # errored (auth failures, quota exceeded, network), we leave
+        # last_searched_at alone so the 5-minute rate guard in
+        # routers/sightings.py does not silently suppress the user's
+        # next retry.
+        if succeeded_sources:
+            write_req.last_searched_at = now
         write_db.commit()
 
         # Expunge sightings so they remain usable after session close
