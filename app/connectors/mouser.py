@@ -72,9 +72,21 @@ class MouserConnector(BaseConnector):
         errors = data.get("Errors") or []
         if errors:
             msg = errors[0].get("Message", "Unknown Mouser API error")
+            msg_lower = msg.lower()
             # Quota/rate errors in body — return empty instead of raising
-            if "too many" in msg.lower() or "rate" in msg.lower() or "quota" in msg.lower():
+            if "too many" in msg_lower or "rate" in msg_lower or "quota" in msg_lower:
                 logger.warning(f"Mouser: rate/quota error for {part_number}: {msg}")
+                return []
+            # Auth errors (bad / revoked / missing API key) — return empty
+            # instead of raising so BaseConnector._search_with_retry does
+            # not burn ~8s per search on exponential backoff retries.
+            if (
+                "invalid" in msg_lower
+                or "identifier" in msg_lower
+                or "api key" in msg_lower
+                or "unauthorized" in msg_lower
+            ):
+                logger.warning(f"Mouser: auth error for {part_number}: {msg}")
                 return []
             logger.warning(f"Mouser API errors for {part_number}: {errors}")
             raise RuntimeError(f"Mouser API: {msg}")
