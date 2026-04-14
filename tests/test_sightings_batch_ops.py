@@ -8,8 +8,10 @@ Called by: pytest
 Depends on: app/routers/sightings.py, tests/conftest.py
 """
 
+import asyncio
 import json
 import os
+import time
 
 os.environ["TESTING"] = "1"
 
@@ -122,9 +124,6 @@ def test_batch_refresh_runs_searches_in_parallel(client, db_session, test_user):
     1 × wall_time. We verify this by giving each search a 0.2s sleep and asserting that
     3 requirements complete in well under 0.6s.
     """
-    import asyncio
-    import time
-
     _, req1 = _make_req_and_requirement(db_session, test_user.id)
     _, req2 = _make_req_and_requirement(db_session, test_user.id)
     _, req3 = _make_req_and_requirement(db_session, test_user.id)

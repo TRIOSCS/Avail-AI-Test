@@ -721,10 +721,13 @@ async def sightings_batch_refresh(
             continue
         to_search.append((int(rid), req_obj))
 
-    # Fan out. search_requirement() opens its own write session per
-    # call (see commit 55093bf1), so concurrent invocations are safe.
-    # return_exceptions=True ensures one failing search does not cancel
-    # the rest.
+    # Fan out. search_requirement() uses its own write session for the
+    # sightings / material-card / last_searched_at writes (commit
+    # 55093bf1); the caller's db is still touched by _fetch_fresh for
+    # ApiSource stats, which tolerates occasional concurrent-session
+    # errors via rollback. Same concurrency model as the existing
+    # caller in routers/requisitions/requirements.py. return_exceptions
+    # ensures one failing search does not cancel the rest.
     if to_search:
         results = await asyncio.gather(
             *(search_requirement(req_obj, db) for _, req_obj in to_search),
