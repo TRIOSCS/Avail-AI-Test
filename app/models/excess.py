@@ -119,6 +119,7 @@ class BidSolicitation(Base):
     recipient_name = Column(String(255), nullable=True)
     graph_message_id = Column(String(500), nullable=True)  # Graph API message ID for tracking
     subject = Column(String(500), nullable=True)
+    body_preview = Column(String(500), nullable=True)  # First 500 chars of email body
     response_received_at = Column(DateTime, nullable=True)
     parsed_bid_id = Column(
         Integer, ForeignKey("bids.id", ondelete="SET NULL", use_alter=True), nullable=True
