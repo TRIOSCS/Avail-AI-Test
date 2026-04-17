@@ -106,8 +106,9 @@
   {# Enrich results placeholder #}
   <div id="enrich-results-{{ company.id }}"></div>
 
-  {# AI Insights — lazy-loaded #}
+  {# AI Insights — lazy-loaded (hx-target=this avoids inheriting <main#main-content hx-target="this">) #}
   <div hx-get="/v2/partials/customers/{{ company.id }}/insights"
+       hx-target="this"
        hx-trigger="load"
        hx-swap="innerHTML"
        hx-indicator="#cust-insights-spinner"

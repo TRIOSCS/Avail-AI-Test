@@ -91,9 +91,10 @@
     </div>
   </div>
 
-  {# Pipeline insights — lazy loaded #}
+  {# Pipeline insights — lazy loaded (hx-target=this avoids inheriting <main#main-content hx-target="this">) #}
   <div id="pipeline-insights"
        hx-get="/v2/partials/dashboard/pipeline-insights"
+       hx-target="this"
        hx-trigger="load"
        hx-swap="innerHTML"
        hx-indicator="#pipeline-spinner"

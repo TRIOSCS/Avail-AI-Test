@@ -39,8 +39,9 @@
     <div id="import-result" class="mt-2"></div>
   </div>
 
-  {# API Health #}
+  {# API Health (hx-target=this avoids inheriting <main#main-content hx-target="this">) #}
   <div hx-get="/v2/partials/admin/api-health"
+       hx-target="this"
        hx-trigger="load"
        hx-swap="innerHTML"
        hx-indicator="#api-health-spinner"

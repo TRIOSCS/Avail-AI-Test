@@ -565,6 +565,12 @@ class TestRequisitionDetail:
         db_session.commit()
         resp = client.get(f"/v2/partials/requisitions/{req.id}")
         assert resp.status_code == 200
+        # Lazy insights hx-get must pair with hx-target="this" so swaps do not inherit
+        # <main id="main-content" hx-target="this"> (which would replace the whole main column).
+        marker = f'hx-get="/v2/partials/requisitions/{req.id}/insights"'
+        assert marker in resp.text
+        start = resp.text.index(marker)
+        assert 'hx-target="this"' in resp.text[start : start + 280]
 
     def test_detail_not_found(self, client: TestClient):
         resp = client.get("/v2/partials/requisitions/999999")

@@ -2,6 +2,17 @@
 
 All notable changes to the project are logged here.
 
+## 2026-04-17 — HTMX lazy-load swap target (insights & admin health)
+
+### Bug Fixes
+- **AI insights lazy-load:** Added explicit `hx-target="this"` on requisition, vendor, and customer detail insight loaders so HTMX does not inherit `<main id="main-content" hx-target="this">` and swap the insights fragment into the entire main column.
+- **Dashboard pipeline insights & admin API health:** Same `hx-target="this"` fix for `hx-trigger="load"` partials inside `#main-content`.
+
+### Tests
+- **test_htmx_views.TestRequisitionDetail.test_detail:** Asserts the insights `hx-get` block includes `hx-target="this"`.
+
+---
+
 ## 2026-03-13 — Frontend XSS hardening (innerHTML sanitization)
 
 ### Security

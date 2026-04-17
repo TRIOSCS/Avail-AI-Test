@@ -22,8 +22,9 @@
   {# Header card — inline editable, swappable via #req-header #}
   {% include "htmx/partials/requisitions/detail_header.html" %}
 
-  {# AI Insights — lazy-loaded #}
+  {# AI Insights — lazy-loaded (hx-target=this avoids inheriting <main#main-content hx-target="this">) #}
   <div hx-get="/v2/partials/requisitions/{{ req.id }}/insights"
+       hx-target="this"
        hx-trigger="load"
        hx-swap="innerHTML"
        hx-indicator="#insights-spinner"
