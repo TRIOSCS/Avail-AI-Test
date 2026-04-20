@@ -2,6 +2,16 @@
 
 All notable changes to the project are logged here.
 
+## 2026-04-17 — Search page SSE showed raw JSON instead of vendor cards
+
+### Bug Fixes
+- **`stream_search_mpn`:** HTMX `sse-swap="results"` appends the SSE **message body as HTML**. Events were publishing JSON (`{"cards": [...]}`), so users saw raw JSON. Results and card-update events now publish rendered `vendor_card.html` fragments (with `hx-swap-oob` on updates).
+
+### Tests
+- **`test_search_streaming.test_stream_search_publishes_events`:** Asserts `results` payloads contain `vendor-card` markup and not the legacy `"cards"` JSON wrapper.
+
+---
+
 ## 2026-04-17 — HTMX lazy-load swap target (insights & admin health)
 
 ### Bug Fixes
