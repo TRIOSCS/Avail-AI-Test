@@ -158,6 +158,20 @@ def test_faceted_results_sub_filters_actually_filter(client, db_session: Session
     assert "DDR4-CHIP" not in resp.text
 
 
-def test_manufacturer_filter_partial_renders(client):
+def test_manufacturer_filter_partial_renders(client, db_session: Session):
+    """Manufacturer names must appear in HTML (x-data JSON); avoid broken x-data=\"{name: \"...\"}\"."""
+    db_session.add(
+        MaterialCard(
+            normalized_mpn="mfg-test-1",
+            display_mpn="MFG-TEST-1",
+            manufacturer="MemCo",
+            category="dram",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    db_session.commit()
     resp = client.get("/v2/partials/materials/filters/manufacturers")
     assert resp.status_code == 200
+    assert "MemCo" in resp.text
+    assert "mfrLabel" in resp.text
+    assert 'x-data="{name:' not in resp.text

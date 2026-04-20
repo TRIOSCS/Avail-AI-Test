@@ -14,6 +14,16 @@ All notable changes to the project are logged here.
 
 ---
 
+## 2026-04-17 — Materials manufacturer filter blank labels
+
+### Bug Fixes
+- **`manufacturers.html`:** Manufacturer rows showed checkboxes and counts but no names because `x-data="{ name: {{ mfr.name | tojson }} }"` placed JSON double quotes inside a double-quoted HTML attribute, which truncated the attribute and broke Alpine. Fixed with `x-data="{{ {'mfrLabel': mfr.name}|tojson|e }}"` and Alpine bindings renamed to `mfrLabel`.
+
+### Tests
+- **`test_faceted_routes.test_manufacturer_filter_partial_renders`:** Inserts a material card with manufacturer `MemCo` and asserts the partial HTML contains the name, `mfrLabel`, and does not regress to the broken `x-data="{name:` pattern.
+
+---
+
 ## 2026-03-13 — Frontend XSS hardening (innerHTML sanitization)
 
 ### Security
