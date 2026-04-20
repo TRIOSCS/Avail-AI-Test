@@ -2,6 +2,14 @@
 
 All notable changes to the project are logged here.
 
+## 2026-04-17 — Search “Details” did not open lead drawer
+
+### Bug Fixes
+- **`form.html` / lead drawer:** “Details →” loaded `lead_detail` into `#lead-drawer-content` via HTMX but the drawer never opened (`data-open` was not reactive to external updates). Replaced with Alpine `drawerOpen`, `@htmx:after-swap` on the content container to open after load, and aligned backdrop / close / Escape with the same flag.
+- **`htmx_app.js`:** Scoped `document.body.style.overflow` reset in `htmx:afterSwap` to `#main-content` swaps only (was clearing scroll lock on every swap). Call `Alpine.initTree` after swaps into `#lead-drawer-content` so `@click` on loaded lead detail works.
+
+---
+
 ## 2026-04-17 — Search page SSE showed raw JSON instead of vendor cards
 
 ### Bug Fixes

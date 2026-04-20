@@ -297,9 +297,16 @@ htmx.on('htmx:afterSwap', function(evt) {
             bar.style.transform = 'scaleX(0)';
         }, 200);
     }
-    // Safety: always reset body overflow after page navigation
-    // (prevents stuck overflow:hidden from lead-drawer or modal)
-    document.body.style.overflow = '';
+    // Reset body overflow only on full main-column navigations — not on drawer partials
+    // (otherwise opening the search lead drawer loses scroll lock immediately).
+    var t = evt.detail.target;
+    if (t && t.id === 'main-content') {
+        document.body.style.overflow = '';
+    }
+    // HTMX innerHTML swaps do not auto-run Alpine on new nodes (close button, etc.)
+    if (t && t.id === 'lead-drawer-content' && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
+        Alpine.initTree(t);
+    }
 });
 
 // ── Keyboard shortcuts ─────────────────────────────────────
@@ -311,11 +318,14 @@ document.addEventListener('keydown', (e) => {
             || document.querySelector('input[name="q"]');
         if (searchInput) searchInput.focus();
     }
-    // Escape → close modal or drawer
+    // Escape → close search lead drawer (Alpine drawerOpen on #lead-drawer)
     if (e.key === 'Escape') {
         var drawer = document.getElementById('lead-drawer');
-        if (drawer && drawer.dataset.open === 'true') {
-            drawer.dataset.open = 'false';
+        if (drawer && typeof Alpine !== 'undefined' && typeof Alpine.$data === 'function') {
+            var data = Alpine.$data(drawer);
+            if (data && data.drawerOpen) {
+                data.drawerOpen = false;
+            }
         }
     }
 });

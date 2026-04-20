@@ -67,8 +67,10 @@
         <span x-text="expanded ? 'Hide' : '{{ card.offer_count }} offers'"></span>
       </button>
       {% endif %}
-      <button hx-get="/v2/partials/search/lead-detail?search_id={{ search_id }}&vendor_key={{ card.vendor_name|lower|trim }}"
+      <button type="button"
+              hx-get="/v2/partials/search/lead-detail?search_id={{ search_id }}&vendor_key={{ card.vendor_name|lower|trim }}"
               hx-target="#lead-drawer-content"
+              hx-swap="innerHTML"
               class="text-xs text-gray-400 hover:text-white transition-colors">
         Details →
       </button>
