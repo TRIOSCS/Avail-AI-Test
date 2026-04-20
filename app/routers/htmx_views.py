@@ -75,6 +75,7 @@ from ..services.status_machine import require_valid_transition
 from ..template_env import templates
 from ..utils.search_builder import SearchBuilder
 from ._lookup_helpers import get_requisition_or_404, get_vendor_card_or_404
+from .auth import _password_login_enabled
 
 router = APIRouter(tags=["htmx-views"])
 _DASH = "\u2014"  # em-dash for template fallbacks
@@ -177,7 +178,9 @@ async def v2_page(request: Request, db: Session = Depends(get_db)):
     path = request.url.path
     user = get_user(request, db)
     if not user:
-        return templates.TemplateResponse("htmx/login.html", {"request": request, **_vite_assets()})
+        return templates.TemplateResponse(
+            "htmx/login.html", {"request": request, "password_login": _password_login_enabled(), **_vite_assets()}
+        )
     if "/buy-plans" in path:
         current_view = "buy-plans"
     elif "/excess" in path:
@@ -6224,7 +6227,9 @@ async def v2_sourcing_page(request: Request, requirement_id: int, db: Session = 
     """Full page load for sourcing results."""
     user = get_user(request, db)
     if not user:
-        return templates.TemplateResponse("htmx/login.html", {"request": request, **_vite_assets()})
+        return templates.TemplateResponse(
+            "htmx/login.html", {"request": request, "password_login": _password_login_enabled(), **_vite_assets()}
+        )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}"
     return templates.TemplateResponse("htmx/base_page.html", ctx)
@@ -6235,7 +6240,9 @@ async def v2_lead_detail_page(request: Request, lead_id: int, db: Session = Depe
     """Full page load for lead detail."""
     user = get_user(request, db)
     if not user:
-        return templates.TemplateResponse("htmx/login.html", {"request": request, **_vite_assets()})
+        return templates.TemplateResponse(
+            "htmx/login.html", {"request": request, "password_login": _password_login_enabled(), **_vite_assets()}
+        )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/leads/{lead_id}"
     return templates.TemplateResponse("htmx/base_page.html", ctx)
@@ -6647,7 +6654,9 @@ async def v2_sourcing_workspace_page(request: Request, requirement_id: int, db: 
     """Full page load for sourcing workspace (split-panel view)."""
     user = get_user(request, db)
     if not user:
-        return templates.TemplateResponse("htmx/login.html", {"request": request, **_vite_assets()})
+        return templates.TemplateResponse(
+            "htmx/login.html", {"request": request, "password_login": _password_login_enabled(), **_vite_assets()}
+        )
     ctx = _base_ctx(request, user, "requisitions")
     ctx["partial_url"] = f"/v2/partials/sourcing/{requirement_id}/workspace"
     return templates.TemplateResponse("htmx/base_page.html", ctx)
