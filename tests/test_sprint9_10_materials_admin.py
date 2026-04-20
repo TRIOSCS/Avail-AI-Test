@@ -125,6 +125,10 @@ class TestAdminDataOps:
         )
         assert resp.status_code == 200
         assert "Data Operations" in resp.text
+        marker = 'hx-get="/v2/partials/admin/api-health"'
+        assert marker in resp.text
+        start = resp.text.index(marker)
+        assert 'hx-target="this"' in resp.text[start : start + 280]
 
 
 # ── Vendor CSV Import ────────────────────────────────────────────────

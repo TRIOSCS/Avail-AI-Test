@@ -9,7 +9,8 @@ All notable changes to the project are logged here.
 - **Dashboard pipeline insights & admin API health:** Same `hx-target="this"` fix for `hx-trigger="load"` partials inside `#main-content`.
 
 ### Tests
-- **test_htmx_views.TestRequisitionDetail.test_detail:** Asserts the insights `hx-get` block includes `hx-target="this"`.
+- **test_htmx_views:** `TestRequisitionDetail.test_detail`, `TestVendorDetail.test_detail`, `TestCustomerDetail.test_detail`, and `TestInsights.test_dashboard_partial_pipeline_loader_targets_self` assert lazy-load `hx-get` blocks include `hx-target="this"`.
+- **test_sprint9_10_materials_admin.TestAdminDataOps.test_data_ops_renders:** Asserts API health lazy-load includes `hx-target="this"`.
 
 ---
 
