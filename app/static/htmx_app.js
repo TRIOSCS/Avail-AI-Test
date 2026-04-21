@@ -281,7 +281,7 @@ Alpine.data('splitPanel', (panelId, defaultPct) => ({
  * The `_tipNodes` path is used by x-chip-overflow to show hidden chips
  * without ever touching innerHTML — we clone DOM subtrees directly.
  */
-Alpine.directive('truncate-tip', (el) => {
+Alpine.directive('truncate-tip', (el, _directive, { cleanup }) => {
   let tip = null;
 
   const hasTipNodes = () => el._tipNodes && el._tipNodes.hasChildNodes && el._tipNodes.hasChildNodes();
@@ -323,6 +323,12 @@ Alpine.directive('truncate-tip', (el) => {
   el.addEventListener('mouseenter', show);
   el.addEventListener('mouseleave', hide);
   el.addEventListener('focusout', hide);
+
+  // Remove any visible tooltip when Alpine tears down the element
+  // (HTMX swap-out, component unmount). Without this, the orphaned tip
+  // would stay on document.body with no removal path since its source
+  // listeners have already been disconnected.
+  cleanup(() => hide());
 });
 
 /**
@@ -335,7 +341,7 @@ Alpine.directive('truncate-tip', (el) => {
  * the left-to-right overflow walk never hides a primary while a sub is
  * still visible.
  */
-Alpine.directive('chip-overflow', (el) => {
+Alpine.directive('chip-overflow', (el, _directive, { cleanup }) => {
   const more = el.querySelector('.opp-chip-more');
   if (!more) return;
   const chips = Array.from(el.children).filter((c) => c !== more);
@@ -410,11 +416,14 @@ Alpine.directive('chip-overflow', (el) => {
   const ro = new ResizeObserver(schedule);
   ro.observe(el);
 
-  // Cleanup when Alpine tears down the element.
-  el._chipOverflowCleanup = () => {
+  // Cleanup when Alpine tears down the element. Using Alpine's cleanup()
+  // callback (third-arg of the directive signature) ensures the
+  // ResizeObserver and any pending RAF are disconnected on HTMX swap-out,
+  // preventing an observer leak per chip row.
+  cleanup(() => {
     ro.disconnect();
     if (rafId) cancelAnimationFrame(rafId);
-  };
+  });
 });
 
 // ── Page-level loading bar for navigation ──────────────────
