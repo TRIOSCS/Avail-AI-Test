@@ -128,4 +128,82 @@ document.addEventListener('alpine:init', () => {
       return [...this.selectedIds].join(',');
     }
   }));
+
+  /**
+   * resizableTable — User-resizable table columns via <colgroup> widths.
+   * Drag right-edge handle on <th>, persist to localStorage, restore across HTMX swaps.
+   *
+   * Template contract:
+   *   <div id="..." x-data="resizableTable('<key>', {col1:N, col2:N})">
+   *     <table class="resizable-cols">
+   *       <colgroup><col :style="colStyle('col1')">...</colgroup>
+   *       <thead><tr>
+   *         <th class="resizable">Col1
+   *           <span class="col-resize-handle"
+   *                 @mousedown="startColResize($event,'col1')"
+   *                 @dblclick="autoFitCol('col1')"></span>
+   *         </th>
+   *         <th>Col2</th>  {# last col, no handle #}
+   *       </tr></thead>
+   *     </table>
+   *   </div>
+   *
+   * Consolidate into app/static/htmx_app.js when page.html migrates to base.html.
+   */
+  Alpine.data('resizableTable', (tableKey, defaults) => ({
+    widths: {},
+    _resizing: null,
+    _storageKey: 'avail_table_cols_' + tableKey,
+    _defaults: defaults,
+
+    init() {
+      const saved = JSON.parse(localStorage.getItem(this._storageKey) || '{}');
+      this.widths = { ...this._defaults, ...saved };
+      this.$el.addEventListener('htmx:afterSwap', () => {
+        this.widths = { ...this.widths };
+      });
+    },
+
+    colStyle(key) {
+      const w = this.widths[key];
+      return w ? `width:${w}px;min-width:${w}px` : '';
+    },
+
+    startColResize(e, key) {
+      e.preventDefault();
+      e.stopPropagation();
+      const th = e.target.closest('th');
+      const startWidth = this.widths[key] || (th ? th.offsetWidth : 100);
+      this._resizing = { key, startX: e.clientX, startWidth };
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+
+      const onMove = (ev) => {
+        if (!this._resizing) return;
+        const dx = ev.clientX - this._resizing.startX;
+        this.widths[this._resizing.key] = Math.max(40, this._resizing.startWidth + dx);
+      };
+      const onUp = () => {
+        this._resizing = null;
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+        localStorage.setItem(this._storageKey, JSON.stringify(this.widths));
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    },
+
+    autoFitCol(key) {
+      delete this.widths[key];
+      this.widths = { ...this._defaults, ...this.widths };
+      localStorage.setItem(this._storageKey, JSON.stringify(this.widths));
+    },
+
+    resetAll() {
+      this.widths = { ...this._defaults };
+      localStorage.removeItem(this._storageKey);
+    },
+  }));
 });
