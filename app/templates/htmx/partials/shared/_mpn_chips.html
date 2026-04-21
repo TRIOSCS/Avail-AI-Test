@@ -55,3 +55,30 @@
 <span class="text-gray-400">—</span>
 {% endif %}
 {% endmacro %}
+
+{# ── mpn_chips_aggregated — flat deduped chip row for requisition rows ── #}
+{#
+  Purpose:     Flat primaries-first-then-subs chip row with directive-driven
+               overflow reveal.
+  Depends on:  htmx_app.js x-chip-overflow, x-truncate-tip. The +N button
+               carries NO data-tip-content — x-chip-overflow attaches a
+               cloned DocumentFragment to the element's _tipNodes property
+               at runtime, which x-truncate-tip consumes on hover.
+  Called-by:   requisitions2/_table_rows.html (via opp_name_cell).
+  Business:    `items` is the list produced by _build_row_mpn_chips in
+               requisition_list_service.py. All chips render at equal
+               visual weight; primaries-first DOM order guarantees they
+               remain visible when overflow hides chips from the right.
+#}
+{% macro mpn_chips_aggregated(items, link_map=none) %}
+{%- if items -%}
+<span class="opp-chip-row inline-flex items-center gap-1 min-w-0 whitespace-nowrap" x-chip-overflow>
+  {%- for item in items -%}
+    {{ _chip(item.mpn, link_map) }}
+  {%- endfor -%}
+  <button type="button" class="opp-chip-more px-1.5 text-xs font-medium text-brand-600 hover:text-brand-800 cursor-pointer whitespace-nowrap" style="display:none" x-truncate-tip aria-label="Show hidden chips"></button>
+</span>
+{%- else -%}
+<span class="text-gray-400">—</span>
+{%- endif -%}
+{% endmacro %}

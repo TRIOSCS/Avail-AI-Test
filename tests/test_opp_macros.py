@@ -140,3 +140,39 @@ def test_time_text_days():
     html = render_macro("{{ time_text(120) }}")
     assert "5d" in html
     assert "opp-time--normal" in html
+
+
+# ── mpn_chips_aggregated ──────────────────────────────────────────────
+
+
+def render_aggregated(items_expr: str) -> str:
+    tpl = ENV.from_string(
+        '{% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips_aggregated %}'
+        + f"{{{{ mpn_chips_aggregated({items_expr}) }}}}"
+    )
+    return tpl.render().strip()
+
+
+def test_mpn_chips_aggregated_renders_primaries_before_subs():
+    items = [
+        {"mpn": "LM317", "role": "primary"},
+        {"mpn": "NE555", "role": "primary"},
+        {"mpn": "LM337", "role": "sub"},
+    ]
+    html = render_aggregated(repr(items))
+    pos_lm317 = html.index("LM317")
+    pos_ne555 = html.index("NE555")
+    pos_lm337 = html.index("LM337")
+    assert pos_lm317 < pos_ne555 < pos_lm337
+
+
+def test_mpn_chips_aggregated_includes_overflow_bucket_and_directive():
+    items = [{"mpn": f"M{i}", "role": "primary"} for i in range(4)]
+    html = render_aggregated(repr(items))
+    assert "x-chip-overflow" in html
+    assert "opp-chip-more" in html
+
+
+def test_mpn_chips_aggregated_empty_renders_placeholder():
+    html = render_aggregated("[]")
+    assert "—" in html
