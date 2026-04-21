@@ -252,3 +252,50 @@ def test_opp_status_cell_all_buckets_render_correctly(status, bucket, label):
     assert f"opp-status-dot--{bucket}" in html
     assert f">{label}<" in html
     assert f'aria-label="{label}"' in html
+
+
+# ── opp_name_cell ─────────────────────────────────────────────────────
+
+
+def render_name_cell(req):
+    tpl = ENV.from_string('{% from "htmx/partials/shared/_macros.html" import opp_name_cell %}{{ opp_name_cell(req) }}')
+    return tpl.render(req=req).strip()
+
+
+def test_opp_name_cell_has_chip_row_and_name():
+    req = {
+        "id": 42,
+        "name": "Acme Q3",
+        "mpn_chip_items": [{"mpn": "LM317", "role": "primary"}],
+        "match_reason": None,
+        "matched_mpn": None,
+    }
+    html = render_name_cell(req)
+    assert "opp-chip-row" in html
+    assert "LM317" in html
+    assert "Acme Q3" in html
+
+
+def test_opp_name_cell_renders_match_badge_when_present():
+    req = {
+        "id": 7,
+        "name": "Foo",
+        "mpn_chip_items": [],
+        "match_reason": "part",
+        "matched_mpn": "XYZ123",
+    }
+    html = render_name_cell(req)
+    assert "XYZ123" in html
+    assert "match-badge" in html
+
+
+def test_opp_name_cell_name_has_truncate_tip():
+    req = {
+        "id": 1,
+        "name": "VeryLong" * 10,
+        "mpn_chip_items": [],
+        "match_reason": None,
+        "matched_mpn": None,
+    }
+    html = render_name_cell(req)
+    assert "x-truncate-tip" in html

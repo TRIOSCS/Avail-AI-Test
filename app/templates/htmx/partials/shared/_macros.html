@@ -348,6 +348,37 @@ Usage:
 {%- endmacro %}
 
 
+{# ── Opportunity Table v2 — Name Cell ─────────────────────────────── #}
+{#
+  Purpose:     Chip row on top + requisition name + match badges.
+  Depends on:  mpn_chips_aggregated (from _mpn_chips.html), x-truncate-tip directive.
+  Called-by:   requisitions2/_table_rows.html, _single_row.html
+  Business:    req is the row dict from list_requisitions(). Chip row on
+               row 1 (primaries-first via x-chip-overflow). Name on row 2
+               (tertiary color, truncated with hover-reveal tooltip).
+               Existing customer/part match badges preserved inline.
+#}
+{% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips_aggregated %}
+
+{% macro opp_name_cell(req) %}
+<div class="opp-name-cell min-w-0">
+  <div class="opp-name-cell__chips">
+    {{ mpn_chips_aggregated(req.mpn_chip_items or []) }}
+  </div>
+  <div class="opp-name-cell__title flex items-center gap-1.5 min-w-0">
+    <span class="truncate block min-w-0 text-[12px] text-[color:var(--opp-text-tertiary)]" x-truncate-tip>{{ req.name }}</span>
+    {% if req.match_reason == 'part' and req.matched_mpn %}
+      <span class="match-badge inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold rounded-full bg-violet-50 text-violet-600 border border-violet-200" title="Matched part: {{ req.matched_mpn }}">
+        {{ req.matched_mpn }}
+      </span>
+    {% elif req.match_reason == 'customer' %}
+      <span class="match-badge inline-flex items-center gap-0.5 px-1.5 py-0.5 text-[10px] font-semibold rounded-full bg-sky-50 text-sky-600 border border-sky-200">customer match</span>
+    {% endif %}
+  </div>
+</div>
+{% endmacro %}
+
+
 {# ── Opportunity Table v2 — Status Cell (dot + label + time text) ── #}
 {% macro opp_status_cell(status, hours) %}
 {%- set label_map = {
