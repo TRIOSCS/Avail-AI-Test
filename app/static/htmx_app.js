@@ -470,9 +470,14 @@ htmx.on('htmx:afterSwap', function(evt) {
     if (t && t.id === 'main-content') {
         document.body.style.overflow = '';
     }
-    // HTMX innerHTML swaps do not auto-run Alpine on new nodes (close button, etc.)
-    if (t && t.id === 'lead-drawer-content' && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
-        Alpine.initTree(t);
+    // HTMX innerHTML swaps do not always auto-run Alpine on new nodes.
+    // Explicit initTree for targets known to contain Alpine components/directives
+    // (lead drawer close button; rq2-table rows with rowActionRail, x-truncate-tip,
+    // x-chip-overflow — directives that must re-bind after filter/sort/action swaps).
+    if (t && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
+        if (t.id === 'lead-drawer-content' || t.id === 'rq2-table') {
+            Alpine.initTree(t);
+        }
     }
 });
 
