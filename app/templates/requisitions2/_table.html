@@ -8,6 +8,17 @@
 {% if requisitions %}
 <div class="overflow-x-auto">
   <table class="resizable-cols min-w-full divide-y divide-gray-200 text-sm">
+    {% if avail_opp_table_v2_enabled | default(False) %}
+    <colgroup>
+      <col :style="colStyle('select')">
+      <col :style="colStyle('name')">
+      <col :style="colStyle('status')">
+      <col :style="colStyle('customer')">
+      <col :style="colStyle('coverage')">
+      <col :style="colStyle('deal')">
+      <col style="width:0">
+    </colgroup>
+    {% else %}
     <colgroup>
       <col :style="colStyle('select')">
       <col :style="colStyle('name')">
@@ -15,7 +26,20 @@
       <col :style="colStyle('customer')">
       <col :style="colStyle('count')">
     </colgroup>
+    {% endif %}
     <thead class="bg-gray-50">
+      {% if avail_opp_table_v2_enabled | default(False) %}
+      <tr>
+        <th class="px-3 py-2 w-10"></th>
+        <th class="opp-col-header px-3 py-2 text-left">Name</th>
+        <th class="opp-col-header px-3 py-2 text-left">Status</th>
+        <th class="opp-col-header px-3 py-2 text-left">Customer</th>
+        <th class="opp-col-header px-3 py-2 text-left">Coverage</th>
+        <th class="opp-col-header px-3 py-2 text-left">Deal</th>
+        <th class="w-0" aria-hidden="true"></th>
+      </tr>
+      {% else %}
+      {# legacy thead — preserved verbatim for flag-off rollback #}
       <tr>
         <th class="resizable px-3 py-2">
           <input aria-label="Select all requisitions" type="checkbox"
@@ -49,6 +73,7 @@
         {% endfor %}
         <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
       </tr>
+      {% endif %}
     </thead>
     <tbody id="rq2-rows" class="divide-y divide-gray-100">
       {% include "requisitions2/_table_rows.html" %}

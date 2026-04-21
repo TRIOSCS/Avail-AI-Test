@@ -91,15 +91,21 @@ def test_filter_form_includes_hidden_sort_fields(client):
 # ── Table structure ──────────────────────────────────────────────────
 
 
-def test_table_has_sortable_headers(client, test_requisition):
-    """Table headers have hx-get for sorting."""
+def test_table_has_sortable_headers(client, test_requisition, monkeypatch):
+    """Legacy table headers have hx-get for sorting (v2 thead has no sort links)."""
+    from app.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "avail_opp_table_v2", False)
     resp = client.get("/requisitions2/table", params={"status": "all"})
     assert "hx-get" in resp.text
     assert "sort=" in resp.text
 
 
-def test_table_has_select_all_checkbox(client, test_requisition):
-    """Table has a select-all checkbox in the header."""
+def test_table_has_select_all_checkbox(client, test_requisition, monkeypatch):
+    """Legacy table has a select-all checkbox in the header (v2 omits select-all)."""
+    from app.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "avail_opp_table_v2", False)
     resp = client.get("/requisitions2/table", params={"status": "all"})
     assert "toggleAll" in resp.text
 
@@ -136,12 +142,17 @@ def test_table_row_shows_status_badge(client, test_requisition, db_session):
     assert "active" in resp.text
 
 
-def test_table_row_shows_urgency_badge(client, test_requisition, db_session):
-    """Critical urgency shows a compact badge in the row."""
+def test_table_row_shows_urgency_badge(client, test_requisition, db_session, monkeypatch):
+    """Critical urgency shows a compact CRIT badge in legacy rows; v2 uses accent
+    class."""
+    from app.config import settings as app_settings
+
     test_requisition.status = "active"
     test_requisition.urgency = "critical"
     db_session.commit()
 
+    # Legacy rendering shows CRIT text badge
+    monkeypatch.setattr(app_settings, "avail_opp_table_v2", False)
     resp = client.get("/requisitions2/table", params={"status": "active"})
     assert "CRIT" in resp.text
 
@@ -501,3 +512,24 @@ def test_live_indicator_present(client):
     """Page has a live update indicator dot."""
     resp = client.get("/requisitions2")
     assert "animate-pulse" in resp.text
+
+
+# ── v2 flag gating ───────────────────────────────────────────────────
+
+
+def test_v2_flag_on_renders_opp_col_header(client, test_requisition):
+    """When avail_opp_table_v2 is True, thead renders v2 opp-col-header."""
+    resp = client.get("/requisitions2/table", params={"status": "all"})
+    assert "opp-col-header" in resp.text
+
+
+def test_v2_flag_off_renders_legacy(client, test_requisition, monkeypatch):
+    """When avail_opp_table_v2 is False, thead renders legacy columns (no opp-col-
+    header)."""
+    from app.config import settings as app_settings
+
+    monkeypatch.setattr(app_settings, "avail_opp_table_v2", False)
+    resp = client.get("/requisitions2/table", params={"status": "all"})
+    assert "opp-col-header" not in resp.text
+    # Legacy thead has the parts-count # column header as a unique marker
+    assert "#" in resp.text
