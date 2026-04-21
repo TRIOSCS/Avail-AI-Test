@@ -207,46 +207,4 @@ document.addEventListener('alpine:init', () => {
     },
   }));
 
-  /**
-   * x-truncate-tip — Hover tooltip that appears only when the element is
-   * visually clipped (scrollWidth > clientWidth). Tooltip is appended to
-   * document.body so parent overflow:hidden cannot clip it.
-   *
-   * Usage: <span class="truncate" x-truncate-tip>{{ value }}</span>
-   */
-  Alpine.directive('truncate-tip', (el) => {
-    let tip = null;
-
-    const show = () => {
-      if (el.scrollWidth <= el.clientWidth) return;
-      const text = el.textContent.trim();
-      if (!text) return;
-
-      tip = document.createElement('div');
-      tip.className = 'truncate-tip';
-      tip.textContent = text;
-      document.body.appendChild(tip);
-
-      const r = el.getBoundingClientRect();
-      const tr = tip.getBoundingClientRect();
-      let top = r.top - tr.height - 6;
-      if (top < 4) top = r.bottom + 6;
-      let left = r.left + (r.width - tr.width) / 2;
-      left = Math.max(4, Math.min(left, window.innerWidth - tr.width - 4));
-      tip.style.top = top + 'px';
-      tip.style.left = left + 'px';
-      requestAnimationFrame(() => tip && tip.classList.add('visible'));
-    };
-
-    const hide = () => {
-      if (tip) {
-        tip.remove();
-        tip = null;
-      }
-    };
-
-    el.addEventListener('mouseenter', show);
-    el.addEventListener('mouseleave', hide);
-    el.addEventListener('focusout', hide);
-  });
 });

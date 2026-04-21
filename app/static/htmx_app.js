@@ -273,6 +273,53 @@ Alpine.data('splitPanel', (panelId, defaultPct) => ({
     }
 }));
 
+/**
+ * x-truncate-tip — Hover tooltip that fires when an element overflows
+ * its box (scrollWidth > clientWidth), OR when the element has a
+ * `_tipNodes` property (a DocumentFragment the directive appends as-is).
+ *
+ * The `_tipNodes` path is used by x-chip-overflow to show hidden chips
+ * without ever touching innerHTML — we clone DOM subtrees directly.
+ */
+Alpine.directive('truncate-tip', (el) => {
+  let tip = null;
+
+  const hasTipNodes = () => el._tipNodes && el._tipNodes.hasChildNodes && el._tipNodes.hasChildNodes();
+
+  const show = () => {
+    const viaNodes = hasTipNodes();
+    if (!viaNodes && el.scrollWidth <= el.clientWidth) return;
+    const text = viaNodes ? null : el.textContent.trim();
+    if (!viaNodes && !text) return;
+
+    tip = document.createElement('div');
+    tip.className = 'truncate-tip';
+    if (viaNodes) {
+      // Clone the fragment so the original reference stays reusable.
+      tip.appendChild(el._tipNodes.cloneNode(true));
+    } else {
+      tip.textContent = text;
+    }
+    document.body.appendChild(tip);
+
+    const r = el.getBoundingClientRect();
+    const tr = tip.getBoundingClientRect();
+    let top = r.top - tr.height - 6;
+    if (top < 4) top = r.bottom + 6;
+    let left = r.left + (r.width - tr.width) / 2;
+    left = Math.max(4, Math.min(left, window.innerWidth - tr.width - 4));
+    tip.style.top = top + 'px';
+    tip.style.left = left + 'px';
+    requestAnimationFrame(() => tip && tip.classList.add('visible'));
+  };
+
+  const hide = () => { if (tip) { tip.remove(); tip = null; } };
+
+  el.addEventListener('mouseenter', show);
+  el.addEventListener('mouseleave', hide);
+  el.addEventListener('focusout', hide);
+});
+
 // ── Page-level loading bar for navigation ──────────────────
 // Shows a slim progress bar at the top when navigating between pages.
 htmx.on('htmx:beforeRequest', function(evt) {
