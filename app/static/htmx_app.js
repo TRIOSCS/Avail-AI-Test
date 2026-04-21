@@ -426,6 +426,20 @@ Alpine.directive('chip-overflow', (el, _directive, { cleanup }) => {
   });
 });
 
+/**
+ * rowActionRail — Alpine component for requisitions2 <tr>.
+ * CSS handles hover visibility via tr:hover; this component exposes
+ * `show` state so keyboard users (Tab, Enter, Escape) have a path.
+ */
+Alpine.data('rowActionRail', () => ({
+  show: false,
+  init() {
+    this.$el.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { this.show = false; }
+    });
+  },
+}));
+
 // ── Page-level loading bar for navigation ──────────────────
 // Shows a slim progress bar at the top when navigating between pages.
 htmx.on('htmx:beforeRequest', function(evt) {
