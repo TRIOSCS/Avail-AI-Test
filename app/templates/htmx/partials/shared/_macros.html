@@ -402,3 +402,88 @@ Usage:
   {%- endif -%}
 </span>
 {% endmacro %}
+
+
+{# ── Opportunity Table v2 — Row Action Rail ───────────────────────── #}
+{% macro opp_row_action_rail(req, user) %}
+<td class="opp-action-rail-cell">
+  <div class="opp-action-rail"
+       x-show="show"
+       x-cloak
+       role="toolbar"
+       aria-label="Row actions"
+       @click.stop>
+    {% if req.status != 'archived' %}
+      <button type="button"
+              hx-post="/requisitions2/{{ req.id }}/action/archive"
+              hx-target="#rq2-table"
+              hx-swap="outerHTML"
+              hx-confirm="Archive '{{ req.name }}'?"
+              aria-label="Archive {{ req.name }}"
+              @click.stop>
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 8h14M5 8l1 12a2 2 0 002 2h8a2 2 0 002-2l1-12M9 12h6"/></svg>
+      </button>
+    {% else %}
+      <button type="button"
+              hx-post="/requisitions2/{{ req.id }}/action/activate"
+              hx-target="#rq2-table"
+              hx-swap="outerHTML"
+              aria-label="Activate {{ req.name }}"
+              @click.stop>
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M5 15l7-7 7 7"/></svg>
+      </button>
+    {% endif %}
+
+    {% if not req.claimed_by_id and user and user.role in ('buyer','trader','manager','admin') %}
+      <button type="button"
+              hx-post="/requisitions2/{{ req.id }}/action/claim"
+              hx-target="#rq2-table"
+              hx-swap="outerHTML"
+              aria-label="Claim {{ req.name }}"
+              @click.stop>
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 4v16m0-16L4 12m8-8l8 8"/></svg>
+      </button>
+    {% elif req.claimed_by_id and user and req.claimed_by_id == user.id %}
+      <button type="button"
+              hx-post="/requisitions2/{{ req.id }}/action/unclaim"
+              hx-target="#rq2-table"
+              hx-swap="outerHTML"
+              aria-label="Unclaim {{ req.name }}"
+              @click.stop>
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M12 20V4m0 16l-8-8m8 8l8-8"/></svg>
+      </button>
+    {% endif %}
+
+    {% if req.status in ('active','sourcing','offers','quoting','quoted','open','reopened') %}
+      <button type="button"
+              hx-post="/requisitions2/{{ req.id }}/action/won"
+              hx-target="#rq2-table"
+              hx-swap="outerHTML"
+              aria-label="Mark {{ req.name }} won"
+              class="text-emerald-600"
+              @click.stop>
+        <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20"><path d="M10 15l-5.878 3.09 1.123-6.545L.489 6.91l6.572-.955L10 0l2.939 5.955 6.572.955-4.756 4.635 1.123 6.545z"/></svg>
+      </button>
+      <button type="button"
+              hx-post="/requisitions2/{{ req.id }}/action/lost"
+              hx-target="#rq2-table"
+              hx-swap="outerHTML"
+              hx-confirm="Mark '{{ req.name }}' as lost?"
+              aria-label="Mark {{ req.name }} lost"
+              class="text-rose-600"
+              @click.stop>
+        <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
+    {% endif %}
+
+    <button type="button"
+            hx-post="/requisitions2/{{ req.id }}/action/clone"
+            hx-target="#rq2-table"
+            hx-swap="outerHTML"
+            aria-label="Clone {{ req.name }}"
+            @click.stop>
+      <svg class="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M8 7v8a2 2 0 002 2h6M8 7V5a2 2 0 012-2h4.586a1 1 0 01.707.293l4.414 4.414a1 1 0 01.293.707V15a2 2 0 01-2 2h-2M8 7H6a2 2 0 00-2 2v10a2 2 0 002 2h8a2 2 0 002-2v-2"/></svg>
+    </button>
+  </div>
+</td>
+{% endmacro %}

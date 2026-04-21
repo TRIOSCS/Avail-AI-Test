@@ -331,3 +331,56 @@ def test_opp_name_cell_name_has_truncate_tip():
     }
     html = render_name_cell(req)
     assert "x-truncate-tip" in html
+
+
+# ── opp_row_action_rail ───────────────────────────────────────────────
+
+
+def _req(status="active", claimed_by_id=None, name="Acme", rid=1):
+    return {"id": rid, "name": name, "status": status, "claimed_by_id": claimed_by_id}
+
+
+def _user(uid=5, role="buyer"):
+    class U:
+        pass
+
+    u = U()
+    u.id = uid
+    u.role = role
+    return u
+
+
+def render_rail(req, user):
+    tpl = ENV.from_string(
+        '{% from "htmx/partials/shared/_macros.html" import opp_row_action_rail %}{{ opp_row_action_rail(req, user) }}'
+    )
+    return tpl.render(req=req, user=user).strip()
+
+
+def test_rail_shows_archive_when_not_archived():
+    html = render_rail(_req(status="active"), _user())
+    assert "action/archive" in html
+    assert "action/activate" not in html
+
+
+def test_rail_shows_activate_when_archived():
+    html = render_rail(_req(status="archived"), _user())
+    assert "action/activate" in html
+    assert "action/archive" not in html
+
+
+def test_rail_shows_claim_when_unclaimed_and_role_allowed():
+    html = render_rail(_req(claimed_by_id=None), _user(role="buyer"))
+    assert "action/claim" in html
+    assert "action/unclaim" not in html
+
+
+def test_rail_shows_unclaim_when_claimed_by_current_user():
+    html = render_rail(_req(claimed_by_id=5), _user(uid=5))
+    assert "action/unclaim" in html
+
+
+def test_rail_has_toolbar_role_and_aria_label():
+    html = render_rail(_req(), _user())
+    assert 'role="toolbar"' in html
+    assert 'aria-label="Row actions"' in html
