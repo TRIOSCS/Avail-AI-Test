@@ -59,18 +59,29 @@ def _hours_until_bid_due(deadline: str | None) -> float | None:
         return None
 
 
-def _resolve_deal_value(opportunity_value: float | None, total_target_value: float) -> tuple[float | None, str]:
-    """Pick displayed deal value; tag whether it was entered or computed.
+def _resolve_deal_value(
+    opportunity_value: float | None,
+    priced_sum: float,
+    priced_count: int,
+    requirement_count: int,
+) -> tuple[float | None, str]:
+    """Pick displayed deal value; tag provenance (entered / computed / partial / none).
 
-    Preference order per approved spec (G3):
-      1. Requisition.opportunity_value if set  → source='entered'
-      2. Σ(Requirement.target_price·target_qty) → source='computed'
-      3. neither                                → source='none'
+    Priority (per 2026-04-21 merged spec §Backend contract additions):
+      1. opportunity_value > 0            → 'entered'   (broker-entered wins)
+      2. priced_sum > 0 and all priced    → 'computed'  (target prices complete)
+      3. priced_sum > 0 and some unpriced → 'partial'   (floor estimate)
+      4. otherwise                         → 'none'     (no useful signal)
+
+    Zero-priced requirements count as priced (target_price explicitly 0 means
+    "free/sample," not "unknown"). priced_count reflects NOT-NULL target_price.
     """
     if opportunity_value and opportunity_value > 0:
         return opportunity_value, "entered"
-    if total_target_value and total_target_value > 0:
-        return total_target_value, "computed"
+    if priced_sum and priced_sum > 0:
+        if priced_count >= requirement_count:
+            return priced_sum, "computed"
+        return priced_sum, "partial"
     return None, "none"
 
 
@@ -429,8 +440,7 @@ def list_requisitions(
             req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt
         )
         _opp_val = float(r.opportunity_value) if r.opportunity_value else None
-        _ttv = float(ttv or 0)
-        _deal_val, _deal_src = _resolve_deal_value(_opp_val, _ttv)
+        _deal_val, _deal_src = _resolve_deal_value(_opp_val, float(ttv or 0), 0, req_cnt or 0)
         requisitions.append(
             {
                 "id": r.id,

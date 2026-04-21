@@ -49,27 +49,41 @@ def test_hours_until_bid_due_iso_datetime_parses():
     assert hrs is not None and hrs > 0
 
 
+# ── _resolve_deal_value (extended signature) ─────────────────────────
+
+
 def test_resolve_deal_value_prefers_entered():
-    val, src = _resolve_deal_value(opportunity_value=50000.0, total_target_value=10.0)
+    val, src = _resolve_deal_value(opportunity_value=50000.0, priced_sum=10.0, priced_count=1, requirement_count=5)
     assert val == 50000.0
     assert src == "entered"
 
 
-def test_resolve_deal_value_falls_back_to_computed():
-    val, src = _resolve_deal_value(opportunity_value=None, total_target_value=2500.0)
+def test_resolve_deal_value_all_priced_is_computed():
+    val, src = _resolve_deal_value(opportunity_value=None, priced_sum=2500.0, priced_count=3, requirement_count=3)
     assert val == 2500.0
     assert src == "computed"
 
 
-def test_resolve_deal_value_none_when_both_absent():
-    val, src = _resolve_deal_value(opportunity_value=None, total_target_value=0.0)
+def test_resolve_deal_value_some_priced_is_partial():
+    val, src = _resolve_deal_value(opportunity_value=None, priced_sum=1800.0, priced_count=3, requirement_count=5)
+    assert val == 1800.0
+    assert src == "partial"
+
+
+def test_resolve_deal_value_zero_price_counts_as_priced():
+    val, src = _resolve_deal_value(opportunity_value=None, priced_sum=1500.0, priced_count=4, requirement_count=4)
+    assert val == 1500.0
+    assert src == "computed"
+
+
+def test_resolve_deal_value_none_priced_is_none():
+    val, src = _resolve_deal_value(opportunity_value=None, priced_sum=0.0, priced_count=0, requirement_count=3)
     assert val is None
     assert src == "none"
 
 
 def test_resolve_deal_value_zero_opportunity_falls_through():
-    # opportunity_value = 0 is treated as "not set".
-    val, src = _resolve_deal_value(opportunity_value=0.0, total_target_value=1500.0)
+    val, src = _resolve_deal_value(opportunity_value=0.0, priced_sum=1500.0, priced_count=2, requirement_count=2)
     assert val == 1500.0
     assert src == "computed"
 
@@ -85,7 +99,7 @@ def test_list_row_exposes_v2_visual_fields(db_session, test_user, test_requisiti
     assert "hours_until_bid_due" in req  # may be None if no deadline set
     assert "deal_value_display" in req
     assert "deal_value_source" in req
-    assert req["deal_value_source"] in {"entered", "computed", "none"}
+    assert req["deal_value_source"] in {"entered", "computed", "partial", "none"}
 
 
 def test_list_returns_correct_fields(db_session, test_user, test_requisition):
