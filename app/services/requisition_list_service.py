@@ -12,7 +12,7 @@ from typing import Any
 
 from sqlalchemy import and_, case, exists, literal, or_, select
 from sqlalchemy import func as sqlfunc
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.constants import RequisitionStatus, UserRole
 from app.models import (
@@ -240,6 +240,51 @@ def list_requisitions(
         .scalar_subquery()
         .label("total_target_value")
     )
+    # priced_sum: Σ(target_price · target_qty) across requirements with non-null target_price.
+    priced_sum_sq = (
+        select(
+            sqlfunc.coalesce(
+                sqlfunc.sum(
+                    case(
+                        (Requirement.target_price.isnot(None), Requirement.target_price * Requirement.target_qty),
+                        else_=0,
+                    )
+                ),
+                0,
+            )
+        )
+        .where(Requirement.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("priced_sum")
+    )
+    # priced_count: count of requirements with non-null target_price.
+    priced_count_sq = (
+        select(sqlfunc.count(Requirement.target_price))
+        .where(Requirement.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("priced_count")
+    )
+    # coverage_filled: count of requirements with >=1 Offer.
+    _has_offer_subq = (
+        select(sqlfunc.count(Offer.id))
+        .where(Offer.requirement_id == Requirement.id)
+        .correlate(Requirement)
+        .scalar_subquery()
+    )
+    coverage_filled_sq = (
+        select(
+            sqlfunc.coalesce(
+                sqlfunc.sum(case((_has_offer_subq > 0, 1), else_=0)),
+                0,
+            )
+        )
+        .where(Requirement.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("coverage_filled")
+    )
     _quote_priority = case(
         (Quote.status == "won", literal(1)),
         (Quote.status == "lost", literal(2)),
@@ -361,8 +406,12 @@ def list_requisitions(
         call_count_sq,
         email_activity_count_sq,
         latest_rfq_sent_sq,
+        priced_sum_sq,
+        priced_count_sq,
+        coverage_filled_sq,
     ).options(
         joinedload(Requisition.customer_site).joinedload(CustomerSite.company),
+        selectinload(Requisition.requirements),
     )
 
     # ── Role-based filtering ─────────────────────────────────────────
@@ -473,12 +522,19 @@ def list_requisitions(
         call_cnt,
         email_act_cnt,
         latest_rfq_sent,
+        priced_sum,
+        priced_count,
+        coverage_filled,
     ) in rows:
         _sc, _sc_color, _sc_signals = compute_sourcing_score_safe(
             req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt
         )
         _opp_val = float(r.opportunity_value) if r.opportunity_value else None
-        _deal_val, _deal_src = _resolve_deal_value(_opp_val, float(ttv or 0), 0, req_cnt or 0)
+        _priced_sum = float(priced_sum or 0)
+        _priced_count = int(priced_count or 0)
+        _req_count = int(req_cnt or 0)
+        _deal_val, _deal_src = _resolve_deal_value(_opp_val, _priced_sum, _priced_count, _req_count)
+        _coverage_filled = int(coverage_filled or 0)
         requisitions.append(
             {
                 "id": r.id,
@@ -522,6 +578,11 @@ def list_requisitions(
                 "hours_until_bid_due": _hours_until_bid_due(r.deadline),
                 "deal_value_display": _deal_val,
                 "deal_value_source": _deal_src,
+                "deal_value_priced_count": _priced_count,
+                "deal_value_requirement_count": _req_count,
+                "coverage_filled": _coverage_filled,
+                "coverage_total": _req_count,
+                "mpn_chip_items": _build_row_mpn_chips(list(r.requirements or [])),
                 "sourcing_score": _sc,
                 "sourcing_color": _sc_color,
                 "sourcing_signals": _sc_signals,

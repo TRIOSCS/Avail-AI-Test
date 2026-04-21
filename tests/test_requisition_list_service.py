@@ -494,3 +494,37 @@ def test_build_row_mpn_chips_dedupes_repeated_subs():
     ]
     items = _build_row_mpn_chips(reqs)
     assert [it["mpn"] for it in items] == ["A", "B", "X", "Y", "Z"]
+
+
+# ── list_requisitions aggregation additions ──────────────────────────
+
+
+def test_list_row_exposes_deal_value_and_coverage(db_session, test_user, test_requisition):
+    """New row keys for the v2 row template must be present and typed."""
+    filters = ReqListFilters(status=ReqStatus.all)
+    result = list_requisitions(db_session, filters, test_user.id, "buyer")
+    req = result["requisitions"][0]
+
+    assert "hours_until_bid_due" in req
+    assert "deal_value_display" in req
+    assert "deal_value_source" in req
+    assert req["deal_value_source"] in {"entered", "computed", "partial", "none"}
+    assert "deal_value_priced_count" in req
+    assert isinstance(req["deal_value_priced_count"], int)
+    assert "deal_value_requirement_count" in req
+    assert isinstance(req["deal_value_requirement_count"], int)
+    assert "coverage_filled" in req
+    assert isinstance(req["coverage_filled"], int)
+    assert "coverage_total" in req
+    assert isinstance(req["coverage_total"], int)
+    assert req["coverage_filled"] <= req["coverage_total"]
+    assert "mpn_chip_items" in req
+    assert isinstance(req["mpn_chip_items"], list)
+
+
+def test_list_row_coverage_counts_requirements_with_offers(db_session, test_user, test_requisition):
+    """coverage_filled == count of requirements with >=1 offer (not sightings)."""
+    filters = ReqListFilters(status=ReqStatus.all)
+    result = list_requisitions(db_session, filters, test_user.id, "buyer")
+    req = result["requisitions"][0]
+    assert req["coverage_filled"] == 0
