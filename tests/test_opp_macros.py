@@ -289,6 +289,38 @@ def test_opp_name_cell_renders_match_badge_when_present():
     assert "match-badge" in html
 
 
+def test_opp_name_cell_renders_customer_match_badge():
+    # Spec: match_reason='customer' path must render sky-colored badge
+    # with building-icon SVG and "customer match" label.
+    req = {
+        "id": 8,
+        "name": "Bar",
+        "mpn_chip_items": [],
+        "match_reason": "customer",
+        "matched_mpn": None,
+    }
+    html = render_name_cell(req)
+    assert "match-badge" in html
+    assert "bg-sky-50" in html
+    assert "customer match" in html
+    assert "<svg" in html  # building icon present
+
+
+def test_opp_name_cell_part_match_badge_has_chip_icon():
+    # Spec: match_reason='part' path must include the chip SVG icon
+    # (not just the matched MPN text).
+    req = {
+        "id": 9,
+        "name": "Baz",
+        "mpn_chip_items": [],
+        "match_reason": "part",
+        "matched_mpn": "LM317",
+    }
+    html = render_name_cell(req)
+    assert "<svg" in html  # chip icon present
+    assert "LM317" in html
+
+
 def test_opp_name_cell_name_has_truncate_tip():
     req = {
         "id": 1,
