@@ -216,3 +216,39 @@ def test_opp_status_cell_no_time_text_when_hours_none():
 def test_opp_status_cell_aria_label_combines_status_and_time():
     html = render_status_cell("sourcing", 6)
     assert 'aria-label="Sourcing, 6h"' in html
+
+
+def test_opp_status_cell_overdue_in_html_and_aria_label():
+    html = render_status_cell("sourcing", -2)
+    assert "Overdue" in html
+    assert 'aria-label="Sourcing, Overdue"' in html
+
+
+def test_opp_status_cell_days_formatting_in_html_and_aria_label():
+    html = render_status_cell("active", 120)
+    assert "5d" in html
+    assert 'aria-label="Open, 5d"' in html
+
+
+def test_opp_status_cell_aria_label_has_no_comma_when_hours_none():
+    html = render_status_cell("active", None)
+    assert 'aria-label="Open"' in html
+    assert ", " not in (html.split('aria-label="')[1].split('"')[0])
+
+
+@pytest.mark.parametrize(
+    "status,bucket,label",
+    [
+        ("active", "open", "Open"),
+        ("sourcing", "sourcing", "Sourcing"),
+        ("offers", "offered", "Offered"),
+        ("quoting", "quoted", "Quoting"),
+        ("quoted", "quoted", "Quoted"),
+        ("won", "neutral", "Won"),
+    ],
+)
+def test_opp_status_cell_all_buckets_render_correctly(status, bucket, label):
+    html = render_status_cell(status, None)
+    assert f"opp-status-dot--{bucket}" in html
+    assert f">{label}<" in html
+    assert f'aria-label="{label}"' in html
