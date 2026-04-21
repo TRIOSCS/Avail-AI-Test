@@ -51,3 +51,60 @@ test.describe('Requisitions split divider', () => {
     expect(style).toContain(`width: ${pct}%`);
   });
 });
+
+test.describe('Requisitions left-list columns', () => {
+  test.beforeEach(async ({ page }) => {
+    await clearLayout(page);
+    await page.reload();
+  });
+
+  test('Name column resize persists to localStorage and survives reload', async ({ page }) => {
+    await page.goto(REQS_URL);
+
+    const nameHeader = page.locator('#rq2-table th').filter({ hasText: 'Name' });
+    await expect(nameHeader).toBeVisible({ timeout: 10000 });
+
+    const handle = nameHeader.locator('.col-resize-handle');
+    await expect(handle).toBeVisible();
+
+    const hBox = await handle.boundingBox();
+    if (!hBox) throw new Error('handle not visible');
+
+    // Drag 80px right from the handle center
+    await page.mouse.move(hBox.x + hBox.width / 2, hBox.y + hBox.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(hBox.x + hBox.width / 2 + 80, hBox.y + hBox.height / 2, { steps: 10 });
+    await page.mouse.up();
+
+    const saved = await page.evaluate(() =>
+      JSON.parse(localStorage.getItem('avail_table_cols_rq2-list') || '{}')
+    );
+    expect(saved.name).toBeGreaterThan(200);
+
+    const savedName = saved.name;
+    await page.reload();
+    const col = page.locator('#rq2-table colgroup col').nth(1); // 0=select, 1=name
+    const style = await col.getAttribute('style');
+    expect(style).toContain(`width:${savedName}px`);
+  });
+
+  test('columns survive HTMX swap (sort reorder)', async ({ page }) => {
+    await page.goto(REQS_URL);
+    await page.evaluate(() => {
+      localStorage.setItem(
+        'avail_table_cols_rq2-list',
+        JSON.stringify({ name: 260, status: 110, customer: 160, select: 36, count: 60 })
+      );
+    });
+    await page.reload();
+
+    const nameLink = page.locator('#rq2-table thead a', { hasText: 'Name' });
+    if ((await nameLink.count()) > 0) {
+      await nameLink.first().click();
+      await page.waitForTimeout(400);
+      const col = page.locator('#rq2-table colgroup col').nth(1);
+      const style = await col.getAttribute('style');
+      expect(style).toContain('width:260px');
+    }
+  });
+});
