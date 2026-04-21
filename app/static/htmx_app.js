@@ -325,6 +325,98 @@ Alpine.directive('truncate-tip', (el) => {
   el.addEventListener('focusout', hide);
 });
 
+/**
+ * x-chip-overflow — Measures chip row width and hides chips that don't
+ * fit. Exposes a trailing +N button (must be last child, .opp-chip-more)
+ * whose `_tipNodes` property holds a cloned DocumentFragment of the
+ * hidden chips — x-truncate-tip reads that on hover.
+ *
+ * Primaries-first DOM order (enforced by _build_row_mpn_chips) ensures
+ * the left-to-right overflow walk never hides a primary while a sub is
+ * still visible.
+ */
+Alpine.directive('chip-overflow', (el) => {
+  const more = el.querySelector('.opp-chip-more');
+  if (!more) return;
+  const chips = Array.from(el.children).filter((c) => c !== more);
+
+  let rafId = 0;
+
+  const measure = () => {
+    rafId = 0;
+    chips.forEach((c) => (c.style.display = ''));
+    more.style.display = 'none';
+    more.textContent = '';
+    more._tipNodes = null;
+
+    const containerWidth = el.clientWidth;
+    if (containerWidth === 0) return;
+
+    const style = window.getComputedStyle(el);
+    const gap = parseFloat(style.columnGap || style.gap || '0') || 4;
+
+    // Measure +N width at worst-case placeholder, then clear.
+    more.style.display = '';
+    more.textContent = '+9';
+    const moreWidth = more.getBoundingClientRect().width + gap;
+    more.textContent = '';
+
+    let used = 0;
+    let fitCount = 0;
+    for (const chip of chips) {
+      const w = chip.getBoundingClientRect().width;
+      const projected = used + w + (fitCount > 0 ? gap : 0);
+      const reserve = fitCount < chips.length - 1 ? moreWidth : 0;
+      if (projected + reserve <= containerWidth) {
+        used = projected;
+        fitCount++;
+      } else {
+        break;
+      }
+    }
+
+    if (fitCount === chips.length) {
+      more.style.display = 'none';
+      return;
+    }
+
+    const hidden = chips.slice(fitCount);
+    chips.slice(0, fitCount).forEach((c) => (c.style.display = ''));
+    hidden.forEach((c) => (c.style.display = 'none'));
+
+    more.textContent = '+' + hidden.length;
+
+    // Build a DocumentFragment of cloned hidden chips, inside a chip-row wrapper.
+    // x-truncate-tip will clone this fragment into the tooltip when hovered.
+    const frag = document.createDocumentFragment();
+    const wrap = document.createElement('span');
+    wrap.className = 'opp-chip-row';
+    hidden.forEach((c) => {
+      const clone = c.cloneNode(true);
+      clone.style.display = '';
+      wrap.appendChild(clone);
+    });
+    frag.appendChild(wrap);
+    more._tipNodes = frag;
+  };
+
+  const schedule = () => {
+    if (rafId) return;
+    rafId = requestAnimationFrame(measure);
+  };
+
+  schedule();
+
+  const ro = new ResizeObserver(schedule);
+  ro.observe(el);
+
+  // Cleanup when Alpine tears down the element.
+  el._chipOverflowCleanup = () => {
+    ro.disconnect();
+    if (rafId) cancelAnimationFrame(rafId);
+  };
+});
+
 // ── Page-level loading bar for navigation ──────────────────
 // Shows a slim progress bar at the top when navigating between pages.
 htmx.on('htmx:beforeRequest', function(evt) {
