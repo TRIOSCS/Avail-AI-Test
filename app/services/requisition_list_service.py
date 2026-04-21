@@ -85,6 +85,44 @@ def _resolve_deal_value(
     return None, "none"
 
 
+def _build_row_mpn_chips(requirements) -> list[dict]:
+    """Return flat deduped chip-item list: primaries first, subs second.
+
+    Rules (per 2026-04-21 merged spec §_build_row_mpn_chips):
+      1. Pass 1 — each requirement's primary_mpn (if truthy).
+      2. Pass 2 — each requirement's subs via parse_substitute_mpns.
+      3. Dedupe by MPN keeping the first occurrence (so an MPN that's
+         primary in any requirement renders as primary, never sub).
+      4. No limit; frontend decides visibility via x-chip-overflow.
+
+    Called by: list_requisitions()
+    """
+    from app.utils.normalization import parse_substitute_mpns
+
+    seen: set[str] = set()
+    items: list[dict] = []
+
+    for req in requirements:
+        mpn = (getattr(req, "primary_mpn", None) or "").strip()
+        if mpn and mpn not in seen:
+            items.append({"mpn": mpn, "role": "primary"})
+            seen.add(mpn)
+
+    for req in requirements:
+        raw_subs = getattr(req, "substitutes", None) or []
+        primary = (getattr(req, "primary_mpn", None) or "").strip()
+        # Normalise: canonical format is list[dict]; legacy rows may be list[str].
+        # Convert plain strings to the dict format parse_substitute_mpns expects.
+        dict_subs = [s if isinstance(s, dict) else {"mpn": s, "manufacturer": ""} for s in raw_subs]
+        for parsed in parse_substitute_mpns(dict_subs, primary):
+            sub_mpn = (parsed.get("mpn") or "").strip()
+            if sub_mpn and sub_mpn not in seen:
+                items.append({"mpn": sub_mpn, "role": "sub"})
+                seen.add(sub_mpn)
+
+    return items
+
+
 def _build_pagination(page: int, per_page: int, total: int) -> PaginationContext:
     """Build pagination context from query results."""
     return PaginationContext(

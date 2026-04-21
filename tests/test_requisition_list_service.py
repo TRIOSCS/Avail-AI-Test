@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from app.models import Requisition
 from app.schemas.requisitions2 import ReqListFilters, ReqStatus, SortColumn, SortOrder
 from app.services.requisition_list_service import (
+    _build_row_mpn_chips,
     _hours_until_bid_due,
     _resolve_deal_value,
     get_requisition_detail,
@@ -440,3 +441,56 @@ def test_get_team_users(db_session, test_user):
     users = get_team_users(db_session)
     assert len(users) >= 1
     assert any(u["id"] == test_user.id for u in users)
+
+
+# ── _build_row_mpn_chips ─────────────────────────────────────────────
+
+
+class _FakeReq:
+    def __init__(self, primary_mpn=None, substitutes=None):
+        self.primary_mpn = primary_mpn
+        self.substitutes = substitutes or []
+
+
+def test_build_row_mpn_chips_orders_primaries_before_subs():
+    reqs = [
+        _FakeReq(primary_mpn="LM317", substitutes=[{"mpn": "LM337", "manufacturer": "TI"}]),
+        _FakeReq(primary_mpn="NE555", substitutes=["LMC555"]),
+    ]
+    items = _build_row_mpn_chips(reqs)
+    roles = [it["role"] for it in items]
+    first_sub = roles.index("sub")
+    assert all(r == "primary" for r in roles[:first_sub])
+    assert all(r == "sub" for r in roles[first_sub:])
+    assert [it["mpn"] for it in items] == ["LM317", "NE555", "LM337", "LMC555"]
+
+
+def test_build_row_mpn_chips_dedupes_keeping_primary_role():
+    reqs = [
+        _FakeReq(primary_mpn="LM317"),
+        _FakeReq(primary_mpn="NE555", substitutes=[{"mpn": "LM317", "manufacturer": "TI"}]),
+    ]
+    items = _build_row_mpn_chips(reqs)
+    mpns = [it["mpn"] for it in items]
+    assert mpns.count("LM317") == 1
+    lm317 = next(it for it in items if it["mpn"] == "LM317")
+    assert lm317["role"] == "primary"
+
+
+def test_build_row_mpn_chips_empty_when_no_requirements():
+    assert _build_row_mpn_chips([]) == []
+
+
+def test_build_row_mpn_chips_ignores_empty_primary():
+    reqs = [_FakeReq(primary_mpn="", substitutes=["SUB1"])]
+    items = _build_row_mpn_chips(reqs)
+    assert items == [{"mpn": "SUB1", "role": "sub"}]
+
+
+def test_build_row_mpn_chips_dedupes_repeated_subs():
+    reqs = [
+        _FakeReq(primary_mpn="A", substitutes=["X", "Y"]),
+        _FakeReq(primary_mpn="B", substitutes=["X", "Z"]),
+    ]
+    items = _build_row_mpn_chips(reqs)
+    assert [it["mpn"] for it in items] == ["A", "B", "X", "Y", "Z"]
