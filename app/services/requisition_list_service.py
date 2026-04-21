@@ -7,6 +7,7 @@ Called by: app/routers/htmx_views.py
 Depends on: app/models/sourcing.py, app/models/offers.py, SQLAlchemy
 """
 
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import and_, case, exists, literal, or_, select
@@ -30,6 +31,47 @@ from app.models import (
 from app.schemas.requisitions2 import PaginationContext, ReqListFilters
 from app.services.sourcing_score import compute_sourcing_score_safe
 from app.utils.sql_helpers import escape_like
+
+
+def _hours_until_bid_due(deadline: str | None) -> float | None:
+    """Hours from now (UTC) until the bid deadline, or None if unknown.
+
+    Requisition.deadline is a free-form string column (ISO date, ISO datetime, or the
+    occasional human literal like "ASAP"). Only ISO forms parse; anything else returns
+    None so the UI degrades to no-urgency-accent. Date-only values are treated as end-
+    of-day UTC so "due today" reads as urgent, not overdue.
+    """
+    if not deadline:
+        return None
+    s = deadline.strip()
+    if not s:
+        return None
+    try:
+        if "T" in s or " " in s:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        else:
+            d = datetime.fromisoformat(s).date()
+            dt = datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=timezone.utc)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (dt - datetime.now(timezone.utc)).total_seconds() / 3600.0
+    except (ValueError, TypeError):
+        return None
+
+
+def _resolve_deal_value(opportunity_value: float | None, total_target_value: float) -> tuple[float | None, str]:
+    """Pick displayed deal value; tag whether it was entered or computed.
+
+    Preference order per approved spec (G3):
+      1. Requisition.opportunity_value if set  → source='entered'
+      2. Σ(Requirement.target_price·target_qty) → source='computed'
+      3. neither                                → source='none'
+    """
+    if opportunity_value and opportunity_value > 0:
+        return opportunity_value, "entered"
+    if total_target_value and total_target_value > 0:
+        return total_target_value, "computed"
+    return None, "none"
 
 
 def _build_pagination(page: int, per_page: int, total: int) -> PaginationContext:
@@ -386,6 +428,9 @@ def list_requisitions(
         _sc, _sc_color, _sc_signals = compute_sourcing_score_safe(
             req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt
         )
+        _opp_val = float(r.opportunity_value) if r.opportunity_value else None
+        _ttv = float(ttv or 0)
+        _deal_val, _deal_src = _resolve_deal_value(_opp_val, _ttv)
         requisitions.append(
             {
                 "id": r.id,
@@ -425,7 +470,10 @@ def list_requisitions(
                 "proactive_match_count": pm_cnt or 0,
                 "claimed_by_id": r.claimed_by_id,
                 "urgency": r.urgency or "normal",
-                "opportunity_value": float(r.opportunity_value) if r.opportunity_value else None,
+                "opportunity_value": _opp_val,
+                "hours_until_bid_due": _hours_until_bid_due(r.deadline),
+                "deal_value_display": _deal_val,
+                "deal_value_source": _deal_src,
                 "sourcing_score": _sc,
                 "sourcing_color": _sc_color,
                 "sourcing_signals": _sc_signals,

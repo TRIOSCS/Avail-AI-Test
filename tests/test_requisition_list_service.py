@@ -12,12 +12,80 @@ from datetime import datetime, timezone
 from app.models import Requisition
 from app.schemas.requisitions2 import ReqListFilters, ReqStatus, SortColumn, SortOrder
 from app.services.requisition_list_service import (
+    _hours_until_bid_due,
+    _resolve_deal_value,
     get_requisition_detail,
     get_team_users,
     list_requisitions,
 )
 
+# ── helpers: _hours_until_bid_due / _resolve_deal_value ──────────────
+
+
+def test_hours_until_bid_due_none_and_empty():
+    assert _hours_until_bid_due(None) is None
+    assert _hours_until_bid_due("") is None
+    assert _hours_until_bid_due("   ") is None
+
+
+def test_hours_until_bid_due_unparseable_returns_none():
+    # Literal "ASAP" and other non-ISO strings must degrade to None,
+    # not raise, so the urgency accent just doesn't render.
+    assert _hours_until_bid_due("ASAP") is None
+    assert _hours_until_bid_due("next week") is None
+
+
+def test_hours_until_bid_due_iso_date_treated_as_end_of_day():
+    # A date in the past → negative hours; a date in the future → positive.
+    past = _hours_until_bid_due("2000-01-01")
+    future = _hours_until_bid_due("2999-01-01")
+    assert past is not None and past < 0
+    assert future is not None and future > 0
+
+
+def test_hours_until_bid_due_iso_datetime_parses():
+    iso = "2999-06-15T12:00:00+00:00"
+    hrs = _hours_until_bid_due(iso)
+    assert hrs is not None and hrs > 0
+
+
+def test_resolve_deal_value_prefers_entered():
+    val, src = _resolve_deal_value(opportunity_value=50000.0, total_target_value=10.0)
+    assert val == 50000.0
+    assert src == "entered"
+
+
+def test_resolve_deal_value_falls_back_to_computed():
+    val, src = _resolve_deal_value(opportunity_value=None, total_target_value=2500.0)
+    assert val == 2500.0
+    assert src == "computed"
+
+
+def test_resolve_deal_value_none_when_both_absent():
+    val, src = _resolve_deal_value(opportunity_value=None, total_target_value=0.0)
+    assert val is None
+    assert src == "none"
+
+
+def test_resolve_deal_value_zero_opportunity_falls_through():
+    # opportunity_value = 0 is treated as "not set".
+    val, src = _resolve_deal_value(opportunity_value=0.0, total_target_value=1500.0)
+    assert val == 1500.0
+    assert src == "computed"
+
+
 # ── list_requisitions ────────────────────────────────────────────────
+
+
+def test_list_row_exposes_v2_visual_fields(db_session, test_user, test_requisition):
+    """New row keys required by the v2 row template must be present."""
+    filters = ReqListFilters(status=ReqStatus.all)
+    result = list_requisitions(db_session, filters, test_user.id, "buyer")
+    req = result["requisitions"][0]
+    assert "hours_until_bid_due" in req  # may be None if no deadline set
+    assert "deal_value_display" in req
+    assert "deal_value_source" in req
+    assert req["deal_value_source"] in {"entered", "computed", "none"}
 
 
 def test_list_returns_correct_fields(db_session, test_user, test_requisition):

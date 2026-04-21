@@ -101,6 +101,102 @@ Usage:
 {%- endmacro %}
 
 
+{# ── Opportunity Table v2 — Status Dot ────────────────────────────── #}
+{#
+  Purpose:     Render status as a colored dot + plain text label.
+  Depends on:  styles.css opp-status-* tokens; spec §Exact tokens.
+  Called-by:   htmx/partials/requisitions/req_row.html
+  Business:    Spec maps Requisition.status → 4 named buckets (Open/Sourcing/
+               Offered/Quoted); all other enum values render as neutral gray.
+               Accessibility: the label is plain text so the meaning does not
+               depend on color alone; the dot carries aria-hidden.
+#}
+{% macro status_dot(value) %}
+{%- set bucket_map = {
+  'active': 'open', 'sourcing': 'sourcing', 'offers': 'offered',
+  'quoting': 'quoted', 'quoted': 'quoted'
+} -%}
+{%- set label_map = {
+  'active': 'Open', 'sourcing': 'Sourcing', 'offers': 'Offered',
+  'quoting': 'Quoting', 'quoted': 'Quoted'
+} -%}
+{%- set bucket = bucket_map.get(value, 'neutral') -%}
+{%- set label = label_map.get(value, value|replace('_', ' ')|capitalize) -%}
+<span class="opp-status"><span class="opp-status-dot opp-status-dot--{{ bucket }}" aria-hidden="true"></span><span class="opp-status-label">{{ label }}</span></span>
+{%- endmacro %}
+
+
+{# ── Opportunity Table v2 — Deal Value ────────────────────────────── #}
+{#
+  Purpose:     Dollar amount with typographic-magnitude encoding per spec.
+  Depends on:  styles.css opp-deal-* tokens.
+  Called-by:   htmx/partials/requisitions/req_row.html
+  Business:    Weight/color tier derived from magnitude (>=100k primary-500,
+               1k–99,999 primary-400, <1k tertiary). `source='computed'` marks
+               values derived from Σ(target_price·target_qty) rather than the
+               user-entered opportunity_value — rendered italic to let sales
+               distinguish at a glance.
+#}
+{% macro deal_value(amount, source='entered') %}
+{%- if amount is none or amount == 0 -%}
+<span class="opp-deal opp-deal--tier-tertiary">—</span>
+{%- else -%}
+  {%- if amount >= 100000 -%}{%- set tier = 'primary-500' -%}
+  {%- elif amount >= 1000 -%}{%- set tier = 'primary-400' -%}
+  {%- else -%}{%- set tier = 'tertiary' -%}{%- endif -%}
+<span class="opp-deal opp-deal--tier-{{ tier }}{% if source == 'computed' %} opp-deal--computed{% endif %}">${{ '{:,.0f}'.format(amount) }}</span>
+{%- endif -%}
+{% endmacro %}
+
+
+{# ── Opportunity Table v2 — Coverage Meter ────────────────────────── #}
+{#
+  Purpose:     6-segment meter showing sourced_count / requirement_count.
+  Depends on:  styles.css opp-coverage* tokens.
+  Called-by:   htmx/partials/requisitions/req_row.html
+  Business:    Semantics per approved G2: "parts with ≥1 sighting" over
+               "total parts". Segments filled = round(6·filled/total).
+#}
+{% macro coverage_meter(filled, total) %}
+{%- set total = total or 0 -%}
+{%- set filled = filled or 0 -%}
+{%- if total > 0 -%}{%- set segs = ((filled * 6) / total)|round(0, 'common')|int -%}
+{%- else -%}{%- set segs = 0 -%}{%- endif -%}
+<span class="opp-coverage" role="img" aria-label="Coverage: {{ filled }} of {{ total }} parts sourced">
+{%- for i in range(6) -%}
+<span class="opp-coverage-seg{% if i < segs %} opp-coverage-seg--filled{% endif %}"></span>
+{%- endfor -%}
+</span>
+{% endmacro %}
+
+
+{# ── Opportunity Table v2 — Urgency Accent + Time Text ───────────── #}
+{#
+  Purpose:     Compute row-edge urgency accent class and render time text.
+  Depends on:  styles.css opp-row--urgent-* and opp-time-* tokens.
+  Called-by:   htmx/partials/requisitions/req_row.html
+  Business:    <24h red, <72h amber, else none. hours may be None (no
+               deadline set or unparseable) — treat as not-urgent.
+#}
+{% macro urgency_accent(hours) -%}
+{%- if hours is not none and hours <= 24 -%}urgent-24h
+{%- elif hours is not none and hours <= 72 -%}urgent-72h
+{%- endif -%}
+{%- endmacro %}
+
+{% macro time_text(hours) -%}
+{%- if hours is none -%}{%- elif hours < 0 -%}
+<span class="opp-time opp-time--24h">Overdue</span>
+{%- elif hours <= 24 -%}
+<span class="opp-time opp-time--24h">{{ hours|round(0)|int }}h</span>
+{%- elif hours <= 72 -%}
+<span class="opp-time opp-time--72h">{{ hours|round(0)|int }}h</span>
+{%- else -%}
+<span class="opp-time opp-time--normal">{{ (hours/24)|round(0)|int }}d</span>
+{%- endif -%}
+{%- endmacro %}
+
+
 {# ── Risk Badge ───────────────────────────────────────────────────── #}
 
 {% macro risk_badge(level) %}
