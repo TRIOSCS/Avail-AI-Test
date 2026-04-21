@@ -22,20 +22,22 @@
            x-on:change="toggleSelection({{ req.id }}, $event.target.checked)"
            x-bind:checked="selectedIds.has({{ req.id }})">
   </td>
-  <td class="px-3 py-2">
-    <div class="flex items-center gap-1.5">
-      <span class="text-sm font-medium text-gray-900 truncate max-w-[180px]">{{ req.name }}</span>
+  <td class="px-3 py-2 overflow-hidden">
+    <div class="flex items-center gap-1.5 min-w-0">
+      <span class="text-sm font-medium text-gray-900 truncate block flex-1 min-w-0">{{ req.name }}</span>
       {% if req.urgency == 'hot' %}
-      <span class="inline-flex h-4 px-1 text-[10px] font-semibold rounded bg-amber-50 text-amber-700">HOT</span>
+      <span class="flex-shrink-0 inline-flex h-4 px-1 text-[10px] font-semibold rounded bg-amber-50 text-amber-700">HOT</span>
       {% elif req.urgency == 'critical' %}
-      <span class="inline-flex h-4 px-1 text-[10px] font-semibold rounded bg-rose-50 text-rose-700">CRIT</span>
+      <span class="flex-shrink-0 inline-flex h-4 px-1 text-[10px] font-semibold rounded bg-rose-50 text-rose-700">CRIT</span>
       {% endif %}
     </div>
   </td>
   <td class="px-3 py-2">
     {{ status_badge(req.status) }}
   </td>
-  <td class="px-3 py-2 text-sm text-gray-600 truncate max-w-[140px]">{{ req.customer_display or '—' }}</td>
+  <td class="px-3 py-2 text-sm text-gray-600 overflow-hidden">
+    <span class="truncate block">{{ req.customer_display or '—' }}</span>
+  </td>
   <td class="px-3 py-2 text-sm text-right text-gray-800">{{ req.requirement_count }}</td>
 </tr>
 {% else %}
