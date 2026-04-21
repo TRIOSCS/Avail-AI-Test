@@ -126,6 +126,69 @@
 .opp-coverage-seg { width: 6px; height: 14px; background: var(--opp-coverage-empty); border-radius: 1px; }
 .opp-coverage-seg--filled { background: var(--opp-coverage-filled); }
 
+/* ── Opportunity Table v2 — partial deal value ────────────────── */
+.opp-deal--partial { /* italic comes from .opp-deal--computed; hook for future tweaks. */ }
+
+/* ── Opportunity Table v2 — truncate-tip ─────────────────────── */
+.truncate-tip {
+  position: fixed;
+  z-index: 50;
+  max-width: 320px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #fff;
+  background: #1C2130;
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 80ms ease-out;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+.truncate-tip.visible { opacity: 1; }
+.truncate-tip .opp-chip-row { flex-wrap: wrap; gap: 4px; }
+
+/* ── Opportunity Table v2 — name cell stack ──────────────────── */
+.opp-name-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.opp-name-cell__chips { min-width: 0; }
+.opp-name-cell__title { min-width: 0; }
+.opp-chip-row { min-width: 0; }
+
+/* ── Opportunity Table v2 — row hover action rail ───────────── */
+.opp-action-rail-cell { position: relative; width: 0; padding: 0; }
+.opp-action-rail {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+  background: rgba(255,255,255,0.96);
+  backdrop-filter: blur(2px);
+  border: 1px solid var(--opp-sep);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  opacity: 0;
+  transition: opacity 90ms ease-out;
+  pointer-events: none;
+}
+tr:hover .opp-action-rail,
+tr:focus-within .opp-action-rail {
+  opacity: 1;
+  pointer-events: auto;
+}
+.opp-action-rail button {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--opp-text-secondary);
+  background: transparent;
+  border: none; border-radius: 4px;
+  cursor: pointer;
+}
+.opp-action-rail button:hover { background: var(--opp-sep); color: var(--opp-text-primary); }
+.opp-action-rail button:focus-visible { outline: 2px solid var(--opp-status-open); outline-offset: 1px; }
+
 .opp-col-header {
   font-family: inherit;
   font-size: 10px;
