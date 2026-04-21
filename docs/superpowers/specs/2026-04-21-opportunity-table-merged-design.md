@@ -83,10 +83,12 @@ All changes are frontend + row-dict fields. No migrations, no new routes, no sch
                            ▼
 ┌─ htmx_app.js ────────────────────────────────────────────────┐
 │ x-truncate-tip (existing, relocated from requisitions2.js)   │
-│   extended: accepts data-tip-content override for rich body  │
+│   extended: reads el._tipNodes (DocumentFragment) for rich   │
+│   body, falls back to textContent when not set               │
 │ x-chip-overflow (new directive)                              │
 │   measures chip widths vs container, hides overflow, sets    │
-│   +N label + data-tip-content for hover reveal               │
+│   +N label + attaches cloned-DOM fragment to el._tipNodes    │
+│   (no innerHTML, no HTML-string attributes — XSS-safe)       │
 │ rowActionRail (new Alpine component)                         │
 │   row-hover reveal + keyboard (focus+Enter) alternative path │
 └──────────────────────────────────────────────────────────────┘
@@ -108,7 +110,7 @@ All changes are frontend + row-dict fields. No migrations, no new routes, no sch
 - `app/templates/requisitions2/_table.html` — update `<thead>` for 6-col v2 set + `opp-col-header` styling, gated by flag; legacy 5-col header preserved in `{% else %}`.
 - `app/routers/requisitions2.py` — update `_table_context()` to inject `avail_opp_table_v2_enabled=app_settings.avail_opp_table_v2`.
 - `app/static/styles.css` — add `.truncate-tip`, `.opp-chip-row`, `.opp-name-cell`, `.opp-deal--partial`, `.opp-action-rail` + hover-reveal rules; minor adjustments to existing tokens.
-- `app/static/htmx_app.js` — move `x-truncate-tip` here (currently uncommitted in `requisitions2.js`); extend to support `data-tip-content`; add `x-chip-overflow` directive; add `rowActionRail` Alpine component.
+- `app/static/htmx_app.js` — move `x-truncate-tip` here (currently uncommitted in `requisitions2.js`); extend to read an optional `_tipNodes` DocumentFragment property on the element (cloned into the tooltip, never via `innerHTML`); add `x-chip-overflow` directive; add `rowActionRail` Alpine component.
 - `app/static/js/requisitions2.js` — delete the duplicated `x-truncate-tip` block.
 - `tests/test_requisition_list_service.py` — keep uncommitted helper tests; add tests for chip aggregation, coverage (offers semantic), partial deal value, priced counts.
 - `tests/test_requisitions2_templates.py` — add assertions for v2 markup presence when flag on, legacy markup when flag off.
@@ -496,18 +498,20 @@ The chip row's visible count is dynamic — it depends on (a) the current Name c
    b. Measures container inner width.
    c. Walks chips left→right, summing widths + gaps. When the next chip would exceed the width minus the measured `+N` element width, stop.
    d. Hides all remaining chips.
-   e. If any are hidden, shows `+N` (text = `+{hidden count}`) and sets `data-tip-content` on `+N` to the HTML of the hidden chips.
+   e. If any are hidden, shows `+N` (text = `+{hidden count}`) and attaches a cloned-DOM `DocumentFragment` of the hidden chips to `+N` via an `_tipNodes` property on the element (a runtime property, not an HTML attribute). `x-truncate-tip` consumes this on hover by cloning the fragment again and appending it — zero `innerHTML`, zero HTML-string attributes, XSS-safe.
 3. **Primaries-first guarantee:** Because primaries are rendered first in DOM order, a left-to-right overflow walk naturally preserves the rule that primaries never hide while subs are visible.
 4. **Edge case — not even all primaries fit:** Primaries still get priority over subs (DOM order). If only 2 of 5 primaries fit, the `+N` count is `(3 primaries + all subs)`. Rule intent is preserved: no sub is ever shown while a primary is hidden.
 5. **Empty chip list:** Render `—` tertiary placeholder. Directive does nothing.
 6. **Resize cadence:** `ResizeObserver` fires independently of the `resizableTable` internals — no coupling to a custom event contract. Callback work is batched to `requestAnimationFrame` to avoid thrash during drag.
 7. **Cleanup:** directive disconnects the observer on element removal (HTMX swap, row re-render).
 
-**Reuses `x-truncate-tip` for the hover reveal:** the `+N` element carries `x-truncate-tip` with a `data-tip-content` attribute set to raw HTML. The directive is extended:
+**Reuses `x-truncate-tip` for the hover reveal:** the `+N` element carries `x-truncate-tip` and receives a `_tipNodes` DocumentFragment property at runtime from `x-chip-overflow`. The directive is extended:
 
-- If `data-tip-content` is present, use it as the tooltip body (parsed as HTML via `innerHTML`).
-- Else fall back to the element's own `textContent` (current behavior).
-- Hover activation always shows the tooltip when `data-tip-content` is set — the "only when clipped" gate only applies to the textContent path.
+- If `el._tipNodes` is a DocumentFragment with children, clone it and `appendChild` into the tooltip (no `innerHTML`, no string-attribute payloads — XSS-safe).
+- Else fall back to the element's own `textContent` (existing behavior).
+- Hover activation always shows the tooltip when `_tipNodes` is set — the "only when clipped" gate only applies to the textContent path.
+
+**Why not `data-tip-content`?** An earlier draft of this spec proposed a `data-tip-content` HTML attribute whose value was raw HTML read via `innerHTML`. That pattern is an XSS anti-pattern regardless of whether the current callers produce trusted content. The DOM-property approach sidesteps the `innerHTML` surface entirely.
 
 ### Chip worst-case analysis (drives Name min-width of 320px)
 
@@ -561,7 +565,7 @@ None of those go in this PR — they're listed so future tuners don't re-derive 
 
 Final location: `app/static/htmx_app.js` (globally registered, consistent with `splitPanel` and `resizableTable`). The uncommitted copy in `app/static/js/requisitions2.js` is deleted.
 
-Signature unchanged from uncommitted version except for the `data-tip-content` extension above. Styling — new rule in `styles.css`:
+Signature unchanged from uncommitted version except for the `_tipNodes` property-read extension described above. Styling — new rule in `styles.css`:
 
 ```css
 .truncate-tip {

@@ -287,6 +287,11 @@ Alpine.directive('truncate-tip', (el) => {
   const hasTipNodes = () => el._tipNodes && el._tipNodes.hasChildNodes && el._tipNodes.hasChildNodes();
 
   const show = () => {
+    // Re-entrant guard: if a tooltip is already shown, skip. Without this,
+    // rapid mouseenter events (e.g. synthetic events during HTMX swap or
+    // mouse re-enter across nested elements) would overwrite `tip` and
+    // orphan the prior DOM node on document.body with no cleanup path.
+    if (tip) return;
     const viaNodes = hasTipNodes();
     if (!viaNodes && el.scrollWidth <= el.clientWidth) return;
     const text = viaNodes ? null : el.textContent.trim();
