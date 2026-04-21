@@ -278,40 +278,8 @@ if not os.environ.get("TESTING"):
         ],
     )
 
-
-class _FallbackStaticFiles(StaticFiles):
-    """Serve files from dist/ first, then from app/static/ as fallback.
-
-    Required because requisitions2/page.html loads files (js/, styles.css) that are not
-    part of the Vite dist build.
-    """
-
-    def __init__(self, *args, fallback_dir: str | None = None, **kwargs):
-        super().__init__(*args, **kwargs)
-        self._fallback_dir = fallback_dir
-        self._fallback: StaticFiles | None = (
-            StaticFiles(directory=fallback_dir) if fallback_dir and os.path.isdir(fallback_dir) else None
-        )
-
-    async def get_response(self, path: str, scope):
-        from starlette.exceptions import HTTPException as StarletteHTTPException
-
-        try:
-            return await super().get_response(path, scope)
-        except StarletteHTTPException as exc:
-            if exc.status_code == 404 and self._fallback:
-                return await self._fallback.get_response(path, scope)
-            raise
-
-
-if os.path.isdir("app/static/dist"):
-    app.mount(
-        "/static",
-        _FallbackStaticFiles(directory="app/static/dist", fallback_dir="app/static"),
-        name="static",
-    )
-else:
-    app.mount("/static", StaticFiles(directory="app/static"), name="static")
+_static_dir = "app/static/dist" if os.path.isdir("app/static/dist") else "app/static"
+app.mount("/static", StaticFiles(directory=_static_dir), name="static")
 
 # Prometheus metrics
 from prometheus_fastapi_instrumentator import Instrumentator
