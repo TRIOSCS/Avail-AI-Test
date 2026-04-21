@@ -25,3 +25,7 @@ Do not refactor these without explicit approval. Changes here can break startup,
 - `app/static/styles.css`
 
 When changing any listed file, run tests and do a quick smoke check before committing.
+
+## Known tech debt
+
+- **`app/static/htmx_app.js` — `htmx:afterSwap` Alpine.initTree gate uses a hardcoded ID allowlist** (`lead-drawer-content`, `rq2-table`). When future HTMX-swapped regions contain Alpine directives (`x-*`), they must be added manually to this list or their directives won't re-bind after swap. Fragile. Future refactor idea: trigger `initTree` whenever the swap target subtree contains any element with an `x-*` attribute, so new regions get covered automatically. Not urgent — Alpine's own MutationObserver handles most cases, and the allowlist is a belt-and-suspenders fallback. Captured 2026-04-21 during the opportunity-table v2 merge.
