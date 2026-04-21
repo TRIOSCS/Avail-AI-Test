@@ -137,16 +137,29 @@ Usage:
                user-entered opportunity_value — rendered italic to let sales
                distinguish at a glance.
 #}
-{% macro deal_value(amount, source='entered') %}
+{# ── Opportunity Table v2 — Deal Value ────────────────────────────── #}
+{% macro deal_value(amount, source='entered', priced_count=0, requirement_count=0) -%}
 {%- if amount is none or amount == 0 -%}
 <span class="opp-deal opp-deal--tier-tertiary">—</span>
 {%- else -%}
   {%- if amount >= 100000 -%}{%- set tier = 'primary-500' -%}
   {%- elif amount >= 1000 -%}{%- set tier = 'primary-400' -%}
   {%- else -%}{%- set tier = 'tertiary' -%}{%- endif -%}
-<span class="opp-deal opp-deal--tier-{{ tier }}{% if source == 'computed' %} opp-deal--computed{% endif %}">${{ '{:,.0f}'.format(amount) }}</span>
+  {%- set prefix = '~' if source == 'partial' else '' -%}
+  {%- set italic_cls = ' opp-deal--computed' if source in ('computed', 'partial') else '' -%}
+  {%- set partial_cls = ' opp-deal--partial' if source == 'partial' else '' -%}
+  {%- if source == 'partial' -%}
+    {%- set title_attr = ' title="Floor estimate — ' ~ priced_count ~ ' of ' ~ requirement_count ~ ' parts priced"' -%}
+  {%- elif source == 'computed' -%}
+    {%- set title_attr = ' title="Computed from target prices (all parts priced)"' -%}
+  {%- elif source == 'entered' -%}
+    {%- set title_attr = ' title="Entered by broker"' -%}
+  {%- else -%}
+    {%- set title_attr = '' -%}
+  {%- endif -%}
+<span class="opp-deal opp-deal--tier-{{ tier }}{{ italic_cls }}{{ partial_cls }}"{{ title_attr|safe }}>{{ prefix }}${{ '{:,.0f}'.format(amount) }}</span>
 {%- endif -%}
-{% endmacro %}
+{%- endmacro %}
 
 
 {# ── Opportunity Table v2 — Coverage Meter ────────────────────────── #}
@@ -157,12 +170,19 @@ Usage:
   Business:    Semantics per approved G2: "parts with ≥1 sighting" over
                "total parts". Segments filled = round(6·filled/total).
 #}
+{# ── Opportunity Table v2 — Coverage Meter ────────────────────────── #}
 {% macro coverage_meter(filled, total) %}
 {%- set total = total or 0 -%}
 {%- set filled = filled or 0 -%}
-{%- if total > 0 -%}{%- set segs = ((filled * 6) / total)|round(0, 'common')|int -%}
-{%- else -%}{%- set segs = 0 -%}{%- endif -%}
-<span class="opp-coverage" role="img" aria-label="Coverage: {{ filled }} of {{ total }} parts sourced">
+{%- if total > 0 -%}
+  {%- set segs = ((filled * 6) / total)|round(0, 'common')|int -%}
+{%- else -%}
+  {%- set segs = 0 -%}
+{%- endif -%}
+<span class="opp-coverage"
+      role="img"
+      aria-label="Coverage: {{ filled }} of {{ total }} parts sourced"
+      {%- if total == 0 %} title="no parts yet"{%- endif %}>
 {%- for i in range(6) -%}
 <span class="opp-coverage-seg{% if i < segs %} opp-coverage-seg--filled{% endif %}"></span>
 {%- endfor -%}
@@ -178,9 +198,11 @@ Usage:
   Business:    <24h red, <72h amber, else none. hours may be None (no
                deadline set or unparseable) — treat as not-urgent.
 #}
-{% macro urgency_accent(hours) -%}
-{%- if hours is not none and hours <= 24 -%}urgent-24h
-{%- elif hours is not none and hours <= 72 -%}urgent-72h
+{# ── Opportunity Table v2 — Urgency Accent Class ─────────────────── #}
+{% macro urgency_accent_class(hours, urgency) -%}
+{%- if hours is not none and hours <= 24 -%}opp-row--urgent-24h
+{%- elif hours is not none and hours <= 72 -%}opp-row--urgent-72h
+{%- elif urgency == 'critical' -%}opp-row--urgent-24h
 {%- endif -%}
 {%- endmacro %}
 
