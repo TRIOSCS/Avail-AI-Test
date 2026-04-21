@@ -128,16 +128,14 @@ Usage:
 
 {# ── Opportunity Table v2 — Deal Value ────────────────────────────── #}
 {#
-  Purpose:     Dollar amount with typographic-magnitude encoding per spec.
+  Purpose:     Dollar amount with typographic-magnitude encoding.
   Depends on:  styles.css opp-deal-* tokens.
-  Called-by:   htmx/partials/requisitions/req_row.html
-  Business:    Weight/color tier derived from magnitude (>=100k primary-500,
-               1k–99,999 primary-400, <1k tertiary). `source='computed'` marks
-               values derived from Σ(target_price·target_qty) rather than the
-               user-entered opportunity_value — rendered italic to let sales
-               distinguish at a glance.
+  Called-by:   requisitions2/_table_rows.html, _single_row.html
+  Business:    Tier by magnitude (>=100k primary-500, 1k–99,999 primary-400,
+               <1k tertiary). source='computed' → italic. source='partial' →
+               italic + leading ~ + floor-estimate tooltip (priced_count /
+               requirement_count interpolated).
 #}
-{# ── Opportunity Table v2 — Deal Value ────────────────────────────── #}
 {% macro deal_value(amount, source='entered', priced_count=0, requirement_count=0) -%}
 {%- if amount is none or amount == 0 -%}
 <span class="opp-deal opp-deal--tier-tertiary">—</span>
@@ -164,13 +162,14 @@ Usage:
 
 {# ── Opportunity Table v2 — Coverage Meter ────────────────────────── #}
 {#
-  Purpose:     6-segment meter showing sourced_count / requirement_count.
+  Purpose:     6-segment meter showing offers-covered / total requirements.
   Depends on:  styles.css opp-coverage* tokens.
-  Called-by:   htmx/partials/requisitions/req_row.html
-  Business:    Semantics per approved G2: "parts with ≥1 sighting" over
-               "total parts". Segments filled = round(6·filled/total).
+  Called-by:   requisitions2/_table_rows.html, _single_row.html
+  Business:    coverage_filled = count of requirements with ≥1 offer (not
+               sightings — see spec §Coverage semantic). Segments filled =
+               round(6·filled/total). total==0 renders an empty meter with
+               title="no parts yet".
 #}
-{# ── Opportunity Table v2 — Coverage Meter ────────────────────────── #}
 {% macro coverage_meter(filled, total) %}
 {%- set total = total or 0 -%}
 {%- set filled = filled or 0 -%}
