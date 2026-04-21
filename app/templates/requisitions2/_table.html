@@ -7,21 +7,31 @@
 #}
 {% if requisitions %}
 <div class="overflow-x-auto">
-  <table class="min-w-full divide-y divide-gray-200 text-sm">
+  <table class="resizable-cols min-w-full divide-y divide-gray-200 text-sm">
+    <colgroup>
+      <col :style="colStyle('select')">
+      <col :style="colStyle('name')">
+      <col :style="colStyle('status')">
+      <col :style="colStyle('customer')">
+      <col :style="colStyle('count')">
+    </colgroup>
     <thead class="bg-gray-50">
       <tr>
-        <th class="w-8 px-3 py-2">
+        <th class="resizable px-3 py-2">
           <input aria-label="Select all requisitions" type="checkbox"
                  class="rounded border-gray-300 text-brand-500 focus:ring-brand-400"
                  x-on:change="toggleAll($event.target.checked, {{ requisitions | map(attribute='id') | list | tojson }})">
+          <span class="col-resize-handle"
+                @mousedown="startColResize($event,'select')"
+                @dblclick="autoFitCol('select')"></span>
         </th>
         {% set columns = [
-          ('name', 'Name'),
-          ('status', 'Status'),
-          ('customer_name', 'Customer'),
+          ('name', 'Name', 'name'),
+          ('status', 'Status', 'status'),
+          ('customer_name', 'Customer', 'customer'),
         ] %}
-        {% for col_key, col_label in columns %}
-        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+        {% for col_key, col_label, store_key in columns %}
+        <th class="resizable px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
           <a hx-get="/requisitions2/table?sort={{ col_key }}&order={{ 'asc' if filters.sort.value == col_key and filters.order.value == 'desc' else 'desc' }}"
              hx-target="#rq2-table"
              hx-include="#rq2-filters"
@@ -32,6 +42,9 @@
               <span class="text-brand-500">{{ '▲' if filters.order.value == 'asc' else '▼' }}</span>
             {% endif %}
           </a>
+          <span class="col-resize-handle"
+                @mousedown="startColResize($event,'{{ store_key }}')"
+                @dblclick="autoFitCol('{{ store_key }}')"></span>
         </th>
         {% endfor %}
         <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
