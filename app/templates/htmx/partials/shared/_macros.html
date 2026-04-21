@@ -346,3 +346,25 @@ Usage:
   {% endif %}
 </div>
 {%- endmacro %}
+
+
+{# ── Opportunity Table v2 — Status Cell (dot + label + time text) ── #}
+{% macro opp_status_cell(status, hours) %}
+{%- set label_map = {
+  'active': 'Open', 'sourcing': 'Sourcing', 'offers': 'Offered',
+  'quoting': 'Quoting', 'quoted': 'Quoted'
+} -%}
+{%- set label = label_map.get(status, status|replace('_', ' ')|capitalize) -%}
+{%- set time_label = '' -%}
+{%- if hours is not none and hours < 0 -%}{%- set time_label = 'Overdue' -%}
+{%- elif hours is not none and hours <= 72 -%}{%- set time_label = (hours|round(0)|int ~ 'h') -%}
+{%- elif hours is not none -%}{%- set time_label = ((hours/24)|round(0)|int ~ 'd') -%}
+{%- endif -%}
+<span class="opp-status-cell inline-flex items-center gap-1.5" aria-label="{{ label }}{% if time_label %}, {{ time_label }}{% endif %}">
+  {{ status_dot(status) }}
+  {%- if hours is not none -%}
+    <span class="opp-status-sep" aria-hidden="true">·</span>
+    {{ time_text(hours) }}
+  {%- endif -%}
+</span>
+{% endmacro %}

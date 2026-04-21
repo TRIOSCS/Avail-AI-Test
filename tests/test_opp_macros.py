@@ -186,3 +186,33 @@ def test_mpn_chips_aggregated_plus_n_button_carries_no_data_tip_content():
 def test_mpn_chips_aggregated_empty_renders_placeholder():
     html = render_aggregated("[]")
     assert "—" in html
+
+
+# ── opp_status_cell ───────────────────────────────────────────────────
+
+
+def render_status_cell(status, hours):
+    tpl = ENV.from_string(
+        '{% from "htmx/partials/shared/_macros.html" import opp_status_cell %}'
+        f"{{{{ opp_status_cell({status!r}, {hours!r}) }}}}"
+    )
+    return tpl.render().strip()
+
+
+def test_opp_status_cell_includes_dot_and_time_text():
+    html = render_status_cell("sourcing", 6)
+    assert "opp-status-dot--sourcing" in html
+    assert ">Sourcing<" in html
+    assert "opp-time--24h" in html
+    assert "6h" in html
+
+
+def test_opp_status_cell_no_time_text_when_hours_none():
+    html = render_status_cell("active", None)
+    assert "opp-status-dot--open" in html
+    assert "opp-time--" not in html
+
+
+def test_opp_status_cell_aria_label_combines_status_and_time():
+    html = render_status_cell("sourcing", 6)
+    assert 'aria-label="Sourcing, 6h"' in html
