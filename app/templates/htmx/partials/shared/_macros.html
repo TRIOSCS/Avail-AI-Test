@@ -358,9 +358,8 @@ Usage:
                (tertiary color, truncated with hover-reveal tooltip).
                Existing customer/part match badges preserved inline.
 #}
-{% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips_aggregated %}
-
 {% macro opp_name_cell(req) %}
+{% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips_aggregated %}
 <div class="opp-name-cell min-w-0">
   <div class="opp-name-cell__chips">
     {{ mpn_chips_aggregated(req.mpn_chip_items or []) }}
