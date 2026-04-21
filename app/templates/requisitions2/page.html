@@ -91,17 +91,28 @@
            class="hidden"></div>
 
       {# ── Split-screen workspace ────────────────────────────── #}
-      <div class="flex flex-1 overflow-hidden">
+      <div id="split-rq2"
+           class="flex flex-1 overflow-hidden min-h-0"
+           x-data="splitPanel('rq2', 40)">
 
         {# Left panel: compact requisition list #}
-        <div class="w-2/5 min-w-[300px] max-w-[500px] border-r border-gray-200 flex flex-col bg-white">
+        <div class="border-r border-gray-200 flex flex-col bg-white flex-shrink-0 overflow-hidden"
+             :style="'width: ' + leftWidth + '%'">
           <div id="rq2-table" class="flex-1 overflow-y-auto">
             {% include "requisitions2/_table.html" %}
           </div>
         </div>
 
+        {# Resizable divider #}
+        <div class="w-1 bg-gray-200 hover:bg-brand-400 cursor-col-resize flex-shrink-0 transition-colors"
+             role="separator" aria-label="Resize panels" tabindex="0"
+             @mousedown="startResize($event)"
+             @touchstart.prevent="startTouchResize($event)"
+             @keydown.left.prevent="leftWidth = Math.max(20, leftWidth - 2); localStorage.setItem('avail_split_rq2', leftWidth)"
+             @keydown.right.prevent="leftWidth = Math.min(70, leftWidth + 2); localStorage.setItem('avail_split_rq2', leftWidth)"></div>
+
         {# Right panel: detail view #}
-        <div id="rq2-detail" class="flex-1 overflow-y-auto bg-white">
+        <div id="rq2-detail" class="flex-1 overflow-y-auto bg-white min-w-0">
           {% include "requisitions2/_detail_empty.html" %}
         </div>
 
