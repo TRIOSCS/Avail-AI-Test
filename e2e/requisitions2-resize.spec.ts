@@ -108,3 +108,45 @@ test.describe('Requisitions left-list columns', () => {
     }
   });
 });
+
+test.describe('Truncation tooltips', () => {
+  test.beforeEach(async ({ page }) => {
+    await clearLayout(page);
+    await page.reload();
+  });
+
+  test('tooltip appears on hover over truncated cell and disappears on leave', async ({ page }) => {
+    await page.goto(REQS_URL);
+    // Force the Name column narrow so long names truncate.
+    await page.evaluate(() => {
+      localStorage.setItem(
+        'avail_table_cols_rq2-list',
+        JSON.stringify({ name: 80, status: 110, customer: 160, select: 36, count: 60 })
+      );
+    });
+    await page.reload();
+
+    const nameCell = page.locator('#rq2-rows tr').first().locator('td').nth(1).locator('span').first();
+    await expect(nameCell).toBeVisible({ timeout: 10000 });
+
+    await nameCell.hover();
+    await page.waitForTimeout(200);
+
+    const tip = page.locator('.truncate-tip.visible');
+    const nameText = ((await nameCell.textContent()) || '').trim();
+    const scrollOverflow = await nameCell.evaluate(
+      (el: HTMLElement) => el.scrollWidth > el.clientWidth
+    );
+
+    if (scrollOverflow) {
+      await expect(tip).toBeVisible();
+      await expect(tip).toHaveText(nameText);
+    } else {
+      await expect(tip).toHaveCount(0);
+    }
+
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(150);
+    await expect(page.locator('.truncate-tip.visible')).toHaveCount(0);
+  });
+});
