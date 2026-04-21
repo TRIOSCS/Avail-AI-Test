@@ -15,6 +15,7 @@ import asyncio
 import html
 import json
 from datetime import datetime, timezone
+from pathlib import Path
 
 from fastapi import APIRouter, Depends, Form, Request
 from fastapi.responses import HTMLResponse, StreamingResponse
@@ -41,6 +42,45 @@ from ..services.sse_broker import broker
 from ..template_env import templates
 
 router = APIRouter(prefix="/requisitions2", tags=["requisitions2"])
+
+_STATIC_ASSETS = Path(__file__).parent.parent / "static" / "dist" / "assets"
+_MANIFEST = Path(__file__).parent.parent / "static" / "dist" / ".vite" / "manifest.json"
+
+_vite_manifest: dict = {}
+if _MANIFEST.exists():
+    _vite_manifest = json.loads(_MANIFEST.read_text())
+
+
+def _resolve_asset(name: str, manifest_key: str) -> str:
+    """Resolve a static asset URL via Vite manifest, with glob fallback.
+
+    Tries: manifest lookup → glob for matching file in dist/assets → raw path.
+    """
+    # 1. Manifest lookup
+    entry = _vite_manifest.get(manifest_key, {})
+    if entry.get("file"):
+        candidate = _STATIC_ASSETS.parent / entry["file"]
+        if candidate.exists():
+            return "/static/" + entry["file"]
+
+    # 2. Glob for latest matching file in dist/assets
+    if _STATIC_ASSETS.is_dir():
+        stem = Path(name).stem  # e.g. "styles" from "styles.css"
+        suffix = Path(name).suffix  # e.g. ".css"
+        matches = sorted(_STATIC_ASSETS.glob(f"{stem}-*{suffix}"))
+        if matches:
+            return "/static/assets/" + matches[-1].name
+
+    # 3. Raw fallback (works if served from app/static via fallback mount)
+    return f"/static/{name}"
+
+
+def _styles_css_url() -> str:
+    return _resolve_asset("styles.css", "styles.css")
+
+
+def _mobile_css_url() -> str:
+    return _resolve_asset("htmx_mobile.css", "htmx_mobile.css")
 
 
 def _is_htmx(request: Request) -> bool:
@@ -69,7 +109,14 @@ def _table_context(request: Request, filters: ReqListFilters, db: Session, user:
         user_role=getattr(user, "role", "sales"),
     )
     users = get_team_users(db)
-    return {"request": request, **result, "user": user, "users": users}
+    return {
+        "request": request,
+        **result,
+        "user": user,
+        "users": users,
+        "styles_css_url": _styles_css_url(),
+        "mobile_css_url": _mobile_css_url(),
+    }
 
 
 # ── Full page ────────────────────────────────────────────────────────

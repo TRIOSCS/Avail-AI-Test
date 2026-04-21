@@ -27,6 +27,55 @@ def _norm_key(raw):
     return _NONALNUM.sub("", str(raw).strip().lower())
 
 
+def _bootstrap_test_db() -> None:
+    """Create all tables and seed a test user for E2E testing (TESTING=1 only).
+
+    Uses StaticPool in-memory SQLite — tables persist for the lifetime of the process.
+    Patches PostgreSQL-specific types (ARRAY, TSVECTOR, JSONB) to SQLite equivalents.
+    """
+    import base64
+    import hashlib
+
+    # Patch PG-only types so SQLite can compile the DDL
+    from sqlalchemy.dialects.sqlite.base import SQLiteTypeCompiler
+
+    SQLiteTypeCompiler.visit_ARRAY = lambda self, type_, **kw: "JSON"
+    SQLiteTypeCompiler.visit_TSVECTOR = lambda self, type_, **kw: "TEXT"
+    SQLiteTypeCompiler.visit_JSONB = lambda self, type_, **kw: "JSON"
+
+    from .models import Base
+
+    # Exclude tables that use PostgreSQL-only types (e.g. ARRAY columns not patchable)
+    _PG_ONLY = {"buyer_profiles"}
+    sqlite_safe = [t for name, t in Base.metadata.tables.items() if name not in _PG_ONLY]
+    Base.metadata.create_all(bind=engine, tables=sqlite_safe)
+
+    db = SessionLocal()
+    try:
+        from .models.auth import User
+
+        test_email = "test@availai.local"
+        if not db.query(User).filter_by(email=test_email).first():
+            salt = b"testingsalt00001"
+            dk = hashlib.pbkdf2_hmac("sha256", b"testpass", salt, 200_000)
+            store = base64.b64encode(salt).decode() + "$" + base64.b64encode(dk).decode()
+            user = User(
+                email=test_email,
+                name="Test User",
+                role="admin",
+                password_hash=store,
+                is_active=True,
+            )
+            db.add(user)
+            db.commit()
+            logger.info("TESTING: seeded test user %s", test_email)
+    except Exception:
+        logger.exception("TESTING: failed to seed test user")
+        db.rollback()
+    finally:
+        db.close()
+
+
 def run_startup_migrations() -> None:
     """Execute all idempotent startup operations.
 
@@ -42,7 +91,8 @@ def run_startup_migrations() -> None:
         )
 
     if os.environ.get("TESTING"):
-        logger.info("TESTING mode — skipping startup migrations")
+        logger.info("TESTING mode — creating SQLite schema and test user")
+        _bootstrap_test_db()
         return
 
     with engine.connect() as conn:

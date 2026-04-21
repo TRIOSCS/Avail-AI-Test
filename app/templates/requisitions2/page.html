@@ -11,8 +11,8 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Requisitions — AvailAI</title>
-  <link rel="stylesheet" href="/static/styles.css">
-  <link rel="stylesheet" href="/static/htmx_mobile.css">
+  <link rel="stylesheet" href="{{ styles_css_url }}">
+  <link rel="stylesheet" href="{{ mobile_css_url }}">
   <style>
     /* Inline editing — keeps HTMX swap responsive */
     .rq2-editable:hover { background: #f0f4f8; cursor: cell; }
@@ -42,11 +42,12 @@
   <script src="https://unpkg.com/htmx-ext-loading-states@2.0.0/loading-states.js"></script>
   <script src="https://unpkg.com/htmx-ext-preload@2.1.1/preload.js"></script>
   <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"></script>
+  {# requisitions2.js must load before Alpine so alpine:init listeners register correctly #}
+  <script src="/static/js/requisitions2.js"></script>
   <script defer src="https://unpkg.com/@alpinejs/focus@3.14.8/dist/cdn.min.js"></script>
   <script defer src="https://unpkg.com/@alpinejs/collapse@3.14.8/dist/cdn.min.js"></script>
   <script defer src="https://unpkg.com/@alpinejs/persist@3.14.8/dist/cdn.min.js"></script>
   <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
-  <script src="/static/js/requisitions2.js" defer></script>
 </head>
 <body class="bg-gray-50 text-gray-900">
 
@@ -91,17 +92,28 @@
            class="hidden"></div>
 
       {# ── Split-screen workspace ────────────────────────────── #}
-      <div class="flex flex-1 overflow-hidden">
+      <div id="split-rq2"
+           class="flex flex-1 overflow-hidden min-h-0"
+           x-data="splitPanel('rq2', 40)">
 
         {# Left panel: compact requisition list #}
-        <div class="w-2/5 min-w-[300px] max-w-[500px] border-r border-gray-200 flex flex-col bg-white">
+        <div class="border-r border-gray-200 flex flex-col bg-white flex-shrink-0 overflow-hidden"
+             :style="'width: ' + leftWidth + '%'">
           <div id="rq2-table" class="flex-1 overflow-y-auto">
             {% include "requisitions2/_table.html" %}
           </div>
         </div>
 
+        {# Resizable divider #}
+        <div class="w-1 bg-gray-200 hover:bg-brand-400 cursor-col-resize flex-shrink-0 transition-colors"
+             role="separator" aria-label="Resize panels" tabindex="0"
+             @mousedown="startResize($event)"
+             @touchstart.prevent="startTouchResize($event)"
+             @keydown.left.prevent="leftWidth = Math.max(20, leftWidth - 2); localStorage.setItem('avail_split_rq2', leftWidth)"
+             @keydown.right.prevent="leftWidth = Math.min(70, leftWidth + 2); localStorage.setItem('avail_split_rq2', leftWidth)"></div>
+
         {# Right panel: detail view #}
-        <div id="rq2-detail" class="flex-1 overflow-y-auto bg-white">
+        <div id="rq2-detail" class="flex-1 overflow-y-auto bg-white min-w-0">
           {% include "requisitions2/_detail_empty.html" %}
         </div>
 

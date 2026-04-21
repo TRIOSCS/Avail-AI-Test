@@ -1,14 +1,24 @@
 /**
  * requisitions2-resize.spec.ts — E2E tests for resizable split, columns, and tooltips.
  * Called by: npx playwright test e2e/requisitions2-resize.spec.ts
- * Depends on: running app server with test auth bypass (TESTING=1)
+ * Depends on: running app server with TESTING=1 (seeds test@availai.local / testpass)
  */
 import { test, expect, Page } from '@playwright/test';
 
 const REQS_URL = '/requisitions2';
 
+/** Log in using the test user seeded by startup._bootstrap_test_db (TESTING=1). */
+async function loginAsTestUser(page: Page) {
+  const res = await page.request.post('/auth/login', {
+    form: { email: 'test@availai.local', password: 'testpass' },
+  });
+  if (res.status() !== 200) {
+    const body = await res.text();
+    throw new Error(`Login failed (${res.status()}): ${body}`);
+  }
+}
+
 async function clearLayout(page: Page) {
-  await page.goto(REQS_URL);
   await page.evaluate(() => {
     localStorage.removeItem('avail_split_rq2');
     localStorage.removeItem('avail_table_cols_rq2-list');
@@ -18,6 +28,8 @@ async function clearLayout(page: Page) {
 
 test.describe('Requisitions split divider', () => {
   test.beforeEach(async ({ page }) => {
+    await loginAsTestUser(page);
+    await page.goto(REQS_URL);
     await clearLayout(page);
     await page.reload();
   });
