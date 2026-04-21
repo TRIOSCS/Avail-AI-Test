@@ -173,6 +173,16 @@ def test_mpn_chips_aggregated_includes_overflow_bucket_and_directive():
     assert "opp-chip-more" in html
 
 
+def test_mpn_chips_aggregated_plus_n_button_carries_no_data_tip_content():
+    # Security invariant (spec §Name cell / MPN chip row): the +N button
+    # MUST NOT have a data-tip-content attribute. Hidden-chip content flows
+    # at runtime via _tipNodes on the element, not as an HTML-string attr.
+    # A regression here would re-open the innerHTML XSS class.
+    items = [{"mpn": f"M{i}", "role": "primary"} for i in range(4)]
+    html = render_aggregated(repr(items))
+    assert "data-tip-content" not in html
+
+
 def test_mpn_chips_aggregated_empty_renders_placeholder():
     html = render_aggregated("[]")
     assert "—" in html
