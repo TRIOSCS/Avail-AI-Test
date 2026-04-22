@@ -22,10 +22,9 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.orm import Session
+from starlette.requests import Request
 
-from app.models import ActivityLog, Company, User, VendorCard
-
+from app.models import ActivityLog
 
 # ── Graph Webhook ────────────────────────────────────────────────────
 
@@ -93,7 +92,7 @@ class TestTeamsWebhook:
         assert resp.status_code == 404
 
     def test_validation_token_returns_plaintext(self, client, monkeypatch):
-        """validationToken query param returns it as plain text."""
+        """ValidationToken query param returns it as plain text."""
         from app.config import settings
 
         monkeypatch.setattr(settings, "mvp_mode", False)
@@ -625,7 +624,6 @@ class TestActivityStatus:
 
     def test_vendor_activity_status_no_activity(self, client, test_vendor_card, monkeypatch):
         """Vendor with no activity returns no_activity status."""
-        from app.config import settings
 
         with patch("app.services.activity_service.days_since_last_vendor_activity", return_value=None):
             resp = client.get(f"/api/vendors/{test_vendor_card.id}/activity-status")
@@ -733,12 +731,8 @@ class TestActivityStatus:
 # Call the handler functions directly with mock starlette Requests.
 
 
-def _make_request(body: bytes = b"", query_string: bytes = b"") -> "Request":
+def _make_request(body: bytes = b"", query_string: bytes = b"") -> Request:
     """Build a minimal starlette Request for direct handler calls."""
-    import json as _json
-
-    from starlette.requests import Request
-
     scope = {
         "type": "http",
         "method": "POST",
@@ -757,13 +751,12 @@ def _make_request(body: bytes = b"", query_string: bytes = b"") -> "Request":
 
 
 class TestGraphWebhookDirect:
-    """Direct async calls to graph_webhook to capture coverage of rate-limited handler."""
+    """Direct async calls to graph_webhook to capture coverage of rate-limited
+    handler."""
 
     async def test_payload_validate_and_accepted(self, db_session):
         """Route body: parse payload, validate_notifications, handle_notification."""
         import json
-
-        from fastapi import HTTPException
 
         import app.routers.v13_features.activity as mod
 
@@ -823,7 +816,7 @@ class TestGraphWebhookDirect:
         assert exc_info.value.status_code == 400
 
     async def test_validation_token_returns_plaintext(self, db_session):
-        """validationToken query param returns PlainTextResponse."""
+        """ValidationToken query param returns PlainTextResponse."""
         import app.routers.v13_features.activity as mod
 
         request = _make_request(query_string=b"validationToken=my-token")
@@ -848,7 +841,7 @@ class TestTeamsWebhookDirect:
         assert exc_info.value.status_code == 404
 
     async def test_validation_token(self, db_session, monkeypatch):
-        """validationToken query -> plain text."""
+        """ValidationToken query -> plain text."""
         import app.routers.v13_features.activity as mod
         from app.config import settings
 
