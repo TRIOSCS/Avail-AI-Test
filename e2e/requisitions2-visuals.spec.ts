@@ -94,3 +94,47 @@ test.describe('Coverage meter', () => {
     expect(segs).toBe(6);
   });
 });
+
+test.describe('Chip overflow', () => {
+  test('each chip row has at least one visible chip', async ({ page }) => {
+    await gotoFresh(page);
+    const rows = await page.locator('.opp-chip-row').all();
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      const visible = await row.locator(':scope > *:not([style*="display: none"])').count();
+      expect(visible).toBeGreaterThan(0);
+    }
+  });
+
+  test('narrowing Name column does not increase visible chip count', async ({ page }) => {
+    await gotoFresh(page);
+    const handle = page.locator('th.resizable .col-resize-handle').first();
+    if ((await handle.count()) === 0) test.skip();
+    const box = await handle.boundingBox();
+    if (!box) test.skip();
+
+    const firstRow = page.locator('.opp-chip-row').first();
+    const before = await firstRow.locator(':scope > *:not([style*="display: none"])').count();
+
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await page.mouse.down();
+    await page.mouse.move(box.x - 80, box.y + box.height / 2, { steps: 10 });
+    await page.mouse.up();
+    await page.waitForTimeout(120);
+
+    const after = await firstRow.locator(':scope > *:not([style*="display: none"])').count();
+    expect(after).toBeLessThanOrEqual(before);
+  });
+
+  test('hovering +N reveals tooltip containing hidden chips', async ({ page }) => {
+    await gotoFresh(page);
+    const more = page.locator('.opp-chip-more:visible').first();
+    if ((await more.count()) === 0) test.skip();
+
+    await more.hover();
+    const tip = page.locator('.truncate-tip.visible');
+    await expect(tip).toBeVisible({ timeout: 2000 });
+    const tipChips = await tip.locator('.opp-chip-row > *').count();
+    expect(tipChips).toBeGreaterThan(0);
+  });
+});
