@@ -12,8 +12,6 @@ import os
 
 os.environ["TESTING"] = "1"
 
-import asyncio
-from datetime import datetime
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
@@ -33,7 +31,6 @@ class TestSearchSchedulerIsBusinessHours:
     def test_saturday_always_off(self):
         """Saturday (weekday 5) is always outside business hours."""
         scheduler = self._make_scheduler()
-        from app.services.search_worker_base.scheduler import EASTERN
 
         # Saturday at noon
         with patch("app.services.search_worker_base.scheduler.datetime") as mock_dt:

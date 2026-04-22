@@ -43,9 +43,7 @@ def _make_mock_session_full(req_ids=None, vendor_ids=None, company_ids=None, mpn
         mock_q.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = (
             row_set
         )
-        mock_q.join.return_value.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = (
-            row_set
-        )
+        mock_q.join.return_value.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = row_set
         return mock_q
 
     mock_session.query.side_effect = query_side_effect
@@ -84,7 +82,9 @@ class TestJobRefreshInsightsMissingBranches:
         with patch("app.database.SessionLocal", return_value=mock_session):
             with patch("app.services.knowledge_service.generate_insights", new=AsyncMock(return_value=[])):
                 with patch("app.services.knowledge_service.generate_pipeline_insights", new=AsyncMock(return_value=[])):
-                    with patch("app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])):
+                    with patch(
+                        "app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])
+                    ):
                         with patch("app.services.knowledge_service.generate_company_insights", new=mock_company):
                             with patch(
                                 "app.services.knowledge_service.generate_mpn_insights", new=AsyncMock(return_value=[])
@@ -103,7 +103,9 @@ class TestJobRefreshInsightsMissingBranches:
         with patch("app.database.SessionLocal", return_value=mock_session):
             with patch("app.services.knowledge_service.generate_insights", new=AsyncMock(return_value=[])):
                 with patch("app.services.knowledge_service.generate_pipeline_insights", new=AsyncMock(return_value=[])):
-                    with patch("app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])):
+                    with patch(
+                        "app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])
+                    ):
                         with patch(
                             "app.services.knowledge_service.generate_company_insights", new=AsyncMock(return_value=[])
                         ):
@@ -122,7 +124,9 @@ class TestJobRefreshInsightsMissingBranches:
         with patch("app.database.SessionLocal", return_value=mock_session):
             with patch("app.services.knowledge_service.generate_insights", new=AsyncMock(return_value=[])):
                 with patch("app.services.knowledge_service.generate_pipeline_insights", new=AsyncMock(return_value=[])):
-                    with patch("app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])):
+                    with patch(
+                        "app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])
+                    ):
                         with patch("app.services.knowledge_service.generate_company_insights", new=mock_company):
                             with patch(
                                 "app.services.knowledge_service.generate_mpn_insights", new=AsyncMock(return_value=[])
@@ -141,7 +145,9 @@ class TestJobRefreshInsightsMissingBranches:
         with patch("app.database.SessionLocal", return_value=mock_session):
             with patch("app.services.knowledge_service.generate_insights", new=AsyncMock(return_value=[])):
                 with patch("app.services.knowledge_service.generate_pipeline_insights", new=AsyncMock(return_value=[])):
-                    with patch("app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])):
+                    with patch(
+                        "app.services.knowledge_service.generate_vendor_insights", new=AsyncMock(return_value=[])
+                    ):
                         with patch(
                             "app.services.knowledge_service.generate_company_insights", new=AsyncMock(return_value=[])
                         ):
@@ -198,12 +204,8 @@ class TestJobRefreshInsightsMissingBranches:
                 )
             else:
                 mock_q.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
-                mock_q.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = (
-                    []
-                )
-                mock_q.join.return_value.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = (
-                    []
-                )
+                mock_q.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = []
+                mock_q.join.return_value.filter.return_value.group_by.return_value.order_by.return_value.limit.return_value.all.return_value = []
             return mock_q
 
         mock_session.query.side_effect = query_side_effect

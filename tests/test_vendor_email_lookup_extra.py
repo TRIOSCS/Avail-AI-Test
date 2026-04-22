@@ -172,7 +172,8 @@ class TestSightingPhoneAndSource:
 
 class TestMaterialVendorHistory:
     def test_material_history_query_executes_without_crash(self, db_session: Session):
-        """MaterialVendorHistory branch runs without crashing (exception caught internally)."""
+        """MaterialVendorHistory branch runs without crashing (exception caught
+        internally)."""
         card = MaterialCard(
             normalized_mpn="mvhtest",
             display_mpn="MVHTEST",
@@ -452,7 +453,8 @@ class TestBroadcastVendorContacts:
         assert isinstance(vendor["emails"], list)
 
     def test_broadcast_vendor_already_found_tagged(self, db_session: Session, req_and_item):
-        """Broadcast vendor already found via sightings gets 'broadcast' source added."""
+        """Broadcast vendor already found via sightings gets 'broadcast' source
+        added."""
         _, item = req_and_item
         _make_sighting(db_session, item.id, "BCAST_FOUND", "Broadcast Existing")
 

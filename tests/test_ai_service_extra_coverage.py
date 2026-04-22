@@ -11,15 +11,12 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import AsyncMock, patch
 
 from app.services.ai_service import (
     company_intel,
     draft_rfq,
     enrich_contacts_websearch,
-    rephrase_rfq,
 )
 from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
@@ -47,7 +44,6 @@ class TestEnrichContactsWebsearchErrorPaths:
 
     async def test_validation_error_falls_back_to_raw_contacts(self):
         """Pydantic ValidationError → falls back to raw dict (lines 117-119)."""
-        from pydantic import ValidationError
 
         # Return a dict where contacts field is invalid (wrong type triggers ValidationError)
         raw_result = {
@@ -81,9 +77,7 @@ class TestEnrichContactsWebsearchErrorPaths:
 
     async def test_domain_match_sets_medium_confidence(self):
         """Email matching domain → confidence=medium (line 138-139)."""
-        raw_result = {
-            "contacts": [{"full_name": "Jane Doe", "email": "jane@acme.com"}]
-        }
+        raw_result = {"contacts": [{"full_name": "Jane Doe", "email": "jane@acme.com"}]}
         with patch(
             "app.services.ai_service.claude_json",
             new=AsyncMock(return_value=raw_result),
@@ -93,9 +87,7 @@ class TestEnrichContactsWebsearchErrorPaths:
 
     async def test_email_without_domain_sets_medium_confidence(self):
         """Email present but not matching domain → confidence=medium (line 141)."""
-        raw_result = {
-            "contacts": [{"full_name": "Jane Doe", "email": "jane@other.com"}]
-        }
+        raw_result = {"contacts": [{"full_name": "Jane Doe", "email": "jane@other.com"}]}
         with patch(
             "app.services.ai_service.claude_json",
             new=AsyncMock(return_value=raw_result),
@@ -122,26 +114,29 @@ class TestEnrichContactsWebsearchErrorPaths:
 
 
 class TestCompanyIntelErrorPaths:
-    """Cover lines 231-235, 242-243 — error handlers and validation failure in company_intel."""
+    """Cover lines 231-235, 242-243 — error handlers and validation failure in
+    company_intel."""
 
     async def test_claude_unavailable_returns_none(self):
         """ClaudeUnavailableError → returns None (lines 231-232)."""
-        with patch(
-            "app.cache.intel_cache.get_cached", return_value=None
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new=AsyncMock(side_effect=ClaudeUnavailableError("not configured")),
+        with (
+            patch("app.cache.intel_cache.get_cached", return_value=None),
+            patch(
+                "app.services.ai_service.claude_json",
+                new=AsyncMock(side_effect=ClaudeUnavailableError("not configured")),
+            ),
         ):
             result = await company_intel("Acme Corp")
         assert result is None
 
     async def test_claude_error_returns_none(self):
         """ClaudeError → returns None (lines 234-235)."""
-        with patch(
-            "app.cache.intel_cache.get_cached", return_value=None
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new=AsyncMock(side_effect=ClaudeError("api failure")),
+        with (
+            patch("app.cache.intel_cache.get_cached", return_value=None),
+            patch(
+                "app.services.ai_service.claude_json",
+                new=AsyncMock(side_effect=ClaudeError("api failure")),
+            ),
         ):
             result = await company_intel("Widget Co", domain="widget.com")
         assert result is None
@@ -150,13 +145,13 @@ class TestCompanyIntelErrorPaths:
         """Pydantic ValidationError → uses raw dict (lines 242-243)."""
         # Provide intel with invalid field types to trigger ValidationError
         raw_intel = {"summary": 12345, "revenue": None}  # summary should be str
-        with patch(
-            "app.services.ai_service.get_cached", return_value=None
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new=AsyncMock(return_value=raw_intel),
-        ), patch(
-            "app.services.ai_service.set_cached"
+        with (
+            patch("app.services.ai_service.get_cached", return_value=None),
+            patch(
+                "app.services.ai_service.claude_json",
+                new=AsyncMock(return_value=raw_intel),
+            ),
+            patch("app.services.ai_service.set_cached"),
         ):
             result = await company_intel("Parts Co")
         # Result can be the raw dict or None depending on validation behavior
@@ -165,21 +160,19 @@ class TestCompanyIntelErrorPaths:
     async def test_returns_cached_result(self):
         """Cached result is returned without calling Claude."""
         cached = {"summary": "From cache", "revenue": "unknown"}
-        with patch(
-            "app.services.ai_service.get_cached", return_value=cached
-        ):
+        with patch("app.services.ai_service.get_cached", return_value=cached):
             result = await company_intel("Cached Corp")
         assert result == cached
 
     async def test_non_dict_result_returns_none(self):
         """If claude_json returns non-dict, returns None."""
-        with patch(
-            "app.services.ai_service.get_cached", return_value=None
-        ), patch(
-            "app.services.ai_service.claude_json",
-            new=AsyncMock(return_value=None),
-        ), patch(
-            "app.services.ai_service.set_cached"
+        with (
+            patch("app.services.ai_service.get_cached", return_value=None),
+            patch(
+                "app.services.ai_service.claude_json",
+                new=AsyncMock(return_value=None),
+            ),
+            patch("app.services.ai_service.set_cached"),
         ):
             result = await company_intel("Bad Co")
         assert result is None

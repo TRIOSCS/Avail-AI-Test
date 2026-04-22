@@ -1,4 +1,5 @@
-"""tests/test_knowledge_service_extra_coverage.py — Additional coverage for knowledge_service.
+"""tests/test_knowledge_service_extra_coverage.py — Additional coverage for
+knowledge_service.
 
 Targets uncovered branches in:
 - build_context: MPN entries, vendor entries, company entries (lines 445-510)
@@ -30,7 +31,8 @@ from app.services import knowledge_service
 
 
 def _make_create_entry_with_user(user_id_override):
-    """Return a wrapper around create_entry that replaces user_id=0 with a real user id."""
+    """Return a wrapper around create_entry that replaces user_id=0 with a real user
+    id."""
     original = knowledge_service.create_entry
 
     def wrapped(db, user_id=0, **kwargs):
@@ -207,7 +209,8 @@ class TestBuildContextExtended:
     def test_includes_vendor_entries_when_offers_exist(
         self, db_session: Session, test_user: User, requisition: Requisition, test_vendor_card: VendorCard
     ):
-        """Context includes vendor knowledge when the req has offers with vendor_card_id."""
+        """Context includes vendor knowledge when the req has offers with
+        vendor_card_id."""
         offer = Offer(
             requisition_id=requisition.id,
             vendor_name="Arrow Electronics",

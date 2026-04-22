@@ -1724,7 +1724,8 @@ class TestInsights:
                 assert resp.status_code == 200
 
     def test_dashboard_partial_pipeline_loader_targets_self(self, client: TestClient):
-        """Pipeline lazy-load must set hx-target so it does not inherit <main hx-target="this">."""
+        """Pipeline lazy-load must set hx-target so it does not inherit <main hx-
+        target="this">."""
         resp = client.get("/v2/partials/dashboard")
         assert resp.status_code == 200
         marker = 'hx-get="/v2/partials/dashboard/pipeline-insights"'

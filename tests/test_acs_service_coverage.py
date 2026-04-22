@@ -8,10 +8,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-
+from unittest.mock import MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # initiate_call
@@ -81,9 +78,7 @@ async def test_initiate_call_generic_exception():
     from app.services.acs_service import initiate_call
 
     mock_acs_module = MagicMock()
-    mock_acs_module.CallAutomationClient.from_connection_string.side_effect = RuntimeError(
-        "service unavailable"
-    )
+    mock_acs_module.CallAutomationClient.from_connection_string.side_effect = RuntimeError("service unavailable")
     mock_acs_module.PhoneNumberIdentifier = MagicMock()
     mock_acs_module.CallInvite = MagicMock()
 

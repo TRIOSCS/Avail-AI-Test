@@ -322,6 +322,7 @@ class TestResolveTeamsUserEmail:
 
     def setup_method(self):
         from app.services.webhook_service import _teams_user_email_cache
+
         _teams_user_email_cache.clear()
 
     def test_returns_cached_email(self):
@@ -495,10 +496,12 @@ class TestHandleTeamsNotification:
 
         notif = self._make_validated_notif(test_user)
         mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(side_effect=[
-            {"id": "msg-noemail", "from": {"user": {"id": "guid-unknown", "displayName": "Unknown"}}},
-            Exception("user lookup failed"),  # _resolve_teams_user_email call
-        ])
+        mock_gc.get_json = AsyncMock(
+            side_effect=[
+                {"id": "msg-noemail", "from": {"user": {"id": "guid-unknown", "displayName": "Unknown"}}},
+                Exception("user lookup failed"),  # _resolve_teams_user_email call
+            ]
+        )
 
         with (
             patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
@@ -508,16 +511,18 @@ class TestHandleTeamsNotification:
 
     def test_skips_own_messages(self, db_session, test_user):
         """Messages sent by the subscribed user are skipped."""
-        from app.services.webhook_service import handle_teams_notification, _teams_user_email_cache
+        from app.services.webhook_service import _teams_user_email_cache, handle_teams_notification
 
         _teams_user_email_cache["self-guid"] = test_user.email.lower()
 
         notif = self._make_validated_notif(test_user)
         mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(return_value={
-            "id": "msg-own",
-            "from": {"user": {"id": "self-guid", "displayName": "Self"}},
-        })
+        mock_gc.get_json = AsyncMock(
+            return_value={
+                "id": "msg-own",
+                "from": {"user": {"id": "self-guid", "displayName": "Self"}},
+            }
+        )
 
         with (
             patch(_PATCH_GET_TOKEN, new_callable=AsyncMock, return_value="token"),
@@ -530,18 +535,20 @@ class TestHandleTeamsNotification:
     def test_processes_inbound_message_with_company_match(self, db_session, test_user, test_company):
         """Inbound Teams message matched to a company creates an ActivityLog."""
         from app.models import ActivityLog
-        from app.services.webhook_service import handle_teams_notification, _teams_user_email_cache
+        from app.services.webhook_service import _teams_user_email_cache, handle_teams_notification
 
         sender_email = "vendor@external.com"
         _teams_user_email_cache["sender-guid"] = sender_email
 
         notif = self._make_validated_notif(test_user)
         mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(return_value={
-            "id": "msg-company-match",
-            "from": {"user": {"id": "sender-guid", "displayName": "External Vendor"}},
-            "body": {"content": "Hello, interested in parts"},
-        })
+        mock_gc.get_json = AsyncMock(
+            return_value={
+                "id": "msg-company-match",
+                "from": {"user": {"id": "sender-guid", "displayName": "External Vendor"}},
+                "body": {"content": "Hello, interested in parts"},
+            }
+        )
 
         match_result = {"type": "company", "id": test_company.id}
         with (
@@ -560,18 +567,20 @@ class TestHandleTeamsNotification:
     def test_processes_inbound_message_with_vendor_match(self, db_session, test_user, test_vendor_card):
         """Inbound Teams message matched to a vendor card creates an ActivityLog."""
         from app.models import ActivityLog
-        from app.services.webhook_service import handle_teams_notification, _teams_user_email_cache
+        from app.services.webhook_service import _teams_user_email_cache, handle_teams_notification
 
         sender_email = "vendor@supplier.com"
         _teams_user_email_cache["vendor-guid"] = sender_email
 
         notif = self._make_validated_notif(test_user, sub_id="teams-sub-vc")
         mock_gc = MagicMock()
-        mock_gc.get_json = AsyncMock(return_value={
-            "id": "msg-vendor-match",
-            "from": {"user": {"id": "vendor-guid", "displayName": "Vendor Rep"}},
-            "body": {"content": "We have stock available"},
-        })
+        mock_gc.get_json = AsyncMock(
+            return_value={
+                "id": "msg-vendor-match",
+                "from": {"user": {"id": "vendor-guid", "displayName": "Vendor Rep"}},
+                "body": {"content": "We have stock available"},
+            }
+        )
 
         match_result = {"type": "vendor", "id": test_vendor_card.id}
         mock_update = MagicMock()

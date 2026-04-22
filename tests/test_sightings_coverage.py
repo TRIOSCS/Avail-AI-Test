@@ -103,7 +103,8 @@ class TestHeatmapCriticalHotUrgency:
     """Heatmap path via critical/hot urgency on requisition (line 277)."""
 
     def test_critical_urgency_heatmap_path(self, client, db_session):
-        """Requirement with critical urgency on requisition exercises urgency heatmap branch."""
+        """Requirement with critical urgency on requisition exercises urgency heatmap
+        branch."""
         req = Requisition(
             name="Critical RFQ",
             status="active",
@@ -357,7 +358,7 @@ class TestBatchRefreshLogic:
 
 
 class TestMarkUnavailableEndpoint:
-    """mark-unavailable marks sightings for vendor unavailable (lines 580-593)."""
+    """Mark-unavailable marks sightings for vendor unavailable (lines 580-593)."""
 
     def test_marks_matching_sightings_unavailable(self, client, db_session):
         """Matching sightings are set is_unavailable=True."""
@@ -424,7 +425,7 @@ class TestAssignBuyerEndpoint:
 
 
 class TestSendInquiryEndpoint:
-    """send-inquiry endpoint (lines 690-759)."""
+    """Send-inquiry endpoint (lines 690-759)."""
 
     def test_400_when_missing_all_params(self, client, db_session):
         """Requires requirement_ids, vendor_names, and email_body."""
@@ -444,7 +445,7 @@ class TestSendInquiryEndpoint:
         assert resp.status_code == 400
 
     def test_send_inquiry_calls_send_batch_rfq(self, client, db_session):
-        """send-inquiry calls email_service.send_batch_rfq and returns 200."""
+        """Send-inquiry calls email_service.send_batch_rfq and returns 200."""
         _, r, _ = _seed_active(db_session)
         mock_results = [{"vendor_name": "Cover Vendor", "status": "sent"}]
         with patch("app.email_service.send_batch_rfq", new=AsyncMock(return_value=mock_results)):
@@ -460,7 +461,7 @@ class TestSendInquiryEndpoint:
         assert "RFQ sent" in resp.text or "vendor" in resp.text.lower()
 
     def test_send_inquiry_handles_exception(self, client, db_session):
-        """send-inquiry catches exceptions and returns warning toast."""
+        """Send-inquiry catches exceptions and returns warning toast."""
         _, r, _ = _seed_active(db_session)
         with patch("app.email_service.send_batch_rfq", new=AsyncMock(side_effect=Exception("graph down"))):
             resp = client.post(
@@ -476,7 +477,7 @@ class TestSendInquiryEndpoint:
         assert "warning" in resp.text or "Cover Vendor" in resp.text
 
     def test_send_inquiry_with_vendor_card_resolves_email(self, client, db_session):
-        """send-inquiry resolves vendor email from VendorCard + VendorContact."""
+        """Send-inquiry resolves vendor email from VendorCard + VendorContact."""
         _, r, _ = _seed_active(db_session)
         vc = VendorCard(normalized_name="cover vendor", display_name="Cover Vendor")
         db_session.add(vc)
@@ -502,7 +503,7 @@ class TestSendInquiryEndpoint:
         assert resp.status_code == 200
 
     def test_send_inquiry_logs_rfq_activity(self, client, db_session):
-        """send-inquiry logs rfq_sent activity for each requirement+vendor."""
+        """Send-inquiry logs rfq_sent activity for each requirement+vendor."""
         req, r, _ = _seed_active(db_session)
         with patch("app.email_service.send_batch_rfq", new=AsyncMock(return_value=[{"ok": True}])):
             resp = client.post(
@@ -525,7 +526,7 @@ class TestSendInquiryEndpoint:
         assert len(logs) >= 1
 
     def test_send_inquiry_multiple_vendors(self, client, db_session):
-        """send-inquiry handles multiple vendor names."""
+        """Send-inquiry handles multiple vendor names."""
         _, r, _ = _seed_active(db_session)
 
         with patch("app.email_service.send_batch_rfq", new=AsyncMock(return_value=[{}, {}])):

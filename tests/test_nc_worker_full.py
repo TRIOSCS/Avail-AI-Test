@@ -944,7 +944,8 @@ class TestSightingWriterFull:
 class TestAiGate:
     @pytest.fixture(autouse=True)
     def reset_ai_gate_cooldown(self):
-        """Reset module-level cooldown state before each test to prevent ordering failures."""
+        """Reset module-level cooldown state before each test to prevent ordering
+        failures."""
         import app.services.nc_worker.ai_gate as ai_gate_mod
 
         ai_gate_mod._last_api_failure = 0.0

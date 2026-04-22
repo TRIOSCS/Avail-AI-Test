@@ -1,4 +1,5 @@
-"""tests/test_presence_service_coverage.py — Coverage tests for app/services/presence_service.py.
+"""tests/test_presence_service_coverage.py — Coverage tests for
+app/services/presence_service.py.
 
 Targets uncovered lines:
   - Lines 35-37: LRU eviction when cache is at _CACHE_MAX capacity
@@ -14,10 +15,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-from unittest.mock import AsyncMock, MagicMock
-
-import pytest
-
+from unittest.mock import AsyncMock
 
 # ---------------------------------------------------------------------------
 # LRU eviction — lines 35-37
@@ -104,7 +102,8 @@ async def test_get_presence_lru_eviction_removes_oldest_twenty_percent():
 
 
 async def test_get_presence_auth_failure_401_returns_none():
-    """When graph client raises an error containing '401', logs auth error and returns None."""
+    """When graph client raises an error containing '401', logs auth error and returns
+    None."""
     import app.services.presence_service as svc
 
     original_cache = svc._presence_cache.copy()
@@ -125,7 +124,8 @@ async def test_get_presence_auth_failure_401_returns_none():
 
 
 async def test_get_presence_auth_failure_403_returns_none():
-    """When graph client raises an error containing '403', logs auth error and returns None."""
+    """When graph client raises an error containing '403', logs auth error and returns
+    None."""
     import app.services.presence_service as svc
 
     original_cache = svc._presence_cache.copy()

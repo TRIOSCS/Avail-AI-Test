@@ -47,7 +47,7 @@ def _prospect(**overrides):
 
 class TestBuildPrioritySnapshotAllBranches:
     def test_moderate_buying_intent(self):
-        """moderate intent → +6 score, reason added (line 42-44 else branch)."""
+        """Moderate intent → +6 score, reason added (line 42-44 else branch)."""
         snapshot = build_priority_snapshot(
             _prospect(
                 readiness_signals={"intent": {"strength": "moderate"}},
@@ -112,7 +112,8 @@ class TestBuildPrioritySnapshotAllBranches:
         assert any("2 verified contacts" in r for r in reasons)
 
     def test_one_verified_non_dm_contact(self):
-        """1 verified contact (not DM) → +3, reason '1 verified contact' (lines 59-61)."""
+        """1 verified contact (not DM) → +3, reason '1 verified contact' (lines
+        59-61)."""
         snapshot = build_priority_snapshot(
             _prospect(
                 contacts_preview=[
@@ -124,7 +125,8 @@ class TestBuildPrioritySnapshotAllBranches:
         assert "1 verified contact" in reasons
 
     def test_warm_intro_non_hot_warmth(self):
-        """warm intro with warmth != 'hot' → +6, 'Prior relationship' reason (lines 70-71)."""
+        """Warm intro with warmth != 'hot' → +6, 'Prior relationship' reason (lines
+        70-71)."""
         snapshot = build_priority_snapshot(
             _prospect(
                 enrichment_data={"warm_intro": {"has_warm_intro": True, "warmth": "warm"}},
@@ -191,7 +193,8 @@ class TestBuildPrioritySnapshotAllBranches:
         assert isinstance(snapshot, dict)
 
     def test_procurement_hiring_signal(self):
-        """hiring type='procurement' → +4, 'Procurement hiring signal' (lines 104-106)."""
+        """Hiring type='procurement' → +4, 'Procurement hiring signal' (lines
+        104-106)."""
         snapshot = build_priority_snapshot(
             _prospect(
                 readiness_signals={"hiring": {"type": "procurement"}},
@@ -201,7 +204,8 @@ class TestBuildPrioritySnapshotAllBranches:
         assert "Procurement hiring signal" in reasons
 
     def test_engineering_hiring_signal(self):
-        """hiring type='engineering' → +2, 'Engineering growth signal' (lines 108-110)."""
+        """Hiring type='engineering' → +2, 'Engineering growth signal' (lines
+        108-110)."""
         snapshot = build_priority_snapshot(
             _prospect(
                 readiness_signals={"hiring": {"type": "engineering"}},
@@ -231,7 +235,7 @@ class TestBuildPrioritySnapshotAllBranches:
         assert "Marked priority" in reasons
 
     def test_strong_fit_readiness_baseline(self):
-        """fit>=75 and readiness>=55 → 'Strong fit/readiness baseline' (line 124)."""
+        """Fit>=75 and readiness>=55 → 'Strong fit/readiness baseline' (line 124)."""
         snapshot = build_priority_snapshot(
             _prospect(
                 fit_score=78,
@@ -242,7 +246,7 @@ class TestBuildPrioritySnapshotAllBranches:
         assert "Strong fit/readiness baseline" in reasons
 
     def test_strong_icp_fit_only(self):
-        """fit>=70 but readiness<55 → 'Strong ICP fit' (line 126)."""
+        """Fit>=70 but readiness<55 → 'Strong ICP fit' (line 126)."""
         snapshot = build_priority_snapshot(
             _prospect(
                 fit_score=72,
@@ -253,7 +257,7 @@ class TestBuildPrioritySnapshotAllBranches:
         assert "Strong ICP fit" in reasons
 
     def test_strong_near_term_timing_only(self):
-        """readiness>=60 but fit<70 → 'Strong near-term timing' (line 128)."""
+        """Readiness>=60 but fit<70 → 'Strong near-term timing' (line 128)."""
         snapshot = build_priority_snapshot(
             _prospect(
                 fit_score=55,

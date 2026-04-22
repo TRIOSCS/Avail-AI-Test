@@ -1,4 +1,5 @@
-"""tests/test_requisitions_core_coverage.py — Coverage for app/routers/requisitions/core.py.
+"""tests/test_requisitions_core_coverage.py — Coverage for
+app/routers/requisitions/core.py.
 
 Targets uncovered branches:
 - requisition_counts with SALES role (line 62)
@@ -18,14 +19,10 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
-from sqlalchemy.orm import Session
-
-from app.constants import RequisitionStatus, UserRole
+from app.constants import RequisitionStatus
 from app.models import Requisition, User
-
 
 # ── Requisition Counts ───────────────────────────────────────────────
 

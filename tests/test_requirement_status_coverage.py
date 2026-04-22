@@ -21,7 +21,7 @@ from unittest.mock import patch
 
 import pytest
 
-from app.models import ActivityLog, Requirement, Requisition, User
+from app.models import ActivityLog, Requisition
 from app.services.requirement_status import (
     claim_requisition,
     on_offer_created,
@@ -35,9 +35,7 @@ from app.services.requirement_status import (
 class TestTransitionRequirementNoActor:
     """Lines 73-74 — transition with no actor logs with user_id=None."""
 
-    def test_transition_without_actor_creates_log_with_null_user(
-        self, db_session, test_requisition
-    ):
+    def test_transition_without_actor_creates_log_with_null_user(self, db_session, test_requisition):
         req_item = test_requisition.requirements[0]
         req_item.sourcing_status = "open"
         db_session.commit()
@@ -57,9 +55,7 @@ class TestTransitionRequirementNoActor:
         assert log is not None
         assert log.user_id is None
 
-    def test_transition_activity_log_exception_does_not_crash(
-        self, db_session, test_requisition
-    ):
+    def test_transition_activity_log_exception_does_not_crash(self, db_session, test_requisition):
         """ActivityLog creation failure is swallowed (lines 73-74)."""
         req_item = test_requisition.requirements[0]
         req_item.sourcing_status = "open"
@@ -190,9 +186,7 @@ class TestUnclaimRequisitionNoActor:
         assert log is not None
         assert log.user_id is None
 
-    def test_unclaim_activity_log_exception_is_swallowed(
-        self, db_session, test_requisition, test_user
-    ):
+    def test_unclaim_activity_log_exception_is_swallowed(self, db_session, test_requisition, test_user):
         """ActivityLog creation failure during unclaim is swallowed (lines 183-184)."""
         test_requisition.claimed_by_id = test_user.id
         db_session.commit()

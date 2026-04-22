@@ -1,4 +1,5 @@
-"""test_material_enrichment_service_coverage.py — Extra coverage for material_enrichment_service.py.
+"""test_material_enrichment_service_coverage.py — Extra coverage for
+material_enrichment_service.py.
 
 Targets uncovered branches at lines 75, 162-166, 226-235, 253-308, 321-392.
 These cover:
@@ -20,7 +21,6 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from sqlalchemy.orm import Session
 
 from app.models import Base, MaterialCard
 from tests.conftest import TestSessionLocal, engine
@@ -75,7 +75,9 @@ def test_apply_enrichment_invalid_lifecycle_defaults_to_active(db):
     from app.services.material_enrichment_service import _apply_enrichment_result
 
     card = _make_card(db, "NE555")
-    _apply_enrichment_result(card, {"description": "555 timer", "category": "other", "lifecycle_status": "unknown_status"})
+    _apply_enrichment_result(
+        card, {"description": "555 timer", "category": "other", "lifecycle_status": "unknown_status"}
+    )
     assert card.lifecycle_status == "active"
 
 
@@ -94,7 +96,9 @@ def test_apply_enrichment_sets_enrichment_source_and_time(db):
 
     card = _make_card(db, "LM7805")
     before = datetime.now(timezone.utc)
-    _apply_enrichment_result(card, {"description": "5V regulator", "category": "power_ic", "lifecycle_status": "active"})
+    _apply_enrichment_result(
+        card, {"description": "5V regulator", "category": "power_ic", "lifecycle_status": "active"}
+    )
     assert card.enrichment_source == "claude_haiku"
     assert card.enriched_at >= before
 
@@ -215,12 +219,13 @@ async def test_batch_enrich_claude_unavailable_returns_none(db):
 
     mock_redis = MagicMock()
     mock_redis.get.return_value = None
-    with patch(
-        "app.services.material_enrichment_service._get_redis", return_value=mock_redis
-    ), patch(
-        "app.services.material_enrichment_service.claude_batch_submit",
-        new_callable=AsyncMock,
-        side_effect=ClaudeUnavailableError("not configured"),
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+        patch(
+            "app.services.material_enrichment_service.claude_batch_submit",
+            new_callable=AsyncMock,
+            side_effect=ClaudeUnavailableError("not configured"),
+        ),
     ):
         result = await batch_enrich_materials(db)
     assert result is None
@@ -236,12 +241,13 @@ async def test_batch_enrich_claude_error_returns_none(db):
 
     mock_redis = MagicMock()
     mock_redis.get.return_value = None
-    with patch(
-        "app.services.material_enrichment_service._get_redis", return_value=mock_redis
-    ), patch(
-        "app.services.material_enrichment_service.claude_batch_submit",
-        new_callable=AsyncMock,
-        side_effect=ClaudeError("api error"),
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+        patch(
+            "app.services.material_enrichment_service.claude_batch_submit",
+            new_callable=AsyncMock,
+            side_effect=ClaudeError("api error"),
+        ),
     ):
         result = await batch_enrich_materials(db)
     assert result is None
@@ -256,12 +262,13 @@ async def test_batch_enrich_none_batch_id_returns_none(db):
 
     mock_redis = MagicMock()
     mock_redis.get.return_value = None
-    with patch(
-        "app.services.material_enrichment_service._get_redis", return_value=mock_redis
-    ), patch(
-        "app.services.material_enrichment_service.claude_batch_submit",
-        new_callable=AsyncMock,
-        return_value=None,
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+        patch(
+            "app.services.material_enrichment_service.claude_batch_submit",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
     ):
         result = await batch_enrich_materials(db)
     assert result is None
@@ -276,12 +283,13 @@ async def test_batch_enrich_success_stores_batch_id(db):
 
     mock_redis = MagicMock()
     mock_redis.get.return_value = None
-    with patch(
-        "app.services.material_enrichment_service._get_redis", return_value=mock_redis
-    ), patch(
-        "app.services.material_enrichment_service.claude_batch_submit",
-        new_callable=AsyncMock,
-        return_value="batch-xyz-123",
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+        patch(
+            "app.services.material_enrichment_service.claude_batch_submit",
+            new_callable=AsyncMock,
+            return_value="batch-xyz-123",
+        ),
     ):
         result = await batch_enrich_materials(db)
 
@@ -296,12 +304,13 @@ async def test_batch_enrich_no_redis_still_submits(db):
 
     _make_card(db, "PART-E")
 
-    with patch(
-        "app.services.material_enrichment_service._get_redis", return_value=None
-    ), patch(
-        "app.services.material_enrichment_service.claude_batch_submit",
-        new_callable=AsyncMock,
-        return_value="batch-no-redis",
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=None),
+        patch(
+            "app.services.material_enrichment_service.claude_batch_submit",
+            new_callable=AsyncMock,
+            return_value="batch-no-redis",
+        ),
     ):
         result = await batch_enrich_materials(db)
     assert result == "batch-no-redis"
@@ -339,12 +348,13 @@ async def test_process_batch_returns_none_when_still_processing(db):
 
     mock_redis = MagicMock()
     mock_redis.get.return_value = b"batch-123"
-    with patch(
-        "app.services.material_enrichment_service._get_redis", return_value=mock_redis
-    ), patch(
-        "app.services.material_enrichment_service.claude_batch_results",
-        new_callable=AsyncMock,
-        return_value=None,
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+        patch(
+            "app.services.material_enrichment_service.claude_batch_results",
+            new_callable=AsyncMock,
+            return_value=None,
+        ),
     ):
         result = await process_material_batch_results(db)
     assert result is None
@@ -358,12 +368,13 @@ async def test_process_batch_claude_error_returns_none(db):
 
     mock_redis = MagicMock()
     mock_redis.get.return_value = "batch-456"
-    with patch(
-        "app.services.material_enrichment_service._get_redis", return_value=mock_redis
-    ), patch(
-        "app.services.material_enrichment_service.claude_batch_results",
-        new_callable=AsyncMock,
-        side_effect=ClaudeError("poll failed"),
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+        patch(
+            "app.services.material_enrichment_service.claude_batch_results",
+            new_callable=AsyncMock,
+            side_effect=ClaudeError("poll failed"),
+        ),
     ):
         result = await process_material_batch_results(db)
     assert result is None
@@ -389,12 +400,13 @@ async def test_process_batch_applies_results_to_cards(db):
     }
     mock_redis = MagicMock()
     mock_redis.get.return_value = b"batch-789"
-    with patch(
-        "app.services.material_enrichment_service._get_redis", return_value=mock_redis
-    ), patch(
-        "app.services.material_enrichment_service.claude_batch_results",
-        new_callable=AsyncMock,
-        return_value=batch_results,
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+        patch(
+            "app.services.material_enrichment_service.claude_batch_results",
+            new_callable=AsyncMock,
+            return_value=batch_results,
+        ),
     ):
         stats = await process_material_batch_results(db)
 
@@ -419,12 +431,13 @@ async def test_process_batch_handles_none_result_for_item(db):
     }
     mock_redis = MagicMock()
     mock_redis.get.return_value = b"batch-bad"
-    with patch(
-        "app.services.material_enrichment_service._get_redis", return_value=mock_redis
-    ), patch(
-        "app.services.material_enrichment_service.claude_batch_results",
-        new_callable=AsyncMock,
-        return_value=batch_results,
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+        patch(
+            "app.services.material_enrichment_service.claude_batch_results",
+            new_callable=AsyncMock,
+            return_value=batch_results,
+        ),
     ):
         stats = await process_material_batch_results(db)
 
@@ -442,12 +455,13 @@ async def test_process_batch_handles_bad_custom_id_format(db):
     }
     mock_redis = MagicMock()
     mock_redis.get.return_value = b"batch-fmt"
-    with patch(
-        "app.services.material_enrichment_service._get_redis", return_value=mock_redis
-    ), patch(
-        "app.services.material_enrichment_service.claude_batch_results",
-        new_callable=AsyncMock,
-        return_value=batch_results,
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+        patch(
+            "app.services.material_enrichment_service.claude_batch_results",
+            new_callable=AsyncMock,
+            return_value=batch_results,
+        ),
     ):
         stats = await process_material_batch_results(db)
 
@@ -466,12 +480,13 @@ async def test_process_batch_handles_missing_card(db):
     }
     mock_redis = MagicMock()
     mock_redis.get.return_value = b"batch-missing"
-    with patch(
-        "app.services.material_enrichment_service._get_redis", return_value=mock_redis
-    ), patch(
-        "app.services.material_enrichment_service.claude_batch_results",
-        new_callable=AsyncMock,
-        return_value=batch_results,
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+        patch(
+            "app.services.material_enrichment_service.claude_batch_results",
+            new_callable=AsyncMock,
+            return_value=batch_results,
+        ),
     ):
         stats = await process_material_batch_results(db)
 
@@ -489,12 +504,13 @@ async def test_process_batch_handles_empty_parts_list(db):
     }
     mock_redis = MagicMock()
     mock_redis.get.return_value = b"batch-empty"
-    with patch(
-        "app.services.material_enrichment_service._get_redis", return_value=mock_redis
-    ), patch(
-        "app.services.material_enrichment_service.claude_batch_results",
-        new_callable=AsyncMock,
-        return_value=batch_results,
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+        patch(
+            "app.services.material_enrichment_service.claude_batch_results",
+            new_callable=AsyncMock,
+            return_value=batch_results,
+        ),
     ):
         stats = await process_material_batch_results(db)
 

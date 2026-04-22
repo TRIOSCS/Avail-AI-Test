@@ -18,7 +18,6 @@ from unittest.mock import patch
 
 from app.models.trouble_ticket import TroubleTicket
 
-
 # ── Invalid JSON body ─────────────────────────────────────────────────────
 
 
@@ -221,9 +220,7 @@ class TestUpdateTicketStatusVariants:
 
 
 class TestAnalyzeClaudeUnavailablePath:
-    def test_analyze_tickets_claude_unavailable_returns_fallback(
-        self, client, db_session, test_user
-    ):
+    def test_analyze_tickets_claude_unavailable_returns_fallback(self, client, db_session, test_user):
         """ClaudeUnavailableError during analyze returns amber fallback HTML."""
         from unittest.mock import AsyncMock
 
@@ -254,7 +251,8 @@ class TestAnalyzeClaudeUnavailablePath:
         assert "try again" in resp.text.lower() or "no results" in resp.text.lower()
 
     def test_analyze_returns_no_groups_key_in_result(self, client, db_session, test_user):
-        """When claude_structured returns dict without 'groups', fallback HTML is shown."""
+        """When claude_structured returns dict without 'groups', fallback HTML is
+        shown."""
         from unittest.mock import AsyncMock
 
         ticket = TroubleTicket(

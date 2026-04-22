@@ -1,4 +1,5 @@
-"""tests/test_sightings_router_coverage2.py — Additional coverage for app/routers/sightings.py.
+"""tests/test_sightings_router_coverage2.py — Additional coverage for
+app/routers/sightings.py.
 
 Targets uncovered branches:
 - _within_rate_limit: timezone-naive branch
@@ -30,7 +31,6 @@ from sqlalchemy.orm import Session
 
 from app.models import Requirement, Requisition, User
 from app.routers.sightings import _within_rate_limit
-
 
 # ── Unit tests for helpers ─────────────────────────────────────────────────
 
@@ -296,9 +296,7 @@ class TestMarkUnavailableSuccess:
 
 
 class TestAssignBuyerWithId:
-    def test_assign_buyer_with_valid_id(
-        self, client: TestClient, req_with_item: tuple, test_user: User
-    ):
+    def test_assign_buyer_with_valid_id(self, client: TestClient, req_with_item: tuple, test_user: User):
         _, item = req_with_item
         resp = client.patch(
             f"/v2/partials/sightings/{item.id}/assign",
@@ -485,9 +483,7 @@ class TestSendInquiry:
 
 
 class TestBatchRefreshAdditional:
-    def test_batch_refresh_rate_limited_skips(
-        self, client: TestClient, req_with_item: tuple, db_session: Session
-    ):
+    def test_batch_refresh_rate_limited_skips(self, client: TestClient, req_with_item: tuple, db_session: Session):
         _, item = req_with_item
         item.last_searched_at = datetime.utcnow() - timedelta(seconds=10)
         db_session.commit()

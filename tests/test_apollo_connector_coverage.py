@@ -1,4 +1,5 @@
-"""tests/test_apollo_connector_coverage.py — Coverage tests for app/connectors/apollo.py.
+"""tests/test_apollo_connector_coverage.py — Coverage tests for
+app/connectors/apollo.py.
 
 Tests all branches of _parse_company_response, _parse_contacts_response,
 search_company, and search_contacts.
@@ -14,8 +15,6 @@ os.environ["TESTING"] = "1"
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
-import pytest
-
 
 # -- _parse_company_response --------------------------------------------------
 

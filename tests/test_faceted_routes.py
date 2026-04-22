@@ -159,7 +159,8 @@ def test_faceted_results_sub_filters_actually_filter(client, db_session: Session
 
 
 def test_manufacturer_filter_partial_renders(client, db_session: Session):
-    """Manufacturer names must appear in HTML (x-data JSON); avoid broken x-data=\"{name: \"...\"}\"."""
+    """Manufacturer names must appear in HTML (x-data JSON); avoid broken
+    x-data=\"{name: \"...\"}\"."""
     db_session.add(
         MaterialCard(
             normalized_mpn="mfg-test-1",
