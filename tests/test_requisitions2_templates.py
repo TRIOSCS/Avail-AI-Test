@@ -92,7 +92,12 @@ def test_filter_form_includes_hidden_sort_fields(client):
 
 
 def test_table_has_sortable_headers(client, test_requisition, monkeypatch):
-    """Legacy table headers have hx-get for sorting (v2 thead has no sort links)."""
+    """Legacy table headers have hx-get for sorting.
+
+    v2 also carries sort links on Name/Status/Customer — see
+    test_v2_thead_name_status_customer_are_sortable for the v2 assertion. This test
+    remains flag-off to verify the legacy thead specifically.
+    """
     from app.config import settings as app_settings
 
     monkeypatch.setattr(app_settings, "avail_opp_table_v2", False)
@@ -521,6 +526,19 @@ def test_v2_flag_on_renders_opp_col_header(client, test_requisition):
     """When avail_opp_table_v2 is True, thead renders v2 opp-col-header."""
     resp = client.get("/requisitions2/table", params={"status": "all"})
     assert "opp-col-header" in resp.text
+
+
+def test_v2_thead_name_status_customer_are_sortable(client, test_requisition):
+    """V2 thead carries hx-get sort links on Name/Status/Customer for legacy UX parity.
+
+    Coverage and Deal are derived/aggregate and intentionally not sortable.
+    """
+    resp = client.get("/requisitions2/table", params={"status": "all"})
+    html = resp.text
+    for col in ("name", "status", "customer_name"):
+        assert f"sort={col}" in html, f"v2 thead missing sort link for {col}"
+    assert "sort=coverage" not in html
+    assert "sort=deal" not in html
 
 
 def test_v2_flag_off_renders_legacy(client, test_requisition, monkeypatch):

@@ -29,11 +29,29 @@
     {% endif %}
     <thead class="bg-gray-50">
       {% if avail_opp_table_v2_enabled | default(False) %}
+      {# Name/Status/Customer are sortable (legacy parity); Coverage and Deal
+         are derived/aggregate columns and intentionally not sortable. #}
+      {% set v2_sort_columns = [
+        ('name', 'Name'),
+        ('status', 'Status'),
+        ('customer_name', 'Customer'),
+      ] %}
       <tr>
         <th class="px-3 py-2 w-10"></th>
-        <th class="opp-col-header px-3 py-2 text-left">Name</th>
-        <th class="opp-col-header px-3 py-2 text-left">Status</th>
-        <th class="opp-col-header px-3 py-2 text-left">Customer</th>
+        {% for col_key, col_label in v2_sort_columns %}
+        <th class="opp-col-header px-3 py-2 text-left">
+          <a hx-get="/requisitions2/table?sort={{ col_key }}&order={{ 'asc' if filters.sort.value == col_key and filters.order.value == 'desc' else 'desc' }}"
+             hx-target="#rq2-table"
+             hx-include="#rq2-filters"
+             hx-push-url="/requisitions2"
+             class="inline-flex items-center gap-1 hover:text-[color:var(--opp-text-primary)] cursor-pointer transition-colors">
+            {{ col_label }}
+            {% if filters.sort.value == col_key %}
+              <span class="text-[color:var(--opp-status-open)]">{{ '▲' if filters.order.value == 'asc' else '▼' }}</span>
+            {% endif %}
+          </a>
+        </th>
+        {% endfor %}
         <th class="opp-col-header px-3 py-2 text-left">Coverage</th>
         <th class="opp-col-header px-3 py-2 text-left">Deal</th>
         <th class="w-0" aria-hidden="true"></th>
