@@ -312,20 +312,24 @@ async def run_health_checks(check_type: str = "ping") -> dict:
 
         check_fn = deep_test_source if check_type == "deep" else ping_source
 
+        # Per-source commit: release api_sources row locks immediately after each
+        # check so the search path (which UPDATEs the same rows after asyncio.gather)
+        # doesn't hit LockNotAvailable while a 15-min health run iterates.
         for source in sources:
             try:
                 result = await check_fn(source, db)
+                db.commit()
                 results["sources"][source.name] = result
                 if result["success"]:
                     results["passed"] += 1
                 else:
                     results["failed"] += 1
             except Exception as e:
+                db.rollback()
                 logger.error("Health check crashed for {}: {}", source.name, e)
                 results["sources"][source.name] = {"success": False, "error": str(e)}
                 results["failed"] += 1
 
-        db.commit()
         logger.info(
             "Health check ({}) complete: {}/{} passed",
             check_type,

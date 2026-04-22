@@ -413,6 +413,84 @@ class TestRunHealthChecks:
         mock_session.rollback.assert_called_once()
         mock_session.close.assert_called_once()
 
+    def test_commits_per_source_not_once_at_end(self):
+        """Each source commits independently so api_sources row locks release between
+        iterations — otherwise the search path hits LockNotAvailable (see Phase 3 root-
+        cause analysis)."""
+        sources = []
+        for i in range(1, 4):
+            s = MagicMock()
+            s.name = f"source_{i}"
+            sources.append(s)
+
+        mock_session = MagicMock(spec=Session)
+        mock_session.query.return_value.filter.return_value.all.return_value = sources
+        mock_session.close = MagicMock()
+
+        commit_count = 0
+
+        def _count_commits():
+            nonlocal commit_count
+            commit_count += 1
+
+        mock_session.commit.side_effect = _count_commits
+
+        with patch("app.database.SessionLocal", return_value=mock_session):
+            with patch("app.services.health_monitor.ping_source", new_callable=AsyncMock) as mock_ping:
+                mock_ping.return_value = {"success": True, "elapsed_ms": 50, "error": None}
+                asyncio.get_event_loop().run_until_complete(run_health_checks("ping"))
+
+        assert commit_count == 3, (
+            f"expected one commit per source (3), got {commit_count} — locks on api_sources "
+            f"would be held for the whole run instead of released between iterations"
+        )
+
+    def test_source_failure_does_not_rollback_siblings(self):
+        """When one source's check raises, earlier-committed sources persist and later
+        sources still run.
+
+        Under the old single-transaction design, a mid-loop exception rolled back every
+        source's changes.
+        """
+        s1 = MagicMock()
+        s1.name = "source_1"
+        s2 = MagicMock()
+        s2.name = "source_2"
+        s3 = MagicMock()
+        s3.name = "source_3"
+
+        mock_session = MagicMock(spec=Session)
+        mock_session.query.return_value.filter.return_value.all.return_value = [s1, s2, s3]
+        mock_session.close = MagicMock()
+
+        commit_count = 0
+        rollback_count = 0
+
+        def _count_commits():
+            nonlocal commit_count
+            commit_count += 1
+
+        def _count_rollbacks():
+            nonlocal rollback_count
+            rollback_count += 1
+
+        mock_session.commit.side_effect = _count_commits
+        mock_session.rollback.side_effect = _count_rollbacks
+
+        with patch("app.database.SessionLocal", return_value=mock_session):
+            with patch("app.services.health_monitor.ping_source", new_callable=AsyncMock) as mock_ping:
+                mock_ping.side_effect = [
+                    {"success": True, "elapsed_ms": 50, "error": None},
+                    Exception("connector blew up"),
+                    {"success": True, "elapsed_ms": 60, "error": None},
+                ]
+                result = asyncio.get_event_loop().run_until_complete(run_health_checks("ping"))
+
+        assert result["passed"] == 2
+        assert result["failed"] == 1
+        assert commit_count == 2, f"sources 1 and 3 should have committed independently; got {commit_count} commits"
+        assert rollback_count == 1, f"source 2's failure should trigger exactly one rollback; got {rollback_count}"
+
 
 # ── _get_connector tests ─────────────────────────────────────────────
 
