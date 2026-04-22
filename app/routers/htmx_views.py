@@ -1674,7 +1674,7 @@ async def requisitions_bulk_action(
         date_from="",
         date_to="",
         sort="created_at",
-        dir="desc",
+        sort_dir="desc",
         limit=50,
         offset=0,
         user=user,
@@ -1882,7 +1882,7 @@ async def requisition_row_action(
             date_from="",
             date_to="",
             sort="created_at",
-            dir="desc",
+            sort_dir="desc",
             limit=50,
             offset=0,
             user=user,
@@ -7775,8 +7775,9 @@ async def build_buy_plan_htmx(
     # Return buy plan detail partial
     bp_lines = db.query(BuyPlanLine).filter(BuyPlanLine.buy_plan_id == plan.id).all()
     ctx = _base_ctx(request, user, "buy-plans")
-    ctx["plan"] = plan
+    ctx["bp"] = plan
     ctx["lines"] = bp_lines
+    ctx["is_ops_member"] = _is_ops_member(user, db)
     return templates.TemplateResponse("htmx/partials/buy_plans/detail.html", ctx)
 
 

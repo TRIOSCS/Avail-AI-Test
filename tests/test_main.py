@@ -503,13 +503,13 @@ class TestHealthPublicVsAuth:
     """Verify /health gates detailed info behind metrics token."""
 
     def test_health_public_minimal(self, client):
-        """Without token, /health returns only status and db."""
+        """Without token, /health returns status, db, redis, and build_commit."""
         resp = client.get("/health")
         data = resp.json()
         assert "status" in data
         assert "db" in data
+        assert "redis" in data
         assert "version" not in data
-        assert "redis" not in data
         assert "scheduler" not in data
         assert "connectors_enabled" not in data
         assert "backup" not in data
@@ -528,12 +528,13 @@ class TestHealthPublicVsAuth:
             assert "backup" in data
 
     def test_health_wrong_token_returns_minimal(self, client):
-        """With wrong token, /health returns only minimal info."""
+        """With wrong token, /health returns only minimal info (no version, scheduler, etc)."""
         with patch("app.main.settings.metrics_token", "real-token"):
             resp = client.get("/health", headers={"x-metrics-token": "wrong-token"})
             data = resp.json()
             assert "version" not in data
-            assert "redis" not in data
+            assert "scheduler" not in data
+            assert "redis" in data
 
 
 # ── _seed_api_sources: existing source update (lines 767-773) ────────

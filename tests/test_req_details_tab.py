@@ -192,7 +192,7 @@ def test_req_details_tab_shows_new_columns(client, db_session, test_user):
     assert "Texas Instruments" in resp.text
     assert "$1.25" in resp.text
     assert "CUST-001" in resp.text
-    assert ">2<" in resp.text or ">2 " in resp.text  # 2 subs
+    assert "LM358A" in resp.text and "LM358B" in resp.text  # 2 subs
     assert "$0.85" in resp.text  # best offer price
 
 

@@ -389,7 +389,7 @@ class TestLogBuyplanActivity:
         from app.services.buyplan_notifications import log_buyplan_activity
 
         user = _make_user(db_session)
-        plan = _make_plan(db_session, user.id, status="approved")
+        plan = _make_plan(db_session, user.id, status="active")
 
         log_buyplan_activity(db_session, user.id, plan, "buyplan_approved", detail="Manager approved")
         db_session.commit()
@@ -398,7 +398,7 @@ class TestLogBuyplanActivity:
         assert act is not None
         assert f"Buy Plan #{plan.id}: Manager approved" == act.subject
         assert f"plan_id={plan.id}" in act.notes
-        assert "status=approved" in act.notes
+        assert "status=active" in act.notes
 
     def test_creates_activity_without_detail(self, db_session):
         from app.services.buyplan_notifications import log_buyplan_activity
