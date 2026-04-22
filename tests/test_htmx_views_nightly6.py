@@ -154,7 +154,8 @@ class TestFindCrosses:
         assert resp.status_code == 404
 
     def test_cache_hit_skips_ai_call(self, client, db_session):
-        """When cross_references already set and refresh=False, returns template immediately."""
+        """When cross_references already set and refresh=False, returns template
+        immediately."""
         existing_crosses = [{"mpn": "LM117", "manufacturer": "TI"}]
         mc = _make_material_card(db_session, crosses=existing_crosses)
 
@@ -189,7 +190,7 @@ class TestFindCrosses:
         assert "failed" in resp.text.lower() or "try again" in resp.text.lower()
 
     def test_refresh_flag_bypasses_cache(self, client, db_session):
-        """refresh=True forces AI call even when cross_references already set."""
+        """Refresh=True forces AI call even when cross_references already set."""
         existing_crosses = [{"mpn": "LM117", "manufacturer": "TI"}]
         mc = _make_material_card(db_session, crosses=existing_crosses)
         ai_result = {"crosses": [{"mpn": "MC7817", "manufacturer": "Motorola"}]}
@@ -323,8 +324,8 @@ class TestBuyPlanWorkflow:
     def test_approve_non_manager_raises_403(self, client, db_session, test_user):
         """Buyer role (not manager/admin) calling approve → 403.
 
-        The conftest client uses test_user which has role='buyer'.
-        The approve route checks user.role not in (MANAGER, ADMIN).
+        The conftest client uses test_user which has role='buyer'. The approve route
+        checks user.role not in (MANAGER, ADMIN).
         """
         resp = client.post(
             "/v2/partials/buy-plans/999/approve",
@@ -418,14 +419,15 @@ class TestAdminRoutes:
     def test_api_health_returns_200(self, admin_client, db_session):
         """GET /v2/partials/admin/api-health → 200.
 
-        The route catches ImportError when connector_health doesn't exist and
-        returns a fallback dict, so no mocking needed.
+        The route catches ImportError when connector_health doesn't exist and returns a
+        fallback dict, so no mocking needed.
         """
         resp = admin_client.get("/v2/partials/admin/api-health")
         assert resp.status_code == 200
 
     def test_api_health_with_health_service_mocked(self, admin_client, db_session):
-        """When connector_health module exists and returns data → 200 with connectors."""
+        """When connector_health module exists and returns data → 200 with
+        connectors."""
         import sys
         import types
 

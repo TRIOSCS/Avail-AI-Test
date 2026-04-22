@@ -240,7 +240,8 @@ class TestAddRequirements:
         assert "duplicates" in data
 
     def test_add_requirements_with_customer_site_duplicate_detection(self, client, db_session, test_user):
-        """When customer_site_id set and material_card_id set, duplicate detection runs."""
+        """When customer_site_id set and material_card_id set, duplicate detection
+        runs."""
         from app.models import Company, CustomerSite
 
         company = Company(
@@ -320,7 +321,8 @@ class TestSearchAll:
         assert resp.status_code == 404
 
     def test_search_all_with_search_exception(self, client, db_session, test_user, test_requisition):
-        """search_requirement raising exception should be caught (logged, sightings=[])."""
+        """search_requirement raising exception should be caught (logged,
+        sightings=[])."""
 
         async def _raise(*a, **kw):
             raise Exception("search failed")
@@ -360,7 +362,8 @@ class TestSearchAll:
         assert resp.status_code in (200, 500)
 
     def test_search_all_draft_status_transitions_to_active(self, client, db_session, test_user):
-        """When req is in 'draft' status, transition to 'active' is attempted (line 846)."""
+        """When req is in 'draft' status, transition to 'active' is attempted (line
+        846)."""
         req = _make_requisition(db_session, test_user, status="draft")
         _make_requirement(db_session, req)
         db_session.refresh(req)
@@ -405,7 +408,8 @@ class TestGetSavedSightings:
         assert resp.status_code == 404
 
     def test_get_saved_sightings_with_history(self, client, db_session, test_user, test_requisition):
-        """Saved sightings with a material card triggers _history_to_result (line 1025)."""
+        """Saved sightings with a material card triggers _history_to_result (line
+        1025)."""
         card = _make_material_card(db_session, "LM317T")
         req_item = test_requisition.requirements[0]
         req_item.material_card_id = card.id
@@ -548,7 +552,8 @@ class TestImportStockList:
 
 class TestListRequirementSightings:
     def test_sightings_with_sub_mpn_material_card(self, client, db_session, test_user, test_requisition):
-        """Requirement with substitute MPNs that have material cards triggers sub_rows path."""
+        """Requirement with substitute MPNs that have material cards triggers sub_rows
+        path."""
         req_item = test_requisition.requirements[0]
 
         # Add a substitute to the requirement (string format)
@@ -581,7 +586,8 @@ class TestListRequirementSightings:
 
 class TestUploadRequirements:
     def test_upload_csv_with_substitute_columns(self, client, db_session, test_user, test_requisition):
-        """CSV with sub_1/sub_2 columns normalizes MPNs (exercises dedup loop at line 603)."""
+        """CSV with sub_1/sub_2 columns normalizes MPNs (exercises dedup loop at line
+        603)."""
         csv_content = b"primary_mpn,target_qty,sub_1,sub_2\nLM317T,100,TL431A,\n"
         with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None):
             with patch(

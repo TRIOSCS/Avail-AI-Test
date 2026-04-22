@@ -71,7 +71,9 @@ class TestGenerateDescription:
             patch(
                 "app.routers.ai.ai_generate_description_for_requirement.__wrapped__",
                 new_callable=AsyncMock,
-            ) if False else patch(
+            )
+            if False
+            else patch(
                 "app.services.description_service.generate_verified_description",
                 new_callable=AsyncMock,
                 return_value=fake_result,

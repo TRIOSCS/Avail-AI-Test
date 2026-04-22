@@ -1,4 +1,5 @@
-"""tests/test_vendor_scorecard_nightly.py — Coverage for uncovered lines in vendor_scorecard.
+"""tests/test_vendor_scorecard_nightly.py — Coverage for uncovered lines in
+vendor_scorecard.
 
 Targets lines: 111-118, 129-138, 225-228, 239, 260-261, 296-299
 Called by: pytest
@@ -94,7 +95,8 @@ def _make_offer(db: Session, vendor_card_id: int, user: User) -> Offer:
 
 class TestComputeVendorScorecardLazyLookups:
     def test_quoted_offer_ids_loaded_on_demand_when_none(self, db_session: Session):
-        """Lines 111-118 — quoted_offer_ids=None auto-loads from Quote when offers exist."""
+        """Lines 111-118 — quoted_offer_ids=None auto-loads from Quote when offers
+        exist."""
         user = _make_user(db_session, "lazy")
         vc = _make_vendor(db_session, "lazy vendor")
         offer = _make_offer(db_session, vc.id, user)
@@ -118,7 +120,8 @@ class TestComputeVendorScorecardLazyLookups:
         assert result.get("quote_conversion") == 1.0
 
     def test_po_offer_ids_loaded_on_demand_when_none(self, db_session: Session):
-        """Lines 129-138 — po_offer_ids=None auto-loads from BuyPlanLine when offers exist."""
+        """Lines 129-138 — po_offer_ids=None auto-loads from BuyPlanLine when offers
+        exist."""
         from app.models import BuyPlan, BuyPlanLine
 
         user = _make_user(db_session, "po")
@@ -162,7 +165,8 @@ class TestComputeVendorScorecardLazyLookups:
 
 class TestComputeAllVendorScorecards:
     def test_empty_scorecard_result_triggers_savepoint_rollback(self, db_session: Session):
-        """Lines 225-228 — compute_vendor_scorecard returns {} → savepoint.rollback(), continue."""
+        """Lines 225-228 — compute_vendor_scorecard returns {} → savepoint.rollback(),
+        continue."""
         _make_vendor(db_session, "cold vendor")
         db_session.commit()
 
@@ -222,7 +226,8 @@ class TestComputeAllVendorScorecards:
         assert count == 1
 
     def test_exception_in_scorecard_triggers_savepoint_rollback_and_continues(self, db_session: Session):
-        """Lines 260-261 — exception during compute → savepoint.rollback(), next vendor."""
+        """Lines 260-261 — exception during compute → savepoint.rollback(), next
+        vendor."""
         vc1 = _make_vendor(db_session, "err vendor 1")
         vc2 = _make_vendor(db_session, "ok vendor 2")
         db_session.commit()
@@ -256,7 +261,8 @@ class TestComputeAllVendorScorecards:
 
 class TestGetVendorScorecardListSearch:
     def test_search_filter_returns_matching_vendors(self, db_session: Session):
-        """Lines 296-299 — search param → ILIKE filter applied, non-matching excluded."""
+        """Lines 296-299 — search param → ILIKE filter applied, non-matching
+        excluded."""
         vc1 = _make_vendor(db_session, "arrow electronics")
         vc2 = _make_vendor(db_session, "mouser electronics")
         db_session.commit()

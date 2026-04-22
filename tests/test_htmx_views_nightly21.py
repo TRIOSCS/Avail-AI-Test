@@ -1,4 +1,5 @@
-"""tests/test_htmx_views_nightly21.py — Coverage for sourcing, pricing history, quote edit.
+"""tests/test_htmx_views_nightly21.py — Coverage for sourcing, pricing history, quote
+edit.
 
 Targets:
   - pricing_history (GET)
@@ -19,14 +20,12 @@ os.environ["TESTING"] = "1"
 import uuid
 from datetime import datetime, timezone
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.constants import QuoteStatus
 from app.models import Requirement, Requisition, User
 from app.models.quotes import Quote
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -74,7 +73,9 @@ class TestPricingHistory:
 
 
 class TestEditQuoteMetadata:
-    def test_edit_payment_terms(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_edit_payment_terms(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         quote = _make_quote(db_session, test_requisition, test_user)
         resp = client.post(
             f"/v2/partials/quotes/{quote.id}/edit",
@@ -88,7 +89,9 @@ class TestEditQuoteMetadata:
         resp = client.post("/v2/partials/quotes/99999/edit", data={"payment_terms": "Net 30"})
         assert resp.status_code == 404
 
-    def test_edit_shipping_and_notes(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_edit_shipping_and_notes(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         quote = _make_quote(db_session, test_requisition, test_user)
         resp = client.post(
             f"/v2/partials/quotes/{quote.id}/edit",
@@ -123,7 +126,9 @@ class TestSourcingResultsPartial:
         resp = client.get("/v2/partials/sourcing/99999")
         assert resp.status_code == 404
 
-    def test_sourcing_with_confidence_filter(self, client: TestClient, db_session: Session, test_requisition: Requisition):
+    def test_sourcing_with_confidence_filter(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition
+    ):
         req_item = _make_requirement(db_session, test_requisition)
         resp = client.get(f"/v2/partials/sourcing/{req_item.id}?confidence=green")
         assert resp.status_code == 200
@@ -133,12 +138,16 @@ class TestSourcingResultsPartial:
         resp = client.get(f"/v2/partials/sourcing/{req_item.id}?sort=freshest")
         assert resp.status_code == 200
 
-    def test_sourcing_with_freshness_filter(self, client: TestClient, db_session: Session, test_requisition: Requisition):
+    def test_sourcing_with_freshness_filter(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition
+    ):
         req_item = _make_requirement(db_session, test_requisition)
         resp = client.get(f"/v2/partials/sourcing/{req_item.id}?freshness=7d")
         assert resp.status_code == 200
 
-    def test_sourcing_with_corroborated_filter(self, client: TestClient, db_session: Session, test_requisition: Requisition):
+    def test_sourcing_with_corroborated_filter(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition
+    ):
         req_item = _make_requirement(db_session, test_requisition)
         resp = client.get(f"/v2/partials/sourcing/{req_item.id}?corroborated=yes")
         assert resp.status_code == 200

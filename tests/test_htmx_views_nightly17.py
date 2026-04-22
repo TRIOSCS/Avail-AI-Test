@@ -14,12 +14,9 @@ import os
 
 os.environ["TESTING"] = "1"
 
-import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.orm import Session
 
 from app.models import VendorCard
-
 
 # ── Vendors List ──────────────────────────────────────────────────────────
 

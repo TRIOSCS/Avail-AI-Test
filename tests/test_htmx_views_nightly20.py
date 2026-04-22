@@ -18,17 +18,14 @@ import os
 os.environ["TESTING"] = "1"
 
 import uuid
-from datetime import datetime, timezone
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.constants import BuyPlanLineStatus, BuyPlanStatus, SOVerificationStatus
-from app.models import Requisition, User
+from app.models import Requisition
 from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.quotes import Quote
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 

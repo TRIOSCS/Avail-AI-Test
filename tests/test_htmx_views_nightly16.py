@@ -1,4 +1,5 @@
-"""tests/test_htmx_views_nightly16.py — Coverage for search, requirement update, poll-inbox.
+"""tests/test_htmx_views_nightly16.py — Coverage for search, requirement update, poll-
+inbox.
 
 Targets:
   - poll_inbox_htmx
@@ -19,12 +20,10 @@ os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import Requirement, Requisition, User
-
+from app.models import Requirement, Requisition
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -190,9 +189,7 @@ class TestSearchLeadDetail:
 
     def test_cache_miss_with_search_id(self, client: TestClient):
         """search_id + vendor_key with empty cache → returns 'Lead not found'."""
-        resp = client.get(
-            "/v2/partials/search/lead-detail?search_id=nosuch&vendor_key=acme&idx=0"
-        )
+        resp = client.get("/v2/partials/search/lead-detail?search_id=nosuch&vendor_key=acme&idx=0")
         assert resp.status_code == 200
         assert b"Lead not found" in resp.content
 
@@ -202,11 +199,9 @@ class TestSearchLeadDetail:
 
 class TestRequisitionPicker:
     def test_get_picker(self, client: TestClient, test_requisition: Requisition):
-        resp = client.get(f"/v2/partials/search/requisition-picker?mpn=NE555")
+        resp = client.get("/v2/partials/search/requisition-picker?mpn=NE555")
         assert resp.status_code == 200
 
     def test_picker_with_items(self, client: TestClient):
-        resp = client.get(
-            '/v2/partials/search/requisition-picker?mpn=BC547&items=[{"vendor_name":"Test"}]&action=add'
-        )
+        resp = client.get('/v2/partials/search/requisition-picker?mpn=BC547&items=[{"vendor_name":"Test"}]&action=add')
         assert resp.status_code == 200

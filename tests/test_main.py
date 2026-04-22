@@ -528,7 +528,8 @@ class TestHealthPublicVsAuth:
             assert "backup" in data
 
     def test_health_wrong_token_returns_minimal(self, client):
-        """With wrong token, /health returns only minimal info (no version, scheduler, etc)."""
+        """With wrong token, /health returns only minimal info (no version, scheduler,
+        etc)."""
         with patch("app.main.settings.metrics_token", "real-token"):
             resp = client.get("/health", headers={"x-metrics-token": "wrong-token"})
             data = resp.json()

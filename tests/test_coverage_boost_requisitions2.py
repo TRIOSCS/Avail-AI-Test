@@ -62,7 +62,7 @@ class TestInlineEditCell:
         assert resp.status_code == 200
 
     def test_owner_field_loads_users(self, client: TestClient, active_req: Requisition):
-        """field=owner triggers get_team_users call."""
+        """Field=owner triggers get_team_users call."""
         resp = client.get(f"/requisitions2/{active_req.id}/edit/owner")
         assert resp.status_code == 200
 
@@ -195,13 +195,13 @@ class TestRowAction:
         assert resp.status_code == 200  # returns table, not error
 
     def test_archive_action(self, client: TestClient, active_req: Requisition):
-        """archive action path."""
+        """Archive action path."""
         with patch("app.services.requisition_state.transition"):
             resp = client.post(f"/requisitions2/{active_req.id}/action/archive")
         assert resp.status_code == 200
 
     def test_assign_action_with_owner(self, client: TestClient, active_req: Requisition, test_user: User):
-        """assign action with owner_id sets created_by."""
+        """Assign action with owner_id sets created_by."""
         resp = client.post(
             f"/requisitions2/{active_req.id}/action/assign",
             data={"owner_id": str(test_user.id)},

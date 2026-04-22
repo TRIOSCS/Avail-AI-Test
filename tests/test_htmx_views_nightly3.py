@@ -22,14 +22,13 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.constants import BuyPlanStatus, OfferStatus, QuoteStatus, RequisitionStatus, SourcingStatus
-from app.models import Company, Offer, Requirement, Requisition, User, VendorCard
+from app.constants import BuyPlanStatus, OfferStatus, RequisitionStatus, SourcingStatus
+from app.models import Company, Offer, Requirement, Requisition, User
 from app.models.buy_plan import BuyPlan
 from app.models.crm import CustomerSite, SiteContact
 from app.models.intelligence import MaterialCard
 from app.models.quotes import Quote, QuoteLine
 from app.models.sourcing_lead import SourcingLead
-
 
 # ── Admin client fixture ─────────────────────────────────────────────────
 
@@ -516,9 +515,7 @@ class TestCustomerSites:
         db_session.add(contact)
         db_session.commit()
 
-        resp = client.delete(
-            f"/v2/partials/customers/{test_company.id}/sites/{site.id}/contacts/{contact.id}"
-        )
+        resp = client.delete(f"/v2/partials/customers/{test_company.id}/sites/{site.id}/contacts/{contact.id}")
         assert resp.status_code == 200
 
 

@@ -1,4 +1,5 @@
-"""tests/test_htmx_views_nightly28.py — Targeted helper-function coverage for htmx_views.py.
+"""tests/test_htmx_views_nightly28.py — Targeted helper-function coverage for
+htmx_views.py.
 
 Covers previously untested private helpers and v2_page requisitions path:
   - _vite_assets()          line 100  (styles file prepended when absent from htmx_app.js css)
@@ -22,7 +23,8 @@ from sqlalchemy.orm import Session
 
 
 class TestViteAssetsHelper:
-    """Tests for _vite_assets() — particularly the styles-file-prepend branch (line 100)."""
+    """Tests for _vite_assets() — particularly the styles-file-prepend branch (line
+    100)."""
 
     def test_styles_file_prepended_when_absent_from_js_css(self):
         """Line 100: styles entry prepended when htmx_app.js css list lacks it."""
@@ -90,7 +92,8 @@ class TestStalenessHelper:
         assert _staleness_tier(ts) == "overdue"
 
     def test_naive_datetime_treated_as_utc(self):
-        """Naive datetime (no tzinfo) → line 4283 adds UTC, staleness computed correctly."""
+        """Naive datetime (no tzinfo) → line 4283 adds UTC, staleness computed
+        correctly."""
         from app.routers.htmx_views import _staleness_tier
 
         naive = datetime.now() - timedelta(days=40)

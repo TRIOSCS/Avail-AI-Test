@@ -1,4 +1,5 @@
-"""tests/test_vendor_email_lookup_nightly.py — Coverage for uncovered lines in vendor_email_lookup.
+"""tests/test_vendor_email_lookup_nightly.py — Coverage for uncovered lines in
+vendor_email_lookup.
 
 Targets lines: 93, 96, 140-147, 188-190, 193-209, 392-394
 Called by: pytest
@@ -46,7 +47,8 @@ def basic_req(db_session: Session, test_user: User) -> Requisition:
 
 class TestQueryDbForPartEdgeCases:
     def test_sighting_with_empty_vendor_name_is_skipped(self, db_session: Session, basic_req: Requisition):
-        """Line 93 — sighting with empty vendor_name triggers the 'if not vn: continue' branch."""
+        """Line 93 — sighting with empty vendor_name triggers the 'if not vn: continue'
+        branch."""
         from app.models import Requirement, Sighting
 
         item = db_session.query(Requirement).filter_by(requisition_id=basic_req.id).first()
@@ -66,7 +68,10 @@ class TestQueryDbForPartEdgeCases:
         assert all(v["vendor_name"] != "" for v in result)
 
     def test_sighting_with_unnormalizable_vendor_is_skipped(self, db_session: Session, basic_req: Requisition):
-        """Line 96 — normalize_vendor_name returns None triggers 'if not norm: continue'."""
+        """Line 96 — normalize_vendor_name returns None triggers 'if not norm:
+
+        continue'.
+        """
         from app.models import Requirement, Sighting
 
         item = db_session.query(Requirement).filter_by(requisition_id=basic_req.id).first()
@@ -88,7 +93,8 @@ class TestQueryDbForPartEdgeCases:
         assert result == []
 
     def test_material_vendor_history_duplicate_vendor_skipped(self, db_session: Session, basic_req: Requisition):
-        """Lines 140-147 — history vendor already in sightings → 'norm in vendors' skips it."""
+        """Lines 140-147 — history vendor already in sightings → 'norm in vendors' skips
+        it."""
         from app.models import MaterialCard, MaterialVendorHistory, Requirement, Sighting
 
         item = db_session.query(Requirement).filter_by(requisition_id=basic_req.id).first()
@@ -128,7 +134,8 @@ class TestQueryDbForPartEdgeCases:
         assert len(arrow_entries) == 1
 
     def test_email_intelligence_first_query_exception_triggers_fallback(self, db_session: Session):
-        """Lines 188-190 — first EmailIntelligence query fails → falls into except block."""
+        """Lines 188-190 — first EmailIntelligence query fails → falls into except
+        block."""
         original_query = db_session.query
         call_count = {"n": 0}
 
@@ -174,7 +181,8 @@ class TestQueryDbForPartEdgeCases:
 
 class TestEnrichVendorsBatchTimeout:
     async def test_batch_timeout_with_commit_failure_triggers_rollback(self, db_session: Session):
-        """Lines 392-394 — asyncio.TimeoutError on batch gather + commit failure → rollback."""
+        """Lines 392-394 — asyncio.TimeoutError on batch gather + commit failure →
+        rollback."""
         vendors = [
             {
                 "vendor_name": "Test Vendor",

@@ -18,14 +18,12 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import BackgroundTasks, HTTPException
+from fastapi import HTTPException
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 
-from app.constants import SourcingStatus
-from app.models import ActivityLog, Requirement, Requisition, Sighting, User, VendorCard
+from app.models import Requirement, Requisition, Sighting, User, VendorCard
 from app.models.vendors import VendorContact
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -37,7 +35,11 @@ def _make_form_request(fields: dict) -> MagicMock:
     async def _form():
         form_mock = MagicMock()
         form_mock.get = lambda key, default=None: fields.get(key, default)
-        form_mock.getlist = lambda key: fields.get(key, []) if isinstance(fields.get(key), list) else ([fields[key]] if key in fields else [])
+        form_mock.getlist = (
+            lambda key: fields.get(key, [])
+            if isinstance(fields.get(key), list)
+            else ([fields[key]] if key in fields else [])
+        )
         return form_mock
 
     mock_req.form = _form
@@ -69,9 +71,11 @@ async def test_batch_refresh_success(db_session: Session, test_user: User, test_
 
     req_item = _make_requirement(db_session, test_requisition)
 
-    mock_req = _make_form_request({
-        "requirement_ids": json.dumps([req_item.id]),
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": json.dumps([req_item.id]),
+        }
+    )
 
     with (
         patch("app.routers.sightings.broker") as mock_broker,
@@ -94,9 +98,11 @@ async def test_batch_refresh_empty_ids(db_session: Session, test_user: User):
     """Covers lines 687-746: empty requirement_ids returns success toast."""
     from app.routers.sightings import sightings_batch_refresh
 
-    mock_req = _make_form_request({
-        "requirement_ids": "[]",
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": "[]",
+        }
+    )
 
     with patch("app.routers.sightings.broker") as mock_broker:
         mock_broker.publish = AsyncMock()
@@ -113,9 +119,11 @@ async def test_batch_refresh_id_not_found(db_session: Session, test_user: User):
     """Covers line 711: requirement ID not found → failed += 1."""
     from app.routers.sightings import sightings_batch_refresh
 
-    mock_req = _make_form_request({
-        "requirement_ids": json.dumps([999998]),
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": json.dumps([999998]),
+        }
+    )
 
     with patch("app.routers.sightings.broker") as mock_broker:
         mock_broker.publish = AsyncMock()
@@ -135,9 +143,11 @@ async def test_batch_refresh_search_raises(db_session: Session, test_user: User,
 
     req_item = _make_requirement(db_session, test_requisition)
 
-    mock_req = _make_form_request({
-        "requirement_ids": json.dumps([req_item.id]),
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": json.dumps([req_item.id]),
+        }
+    )
 
     with (
         patch("app.routers.sightings.broker") as mock_broker,
@@ -172,9 +182,11 @@ async def test_batch_refresh_skipped_all_fresh(db_session: Session, test_user: U
     db_session.commit()
     db_session.refresh(req_item)
 
-    mock_req = _make_form_request({
-        "requirement_ids": json.dumps([req_item.id]),
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": json.dumps([req_item.id]),
+        }
+    )
 
     with patch("app.routers.sightings.broker") as mock_broker:
         mock_broker.publish = AsyncMock()
@@ -197,10 +209,12 @@ async def test_batch_assign_with_buyer(db_session: Session, test_user: User, tes
 
     req_item = _make_requirement(db_session, test_requisition)
 
-    mock_req = _make_form_request({
-        "requirement_ids": json.dumps([req_item.id]),
-        "buyer_id": str(test_user.id),
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": json.dumps([req_item.id]),
+            "buyer_id": str(test_user.id),
+        }
+    )
 
     resp = await sightings_batch_assign(
         request=mock_req,
@@ -218,10 +232,12 @@ async def test_batch_assign_no_buyer_id(db_session: Session, test_user: User, te
 
     req_item = _make_requirement(db_session, test_requisition)
 
-    mock_req = _make_form_request({
-        "requirement_ids": json.dumps([req_item.id]),
-        "buyer_id": "",
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": json.dumps([req_item.id]),
+            "buyer_id": "",
+        }
+    )
 
     resp = await sightings_batch_assign(
         request=mock_req,
@@ -241,10 +257,12 @@ async def test_batch_assign_unknown_buyer(db_session: Session, test_user: User, 
 
     # buyer_id 99999 doesn't exist in DB → buyer_name = "user 99999"
     # But we skip the actual db.commit since the FK would fail — instead test the name resolution
-    mock_req = _make_form_request({
-        "requirement_ids": "[]",  # empty so no commit needed
-        "buyer_id": "99999",
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": "[]",  # empty so no commit needed
+            "buyer_id": "99999",
+        }
+    )
 
     resp = await sightings_batch_assign(
         request=mock_req,
@@ -260,10 +278,12 @@ async def test_batch_assign_empty_ids(db_session: Session, test_user: User):
     """Covers line 765-766: empty ids → warning toast."""
     from app.routers.sightings import sightings_batch_assign
 
-    mock_req = _make_form_request({
-        "requirement_ids": "[]",
-        "buyer_id": "",
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": "[]",
+            "buyer_id": "",
+        }
+    )
 
     resp = await sightings_batch_assign(
         request=mock_req,
@@ -286,10 +306,12 @@ async def test_batch_status_update_open_to_sourcing(
 
     req_item = _make_requirement(db_session, test_requisition, status="open")
 
-    mock_req = _make_form_request({
-        "requirement_ids": json.dumps([req_item.id]),
-        "status": "sourcing",
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": json.dumps([req_item.id]),
+            "status": "sourcing",
+        }
+    )
 
     resp = await sightings_batch_status(
         request=mock_req,
@@ -305,10 +327,12 @@ async def test_batch_status_empty_ids_returns_warning(db_session: Session, test_
     """Covers lines 803-804: empty requirement_ids → warning."""
     from app.routers.sightings import sightings_batch_status
 
-    mock_req = _make_form_request({
-        "requirement_ids": "[]",
-        "status": "sourcing",
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": "[]",
+            "status": "sourcing",
+        }
+    )
 
     resp = await sightings_batch_status(
         request=mock_req,
@@ -320,16 +344,20 @@ async def test_batch_status_empty_ids_returns_warning(db_session: Session, test_
     assert "No requirements" in resp.body.decode()
 
 
-async def test_batch_status_invalid_status_raises_400(db_session: Session, test_user: User, test_requisition: Requisition):
+async def test_batch_status_invalid_status_raises_400(
+    db_session: Session, test_user: User, test_requisition: Requisition
+):
     """Covers lines 806-809: invalid status → 400."""
     from app.routers.sightings import sightings_batch_status
 
     req_item = _make_requirement(db_session, test_requisition)
 
-    mock_req = _make_form_request({
-        "requirement_ids": json.dumps([req_item.id]),
-        "status": "not_a_real_status",
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": json.dumps([req_item.id]),
+            "status": "not_a_real_status",
+        }
+    )
 
     with pytest.raises(HTTPException) as exc:
         await sightings_batch_status(
@@ -349,10 +377,12 @@ async def test_batch_status_skipped_invalid_transition(
     # won → open is not a valid forward transition
     req_item = _make_requirement(db_session, test_requisition, status="won")
 
-    mock_req = _make_form_request({
-        "requirement_ids": json.dumps([req_item.id]),
-        "status": "open",
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": json.dumps([req_item.id]),
+            "status": "open",
+        }
+    )
 
     resp = await sightings_batch_status(
         request=mock_req,
@@ -372,10 +402,12 @@ async def test_batch_notes_success(db_session: Session, test_user: User, test_re
 
     req_item = _make_requirement(db_session, test_requisition)
 
-    mock_req = _make_form_request({
-        "requirement_ids": json.dumps([req_item.id]),
-        "notes": "Following up with vendor",
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": json.dumps([req_item.id]),
+            "notes": "Following up with vendor",
+        }
+    )
 
     resp = await sightings_batch_notes(
         request=mock_req,
@@ -391,10 +423,12 @@ async def test_batch_notes_empty_ids(db_session: Session, test_user: User):
     """Covers lines 860-861: no requirements selected → warning."""
     from app.routers.sightings import sightings_batch_notes
 
-    mock_req = _make_form_request({
-        "requirement_ids": "[]",
-        "notes": "Some note",
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": "[]",
+            "notes": "Some note",
+        }
+    )
 
     resp = await sightings_batch_notes(
         request=mock_req,
@@ -412,10 +446,12 @@ async def test_batch_notes_empty_notes(db_session: Session, test_user: User, tes
 
     req_item = _make_requirement(db_session, test_requisition)
 
-    mock_req = _make_form_request({
-        "requirement_ids": json.dumps([req_item.id]),
-        "notes": "",
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": json.dumps([req_item.id]),
+            "notes": "",
+        }
+    )
 
     resp = await sightings_batch_notes(
         request=mock_req,
@@ -430,9 +466,7 @@ async def test_batch_notes_empty_notes(db_session: Session, test_user: User, tes
 # ── mark-unavailable (lines 887-919) ──────────────────────────────────────────
 
 
-async def test_mark_unavailable_success(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_mark_unavailable_success(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers lines 887-919: mark vendor sightings as unavailable."""
     from app.routers.sightings import sightings_mark_unavailable
 
@@ -452,9 +486,11 @@ async def test_mark_unavailable_success(
     db_session.add(sighting)
     db_session.commit()
 
-    mock_req = _make_form_request({
-        "vendor_name": "Arrow Electronics",
-    })
+    mock_req = _make_form_request(
+        {
+            "vendor_name": "Arrow Electronics",
+        }
+    )
 
     with (
         patch("app.routers.sightings.broker") as mock_broker,
@@ -473,15 +509,15 @@ async def test_mark_unavailable_success(
     mock_detail.assert_called_once()
 
 
-async def test_mark_unavailable_no_vendor_name_raises(
-    db_session: Session, test_user: User
-):
+async def test_mark_unavailable_no_vendor_name_raises(db_session: Session, test_user: User):
     """Covers lines 897-898: missing vendor_name → 400."""
     from app.routers.sightings import sightings_mark_unavailable
 
-    mock_req = _make_form_request({
-        "vendor_name": "",
-    })
+    mock_req = _make_form_request(
+        {
+            "vendor_name": "",
+        }
+    )
 
     with pytest.raises(HTTPException) as exc:
         await sightings_mark_unavailable(
@@ -496,17 +532,17 @@ async def test_mark_unavailable_no_vendor_name_raises(
 # ── assign-buyer (lines 922-947) ─────────────────────────────────────────────
 
 
-async def test_assign_buyer_success(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_assign_buyer_success(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers lines 922-947: assign buyer to requirement."""
     from app.routers.sightings import sightings_assign_buyer
 
     req_item = _make_requirement(db_session, test_requisition)
 
-    mock_req = _make_form_request({
-        "assigned_buyer_id": str(test_user.id),
-    })
+    mock_req = _make_form_request(
+        {
+            "assigned_buyer_id": str(test_user.id),
+        }
+    )
 
     with (
         patch("app.routers.sightings.broker") as mock_broker,
@@ -527,15 +563,15 @@ async def test_assign_buyer_success(
     assert req_item.assigned_buyer_id == test_user.id
 
 
-async def test_assign_buyer_not_found_raises(
-    db_session: Session, test_user: User
-):
+async def test_assign_buyer_not_found_raises(db_session: Session, test_user: User):
     """Covers lines 935-936: requirement not found → 404."""
     from app.routers.sightings import sightings_assign_buyer
 
-    mock_req = _make_form_request({
-        "assigned_buyer_id": str(test_user.id),
-    })
+    mock_req = _make_form_request(
+        {
+            "assigned_buyer_id": str(test_user.id),
+        }
+    )
 
     with pytest.raises(HTTPException) as exc:
         await sightings_assign_buyer(
@@ -547,17 +583,17 @@ async def test_assign_buyer_not_found_raises(
     assert exc.value.status_code == 404
 
 
-async def test_assign_buyer_empty_id(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_assign_buyer_empty_id(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers line 932: empty buyer_id → None."""
     from app.routers.sightings import sightings_assign_buyer
 
     req_item = _make_requirement(db_session, test_requisition)
 
-    mock_req = _make_form_request({
-        "assigned_buyer_id": "",
-    })
+    mock_req = _make_form_request(
+        {
+            "assigned_buyer_id": "",
+        }
+    )
 
     with (
         patch("app.routers.sightings.broker") as mock_broker,
@@ -580,17 +616,17 @@ async def test_assign_buyer_empty_id(
 # ── advance-status (lines 950-992) ───────────────────────────────────────────
 
 
-async def test_advance_status_valid_transition(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_advance_status_valid_transition(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers lines 950-992: valid status transition."""
     from app.routers.sightings import sightings_advance_status
 
     req_item = _make_requirement(db_session, test_requisition, status="open")
 
-    mock_req = _make_form_request({
-        "status": "sourcing",
-    })
+    mock_req = _make_form_request(
+        {
+            "status": "sourcing",
+        }
+    )
 
     with (
         patch("app.routers.sightings.broker") as mock_broker,
@@ -611,15 +647,15 @@ async def test_advance_status_valid_transition(
     assert req_item.sourcing_status == "sourcing"
 
 
-async def test_advance_status_empty_status_raises(
-    db_session: Session, test_user: User
-):
+async def test_advance_status_empty_status_raises(db_session: Session, test_user: User):
     """Covers lines 960-961: missing status → 400."""
     from app.routers.sightings import sightings_advance_status
 
-    mock_req = _make_form_request({
-        "status": "",
-    })
+    mock_req = _make_form_request(
+        {
+            "status": "",
+        }
+    )
 
     with pytest.raises(HTTPException) as exc:
         await sightings_advance_status(
@@ -631,15 +667,15 @@ async def test_advance_status_empty_status_raises(
     assert exc.value.status_code == 400
 
 
-async def test_advance_status_not_found_raises(
-    db_session: Session, test_user: User
-):
+async def test_advance_status_not_found_raises(db_session: Session, test_user: User):
     """Covers lines 963-965: requirement not found → 404."""
     from app.routers.sightings import sightings_advance_status
 
-    mock_req = _make_form_request({
-        "status": "sourcing",
-    })
+    mock_req = _make_form_request(
+        {
+            "status": "sourcing",
+        }
+    )
 
     with pytest.raises(HTTPException) as exc:
         await sightings_advance_status(
@@ -655,8 +691,11 @@ async def test_advance_status_not_found_raises(
 
 
 async def test_preview_inquiry_success(
-    db_session: Session, test_user: User, test_requisition: Requisition,
-    test_vendor_card: VendorCard, test_vendor_contact: VendorContact
+    db_session: Session,
+    test_user: User,
+    test_requisition: Requisition,
+    test_vendor_card: VendorCard,
+    test_vendor_contact: VendorContact,
 ):
     """Covers lines 1132-1181: preview RFQ emails without sending."""
     from app.routers.sightings import sightings_preview_inquiry
@@ -669,13 +708,14 @@ async def test_preview_inquiry_success(
     async def _form():
         form_mock = MagicMock()
         form_mock.getlist = lambda key: (
-            [str(req_item.id)] if key == "requirement_ids"
-            else [test_vendor_card.display_name] if key == "vendor_names"
+            [str(req_item.id)]
+            if key == "requirement_ids"
+            else [test_vendor_card.display_name]
+            if key == "vendor_names"
             else []
         )
         form_mock.get = lambda key, default=None: (
-            "Please quote the following parts" if key == "email_body"
-            else default
+            "Please quote the following parts" if key == "email_body" else default
         )
         return form_mock
 
@@ -692,9 +732,7 @@ async def test_preview_inquiry_success(
     mock_templates.TemplateResponse.assert_called_once()
 
 
-async def test_preview_inquiry_missing_ids_raises(
-    db_session: Session, test_user: User
-):
+async def test_preview_inquiry_missing_ids_raises(db_session: Session, test_user: User):
     """Covers lines 1129-1130: missing requirement_ids or vendor_names → 400."""
     from app.routers.sightings import sightings_preview_inquiry
 
@@ -722,8 +760,11 @@ async def test_preview_inquiry_missing_ids_raises(
 
 
 async def test_send_inquiry_success(
-    db_session: Session, test_user: User, test_requisition: Requisition,
-    test_vendor_card: VendorCard, test_vendor_contact: VendorContact
+    db_session: Session,
+    test_user: User,
+    test_requisition: Requisition,
+    test_vendor_card: VendorCard,
+    test_vendor_contact: VendorContact,
 ):
     """Covers lines 1184-1293: send batch RFQ emails."""
     from app.routers.sightings import sightings_send_inquiry
@@ -736,14 +777,13 @@ async def test_send_inquiry_success(
     async def _form():
         form_mock = MagicMock()
         form_mock.getlist = lambda key: (
-            [str(req_item.id)] if key == "requirement_ids"
-            else [test_vendor_card.display_name] if key == "vendor_names"
+            [str(req_item.id)]
+            if key == "requirement_ids"
+            else [test_vendor_card.display_name]
+            if key == "vendor_names"
             else []
         )
-        form_mock.get = lambda key, default=None: (
-            "Please quote: LM317T x100" if key == "email_body"
-            else default
-        )
+        form_mock.get = lambda key, default=None: ("Please quote: LM317T x100" if key == "email_body" else default)
         return form_mock
 
     mock_req.form = _form
@@ -768,9 +808,7 @@ async def test_send_inquiry_success(
     assert "RFQ sent" in resp.body.decode() or "vendor" in resp.body.decode().lower()
 
 
-async def test_send_inquiry_missing_fields_raises(
-    db_session: Session, test_user: User
-):
+async def test_send_inquiry_missing_fields_raises(db_session: Session, test_user: User):
     """Covers lines 1200-1204: missing requirement_ids/vendor_names/email_body → 400."""
     from app.routers.sightings import sightings_send_inquiry
 
@@ -796,8 +834,7 @@ async def test_send_inquiry_missing_fields_raises(
 
 
 async def test_send_inquiry_rfq_exception(
-    db_session: Session, test_user: User, test_requisition: Requisition,
-    test_vendor_card: VendorCard
+    db_session: Session, test_user: User, test_requisition: Requisition, test_vendor_card: VendorCard
 ):
     """Covers lines 1271-1273: send_batch_rfq raises → failed_vendors set."""
     from app.routers.sightings import sightings_send_inquiry
@@ -810,14 +847,9 @@ async def test_send_inquiry_rfq_exception(
     async def _form():
         form_mock = MagicMock()
         form_mock.getlist = lambda key: (
-            [str(req_item.id)] if key == "requirement_ids"
-            else ["Arrow Electronics"] if key == "vendor_names"
-            else []
+            [str(req_item.id)] if key == "requirement_ids" else ["Arrow Electronics"] if key == "vendor_names" else []
         )
-        form_mock.get = lambda key, default=None: (
-            "RFQ body text here" if key == "email_body"
-            else default
-        )
+        form_mock.get = lambda key, default=None: ("RFQ body text here" if key == "email_body" else default)
         return form_mock
 
     mock_req.form = _form
@@ -843,9 +875,7 @@ async def test_send_inquiry_rfq_exception(
 # ── vendor-modal (lines 1063-1110) ───────────────────────────────────────────
 
 
-async def test_vendor_modal_with_requirement_ids(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_vendor_modal_with_requirement_ids(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers lines 1063-1110: vendor selection modal with requirement IDs."""
     from app.routers.sightings import sightings_vendor_modal
 
@@ -869,9 +899,7 @@ async def test_vendor_modal_with_requirement_ids(
     assert ctx.get("requirement_ids") == [req_item.id]
 
 
-async def test_vendor_modal_empty_requirement_ids(
-    db_session: Session, test_user: User
-):
+async def test_vendor_modal_empty_requirement_ids(db_session: Session, test_user: User):
     """Covers lines 1071-1110: empty requirement_ids → empty lists."""
     from app.routers.sightings import sightings_vendor_modal
 
@@ -911,9 +939,7 @@ async def test_batch_refresh_invalid_json_raises_400(db_session: Session, test_u
     assert "Invalid" in exc.value.detail
 
 
-async def test_batch_refresh_non_list_json_resets_to_empty(
-    db_session: Session, test_user: User
-):
+async def test_batch_refresh_non_list_json_resets_to_empty(db_session: Session, test_user: User):
     """Covers line 691: requirement_ids parses to non-list (e.g. dict) → reset to []."""
     from app.routers.sightings import sightings_batch_refresh
 
@@ -932,9 +958,7 @@ async def test_batch_refresh_non_list_json_resets_to_empty(
     assert resp.status_code == 200
 
 
-async def test_batch_refresh_exceeds_max_batch_size_raises_400(
-    db_session: Session, test_user: User
-):
+async def test_batch_refresh_exceeds_max_batch_size_raises_400(db_session: Session, test_user: User):
     """Covers line 695-696: len(requirement_ids) > MAX_BATCH_SIZE → 400."""
     from app.routers.sightings import sightings_batch_refresh
 
@@ -954,17 +978,17 @@ async def test_batch_refresh_exceeds_max_batch_size_raises_400(
     assert "Maximum" in exc.value.detail
 
 
-async def test_batch_assign_exceeds_max_batch_size_raises_400(
-    db_session: Session, test_user: User
-):
+async def test_batch_assign_exceeds_max_batch_size_raises_400(db_session: Session, test_user: User):
     """Covers lines 762-763: len(requirement_ids) > MAX_BATCH_SIZE → 400."""
     from app.routers.sightings import sightings_batch_assign
 
     ids = list(range(1, 52))
-    mock_req = _make_form_request({
-        "requirement_ids": json.dumps(ids),
-        "buyer_id": str(test_user.id),
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": json.dumps(ids),
+            "buyer_id": str(test_user.id),
+        }
+    )
 
     with pytest.raises(HTTPException) as exc:
         await sightings_batch_assign(
@@ -976,17 +1000,17 @@ async def test_batch_assign_exceeds_max_batch_size_raises_400(
     assert "Maximum" in exc.value.detail
 
 
-async def test_batch_status_exceeds_max_batch_size_raises_400(
-    db_session: Session, test_user: User
-):
+async def test_batch_status_exceeds_max_batch_size_raises_400(db_session: Session, test_user: User):
     """Covers lines 800-801: len(requirement_ids) > MAX_BATCH_SIZE → 400."""
     from app.routers.sightings import sightings_batch_status
 
     ids = list(range(1, 52))
-    mock_req = _make_form_request({
-        "requirement_ids": json.dumps(ids),
-        "status": "sourcing",
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": json.dumps(ids),
+            "status": "sourcing",
+        }
+    )
 
     with pytest.raises(HTTPException) as exc:
         await sightings_batch_status(
@@ -998,17 +1022,17 @@ async def test_batch_status_exceeds_max_batch_size_raises_400(
     assert "Maximum" in exc.value.detail
 
 
-async def test_batch_notes_exceeds_max_batch_size_raises_400(
-    db_session: Session, test_user: User
-):
+async def test_batch_notes_exceeds_max_batch_size_raises_400(db_session: Session, test_user: User):
     """Covers lines 857-858: len(requirement_ids) > MAX_BATCH_SIZE → 400."""
     from app.routers.sightings import sightings_batch_notes
 
     ids = list(range(1, 52))
-    mock_req = _make_form_request({
-        "requirement_ids": json.dumps(ids),
-        "notes": "Some note",
-    })
+    mock_req = _make_form_request(
+        {
+            "requirement_ids": json.dumps(ids),
+            "notes": "Some note",
+        }
+    )
 
     with pytest.raises(HTTPException) as exc:
         await sightings_batch_notes(

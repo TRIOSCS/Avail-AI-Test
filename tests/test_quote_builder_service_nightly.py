@@ -1,4 +1,5 @@
-"""tests/test_quote_builder_service_nightly.py — Coverage for uncovered lines in quote_builder_service.
+"""tests/test_quote_builder_service_nightly.py — Coverage for uncovered lines in
+quote_builder_service.
 
 Targets lines: 27, 38, 90-107, 221, 259, 271-272, 321-329, 336-337
 Called by: pytest
@@ -112,7 +113,8 @@ class TestGetBuilderData:
         assert result[0]["offers"] == []
 
     def test_pricing_history_exception_is_swallowed(self, db_session: Session, req_with_item):
-        """Lines 90-107 — _preload_last_quoted_prices raises, pricing_history stays None."""
+        """Lines 90-107 — _preload_last_quoted_prices raises, pricing_history stays
+        None."""
         req, item = req_with_item
 
         with patch(
@@ -133,7 +135,8 @@ class TestSaveQuoteFromBuilder:
     def test_quote_id_with_missing_old_quote_uses_next_number(
         self, db_session: Session, req_with_item, test_user: User
     ):
-        """Line 259 — payload.quote_id points to non-existent quote → next_quote_number."""
+        """Line 259 — payload.quote_id points to non-existent quote →
+        next_quote_number."""
         req, item = req_with_item
 
         # Patch at the source module where it's imported

@@ -101,7 +101,6 @@ def test_search_requirements_req_not_found(client):
 
 
 def test_search_requirements_with_exception(client, test_requisition, db_session):
-
     r = Requirement(
         requisition_id=test_requisition.id,
         primary_mpn="LM317T",

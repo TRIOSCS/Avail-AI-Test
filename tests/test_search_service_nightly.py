@@ -191,7 +191,8 @@ class TestIncrementalDedupZeroQty:
 
 class TestIncrementalDedupBetterScore:
     def test_better_score_replaces_existing(self):
-        """When incoming item has higher score, it becomes the new best (lines 679-685)."""
+        """When incoming item has higher score, it becomes the new best (lines
+        679-685)."""
         existing = [
             {
                 "vendor_name": "Arrow",
@@ -260,7 +261,8 @@ class TestIncrementalDedupBetterScore:
 
 class TestFetchFreshAiLiveWebDisabled:
     async def test_ai_live_web_disabled_source_sets_disabled_stat(self, db_session: Session):
-        """When ai_live_web is in disabled_sources, stat is set to 'disabled' (line 835)."""
+        """When ai_live_web is in disabled_sources, stat is set to 'disabled' (line
+        835)."""
         # Create an ApiSource row with status=disabled for ai_live_web
         src = ApiSource(
             name="ai_live_web",
@@ -455,9 +457,7 @@ class TestSaveSightingsSourcingLeadsException:
         with patch("app.search_service.sync_leads_for_sightings", side_effect=RuntimeError("leads failure")):
             with patch("app.search_service._propagate_vendor_emails"):
                 with patch("app.search_service.record_price_snapshot"):
-                    with patch(
-                        "app.services.sighting_aggregation.rebuild_vendor_summaries_from_sightings"
-                    ):
+                    with patch("app.services.sighting_aggregation.rebuild_vendor_summaries_from_sightings"):
                         # Should not raise
                         result = _save_sightings([], req, db_session, set())
         assert isinstance(result, list)

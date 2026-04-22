@@ -1,4 +1,5 @@
-"""test_error_reports_async_direct.py — Direct async invocation of submit_trouble_ticket.
+"""test_error_reports_async_direct.py — Direct async invocation of
+submit_trouble_ticket.
 
 Covers lines 187-255 which are inside the async view function body and cannot be
 traced through TestClient (which uses greenlet/thread concurrency bridge).
@@ -16,16 +17,11 @@ os.environ["TESTING"] = "1"
 
 import base64
 import json
-from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi import BackgroundTasks
-from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
-from starlette.datastructures import Headers
 from starlette.requests import Request
-from starlette.testclient import TestClient as StarletteTestClient
 
 from app.models import User
 from app.models.trouble_ticket import TroubleTicket
@@ -78,11 +74,13 @@ async def test_submit_json_with_ua_and_viewport(db_session: Session, test_user: 
     """Covers lines 190-192, 217-218: user_agent + viewport → browser_info."""
     mock_req = _make_mock_request(
         "application/json",
-        json.dumps({
-            "description": "Chrome bug",
-            "user_agent": "Mozilla/5.0 Chrome/120",
-            "viewport": "1920x1080",
-        }).encode(),
+        json.dumps(
+            {
+                "description": "Chrome bug",
+                "user_agent": "Mozilla/5.0 Chrome/120",
+                "viewport": "1920x1080",
+            }
+        ).encode(),
     )
     bg_tasks = BackgroundTasks()
 
@@ -94,9 +92,7 @@ async def test_submit_json_with_ua_and_viewport(db_session: Session, test_user: 
     )
     assert resp.status_code == 200
 
-    ticket = db_session.query(TroubleTicket).filter(
-        TroubleTicket.description == "Chrome bug"
-    ).first()
+    ticket = db_session.query(TroubleTicket).filter(TroubleTicket.description == "Chrome bug").first()
     assert ticket is not None
     assert ticket.browser_info is not None
     info = json.loads(ticket.browser_info)
@@ -109,10 +105,12 @@ async def test_submit_json_with_network_log_string(db_session: Session, test_use
     network_log = json.dumps([{"url": "/api/search", "status": 500}])
     mock_req = _make_mock_request(
         "application/json",
-        json.dumps({
-            "description": "Network error test",
-            "network_log": network_log,
-        }).encode(),
+        json.dumps(
+            {
+                "description": "Network error test",
+                "network_log": network_log,
+            }
+        ).encode(),
     )
     bg_tasks = BackgroundTasks()
 
@@ -129,10 +127,12 @@ async def test_submit_json_with_invalid_network_log(db_session: Session, test_us
     """Covers line 225: invalid network_log JSON → network_errors = None."""
     mock_req = _make_mock_request(
         "application/json",
-        json.dumps({
-            "description": "Bad network log",
-            "network_log": "{{{not json}}}",
-        }).encode(),
+        json.dumps(
+            {
+                "description": "Bad network log",
+                "network_log": "{{{not json}}}",
+            }
+        ).encode(),
     )
     bg_tasks = BackgroundTasks()
 
@@ -149,10 +149,12 @@ async def test_submit_json_with_dict_network_log(db_session: Session, test_user:
     """Covers line 223 (isinstance branch): network_log as list → stored directly."""
     mock_req = _make_mock_request(
         "application/json",
-        json.dumps({
-            "description": "List network log",
-            "network_log": [{"url": "/api/test", "status": 200}],
-        }).encode(),
+        json.dumps(
+            {
+                "description": "List network log",
+                "network_log": [{"url": "/api/test", "status": 200}],
+            }
+        ).encode(),
     )
     bg_tasks = BackgroundTasks()
 
@@ -203,9 +205,7 @@ async def test_submit_json_too_long_description_returns_422(db_session: Session,
     assert "too long" in resp.body.decode().lower() or "max" in resp.body.decode().lower()
 
 
-async def test_submit_json_with_screenshot_saves_path(
-    db_session: Session, test_user: User, tmp_path
-):
+async def test_submit_json_with_screenshot_saves_path(db_session: Session, test_user: User, tmp_path):
     """Covers lines 240-244: screenshot_b64 → saved to disk → path stored."""
     import app.routers.error_reports as er_mod
 
@@ -231,18 +231,14 @@ async def test_submit_json_with_screenshot_saves_path(
         )
         assert resp.status_code == 200
 
-        ticket = db_session.query(TroubleTicket).filter(
-            TroubleTicket.description == "Screenshot test"
-        ).first()
+        ticket = db_session.query(TroubleTicket).filter(TroubleTicket.description == "Screenshot test").first()
         assert ticket is not None
         assert ticket.screenshot_path is not None
     finally:
         er_mod.UPLOAD_DIR = original_dir
 
 
-async def test_submit_json_screenshot_bad_b64_no_path(
-    db_session: Session, test_user: User, tmp_path
-):
+async def test_submit_json_screenshot_bad_b64_no_path(db_session: Session, test_user: User, tmp_path):
     """Covers lines 240-244 (path=None branch): bad b64 → no path stored."""
     import app.routers.error_reports as er_mod
 
@@ -382,10 +378,12 @@ async def test_submit_json_only_ua_sets_browser_info(db_session: Session, test_u
     """Covers line 217: ua without viewport still creates browser_info."""
     mock_req = _make_mock_request(
         "application/json",
-        json.dumps({
-            "description": "UA only",
-            "user_agent": "Firefox/122",
-        }).encode(),
+        json.dumps(
+            {
+                "description": "UA only",
+                "user_agent": "Firefox/122",
+            }
+        ).encode(),
     )
     bg_tasks = BackgroundTasks()
 
@@ -397,9 +395,7 @@ async def test_submit_json_only_ua_sets_browser_info(db_session: Session, test_u
     )
     assert resp.status_code == 200
 
-    ticket = db_session.query(TroubleTicket).filter(
-        TroubleTicket.description == "UA only"
-    ).first()
+    ticket = db_session.query(TroubleTicket).filter(TroubleTicket.description == "UA only").first()
     assert ticket is not None
     assert ticket.browser_info is not None
 
@@ -408,10 +404,12 @@ async def test_submit_json_with_error_log(db_session: Session, test_user: User):
     """Covers line 192: error_log field is read from JSON body."""
     mock_req = _make_mock_request(
         "application/json",
-        json.dumps({
-            "description": "JS error test",
-            "error_log": "[{\"msg\":\"TypeError\",\"ts\":\"2026-01-01\"}]",
-        }).encode(),
+        json.dumps(
+            {
+                "description": "JS error test",
+                "error_log": '[{"msg":"TypeError","ts":"2026-01-01"}]',
+            }
+        ).encode(),
     )
     bg_tasks = BackgroundTasks()
 
@@ -423,8 +421,6 @@ async def test_submit_json_with_error_log(db_session: Session, test_user: User):
     )
     assert resp.status_code == 200
 
-    ticket = db_session.query(TroubleTicket).filter(
-        TroubleTicket.description == "JS error test"
-    ).first()
+    ticket = db_session.query(TroubleTicket).filter(TroubleTicket.description == "JS error test").first()
     assert ticket is not None
     assert ticket.console_errors is not None

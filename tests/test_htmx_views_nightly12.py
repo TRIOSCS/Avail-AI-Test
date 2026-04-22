@@ -1,4 +1,5 @@
-"""tests/test_htmx_views_nightly12.py — Coverage for parts tabs, tasks, archive, and buy plan routes.
+"""tests/test_htmx_views_nightly12.py — Coverage for parts tabs, tasks, archive, and buy
+plan routes.
 
 Targets: parts list (with filters), parts tabs (offers/sourcing/req-details/activity/comms/notes),
 save-notes, create-task, mark-task-done/reopen, archive/unarchive single + bulk,
@@ -13,24 +14,19 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import (
     BuyPlan,
-    BuyPlanLine,
-    Offer,
     Quote,
     Requirement,
     Requisition,
     User,
-    VendorCard,
 )
 from app.models.task import RequisitionTask
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -102,9 +98,7 @@ class TestPartsListPartial:
         resp = client.get("/v2/partials/parts")
         assert resp.status_code == 200
 
-    def test_parts_list_with_search(
-        self, client: TestClient, test_requisition: Requisition
-    ) -> None:
+    def test_parts_list_with_search(self, client: TestClient, test_requisition: Requisition) -> None:
         resp = client.get("/v2/partials/parts?q=LM317T")
         assert resp.status_code == 200
 

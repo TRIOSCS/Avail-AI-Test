@@ -1,4 +1,5 @@
-"""tests/test_htmx_views_nightly13.py — Coverage for vendor CRUD, follow-ups, response review.
+"""tests/test_htmx_views_nightly13.py — Coverage for vendor CRUD, follow-ups, response
+review.
 
 Targets: vendor edit form/save, toggle-blacklist, contact-timeline, contact-nudges,
 vendor reviews (get/add/delete), prospect save/promote/delete, follow-ups list/send,
@@ -15,16 +16,12 @@ os.environ["TESTING"] = "1"
 
 import uuid
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import (
-    Company,
-    CustomerSite,
-    Offer,
     Requirement,
     Requisition,
     User,
@@ -34,7 +31,6 @@ from app.models import (
 from app.models.enrichment import ProspectContact
 from app.models.offers import Contact as RfqContact
 from app.models.vendors import VendorReview
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -122,9 +118,7 @@ class TestEditVendor:
         db_session.refresh(test_vendor_card)
         assert test_vendor_card.display_name == "Updated Vendor Name"
 
-    def test_edit_vendor_website(
-        self, client: TestClient, db_session: Session, test_vendor_card: VendorCard
-    ) -> None:
+    def test_edit_vendor_website(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard) -> None:
         resp = client.post(
             f"/v2/partials/vendors/{test_vendor_card.id}/edit",
             data={"website": "https://updated.com"},
@@ -133,9 +127,7 @@ class TestEditVendor:
         db_session.refresh(test_vendor_card)
         assert test_vendor_card.website == "https://updated.com"
 
-    def test_edit_vendor_emails(
-        self, client: TestClient, db_session: Session, test_vendor_card: VendorCard
-    ) -> None:
+    def test_edit_vendor_emails(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard) -> None:
         resp = client.post(
             f"/v2/partials/vendors/{test_vendor_card.id}/edit",
             data={"emails": "a@vendor.com, b@vendor.com"},
@@ -150,9 +142,7 @@ class TestEditVendor:
 
 
 class TestToggleBlacklist:
-    def test_toggle_blacklist_on(
-        self, client: TestClient, db_session: Session, test_vendor_card: VendorCard
-    ) -> None:
+    def test_toggle_blacklist_on(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard) -> None:
         test_vendor_card.is_blacklisted = False
         db_session.commit()
         resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/toggle-blacklist")
@@ -160,9 +150,7 @@ class TestToggleBlacklist:
         db_session.refresh(test_vendor_card)
         assert test_vendor_card.is_blacklisted is True
 
-    def test_toggle_blacklist_off(
-        self, client: TestClient, db_session: Session, test_vendor_card: VendorCard
-    ) -> None:
+    def test_toggle_blacklist_off(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard) -> None:
         test_vendor_card.is_blacklisted = True
         db_session.commit()
         resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/toggle-blacklist")
@@ -183,22 +171,16 @@ class TestContactTimeline:
         test_vendor_card: VendorCard,
         test_vendor_contact: VendorContact,
     ) -> None:
-        resp = client.get(
-            f"/v2/partials/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}/timeline"
-        )
+        resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/contacts/{test_vendor_contact.id}/timeline")
         assert resp.status_code == 200
 
-    def test_contact_timeline_not_found(
-        self, client: TestClient, test_vendor_card: VendorCard
-    ) -> None:
+    def test_contact_timeline_not_found(self, client: TestClient, test_vendor_card: VendorCard) -> None:
         resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/contacts/99999/timeline")
         assert resp.status_code == 404
 
 
 class TestContactNudges:
-    def test_contact_nudges_returns_200(
-        self, client: TestClient, test_vendor_card: VendorCard
-    ) -> None:
+    def test_contact_nudges_returns_200(self, client: TestClient, test_vendor_card: VendorCard) -> None:
         resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/contact-nudges")
         assert resp.status_code == 200
 
@@ -219,9 +201,7 @@ class TestVendorReviews:
         resp = client.get(f"/v2/partials/vendors/{test_vendor_card.id}/reviews")
         assert resp.status_code == 200
 
-    def test_add_review_success(
-        self, client: TestClient, db_session: Session, test_vendor_card: VendorCard
-    ) -> None:
+    def test_add_review_success(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard) -> None:
         resp = client.post(
             f"/v2/partials/vendors/{test_vendor_card.id}/reviews",
             data={"rating": "5", "comment": "Excellent supplier"},
@@ -281,34 +261,22 @@ class TestVendorReviews:
 
 
 class TestProspectSave:
-    def test_save_prospect(
-        self, client: TestClient, db_session: Session, test_vendor_card: VendorCard
-    ) -> None:
+    def test_save_prospect(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard) -> None:
         p = _prospect(db_session, test_vendor_card)
-        resp = client.post(
-            f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/{p.id}/save"
-        )
+        resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/{p.id}/save")
         assert resp.status_code == 200
         db_session.refresh(p)
         assert p.is_saved is True
 
-    def test_save_prospect_not_found(
-        self, client: TestClient, test_vendor_card: VendorCard
-    ) -> None:
-        resp = client.post(
-            f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/99999/save"
-        )
+    def test_save_prospect_not_found(self, client: TestClient, test_vendor_card: VendorCard) -> None:
+        resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/99999/save")
         assert resp.status_code == 404
 
 
 class TestProspectPromote:
-    def test_promote_new_contact(
-        self, client: TestClient, db_session: Session, test_vendor_card: VendorCard
-    ) -> None:
+    def test_promote_new_contact(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard) -> None:
         p = _prospect(db_session, test_vendor_card, email="promote@vendor.com")
-        resp = client.post(
-            f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/{p.id}/promote"
-        )
+        resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/{p.id}/promote")
         assert resp.status_code == 200
         # VendorContact should be created
         vc = db_session.query(VendorContact).filter_by(email="promote@vendor.com").first()
@@ -332,39 +300,25 @@ class TestProspectPromote:
             email="existing@vendor.com",
             full_name="Updated Name",
         )
-        resp = client.post(
-            f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/{p.id}/promote"
-        )
+        resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/{p.id}/promote")
         assert resp.status_code == 200
 
-    def test_promote_not_found(
-        self, client: TestClient, test_vendor_card: VendorCard
-    ) -> None:
-        resp = client.post(
-            f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/99999/promote"
-        )
+    def test_promote_not_found(self, client: TestClient, test_vendor_card: VendorCard) -> None:
+        resp = client.post(f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/99999/promote")
         assert resp.status_code == 404
 
 
 class TestProspectDelete:
-    def test_delete_prospect(
-        self, client: TestClient, db_session: Session, test_vendor_card: VendorCard
-    ) -> None:
+    def test_delete_prospect(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard) -> None:
         p = _prospect(db_session, test_vendor_card)
         pid = p.id
-        resp = client.delete(
-            f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/{p.id}"
-        )
+        resp = client.delete(f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/{p.id}")
         assert resp.status_code == 200
         assert resp.text == ""
         assert db_session.get(ProspectContact, pid) is None
 
-    def test_delete_prospect_not_found(
-        self, client: TestClient, test_vendor_card: VendorCard
-    ) -> None:
-        resp = client.delete(
-            f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/99999"
-        )
+    def test_delete_prospect_not_found(self, client: TestClient, test_vendor_card: VendorCard) -> None:
+        resp = client.delete(f"/v2/partials/vendors/{test_vendor_card.id}/ai/prospect/99999")
         assert resp.status_code == 404
 
 
@@ -473,9 +427,7 @@ class TestResponseReview:
         )
         assert resp.status_code == 400
 
-    def test_review_response_not_found(
-        self, client: TestClient, test_requisition: Requisition
-    ) -> None:
+    def test_review_response_not_found(self, client: TestClient, test_requisition: Requisition) -> None:
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/responses/99999/review",
             data={"status": "reviewed"},
@@ -484,9 +436,7 @@ class TestResponseReview:
 
 
 class TestPollInbox:
-    def test_poll_inbox_returns_200(
-        self, client: TestClient, test_requisition: Requisition
-    ) -> None:
+    def test_poll_inbox_returns_200(self, client: TestClient, test_requisition: Requisition) -> None:
         resp = client.post(f"/v2/partials/requisitions/{test_requisition.id}/poll-inbox")
         assert resp.status_code == 200
 
@@ -505,25 +455,15 @@ class TestDeleteRequirement:
         db_session: Session,
         test_requisition: Requisition,
     ) -> None:
-        req_item = (
-            db_session.query(Requirement)
-            .filter_by(requisition_id=test_requisition.id)
-            .first()
-        )
+        req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
         assert req_item is not None
         rid = req_item.id
-        resp = client.delete(
-            f"/v2/partials/requisitions/{test_requisition.id}/requirements/{rid}"
-        )
+        resp = client.delete(f"/v2/partials/requisitions/{test_requisition.id}/requirements/{rid}")
         assert resp.status_code == 200
         assert db_session.get(Requirement, rid) is None
 
-    def test_delete_requirement_not_found(
-        self, client: TestClient, test_requisition: Requisition
-    ) -> None:
-        resp = client.delete(
-            f"/v2/partials/requisitions/{test_requisition.id}/requirements/99999"
-        )
+    def test_delete_requirement_not_found(self, client: TestClient, test_requisition: Requisition) -> None:
+        resp = client.delete(f"/v2/partials/requisitions/{test_requisition.id}/requirements/99999")
         assert resp.status_code == 404
 
     def test_delete_requirement_wrong_req(
@@ -553,9 +493,7 @@ class TestDeleteRequirement:
         )
         db_session.add(item)
         db_session.commit()
-        resp = client.delete(
-            f"/v2/partials/requisitions/{req1.id}/requirements/{item.id}"
-        )
+        resp = client.delete(f"/v2/partials/requisitions/{req1.id}/requirements/{item.id}")
         assert resp.status_code == 404
 
 
@@ -563,15 +501,11 @@ class TestDeleteRequirement:
 
 
 class TestAddToRequisition:
-    def test_add_items_success(
-        self, client: TestClient, test_requisition: Requisition
-    ) -> None:
+    def test_add_items_success(self, client: TestClient, test_requisition: Requisition) -> None:
         payload = {
             "requisition_id": test_requisition.id,
             "mpn": "BC547",
-            "items": [
-                {"vendor_name": "Arrow", "qty_available": 1000, "unit_price": 0.10}
-            ],
+            "items": [{"vendor_name": "Arrow", "qty_available": 1000, "unit_price": 0.10}],
         }
         resp = client.post(
             "/v2/partials/search/add-to-requisition",
@@ -618,9 +552,7 @@ class TestAddToRequisition:
         assert resp.status_code == 200
         # New requirement should exist
         new_req = (
-            db_session.query(Requirement)
-            .filter_by(requisition_id=test_requisition.id, primary_mpn="NEWMPN999")
-            .first()
+            db_session.query(Requirement).filter_by(requisition_id=test_requisition.id, primary_mpn="NEWMPN999").first()
         )
         assert new_req is not None
 
@@ -649,9 +581,7 @@ class TestCompaniesRedirect:
 
 
 class TestAiCleanupEmail:
-    def test_cleanup_empty_body(
-        self, client: TestClient, test_requisition: Requisition
-    ) -> None:
+    def test_cleanup_empty_body(self, client: TestClient, test_requisition: Requisition) -> None:
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/ai-cleanup-email",
             data={"body": ""},
@@ -659,9 +589,7 @@ class TestAiCleanupEmail:
         assert resp.status_code == 200
         assert "Write your email first" in resp.text
 
-    def test_cleanup_with_body_mocked(
-        self, client: TestClient, test_requisition: Requisition
-    ) -> None:
+    def test_cleanup_with_body_mocked(self, client: TestClient, test_requisition: Requisition) -> None:
         with patch("app.utils.claude_client.claude_text") as mock_ct:
             mock_ct.return_value = "Dear Vendor, please provide a quote."
             resp = client.post(
@@ -682,18 +610,14 @@ class TestAiCleanupEmail:
 
 
 class TestLogActivity:
-    def test_log_activity_note(
-        self, client: TestClient, test_requisition: Requisition
-    ) -> None:
+    def test_log_activity_note(self, client: TestClient, test_requisition: Requisition) -> None:
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/log-activity",
             data={"activity_type": "note", "notes": "Called vendor today"},
         )
         assert resp.status_code == 200
 
-    def test_log_activity_phone_call(
-        self, client: TestClient, test_requisition: Requisition
-    ) -> None:
+    def test_log_activity_phone_call(self, client: TestClient, test_requisition: Requisition) -> None:
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/log-activity",
             data={"activity_type": "phone_call", "vendor_name": "Arrow"},

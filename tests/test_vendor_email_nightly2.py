@@ -156,9 +156,7 @@ class TestMaterialVendorHistoryLoopBody:
         empty_chain = _make_query_chain([])
 
         normalize_calls = []
-        real_normalize = __import__(
-            "app.vendor_utils", fromlist=["normalize_vendor_name"]
-        ).normalize_vendor_name
+        real_normalize = __import__("app.vendor_utils", fromlist=["normalize_vendor_name"]).normalize_vendor_name
 
         def tracking_normalize(name):
             r = real_normalize(name)
@@ -190,10 +188,10 @@ class TestMaterialVendorHistoryLoopBody:
     def test_history_row_new_vendor_is_added(self, db_session: Session):
         """Lines 147-159 — new vendor from history gets added to vendors dict.
 
-        MaterialCard.mpn does not exist on the ORM model.  The filter expression
-        at line 135 references it and raises AttributeError before .all() is called.
-        We patch the attribute onto the class so the expression is constructable,
-        allowing the mock chain to return our controlled history rows.
+        MaterialCard.mpn does not exist on the ORM model.  The filter expression at line
+        135 references it and raises AttributeError before .all() is called. We patch
+        the attribute onto the class so the expression is constructable, allowing the
+        mock chain to return our controlled history rows.
         """
         from app.models.email_intelligence import EmailIntelligence
         from app.models.intelligence import MaterialCard, MaterialVendorHistory
@@ -348,7 +346,8 @@ class TestEmailIntelligenceLoopBody:
         assert "acme" in result[0]["vendor_name"].lower()
 
     def test_ei_row_adds_email_to_existing_vendor_when_domain_matches(self, db_session: Session):
-        """Lines 200-207 — existing vendor in dict whose domain matches → email appended."""
+        """Lines 200-207 — existing vendor in dict whose domain matches → email
+        appended."""
         from app.models import Sighting
         from app.models.email_intelligence import EmailIntelligence
         from app.models.intelligence import MaterialVendorHistory
@@ -375,9 +374,7 @@ class TestEmailIntelligenceLoopBody:
         ei_chain = _make_query_chain([ei_row])
         history_chain = _make_query_chain([])
 
-        real_normalize = __import__(
-            "app.vendor_utils", fromlist=["normalize_vendor_name"]
-        ).normalize_vendor_name
+        real_normalize = __import__("app.vendor_utils", fromlist=["normalize_vendor_name"]).normalize_vendor_name
 
         from app.models.vendors import VendorCard, VendorContact
 
@@ -435,7 +432,8 @@ class TestEmailIntelligenceLoopBody:
         assert result[0]["last_seen"] is None
 
     def test_fallback_ei_query_runs_when_first_raises(self, db_session: Session):
-        """Lines 178-190 — first EmailIntelligence query raises → fallback cast query runs."""
+        """Lines 178-190 — first EmailIntelligence query raises → fallback cast query
+        runs."""
         from app.models.email_intelligence import EmailIntelligence
         from app.models.intelligence import MaterialVendorHistory
 

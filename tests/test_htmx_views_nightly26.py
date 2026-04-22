@@ -148,7 +148,7 @@ class TestCreateCompanyDirect:
         assert co is not None
 
     async def test_create_company_empty_name_raises_400(self, db_session: Session, test_user: User):
-        """empty name → 400."""
+        """Empty name → 400."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import create_company
@@ -159,7 +159,7 @@ class TestCreateCompanyDirect:
         assert exc_info.value.status_code == 400
 
     async def test_create_company_duplicate_raises_409(self, db_session: Session, test_user: User):
-        """duplicate name → 409."""
+        """Duplicate name → 409."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import create_company
@@ -191,7 +191,7 @@ class TestEditCompanyDirect:
         assert company.name == "Updated N26"
 
     async def test_edit_company_not_found(self, db_session: Session, test_user: User):
-        """non-existent company → 404."""
+        """Non-existent company → 404."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import edit_company
@@ -227,7 +227,7 @@ class TestEditSiteDirect:
         assert site.site_name == "Branch Office"
 
     async def test_edit_site_not_found(self, db_session: Session, test_user: User):
-        """non-existent site → 404."""
+        """Non-existent site → 404."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import edit_site
@@ -264,7 +264,7 @@ class TestAddSiteContactNoteDirect:
         assert result.status_code == 200
 
     async def test_add_note_empty_raises_400(self, db_session: Session, test_user: User):
-        """empty notes → 400."""
+        """Empty notes → 400."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import add_site_contact_note
@@ -304,7 +304,7 @@ class TestEditQuoteMetadataDirect:
         assert quote.payment_terms == "Net30"
 
     async def test_edit_quote_not_found(self, db_session: Session, test_user: User):
-        """non-existent quote → 404."""
+        """Non-existent quote → 404."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import edit_quote_metadata
@@ -361,7 +361,7 @@ class TestBuyPlanConfirmPoDirect:
         assert result.status_code == 200
 
     async def test_confirm_po_empty_po_number_raises_400(self, db_session: Session, test_user: User):
-        """empty po_number → 400."""
+        """Empty po_number → 400."""
         from fastapi import HTTPException
 
         from app.models.buy_plan import BuyPlan
@@ -400,7 +400,7 @@ class TestUpdateMaterialCardDirect:
         assert card.manufacturer == "TI"
 
     async def test_update_material_card_not_found(self, db_session: Session, test_user: User):
-        """non-existent card → 404."""
+        """Non-existent card → 404."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import update_material_card
@@ -437,7 +437,7 @@ class TestUpdateQuoteLineDirect:
         assert line.qty == 200
 
     async def test_update_quote_line_not_found(self, db_session: Session, test_user: User):
-        """non-existent line → 404."""
+        """Non-existent line → 404."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import update_quote_line
@@ -450,7 +450,7 @@ class TestUpdateQuoteLineDirect:
         assert exc_info.value.status_code == 404
 
     async def test_update_quote_line_invalid_qty_raises_400(self, db_session: Session, test_user: User):
-        """non-integer qty → 400."""
+        """Non-integer qty → 400."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import update_quote_line

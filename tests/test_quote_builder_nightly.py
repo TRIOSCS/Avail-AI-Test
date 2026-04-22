@@ -1,4 +1,5 @@
-"""tests/test_quote_builder_nightly.py — Coverage tests for quote_builder_modal_multi (lines 78-103).
+"""tests/test_quote_builder_nightly.py — Coverage tests for quote_builder_modal_multi
+(lines 78-103).
 
 The /v2/partials/quote-builder/multi route is shadowed by /{req_id} because FastAPI
 registers routes in declaration order and "multi" is not a valid int (yields 422).
@@ -32,7 +33,8 @@ def _make_request() -> MagicMock:
 
 
 def _run(coro):
-    """Run an async coroutine synchronously (event loop already exists via nest_asyncio)."""
+    """Run an async coroutine synchronously (event loop already exists via
+    nest_asyncio)."""
     return asyncio.get_event_loop().run_until_complete(coro)
 
 
@@ -110,7 +112,8 @@ class TestQuoteBuilderModalMultiNotFound:
 
 
 class TestQuoteBuilderModalMultiNoCustomerSite:
-    """Lines 92-93, 101-113: valid req without a customer_site_id → 200, empty customer_name."""
+    """Lines 92-93, 101-113: valid req without a customer_site_id → 200, empty
+    customer_name."""
 
     def test_valid_req_no_customer_site_returns_html(
         self,
@@ -215,7 +218,8 @@ class TestQuoteBuilderModalMultiWithCustomerSite:
         test_user: User,
         test_requisition: Requisition,
     ):
-        """multi_req_ids in the template context must equal the raw requisition_ids param."""
+        """multi_req_ids in the template context must equal the raw requisition_ids
+        param."""
         test_requisition.customer_site_id = None
         raw_ids = f"{test_requisition.id},{test_requisition.id + 1}"
 
