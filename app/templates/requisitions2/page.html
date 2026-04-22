@@ -11,8 +11,16 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Requisitions — AvailAI</title>
-  <link rel="stylesheet" href="/static/styles.css">
-  <link rel="stylesheet" href="/static/htmx_mobile.css">
+  {# Vite-built CSS bundles — hash-named so cache-busting is automatic.
+     Falls back to source files if Vite manifest isn't loaded. #}
+  {% if vite_css %}
+    {% for css_file in vite_css %}
+    <link rel="stylesheet" href="/static/{{ css_file }}">
+    {% endfor %}
+  {% else %}
+    <link rel="stylesheet" href="/static/styles.css">
+    <link rel="stylesheet" href="/static/htmx_mobile.css">
+  {% endif %}
   <style>
     /* Inline editing — keeps HTMX swap responsive */
     .rq2-editable:hover { background: #f0f4f8; cursor: cell; }
@@ -46,6 +54,11 @@
   <script defer src="https://unpkg.com/@alpinejs/collapse@3.14.8/dist/cdn.min.js"></script>
   <script defer src="https://unpkg.com/@alpinejs/persist@3.14.8/dist/cdn.min.js"></script>
   <script defer src="https://unpkg.com/alpinejs@3.14.8/dist/cdn.min.js"></script>
+  {# Vite-built JS bundle (htmx_app: htmx + alpine + our stores + directives).
+     Falls back to the un-bundled path if Vite manifest isn't loaded. #}
+  {% if vite_js %}
+    <script type="module" src="/static/{{ vite_js }}"></script>
+  {% endif %}
   <script src="/static/js/requisitions2.js" defer></script>
 </head>
 <body class="bg-gray-50 text-gray-900">
