@@ -927,8 +927,45 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         async with sem:
             return await _run_one(conn, pn)
 
-    tasks = [_throttled(conn, pn) for pn in pns for conn in connectors]
-    results_lists = await asyncio.gather(*tasks, return_exceptions=True)
+    pairs = [(conn, pn) for pn in pns for conn in connectors]
+    task_objs = [asyncio.create_task(_throttled(conn, pn)) for conn, pn in pairs]
+
+    # Bounded deadline: one slow/hung connector must not block the orchestrator.
+    # Tasks still pending when the budget expires are cancelled and recorded as
+    # errored in stats_updates. CancelledError is a BaseException in 3.8+, so
+    # _run_one's except-Exception doesn't swallow it — pending tasks finish
+    # cancelled rather than returning [] and are skipped in results_lists below.
+    if task_objs:
+        _done, pending = await asyncio.wait(task_objs, timeout=settings.search_total_timeout_s)
+    else:
+        pending = set()
+    if pending:
+        logger.warning(
+            "Search budget {:.1f}s exceeded; cancelling {}/{} pending connector tasks",
+            settings.search_total_timeout_s,
+            len(pending),
+            len(task_objs),
+        )
+        for t in pending:
+            t.cancel()
+        await asyncio.gather(*pending, return_exceptions=True)
+        budget_ms = int(settings.search_total_timeout_s * 1000)
+        pending_set = set(pending)
+        for (conn, _pn), t in zip(pairs, task_objs):
+            if t in pending_set:
+                source_name = _CONNECTOR_SOURCE_MAP.get(conn.__class__.__name__)
+                if source_name:
+                    stats_updates.append((source_name, 0, budget_ms, "search budget exceeded"))
+
+    results_lists: list = []
+    for t in task_objs:
+        if t.cancelled():
+            continue
+        exc = t.exception()
+        if exc is not None:
+            results_lists.append(exc)
+        else:
+            results_lists.append(t.result())
 
     # Apply stats to DB in one pass — safe, sequential, after gather completes
     try:

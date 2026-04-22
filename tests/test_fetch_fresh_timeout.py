@@ -1,15 +1,14 @@
-"""Phase 1 smoke gate — proves _fetch_fresh lacks an outer timeout wrapper.
+"""Regression gate for _fetch_fresh graceful-degradation budget.
 
 What it does: stubs the connector list with one fast connector and one that
-hangs for 45s, then asserts _fetch_fresh(...) returns within a 15s budget.
+hangs for 45s, then asserts _fetch_fresh(...) returns within a 15s budget,
+preserves the fast connector's result, and records the slow connector as
+errored/timed-out in source_stats.
 
 What calls it: pytest regression suite (`TESTING=1 pytest tests/test_fetch_fresh_timeout.py -v`).
 
-What it depends on: app.search_service._fetch_fresh, tests/conftest.py db_session fixture.
-
-Status: xfail(strict=True) until the async gather at app/search_service.py:931 is
-wrapped with an outer asyncio.wait_for (or equivalent per-task deadline). Once
-wrapped, this test will pass and the xfail marker must be removed.
+What it depends on: app.search_service._fetch_fresh, settings.search_total_timeout_s,
+tests/conftest.py db_session fixture.
 """
 
 import asyncio
@@ -23,12 +22,16 @@ class _FastFakeConnector:
     """Stub connector that returns instantly with one synthetic hit."""
 
     async def search(self, pn: str) -> list[dict]:
+        # Key names must match what _fetch_fresh's dedup + junk-vendor filter
+        # expect (vendor_name, vendor_sku) — see app/search_service.py:971-984
+        # and JUNK_VENDORS in app/shared_constants.py ("" is junk).
         return [
             {
                 "mpn": pn,
-                "vendor": "fast-fake",
+                "vendor_name": "Fast Fake Distributor",
+                "vendor_sku": f"FF-{pn}",
                 "qty": 1,
-                "price": 1.00,
+                "unit_price": 1.00,
                 "source": "fast_fake",
             }
         ]
@@ -42,14 +45,6 @@ class _SlowFakeConnector:
         return []
 
 
-@pytest.mark.xfail(
-    strict=True,
-    reason=(
-        "Known: app/search_service.py:931 uses bare asyncio.gather with no outer "
-        "wait_for. Remove this xfail once the gather is bounded by a deadline "
-        "(e.g. asyncio.wait_for(gather, timeout=settings.search_total_timeout_s))."
-    ),
-)
 async def test_fetch_fresh_returns_within_budget_when_one_connector_hangs(monkeypatch, db_session):
     """A single hung connector must not block the whole orchestrator.
 
@@ -90,7 +85,7 @@ async def test_fetch_fresh_returns_within_budget_when_one_connector_hangs(monkey
 
     # Fast connector's result must be present — graceful degradation works.
     assert len(results) >= 1, "no results from fast connector despite it returning"
-    assert any(r.get("vendor") == "fast-fake" for r in results)
+    assert any(r.get("vendor_name") == "Fast Fake Distributor" for r in results)
 
     # Slow connector must be recorded as error/timeout in source_stats, not silently dropped.
     slow_stat = next((s for s in stats if s.get("source") == "slow_fake"), None)

@@ -180,6 +180,10 @@ class Settings(BaseSettings):
 
     # --- Search ---
     search_concurrency_limit: int = 10
+    # Total wall-clock budget for one _fetch_fresh() fan-out. Slower connectors
+    # are cancelled when exceeded so the orchestrator returns partial results
+    # well under Caddy's 30s lb_try_duration.
+    search_total_timeout_s: float = 12.0
 
     # --- Contact intelligence ---
     contact_scoring_enabled: bool = True
