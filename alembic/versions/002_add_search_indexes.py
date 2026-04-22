@@ -19,12 +19,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_index("ix_requisitions_name", "requisitions", ["name"])
-    op.create_index("ix_requisitions_customer_name", "requisitions", ["customer_name"])
-    op.create_index("ix_req_primary_mpn", "requirements", ["primary_mpn"])
+    # NOTE: migration 001_initial uses Base.metadata.create_all(checkfirst=True),
+    # which already creates these indexes from the SQLAlchemy model definitions.
+    # On a fresh DB, 002 would otherwise raise DuplicateTable. Use
+    # CREATE INDEX IF NOT EXISTS so this migration is idempotent regardless of
+    # whether 001 is replayed (new DB) or stamped (existing prod DB pre-baseline).
+    op.execute("CREATE INDEX IF NOT EXISTS ix_requisitions_name ON requisitions (name)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_requisitions_customer_name ON requisitions (customer_name)")
+    op.execute("CREATE INDEX IF NOT EXISTS ix_req_primary_mpn ON requirements (primary_mpn)")
 
 
 def downgrade() -> None:
-    op.drop_index("ix_req_primary_mpn", table_name="requirements")
-    op.drop_index("ix_requisitions_customer_name", table_name="requisitions")
-    op.drop_index("ix_requisitions_name", table_name="requisitions")
+    op.execute("DROP INDEX IF EXISTS ix_req_primary_mpn")
+    op.execute("DROP INDEX IF EXISTS ix_requisitions_customer_name")
+    op.execute("DROP INDEX IF EXISTS ix_requisitions_name")
