@@ -2567,6 +2567,7 @@ class TestSearchThrottling:
             patch("app.config.settings") as mock_settings,
         ):
             mock_settings.search_concurrency_limit = 2
+            mock_settings.search_total_timeout_s = 5.0
 
             mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
             _setup_mock_connectors(mocks)

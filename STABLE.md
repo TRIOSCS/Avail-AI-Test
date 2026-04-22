@@ -26,6 +26,11 @@ Do not refactor these without explicit approval. Changes here can break startup,
 
 When changing any listed file, run tests and do a quick smoke check before committing.
 
+## Deploy hygiene
+
+- **Droplet's local `main` must be fast-forward-only with `origin/main` before any deploy.** Before running `./deploy.sh`, resync: `git fetch origin && git checkout main && git merge --ff-only origin/main`. If that merge is not fast-forward-able, stop and investigate — someone's local work has diverged from the remote and pushing will either silently fail (non-fast-forward rejection) or risk rewinding `origin/main`. `deploy.sh` currently swallows non-fast-forward rejections; a follow-up PR will make it fail loudly and/or auto-resync.
+- When working on a feature branch on the droplet, prefer `./deploy.sh --no-commit` (rebuild + push-skipped) so the deploy reflects local code without attempting to push a stale `main`.
+
 ## Known tech debt
 
 - **`app/static/htmx_app.js` — `htmx:afterSwap` Alpine.initTree gate uses a hardcoded ID allowlist** (`lead-drawer-content`, `rq2-table`). When future HTMX-swapped regions contain Alpine directives (`x-*`), they must be added manually to this list or their directives won't re-bind after swap. Fragile. Future refactor idea: trigger `initTree` whenever the swap target subtree contains any element with an `x-*` attribute, so new regions get covered automatically. Not urgent — Alpine's own MutationObserver handles most cases, and the allowlist is a belt-and-suspenders fallback. Captured 2026-04-21 during the opportunity-table v2 merge.

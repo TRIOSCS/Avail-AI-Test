@@ -62,7 +62,13 @@ search_service.py (orchestrator)
     |
     +---> ai_part_normalizer.py --> Claude API (normalize MPN)
     |
-    +---> asyncio.gather() -- ALL connectors fire in parallel:
+    +---> asyncio.wait(tasks, timeout=settings.search_total_timeout_s)
+    |     -- ALL connectors fire in parallel, bounded by the search budget
+    |     (default 12s, env SEARCH_TOTAL_TIMEOUT_S). Pending tasks when the
+    |     deadline expires are cancelled and recorded in source_stats with
+    |     error="search budget exceeded"; completed connectors' results are
+    |     preserved so the response degrades gracefully rather than 504.
+    |
     |       +---> nexar.py ----------> Octopart/Nexar API
     |       +---> brokerbin.py ------> BrokerBin API
     |       +---> digikey.py --------> DigiKey API
