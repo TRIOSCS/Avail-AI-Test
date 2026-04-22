@@ -1,3 +1,14 @@
+# `pre-commit install` auto-installs both hook types: pre-commit (runs on
+# staged files at commit time) + pre-push (runs full --all-files sweep
+# before push, catching branch-wide drift in files the current commit
+# doesn't touch). See the local `all-files-on-push` hook below.
+#
+# First-time setup per developer:
+#   pre-commit install           # installs both hook types automatically
+# Escape hatch if a push hook false-positives:
+#   git push --no-verify
+default_install_hook_types: [pre-commit, pre-push]
+
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
     rev: v0.9.6
@@ -33,3 +44,18 @@ repos:
         ]
         pass_filenames: false
         verbose: true
+
+  # Pre-push gate: runs the full pre-commit suite against --all-files so
+  # branch-wide drift (files the current commit didn't touch) gets caught
+  # locally instead of at PR time. --hook-stage pre-commit makes the nested
+  # run execute the commit-stage hooks, not this push-stage hook (no recursion).
+  # Bypass with `git push --no-verify` if it false-positives.
+  - repo: local
+    hooks:
+      - id: all-files-on-push
+        name: Full pre-commit suite on --all-files (catches branch-wide drift)
+        entry: bash -c 'pre-commit run --all-files --hook-stage pre-commit'
+        language: system
+        stages: [pre-push]
+        pass_filenames: false
+        always_run: true
