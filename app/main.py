@@ -278,8 +278,18 @@ if not os.environ.get("TESTING"):
         ],
     )
 
-_static_dir = "app/static/dist" if os.path.isdir("app/static/dist") else "app/static"
-app.mount("/static", StaticFiles(directory=_static_dir), name="static")
+# Static mount order matters — most specific paths first. Mount the Vite-built
+# hashed bundles at /static/assets/ so hash-named files resolve directly, then
+# mount the source directory at /static/ for everything else (source CSS/JS,
+# public/ images, js/ helpers that aren't bundled). Previously we toggled
+# between source and dist, which made source files 404 whenever a build existed.
+if os.path.isdir("app/static/dist/assets"):
+    app.mount(
+        "/static/assets",
+        StaticFiles(directory="app/static/dist/assets"),
+        name="static-assets",
+    )
+app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # Prometheus metrics
 from prometheus_fastapi_instrumentator import Instrumentator
