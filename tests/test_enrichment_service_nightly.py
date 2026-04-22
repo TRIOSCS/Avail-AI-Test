@@ -948,3 +948,231 @@ class TestFindSuggestedContactsExceptionBranch:
         # Should still get AI results despite explorium failure
         assert len(result) == 1
         assert result[0]["full_name"] == "Jane Smith"
+
+    async def test_duplicate_contacts_deduplicated(self):
+        """Contacts with the same email are deduplicated (line 557 continue path)."""
+        from app.enrichment_service import find_suggested_contacts
+
+        contact = {
+            "source": "explorium",
+            "full_name": "Jane Smith",
+            "title": "procurement manager",
+            "email": "jane@example.com",
+            "phone": None,
+            "linkedin_url": None,
+            "location": None,
+            "company": "Example Corp",
+        }
+        # Same contact duplicated from AI source
+        duplicate = dict(contact)
+        duplicate["source"] = "ai"
+
+        with (
+            patch(
+                "app.enrichment_service._explorium_find_contacts",
+                new_callable=AsyncMock,
+                return_value=[contact],
+            ),
+            patch(
+                "app.enrichment_service._ai_find_contacts",
+                new_callable=AsyncMock,
+                return_value=[duplicate],
+            ),
+        ):
+            result = await find_suggested_contacts("example.com", "Example Corp")
+
+        # Only one contact despite two sources returning same email
+        assert len(result) == 1
+        assert result[0]["full_name"] == "Jane Smith"
+
+
+class TestExploriumFindCompanySuccessPath:
+    async def test_successful_200_response_returns_data(self):
+        """Successful Explorium company response returns parsed dict (lines 289-290)."""
+        from app.enrichment_service import _explorium_find_company
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {
+            "firmo_name": "Example Corp",
+            "firmo_linkedin_profile": "https://linkedin.com/company/example",
+            "firmo_linkedin_industry_category": "Technology",
+            "firmo_number_of_employees_range": "51-200",
+            "firmo_city_name": "Austin",
+            "firmo_region_name": "TX",
+            "firmo_country_name": "US",
+            "firmo_website": "https://example.com",
+            "other_field": "ignored",
+        }
+
+        with (
+            patch(
+                "app.enrichment_service.get_credential_cached",
+                return_value="fake-explorium-key",
+            ),
+            patch(
+                "app.enrichment_service.http.post",
+                new_callable=AsyncMock,
+                return_value=mock_resp,
+            ),
+        ):
+            result = await _explorium_find_company("example.com", "Example Corp")
+
+        assert result is not None
+        assert result["source"] == "explorium"
+        assert result["legal_name"] == "Example Corp"
+        assert result["domain"] == "example.com"
+        assert result["industry"] == "Technology"
+
+
+class TestAiFindCompanySuccessPath:
+    async def test_successful_response_returns_data(self):
+        """claude_json returns valid dict => structured result returned (line 394)."""
+        from app.enrichment_service import _ai_find_company
+
+        with (
+            patch(
+                "app.enrichment_service.get_credential_cached",
+                return_value="fake-anthropic-key",
+            ),
+            patch(
+                "app.enrichment_service.claude_json",
+                new_callable=AsyncMock,
+                return_value={
+                    "legal_name": "Example Corp",
+                    "industry": "Technology",
+                    "employee_size": "51-200",
+                    "hq_city": "Austin",
+                    "hq_state": "TX",
+                    "hq_country": "US",
+                    "website": "https://example.com",
+                    "linkedin_url": "https://linkedin.com/company/example",
+                },
+            ),
+        ):
+            result = await _ai_find_company("example.com", "Example Corp")
+
+        assert result is not None
+        assert result["source"] == "ai"
+        assert result["legal_name"] == "Example Corp"
+        assert result["domain"] == "example.com"
+
+
+class TestAiFindContactsSuccessPath:
+    async def test_successful_response_returns_contacts(self):
+        """enrich_contacts_websearch returns contacts => list returned (line 427)."""
+        from app.enrichment_service import _ai_find_contacts
+
+        with (
+            patch(
+                "app.enrichment_service.get_credential_cached",
+                return_value="fake-anthropic-key",
+            ),
+            patch(
+                "app.enrichment_service.enrich_contacts_websearch",
+                new_callable=AsyncMock,
+                return_value=[
+                    {
+                        "full_name": "Jane Smith",
+                        "title": "Procurement Manager",
+                        "email": "jane@example.com",
+                        "phone": "555-1234",
+                        "linkedin_url": "https://linkedin.com/in/jane",
+                    }
+                ],
+            ),
+        ):
+            result = await _ai_find_contacts("example.com", "Example Corp", "procurement")
+
+        assert len(result) == 1
+        assert result[0]["source"] == "ai"
+        assert result[0]["full_name"] == "Jane Smith"
+        assert result[0]["company"] == "Example Corp"
+
+    async def test_contacts_missing_full_name_filtered_out(self):
+        """Contacts without full_name are filtered from results."""
+        from app.enrichment_service import _ai_find_contacts
+
+        with (
+            patch(
+                "app.enrichment_service.get_credential_cached",
+                return_value="fake-anthropic-key",
+            ),
+            patch(
+                "app.enrichment_service.enrich_contacts_websearch",
+                new_callable=AsyncMock,
+                return_value=[
+                    {"full_name": "Jane Smith", "title": "Buyer", "email": "jane@example.com"},
+                    {"full_name": None, "title": "Unknown", "email": "unknown@example.com"},
+                ],
+            ),
+        ):
+            result = await _ai_find_contacts("example.com")
+
+        assert len(result) == 1
+        assert result[0]["full_name"] == "Jane Smith"
+
+
+class TestEnrichEntityCacheHit:
+    async def test_cache_hit_returns_early(self):
+        """When cache has a result, enrich_entity returns it immediately (line 467)."""
+        from app.enrichment_service import enrich_entity
+
+        cached_data = {
+            "legal_name": "Cached Corp",
+            "domain": "example.com",
+            "industry": "Technology",
+            "source": "explorium",
+        }
+
+        with (
+            patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock, return_value=("Cached Corp", "example.com")),
+            patch("app.cache.intel_cache.get_cached", return_value=cached_data),
+            # These should NOT be called on cache hit:
+            patch("app.enrichment_service._explorium_find_company", new_callable=AsyncMock) as mock_explorium,
+        ):
+            result = await enrich_entity("example.com", "Cached Corp")
+
+        assert result == cached_data
+        mock_explorium.assert_not_called()
+
+
+class TestNameLooksSuspiciousEdgeCases:
+    def test_all_short_words_returns_false(self):
+        """Name with only short words (≤2 chars) → no qualifying words → False (line 163)."""
+        from app.enrichment_service import _name_looks_suspicious
+
+        # "AI Co" → words with len > 2: none (AI=2, Co=2) → empty list → False
+        result = _name_looks_suspicious("AI Co")
+        assert result is False
+
+    def test_empty_string_returns_false(self):
+        """Empty name → no words → False (line 163)."""
+        from app.enrichment_service import _name_looks_suspicious
+
+        result = _name_looks_suspicious("")
+        assert result is False
+
+    def test_known_acronym_words_returns_false(self):
+        """Name of all known acronyms → no qualifying words → False (line 163)."""
+        from app.enrichment_service import _name_looks_suspicious
+
+        # IBM TDK LLC are all in _KNOWN_ACRONYMS
+        result = _name_looks_suspicious("IBM TDK LLC")
+        assert result is False
+
+
+class TestTitleCasePreserveAcronymsEdgeCases:
+    def test_empty_string_returns_empty(self):
+        """Empty string returns empty string immediately (line 199)."""
+        from app.enrichment_service import _title_case_preserve_acronyms
+
+        result = _title_case_preserve_acronyms("")
+        assert result == ""
+
+    def test_known_acronym_preserved_uppercase(self):
+        """Known acronym stays uppercase; regular word title-cased."""
+        from app.enrichment_service import _title_case_preserve_acronyms
+
+        result = _title_case_preserve_acronyms("ibm semiconductor")
+        assert result == "IBM Semiconductor"
