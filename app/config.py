@@ -213,6 +213,10 @@ class Settings(BaseSettings):
 
     # --- Frontend ---
     use_htmx: bool = True
+    # Gates the merged v2 opportunity-table rendering on /requisitions2.
+    # See docs/superpowers/specs/2026-04-21-opportunity-table-merged-design.md
+    # Flip to false + restart to revert to legacy rendering with no code change.
+    avail_opp_table_v2: bool = True
 
     # --- On-demand enrichment orchestrator ---
     on_demand_enrichment_enabled: bool = True

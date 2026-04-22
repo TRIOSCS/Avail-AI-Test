@@ -232,6 +232,15 @@ async def test_stream_search_publishes_events(db_session):
     assert "total_results" in done_data
     assert "elapsed_seconds" in done_data
 
+    # SSE sse-swap="results" expects HTML vendor cards, not raw JSON
+    for e in published_events:
+        if e["event"] == "results":
+            assert "vendor-card" in e["data"]
+            assert '"cards"' not in e["data"]
+    for e in published_events:
+        if e["event"] == "card-update" and e["data"]:
+            assert "hx-swap-oob" in e["data"]
+
 
 # ── Route tests ───────────────────────────────────────────────────────
 
@@ -286,6 +295,35 @@ def test_vendor_card_template_renders():
     assert "85%" in html
     assert "nexar" in html
     assert "Texas Instruments" in html
+
+
+def test_render_search_vendor_cards_html_for_streaming():
+    """_render_search_vendor_cards_html produces HTMX-safe HTML for SSE (not JSON)."""
+    from app.search_service import _render_search_vendor_cards_html
+
+    card = {
+        "vendor_name": "Arrow",
+        "mpn_matched": "LM317T",
+        "manufacturer": "TI",
+        "unit_price": 0.45,
+        "qty_available": 100,
+        "confidence_color": "green",
+        "confidence_pct": 80,
+        "lead_quality": "strong",
+        "is_authorized": True,
+        "source_type": "nexar",
+        "sub_offers": [],
+        "offer_count": 1,
+        "sources_found": {"nexar"},
+        "reason": "ok",
+    }
+    html = _render_search_vendor_cards_html([card], search_id="sid-1", start_index=3, swap_oob=False)
+    assert "vendor-card" in html
+    assert "Arrow" in html
+    assert "hx-swap-oob" not in html
+
+    html_oob = _render_search_vendor_cards_html([card], search_id="sid-1", start_index=0, swap_oob=True)
+    assert 'hx-swap-oob="true"' in html_oob
 
 
 def test_vendor_card_template_renders_no_price():

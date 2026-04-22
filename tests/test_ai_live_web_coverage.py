@@ -16,8 +16,6 @@ os.environ["TESTING"] = "1"
 
 from unittest.mock import AsyncMock, patch
 
-import pytest
-
 from app.connectors.ai_live_web import AIWebSearchConnector
 from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
@@ -29,7 +27,10 @@ class TestNormalizeVendorUrl:
         assert AIWebSearchConnector._normalize_vendor_url("") is None
 
     def test_www_prefix_gets_https(self):
-        """www. URL gets https:// prepended (line 72)."""
+        """www.
+
+        URL gets https:// prepended (line 72).
+        """
         result = AIWebSearchConnector._normalize_vendor_url("www.example.com/part")
         assert result == "https://www.example.com/part"
 
@@ -111,7 +112,7 @@ class TestDoSearchErrorHandling:
         assert out == []
 
     async def test_offers_not_list_returns_empty(self):
-        """offers key is not a list → returns empty (line 132)."""
+        """Offers key is not a list → returns empty (line 132)."""
         connector = AIWebSearchConnector(api_key="test-key")
         with patch(
             "app.connectors.ai_live_web.claude_json",
@@ -154,12 +155,12 @@ class TestDoSearchQualityGates:
         assert len(out) == 1
 
     async def test_zero_qty_dropped(self):
-        """qty <= 0 → dropped (lines 159-160)."""
+        """Qty <= 0 → dropped (lines 159-160)."""
         out = await self._search_with_offers([self._base_offer(qty_available=0)])
         assert out == []
 
     async def test_none_qty_dropped(self):
-        """qty=None → dropped."""
+        """Qty=None → dropped."""
         out = await self._search_with_offers([self._base_offer(qty_available=None)])
         assert out == []
 
@@ -175,16 +176,12 @@ class TestDoSearchQualityGates:
 
     async def test_no_stock_signal_dropped(self):
         """evidence_note with no stock signal → dropped (line 167-169)."""
-        out = await self._search_with_offers(
-            [self._base_offer(evidence_note="product page", in_stock_explicit=False)]
-        )
+        out = await self._search_with_offers([self._base_offer(evidence_note="product page", in_stock_explicit=False)])
         assert out == []
 
     async def test_stale_listing_dropped(self):
         """Listing older than 30 days → dropped (lines 170-172)."""
-        out = await self._search_with_offers(
-            [self._base_offer(listing_age_days=45, in_stock_explicit=True)]
-        )
+        out = await self._search_with_offers([self._base_offer(listing_age_days=45, in_stock_explicit=True)])
         assert out == []
 
     async def test_evidence_without_qty_token_dropped(self):

@@ -58,7 +58,8 @@ class TestScoreActivityNoData:
     """Test score_activity when ActivityLog has no analyzable fields."""
 
     async def test_no_data_marks_as_assessed_without_claude(self, db_session: Session, test_user):
-        """ActivityLog with no meaningful fields gets marked with quality_score=0 and no_data."""
+        """ActivityLog with no meaningful fields gets marked with quality_score=0 and
+        no_data."""
         from app.services.activity_quality_service import score_activity
 
         log = ActivityLog(

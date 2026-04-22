@@ -433,7 +433,8 @@ def test_backfill_descriptions_handles_exception_gracefully():
 
 
 def test_backfill_descriptions_updates_material_card():
-    """backfill_descriptions updates linked MaterialCard when card has no description."""
+    """backfill_descriptions updates linked MaterialCard when card has no
+    description."""
     import os
     from unittest.mock import AsyncMock, MagicMock
 

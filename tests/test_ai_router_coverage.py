@@ -562,7 +562,10 @@ class TestApplyFreeformRfq:
 
 class TestSaveFreeformOffers:
     def test_requisition_not_found_returns_404(self, client, db_session):
-        """Non-existent requisition should return 404. Uses one valid offer."""
+        """Non-existent requisition should return 404.
+
+        Uses one valid offer.
+        """
         resp = client.post(
             "/api/ai/save-freeform-offers",
             json={
@@ -590,7 +593,10 @@ class TestSaveFreeformOffers:
 
 class TestSaveParsedOffers:
     def test_requisition_not_found_returns_404(self, client, db_session):
-        """Non-existent requisition returns 404. Uses one valid offer."""
+        """Non-existent requisition returns 404.
+
+        Uses one valid offer.
+        """
         resp = client.post(
             "/api/ai/save-parsed-offers",
             json={
@@ -637,8 +643,13 @@ class TestAiFindContacts:
         ):
             mock_settings.ai_features_enabled = "all"
             mock_search.return_value = [
-                {"full_name": "Bob Smith", "title": "VP Sales", "email": "bob@vendor.com",
-                 "source": "web", "confidence": "high"}
+                {
+                    "full_name": "Bob Smith",
+                    "title": "VP Sales",
+                    "email": "bob@vendor.com",
+                    "source": "web",
+                    "confidence": "high",
+                }
             ]
             resp = client.post(
                 "/api/ai/find-contacts",
@@ -698,14 +709,13 @@ class TestAiFindContacts:
 
 class TestIntakeParseWithRequisitionId:
     def test_parse_with_requisition_id_found(self, client, db_session, test_requisition):
-        """intake-parse with a valid requisition_id includes rfq_context."""
+        """Intake-parse with a valid requisition_id includes rfq_context."""
         with patch("app.services.ai_intake_parser.parse_freeform_intake", new_callable=AsyncMock) as mock_parse:
             mock_parse.return_value = {"rows": [{"mpn": "LM317T", "qty": 100}]}
             resp = client.post(
                 "/api/ai/intake-parse",
                 content=(
-                    '{"text": "LM317T qty 100 units needed", "mode": "rfq"'
-                    f', "requisition_id": {test_requisition.id}}}'
+                    f'{{"text": "LM317T qty 100 units needed", "mode": "rfq", "requisition_id": {test_requisition.id}}}'
                 ).encode(),
                 headers={"Content-Type": "application/json"},
             )
@@ -713,7 +723,7 @@ class TestIntakeParseWithRequisitionId:
         assert resp.json()["parsed"] is True
 
     def test_parse_with_requisition_id_not_found(self, client, db_session):
-        """intake-parse with a missing requisition_id returns 404."""
+        """Intake-parse with a missing requisition_id returns 404."""
         resp = client.post(
             "/api/ai/intake-parse",
             content=b'{"text": "LM317T qty 100 units needed", "mode": "rfq", "requisition_id": 99999}',

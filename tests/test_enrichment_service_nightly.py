@@ -1,4 +1,5 @@
-"""test_enrichment_service_nightly.py — Additional coverage tests for app/enrichment_service.py.
+"""test_enrichment_service_nightly.py — Additional coverage tests for
+app/enrichment_service.py.
 
 Targets the uncovered branches in:
 - normalize_company_input (lines 190-191): claude_text exception path
@@ -22,8 +23,6 @@ os.environ["TESTING"] = "1"
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
-import pytest
-
 
 # ═══════════════════════════════════════════════════════════════════════
 #  normalize_company_input — exception path (lines 190-191)
@@ -84,7 +83,8 @@ class TestNormalizeCompanyInputExceptionPath:
 
 class TestNormalizeCompanyOutputBranches:
     def test_employee_size_non_digit_string_preserved(self):
-        """employee_size that matches range pattern hits the else branch (line 229 skipped)."""
+        """employee_size that matches range pattern hits the else branch (line 229
+        skipped)."""
         from app.enrichment_service import normalize_company_output
 
         # Pattern like "51-200" matches the regex => goes to else at line 231
@@ -93,7 +93,8 @@ class TestNormalizeCompanyOutputBranches:
         assert result["employee_size"] == "51-200"
 
     def test_employee_size_non_matching_string_uses_else(self):
-        """employee_size that doesn't match range pattern uses the elif branch (line 229)."""
+        """employee_size that doesn't match range pattern uses the elif branch (line
+        229)."""
         from app.enrichment_service import normalize_company_output
 
         # "small company" after replace(" ", "") → "smallcompany"
@@ -220,7 +221,8 @@ class TestExploriumFindContactsBranches:
         assert result == []
 
     async def test_httpx_error_returns_empty_list(self):
-        """HTTPError during Explorium contacts lookup returns empty list (lines 345-347)."""
+        """HTTPError during Explorium contacts lookup returns empty list (lines
+        345-347)."""
         from app.enrichment_service import _explorium_find_contacts
 
         with (
@@ -328,7 +330,8 @@ class TestAiFindCompanyBranches:
         assert result is None
 
     async def test_claude_json_returns_list_returns_none(self):
-        """claude_json returning non-dict (e.g. list) causes early return (lines 392-393)."""
+        """claude_json returning non-dict (e.g. list) causes early return (lines
+        392-393)."""
         from app.enrichment_service import _ai_find_company
 
         with (
@@ -457,7 +460,8 @@ class TestAiFindContactsExceptionPath:
 
 class TestEnrichEntityApolloBranch:
     async def test_apollo_api_key_triggers_apollo_search(self):
-        """When apollo_api_key is set, apollo search_company is called (lines 511-513)."""
+        """When apollo_api_key is set, apollo search_company is called (lines
+        511-513)."""
         from app.enrichment_service import enrich_entity
 
         mock_settings = MagicMock()
@@ -480,7 +484,11 @@ class TestEnrichEntityApolloBranch:
 
         # get_cached/set_cached are lazy-imported inside enrich_entity from .cache.intel_cache
         with (
-            patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock, return_value=("Example Corp", "example.com")),
+            patch(
+                "app.enrichment_service.normalize_company_input",
+                new_callable=AsyncMock,
+                return_value=("Example Corp", "example.com"),
+            ),
             patch("app.enrichment_service._explorium_find_company", new_callable=AsyncMock, return_value=None),
             patch("app.enrichment_service._ai_find_company", new_callable=AsyncMock, return_value=None),
             patch("app.cache.intel_cache.get_cached", return_value=None),
@@ -503,7 +511,11 @@ class TestEnrichEntityApolloBranch:
 
         # get_cached/set_cached are lazy-imported inside enrich_entity from .cache.intel_cache
         with (
-            patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock, return_value=("Example Corp", "example.com")),
+            patch(
+                "app.enrichment_service.normalize_company_input",
+                new_callable=AsyncMock,
+                return_value=("Example Corp", "example.com"),
+            ),
             patch("app.enrichment_service._explorium_find_company", new_callable=AsyncMock, return_value=None),
             patch("app.enrichment_service._ai_find_company", new_callable=AsyncMock, return_value=None),
             patch("app.cache.intel_cache.get_cached", return_value=None),
@@ -644,7 +656,8 @@ class TestFindSuggestedContactsRelevantFilter:
 
 class TestApplyEnrichmentToCompany:
     def test_website_set_when_empty(self):
-        """Website is applied to company when company.website is empty (lines 622-623)."""
+        """Website is applied to company when company.website is empty (lines
+        622-623)."""
         from app.enrichment_service import apply_enrichment_to_company
 
         company = MagicMock()
@@ -694,7 +707,8 @@ class TestApplyEnrichmentToCompany:
         assert company.website == "https://existing.com"
 
     def test_no_updates_returns_empty_list(self):
-        """When no fields need updating, returns empty list without touching timestamps."""
+        """When no fields need updating, returns empty list without touching
+        timestamps."""
         from app.enrichment_service import apply_enrichment_to_company
 
         company = MagicMock()
@@ -765,7 +779,7 @@ class TestApplyEnrichmentToCompany:
 
 class TestApplyEnrichmentToVendor:
     def test_website_and_domain_set_when_empty(self):
-        """website and domain fields applied to vendor when empty."""
+        """Website and domain fields applied to vendor when empty."""
         from app.enrichment_service import apply_enrichment_to_vendor
 
         card = MagicMock()
@@ -826,7 +840,8 @@ class TestApplyEnrichmentToVendor:
 
 class TestNormalizeCompanyInputSuccessPath:
     async def test_claude_text_fixes_typo_applies_result(self):
-        """When claude_text succeeds, the fixed name replaces the original (lines 188-189)."""
+        """When claude_text succeeds, the fixed name replaces the original (lines
+        188-189)."""
         from app.enrichment_service import normalize_company_input
 
         # "Grp Tch" has no vowels — triggers suspicious check
@@ -848,7 +863,8 @@ class TestNormalizeCompanyInputSuccessPath:
         assert result_name == "Group Tech"
 
     async def test_name_looks_suspicious_all_words_have_vowels_returns_false(self):
-        """_name_looks_suspicious returns False when all long words have vowels (line 167)."""
+        """_name_looks_suspicious returns False when all long words have vowels (line
+        167)."""
         from app.enrichment_service import normalize_company_input
 
         # Normal company name — all words have vowels, so not suspicious
@@ -1126,7 +1142,11 @@ class TestEnrichEntityCacheHit:
         }
 
         with (
-            patch("app.enrichment_service.normalize_company_input", new_callable=AsyncMock, return_value=("Cached Corp", "example.com")),
+            patch(
+                "app.enrichment_service.normalize_company_input",
+                new_callable=AsyncMock,
+                return_value=("Cached Corp", "example.com"),
+            ),
             patch("app.cache.intel_cache.get_cached", return_value=cached_data),
             # These should NOT be called on cache hit:
             patch("app.enrichment_service._explorium_find_company", new_callable=AsyncMock) as mock_explorium,
@@ -1139,7 +1159,8 @@ class TestEnrichEntityCacheHit:
 
 class TestNameLooksSuspiciousEdgeCases:
     def test_all_short_words_returns_false(self):
-        """Name with only short words (≤2 chars) → no qualifying words → False (line 163)."""
+        """Name with only short words (≤2 chars) → no qualifying words → False (line
+        163)."""
         from app.enrichment_service import _name_looks_suspicious
 
         # "AI Co" → words with len > 2: none (AI=2, Co=2) → empty list → False

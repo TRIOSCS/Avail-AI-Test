@@ -15,27 +15,21 @@ os.environ["TESTING"] = "1"
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.constants import BuyPlanStatus, OfferStatus, QuoteStatus, RequisitionStatus, SourcingStatus  # noqa: F401
 from app.models import (
-    Company,
-    CustomerSite,
     Offer,
     Quote,
     QuoteLine,
     Requirement,
     Requisition,
-    Sighting,
     User,
     VendorCard,
 )
-from app.models.buy_plan import BuyPlan, BuyPlanLine
 from app.models.intelligence import MaterialCard
 from app.models.prospect_account import ProspectAccount
 from app.models.sourcing_lead import SourcingLead
-
 
 # ── Helpers ────────────────────────────────────────────────────────────
 
@@ -404,9 +398,7 @@ class TestSourcingPartials:
         _sourcing_lead(db_session, item, vendor_safety_band="safe")
         db_session.commit()
 
-        resp = client.get(
-            f"/v2/partials/sourcing/{item.id}/workspace?safety=safe&sort=safest&lead=0"
-        )
+        resp = client.get(f"/v2/partials/sourcing/{item.id}/workspace?safety=safe&sort=safest&lead=0")
         assert resp.status_code == 200
 
     def test_lead_panel_partial(self, client, db_session: Session, test_user: User):

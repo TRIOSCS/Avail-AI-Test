@@ -246,8 +246,16 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         fresh_vendors = {s.vendor_name.lower() for s in sightings}
         history = _get_material_history(list(card_ids), fresh_vendors, write_db)
 
-        # Stamp per-requirement search timestamp and commit all changes
-        write_req.last_searched_at = now
+        # Stamp per-requirement search timestamp only when the search
+        # actually succeeded. "Success" means at least one connector
+        # returned status=ok — i.e. there was a real response from an
+        # upstream API (even if it had zero matches). If every connector
+        # errored (auth failures, quota exceeded, network), we leave
+        # last_searched_at alone so the 5-minute rate guard in
+        # routers/sightings.py does not silently suppress the user's
+        # next retry.
+        if succeeded_sources:
+            write_req.last_searched_at = now
         write_db.commit()
 
         # Expunge sightings so they remain usable after session close
@@ -701,6 +709,34 @@ def _incremental_dedup(incoming: list[dict], existing: list[dict]) -> tuple[list
             new_cards.append(new_card)
 
     return new_cards, updated_cards
+
+
+def _render_search_vendor_cards_html(
+    cards: list[dict],
+    *,
+    search_id: str,
+    start_index: int = 0,
+    swap_oob: bool = False,
+) -> str:
+    """Render vendor_card.html fragments for HTMX SSE (must be HTML, not JSON).
+
+    Called by: stream_search_mpn (results + card-update events)
+    Depends on: app.template_env.templates, htmx/partials/search/vendor_card.html
+    """
+    from .template_env import templates
+
+    tmpl = templates.get_template("htmx/partials/search/vendor_card.html")
+    parts: list[str] = []
+    for i, card in enumerate(cards):
+        parts.append(
+            tmpl.render(
+                card=card,
+                card_index=start_index + i,
+                search_id=search_id,
+                swap_oob=swap_oob,
+            )
+        )
+    return "".join(parts)
 
 
 # ── Smart AI trigger ─────────────────────────────────────────────────────
@@ -1973,33 +2009,29 @@ async def stream_search_mpn(search_id: str, mpn: str, db: Session) -> None:
                     ),
                 )
 
-                # Publish new result cards
+                # Publish new result cards (HTML for sse-swap="results" — not JSON)
                 if new_cards:
-                    await active_broker.publish(
-                        channel,
-                        "results",
-                        json.dumps(
-                            {
-                                "cards": new_cards,
-                                "source": source_name,
-                            },
-                            default=str,
-                        ),
+                    start_idx = len(accumulated) - len(new_cards)
+                    cards_html = _render_search_vendor_cards_html(
+                        new_cards,
+                        search_id=search_id,
+                        start_index=start_idx,
+                        swap_oob=False,
                     )
+                    await active_broker.publish(channel, "results", cards_html)
 
-                # Publish updated cards
+                # Publish updated cards as OOB HTML so existing vendor-card nodes refresh
                 if updated_cards:
-                    await active_broker.publish(
-                        channel,
-                        "card-update",
-                        json.dumps(
-                            {
-                                "cards": updated_cards,
-                                "source": source_name,
-                            },
-                            default=str,
-                        ),
+                    update_html = "".join(
+                        _render_search_vendor_cards_html(
+                            [card],
+                            search_id=search_id,
+                            start_index=0,
+                            swap_oob=True,
+                        )
+                        for card in updated_cards
                     )
+                    await active_broker.publish(channel, "card-update", update_html)
 
                 total_results += hit_count
 

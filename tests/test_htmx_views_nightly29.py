@@ -1,4 +1,5 @@
-"""tests/test_htmx_views_nightly29.py — Direct-async coverage for bulk_archive / bulk_unarchive.
+"""tests/test_htmx_views_nightly29.py — Direct-async coverage for bulk_archive /
+bulk_unarchive.
 
 Target: Push app/routers/htmx_views.py from 84.9% → 85%+ by covering the
 lines that TestClient cannot reach due to async-continuation tracking gaps:
@@ -148,7 +149,8 @@ class TestBulkUnarchiveDirect:
         mock_list.assert_awaited_once()
 
     async def test_requirement_ids_branch_covered(self, db_session: Session, test_user: User):
-        """Lines 9907–9911: requirement_ids non-empty → archived parts restored to open."""
+        """Lines 9907–9911: requirement_ids non-empty → archived parts restored to
+        open."""
         from app.routers.htmx_views import bulk_unarchive
 
         req = _make_requisition(db_session, test_user)

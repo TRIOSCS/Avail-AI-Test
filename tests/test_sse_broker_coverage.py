@@ -44,7 +44,7 @@ class TestSSEBrokerSubscribe:
     """Tests for SSEBroker.subscribe()."""
 
     def test_subscribe_creates_queue(self):
-        """subscribe() returns an asyncio.Queue."""
+        """Subscribe() returns an asyncio.Queue."""
         from app.services.sse_broker import SSEBroker
 
         b = SSEBroker()
@@ -52,7 +52,7 @@ class TestSSEBrokerSubscribe:
         assert isinstance(q, asyncio.Queue)
 
     def test_subscribe_adds_queue_to_channel(self):
-        """subscribe() adds queue to the channel set."""
+        """Subscribe() adds queue to the channel set."""
         from app.services.sse_broker import SSEBroker
 
         b = SSEBroker()
@@ -82,7 +82,7 @@ class TestSSEBrokerUnsubscribe:
     """Tests for SSEBroker.unsubscribe()."""
 
     def test_unsubscribe_removes_queue(self):
-        """unsubscribe() removes the queue from the channel."""
+        """Unsubscribe() removes the queue from the channel."""
         from app.services.sse_broker import SSEBroker
 
         b = SSEBroker()
@@ -93,7 +93,7 @@ class TestSSEBrokerUnsubscribe:
         assert q not in b._channels["unsub-test"]
 
     def test_unsubscribe_nonexistent_queue_is_safe(self):
-        """unsubscribe() of a queue not in channel does not raise."""
+        """Unsubscribe() of a queue not in channel does not raise."""
         from app.services.sse_broker import SSEBroker
 
         b = SSEBroker()
@@ -118,7 +118,7 @@ class TestSSEBrokerPublish:
     """Tests for SSEBroker.publish()."""
 
     async def test_publish_sends_to_all_subscribers(self):
-        """publish() puts event on all subscriber queues."""
+        """Publish() puts event on all subscriber queues."""
         from app.services.sse_broker import SSEBroker
 
         b = SSEBroker()
@@ -133,7 +133,7 @@ class TestSSEBrokerPublish:
         assert msg2 == {"event": "my-event", "data": "some-data"}
 
     async def test_publish_to_empty_channel_is_safe(self):
-        """publish() to a channel with no subscribers does not raise."""
+        """Publish() to a channel with no subscribers does not raise."""
         from app.services.sse_broker import SSEBroker
 
         b = SSEBroker()
@@ -165,7 +165,7 @@ class TestSSEBrokerPublish:
         assert "new-event" in event_names
 
     async def test_publish_default_data_is_empty_string(self):
-        """publish() with no data argument defaults to empty string."""
+        """Publish() with no data argument defaults to empty string."""
         from app.services.sse_broker import SSEBroker
 
         b = SSEBroker()
@@ -178,7 +178,8 @@ class TestSSEBrokerPublish:
         assert msg["event"] == "test-event"
 
     async def test_publish_handles_queue_full_exception_on_put(self):
-        """publish() handles QueueFull gracefully when put_nowait fails (queue not full but race)."""
+        """Publish() handles QueueFull gracefully when put_nowait fails (queue not full
+        but race)."""
         import asyncio
         from unittest.mock import patch
 
@@ -198,7 +199,7 @@ class TestSSEBrokerListen:
     """Tests for SSEBroker.listen() async generator."""
 
     async def test_listen_yields_published_events(self):
-        """listen() yields events as they are published."""
+        """Listen() yields events as they are published."""
         from app.services.sse_broker import SSEBroker
 
         b = SSEBroker()
@@ -222,7 +223,7 @@ class TestSSEBrokerListen:
         assert received[0]["data"] == "payload"
 
     async def test_listen_unsubscribes_on_cancel(self):
-        """listen() unsubscribes from channel when generator exits via break."""
+        """Listen() unsubscribes from channel when generator exits via break."""
         from app.services.sse_broker import SSEBroker
 
         b = SSEBroker()
@@ -245,7 +246,7 @@ class TestSSEBrokerListen:
         assert len(result) == 1
 
     async def test_listen_subscribes_on_start(self):
-        """listen() subscribes to channel when generator starts iterating."""
+        """Listen() subscribes to channel when generator starts iterating."""
         from app.services.sse_broker import SSEBroker
 
         b = SSEBroker()

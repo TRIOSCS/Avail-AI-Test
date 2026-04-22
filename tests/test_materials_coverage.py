@@ -170,7 +170,8 @@ class TestGetMaterialByMpnWithManufacturerInference:
     """Manufacturer inference in get_material_by_mpn (lines 213-218)."""
 
     def test_by_mpn_infers_manufacturer_when_missing(self, client, db_session):
-        """GET /api/materials/by-mpn/{mpn} triggers inference when manufacturer empty."""
+        """GET /api/materials/by-mpn/{mpn} triggers inference when manufacturer
+        empty."""
         mc = MaterialCard(
             normalized_mpn="infer002",
             display_mpn="INFER002",
@@ -190,10 +191,11 @@ class TestGetMaterialByMpnWithManufacturerInference:
 
 
 class TestEnrichMaterial:
-    """enrich endpoint (lines 271-294)."""
+    """Enrich endpoint (lines 271-294)."""
 
     def test_enrich_updates_fields_and_sets_timestamp(self, client, db_session, test_material_card):
-        """POST /api/materials/{id}/enrich applies enrichment data and sets enriched_at."""
+        """POST /api/materials/{id}/enrich applies enrichment data and sets
+        enriched_at."""
         resp = client.post(
             f"/api/materials/{test_material_card.id}/enrich",
             json={
@@ -277,7 +279,7 @@ class TestDeleteMaterialAlreadyDeleted:
 
 
 class TestRestoreMaterial:
-    """restore endpoint (lines 326-343)."""
+    """Restore endpoint (lines 326-343)."""
 
     def test_restore_deleted_card(self, client, db_session, admin_user):
         """POST /api/materials/{id}/restore restores a soft-deleted card."""
@@ -380,7 +382,7 @@ class TestRestoreMaterial:
 
 
 class TestMergeMaterial:
-    """merge endpoint (lines 355-369)."""
+    """Merge endpoint (lines 355-369)."""
 
     def test_merge_missing_source_returns_400(self, client, db_session, admin_user):
         """POST /api/materials/merge with missing source_card_id returns 400."""
@@ -487,7 +489,7 @@ class TestMergeMaterial:
 
 
 class TestBackfillManufacturers:
-    """backfill-manufacturers endpoint (lines 379-382)."""
+    """Backfill-manufacturers endpoint (lines 379-382)."""
 
     def test_backfill_manufacturers_returns_count(self, client, db_session, admin_user):
         """POST /materials/backfill-manufacturers returns enriched_records count."""
@@ -652,7 +654,8 @@ class TestImportStockInvalidFile:
         assert resp.status_code in (200, 400, 500)
 
     def test_import_stock_integrity_error_on_duplicate_vendor(self, client, db_session, monkeypatch):
-        """POST /api/materials/import-stock handles IntegrityError on duplicate vendor."""
+        """POST /api/materials/import-stock handles IntegrityError on duplicate
+        vendor."""
         monkeypatch.setattr("app.routers.materials.get_credential_cached", lambda *a, **kw: None)
         monkeypatch.setattr("asyncio.create_task", lambda coro: coro.close())
 

@@ -1,4 +1,5 @@
-"""test_requirements_async_direct.py — Direct async invocation of requirements view functions.
+"""test_requirements_async_direct.py — Direct async invocation of requirements view
+functions.
 
 Covers lines 388-560, 603, 837-847, 914, 1025, 1207-1342 which are inside async
 view function bodies and cannot be traced through TestClient.
@@ -11,7 +12,6 @@ import os
 
 os.environ["TESTING"] = "1"
 
-import json
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -21,7 +21,6 @@ from sqlalchemy.orm import Session
 from starlette.requests import Request
 
 from app.models import Requirement, Requisition, Sighting, User
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -56,18 +55,18 @@ def _make_requirement(db: Session, req: Requisition, mpn: str = "LM317T") -> Req
 # ── add_requirements (lines 388-560) ────────────────────────────────────────
 
 
-async def test_add_requirements_single_item(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_add_requirements_single_item(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers lines 388-547: add a single requirement via JSON body."""
     from app.routers.requisitions.requirements import add_requirements
 
-    mock_req = _make_json_request({
-        "primary_mpn": "BC547",
-        "manufacturer": "Fairchild",
-        "target_qty": 500,
-        "target_price": 0.25,
-    })
+    mock_req = _make_json_request(
+        {
+            "primary_mpn": "BC547",
+            "manufacturer": "Fairchild",
+            "target_qty": 500,
+            "target_price": 0.25,
+        }
+    )
 
     bg_tasks = BackgroundTasks()
 
@@ -85,16 +84,16 @@ async def test_add_requirements_single_item(
     assert result["created"][0]["primary_mpn"] == "BC547"
 
 
-async def test_add_requirements_batch_list(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_add_requirements_batch_list(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers lines 388-389 (is_batch=True): batch list of requirements."""
     from app.routers.requisitions.requirements import add_requirements
 
-    mock_req = _make_json_request([
-        {"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": 1000},
-        {"primary_mpn": "NE555", "manufacturer": "Philips", "target_qty": 200},
-    ])
+    mock_req = _make_json_request(
+        [
+            {"primary_mpn": "LM317T", "manufacturer": "TI", "target_qty": 1000},
+            {"primary_mpn": "NE555", "manufacturer": "Philips", "target_qty": 200},
+        ]
+    )
 
     bg_tasks = BackgroundTasks()
 
@@ -116,10 +115,12 @@ async def test_add_requirements_batch_with_invalid_item_skipped(
     """Covers lines 395-399: invalid item in batch → skipped."""
     from app.routers.requisitions.requirements import add_requirements
 
-    mock_req = _make_json_request([
-        {"primary_mpn": "VALID001", "manufacturer": "Acme", "target_qty": 100},
-        {"primary_mpn": ""},  # invalid - blank mpn
-    ])
+    mock_req = _make_json_request(
+        [
+            {"primary_mpn": "VALID001", "manufacturer": "Acme", "target_qty": 100},
+            {"primary_mpn": ""},  # invalid - blank mpn
+        ]
+    )
 
     bg_tasks = BackgroundTasks()
 
@@ -142,10 +143,12 @@ async def test_add_requirements_single_invalid_raises_422(
     """Covers lines 396-397: single invalid item (not batch) → raises 422."""
     from app.routers.requisitions.requirements import add_requirements
 
-    mock_req = _make_json_request({
-        "primary_mpn": "",  # invalid
-        "target_qty": 100,
-    })
+    mock_req = _make_json_request(
+        {
+            "primary_mpn": "",  # invalid
+            "target_qty": 100,
+        }
+    )
 
     bg_tasks = BackgroundTasks()
 
@@ -161,9 +164,7 @@ async def test_add_requirements_single_invalid_raises_422(
     assert exc.value.status_code == 422
 
 
-async def test_add_requirements_requisition_not_found(
-    db_session: Session, test_user: User
-):
+async def test_add_requirements_requisition_not_found(db_session: Session, test_user: User):
     """Covers lines 384-386: requisition not found → 404."""
     from app.routers.requisitions.requirements import add_requirements
 
@@ -181,18 +182,18 @@ async def test_add_requirements_requisition_not_found(
     assert exc.value.status_code == 404
 
 
-async def test_add_requirements_with_substitutes(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_add_requirements_with_substitutes(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers lines 400 (_dedupe_substitutes call): substitutes are deduped."""
     from app.routers.requisitions.requirements import add_requirements
 
-    mock_req = _make_json_request({
-        "primary_mpn": "LM317T",
-        "manufacturer": "TI",
-        "target_qty": 100,
-        "substitutes": ["LM317AT", "LM317T", "LM317BT"],  # LM317T is primary → excluded
-    })
+    mock_req = _make_json_request(
+        {
+            "primary_mpn": "LM317T",
+            "manufacturer": "TI",
+            "target_qty": 100,
+            "substitutes": ["LM317AT", "LM317T", "LM317BT"],  # LM317T is primary → excluded
+        }
+    )
 
     bg_tasks = BackgroundTasks()
 
@@ -219,11 +220,13 @@ async def test_add_requirements_with_material_card(
     """Covers lines 401-408 (mat_card resolution): material card linked."""
     from app.routers.requisitions.requirements import add_requirements
 
-    mock_req = _make_json_request({
-        "primary_mpn": "LM317T",
-        "manufacturer": "TI",
-        "target_qty": 100,
-    })
+    mock_req = _make_json_request(
+        {
+            "primary_mpn": "LM317T",
+            "manufacturer": "TI",
+            "target_qty": 100,
+        }
+    )
 
     bg_tasks = BackgroundTasks()
 
@@ -244,25 +247,25 @@ async def test_add_requirements_with_material_card(
     assert req_item.material_card_id == test_material_card.id
 
 
-async def test_add_requirements_with_all_fields(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_add_requirements_with_all_fields(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers lines 418-428 (all optional fields): condition, packaging, etc."""
     from app.routers.requisitions.requirements import add_requirements
 
-    mock_req = _make_json_request({
-        "primary_mpn": "NE555P",
-        "manufacturer": "Texas Instruments",
-        "target_qty": 250,
-        "target_price": 0.15,
-        "condition": "new",
-        "packaging": "reel",
-        "date_codes": "2024+",
-        "firmware": "v1.0",
-        "hardware_codes": "rev-A",
-        "notes": "Prefer Texas Instruments",
-        "description": "Timer IC",
-    })
+    mock_req = _make_json_request(
+        {
+            "primary_mpn": "NE555P",
+            "manufacturer": "Texas Instruments",
+            "target_qty": 250,
+            "target_price": 0.15,
+            "condition": "new",
+            "packaging": "reel",
+            "date_codes": "2024+",
+            "firmware": "v1.0",
+            "hardware_codes": "rev-A",
+            "notes": "Prefer Texas Instruments",
+            "description": "Timer IC",
+        }
+    )
 
     bg_tasks = BackgroundTasks()
 
@@ -288,11 +291,13 @@ async def test_add_requirements_duplicate_detection(
     test_requisition.customer_site_id = None  # no site → no dup detection
     db_session.commit()
 
-    mock_req = _make_json_request({
-        "primary_mpn": "LM317T",
-        "manufacturer": "TI",
-        "target_qty": 100,
-    })
+    mock_req = _make_json_request(
+        {
+            "primary_mpn": "LM317T",
+            "manufacturer": "TI",
+            "target_qty": 100,
+        }
+    )
 
     bg_tasks = BackgroundTasks()
 
@@ -352,9 +357,7 @@ async def test_search_all_transitions_draft_to_active(
 # ── get_saved_sightings (line 914, 1025) ──────────────────────────────────────
 
 
-async def test_get_saved_sightings_requisition_not_found(
-    db_session: Session, test_user: User
-):
+async def test_get_saved_sightings_requisition_not_found(db_session: Session, test_user: User):
     """Covers line 914: requisition not found → 404."""
     from app.routers.requisitions.requirements import get_saved_sightings
 
@@ -367,9 +370,7 @@ async def test_get_saved_sightings_requisition_not_found(
     assert exc.value.status_code == 404
 
 
-async def test_get_saved_sightings_with_data(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_get_saved_sightings_with_data(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers lines 912-1039: successful get_saved_sightings with sightings."""
     from app.routers.requisitions.requirements import get_saved_sightings
 
@@ -421,9 +422,7 @@ async def test_get_saved_sightings_no_sightings_skipped(
 # ── import_stock_list (lines 1207-1281) ──────────────────────────────────────
 
 
-async def test_import_stock_list_success(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_import_stock_list_success(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers lines 1207-1281: import stock list that matches requirements."""
     from app.routers.requisitions.requirements import import_stock_list
 
@@ -442,9 +441,7 @@ async def test_import_stock_list_success(
     async def _form():
         form_mock = MagicMock()
         form_mock.get = lambda key, default=None: (
-            mock_file if key == "file"
-            else "Test Vendor" if key == "vendor_name"
-            else default
+            mock_file if key == "file" else "Test Vendor" if key == "vendor_name" else default
         )
         return form_mock
 
@@ -474,9 +471,7 @@ async def test_import_stock_list_success(
     assert result["imported_rows"] >= 0
 
 
-async def test_import_stock_list_no_file_raises(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_import_stock_list_no_file_raises(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers lines 1204-1207: no file → 400."""
     from app.routers.requisitions.requirements import import_stock_list
 
@@ -500,9 +495,7 @@ async def test_import_stock_list_no_file_raises(
     assert exc.value.status_code == 400
 
 
-async def test_import_stock_list_requisition_not_found(
-    db_session: Session, test_user: User
-):
+async def test_import_stock_list_requisition_not_found(db_session: Session, test_user: User):
     """Covers lines 1200-1201: requisition not found → 404."""
     from app.routers.requisitions.requirements import import_stock_list
 
@@ -527,9 +520,7 @@ async def test_import_stock_list_requisition_not_found(
 # ── list_requirement_sightings (lines 1288-1355) ──────────────────────────────
 
 
-async def test_list_requirement_sightings_success(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_list_requirement_sightings_success(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers lines 1288-1355: list sightings for a single requirement."""
     from app.routers.requisitions.requirements import list_requirement_sightings
 
@@ -559,9 +550,7 @@ async def test_list_requirement_sightings_success(
     assert "label" in result
 
 
-async def test_list_requirement_sightings_not_found(
-    db_session: Session, test_user: User
-):
+async def test_list_requirement_sightings_not_found(db_session: Session, test_user: User):
     """Covers lines 1303-1305: requirement not found → 404."""
     from app.routers.requisitions.requirements import list_requirement_sightings
 
@@ -633,9 +622,7 @@ async def test_list_requirement_sightings_with_substitutes(
 # ── upload_requirements (line 603) ────────────────────────────────────────────
 
 
-async def test_upload_requirements_empty_csv(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_upload_requirements_empty_csv(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers upload_requirements: empty file → 0 created."""
     from app.routers.requisitions.requirements import upload_requirements
 
@@ -663,9 +650,7 @@ async def test_upload_requirements_empty_csv(
     assert result["total_rows"] == 0
 
 
-async def test_upload_requirements_with_valid_rows(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
+async def test_upload_requirements_with_valid_rows(db_session: Session, test_user: User, test_requisition: Requisition):
     """Covers upload_requirements: file with valid MPNs → created count > 0."""
     from app.routers.requisitions.requirements import upload_requirements
 
@@ -702,9 +687,7 @@ async def test_upload_requirements_with_valid_rows(
     assert result["total_rows"] == 2
 
 
-async def test_upload_requirements_requisition_not_found(
-    db_session: Session, test_user: User
-):
+async def test_upload_requirements_requisition_not_found(db_session: Session, test_user: User):
     """Covers upload_requirements: req not found → 404."""
     from app.routers.requisitions.requirements import upload_requirements
 
@@ -734,12 +717,14 @@ async def test_add_requirements_resolve_material_card_exception(
     """Covers lines 406-408: resolve_material_card raises → logged, mat_card=None."""
     from app.routers.requisitions.requirements import add_requirements
 
-    mock_req = _make_json_request({
-        "primary_mpn": "BC547X",
-        "manufacturer": "Fairchild",
-        "target_qty": 100,
-        "target_price": 0.10,
-    })
+    mock_req = _make_json_request(
+        {
+            "primary_mpn": "BC547X",
+            "manufacturer": "Fairchild",
+            "target_qty": 100,
+            "target_price": 0.10,
+        }
+    )
 
     bg_tasks = BackgroundTasks()
 
@@ -784,11 +769,13 @@ async def test_add_requirements_with_customer_site_tag_propagation(
     db_session.commit()
     db_session.refresh(req_with_site)
 
-    mock_req = _make_json_request({
-        "primary_mpn": "LM324N",
-        "manufacturer": "TI",
-        "target_qty": 200,
-    })
+    mock_req = _make_json_request(
+        {
+            "primary_mpn": "LM324N",
+            "manufacturer": "TI",
+            "target_qty": 200,
+        }
+    )
 
     bg_tasks = BackgroundTasks()
 
@@ -823,11 +810,13 @@ async def test_add_requirements_task_service_exception(
     """Covers lines 452-453: on_requirement_added raises → logged, continues."""
     from app.routers.requisitions.requirements import add_requirements
 
-    mock_req = _make_json_request({
-        "primary_mpn": "NE5532",
-        "manufacturer": "Philips",
-        "target_qty": 50,
-    })
+    mock_req = _make_json_request(
+        {
+            "primary_mpn": "NE5532",
+            "manufacturer": "Philips",
+            "target_qty": 50,
+        }
+    )
 
     bg_tasks = BackgroundTasks()
 
@@ -855,9 +844,7 @@ async def test_add_requirements_task_service_exception(
 # ── search_all with draft/archived status (lines 837-838, 841-847) ───────────
 
 
-async def test_search_all_with_draft_requisition_transitions_to_active(
-    db_session: Session, test_user: User
-):
+async def test_search_all_with_draft_requisition_transitions_to_active(db_session: Session, test_user: User):
     """Covers lines 841-847: draft requisition → transition to active."""
     from app.models import Requisition
     from app.routers.requisitions.requirements import search_all
@@ -906,9 +893,7 @@ async def test_search_all_with_draft_requisition_transitions_to_active(
     assert "source_stats" in result
 
 
-async def test_search_all_merged_source_stats_with_error(
-    db_session: Session, test_user: User
-):
+async def test_search_all_merged_source_stats_with_error(db_session: Session, test_user: User):
     """Covers lines 837-838: merged source stats where stat has error."""
     from app.models import Requisition
     from app.routers.requisitions.requirements import search_all
@@ -1062,9 +1047,7 @@ async def test_import_stock_list_no_filename_raises_400(
 
     async def _form():
         form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (
-            mock_file if key == "file" else default
-        )
+        form_mock.get = lambda key, default=None: (mock_file if key == "file" else default)
         return form_mock
 
     mock_req.form = _form
@@ -1114,9 +1097,7 @@ async def test_import_stock_list_with_requirement_having_substitutes(
     async def _form():
         form_mock = MagicMock()
         form_mock.get = lambda key, default=None: (
-            mock_file if key == "file"
-            else "Acme Surplus" if key == "vendor_name"
-            else default
+            mock_file if key == "file" else "Acme Surplus" if key == "vendor_name" else default
         )
         return form_mock
 
@@ -1166,9 +1147,7 @@ async def test_import_stock_list_commit_exception_raises_500(
 
     async def _form():
         form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (
-            mock_file if key == "file" else default
-        )
+        form_mock.get = lambda key, default=None: (mock_file if key == "file" else default)
         return form_mock
 
     mock_req.form = _form
@@ -1340,9 +1319,7 @@ async def test_import_stock_list_normalize_stock_row_returns_none(
 
     async def _form():
         form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (
-            mock_file if key == "file" else default
-        )
+        form_mock.get = lambda key, default=None: (mock_file if key == "file" else default)
         return form_mock
 
     mock_req.form = _form
@@ -1391,9 +1368,7 @@ async def test_import_stock_list_mpn_not_in_req_mpns(
 
     async def _form():
         form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (
-            mock_file if key == "file" else default
-        )
+        form_mock.get = lambda key, default=None: (mock_file if key == "file" else default)
         return form_mock
 
     mock_req.form = _form

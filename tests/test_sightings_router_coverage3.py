@@ -1,4 +1,5 @@
-"""tests/test_sightings_router_coverage3.py — Coverage boost for app/routers/sightings.py.
+"""tests/test_sightings_router_coverage3.py — Coverage boost for
+app/routers/sightings.py.
 
 Targets uncovered lines:
 - batch-refresh: success, failed (id not found), skipped+failed mixed, only-skipped level,
@@ -31,7 +32,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import Requirement, Requisition, User, VendorCard, VendorContact
-
 
 # ── Shared fixture ────────────────────────────────────────────────────────────
 
@@ -118,9 +118,7 @@ class TestBatchRefreshCoverage:
         assert resp.status_code == 200
         assert "failed" in resp.text.lower()
 
-    def test_batch_refresh_only_skipped_level_info(
-        self, client: TestClient, req_item, db_session: Session
-    ):
+    def test_batch_refresh_only_skipped_level_info(self, client: TestClient, req_item, db_session: Session):
         """Lines 689-690: skipped and not success → level='info'."""
         _, item = req_item
         # Set recently searched so it gets rate-limited
@@ -135,9 +133,7 @@ class TestBatchRefreshCoverage:
         assert resp.status_code == 200
         assert "skipped" in resp.text.lower()
 
-    def test_batch_refresh_mixed_failed_and_skipped(
-        self, client: TestClient, two_items, db_session: Session
-    ):
+    def test_batch_refresh_mixed_failed_and_skipped(self, client: TestClient, two_items, db_session: Session):
         """Lines 683-688: failed > 0 → level='warning', skipped text appended."""
         _, items = two_items
         # Rate-limit first item
@@ -203,9 +199,7 @@ class TestBatchAssignCoverage:
         )
         assert resp.status_code == 400
 
-    def test_batch_assign_with_buyer_id_valid_user(
-        self, client: TestClient, req_item, test_user: User
-    ):
+    def test_batch_assign_with_buyer_id_valid_user(self, client: TestClient, req_item, test_user: User):
         """Lines 719-721: buyer_id resolves to known user → buyer_name = user.name."""
         _, item = req_item
         resp = client.post(
@@ -309,9 +303,7 @@ class TestBatchStatusCoverage:
         assert resp.status_code == 200
         assert "Updated 1" in resp.text
 
-    def test_batch_status_skipped_invalid_transition(
-        self, client: TestClient, req_item, db_session: Session
-    ):
+    def test_batch_status_skipped_invalid_transition(self, client: TestClient, req_item, db_session: Session):
         """Lines 778-787: invalid transition → skipped > 0, level=warning."""
         _, item = req_item
         # won is a terminal state that can't transition to sourcing
@@ -325,9 +317,7 @@ class TestBatchStatusCoverage:
         assert resp.status_code == 200
         assert "skipped" in resp.text.lower()
 
-    def test_batch_status_two_items_mixed(
-        self, client: TestClient, two_items, db_session: Session
-    ):
+    def test_batch_status_two_items_mixed(self, client: TestClient, two_items, db_session: Session):
         """Both items: one valid, one invalid transition → updated=1, skipped=1."""
         _, items = two_items
         items[1].sourcing_status = "won"  # can't go to sourcing
@@ -413,9 +403,7 @@ class TestMarkUnavailableCoverage:
         )
         assert resp.status_code == 400
 
-    def test_mark_unavailable_success_with_sightings(
-        self, client: TestClient, req_item, db_session: Session
-    ):
+    def test_mark_unavailable_success_with_sightings(self, client: TestClient, req_item, db_session: Session):
         """Lines 847-866: sightings found and marked unavailable."""
         from app.models import Sighting
 
@@ -472,9 +460,7 @@ class TestAdvanceStatusCoverage:
         )
         assert resp.status_code == 200
 
-    def test_advance_status_invalid_transition_returns_409(
-        self, client: TestClient, req_item, db_session: Session
-    ):
+    def test_advance_status_invalid_transition_returns_409(self, client: TestClient, req_item, db_session: Session):
         """Line 917: require_valid_transition raises → 409."""
         _, item = req_item
         item.sourcing_status = "won"  # terminal, can only go to archived
@@ -491,9 +477,7 @@ class TestAdvanceStatusCoverage:
 
 
 class TestPreviewInquiryCoverage:
-    def test_preview_with_vendor_card_no_contact(
-        self, client: TestClient, req_item, db_session: Session
-    ):
+    def test_preview_with_vendor_card_no_contact(self, client: TestClient, req_item, db_session: Session):
         """Lines 1079-1128: vendor card found, no contact → vendor_email empty."""
         _, item = req_item
         card = VendorCard(
@@ -519,9 +503,7 @@ class TestPreviewInquiryCoverage:
             )
         assert resp.status_code == 200
 
-    def test_preview_with_vendor_card_and_contact_email(
-        self, client: TestClient, req_item, db_session: Session
-    ):
+    def test_preview_with_vendor_card_and_contact_email(self, client: TestClient, req_item, db_session: Session):
         """Lines 1100-1105: contact has email → vendor_email populated."""
         _, item = req_item
         card = VendorCard(
@@ -554,9 +536,7 @@ class TestPreviewInquiryCoverage:
             )
         assert resp.status_code == 200
 
-    def test_preview_multiple_requirements_subject(
-        self, client: TestClient, two_items
-    ):
+    def test_preview_multiple_requirements_subject(self, client: TestClient, two_items):
         """Line 1107: plural 'parts' in subject when len > 1."""
         _, items = two_items
         with patch("app.email_service._build_html_body", return_value="<p>body</p>"):
@@ -609,9 +589,7 @@ class TestPreviewInquiryCoverage:
 
 
 class TestSendInquiryCoverage:
-    def test_send_with_vendor_card_and_contact(
-        self, client: TestClient, req_item, db_session: Session
-    ):
+    def test_send_with_vendor_card_and_contact(self, client: TestClient, req_item, db_session: Session):
         """Lines 1153-1174: vendor card + contact email populates vendor_groups."""
         _, item = req_item
         card = VendorCard(
@@ -646,9 +624,7 @@ class TestSendInquiryCoverage:
         assert resp.status_code == 200
         assert "RFQ sent" in resp.text
 
-    def test_send_with_auto_progress_multiple_reqs(
-        self, client: TestClient, two_items
-    ):
+    def test_send_with_auto_progress_multiple_reqs(self, client: TestClient, two_items):
         """Lines 1215-1217: auto_progress_status returns True for each req → progressed_count."""
         _, items = two_items
         with patch("app.email_service.send_batch_rfq", new=AsyncMock(return_value=[{}])):
@@ -666,7 +642,8 @@ class TestSendInquiryCoverage:
         assert "advanced to sourcing" in resp.text.lower() or "sourcing" in resp.text.lower()
 
     def test_send_failed_vendors_message(self, client: TestClient, req_item):
-        """Lines 1218-1220, 1233-1234: exception → failed_vendors list → warning message."""
+        """Lines 1218-1220, 1233-1234: exception → failed_vendors list → warning
+        message."""
         _, item = req_item
         with patch(
             "app.email_service.send_batch_rfq",

@@ -1,9 +1,44 @@
 {# requisitions2/_single_row.html — Single row after inline save.
    Called by: PATCH /requisitions2/{id}/inline
-   Receives: req (Requisition model), user, customer_display, created_by_name, requirement_count
+   Receives: req (Requisition model), user, customer_display, created_by_name, requirement_count,
+             avail_opp_table_v2_enabled context flag.
    Depends on: HTMX, Alpine.js
 #}
-{% from "htmx/partials/shared/_macros.html" import status_badge %}
+{% from "htmx/partials/shared/_macros.html" import status_badge, opp_name_cell, opp_status_cell, opp_row_action_rail, urgency_accent_class, deal_value, coverage_meter %}
+{% if avail_opp_table_v2_enabled | default(False) %}
+<tr id="rq2-row-{{ req.id }}"
+    class="rq2-row group {{ urgency_accent_class(req.hours_until_bid_due, req.urgency) }}"
+    data-status="{{ req.status }}"
+    x-data="rowActionRail()"
+    tabindex="0"
+    @mouseenter="show = true"
+    @mouseleave="show = false"
+    @focusin="show = true"
+    @focusout.self="show = false"
+    @keydown.enter="show = true"
+    @keydown.escape="show = false"
+    @click="selectReq({{ req.id }})"
+    hx-get="/requisitions2/{{ req.id }}/detail"
+    hx-target="#rq2-detail"
+    hx-swap="innerHTML"
+    :class="selectedReqId === {{ req.id }} ? 'bg-brand-50 border-l-2 border-brand-500' : ''">
+  <td class="px-3 py-2" @click.stop>
+    <input aria-label="Select requisition {{ req.name }}" type="checkbox" value="{{ req.id }}"
+           class="rounded border-gray-300 text-brand-500 focus:ring-brand-400"
+           x-on:change="toggleSelection({{ req.id }}, $event.target.checked)"
+           x-bind:checked="selectedIds.has({{ req.id }})">
+  </td>
+  <td class="px-3 py-2 overflow-hidden">{{ opp_name_cell(req) }}</td>
+  <td class="px-3 py-2">{{ opp_status_cell(req.status, req.hours_until_bid_due) }}</td>
+  <td class="px-3 py-2 text-sm text-gray-600 overflow-hidden">
+    <span class="truncate block" x-truncate-tip>{{ customer_display or '—' }}</span>
+  </td>
+  <td class="px-3 py-2">{{ coverage_meter(req.coverage_filled, req.coverage_total) }}</td>
+  <td class="px-3 py-2">{{ deal_value(req.deal_value_display, req.deal_value_source, priced_count=req.deal_value_priced_count, requirement_count=req.deal_value_requirement_count) }}</td>
+  {{ opp_row_action_rail(req, user) }}
+</tr>
+{% else %}
+{# Legacy 5-col rendering — preserved verbatim for flag-off rollback. #}
 <tr id="rq2-row-{{ req.id }}"
     hx-get="/requisitions2/{{ req.id }}/detail"
     hx-target="#rq2-detail"
@@ -32,3 +67,4 @@
   <td class="px-3 py-2 text-sm text-gray-600 truncate max-w-[140px]">{{ customer_display or '—' }}</td>
   <td class="px-3 py-2 text-sm text-right text-gray-800">{{ requirement_count }}</td>
 </tr>
+{% endif %}

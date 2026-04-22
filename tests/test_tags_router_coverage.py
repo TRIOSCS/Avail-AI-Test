@@ -308,7 +308,8 @@ class TestGetMaterialCardTags:
         assert data[0]["source"] == "ai_classified"
 
     def test_material_tag_response_fields(self, client, db_session: Session):
-        """Material tag response includes tag details, confidence, source, classified_at."""
+        """Material tag response includes tag details, confidence, source,
+        classified_at."""
         mc = MaterialCard(
             normalized_mpn="ne555-tag-test",
             display_mpn="NE555",

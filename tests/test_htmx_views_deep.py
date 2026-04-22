@@ -14,13 +14,11 @@ os.environ["TESTING"] = "1"
 from datetime import datetime, timezone
 from unittest.mock import MagicMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.constants import (
     BuyPlanStatus,
-    OfferStatus,
     QuoteStatus,
     RequisitionStatus,
     SourcingStatus,
@@ -28,15 +26,12 @@ from app.constants import (
 from app.models import (
     BuyPlan,
     Company,
-    CustomerSite,
-    Offer,
     Quote,
     Requirement,
     Requisition,
     User,
     VendorCard,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -130,7 +125,8 @@ def _company(db: Session, **kw) -> Company:
 
 
 class TestV2PagePathVariants:
-    """Test v2_page routes — must mock get_user since v2_page uses session, not require_user."""
+    """Test v2_page routes — must mock get_user since v2_page uses session, not
+    require_user."""
 
     def _get(self, client: TestClient, path: str, test_user: User) -> int:
         with patch("app.routers.htmx_views.get_user", return_value=test_user):
@@ -518,9 +514,7 @@ class TestSettingsRoutes:
         resp = client.get("/v2/partials/settings/system")
         assert resp.status_code == 403
 
-    def test_settings_system_admin(
-        self, db_session: Session, admin_user: User
-    ):
+    def test_settings_system_admin(self, db_session: Session, admin_user: User):
         from app.database import get_db
         from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
         from app.main import app
@@ -561,12 +555,16 @@ class TestSettingsRoutes:
 
 class TestProactiveRoutes:
     def test_proactive_list(self, client: TestClient):
-        with patch("app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}):
+        with patch(
+            "app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}
+        ):
             resp = client.get("/v2/partials/proactive")
         assert resp.status_code == 200
 
     def test_proactive_list_sent_tab(self, client: TestClient):
-        with patch("app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}):
+        with patch(
+            "app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}
+        ):
             with patch("app.services.proactive_service.get_sent_offers", return_value=[]):
                 resp = client.get("/v2/partials/proactive?tab=sent")
         assert resp.status_code == 200
@@ -576,12 +574,16 @@ class TestProactiveRoutes:
         assert resp.status_code == 200
 
     def test_proactive_scorecard(self, client: TestClient):
-        with patch("app.services.proactive_service.get_scorecard", return_value={"total_sent": 0, "total_converted": 0}):
+        with patch(
+            "app.services.proactive_service.get_scorecard", return_value={"total_sent": 0, "total_converted": 0}
+        ):
             resp = client.get("/v2/partials/proactive/scorecard")
         assert resp.status_code == 200
 
     def test_proactive_batch_dismiss_empty(self, client: TestClient):
-        with patch("app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}):
+        with patch(
+            "app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}
+        ):
             resp = client.post("/v2/partials/proactive/batch-dismiss", data={})
         assert resp.status_code == 200
 

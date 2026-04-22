@@ -565,6 +565,12 @@ class TestRequisitionDetail:
         db_session.commit()
         resp = client.get(f"/v2/partials/requisitions/{req.id}")
         assert resp.status_code == 200
+        # Lazy insights hx-get must pair with hx-target="this" so swaps do not inherit
+        # <main id="main-content" hx-target="this"> (which would replace the whole main column).
+        marker = f'hx-get="/v2/partials/requisitions/{req.id}/insights"'
+        assert marker in resp.text
+        start = resp.text.index(marker)
+        assert 'hx-target="this"' in resp.text[start : start + 280]
 
     def test_detail_not_found(self, client: TestClient):
         resp = client.get("/v2/partials/requisitions/999999")
@@ -1194,6 +1200,10 @@ class TestVendorDetail:
         db_session.commit()
         resp = client.get(f"/v2/partials/vendors/{vc.id}")
         assert resp.status_code == 200
+        marker = f'hx-get="/v2/partials/vendors/{vc.id}/insights"'
+        assert marker in resp.text
+        start = resp.text.index(marker)
+        assert 'hx-target="this"' in resp.text[start : start + 280]
 
     def test_detail_not_found(self, client: TestClient):
         resp = client.get("/v2/partials/vendors/999999")
@@ -1299,6 +1309,10 @@ class TestCustomerDetail:
         db_session.commit()
         resp = client.get(f"/v2/partials/customers/{co.id}")
         assert resp.status_code == 200
+        marker = f'hx-get="/v2/partials/customers/{co.id}/insights"'
+        assert marker in resp.text
+        start = resp.text.index(marker)
+        assert 'hx-target="this"' in resp.text[start : start + 280]
 
     def test_detail_not_found(self, client: TestClient):
         resp = client.get("/v2/partials/customers/999999")
@@ -1708,6 +1722,16 @@ class TestInsights:
             with patch("app.services.knowledge_service.get_cached_company_insights", return_value=None):
                 resp = client.post(f"/v2/partials/customers/{co.id}/insights/refresh")
                 assert resp.status_code == 200
+
+    def test_dashboard_partial_pipeline_loader_targets_self(self, client: TestClient):
+        """Pipeline lazy-load must set hx-target so it does not inherit <main hx-
+        target="this">."""
+        resp = client.get("/v2/partials/dashboard")
+        assert resp.status_code == 200
+        marker = 'hx-get="/v2/partials/dashboard/pipeline-insights"'
+        assert marker in resp.text
+        start = resp.text.index(marker)
+        assert 'hx-target="this"' in resp.text[start : start + 280]
 
     def test_pipeline_insights(self, client: TestClient):
         with patch("app.services.knowledge_service.get_cached_pipeline_insights", return_value=None):

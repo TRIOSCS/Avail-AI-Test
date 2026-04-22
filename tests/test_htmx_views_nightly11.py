@@ -1,4 +1,5 @@
-"""tests/test_htmx_views_nightly11.py — Coverage for proactive, materials enrichment, prospecting, settings, admin routes.
+"""tests/test_htmx_views_nightly11.py — Coverage for proactive, materials enrichment,
+prospecting, settings, admin routes.
 
 Targets: proactive list/batch-dismiss/draft/send, prospecting list/claim/dismiss,
 settings partials, materials enrichment/find-crosses/insights, admin import/data-ops.
@@ -6,6 +7,7 @@ settings partials, materials enrichment/find-crosses/insights, admin import/data
 Called by: pytest autodiscovery
 Depends on: conftest.py fixtures, app.routers.htmx_views
 """
+
 import os
 
 os.environ["TESTING"] = "1"
@@ -15,7 +17,6 @@ import uuid
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -25,13 +26,11 @@ from app.models import (
     MaterialCard,
     Offer,
     ProactiveOffer,
-    Requisition,
     User,
     VendorCard,
 )
 from app.models.intelligence import ProactiveDoNotOffer, ProactiveMatch
 from app.models.knowledge import KnowledgeEntry
-
 
 # ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -239,7 +238,8 @@ class TestProspectingDetailClaimDismiss:
 
 
 class TestSettingsPartials:
-    """Covers GET /v2/partials/settings, /settings/sources, /settings/profile, /settings/system."""
+    """Covers GET /v2/partials/settings, /settings/sources, /settings/profile,
+    /settings/system."""
 
     def test_settings_index(self, client: TestClient):
         resp = client.get("/v2/partials/settings")
@@ -257,9 +257,7 @@ class TestSettingsPartials:
         resp = client.get("/v2/partials/settings/profile")
         assert resp.status_code == 200
 
-    def test_settings_system_tab_non_admin_returns_403(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_settings_system_tab_non_admin_returns_403(self, client: TestClient, db_session: Session, test_user: User):
         """Buyer user should get 403 from system tab (admin-only)."""
         resp = client.get("/v2/partials/settings/system")
         assert resp.status_code == 403
@@ -294,16 +292,21 @@ class TestSettingsDataOps:
 
 
 class TestProactiveListAndDismiss:
-    """Covers GET /v2/partials/proactive and POST /v2/partials/proactive/batch-dismiss."""
+    """Covers GET /v2/partials/proactive and POST /v2/partials/proactive/batch-
+    dismiss."""
 
     def test_proactive_list_matches_tab(self, client: TestClient, db_session: Session):
-        with patch("app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}):
+        with patch(
+            "app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}
+        ):
             with patch("app.services.proactive_service.get_sent_offers", return_value=[]):
                 resp = client.get("/v2/partials/proactive")
                 assert resp.status_code == 200
 
     def test_proactive_list_sent_tab(self, client: TestClient, db_session: Session):
-        with patch("app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}):
+        with patch(
+            "app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}
+        ):
             with patch("app.services.proactive_service.get_sent_offers", return_value=[]):
                 resp = client.get("/v2/partials/proactive?tab=sent")
                 assert resp.status_code == 200
@@ -316,7 +319,9 @@ class TestProactiveListAndDismiss:
                 assert resp.status_code == 200
 
     def test_batch_dismiss_empty_form(self, client: TestClient, db_session: Session):
-        with patch("app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}):
+        with patch(
+            "app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}
+        ):
             resp = client.post("/v2/partials/proactive/batch-dismiss", data={})
             assert resp.status_code == 200
 
@@ -329,7 +334,9 @@ class TestProactiveListAndDismiss:
         test_customer_site: CustomerSite,
     ):
         m = make_proactive_match(db_session, test_offer, test_user, test_customer_site)
-        with patch("app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}):
+        with patch(
+            "app.services.proactive_service.get_matches_for_user", return_value={"groups": [], "stats": {"total": 0}}
+        ):
             resp = client.post(
                 "/v2/partials/proactive/batch-dismiss",
                 data={"match_ids": [str(m.id)]},
@@ -350,9 +357,7 @@ class TestProactiveDraft:
         assert resp.status_code == 200
         assert "No matches selected" in resp.text
 
-    def test_draft_invalid_match_ids_returns_no_valid_matches(
-        self, client: TestClient, db_session: Session
-    ):
+    def test_draft_invalid_match_ids_returns_no_valid_matches(self, client: TestClient, db_session: Session):
         resp = client.post("/v2/partials/proactive/draft", data={"match_ids": "999999"})
         assert resp.status_code == 200
         assert "No valid matches found" in resp.text
@@ -403,7 +408,10 @@ class TestProactiveScorecardAndBadge:
     """Covers GET /v2/partials/proactive/scorecard and /badge."""
 
     def test_scorecard_returns_200(self, client: TestClient):
-        with patch("app.services.proactive_service.get_scorecard", return_value={"total_sent": 5, "total_converted": 2, "conversion_rate": 40, "total_revenue": 1000}):
+        with patch(
+            "app.services.proactive_service.get_scorecard",
+            return_value={"total_sent": 5, "total_converted": 2, "conversion_rate": 40, "total_revenue": 1000},
+        ):
             resp = client.get("/v2/partials/proactive/scorecard")
             assert resp.status_code == 200
 
@@ -452,9 +460,7 @@ class TestProactiveDoNotOffer:
         )
         assert resp.status_code == 400
 
-    def test_do_not_offer_creates_record(
-        self, client: TestClient, db_session: Session, test_company: Company
-    ):
+    def test_do_not_offer_creates_record(self, client: TestClient, db_session: Session, test_company: Company):
         resp = client.post(
             "/v2/partials/proactive/do-not-offer",
             data={"mpn": "LM317T", "company_id": str(test_company.id)},
@@ -465,9 +471,7 @@ class TestProactiveDoNotOffer:
         assert rec is not None
         assert rec.mpn == "LM317T"
 
-    def test_do_not_offer_duplicate_is_idempotent(
-        self, client: TestClient, db_session: Session, test_company: Company
-    ):
+    def test_do_not_offer_duplicate_is_idempotent(self, client: TestClient, db_session: Session, test_company: Company):
         client.post(
             "/v2/partials/proactive/do-not-offer",
             data={"mpn": "LM317T", "company_id": str(test_company.id)},
@@ -692,38 +696,32 @@ class TestKnowledgePartial:
         resp = client.get("/v2/partials/knowledge")
         assert resp.status_code == 200
 
-    def test_knowledge_list_with_entries(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_knowledge_list_with_entries(self, client: TestClient, db_session: Session, test_user: User):
         make_knowledge_entry(db_session, test_user, content="LM317T voltage regulator notes")
         resp = client.get("/v2/partials/knowledge")
         assert resp.status_code == 200
 
-    def test_knowledge_list_with_query(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_knowledge_list_with_query(self, client: TestClient, db_session: Session, test_user: User):
         make_knowledge_entry(db_session, test_user, content="Searchable content about LM317T")
         resp = client.get("/v2/partials/knowledge?q=LM317T")
         assert resp.status_code == 200
 
-    def test_create_knowledge_entry_success(
-        self, client: TestClient, db_session: Session
-    ):
+    def test_create_knowledge_entry_success(self, client: TestClient, db_session: Session):
         resp = client.post(
             "/v2/partials/knowledge",
             data={"content": "This is a test knowledge entry", "entry_type": "note"},
         )
         assert resp.status_code == 200
-        entry = db_session.query(KnowledgeEntry).filter(KnowledgeEntry.content == "This is a test knowledge entry").first()
+        entry = (
+            db_session.query(KnowledgeEntry).filter(KnowledgeEntry.content == "This is a test knowledge entry").first()
+        )
         assert entry is not None
 
     def test_create_knowledge_entry_empty_content_returns_400(self, client: TestClient):
         resp = client.post("/v2/partials/knowledge", data={"content": ""})
         assert resp.status_code == 400
 
-    def test_create_knowledge_entry_defaults_entry_type(
-        self, client: TestClient, db_session: Session
-    ):
+    def test_create_knowledge_entry_defaults_entry_type(self, client: TestClient, db_session: Session):
         resp = client.post("/v2/partials/knowledge", data={"content": "Default type entry"})
         assert resp.status_code == 200
         entry = db_session.query(KnowledgeEntry).filter(KnowledgeEntry.content == "Default type entry").first()
@@ -735,7 +733,8 @@ class TestKnowledgePartial:
 
 
 class TestAdminImportVendors:
-    """Covers POST /v2/partials/admin/import/vendors and GET /v2/partials/admin/data-ops."""
+    """Covers POST /v2/partials/admin/import/vendors and GET /v2/partials/admin/data-
+    ops."""
 
     def test_import_vendors_no_file_returns_400(
         self, client: TestClient, db_session: Session, test_user: User, admin_user: User
@@ -764,9 +763,7 @@ class TestAdminImportVendors:
             for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
                 app.dependency_overrides.pop(dep, None)
 
-    def test_import_vendors_csv_success(
-        self, client: TestClient, db_session: Session, admin_user: User
-    ):
+    def test_import_vendors_csv_success(self, client: TestClient, db_session: Session, admin_user: User):
         from app.database import get_db
         from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
         from app.main import app
@@ -831,9 +828,7 @@ class TestAdminImportVendors:
             for dep in [get_db, require_user, require_admin, require_buyer, require_fresh_token]:
                 app.dependency_overrides.pop(dep, None)
 
-    def test_admin_data_ops_returns_200_for_admin(
-        self, client: TestClient, db_session: Session, admin_user: User
-    ):
+    def test_admin_data_ops_returns_200_for_admin(self, client: TestClient, db_session: Session, admin_user: User):
         """Admin users can access data-ops panel."""
         from app.database import get_db
         from app.dependencies import require_admin, require_buyer, require_fresh_token, require_user
@@ -889,7 +884,8 @@ class TestAdminImportVendors:
 
 
 class TestAdminMerge:
-    """Covers POST /v2/partials/admin/vendor-merge and /company-merge (buyer role → 403)."""
+    """Covers POST /v2/partials/admin/vendor-merge and /company-merge (buyer role →
+    403)."""
 
     def test_vendor_merge_non_admin_returns_403(self, client: TestClient, test_vendor_card: VendorCard):
         resp = client.post(

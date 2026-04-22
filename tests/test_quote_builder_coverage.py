@@ -1,4 +1,5 @@
-"""tests/test_quote_builder_coverage.py — Additional coverage for app/routers/quote_builder.py.
+"""tests/test_quote_builder_coverage.py — Additional coverage for
+app/routers/quote_builder.py.
 
 Targets uncovered branches:
 - quote_builder_modal: req not found, with customer site
@@ -19,12 +20,10 @@ os.environ["TESTING"] = "1"
 
 from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import CustomerSite, Requisition
-
 
 # ── quote_builder_modal ────────────────────────────────────────────────────
 
@@ -91,9 +90,7 @@ class TestQuoteBuilderModalMulti:
         assert resp.status_code == 200
         assert resp.json()["lines"] == []
 
-    def test_multi_data_multiple_reqs(
-        self, client: TestClient, test_requisition: Requisition
-    ):
+    def test_multi_data_multiple_reqs(self, client: TestClient, test_requisition: Requisition):
         """Multiple IDs in requisition_ids — lines from each are merged."""
         with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
             with patch(
@@ -114,9 +111,7 @@ class TestQuoteBuilderModalMulti:
 
 
 class TestQuoteBuilderDataExtra:
-    def test_data_invalid_requirement_ids_format(
-        self, client: TestClient, test_requisition: Requisition
-    ):
+    def test_data_invalid_requirement_ids_format(self, client: TestClient, test_requisition: Requisition):
         """Invalid requirement_ids string should gracefully fall back to None."""
         with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
             with patch("app.services.quote_builder_service.get_builder_data", return_value=[]):

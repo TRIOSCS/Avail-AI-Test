@@ -1,4 +1,5 @@
-"""test_attachments_coverage2.py — Additional coverage for requisition/requirement attachments.
+"""test_attachments_coverage2.py — Additional coverage for requisition/requirement
+attachments.
 
 Targets remaining uncovered branches in app/routers/requisitions/attachments.py:
 - Line 39: list_requisition_attachments — get_req_for_user returns None (dead-code guard)
@@ -88,8 +89,8 @@ class TestListRequisitionAttachmentsLine39:
     def test_returns_404_when_get_req_for_user_returns_none(self, client, test_requisition):
         """When get_req_for_user returns None, line 39 raises 404.
 
-        Normally get_req_for_user raises, but patching it to return None
-        exercises the `if not req:` guard on line 38-39.
+        Normally get_req_for_user raises, but patching it to return None exercises the
+        `if not req:` guard on line 38-39.
         """
         with patch(
             "app.routers.requisitions.attachments.get_req_for_user",
@@ -238,9 +239,9 @@ class TestAttachRequisitionFromOneDriveLine123:
 class TestAttachOneDriveDirectHandler:
     """Call attach_requisition_from_onedrive directly to guarantee coverage.
 
-    The HTTP-layer tests verify the endpoint works end-to-end. These async
-    tests call the handler function directly with mocked dependencies to
-    guarantee coverage.py traces lines 125-155 regardless of xdist behaviour.
+    The HTTP-layer tests verify the endpoint works end-to-end. These async tests call
+    the handler function directly with mocked dependencies to guarantee coverage.py
+    traces lines 125-155 regardless of xdist behaviour.
     """
 
     async def test_direct_success_path_creates_attachment(self, db_session, test_requisition, test_user):
@@ -523,8 +524,8 @@ class TestUploadRequirementAttachmentNoFilename:
     async def test_file_with_no_filename_raises_400(self, db_session, test_requisition, test_user):
         """UploadFile with falsy filename → HTTPException 400 at line 255.
 
-        Calls the handler function directly with a mocked UploadFile that
-        has filename=None, bypassing FastAPI's multipart validation.
+        Calls the handler function directly with a mocked UploadFile that has
+        filename=None, bypassing FastAPI's multipart validation.
         """
         from fastapi import HTTPException
         from fastapi import UploadFile as FUF
@@ -572,7 +573,8 @@ class TestDeleteRequirementAttachmentLines309And319:
         assert resp.status_code == 401
 
     def test_onedrive_delete_returns_401(self, client, db_session, test_requisition, test_user):
-        """OneDrive returns 401 during requirement attachment delete → 401 — line 309."""
+        """OneDrive returns 401 during requirement attachment delete → 401 — line
+        309."""
         requirement = _make_requirement(db_session, test_requisition.id)
         att = _make_reqmt_att(db_session, requirement.id, test_user.id)
         with (
@@ -591,7 +593,8 @@ class TestDeleteRequirementAttachmentLines309And319:
         assert resp.status_code == 401
 
     def test_onedrive_delete_returns_403(self, client, db_session, test_requisition, test_user):
-        """OneDrive returns 403 during requirement attachment delete → 403 — line 319."""
+        """OneDrive returns 403 during requirement attachment delete → 403 — line
+        319."""
         requirement = _make_requirement(db_session, test_requisition.id)
         att = _make_reqmt_att(db_session, requirement.id, test_user.id)
         with (

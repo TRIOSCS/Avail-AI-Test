@@ -1,10 +1,12 @@
 {# Single vendor card — rendered per SSE event in streaming search.
-   Called by: htmx_views.search_stream (via Jinja2 render)
+   Called by: search_service.stream_search_mpn (HTML SSE), htmx_views.search_filter
    Depends on: Alpine.js $store.shortlist, search detail drawer
+   swap_oob: when true, HTMX replaces the existing node with the same id (card-update SSE).
 #}
 <div class="vendor-card bg-gray-800 border border-gray-700 rounded-lg p-4 hover:border-gray-500 transition-all"
      style="--i: {{ card_index }}"
      id="vendor-card-{{ card.vendor_name|lower|replace(' ', '-') }}"
+     {% if swap_oob %}hx-swap-oob="true"{% endif %}
      x-data="{ expanded: false }">
 
   <div class="flex items-start gap-3">
@@ -65,8 +67,10 @@
         <span x-text="expanded ? 'Hide' : '{{ card.offer_count }} offers'"></span>
       </button>
       {% endif %}
-      <button hx-get="/v2/partials/search/lead-detail?search_id={{ search_id }}&vendor_key={{ card.vendor_name|lower|trim }}"
+      <button type="button"
+              hx-get="/v2/partials/search/lead-detail?search_id={{ search_id }}&vendor_key={{ card.vendor_name|lower|trim }}"
               hx-target="#lead-drawer-content"
+              hx-swap="innerHTML"
               class="text-xs text-gray-400 hover:text-white transition-colors">
         Details →
       </button>

@@ -20,7 +20,6 @@ os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -28,7 +27,6 @@ from app.constants import ContactStatus, OfferStatus
 from app.models import Offer, Requisition, User
 from app.models.offers import Contact as RfqContact
 from app.models.offers import VendorResponse
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -95,7 +93,9 @@ class TestOfferReviewQueue:
         resp = client.get("/v2/partials/offers/review-queue")
         assert resp.status_code == 200
 
-    def test_queue_with_pending_offer(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_queue_with_pending_offer(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         _make_offer(db_session, test_requisition, test_user, status=OfferStatus.PENDING_REVIEW)
         resp = client.get("/v2/partials/offers/review-queue")
         assert resp.status_code == 200
@@ -105,7 +105,9 @@ class TestOfferReviewQueue:
 
 
 class TestPromoteOffer:
-    def test_promote_success(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_promote_success(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user, status=OfferStatus.PENDING_REVIEW)
         resp = client.post(f"/v2/partials/offers/{offer.id}/promote")
         assert resp.status_code == 200
@@ -116,7 +118,9 @@ class TestPromoteOffer:
         resp = client.post("/v2/partials/offers/99999/promote")
         assert resp.status_code == 404
 
-    def test_promote_wrong_status(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_promote_wrong_status(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user, status=OfferStatus.ACTIVE)
         resp = client.post(f"/v2/partials/offers/{offer.id}/promote")
         assert resp.status_code == 400
@@ -126,7 +130,9 @@ class TestPromoteOffer:
 
 
 class TestRejectOffer:
-    def test_reject_success(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_reject_success(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user, status=OfferStatus.PENDING_REVIEW)
         resp = client.post(f"/v2/partials/offers/{offer.id}/reject")
         assert resp.status_code == 200
@@ -137,7 +143,9 @@ class TestRejectOffer:
         resp = client.post("/v2/partials/offers/99999/reject")
         assert resp.status_code == 404
 
-    def test_reject_wrong_status(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_reject_wrong_status(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user, status=OfferStatus.ACTIVE)
         resp = client.post(f"/v2/partials/offers/{offer.id}/reject")
         assert resp.status_code == 400
@@ -147,7 +155,9 @@ class TestRejectOffer:
 
 
 class TestOfferChangelog:
-    def test_get_changelog(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_get_changelog(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user)
         resp = client.get(f"/v2/partials/offers/{offer.id}/changelog")
         assert resp.status_code == 200
@@ -189,8 +199,7 @@ class TestRfqSend:
 
     def test_send_multiple_vendors(self, client: TestClient, test_requisition: Requisition):
         form_bytes = (
-            b"vendor_names=VendorA&vendor_emails=a%40example.com"
-            b"&vendor_names=VendorB&vendor_emails=b%40example.com"
+            b"vendor_names=VendorA&vendor_emails=a%40example.com&vendor_names=VendorB&vendor_emails=b%40example.com"
         )
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/rfq-send",
@@ -226,7 +235,9 @@ class TestRfqSend:
 
 
 class TestSendFollowUp:
-    def test_send_follow_up_test_mode(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_send_follow_up_test_mode(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         """In TESTING=1 mode, marks contact as sent without real email."""
         contact = _make_contact(db_session, test_requisition, test_user)
         resp = client.post(

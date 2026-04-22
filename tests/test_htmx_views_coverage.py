@@ -1,4 +1,5 @@
-"""test_htmx_views_coverage.py — Additional coverage tests for app/routers/htmx_views.py.
+"""test_htmx_views_coverage.py — Additional coverage tests for
+app/routers/htmx_views.py.
 
 Targets previously uncovered branches including: unauthenticated page load,
 customer tabs, company CRUD, vendor find-by-part, search endpoints, requisition
@@ -14,9 +15,8 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -29,11 +29,9 @@ from app.models import (
     Quote,
     Requirement,
     Requisition,
-    Sighting,
     User,
     VendorCard,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 

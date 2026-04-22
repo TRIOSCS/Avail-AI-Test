@@ -11,9 +11,8 @@ import os
 
 os.environ["TESTING"] = "1"
 
-import json
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
@@ -22,7 +21,6 @@ from sqlalchemy.orm import Session
 from app.constants import RequisitionStatus, SourcingStatus, TaskStatus, TicketSource
 from app.models import (
     Company,
-    Offer,
     Requirement,
     Requisition,
     User,
@@ -32,7 +30,6 @@ from app.models.intelligence import MaterialCard
 from app.models.knowledge import KnowledgeEntry
 from app.models.task import RequisitionTask
 from app.models.trouble_ticket import TroubleTicket
-
 
 # ── Fixtures ────────────────────────────────────────────────────────────
 

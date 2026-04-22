@@ -2,6 +2,46 @@
 
 All notable changes to the project are logged here.
 
+## 2026-04-17 — Search “Details” did not open lead drawer
+
+### Bug Fixes
+- **`form.html` / lead drawer:** “Details →” loaded `lead_detail` into `#lead-drawer-content` via HTMX but the drawer never opened (`data-open` was not reactive to external updates). Replaced with Alpine `drawerOpen`, `@htmx:after-swap` on the content container to open after load, and aligned backdrop / close / Escape with the same flag.
+- **`htmx_app.js`:** Scoped `document.body.style.overflow` reset in `htmx:afterSwap` to `#main-content` swaps only (was clearing scroll lock on every swap). Call `Alpine.initTree` after swaps into `#lead-drawer-content` so `@click` on loaded lead detail works.
+
+---
+
+## 2026-04-17 — Search page SSE showed raw JSON instead of vendor cards
+
+### Bug Fixes
+- **`stream_search_mpn`:** HTMX `sse-swap="results"` appends the SSE **message body as HTML**. Events were publishing JSON (`{"cards": [...]}`), so users saw raw JSON. Results and card-update events now publish rendered `vendor_card.html` fragments (with `hx-swap-oob` on updates).
+
+### Tests
+- **`test_search_streaming.test_stream_search_publishes_events`:** Asserts `results` payloads contain `vendor-card` markup and not the legacy `"cards"` JSON wrapper.
+
+---
+
+## 2026-04-17 — HTMX lazy-load swap target (insights & admin health)
+
+### Bug Fixes
+- **AI insights lazy-load:** Added explicit `hx-target="this"` on requisition, vendor, and customer detail insight loaders so HTMX does not inherit `<main id="main-content" hx-target="this">` and swap the insights fragment into the entire main column.
+- **Dashboard pipeline insights & admin API health:** Same `hx-target="this"` fix for `hx-trigger="load"` partials inside `#main-content`.
+
+### Tests
+- **test_htmx_views:** `TestRequisitionDetail.test_detail`, `TestVendorDetail.test_detail`, `TestCustomerDetail.test_detail`, and `TestInsights.test_dashboard_partial_pipeline_loader_targets_self` assert lazy-load `hx-get` blocks include `hx-target="this"`.
+- **test_sprint9_10_materials_admin.TestAdminDataOps.test_data_ops_renders:** Asserts API health lazy-load includes `hx-target="this"`.
+
+---
+
+## 2026-04-17 — Materials manufacturer filter blank labels
+
+### Bug Fixes
+- **`manufacturers.html`:** Manufacturer rows showed checkboxes and counts but no names because `x-data="{ name: {{ mfr.name | tojson }} }"` placed JSON double quotes inside a double-quoted HTML attribute, which truncated the attribute and broke Alpine. Fixed with `x-data="{{ {'mfrLabel': mfr.name}|tojson|e }}"` and Alpine bindings renamed to `mfrLabel`.
+
+### Tests
+- **`test_faceted_routes.test_manufacturer_filter_partial_renders`:** Inserts a material card with manufacturer `MemCo` and asserts the partial HTML contains the name, `mfrLabel`, and does not regress to the broken `x-data="{name:` pattern.
+
+---
+
 ## 2026-03-13 — Frontend XSS hardening (innerHTML sanitization)
 
 ### Security

@@ -1,4 +1,5 @@
-"""tests/test_htmx_views_nightly19.py — Coverage for dashboard, insights, and buy plan routes.
+"""tests/test_htmx_views_nightly19.py — Coverage for dashboard, insights, and buy plan
+routes.
 
 Targets:
   - dashboard_partial
@@ -14,21 +15,20 @@ import os
 
 os.environ["TESTING"] = "1"
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.models import Requisition, User, VendorCard
-from app.models.buy_plan import BuyPlan, BuyPlanLine
-
+from app.models import Requisition, VendorCard
+from app.models.buy_plan import BuyPlan
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
 
 def _make_buy_plan(db: Session, req: Requisition, **kw) -> BuyPlan:
+    import uuid
+
     from app.constants import BuyPlanStatus, SOVerificationStatus
     from app.models.quotes import Quote
-    import uuid
 
     quote = Quote(
         requisition_id=req.id,
@@ -83,6 +83,7 @@ class TestInsights:
 
     def test_company_insights_panel(self, client: TestClient, db_session: Session):
         from app.models import Company
+
         company = Company(name="InsightCo", is_active=True)
         db_session.add(company)
         db_session.commit()
@@ -91,6 +92,7 @@ class TestInsights:
 
     def test_company_insights_refresh(self, client: TestClient, db_session: Session):
         from app.models import Company
+
         company = Company(name="InsightCo2", is_active=True)
         db_session.add(company)
         db_session.commit()

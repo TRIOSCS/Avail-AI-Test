@@ -18,10 +18,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
-from io import BytesIO
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from unittest.mock import AsyncMock, patch
 
 from app.models import Company
 from app.models.excess import Bid, ExcessLineItem, ExcessList

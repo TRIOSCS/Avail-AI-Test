@@ -685,7 +685,6 @@ class TestCompanyTabRoutes:
         assert resp.status_code == 404
 
     def test_requisitions_tab_with_data(self, client: TestClient, db_session: Session, test_company, test_user: User):
-
         req = Requisition(
             name="TAB-REQ-001",
             customer_name=test_company.name,

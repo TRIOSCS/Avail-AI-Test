@@ -7,21 +7,73 @@
 #}
 {% if requisitions %}
 <div class="overflow-x-auto">
-  <table class="min-w-full divide-y divide-gray-200 text-sm">
+  <table class="resizable-cols min-w-full divide-y divide-gray-200 text-sm">
+    {% if avail_opp_table_v2_enabled | default(False) %}
+    <colgroup>
+      <col :style="colStyle('select')">
+      <col :style="colStyle('name')">
+      <col :style="colStyle('status')">
+      <col :style="colStyle('customer')">
+      <col :style="colStyle('coverage')">
+      <col :style="colStyle('deal')">
+      <col style="width:0">
+    </colgroup>
+    {% else %}
+    <colgroup>
+      <col :style="colStyle('select')">
+      <col :style="colStyle('name')">
+      <col :style="colStyle('status')">
+      <col :style="colStyle('customer')">
+      <col :style="colStyle('count')">
+    </colgroup>
+    {% endif %}
     <thead class="bg-gray-50">
+      {% if avail_opp_table_v2_enabled | default(False) %}
+      {# Name/Status/Customer are sortable (legacy parity); Coverage and Deal
+         are derived/aggregate columns and intentionally not sortable. #}
+      {% set v2_sort_columns = [
+        ('name', 'Name'),
+        ('status', 'Status'),
+        ('customer_name', 'Customer'),
+      ] %}
       <tr>
-        <th class="w-8 px-3 py-2">
+        <th class="px-3 py-2 w-10"></th>
+        {% for col_key, col_label in v2_sort_columns %}
+        <th class="opp-col-header px-3 py-2 text-left">
+          <a hx-get="/requisitions2/table?sort={{ col_key }}&order={{ 'asc' if filters.sort.value == col_key and filters.order.value == 'desc' else 'desc' }}"
+             hx-target="#rq2-table"
+             hx-include="#rq2-filters"
+             hx-push-url="/requisitions2"
+             class="inline-flex items-center gap-1 hover:text-[color:var(--opp-text-primary)] cursor-pointer transition-colors">
+            {{ col_label }}
+            {% if filters.sort.value == col_key %}
+              <span class="text-[color:var(--opp-status-open)]">{{ '▲' if filters.order.value == 'asc' else '▼' }}</span>
+            {% endif %}
+          </a>
+        </th>
+        {% endfor %}
+        <th class="opp-col-header px-3 py-2 text-left">Coverage</th>
+        <th class="opp-col-header px-3 py-2 text-left">Deal</th>
+        <th class="w-0" aria-hidden="true"></th>
+      </tr>
+      {% else %}
+      {# legacy thead — preserved verbatim for flag-off rollback #}
+      <tr>
+        <th class="resizable px-3 py-2">
           <input aria-label="Select all requisitions" type="checkbox"
                  class="rounded border-gray-300 text-brand-500 focus:ring-brand-400"
                  x-on:change="toggleAll($event.target.checked, {{ requisitions | map(attribute='id') | list | tojson }})">
+          <span class="col-resize-handle"
+                @mousedown="startColResize($event,'select')"
+                @dblclick="autoFitCol('select')"></span>
         </th>
         {% set columns = [
-          ('name', 'Name'),
-          ('status', 'Status'),
-          ('customer_name', 'Customer'),
+          ('name', 'Name', 'name'),
+          ('status', 'Status', 'status'),
+          ('customer_name', 'Customer', 'customer'),
         ] %}
-        {% for col_key, col_label in columns %}
-        <th class="px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+        {% for col_key, col_label, store_key in columns %}
+        <th class="resizable px-3 py-2 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
           <a hx-get="/requisitions2/table?sort={{ col_key }}&order={{ 'asc' if filters.sort.value == col_key and filters.order.value == 'desc' else 'desc' }}"
              hx-target="#rq2-table"
              hx-include="#rq2-filters"
@@ -32,10 +84,14 @@
               <span class="text-brand-500">{{ '▲' if filters.order.value == 'asc' else '▼' }}</span>
             {% endif %}
           </a>
+          <span class="col-resize-handle"
+                @mousedown="startColResize($event,'{{ store_key }}')"
+                @dblclick="autoFitCol('{{ store_key }}')"></span>
         </th>
         {% endfor %}
         <th class="px-3 py-2 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">#</th>
       </tr>
+      {% endif %}
     </thead>
     <tbody id="rq2-rows" class="divide-y divide-gray-100">
       {% include "requisitions2/_table_rows.html" %}

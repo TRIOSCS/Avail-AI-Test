@@ -124,7 +124,7 @@ class TestPromoteOfferHtmxDirect:
         assert offer.status == OfferStatus.ACTIVE
 
     async def test_promote_offer_not_found(self, db_session: Session, test_user: User):
-        """promote non-existent → 404."""
+        """Promote non-existent → 404."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import promote_offer_htmx
@@ -135,7 +135,7 @@ class TestPromoteOfferHtmxDirect:
         assert exc_info.value.status_code == 404
 
     async def test_promote_offer_wrong_status_raises_400(self, db_session: Session, test_user: User):
-        """promote active offer → 400 (only pending_review can be promoted)."""
+        """Promote active offer → 400 (only pending_review can be promoted)."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import promote_offer_htmx
@@ -167,7 +167,7 @@ class TestRejectOfferHtmxDirect:
         assert offer.status == OfferStatus.REJECTED
 
     async def test_reject_offer_not_found(self, db_session: Session, test_user: User):
-        """reject non-existent → 404."""
+        """Reject non-existent → 404."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import reject_offer_htmx
@@ -195,7 +195,7 @@ class TestOfferChangelogDirect:
         assert result.status_code == 200
 
     async def test_offer_changelog_not_found(self, db_session: Session, test_user: User):
-        """non-existent offer → 404."""
+        """Non-existent offer → 404."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import offer_changelog
@@ -222,7 +222,7 @@ class TestRfqComposeGetDirect:
         assert result.status_code == 200
 
     async def test_rfq_compose_not_found(self, db_session: Session, test_user: User):
-        """non-existent req → 404."""
+        """Non-existent req → 404."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import rfq_compose
@@ -306,7 +306,7 @@ class TestSendFollowUpHtmxDirect:
         assert contact.status == ContactStatus.SENT
 
     async def test_send_follow_up_not_found(self, db_session: Session, test_user: User):
-        """non-existent contact → 404."""
+        """Non-existent contact → 404."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import send_follow_up_htmx
@@ -472,7 +472,8 @@ class TestFindByPartPartialDirect:
         assert result.status_code == 200
 
     async def test_find_by_part_with_mpn(self, db_session: Session, test_user: User):
-        """Lines 3493–3561: valid mpn → MVH query, affinity fallback, renders template."""
+        """Lines 3493–3561: valid mpn → MVH query, affinity fallback, renders
+        template."""
         from app.routers.htmx_views import find_by_part_partial
 
         mock_req = _mock_get_request("/v2/partials/vendors/find-by-part")

@@ -1,12 +1,46 @@
 {#
-  _table_rows.html — Compact requisition rows for the left panel of split-screen workspace.
-  Each row is clickable to load detail in the right panel.
+  _table_rows.html — Compact requisition rows for the left panel.
   Called by: _table.html (include), GET /requisitions2/table/rows
-  Depends on: requisitions list, user object, HTMX, Alpine.js
+  Depends on: requisitions list, user object, HTMX, Alpine.js,
+              avail_opp_table_v2_enabled context flag.
 #}
-{% from "htmx/partials/shared/_macros.html" import status_badge %}
+{% from "htmx/partials/shared/_macros.html" import status_badge, opp_name_cell, opp_status_cell, opp_row_action_rail, urgency_accent_class, deal_value, coverage_meter %}
 
 {% for req in requisitions %}
+{% if avail_opp_table_v2_enabled | default(False) %}
+<tr id="rq2-row-{{ req.id }}"
+    class="rq2-row group {{ urgency_accent_class(req.hours_until_bid_due, req.urgency) }}"
+    data-status="{{ req.status }}"
+    x-data="rowActionRail()"
+    tabindex="0"
+    @mouseenter="show = true"
+    @mouseleave="show = false"
+    @focusin="show = true"
+    @focusout.self="show = false"
+    @keydown.enter="show = true"
+    @keydown.escape="show = false"
+    @click="selectReq({{ req.id }})"
+    hx-get="/requisitions2/{{ req.id }}/detail"
+    hx-target="#rq2-detail"
+    hx-swap="innerHTML"
+    :class="selectedReqId === {{ req.id }} ? 'bg-brand-50 border-l-2 border-brand-500' : ''">
+  <td class="px-3 py-2" @click.stop>
+    <input aria-label="Select requisition {{ req.name }}" type="checkbox" value="{{ req.id }}"
+           class="rounded border-gray-300 text-brand-500 focus:ring-brand-400"
+           x-on:change="toggleSelection({{ req.id }}, $event.target.checked)"
+           x-bind:checked="selectedIds.has({{ req.id }})">
+  </td>
+  <td class="px-3 py-2 overflow-hidden">{{ opp_name_cell(req) }}</td>
+  <td class="px-3 py-2">{{ opp_status_cell(req.status, req.hours_until_bid_due) }}</td>
+  <td class="px-3 py-2 text-sm text-gray-600 overflow-hidden">
+    <span class="truncate block" x-truncate-tip>{{ req.customer_display or '—' }}</span>
+  </td>
+  <td class="px-3 py-2">{{ coverage_meter(req.coverage_filled, req.coverage_total) }}</td>
+  <td class="px-3 py-2">{{ deal_value(req.deal_value_display, req.deal_value_source, priced_count=req.deal_value_priced_count, requirement_count=req.deal_value_requirement_count) }}</td>
+  {{ opp_row_action_rail(req, user) }}
+</tr>
+{% else %}
+{# Legacy 5-col rendering — preserved verbatim for flag-off rollback. #}
 <tr id="rq2-row-{{ req.id }}"
     hx-get="/requisitions2/{{ req.id }}/detail"
     hx-target="#rq2-detail"
@@ -22,25 +56,26 @@
            x-on:change="toggleSelection({{ req.id }}, $event.target.checked)"
            x-bind:checked="selectedIds.has({{ req.id }})">
   </td>
-  <td class="px-3 py-2">
-    <div class="flex items-center gap-1.5">
-      <span class="text-sm font-medium text-gray-900 truncate max-w-[180px]">{{ req.name }}</span>
+  <td class="px-3 py-2 overflow-hidden">
+    <div class="flex items-center gap-1.5 min-w-0">
+      <span class="text-sm font-medium text-gray-900 truncate block flex-1 min-w-0">{{ req.name }}</span>
       {% if req.urgency == 'hot' %}
-      <span class="inline-flex h-4 px-1 text-[10px] font-semibold rounded bg-amber-50 text-amber-700">HOT</span>
+      <span class="flex-shrink-0 inline-flex h-4 px-1 text-[10px] font-semibold rounded bg-amber-50 text-amber-700">HOT</span>
       {% elif req.urgency == 'critical' %}
-      <span class="inline-flex h-4 px-1 text-[10px] font-semibold rounded bg-rose-50 text-rose-700">CRIT</span>
+      <span class="flex-shrink-0 inline-flex h-4 px-1 text-[10px] font-semibold rounded bg-rose-50 text-rose-700">CRIT</span>
       {% endif %}
     </div>
   </td>
-  <td class="px-3 py-2">
-    {{ status_badge(req.status) }}
+  <td class="px-3 py-2">{{ status_badge(req.status) }}</td>
+  <td class="px-3 py-2 text-sm text-gray-600 overflow-hidden">
+    <span class="truncate block">{{ req.customer_display or '—' }}</span>
   </td>
-  <td class="px-3 py-2 text-sm text-gray-600 truncate max-w-[140px]">{{ req.customer_display or '—' }}</td>
   <td class="px-3 py-2 text-sm text-right text-gray-800">{{ req.requirement_count }}</td>
 </tr>
+{% endif %}
 {% else %}
 <tr>
-  <td colspan="5" class="px-4 py-12 text-center">
+  <td colspan="{{ 7 if avail_opp_table_v2_enabled | default(False) else 5 }}" class="px-4 py-12 text-center">
     <svg class="mx-auto h-10 w-10 text-gray-300" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
       <path stroke-linecap="round" stroke-linejoin="round"
             d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2"/>

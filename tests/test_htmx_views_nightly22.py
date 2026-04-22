@@ -33,7 +33,6 @@ import json
 import uuid
 from datetime import datetime, timezone
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -42,7 +41,6 @@ from app.models import Company, CustomerSite, Requisition, User, VendorCard
 from app.models.offers import Offer, VendorResponse
 from app.models.quotes import Quote, QuoteLine
 from app.models.sourcing_lead import SourcingLead
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -293,9 +291,7 @@ class TestLeadStatusUpdate:
         )
         assert resp.status_code == 404
 
-    def test_update_status_with_hx_target_row(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_update_status_with_hx_target_row(self, client: TestClient, db_session: Session, test_user: User):
         """When HX-Target starts with 'lead-row-', returns lead_row template."""
         req = _make_req(db_session, test_user)
         lead = _make_lead(db_session, req)
@@ -332,9 +328,7 @@ class TestLeadFeedback:
 
 
 class TestBulkArchive:
-    def test_bulk_archive_requirement_ids(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_bulk_archive_requirement_ids(self, client: TestClient, db_session: Session, test_user: User):
         from app.models import Requirement
 
         req = _make_req(db_session, test_user)
@@ -346,9 +340,7 @@ class TestBulkArchive:
         )
         assert resp.status_code == 200
 
-    def test_bulk_archive_requisition_ids(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_bulk_archive_requisition_ids(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         resp = client.post(
             "/v2/partials/parts/bulk-archive",
@@ -365,9 +357,7 @@ class TestBulkArchive:
         )
         assert resp.status_code == 200
 
-    def test_bulk_unarchive_requirement_ids(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_bulk_unarchive_requirement_ids(self, client: TestClient, db_session: Session, test_user: User):
         from app.models import Requirement
 
         req = _make_req(db_session, test_user)
@@ -379,9 +369,7 @@ class TestBulkArchive:
         )
         assert resp.status_code == 200
 
-    def test_bulk_unarchive_requisition_cascade(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_bulk_unarchive_requisition_cascade(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         resp = client.post(
             "/v2/partials/parts/bulk-unarchive",
@@ -395,9 +383,7 @@ class TestBulkArchive:
 
 
 class TestLogPhoneCall:
-    def test_log_phone_success(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_log_phone_success(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         resp = client.post(
             f"/v2/partials/requisitions/{req.id}/log-phone",
@@ -405,9 +391,7 @@ class TestLogPhoneCall:
         )
         assert resp.status_code == 200
 
-    def test_log_phone_missing_fields(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_log_phone_missing_fields(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         resp = client.post(
             f"/v2/partials/requisitions/{req.id}/log-phone",
@@ -420,9 +404,7 @@ class TestLogPhoneCall:
 
 
 class TestEditVendor:
-    def test_edit_vendor_success(
-        self, client: TestClient, db_session: Session, test_vendor_card: VendorCard
-    ):
+    def test_edit_vendor_success(self, client: TestClient, db_session: Session, test_vendor_card: VendorCard):
         resp = client.post(
             f"/v2/partials/vendors/{test_vendor_card.id}/edit",
             data={"display_name": "Arrow Electronics Updated", "website": "https://arrow.com"},
@@ -431,9 +413,7 @@ class TestEditVendor:
         db_session.refresh(test_vendor_card)
         assert test_vendor_card.display_name == "Arrow Electronics Updated"
 
-    def test_edit_vendor_emails_and_phones(
-        self, client: TestClient, test_vendor_card: VendorCard
-    ):
+    def test_edit_vendor_emails_and_phones(self, client: TestClient, test_vendor_card: VendorCard):
         resp = client.post(
             f"/v2/partials/vendors/{test_vendor_card.id}/edit",
             data={"emails": "a@arrow.com, b@arrow.com", "phones": "+1-555-0101"},
@@ -452,18 +432,14 @@ class TestEditVendor:
 
 
 class TestAddVendorReview:
-    def test_add_review_success(
-        self, client: TestClient, test_vendor_card: VendorCard
-    ):
+    def test_add_review_success(self, client: TestClient, test_vendor_card: VendorCard):
         resp = client.post(
             f"/v2/partials/vendors/{test_vendor_card.id}/reviews",
             data={"rating": "4", "comment": "Good supplier, fast delivery"},
         )
         assert resp.status_code == 200
 
-    def test_add_review_invalid_rating(
-        self, client: TestClient, test_vendor_card: VendorCard
-    ):
+    def test_add_review_invalid_rating(self, client: TestClient, test_vendor_card: VendorCard):
         """Invalid rating falls back to 3."""
         resp = client.post(
             f"/v2/partials/vendors/{test_vendor_card.id}/reviews",
@@ -483,9 +459,7 @@ class TestAddVendorReview:
 
 
 class TestLogActivity:
-    def test_log_activity_note(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_log_activity_note(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         resp = client.post(
             f"/v2/partials/requisitions/{req.id}/log-activity",
@@ -497,9 +471,7 @@ class TestLogActivity:
         )
         assert resp.status_code == 200
 
-    def test_log_activity_phone_call(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_log_activity_phone_call(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         resp = client.post(
             f"/v2/partials/requisitions/{req.id}/log-activity",
@@ -516,9 +488,7 @@ class TestLogActivity:
 
 
 class TestReviewResponse:
-    def test_review_as_reviewed(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_review_as_reviewed(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         vr = _make_vendor_response(db_session, req)
         resp = client.post(
@@ -529,9 +499,7 @@ class TestReviewResponse:
         db_session.refresh(vr)
         assert vr.status == "reviewed"
 
-    def test_review_as_rejected(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_review_as_rejected(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         vr = _make_vendor_response(db_session, req)
         resp = client.post(
@@ -545,9 +513,7 @@ class TestReviewResponse:
 
 
 class TestUpdateResponseStatus:
-    def test_patch_status_reviewed(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_patch_status_reviewed(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         vr = _make_vendor_response(db_session, req)
         resp = client.patch(
@@ -556,9 +522,7 @@ class TestUpdateResponseStatus:
         )
         assert resp.status_code == 200
 
-    def test_patch_status_flagged(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_patch_status_flagged(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         vr = _make_vendor_response(db_session, req)
         resp = client.patch(
@@ -567,9 +531,7 @@ class TestUpdateResponseStatus:
         )
         assert resp.status_code == 200
 
-    def test_patch_status_invalid(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_patch_status_invalid(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         vr = _make_vendor_response(db_session, req)
         resp = client.patch(
@@ -583,9 +545,7 @@ class TestUpdateResponseStatus:
 
 
 class TestEditCompany:
-    def test_edit_company_success(
-        self, client: TestClient, db_session: Session, test_company: Company
-    ):
+    def test_edit_company_success(self, client: TestClient, db_session: Session, test_company: Company):
         resp = client.post(
             f"/v2/partials/customers/{test_company.id}/edit",
             data={"name": "Acme Corp Updated", "website": "https://acme-corp.com"},
@@ -606,9 +566,7 @@ class TestEditCompany:
 
 
 class TestEditSite:
-    def test_edit_site_success(
-        self, client: TestClient, db_session: Session, test_company: Company
-    ):
+    def test_edit_site_success(self, client: TestClient, db_session: Session, test_company: Company):
         site = CustomerSite(
             company_id=test_company.id,
             site_name="Main HQ",
@@ -637,9 +595,7 @@ class TestEditSite:
 
 
 class TestCreateQuoteFromOffersHappy:
-    def test_create_quote_success(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_create_quote_success(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         offer = _make_offer(db_session, req, test_user)
         resp = client.post(
@@ -648,9 +604,7 @@ class TestCreateQuoteFromOffersHappy:
         )
         assert resp.status_code == 200
 
-    def test_create_quote_multiple_offers(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_create_quote_multiple_offers(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         o1 = _make_offer(db_session, req, test_user, mpn="LM741")
         o2 = _make_offer(db_session, req, test_user, mpn="NE555")
@@ -660,9 +614,7 @@ class TestCreateQuoteFromOffersHappy:
         )
         assert resp.status_code == 200
 
-    def test_create_quote_offers_not_found(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_create_quote_offers_not_found(self, client: TestClient, db_session: Session, test_user: User):
         """offer_ids exist but don't belong to this requisition → 404."""
         req = _make_req(db_session, test_user)
         resp = client.post(
@@ -676,9 +628,7 @@ class TestCreateQuoteFromOffersHappy:
 
 
 class TestSaveParsedOffersHappy:
-    def test_save_offers_with_matching_mpn(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_save_offers_with_matching_mpn(self, client: TestClient, db_session: Session, test_user: User):
         """MPN matches existing requirement → offer saved with requirement_id."""
         req = _make_req(db_session, test_user)
         # _make_req creates a requirement for BC547
@@ -696,16 +646,10 @@ class TestSaveParsedOffersHappy:
         )
         assert resp.status_code == 200
 
-    def test_save_offers_new_vendor_card(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_save_offers_new_vendor_card(self, client: TestClient, db_session: Session, test_user: User):
         """Vendor not in VendorCard table — auto-creates VendorCard."""
         req = _make_req(db_session, test_user)
-        form_data = (
-            b"vendor_name=BrandNewVendorXYZ123"
-            b"&offers%5B0%5D.mpn=BC547"
-            b"&offers%5B0%5D.qty_available=500"
-        )
+        form_data = b"vendor_name=BrandNewVendorXYZ123&offers%5B0%5D.mpn=BC547&offers%5B0%5D.qty_available=500"
         resp = client.post(
             f"/v2/partials/requisitions/{req.id}/save-parsed-offers",
             content=form_data,
@@ -713,9 +657,7 @@ class TestSaveParsedOffersHappy:
         )
         assert resp.status_code == 200
 
-    def test_save_offers_empty_returns_warning(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_save_offers_empty_returns_warning(self, client: TestClient, db_session: Session, test_user: User):
         """No offers in form → 200 with warning message."""
         req = _make_req(db_session, test_user)
         resp = client.post(
@@ -730,9 +672,7 @@ class TestSaveParsedOffersHappy:
 
 
 class TestAddOfferManual:
-    def test_add_offer_success(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_add_offer_success(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         resp = client.post(
             f"/v2/partials/requisitions/{req.id}/add-offer",
@@ -747,9 +687,7 @@ class TestAddOfferManual:
         )
         assert resp.status_code == 200
 
-    def test_add_offer_missing_vendor(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_add_offer_missing_vendor(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         resp = client.post(
             f"/v2/partials/requisitions/{req.id}/add-offer",
@@ -757,9 +695,7 @@ class TestAddOfferManual:
         )
         assert resp.status_code == 400
 
-    def test_add_offer_missing_mpn(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_add_offer_missing_mpn(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         resp = client.post(
             f"/v2/partials/requisitions/{req.id}/add-offer",
@@ -772,9 +708,7 @@ class TestAddOfferManual:
 
 
 class TestAddOffersToDraftQuote:
-    def test_add_offers_success(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_add_offers_success(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         offer = _make_offer(db_session, req, test_user)
         quote = _make_quote(db_session, req, test_user)
@@ -785,9 +719,7 @@ class TestAddOffersToDraftQuote:
         )
         assert resp.status_code == 200
 
-    def test_add_offers_duplicate_skipped(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_add_offers_duplicate_skipped(self, client: TestClient, db_session: Session, test_user: User):
         """Adding the same offer twice — second add is skipped."""
         req = _make_req(db_session, test_user)
         offer = _make_offer(db_session, req, test_user)
@@ -813,9 +745,7 @@ class TestAddOffersToDraftQuote:
         )
         assert resp.status_code == 200
 
-    def test_add_offers_missing_params(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_add_offers_missing_params(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         resp = client.post(
             f"/v2/partials/requisitions/{req.id}/add-offers-to-quote",
@@ -829,9 +759,7 @@ class TestAddOffersToDraftQuote:
 
 
 class TestBuyPlanCancel:
-    def test_cancel_draft_plan(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_cancel_draft_plan(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         bp = _make_buy_plan(db_session, req)
         resp = client.post(
@@ -852,9 +780,7 @@ class TestBuyPlanCancel:
 
 
 class TestRequisitionsBulkAction:
-    def test_bulk_archive(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_bulk_archive(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         resp = client.post(
             "/v2/partials/requisitions/bulk/archive",
@@ -862,9 +788,7 @@ class TestRequisitionsBulkAction:
         )
         assert resp.status_code == 200
 
-    def test_bulk_activate(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
+    def test_bulk_activate(self, client: TestClient, db_session: Session, test_user: User):
         req = _make_req(db_session, test_user)
         resp = client.post(
             "/v2/partials/requisitions/bulk/activate",

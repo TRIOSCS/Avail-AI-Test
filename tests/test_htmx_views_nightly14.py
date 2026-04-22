@@ -1,4 +1,5 @@
-"""tests/test_htmx_views_nightly14.py — Coverage for offer management, bulk actions, inline-edit.
+"""tests/test_htmx_views_nightly14.py — Coverage for offer management, bulk actions,
+inline-edit.
 
 Targets:
   - review_offer (approve/reject)
@@ -22,10 +23,7 @@ import os
 
 os.environ["TESTING"] = "1"
 
-import uuid
-from datetime import datetime, timezone
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -36,8 +34,6 @@ from app.models import (
     Requisition,
     User,
 )
-from app.models.quotes import Quote, QuoteLine
-
 
 # ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -77,7 +73,9 @@ def _make_requirement(db: Session, req: Requisition, mpn: str = "BC547", **kw) -
 
 
 class TestReviewOffer:
-    def test_approve_offer(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_approve_offer(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user, status=OfferStatus.PENDING_REVIEW)
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/offers/{offer.id}/review",
@@ -87,7 +85,9 @@ class TestReviewOffer:
         db_session.refresh(offer)
         assert offer.status == OfferStatus.APPROVED
 
-    def test_reject_offer(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_reject_offer(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user, status=OfferStatus.PENDING_REVIEW)
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/offers/{offer.id}/review",
@@ -97,7 +97,9 @@ class TestReviewOffer:
         db_session.refresh(offer)
         assert offer.status == OfferStatus.REJECTED
 
-    def test_invalid_action(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_invalid_action(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user, status=OfferStatus.PENDING_REVIEW)
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/offers/{offer.id}/review",
@@ -163,7 +165,9 @@ class TestAddOffer:
 
 
 class TestReconfirmOffer:
-    def test_reconfirm_success(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_reconfirm_success(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user)
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/offers/{offer.id}/reconfirm",
@@ -183,7 +187,9 @@ class TestReconfirmOffer:
 
 
 class TestEditOfferForm:
-    def test_get_edit_form(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_get_edit_form(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user)
         resp = client.get(
             f"/v2/partials/requisitions/{test_requisition.id}/offers/{offer.id}/edit-form",
@@ -201,7 +207,9 @@ class TestEditOfferForm:
 
 
 class TestEditOffer:
-    def test_edit_offer_success(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_edit_offer_success(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user, vendor_name="OldVendor")
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/offers/{offer.id}/edit",
@@ -218,7 +226,9 @@ class TestEditOffer:
         )
         assert resp.status_code == 404
 
-    def test_edit_offer_invalid_int(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_edit_offer_invalid_int(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         """Non-numeric int field is silently skipped."""
         offer = _make_offer(db_session, test_requisition, test_user)
         resp = client.post(
@@ -232,7 +242,9 @@ class TestEditOffer:
 
 
 class TestDeleteOffer:
-    def test_delete_success(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_delete_success(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user)
         oid = offer.id
         resp = client.delete(
@@ -252,7 +264,9 @@ class TestDeleteOffer:
 
 
 class TestMarkOfferSold:
-    def test_mark_sold_success(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_mark_sold_success(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user, status=OfferStatus.PENDING_REVIEW)
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/offers/{offer.id}/mark-sold",
@@ -261,7 +275,9 @@ class TestMarkOfferSold:
         db_session.refresh(offer)
         assert offer.status == OfferStatus.SOLD
 
-    def test_already_sold_returns_tab(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_already_sold_returns_tab(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user, status=OfferStatus.SOLD)
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/offers/{offer.id}/mark-sold",
@@ -280,7 +296,8 @@ class TestMarkOfferSold:
 
 class TestSaveParsedOffers:
     def test_no_offers_returns_message(self, client: TestClient, test_requisition: Requisition):
-        """Submitting form with no offer rows returns the 'No offers to save' message."""
+        """Submitting form with no offer rows returns the 'No offers to save'
+        message."""
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/save-parsed-offers",
             data={"vendor_name": "AcmeCorp"},
@@ -375,7 +392,9 @@ class TestRequisitionsBulkAction:
 
 
 class TestCreateQuoteFromOffers:
-    def test_create_quote_success(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_create_quote_success(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         offer = _make_offer(db_session, test_requisition, test_user, qty_available=10, unit_price=1.5)
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/create-quote",
@@ -536,7 +555,7 @@ class TestRequisitionRowAction:
         assert resp.status_code == 200
 
     def test_return_detail_format(self, client: TestClient, test_requisition: Requisition):
-        """return=detail format returns empty 200 response."""
+        """Return=detail format returns empty 200 response."""
         resp = client.post(
             f"/v2/partials/requisitions/{test_requisition.id}/action/activate",
             data={"return": "detail"},

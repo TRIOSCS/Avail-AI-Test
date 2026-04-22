@@ -1,4 +1,5 @@
-"""tests/test_htmx_views_nightly18.py — Coverage for customers list/detail/tabs and quotes.
+"""tests/test_htmx_views_nightly18.py — Coverage for customers list/detail/tabs and
+quotes.
 
 Targets:
   - companies_list_partial
@@ -17,16 +18,13 @@ import os
 os.environ["TESTING"] = "1"
 
 import uuid
-from datetime import datetime, timezone
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.constants import QuoteStatus
-from app.models import Company, CustomerSite, Requisition, User
+from app.models import Company, Requisition, User
 from app.models.quotes import Quote
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -200,7 +198,9 @@ class TestCompanyTab:
 
 
 class TestPreviewQuote:
-    def test_preview_success(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_preview_success(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         quote = _make_quote(db_session, test_requisition, test_user)
         resp = client.post(f"/v2/partials/quotes/{quote.id}/preview")
         assert resp.status_code == 200
@@ -214,14 +214,18 @@ class TestPreviewQuote:
 
 
 class TestDeleteQuote:
-    def test_delete_draft_quote(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_delete_draft_quote(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         quote = _make_quote(db_session, test_requisition, test_user, status=QuoteStatus.DRAFT)
         qid = quote.id
         resp = client.delete(f"/v2/partials/quotes/{qid}")
         assert resp.status_code == 200
         assert db_session.get(Quote, qid) is None
 
-    def test_delete_non_draft(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_delete_non_draft(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         quote = _make_quote(db_session, test_requisition, test_user, status=QuoteStatus.SENT)
         resp = client.delete(f"/v2/partials/quotes/{quote.id}")
         assert resp.status_code == 400
@@ -235,14 +239,18 @@ class TestDeleteQuote:
 
 
 class TestReopenQuote:
-    def test_reopen_sent_quote(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_reopen_sent_quote(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         quote = _make_quote(db_session, test_requisition, test_user, status=QuoteStatus.SENT)
         resp = client.post(f"/v2/partials/quotes/{quote.id}/reopen")
         assert resp.status_code == 200
         db_session.refresh(quote)
         assert quote.status == QuoteStatus.DRAFT
 
-    def test_reopen_draft_quote_rejected(self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User):
+    def test_reopen_draft_quote_rejected(
+        self, client: TestClient, db_session: Session, test_requisition: Requisition, test_user: User
+    ):
         quote = _make_quote(db_session, test_requisition, test_user, status=QuoteStatus.DRAFT)
         resp = client.post(f"/v2/partials/quotes/{quote.id}/reopen")
         assert resp.status_code == 400

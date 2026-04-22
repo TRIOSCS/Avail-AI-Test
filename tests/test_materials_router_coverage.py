@@ -1,4 +1,5 @@
-"""tests/test_materials_router_coverage.py — Coverage tests for app/routers/materials.py.
+"""tests/test_materials_router_coverage.py — Coverage tests for
+app/routers/materials.py.
 
 Tests all major branches: list, get, update, enrich, delete, restore, merge,
 quick-search, by-mpn, backfill, and import-stock.
@@ -17,11 +18,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from fastapi import HTTPException
-from starlette.datastructures import Headers
 from starlette.requests import Request
 
 from app.models import MaterialCard, MaterialVendorHistory, VendorCard
-
 
 # -- Helper -------------------------------------------------------------------
 
@@ -412,7 +411,6 @@ class TestImportStock:
     def _csv_bytes(self, rows: list[dict]) -> bytes:
         """Build minimal CSV bytes for upload tests."""
         import csv
-        import io
 
         buf = io.StringIO()
         if rows:
@@ -463,9 +461,11 @@ class TestImportStock:
         assert resp.status_code == 400
 
     def test_import_csv_success(self, client, db_session):
-        csv_data = self._csv_bytes([
-            {"mpn": "TESTVEND001", "qty": "500", "price": "1.25", "manufacturer": "TI"},
-        ])
+        csv_data = self._csv_bytes(
+            [
+                {"mpn": "TESTVEND001", "qty": "500", "price": "1.25", "manufacturer": "TI"},
+            ]
+        )
         with patch("app.routers.materials.get_credential_cached", return_value=None):
             resp = client.post(
                 "/api/materials/import-stock",
@@ -529,7 +529,8 @@ class TestImportStock:
         assert resp.status_code == 200
 
     def test_import_existing_mvh_updated(self, client, db_session):
-        """Re-importing same part+vendor should update existing MaterialVendorHistory."""
+        """Re-importing same part+vendor should update existing
+        MaterialVendorHistory."""
         norm_vendor = "update vendor"
         card = MaterialCard(
             normalized_mpn="updatepart",
@@ -891,8 +892,6 @@ class TestDirectHandlerCoverage:
 
     async def test_import_stock_direct_success(self, db_session):
         """Direct call: valid CSV with one row → success."""
-        import csv
-        import io as _io
 
         from app.routers.materials import import_stock_list_standalone
 
@@ -1078,9 +1077,11 @@ class TestDirectHandlerCoverage:
         req.form = AsyncMock(return_value=mock_form)
         user = MagicMock()
 
-        with patch("app.routers.materials.get_credential_cached", return_value="fake-api-key"), \
-             patch("app.routers.materials.safe_background_task", new_callable=AsyncMock) as mock_bg, \
-             patch("app.routers.materials._background_enrich_vendor", return_value=AsyncMock()):
+        with (
+            patch("app.routers.materials.get_credential_cached", return_value="fake-api-key"),
+            patch("app.routers.materials.safe_background_task", new_callable=AsyncMock) as mock_bg,
+            patch("app.routers.materials._background_enrich_vendor", return_value=AsyncMock()),
+        ):
             mock_bg.return_value = None
             result = await import_stock_list_standalone(req, user=user, db=db_session)
 

@@ -23,29 +23,35 @@ def _now():
 
 # ── _source_reliability (line 101) ───────────────────────────────────
 
+
 class TestSourceReliability:
     def test_salesforce_base_85(self):
         from app.services.sourcing_leads import _source_reliability
+
         score = _source_reliability("salesforce", None)
         assert 80 <= score <= 93  # base 85 ± tier
 
     def test_avail_history_base_85(self):
         from app.services.sourcing_leads import _source_reliability
+
         score = _source_reliability("avail_history", None)
         assert 80 <= score <= 93
 
     def test_digikey_base_90(self):
         from app.services.sourcing_leads import _source_reliability
+
         score = _source_reliability("digikey", None)
         assert score >= 88
 
     def test_unknown_base_60(self):
         from app.services.sourcing_leads import _source_reliability
+
         score = _source_reliability("unknown_xyz", None)
         assert 55 <= score <= 65
 
     def test_t1_tier_boosts(self):
         from app.services.sourcing_leads import _source_reliability
+
         base = _source_reliability("brokerbin", None)
         t1 = _source_reliability("brokerbin", "T1")
         assert t1 > base
@@ -53,62 +59,81 @@ class TestSourceReliability:
 
 # ── _freshness_score (lines 122, 126, 128) ───────────────────────────
 
+
 class TestFreshnessScore:
     def test_12_hours_returns_95(self):
         from app.services.sourcing_leads import _freshness_score
+
         assert _freshness_score(_now() - timedelta(hours=12)) == 95.0
 
     def test_23_hours_returns_95(self):
         from app.services.sourcing_leads import _freshness_score
+
         assert _freshness_score(_now() - timedelta(hours=23)) == 95.0
 
     def test_2_days_returns_85(self):
         from app.services.sourcing_leads import _freshness_score
+
         assert _freshness_score(_now() - timedelta(days=2)) == 85.0
 
     def test_5_days_returns_72(self):
         from app.services.sourcing_leads import _freshness_score
+
         assert _freshness_score(_now() - timedelta(days=5)) == 72.0
 
     def test_none_returns_45(self):
         from app.services.sourcing_leads import _freshness_score
+
         assert _freshness_score(None) == 45.0
 
 
 # ── _historical_success_score (lines 139, 155) ────────────────────────
 
+
 class TestHistoricalSuccessScore:
     def test_no_vendor_returns_45(self):
         from app.services.sourcing_leads import _historical_success_score
+
         assert _historical_success_score(None) == 45.0
 
     def test_blacklisted_penalized(self):
         from app.services.sourcing_leads import _historical_success_score
-        normal = MagicMock(vendor_score=70, is_blacklisted=False,
-                           total_wins=0, ghost_rate=None, cancellation_rate=None)
-        blacklisted = MagicMock(vendor_score=70, is_blacklisted=True,
-                                total_wins=0, ghost_rate=None, cancellation_rate=None)
+
+        normal = MagicMock(vendor_score=70, is_blacklisted=False, total_wins=0, ghost_rate=None, cancellation_rate=None)
+        blacklisted = MagicMock(
+            vendor_score=70, is_blacklisted=True, total_wins=0, ghost_rate=None, cancellation_rate=None
+        )
         assert _historical_success_score(blacklisted) < _historical_success_score(normal)
 
     def test_vendor_score_used(self):
         from app.services.sourcing_leads import _historical_success_score
-        v = MagicMock(vendor_score=80.0, is_blacklisted=False,
-                      total_wins=0, ghost_rate=None, cancellation_rate=None)
+
+        v = MagicMock(vendor_score=80.0, is_blacklisted=False, total_wins=0, ghost_rate=None, cancellation_rate=None)
         score = _historical_success_score(v)
         assert 70 <= score <= 90
 
 
 # ── _compute_vendor_safety (lines 204-205, 225-226, 230-231) ─────────
 
+
 class TestComputeVendorSafety:
     def _make_vendor(self, **kwargs):
         defaults = dict(
-            website="https://example.com", domain="example.com",
-            hq_city="NY", hq_country="US", legal_name="Corp",
-            emails=["s@example.com"], phones=["+1-555-0100"],
-            is_new_vendor=False, sighting_count=5, vendor_score=None,
-            is_blacklisted=False, ghost_rate=None, cancellation_rate=None,
-            relationship_months=None, total_wins=0,
+            website="https://example.com",
+            domain="example.com",
+            hq_city="NY",
+            hq_country="US",
+            legal_name="Corp",
+            emails=["s@example.com"],
+            phones=["+1-555-0100"],
+            is_new_vendor=False,
+            sighting_count=5,
+            vendor_score=None,
+            is_blacklisted=False,
+            ghost_rate=None,
+            cancellation_rate=None,
+            relationship_months=None,
+            total_wins=0,
         )
         defaults.update(kwargs)
         return MagicMock(**defaults)
@@ -116,6 +141,7 @@ class TestComputeVendorSafety:
     def test_domain_but_no_website_limited_footprint(self):
         """Vendor has domain but no website → limited_business_footprint (204-205)."""
         from app.services.sourcing_leads import _compute_vendor_safety
+
         v = self._make_vendor(website=None)
         _, flags, _ = _compute_vendor_safety(v, 60.0)
         assert "limited_business_footprint" in flags
@@ -123,6 +149,7 @@ class TestComputeVendorSafety:
     def test_high_ghost_rate_flag(self):
         """ghost_rate > 0.5 → repeated_bad_feedback (225-226)."""
         from app.services.sourcing_leads import _compute_vendor_safety
+
         v = self._make_vendor(ghost_rate=0.7)
         _, flags, _ = _compute_vendor_safety(v, 60.0)
         assert "repeated_bad_feedback" in flags
@@ -130,6 +157,7 @@ class TestComputeVendorSafety:
     def test_high_cancellation_rate_flag(self):
         """cancellation_rate > 0.2 → high_cancellation_rate (230-231)."""
         from app.services.sourcing_leads import _compute_vendor_safety
+
         v = self._make_vendor(cancellation_rate=0.4)
         _, flags, _ = _compute_vendor_safety(v, 60.0)
         assert "high_cancellation_rate" in flags
@@ -137,11 +165,13 @@ class TestComputeVendorSafety:
     def test_no_vendor_returns_unknown_flags(self):
         """No vendor card → no_internal_vendor_profile flag."""
         from app.services.sourcing_leads import _compute_vendor_safety
+
         _, flags, _ = _compute_vendor_safety(None, 60.0)
         assert "no_internal_vendor_profile" in flags
 
 
 # ── Helpers for DB tests ──────────────────────────────────────────────
+
 
 def _make_req_and_requirement(db):
     import uuid
@@ -149,8 +179,9 @@ def _make_req_and_requirement(db):
     from app.models import Requisition, User
     from app.models.sourcing import Requirement
 
-    u = User(email=f"u{uuid.uuid4().hex[:6]}@x.com", name="T", role="buyer",
-             azure_id=uuid.uuid4().hex, created_at=_now())
+    u = User(
+        email=f"u{uuid.uuid4().hex[:6]}@x.com", name="T", role="buyer", azure_id=uuid.uuid4().hex, created_at=_now()
+    )
     db.add(u)
     db.flush()
     req = Requisition(name="R", status="active", created_by=u.id)
@@ -166,6 +197,7 @@ def _make_lead(db, req_id, requirement_id, buyer_status="new", vendor_suffix="")
     import uuid
 
     from app.models.sourcing_lead import SourcingLead
+
     uid = uuid.uuid4().hex[:8]
     name = f"TestVendor{vendor_suffix or uid}"
     lead = SourcingLead(
@@ -187,6 +219,7 @@ def _make_lead(db, req_id, requirement_id, buyer_status="new", vendor_suffix="")
 
 
 # ── _auto_merge_leads (lines 530-548) ────────────────────────────────
+
 
 class TestAutoMergeLeads:
     def test_buyer_acted_flags_not_merged(self, db_session):
@@ -223,14 +256,14 @@ class TestAutoMergeLeads:
 
 # ── _count_dedup_signals (lines 573-611) ─────────────────────────────
 
+
 class TestCountDedupSignals:
     def test_shared_vendor_card_id_strong_signal(self, db_session):
         """Same vendor_card_id → signals >= 2 (line 572-573)."""
         from app.models import VendorCard
         from app.services.sourcing_leads import _count_dedup_signals
 
-        vendor = VendorCard(normalized_name="acme-test", display_name="Acme",
-                            domain="acme.com", emails=["a@acme.com"])
+        vendor = VendorCard(normalized_name="acme-test", display_name="Acme", domain="acme.com", emails=["a@acme.com"])
         db_session.add(vendor)
         db_session.flush()
 
@@ -249,10 +282,8 @@ class TestCountDedupSignals:
         from app.models import VendorCard
         from app.services.sourcing_leads import _count_dedup_signals
 
-        v1 = VendorCard(normalized_name="v1-shared", display_name="V1",
-                        domain="shared.com", emails=["a@shared.com"])
-        v2 = VendorCard(normalized_name="v2-shared", display_name="V2",
-                        domain="shared.com", emails=["b@shared.com"])
+        v1 = VendorCard(normalized_name="v1-shared", display_name="V1", domain="shared.com", emails=["a@shared.com"])
+        v2 = VendorCard(normalized_name="v2-shared", display_name="V2", domain="shared.com", emails=["b@shared.com"])
         db_session.add_all([v1, v2])
         db_session.flush()
 
@@ -271,10 +302,8 @@ class TestCountDedupSignals:
         from app.models import VendorCard
         from app.services.sourcing_leads import _count_dedup_signals
 
-        v1 = VendorCard(normalized_name="vp1", display_name="VP1",
-                        phones=["+15559999"])
-        v2 = VendorCard(normalized_name="vp2", display_name="VP2",
-                        phones=["+15559999"])
+        v1 = VendorCard(normalized_name="vp1", display_name="VP1", phones=["+15559999"])
+        v2 = VendorCard(normalized_name="vp2", display_name="VP2", phones=["+15559999"])
         db_session.add_all([v1, v2])
         db_session.flush()
 
@@ -293,10 +322,8 @@ class TestCountDedupSignals:
         from app.models import VendorCard
         from app.services.sourcing_leads import _count_dedup_signals
 
-        v1 = VendorCard(normalized_name="ve1", display_name="VE1",
-                        emails=["sales@common.com"])
-        v2 = VendorCard(normalized_name="ve2", display_name="VE2",
-                        emails=["support@common.com"])
+        v1 = VendorCard(normalized_name="ve1", display_name="VE1", emails=["sales@common.com"])
+        v2 = VendorCard(normalized_name="ve2", display_name="VE2", emails=["support@common.com"])
         db_session.add_all([v1, v2])
         db_session.flush()
 
@@ -312,6 +339,7 @@ class TestCountDedupSignals:
 
 
 # ── _propagate_outcome_to_vendor (lines 808, 812) ────────────────────
+
 
 class TestPropagateOutcomeToVendor:
     def test_no_vendor_card_id_returns_early(self, db_session):

@@ -1,4 +1,5 @@
-"""tests/test_htmx_views_nightly10.py — Coverage for htmx_views.py shell routing and quotes routes.
+"""tests/test_htmx_views_nightly10.py — Coverage for htmx_views.py shell routing and
+quotes routes.
 
 Targets: shell page routing (buy-plans, excess, quotes, prospecting, etc.),
 quote line CRUD, quote send/result/revise, buy plan building.
@@ -571,11 +572,7 @@ class TestReviseQuoteHtmx:
         resp = client.post(f"/v2/partials/quotes/{quote.id}/revise")
         assert resp.status_code == 200
         # New revised quote should exist
-        new_quotes = (
-            db_session.query(Quote)
-            .filter(Quote.requisition_id == test_requisition.id)
-            .all()
-        )
+        new_quotes = db_session.query(Quote).filter(Quote.requisition_id == test_requisition.id).all()
         assert len(new_quotes) == 2
         revisions = [q for q in new_quotes if q.id != quote.id]
         assert len(revisions) == 1

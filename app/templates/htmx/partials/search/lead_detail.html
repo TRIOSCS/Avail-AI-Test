@@ -12,7 +12,7 @@
     <h2 class="text-lg font-bold text-white truncate">{{ s.vendor_name }}</h2>
     <p class="text-xs text-brand-300 mt-0.5">{{ s.mpn_matched or s.mpn or mpn }}</p>
   </div>
-  <button onclick="document.getElementById('lead-drawer').dataset.open = 'false'"
+  <button type="button" @click="drawerOpen = false"
           class="text-brand-300 hover:text-white p-1 rounded">
     <svg class="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
       <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>

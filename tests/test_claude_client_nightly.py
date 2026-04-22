@@ -132,9 +132,7 @@ class TestClaudeStructuredGaps:
             200,
             {"content": [{"type": "tool_use", "name": "structured_output", "input": {"retried": True}}]},
         )
-        mock_http.post = AsyncMock(
-            side_effect=[httpx.ConnectError("Connection refused"), success_resp]
-        )
+        mock_http.post = AsyncMock(side_effect=[httpx.ConnectError("Connection refused"), success_resp])
 
         result = await claude_structured("test", {"type": "object"})
         assert result == {"retried": True}
@@ -145,9 +143,7 @@ class TestClaudeStructuredGaps:
     @patch("app.utils.claude_client.asyncio.sleep", new_callable=AsyncMock)
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_connect_error_exhausts_retries_raises_claude_error(
-        self, mock_http, mock_cred, mock_sleep
-    ):
+    async def test_connect_error_exhausts_retries_raises_claude_error(self, mock_http, mock_cred, mock_sleep):
         """Line 207 + 213: ConnectError on all 3 attempts raises ClaudeError."""
         mock_http.post = AsyncMock(side_effect=httpx.ConnectError("unreachable"))
 
@@ -160,9 +156,7 @@ class TestClaudeStructuredGaps:
     @patch("app.utils.claude_client.asyncio.sleep", new_callable=AsyncMock)
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_all_retries_exhausted_via_429_raises_rate_limit(
-        self, mock_http, mock_cred, mock_sleep
-    ):
+    async def test_all_retries_exhausted_via_429_raises_rate_limit(self, mock_http, mock_cred, mock_sleep):
         """Line 213: all retry attempts used (via 429 retries + final 429) raises error."""
         # First two attempts get 429 (triggers retry), third gets 429 without retry budget
         mock_http.post = AsyncMock(return_value=_mock_response(429, text="Rate Limited"))
@@ -181,7 +175,8 @@ class TestClaudeTextGaps:
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
     async def test_system_with_cache_system_true_sets_cache_control(self, mock_http, mock_cred):
-        """Lines 256-259, 268: system block with cache_control when cache_system=True."""
+        """Lines 256-259, 268: system block with cache_control when
+        cache_system=True."""
         mock_http.post = AsyncMock(
             return_value=_mock_response(
                 200,
@@ -268,9 +263,7 @@ class TestClaudeTextGaps:
             200,
             {"content": [{"type": "text", "text": "recovered"}]},
         )
-        mock_http.post = AsyncMock(
-            side_effect=[httpx.ConnectError("Connection refused"), success_resp]
-        )
+        mock_http.post = AsyncMock(side_effect=[httpx.ConnectError("Connection refused"), success_resp])
 
         result = await claude_text("test")
         assert result == "recovered"
@@ -280,9 +273,7 @@ class TestClaudeTextGaps:
     @patch("app.utils.claude_client.asyncio.sleep", new_callable=AsyncMock)
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_connect_error_exhausts_retries_raises_claude_error(
-        self, mock_http, mock_cred, mock_sleep
-    ):
+    async def test_connect_error_exhausts_retries_raises_claude_error(self, mock_http, mock_cred, mock_sleep):
         """Lines 335 + 340: ConnectError on all attempts raises ClaudeError."""
         mock_http.post = AsyncMock(side_effect=httpx.ConnectError("host unreachable"))
 
@@ -295,9 +286,7 @@ class TestClaudeTextGaps:
     @patch("app.utils.claude_client.asyncio.sleep", new_callable=AsyncMock)
     @patch("app.utils.claude_client.get_credential_cached", side_effect=_cred_side_effect)
     @patch("app.utils.claude_client.http")
-    async def test_all_retries_exhausted_via_429_raises_rate_limit(
-        self, mock_http, mock_cred, mock_sleep
-    ):
+    async def test_all_retries_exhausted_via_429_raises_rate_limit(self, mock_http, mock_cred, mock_sleep):
         """Line 340: all retries exhausted via repeated 429."""
         mock_http.post = AsyncMock(return_value=_mock_response(429, text="Rate Limited"))
 

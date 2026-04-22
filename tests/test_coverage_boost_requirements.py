@@ -272,7 +272,8 @@ class TestSearchAllStatsMerge:
 
 
 class TestRequirementSightingsGaps:
-    """Cover requirements.py lines 1327-1342 via GET /api/requirements/{id}/sightings."""
+    """Cover requirements.py lines 1327-1342 via GET
+    /api/requirements/{id}/sightings."""
 
     def test_sightings_with_material_card_id(self, client: TestClient, db_session: Session, test_user: User):
         """Requirement with material_card_id adds it to card_ids (line 1328)."""
@@ -313,7 +314,8 @@ class TestRequirementSightingsGaps:
         assert resp.status_code == 200
 
     def test_sightings_with_string_substitutes(self, client: TestClient, db_session: Session, test_user: User):
-        """String-format substitutes are processed into sub_keys (lines 1333-1335, 1337-1338)."""
+        """String-format substitutes are processed into sub_keys (lines 1333-1335,
+        1337-1338)."""
         from app.models.intelligence import MaterialCard
 
         reqn = Requisition(
@@ -360,7 +362,8 @@ class TestRequirementOffersGaps:
     def test_offers_with_string_substitutes_and_material_card(
         self, client: TestClient, db_session: Session, test_user: User
     ):
-        """String substitutes with matching MaterialCard are added to card_ids (lines 1431-1435)."""
+        """String substitutes with matching MaterialCard are added to card_ids (lines
+        1431-1435)."""
         from app.models.intelligence import MaterialCard
 
         reqn = Requisition(
@@ -403,10 +406,9 @@ class TestRequirementOffersGaps:
 class TestListRequirementsContactGap:
     """Cover requirements.py lines 329-331 (hours_since computation)."""
 
-    def test_list_requirements_with_recent_contact(
-        self, client: TestClient, db_session: Session, test_user: User
-    ):
-        """Contact row for the requisition triggers hours_since computation (lines 329-331)."""
+    def test_list_requirements_with_recent_contact(self, client: TestClient, db_session: Session, test_user: User):
+        """Contact row for the requisition triggers hours_since computation (lines
+        329-331)."""
         from app.models.offers import Contact
 
         reqn = Requisition(

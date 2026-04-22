@@ -14,11 +14,9 @@ import os
 
 os.environ["TESTING"] = "1"
 
-import io
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
-import pytest
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -29,9 +27,7 @@ from app.models import (
     Requisition,
     Sighting,
     User,
-    VendorCard,
 )
-
 
 # ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -202,11 +198,13 @@ class TestAddRequirementsWithMaterialCard:
 class TestUploadRequirements:
     def test_upload_csv(self, client, db_session, test_user, test_requisition):
         csv_content = b"mpn,qty,condition\nLM317T,100,new\nNE555P,50,used\n"
-        with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None), \
-             patch("app.services.tagging.propagate_tags_to_entity", return_value=None), \
-             patch("app.routers.requisitions.requirements.enqueue_for_nc_search"), \
-             patch("app.routers.requisitions.requirements.enqueue_for_ics_search"), \
-             patch("app.routers.requisitions.requirements.SessionLocal") as mock_sl:
+        with (
+            patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None),
+            patch("app.services.tagging.propagate_tags_to_entity", return_value=None),
+            patch("app.routers.requisitions.requirements.enqueue_for_nc_search"),
+            patch("app.routers.requisitions.requirements.enqueue_for_ics_search"),
+            patch("app.routers.requisitions.requirements.SessionLocal") as mock_sl,
+        ):
             mock_sl.return_value.__enter__ = lambda s, *a: db_session
             mock_sl.return_value.__exit__ = lambda s, *a: None
             mock_sl.return_value = db_session
@@ -246,11 +244,13 @@ class TestUploadRequirements:
 
     def test_upload_with_substitutes_columns(self, client, db_session, test_user, test_requisition):
         csv_content = b"mpn,qty,sub_1,sub_2\nLM317T,100,NE555P,LM7805\n"
-        with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None), \
-             patch("app.services.tagging.propagate_tags_to_entity", return_value=None), \
-             patch("app.routers.requisitions.requirements.enqueue_for_nc_search"), \
-             patch("app.routers.requisitions.requirements.enqueue_for_ics_search"), \
-             patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session):
+        with (
+            patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None),
+            patch("app.services.tagging.propagate_tags_to_entity", return_value=None),
+            patch("app.routers.requisitions.requirements.enqueue_for_nc_search"),
+            patch("app.routers.requisitions.requirements.enqueue_for_ics_search"),
+            patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session),
+        ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/upload",
                 files={"file": ("subs.csv", csv_content, "text/csv")},
@@ -266,7 +266,6 @@ class TestUploadRequirements:
 class TestDeleteRequirementAuth:
     def test_delete_wrong_req(self, client, db_session, test_user, test_requisition):
         """Delete should fail with 403 when req is not accessible."""
-        from app.constants import RequisitionStatus
 
         # Create a second requisition owned by a different user — but since auth
         # is overridden in tests to always return test_user, we simulate the
@@ -734,8 +733,10 @@ class TestRequirementHistoryOfferChanges:
 class TestBatchAddRequirements:
     def test_batch_add_valid(self, client, db_session, test_user, test_requisition):
         """Batch POST with a list of requirements."""
-        with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None), \
-             patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session):
+        with (
+            patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None),
+            patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session),
+        ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/requirements",
                 json=[
@@ -749,8 +750,10 @@ class TestBatchAddRequirements:
 
     def test_batch_add_partial_invalid(self, client, db_session, test_user, test_requisition):
         """Batch POST where one item is invalid — should be skipped."""
-        with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None), \
-             patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session):
+        with (
+            patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None),
+            patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session),
+        ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/requirements",
                 json=[
@@ -849,9 +852,10 @@ class TestPatchLeadStatus:
 class TestUploadParseError:
     def test_upload_parse_error(self, client, db_session, test_user, test_requisition):
         """Simulates a parse error in parse_tabular_file."""
-        with patch(
-            "app.routers.requisitions.requirements.resolve_material_card", return_value=None
-        ), patch("app.file_utils.parse_tabular_file", side_effect=ValueError("bad csv")):
+        with (
+            patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None),
+            patch("app.file_utils.parse_tabular_file", side_effect=ValueError("bad csv")),
+        ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/upload",
                 files={"file": ("bad.csv", b"garbage", "text/csv")},
@@ -887,7 +891,8 @@ class TestToggleQuoteSelection:
 
 class TestAddRequirementsDuplicateDetection:
     def test_add_with_customer_site_detects_dup(self, client, db_session, test_user, test_requisition):
-        """Cover duplicate detection block (lines 501-529) by adding with customer_site_id."""
+        """Cover duplicate detection block (lines 501-529) by adding with
+        customer_site_id."""
         from app.models import Company, CustomerSite
 
         co = Company(name="DupCo", is_active=True, created_at=datetime.now(timezone.utc))
@@ -900,9 +905,10 @@ class TestAddRequirementsDuplicateDetection:
         db_session.commit()
 
         mc = _make_material_card(db_session, "NE555P")
-        with patch(
-            "app.routers.requisitions.requirements.resolve_material_card", return_value=mc
-        ), patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session):
+        with (
+            patch("app.routers.requisitions.requirements.resolve_material_card", return_value=mc),
+            patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session),
+        ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/requirements",
                 json={"primary_mpn": "NE555P", "manufacturer": "TI", "target_qty": 100},

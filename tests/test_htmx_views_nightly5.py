@@ -553,7 +553,8 @@ class TestEmailReply:
         assert resp.status_code == 400
 
     def test_graph_api_connection_error_returns_200_with_error(self, client: TestClient):
-        """Graph API connection error → 200 with error template (no real M365 token in tests)."""
+        """Graph API connection error → 200 with error template (no real M365 token in
+        tests)."""
         # The route imports require_fresh_token locally — in test mode it raises HTTPException
         # which is caught and displayed as an error in the reply_result template (status 200).
         resp = client.post(
@@ -570,11 +571,12 @@ class TestEmailReply:
         assert "m365" in resp.text.lower() or "refresh" in resp.text.lower() or resp.text
 
     def test_http_exception_from_token_returns_200_with_error(self, client: TestClient):
-        """HTTPException from require_fresh_token → 200 with M365 error message in template.
+        """HTTPException from require_fresh_token → 200 with M365 error message in
+        template.
 
         The route uses a local import of require_fresh_token and calls it directly
-        (bypassing FastAPI dependency injection). In test environments without a
-        real M365 token, it raises HTTPException which is caught and shown in the template.
+        (bypassing FastAPI dependency injection). In test environments without a real
+        M365 token, it raises HTTPException which is caught and shown in the template.
         """
         resp = client.post(
             "/v2/partials/emails/reply",
@@ -588,7 +590,8 @@ class TestEmailReply:
         assert resp.text
 
     def test_successful_send_returns_200(self, client: TestClient):
-        """Reply endpoint returns 200 — errors shown in template, not as HTTP error status."""
+        """Reply endpoint returns 200 — errors shown in template, not as HTTP error
+        status."""
 
         # require_fresh_token is imported locally inside the route function body.
         # Patch at source module (app.dependencies) so the local import picks up mock.

@@ -1,5 +1,5 @@
-"""tests/test_coverage_boost_attachments.py — Coverage for uncovered error paths
-in app/routers/requisitions/attachments.py that execute before any await.
+"""tests/test_coverage_boost_attachments.py — Coverage for uncovered error paths in
+app/routers/requisitions/attachments.py that execute before any await.
 
 Targets:
   - line 39:  list_requisition_attachments → 404 for missing req

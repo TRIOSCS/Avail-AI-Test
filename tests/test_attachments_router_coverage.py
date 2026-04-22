@@ -1,4 +1,5 @@
-"""test_attachments_router_coverage.py — Extra coverage for requisition/requirement attachments.
+"""test_attachments_router_coverage.py — Extra coverage for requisition/requirement
+attachments.
 
 Targets uncovered branches in app/routers/requisitions/attachments.py:
 - list_requisition_attachments: 404 path, returns list
@@ -17,11 +18,7 @@ os.environ["TESTING"] = "1"
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-from sqlalchemy.orm import Session
-
 from app.models import Requirement, RequirementAttachment, RequisitionAttachment
-
 
 # ── Helpers ──────────────────────────────────────────────────────────
 
@@ -161,14 +158,17 @@ class TestUploadRequisitionAttachment:
         assert resp.status_code == 401
 
     def test_onedrive_returns_401(self, client, test_requisition):
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.http_client.http.put",
-            new_callable=AsyncMock,
-            return_value=_mock_resp(401),
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.http_client.http.put",
+                new_callable=AsyncMock,
+                return_value=_mock_resp(401),
+            ),
         ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/attachments",
@@ -177,14 +177,17 @@ class TestUploadRequisitionAttachment:
         assert resp.status_code == 401
 
     def test_onedrive_returns_403(self, client, test_requisition):
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.http_client.http.put",
-            new_callable=AsyncMock,
-            return_value=_mock_resp(403),
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.http_client.http.put",
+                new_callable=AsyncMock,
+                return_value=_mock_resp(403),
+            ),
         ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/attachments",
@@ -193,14 +196,17 @@ class TestUploadRequisitionAttachment:
         assert resp.status_code == 403
 
     def test_onedrive_returns_502_on_server_error(self, client, test_requisition):
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.http_client.http.put",
-            new_callable=AsyncMock,
-            return_value=_mock_resp(500, text="server error"),
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.http_client.http.put",
+                new_callable=AsyncMock,
+                return_value=_mock_resp(500, text="server error"),
+            ),
         ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/attachments",
@@ -210,14 +216,17 @@ class TestUploadRequisitionAttachment:
 
     def test_successful_upload_returns_201(self, client, test_requisition):
         onedrive_resp = {"id": "od-123", "webUrl": "https://od.example.com/doc.pdf"}
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.http_client.http.put",
-            new_callable=AsyncMock,
-            return_value=_mock_resp(201, onedrive_resp),
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.http_client.http.put",
+                new_callable=AsyncMock,
+                return_value=_mock_resp(201, onedrive_resp),
+            ),
         ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/attachments",
@@ -262,16 +271,17 @@ class TestAttachRequisitionFromOneDrive:
 
     def test_graph_token_expired_returns_401(self, client, test_requisition):
         gc_mock = MagicMock()
-        gc_mock.get_json = AsyncMock(
-            return_value={"error": {"code": "InvalidAuthenticationToken"}}
-        )
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.utils.graph_client.GraphClient",
-            return_value=gc_mock,
+        gc_mock.get_json = AsyncMock(return_value={"error": {"code": "InvalidAuthenticationToken"}})
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.utils.graph_client.GraphClient",
+                return_value=gc_mock,
+            ),
         ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
@@ -281,16 +291,17 @@ class TestAttachRequisitionFromOneDrive:
 
     def test_graph_access_denied_returns_403(self, client, test_requisition):
         gc_mock = MagicMock()
-        gc_mock.get_json = AsyncMock(
-            return_value={"error": {"code": "accessDenied"}}
-        )
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.utils.graph_client.GraphClient",
-            return_value=gc_mock,
+        gc_mock.get_json = AsyncMock(return_value={"error": {"code": "accessDenied"}})
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.utils.graph_client.GraphClient",
+                return_value=gc_mock,
+            ),
         ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
@@ -300,16 +311,17 @@ class TestAttachRequisitionFromOneDrive:
 
     def test_graph_item_not_found_returns_404(self, client, test_requisition):
         gc_mock = MagicMock()
-        gc_mock.get_json = AsyncMock(
-            return_value={"error": {"code": "itemNotFound"}}
-        )
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.utils.graph_client.GraphClient",
-            return_value=gc_mock,
+        gc_mock.get_json = AsyncMock(return_value={"error": {"code": "itemNotFound"}})
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.utils.graph_client.GraphClient",
+                return_value=gc_mock,
+            ),
         ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
@@ -328,13 +340,16 @@ class TestAttachRequisitionFromOneDrive:
                 "file": {"mimeType": "application/pdf"},
             }
         )
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.utils.graph_client.GraphClient",
-            return_value=gc_mock,
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.utils.graph_client.GraphClient",
+                return_value=gc_mock,
+            ),
         ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/attachments/onedrive",
@@ -349,9 +364,7 @@ class TestAttachRequisitionFromOneDrive:
 
 
 class TestDeleteRequisitionAttachmentNoOneDrive:
-    def test_delete_without_onedrive_id_succeeds(
-        self, client, db_session, test_requisition, test_user
-    ):
+    def test_delete_without_onedrive_id_succeeds(self, client, db_session, test_requisition, test_user):
         """Attachment with no onedrive_item_id deletes directly from DB."""
         att = _make_att_no_onedrive(db_session, test_requisition.id, test_user.id)
         resp = client.delete(f"/api/requisition-attachments/{att.id}")
@@ -362,19 +375,20 @@ class TestDeleteRequisitionAttachmentNoOneDrive:
         resp = client.delete("/api/requisition-attachments/999999")
         assert resp.status_code == 404
 
-    def test_delete_network_error_deletes_db_record_with_warning(
-        self, client, db_session, test_requisition, test_user
-    ):
+    def test_delete_network_error_deletes_db_record_with_warning(self, client, db_session, test_requisition, test_user):
         """Connection error during OneDrive delete → DB record deleted + warning."""
         att = _make_req_attachment(db_session, test_requisition.id, test_user.id)
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.http_client.http.delete",
-            new_callable=AsyncMock,
-            side_effect=ConnectionError("network failure"),
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.http_client.http.delete",
+                new_callable=AsyncMock,
+                side_effect=ConnectionError("network failure"),
+            ),
         ):
             resp = client.delete(f"/api/requisition-attachments/{att.id}")
         assert resp.status_code == 200
@@ -435,14 +449,17 @@ class TestUploadRequirementAttachment:
 
     def test_onedrive_401_returns_401(self, client, db_session, test_requisition):
         requirement = _make_requirement(db_session, test_requisition.id)
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.http_client.http.put",
-            new_callable=AsyncMock,
-            return_value=_mock_resp(401),
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.http_client.http.put",
+                new_callable=AsyncMock,
+                return_value=_mock_resp(401),
+            ),
         ):
             resp = client.post(
                 f"/api/requirements/{requirement.id}/attachments",
@@ -452,14 +469,17 @@ class TestUploadRequirementAttachment:
 
     def test_onedrive_403_returns_403(self, client, db_session, test_requisition):
         requirement = _make_requirement(db_session, test_requisition.id)
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.http_client.http.put",
-            new_callable=AsyncMock,
-            return_value=_mock_resp(403),
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.http_client.http.put",
+                new_callable=AsyncMock,
+                return_value=_mock_resp(403),
+            ),
         ):
             resp = client.post(
                 f"/api/requirements/{requirement.id}/attachments",
@@ -469,14 +489,17 @@ class TestUploadRequirementAttachment:
 
     def test_onedrive_502_on_server_error(self, client, db_session, test_requisition):
         requirement = _make_requirement(db_session, test_requisition.id)
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.http_client.http.put",
-            new_callable=AsyncMock,
-            return_value=_mock_resp(500, text="fail"),
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.http_client.http.put",
+                new_callable=AsyncMock,
+                return_value=_mock_resp(500, text="fail"),
+            ),
         ):
             resp = client.post(
                 f"/api/requirements/{requirement.id}/attachments",
@@ -487,14 +510,17 @@ class TestUploadRequirementAttachment:
     def test_successful_upload(self, client, db_session, test_requisition):
         requirement = _make_requirement(db_session, test_requisition.id)
         onedrive_resp = {"id": "od-spec-1", "webUrl": "https://od.example.com/spec.pdf"}
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.http_client.http.put",
-            new_callable=AsyncMock,
-            return_value=_mock_resp(201, onedrive_resp),
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.http_client.http.put",
+                new_callable=AsyncMock,
+                return_value=_mock_resp(201, onedrive_resp),
+            ),
         ):
             resp = client.post(
                 f"/api/requirements/{requirement.id}/attachments",
@@ -515,9 +541,7 @@ class TestUploadRequirementAttachment:
 
 
 class TestDeleteRequirementAttachmentExtra:
-    def test_delete_without_onedrive_id_succeeds(
-        self, client, db_session, test_requisition, test_user
-    ):
+    def test_delete_without_onedrive_id_succeeds(self, client, db_session, test_requisition, test_user):
         requirement = _make_requirement(db_session, test_requisition.id)
         att = _make_reqmt_att_no_onedrive(db_session, requirement.id, test_user.id)
         resp = client.delete(f"/api/requirement-attachments/{att.id}")
@@ -528,19 +552,20 @@ class TestDeleteRequirementAttachmentExtra:
         resp = client.delete("/api/requirement-attachments/999999")
         assert resp.status_code == 404
 
-    def test_delete_network_error_returns_warning(
-        self, client, db_session, test_requisition, test_user
-    ):
+    def test_delete_network_error_returns_warning(self, client, db_session, test_requisition, test_user):
         requirement = _make_requirement(db_session, test_requisition.id)
         att = _make_reqmt_attachment(db_session, requirement.id, test_user.id)
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.http_client.http.delete",
-            new_callable=AsyncMock,
-            side_effect=ConnectionError("timeout"),
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.http_client.http.delete",
+                new_callable=AsyncMock,
+                side_effect=ConnectionError("timeout"),
+            ),
         ):
             resp = client.delete(f"/api/requirement-attachments/{att.id}")
         assert resp.status_code == 200
@@ -549,14 +574,17 @@ class TestDeleteRequirementAttachmentExtra:
     def test_delete_graph_403_returns_403(self, client, db_session, test_requisition, test_user):
         requirement = _make_requirement(db_session, test_requisition.id)
         att = _make_reqmt_attachment(db_session, requirement.id, test_user.id)
-        with patch(
-            "app.scheduler.get_valid_token",
-            new_callable=AsyncMock,
-            return_value="tok",
-        ), patch(
-            "app.http_client.http.delete",
-            new_callable=AsyncMock,
-            return_value=_mock_resp(403),
+        with (
+            patch(
+                "app.scheduler.get_valid_token",
+                new_callable=AsyncMock,
+                return_value="tok",
+            ),
+            patch(
+                "app.http_client.http.delete",
+                new_callable=AsyncMock,
+                return_value=_mock_resp(403),
+            ),
         ):
             resp = client.delete(f"/api/requirement-attachments/{att.id}")
         assert resp.status_code == 403

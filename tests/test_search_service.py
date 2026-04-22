@@ -2366,6 +2366,93 @@ class TestSearchRequirement:
         assert result is not None
 
     @pytest.mark.asyncio
+    async def test_all_connectors_failed_does_not_stamp_last_searched_at(self, _mock_enrich, db_session):
+        """When every connector errors, last_searched_at must NOT be stamped.
+
+        Otherwise the 5-minute rate guard silences user retries for no reason.
+        """
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+        assert req.last_searched_at is None
+
+        mock_fresh: list[dict] = []
+        mock_stats = [
+            {"source": "nexar", "results": 0, "ms": 100, "error": "quota exceeded", "status": "error"},
+            {"source": "mouser", "results": 0, "ms": 50, "error": "auth failed", "status": "error"},
+        ]
+
+        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = (mock_fresh, mock_stats)
+            await search_requirement(req, db_session)
+
+        db_session.expire(req)
+        reloaded = db_session.get(type(req), req.id)
+        assert reloaded.last_searched_at is None, (
+            "Failed search must not stamp last_searched_at; otherwise the rate guard silences retries for 5 minutes."
+        )
+
+    @pytest.mark.asyncio
+    async def test_successful_search_stamps_last_searched_at(self, _mock_enrich, db_session):
+        """When at least one connector returns OK, last_searched_at IS stamped so the
+        rate guard correctly throttles duplicate clicks."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+        assert req.last_searched_at is None
+
+        mock_fresh = [
+            {
+                "vendor_name": "Arrow",
+                "mpn_matched": "LM317T",
+                "vendor_sku": "A1",
+                "source_type": "nexar",
+                "is_authorized": True,
+                "confidence": 5,
+                "manufacturer": "TI",
+                "qty_available": 100,
+                "unit_price": 0.50,
+                "currency": "USD",
+            },
+        ]
+        mock_stats = [
+            {"source": "nexar", "results": 1, "ms": 100, "error": None, "status": "ok"},
+        ]
+
+        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = (mock_fresh, mock_stats)
+            await search_requirement(req, db_session)
+
+        db_session.expire(req)
+        reloaded = db_session.get(type(req), req.id)
+        assert reloaded.last_searched_at is not None
+
+    @pytest.mark.asyncio
+    async def test_zero_matches_but_all_sources_ok_stamps_last_searched_at(self, _mock_enrich, db_session):
+        """Every source returned 200 OK but the part just has no hits anywhere.
+
+        This is still a successful search and must stamp.
+        """
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+        assert req.last_searched_at is None
+
+        mock_fresh: list[dict] = []
+        mock_stats = [
+            {"source": "nexar", "results": 0, "ms": 100, "error": None, "status": "ok"},
+            {"source": "mouser", "results": 0, "ms": 50, "error": None, "status": "ok"},
+        ]
+
+        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = (mock_fresh, mock_stats)
+            await search_requirement(req, db_session)
+
+        db_session.expire(req)
+        reloaded = db_session.get(type(req), req.id)
+        assert reloaded.last_searched_at is not None
+
+    @pytest.mark.asyncio
     async def test_multiple_pns_all_upserted(self, _mock_enrich, db_session):
         """Multiple PNs each get material card upserts."""
         user = _make_user(db_session)

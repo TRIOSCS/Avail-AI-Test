@@ -34,5 +34,7 @@ export default defineConfig({
     { name: 'visual', testMatch: /visual\.spec\.ts$/ },
     { name: 'dead-ends', testMatch: /dead-ends\.spec\.ts$/ },
     { name: 'workflows', testMatch: /workflows\.spec\.ts$/ },
+    { name: 'requisitions2-resize', testMatch: /requisitions2-resize\.spec\.ts$/ },
+    { name: 'requisitions2-visuals', testMatch: /requisitions2-visuals\.spec\.ts$/ },
   ],
 });

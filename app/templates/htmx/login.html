@@ -13,6 +13,9 @@
   {% for css_file in css_files|default([]) %}
   <link rel="stylesheet" href="/static/{{ css_file }}">
   {% endfor %}
+  {% if password_login %}
+  <script defer src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  {% endif %}
   <style>
     [x-cloak]{display:none!important}
     @keyframes login-fade-up {
@@ -36,8 +39,48 @@
            class="h-32 w-auto select-none">
     </div>
 
-    {# Sign-in button #}
-    <div class="mt-12 login-animate login-animate-delay">
+    {% if password_login %}
+    {# Email / Password form #}
+    <div class="mt-10 w-full max-w-xs login-animate login-animate-delay" x-data="{ loading: false, error: '' }">
+      <form @submit.prevent="
+              loading = true; error = '';
+              const fd = new FormData($el);
+              fetch('/auth/login', { method: 'POST', body: fd })
+                .then(r => r.json().then(d => ({ ok: r.ok, data: d })))
+                .then(({ ok, data }) => {
+                  if (ok) { window.location.href = '/'; }
+                  else { error = data.error || 'Login failed'; loading = false; }
+                })
+                .catch(() => { error = 'Network error'; loading = false; });
+            ">
+        <div class="space-y-3">
+          <input type="email" name="email" required placeholder="Email"
+                 class="w-full px-3 py-2 border border-gray-300 rounded text-sm
+                        focus:outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-300">
+          <input type="password" name="password" required placeholder="Password"
+                 class="w-full px-3 py-2 border border-gray-300 rounded text-sm
+                        focus:outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-300">
+        </div>
+        <p x-show="error" x-text="error" class="mt-2 text-xs text-red-600"></p>
+        <button type="submit" :disabled="loading"
+                class="mt-4 w-full px-4 py-2.5 rounded text-sm font-medium text-white bg-gray-800
+                       hover:bg-gray-700 active:bg-gray-900 disabled:opacity-50
+                       transition-colors duration-150">
+          <span x-show="!loading">Sign in</span>
+          <span x-show="loading">Signing in…</span>
+        </button>
+      </form>
+
+      <div class="mt-6 flex items-center gap-3">
+        <div class="flex-1 h-px bg-gray-200"></div>
+        <span class="text-xs text-gray-400">or</span>
+        <div class="flex-1 h-px bg-gray-200"></div>
+      </div>
+    </div>
+    {% endif %}
+
+    {# Microsoft sign-in button #}
+    <div class="{% if password_login %}mt-4{% else %}mt-12{% endif %} login-animate login-animate-delay{% if not password_login %}-2{% endif %}">
       <a href="/auth/login"
          class="inline-flex items-center gap-3 px-6 py-3 border border-gray-300 rounded
                 text-sm font-medium text-gray-700 bg-white

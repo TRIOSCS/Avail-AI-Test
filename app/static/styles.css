@@ -48,6 +48,155 @@
 /* ── Unified border color ─────────────────────────────────────────── */
 .border-gray-200 { border-color: #BFC4CE !important; }
 .border-gray-100 { border-color: #D5D8DF !important; }
+
+/* ── Opportunity table v2 — visual token set ──────────────────────────
+   Owned by: specs/ui/opportunity-table-aesthetic-v2.md
+   Single source of truth for status dots, urgency accents, coverage
+   meter, deal-value typography, and grid layout on the opportunity
+   (requisitions) list. Also mirrored in STABLE.md.
+   ──────────────────────────────────────────────────────────────────── */
+:root {
+  --opp-status-open: #378ADD;
+  --opp-status-sourcing: #EF9F27;
+  --opp-status-offered: #1D9E75;
+  --opp-status-quoted: #7F77DD;
+  --opp-status-neutral: #838B9B;
+  --opp-urgency-24h-border: #E24B4A;
+  --opp-urgency-72h-border: #854F0B;
+  --opp-urgency-24h-text: #A32D2D;
+  --opp-urgency-72h-text: #854F0B;
+  --opp-coverage-filled: #639922;
+  --opp-coverage-empty: #D3D1C7;
+  --opp-text-primary: #1C2130;
+  --opp-text-secondary: #4B5463;
+  --opp-text-tertiary: #838B9B;
+  --opp-sep: #D5D8DF;
+}
+
+.opp-row {
+  display: grid;
+  grid-template-columns: 16px 1fr 108px 38px 60px 82px 48px;
+  column-gap: 10px;
+  align-items: center;
+  padding: 13px 20px;
+  border-bottom: 0.5px solid var(--opp-sep);
+  background: transparent;
+}
+.opp-row--urgent-24h { padding-left: 17px; border-left: 3px solid var(--opp-urgency-24h-border); }
+.opp-row--urgent-72h { padding-left: 17px; border-left: 3px solid var(--opp-urgency-72h-border); }
+
+.opp-status { display: inline-flex; align-items: center; gap: 6px; }
+.opp-status-dot { width: 8px; height: 8px; border-radius: 50%; flex: 0 0 8px; }
+.opp-status-dot--open     { background: var(--opp-status-open); }
+.opp-status-dot--sourcing { background: var(--opp-status-sourcing); }
+.opp-status-dot--offered  { background: var(--opp-status-offered); }
+.opp-status-dot--quoted   { background: var(--opp-status-quoted); }
+.opp-status-dot--neutral  { background: var(--opp-status-neutral); }
+.opp-status-label { font-size: 12px; font-weight: 400; color: var(--opp-text-secondary); }
+
+.opp-time { font-size: 11px; margin-left: 8px; }
+.opp-time--24h    { color: var(--opp-urgency-24h-text); font-weight: 600; }
+.opp-time--72h    { color: var(--opp-urgency-72h-text); }
+.opp-time--normal { color: var(--opp-text-tertiary); }
+
+.opp-mpn {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--opp-text-primary);
+  font-variant-numeric: tabular-nums;
+  display: block;
+}
+.opp-desc { font-size: 11px; font-weight: 400; color: var(--opp-text-tertiary); margin-top: 2px; display: block; }
+.opp-mpn-more { font-size: 10px; color: var(--opp-text-tertiary); margin-left: 6px; }
+
+.opp-qty, .opp-unit-price {
+  font-size: 12px;
+  color: var(--opp-text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+.opp-deal { font-size: 13px; font-variant-numeric: tabular-nums; }
+.opp-deal--tier-primary-500 { font-weight: 500; color: var(--opp-text-primary); }
+.opp-deal--tier-primary-400 { font-weight: 400; color: var(--opp-text-primary); }
+.opp-deal--tier-tertiary    { font-weight: 400; color: var(--opp-text-tertiary); }
+.opp-deal--computed         { font-style: italic; }
+
+.opp-coverage { display: inline-flex; gap: 2px; align-items: center; }
+.opp-coverage-seg { width: 6px; height: 14px; background: var(--opp-coverage-empty); border-radius: 1px; }
+.opp-coverage-seg--filled { background: var(--opp-coverage-filled); }
+
+/* ── Opportunity Table v2 — partial deal value ────────────────── */
+.opp-deal--partial { /* italic comes from .opp-deal--computed; hook for future tweaks. */ }
+
+/* ── Opportunity Table v2 — truncate-tip ─────────────────────── */
+.truncate-tip {
+  position: fixed;
+  z-index: 50;
+  max-width: 320px;
+  padding: 6px 10px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: #fff;
+  background: #1C2130;
+  border-radius: 4px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 80ms ease-out;
+  box-shadow: 0 4px 12px rgba(0,0,0,0.12);
+}
+.truncate-tip.visible { opacity: 1; }
+.truncate-tip .opp-chip-row { flex-wrap: wrap; gap: 4px; }
+
+/* ── Opportunity Table v2 — name cell stack ──────────────────── */
+.opp-name-cell { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.opp-name-cell__chips { min-width: 0; }
+.opp-name-cell__title { min-width: 0; }
+.opp-chip-row { min-width: 0; }
+
+/* ── Opportunity Table v2 — row hover action rail ───────────── */
+.opp-action-rail-cell { position: relative; width: 0; padding: 0; }
+.opp-action-rail {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  transform: translateY(-50%);
+  display: inline-flex;
+  gap: 2px;
+  padding: 4px;
+  background: rgba(255,255,255,0.96);
+  backdrop-filter: blur(2px);
+  border: 1px solid var(--opp-sep);
+  border-radius: 6px;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.08);
+  opacity: 0;
+  transition: opacity 90ms ease-out;
+  pointer-events: none;
+}
+tr:hover .opp-action-rail,
+tr:focus-within .opp-action-rail {
+  opacity: 1;
+  pointer-events: auto;
+}
+.opp-action-rail button {
+  width: 28px; height: 28px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--opp-text-secondary);
+  background: transparent;
+  border: none; border-radius: 4px;
+  cursor: pointer;
+}
+.opp-action-rail button:hover { background: var(--opp-sep); color: var(--opp-text-primary); }
+.opp-action-rail button:focus-visible { outline: 2px solid var(--opp-status-open); outline-offset: 1px; }
+
+.opp-col-header {
+  font-family: inherit;
+  font-size: 10px;
+  font-weight: 400;
+  color: var(--opp-text-tertiary);
+  letter-spacing: 0.8px;
+  text-transform: none;
+}
 hr { border-color: #BFC4CE; }
 
 /* ── Scrollbars — one global definition ───────────────────────────── */
@@ -417,4 +566,24 @@ table {
 }
 @media (min-width: 640px) {
   .sightings-card-list { display: none !important; }
+}
+
+/* ── Resizable table columns (consumed by Alpine resizableTable) ──── */
+table.resizable-cols { table-layout: fixed; }
+th.resizable { position: relative; }
+.col-resize-handle {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  user-select: none;
+  background: transparent;
+  transition: background 0.15s;
+  z-index: 1;
+}
+.col-resize-handle:hover,
+.col-resize-handle:active {
+  background: rgb(99 146 204 / 0.4);
 }

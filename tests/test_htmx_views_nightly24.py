@@ -1,4 +1,5 @@
-"""tests/test_htmx_views_nightly24.py — Additional direct-async coverage for htmx_views.py.
+"""tests/test_htmx_views_nightly24.py — Additional direct-async coverage for
+htmx_views.py.
 
 Targets more high-impact uncovered line ranges using direct async invocation.
 

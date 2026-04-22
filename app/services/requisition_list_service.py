@@ -7,11 +7,12 @@ Called by: app/routers/htmx_views.py
 Depends on: app/models/sourcing.py, app/models/offers.py, SQLAlchemy
 """
 
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import and_, case, exists, literal, or_, select
 from sqlalchemy import func as sqlfunc
-from sqlalchemy.orm import Session, joinedload
+from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.constants import RequisitionStatus, UserRole
 from app.models import (
@@ -30,6 +31,96 @@ from app.models import (
 from app.schemas.requisitions2 import PaginationContext, ReqListFilters
 from app.services.sourcing_score import compute_sourcing_score_safe
 from app.utils.sql_helpers import escape_like
+
+
+def _hours_until_bid_due(deadline: str | None) -> float | None:
+    """Hours from now (UTC) until the bid deadline, or None if unknown.
+
+    Requisition.deadline is a free-form string column (ISO date, ISO datetime, or the
+    occasional human literal like "ASAP"). Only ISO forms parse; anything else returns
+    None so the UI degrades to no-urgency-accent. Date-only values are treated as end-
+    of-day UTC so "due today" reads as urgent, not overdue.
+    """
+    if not deadline:
+        return None
+    s = deadline.strip()
+    if not s:
+        return None
+    try:
+        if "T" in s or " " in s:
+            dt = datetime.fromisoformat(s.replace("Z", "+00:00"))
+        else:
+            d = datetime.fromisoformat(s).date()
+            dt = datetime(d.year, d.month, d.day, 23, 59, 59, tzinfo=timezone.utc)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=timezone.utc)
+        return (dt - datetime.now(timezone.utc)).total_seconds() / 3600.0
+    except (ValueError, TypeError):
+        return None
+
+
+def _resolve_deal_value(
+    opportunity_value: float | None,
+    priced_sum: float,
+    priced_count: int,
+    requirement_count: int,
+) -> tuple[float | None, str]:
+    """Pick displayed deal value; tag provenance (entered / computed / partial / none).
+
+    Priority (per 2026-04-21 merged spec §Backend contract additions):
+      1. opportunity_value > 0            → 'entered'   (broker-entered wins)
+      2. priced_sum > 0 and all priced    → 'computed'  (target prices complete)
+      3. priced_sum > 0 and some unpriced → 'partial'   (floor estimate)
+      4. otherwise                         → 'none'     (no useful signal)
+
+    Zero-priced requirements count as priced (target_price explicitly 0 means
+    "free/sample," not "unknown"). priced_count reflects NOT-NULL target_price.
+    """
+    if opportunity_value and opportunity_value > 0:
+        return opportunity_value, "entered"
+    if priced_sum and priced_sum > 0:
+        if priced_count >= requirement_count:
+            return priced_sum, "computed"
+        return priced_sum, "partial"
+    return None, "none"
+
+
+def _build_row_mpn_chips(requirements) -> list[dict]:
+    """Return flat deduped chip-item list: primaries first, subs second.
+
+    Rules (per 2026-04-21 merged spec §_build_row_mpn_chips):
+      1. Pass 1 — each requirement's primary_mpn (if truthy).
+      2. Pass 2 — each requirement's subs via parse_substitute_mpns.
+      3. Dedupe by MPN keeping the first occurrence (so an MPN that's
+         primary in any requirement renders as primary, never sub).
+      4. No limit; frontend decides visibility via x-chip-overflow.
+
+    Called by: list_requisitions()
+    """
+    from app.utils.normalization import parse_substitute_mpns
+
+    seen: set[str] = set()
+    items: list[dict] = []
+
+    for req in requirements:
+        mpn = (getattr(req, "primary_mpn", None) or "").strip()
+        if mpn and mpn not in seen:
+            items.append({"mpn": mpn, "role": "primary"})
+            seen.add(mpn)
+
+    for req in requirements:
+        raw_subs = getattr(req, "substitutes", None) or []
+        primary = (getattr(req, "primary_mpn", None) or "").strip()
+        # Normalise: canonical format is list[dict]; legacy rows may be list[str].
+        # Convert plain strings to the dict format parse_substitute_mpns expects.
+        dict_subs = [s if isinstance(s, dict) else {"mpn": s, "manufacturer": ""} for s in raw_subs]
+        for parsed in parse_substitute_mpns(dict_subs, primary):
+            sub_mpn = (parsed.get("mpn") or "").strip()
+            if sub_mpn and sub_mpn not in seen:
+                items.append({"mpn": sub_mpn, "role": "sub"})
+                seen.add(sub_mpn)
+
+    return items
 
 
 def _build_pagination(page: int, per_page: int, total: int) -> PaginationContext:
@@ -148,6 +239,51 @@ def list_requisitions(
         .correlate(Requisition)
         .scalar_subquery()
         .label("total_target_value")
+    )
+    # priced_sum: Σ(target_price · target_qty) across requirements with non-null target_price.
+    priced_sum_sq = (
+        select(
+            sqlfunc.coalesce(
+                sqlfunc.sum(
+                    case(
+                        (Requirement.target_price.isnot(None), Requirement.target_price * Requirement.target_qty),
+                        else_=0,
+                    )
+                ),
+                0,
+            )
+        )
+        .where(Requirement.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("priced_sum")
+    )
+    # priced_count: count of requirements with non-null target_price.
+    priced_count_sq = (
+        select(sqlfunc.count(Requirement.target_price))
+        .where(Requirement.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("priced_count")
+    )
+    # coverage_filled: count of requirements with >=1 Offer.
+    _has_offer_subq = (
+        select(sqlfunc.count(Offer.id))
+        .where(Offer.requirement_id == Requirement.id)
+        .correlate(Requirement)
+        .scalar_subquery()
+    )
+    coverage_filled_sq = (
+        select(
+            sqlfunc.coalesce(
+                sqlfunc.sum(case((_has_offer_subq > 0, 1), else_=0)),
+                0,
+            )
+        )
+        .where(Requirement.requisition_id == Requisition.id)
+        .correlate(Requisition)
+        .scalar_subquery()
+        .label("coverage_filled")
     )
     _quote_priority = case(
         (Quote.status == "won", literal(1)),
@@ -270,8 +406,12 @@ def list_requisitions(
         call_count_sq,
         email_activity_count_sq,
         latest_rfq_sent_sq,
+        priced_sum_sq,
+        priced_count_sq,
+        coverage_filled_sq,
     ).options(
         joinedload(Requisition.customer_site).joinedload(CustomerSite.company),
+        selectinload(Requisition.requirements),
     )
 
     # ── Role-based filtering ─────────────────────────────────────────
@@ -382,10 +522,19 @@ def list_requisitions(
         call_cnt,
         email_act_cnt,
         latest_rfq_sent,
+        priced_sum,
+        priced_count,
+        coverage_filled,
     ) in rows:
         _sc, _sc_color, _sc_signals = compute_sourcing_score_safe(
             req_cnt, sourced_cnt, rfq_sent, reply_cnt, offer_cnt, call_cnt, email_act_cnt
         )
+        _opp_val = float(r.opportunity_value) if r.opportunity_value else None
+        _priced_sum = float(priced_sum or 0)
+        _priced_count = int(priced_count or 0)
+        _req_count = int(req_cnt or 0)
+        _deal_val, _deal_src = _resolve_deal_value(_opp_val, _priced_sum, _priced_count, _req_count)
+        _coverage_filled = int(coverage_filled or 0)
         requisitions.append(
             {
                 "id": r.id,
@@ -425,7 +574,15 @@ def list_requisitions(
                 "proactive_match_count": pm_cnt or 0,
                 "claimed_by_id": r.claimed_by_id,
                 "urgency": r.urgency or "normal",
-                "opportunity_value": float(r.opportunity_value) if r.opportunity_value else None,
+                "opportunity_value": _opp_val,
+                "hours_until_bid_due": _hours_until_bid_due(r.deadline),
+                "deal_value_display": _deal_val,
+                "deal_value_source": _deal_src,
+                "deal_value_priced_count": _priced_count,
+                "deal_value_requirement_count": _req_count,
+                "coverage_filled": _coverage_filled,
+                "coverage_total": _req_count,
+                "mpn_chip_items": _build_row_mpn_chips(list(r.requirements or [])),
                 "sourcing_score": _sc,
                 "sourcing_color": _sc_color,
                 "sourcing_signals": _sc_signals,
@@ -495,13 +652,52 @@ def get_requisition_detail(
 def get_row_context(db: Session, req: Requisition, user) -> dict:
     """Build template context for a single row after inline edit.
 
-    Called by: app/routers/htmx_views.py (inline_save)
-    Depends on: Requisition model, User model
+    Mirrors the row-dict shape produced by list_requisitions() so the
+    v2 rendering in _single_row.html reads the same fields whether a row
+    is rendered in the list loop or swapped in after an inline edit.
+
+    Called by: app/routers/requisitions2.py (inline-save row swap),
+               app/routers/htmx_views.py (inline_save)
+    Depends on: Requisition, Requirement, Offer, User models
     """
+    requirements = list(req.requirements or [])
     # Requirement count
     req_cnt = db.query(sqlfunc.count(Requirement.id)).filter(Requirement.requisition_id == req.id).scalar() or 0
-    # Offer count
+    # Offer count (total offers under this requisition)
     offer_cnt = db.query(sqlfunc.count(Offer.id)).filter(Offer.requisition_id == req.id).scalar() or 0
+    # Coverage: distinct requirements with >=1 offer
+    coverage_filled = (
+        db.query(sqlfunc.count(sqlfunc.distinct(Offer.requirement_id)))
+        .join(Requirement, Offer.requirement_id == Requirement.id)
+        .filter(Requirement.requisition_id == req.id)
+        .scalar()
+        or 0
+    )
+    # Deal-value inputs — priced_sum + priced_count for the 4-arg helper.
+    priced_sum_val = (
+        db.query(
+            sqlfunc.coalesce(
+                sqlfunc.sum(
+                    case(
+                        (
+                            Requirement.target_price.isnot(None),
+                            Requirement.target_price * Requirement.target_qty,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            )
+        )
+        .filter(Requirement.requisition_id == req.id)
+        .scalar()
+        or 0
+    )
+    priced_count = (
+        db.query(sqlfunc.count(Requirement.target_price)).filter(Requirement.requisition_id == req.id).scalar() or 0
+    )
+    opp_val = float(req.opportunity_value) if req.opportunity_value else None
+    deal_val, deal_src = _resolve_deal_value(opp_val, float(priced_sum_val), int(priced_count), int(req_cnt))
     # Creator name
     creator = db.query(User).filter(User.id == req.created_by).first()
     creator_name = creator.name or creator.email if creator else ""
@@ -524,6 +720,22 @@ def get_row_context(db: Session, req: Requisition, user) -> dict:
             "created_at": req.created_at,
             "claimed_by_id": req.claimed_by_id,
             "urgency": req.urgency or "normal",
+            # v2 row-dict fields — mirror list_requisitions() output shape
+            # so _single_row.html's v2 branch renders correctly after inline
+            # edits. See 2026-04-21 merged spec §Backend contract additions.
+            "hours_until_bid_due": _hours_until_bid_due(req.deadline),
+            "opportunity_value": opp_val,
+            "deal_value_display": deal_val,
+            "deal_value_source": deal_src,
+            "deal_value_priced_count": int(priced_count),
+            "deal_value_requirement_count": int(req_cnt),
+            "coverage_filled": int(coverage_filled),
+            "coverage_total": int(req_cnt),
+            "mpn_chip_items": _build_row_mpn_chips(requirements),
+            # Match-reason fields — only populated by the list-view aggregation
+            # (which classifies search matches); always None for single-row swaps.
+            "match_reason": None,
+            "matched_mpn": None,
         },
         "user": user,
     }

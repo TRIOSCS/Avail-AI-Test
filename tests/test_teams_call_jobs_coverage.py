@@ -1,4 +1,5 @@
-"""tests/test_teams_call_jobs_coverage.py — Coverage tests for app/jobs/teams_call_jobs.py.
+"""tests/test_teams_call_jobs_coverage.py — Coverage tests for
+app/jobs/teams_call_jobs.py.
 
 Covers: register_teams_call_jobs, _job_sync_teams_calls (success, no users,
         watermark found/not-found, invalid watermark, token failure, graph
@@ -20,7 +21,6 @@ os.environ["TESTING"] = "1"
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # register_teams_call_jobs

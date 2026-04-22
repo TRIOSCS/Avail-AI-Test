@@ -1,4 +1,5 @@
-"""test_excess_service_nightly.py — Tests for send_bid_solicitation in excess_service.py.
+"""test_excess_service_nightly.py — Tests for send_bid_solicitation in
+excess_service.py.
 
 Covers lines 868-997 (send_bid_solicitation bundled/split modes, invalid item, email
 failure) and smaller missing blocks: 403, 508, 667, 675, 683.
@@ -522,9 +523,7 @@ async def test_send_bid_solicitation_split_partial_failure(db_session: Session):
 
     # First call succeeds, second raises
     gc_instance = AsyncMock()
-    gc_instance.post_json = AsyncMock(
-        side_effect=[None, Exception("Rate limit exceeded")]
-    )
+    gc_instance.post_json = AsyncMock(side_effect=[None, Exception("Rate limit exceeded")])
 
     with patch("app.utils.graph_client.GraphClient", return_value=gc_instance):
         with patch(

@@ -20,12 +20,10 @@ import os
 os.environ["TESTING"] = "1"
 
 import json
-from decimal import Decimal
 from unittest.mock import MagicMock, patch
 
 import pytest
 from sqlalchemy import create_engine
-from sqlalchemy import text as sqltext
 from sqlalchemy.orm import Session
 from sqlalchemy.pool import StaticPool
 
@@ -179,9 +177,7 @@ class TestBackfillProactiveOfferQtyPriceParse:
 
         match_rows = [(10, 5)]  # target_qty=5
         # qty=100 > target(5), and prices are non-numeric strings → ValueError
-        line_items = json.dumps(
-            [{"match_id": 10, "qty": 100, "sell_price": "N/A", "unit_price": "bad"}]
-        )
+        line_items = json.dumps([{"match_id": 10, "qty": 100, "sell_price": "N/A", "unit_price": "bad"}])
         offers = [(1, line_items)]
 
         mock_conn.execute.return_value.fetchall.side_effect = [match_rows, offers]
@@ -340,9 +336,10 @@ class TestSeedApiSources:
     @patch("app.startup.SessionLocal")
     def test_early_return_when_all_sources_present(self, mock_sl):
         """Lines 955-956: returns early when existing source count matches SOURCES."""
-        from app.startup import seed_api_sources
         import json
         from pathlib import Path
+
+        from app.startup import seed_api_sources
 
         sources_path = Path(__file__).parent.parent / "app" / "data" / "api_sources.json"
         sources = json.loads(sources_path.read_text())
@@ -367,8 +364,8 @@ class TestSeedApiSources:
     @patch("app.startup.SessionLocal")
     def test_removes_legacy_newark_source(self, mock_sl, db_session: Session):
         """Lines 982-985: deletes 'newark' when both 'newark' and 'element14' exist."""
-        from app.startup import seed_api_sources
         from app.models import ApiSource
+        from app.startup import seed_api_sources
 
         mock_sl.return_value = db_session
 
@@ -409,8 +406,8 @@ class TestSeedApiSources:
     @patch("app.startup.SessionLocal")
     def test_backfills_monthly_quota_for_known_sources(self, mock_sl, db_session: Session):
         """Lines 1001, 1004-1006: sets monthly_quota where it is NULL."""
-        from app.startup import seed_api_sources
         from app.models import ApiSource
+        from app.startup import seed_api_sources
 
         mock_sl.return_value = db_session
 

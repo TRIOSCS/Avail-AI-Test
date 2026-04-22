@@ -1,4 +1,5 @@
-"""test_email_intelligence_service_coverage.py — Extra coverage for email_intelligence_service.py.
+"""test_email_intelligence_service_coverage.py — Extra coverage for
+email_intelligence_service.py.
 
 Targets uncovered branches at lines 78-83, 98-99, 115-122, 234, 252-253, 276-279,
 286-294, 359-363, 477-482, 604-685.
@@ -23,8 +24,6 @@ os.environ["TESTING"] = "1"
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from app.services.email_intelligence_service import (
     classify_email_ai,
     detect_specialties_ai,
@@ -36,7 +35,6 @@ from app.services.email_intelligence_service import (
 )
 from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
-
 # ── classify_email_ai ─────────────────────────────────────────────────
 
 
@@ -45,10 +43,14 @@ class TestClassifyEmailAi:
         """ClaudeUnavailableError → returns None (lines 78-79)."""
         with patch(
             "app.services.email_intelligence_service.classify_email_ai.__wrapped__"
-            if hasattr(classify_email_ai, "__wrapped__") else "app.utils.claude_client.claude_json",
+            if hasattr(classify_email_ai, "__wrapped__")
+            else "app.utils.claude_client.claude_json",
             new=AsyncMock(side_effect=ClaudeUnavailableError("not configured")),
         ):
-            with patch("app.utils.claude_client.claude_json", new=AsyncMock(side_effect=ClaudeUnavailableError("not configured"))):
+            with patch(
+                "app.utils.claude_client.claude_json",
+                new=AsyncMock(side_effect=ClaudeUnavailableError("not configured")),
+            ):
                 result = await classify_email_ai("Subject", "Body", "sender@x.com")
         assert result is None
 
@@ -119,7 +121,8 @@ class TestExtractPricingIntelligence:
         mock_result = {"offers": [{"mpn": "LM317T", "price": 0.50}]}
         with patch(
             "app.services.email_intelligence_service.extract_pricing_intelligence.__wrapped__"
-            if hasattr(extract_pricing_intelligence, "__wrapped__") else "app.services.ai_email_parser.parse_email",
+            if hasattr(extract_pricing_intelligence, "__wrapped__")
+            else "app.services.ai_email_parser.parse_email",
             new=AsyncMock(return_value=mock_result),
         ):
             with patch(
@@ -140,7 +143,7 @@ class TestExtractPricingIntelligence:
 
 class TestStoreEmailIntelligence:
     def test_auto_applied_true_for_high_confidence_offer_with_quotes(self, db_session, test_user):
-        """conf >= 0.8 and parsed_quotes → auto_applied=True (line 168-169)."""
+        """Conf >= 0.8 and parsed_quotes → auto_applied=True (line 168-169)."""
         classification = {
             "classification": "offer",
             "confidence": 0.85,
@@ -187,7 +190,7 @@ class TestStoreEmailIntelligence:
         assert record.auto_applied is False
 
     def test_spam_skips_review_logic(self, db_session, test_user):
-        """spam classification → no_review set, both flags False."""
+        """Spam classification → no_review set, both flags False."""
         classification = {
             "classification": "spam",
             "confidence": 0.95,
@@ -260,14 +263,18 @@ class TestStoreEmailIntelligence:
 class TestProcessEmailIntelligence:
     async def test_regex_2_matches_skips_ai_classification(self, db_session, test_user):
         """2+ regex matches → classification built without AI call (line 220-229)."""
-        with patch(
-            "app.services.email_intelligence_service.classify_email_ai",
-        ) as mock_classify, patch(
-            "app.services.email_intelligence_service.extract_pricing_intelligence",
-            new=AsyncMock(return_value=None),
-        ), patch(
-            "app.services.email_intelligence_service.extract_durable_facts",
-            new=AsyncMock(return_value=[]),
+        with (
+            patch(
+                "app.services.email_intelligence_service.classify_email_ai",
+            ) as mock_classify,
+            patch(
+                "app.services.email_intelligence_service.extract_pricing_intelligence",
+                new=AsyncMock(return_value=None),
+            ),
+            patch(
+                "app.services.email_intelligence_service.extract_durable_facts",
+                new=AsyncMock(return_value=[]),
+            ),
         ):
             result = await process_email_intelligence(
                 db_session,
@@ -307,26 +314,31 @@ class TestProcessEmailIntelligence:
         assert result is None
 
     async def test_quote_reply_with_pricing_extracts_quotes(self, db_session, test_user):
-        """quote_reply with has_pricing=True → extract_pricing_intelligence is called."""
+        """quote_reply with has_pricing=True → extract_pricing_intelligence is
+        called."""
         mock_quotes = {"offers": [{"mpn": "NE555", "price": 0.10}]}
-        with patch(
-            "app.services.email_intelligence_service.classify_email_ai",
-            new=AsyncMock(
-                return_value={
-                    "classification": "quote_reply",
-                    "confidence": 0.9,
-                    "has_pricing": True,
-                    "parts_mentioned": ["NE555"],
-                    "brands_detected": [],
-                    "commodities_detected": [],
-                }
+        with (
+            patch(
+                "app.services.email_intelligence_service.classify_email_ai",
+                new=AsyncMock(
+                    return_value={
+                        "classification": "quote_reply",
+                        "confidence": 0.9,
+                        "has_pricing": True,
+                        "parts_mentioned": ["NE555"],
+                        "brands_detected": [],
+                        "commodities_detected": [],
+                    }
+                ),
             ),
-        ), patch(
-            "app.services.email_intelligence_service.extract_pricing_intelligence",
-            new=AsyncMock(return_value=mock_quotes),
-        ) as mock_extract, patch(
-            "app.services.email_intelligence_service.extract_durable_facts",
-            new=AsyncMock(return_value=[]),
+            patch(
+                "app.services.email_intelligence_service.extract_pricing_intelligence",
+                new=AsyncMock(return_value=mock_quotes),
+            ) as mock_extract,
+            patch(
+                "app.services.email_intelligence_service.extract_durable_facts",
+                new=AsyncMock(return_value=[]),
+            ),
         ):
             result = await process_email_intelligence(
                 db_session,
@@ -345,24 +357,28 @@ class TestProcessEmailIntelligence:
 
     async def test_store_failure_returns_none(self, db_session, test_user):
         """store_email_intelligence raises → process returns None (lines 276-279)."""
-        with patch(
-            "app.services.email_intelligence_service.classify_email_ai",
-            new=AsyncMock(
-                return_value={
-                    "classification": "general",
-                    "confidence": 0.5,
-                    "has_pricing": False,
-                    "parts_mentioned": [],
-                    "brands_detected": [],
-                    "commodities_detected": [],
-                }
+        with (
+            patch(
+                "app.services.email_intelligence_service.classify_email_ai",
+                new=AsyncMock(
+                    return_value={
+                        "classification": "general",
+                        "confidence": 0.5,
+                        "has_pricing": False,
+                        "parts_mentioned": [],
+                        "brands_detected": [],
+                        "commodities_detected": [],
+                    }
+                ),
             ),
-        ), patch(
-            "app.services.email_intelligence_service.extract_durable_facts",
-            new=AsyncMock(return_value=[]),
-        ), patch(
-            "app.services.email_intelligence_service.store_email_intelligence",
-            side_effect=Exception("DB error"),
+            patch(
+                "app.services.email_intelligence_service.extract_durable_facts",
+                new=AsyncMock(return_value=[]),
+            ),
+            patch(
+                "app.services.email_intelligence_service.store_email_intelligence",
+                side_effect=Exception("DB error"),
+            ),
         ):
             result = await process_email_intelligence(
                 db_session,
@@ -414,9 +430,7 @@ class TestGetRecentIntelligence:
         assert results[0]["classification"] == "offer"
 
         # Different classification filter yields no results
-        results_spam = get_recent_intelligence(
-            db_session, test_user.id, classification="spam"
-        )
+        results_spam = get_recent_intelligence(db_session, test_user.id, classification="spam")
         assert len(results_spam) == 0
 
     def test_returns_formatted_records(self, db_session, test_user):
@@ -494,7 +508,7 @@ class TestDetectSpecialtiesAi:
         assert result[0]["sender_type"] == "distributor"
 
     async def test_invalid_brands_list_defaults_to_empty(self):
-        """brands is not a list → empty list in normalized result."""
+        """Brands is not a list → empty list in normalized result."""
         with patch(
             "app.utils.claude_client.claude_json",
             new=AsyncMock(
@@ -576,9 +590,12 @@ class TestSummarizeThread:
             ]
         )
 
-        with patch("app.utils.graph_client.GraphClient", return_value=gc_mock), patch(
-            "app.utils.claude_client.claude_json",
-            new=AsyncMock(side_effect=ClaudeUnavailableError("not configured")),
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
+            patch(
+                "app.utils.claude_client.claude_json",
+                new=AsyncMock(side_effect=ClaudeUnavailableError("not configured")),
+            ),
         ):
             result = await summarize_thread("tok", "conv-unavail", db_session, test_user.id)
         assert result is None
@@ -596,9 +613,12 @@ class TestSummarizeThread:
             ]
         )
 
-        with patch("app.utils.graph_client.GraphClient", return_value=gc_mock), patch(
-            "app.utils.claude_client.claude_json",
-            new=AsyncMock(side_effect=ClaudeError("fail")),
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
+            patch(
+                "app.utils.claude_client.claude_json",
+                new=AsyncMock(side_effect=ClaudeError("fail")),
+            ),
         ):
             result = await summarize_thread("tok", "conv-error", db_session, test_user.id)
         assert result is None
@@ -616,9 +636,12 @@ class TestSummarizeThread:
             ]
         )
 
-        with patch("app.utils.graph_client.GraphClient", return_value=gc_mock), patch(
-            "app.utils.claude_client.claude_json",
-            new=AsyncMock(return_value=None),
+        with (
+            patch("app.utils.graph_client.GraphClient", return_value=gc_mock),
+            patch(
+                "app.utils.claude_client.claude_json",
+                new=AsyncMock(return_value=None),
+            ),
         ):
             result = await summarize_thread("tok", "conv-null", db_session, test_user.id)
         assert result is None

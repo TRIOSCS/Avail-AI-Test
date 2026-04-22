@@ -551,7 +551,8 @@ class TestApplySimpleScoring:
 
 
 def _make_mock_task(requisition_id: int, user_id: int | None = None) -> MagicMock:
-    """Build a mock RequisitionTask with aware datetimes (bypasses SQLite naive issue)."""
+    """Build a mock RequisitionTask with aware datetimes (bypasses SQLite naive
+    issue)."""
     t = MagicMock(spec=RequisitionTask)
     t.id = 9999
     t.requisition_id = requisition_id

@@ -273,6 +273,173 @@ Alpine.data('splitPanel', (panelId, defaultPct) => ({
     }
 }));
 
+/**
+ * x-truncate-tip — Hover tooltip that fires when an element overflows
+ * its box (scrollWidth > clientWidth), OR when the element has a
+ * `_tipNodes` property (a DocumentFragment the directive appends as-is).
+ *
+ * The `_tipNodes` path is used by x-chip-overflow to show hidden chips
+ * without ever touching innerHTML — we clone DOM subtrees directly.
+ */
+Alpine.directive('truncate-tip', (el, _directive, { cleanup }) => {
+  let tip = null;
+
+  const hasTipNodes = () => el._tipNodes && el._tipNodes.hasChildNodes && el._tipNodes.hasChildNodes();
+
+  const show = () => {
+    // Re-entrant guard: if a tooltip is already shown, skip. Without this,
+    // rapid mouseenter events (e.g. synthetic events during HTMX swap or
+    // mouse re-enter across nested elements) would overwrite `tip` and
+    // orphan the prior DOM node on document.body with no cleanup path.
+    if (tip) return;
+    const viaNodes = hasTipNodes();
+    if (!viaNodes && el.scrollWidth <= el.clientWidth) return;
+    const text = viaNodes ? null : el.textContent.trim();
+    if (!viaNodes && !text) return;
+
+    tip = document.createElement('div');
+    tip.className = 'truncate-tip';
+    if (viaNodes) {
+      // Clone the fragment so the original reference stays reusable.
+      tip.appendChild(el._tipNodes.cloneNode(true));
+    } else {
+      tip.textContent = text;
+    }
+    document.body.appendChild(tip);
+
+    const r = el.getBoundingClientRect();
+    const tr = tip.getBoundingClientRect();
+    let top = r.top - tr.height - 6;
+    if (top < 4) top = r.bottom + 6;
+    let left = r.left + (r.width - tr.width) / 2;
+    left = Math.max(4, Math.min(left, window.innerWidth - tr.width - 4));
+    tip.style.top = top + 'px';
+    tip.style.left = left + 'px';
+    requestAnimationFrame(() => tip && tip.classList.add('visible'));
+  };
+
+  const hide = () => { if (tip) { tip.remove(); tip = null; } };
+
+  el.addEventListener('mouseenter', show);
+  el.addEventListener('mouseleave', hide);
+  el.addEventListener('focusout', hide);
+
+  // Remove any visible tooltip when Alpine tears down the element
+  // (HTMX swap-out, component unmount). Without this, the orphaned tip
+  // would stay on document.body with no removal path since its source
+  // listeners have already been disconnected.
+  cleanup(() => hide());
+});
+
+/**
+ * x-chip-overflow — Measures chip row width and hides chips that don't
+ * fit. Exposes a trailing +N button (must be last child, .opp-chip-more)
+ * whose `_tipNodes` property holds a cloned DocumentFragment of the
+ * hidden chips — x-truncate-tip reads that on hover.
+ *
+ * Primaries-first DOM order (enforced by _build_row_mpn_chips) ensures
+ * the left-to-right overflow walk never hides a primary while a sub is
+ * still visible.
+ */
+Alpine.directive('chip-overflow', (el, _directive, { cleanup }) => {
+  const more = el.querySelector('.opp-chip-more');
+  if (!more) return;
+  const chips = Array.from(el.children).filter((c) => c !== more);
+
+  let rafId = 0;
+
+  const measure = () => {
+    rafId = 0;
+    chips.forEach((c) => (c.style.display = ''));
+    more.style.display = 'none';
+    more.textContent = '';
+    more._tipNodes = null;
+
+    const containerWidth = el.clientWidth;
+    if (containerWidth === 0) return;
+
+    const style = window.getComputedStyle(el);
+    const gap = parseFloat(style.columnGap || style.gap || '0') || 4;
+
+    // Measure +N width at worst-case placeholder, then clear.
+    more.style.display = '';
+    more.textContent = '+9';
+    const moreWidth = more.getBoundingClientRect().width + gap;
+    more.textContent = '';
+
+    let used = 0;
+    let fitCount = 0;
+    for (const chip of chips) {
+      const w = chip.getBoundingClientRect().width;
+      const projected = used + w + (fitCount > 0 ? gap : 0);
+      const reserve = fitCount < chips.length - 1 ? moreWidth : 0;
+      if (projected + reserve <= containerWidth) {
+        used = projected;
+        fitCount++;
+      } else {
+        break;
+      }
+    }
+
+    if (fitCount === chips.length) {
+      more.style.display = 'none';
+      return;
+    }
+
+    const hidden = chips.slice(fitCount);
+    chips.slice(0, fitCount).forEach((c) => (c.style.display = ''));
+    hidden.forEach((c) => (c.style.display = 'none'));
+
+    more.textContent = '+' + hidden.length;
+
+    // Build a DocumentFragment of cloned hidden chips, inside a chip-row wrapper.
+    // x-truncate-tip will clone this fragment into the tooltip when hovered.
+    const frag = document.createDocumentFragment();
+    const wrap = document.createElement('span');
+    wrap.className = 'opp-chip-row';
+    hidden.forEach((c) => {
+      const clone = c.cloneNode(true);
+      clone.style.display = '';
+      wrap.appendChild(clone);
+    });
+    frag.appendChild(wrap);
+    more._tipNodes = frag;
+  };
+
+  const schedule = () => {
+    if (rafId) return;
+    rafId = requestAnimationFrame(measure);
+  };
+
+  schedule();
+
+  const ro = new ResizeObserver(schedule);
+  ro.observe(el);
+
+  // Cleanup when Alpine tears down the element. Using Alpine's cleanup()
+  // callback (third-arg of the directive signature) ensures the
+  // ResizeObserver and any pending RAF are disconnected on HTMX swap-out,
+  // preventing an observer leak per chip row.
+  cleanup(() => {
+    ro.disconnect();
+    if (rafId) cancelAnimationFrame(rafId);
+  });
+});
+
+/**
+ * rowActionRail — Alpine component for requisitions2 <tr>.
+ * CSS handles hover visibility via tr:hover; this component exposes
+ * `show` state so keyboard users (Tab, Enter, Escape) have a path.
+ */
+Alpine.data('rowActionRail', () => ({
+  show: false,
+  init() {
+    this.$el.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { this.show = false; }
+    });
+  },
+}));
+
 // ── Page-level loading bar for navigation ──────────────────
 // Shows a slim progress bar at the top when navigating between pages.
 htmx.on('htmx:beforeRequest', function(evt) {
@@ -297,9 +464,21 @@ htmx.on('htmx:afterSwap', function(evt) {
             bar.style.transform = 'scaleX(0)';
         }, 200);
     }
-    // Safety: always reset body overflow after page navigation
-    // (prevents stuck overflow:hidden from lead-drawer or modal)
-    document.body.style.overflow = '';
+    // Reset body overflow only on full main-column navigations — not on drawer partials
+    // (otherwise opening the search lead drawer loses scroll lock immediately).
+    var t = evt.detail.target;
+    if (t && t.id === 'main-content') {
+        document.body.style.overflow = '';
+    }
+    // HTMX innerHTML swaps do not always auto-run Alpine on new nodes.
+    // Explicit initTree for targets known to contain Alpine components/directives
+    // (lead drawer close button; rq2-table rows with rowActionRail, x-truncate-tip,
+    // x-chip-overflow — directives that must re-bind after filter/sort/action swaps).
+    if (t && typeof Alpine !== 'undefined' && typeof Alpine.initTree === 'function') {
+        if (t.id === 'lead-drawer-content' || t.id === 'rq2-table') {
+            Alpine.initTree(t);
+        }
+    }
 });
 
 // ── Keyboard shortcuts ─────────────────────────────────────
@@ -311,11 +490,14 @@ document.addEventListener('keydown', (e) => {
             || document.querySelector('input[name="q"]');
         if (searchInput) searchInput.focus();
     }
-    // Escape → close modal or drawer
+    // Escape → close search lead drawer (Alpine drawerOpen on #lead-drawer)
     if (e.key === 'Escape') {
         var drawer = document.getElementById('lead-drawer');
-        if (drawer && drawer.dataset.open === 'true') {
-            drawer.dataset.open = 'false';
+        if (drawer && typeof Alpine !== 'undefined' && typeof Alpine.$data === 'function') {
+            var data = Alpine.$data(drawer);
+            if (data && data.drawerOpen) {
+                data.drawerOpen = false;
+            }
         }
     }
 });

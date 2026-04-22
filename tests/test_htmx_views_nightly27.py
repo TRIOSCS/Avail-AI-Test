@@ -139,7 +139,8 @@ class TestEditOfferValueErrorBranchesDirect:
         assert float(offer.unit_price) == 1.00  # unchanged
 
     async def test_edit_offer_invalid_valid_until_continues(self, db_session: Session, test_user: User):
-        """Lines 2187–2192: invalid valid_until date → ValueError caught, field skipped."""
+        """Lines 2187–2192: invalid valid_until date → ValueError caught, field
+        skipped."""
         from app.routers.htmx_views import edit_offer
 
         req = _make_req(db_session, test_user)
@@ -232,7 +233,7 @@ class TestReviewResponseHtmxDirect:
         assert vr.status == "rejected"
 
     async def test_invalid_status_raises_400(self, db_session: Session, test_user: User):
-        """invalid status → 400."""
+        """Invalid status → 400."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import review_response_htmx
@@ -251,7 +252,7 @@ class TestReviewResponseHtmxDirect:
         assert exc_info.value.status_code == 400
 
     async def test_response_not_found_raises_404(self, db_session: Session, test_user: User):
-        """non-existent response → 404."""
+        """Non-existent response → 404."""
         from fastapi import HTTPException
 
         from app.routers.htmx_views import review_response_htmx

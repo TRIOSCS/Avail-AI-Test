@@ -17,15 +17,10 @@ os.environ["TESTING"] = "1"
 
 import base64
 import hashlib
-import hmac
 import secrets
 from datetime import datetime, timezone
 
-import pytest
-from sqlalchemy.orm import Session
-
 from app.models import User
-
 
 # ── Helper: generate a real PBKDF2 password hash ────────────────────
 
