@@ -29,3 +29,27 @@ When changing any listed file, run tests and do a quick smoke check before commi
 ## Known tech debt
 
 - **`app/static/htmx_app.js` — `htmx:afterSwap` Alpine.initTree gate uses a hardcoded ID allowlist** (`lead-drawer-content`, `rq2-table`). When future HTMX-swapped regions contain Alpine directives (`x-*`), they must be added manually to this list or their directives won't re-bind after swap. Fragile. Future refactor idea: trigger `initTree` whenever the swap target subtree contains any element with an `x-*` attribute, so new regions get covered automatically. Not urgent — Alpine's own MutationObserver handles most cases, and the allowlist is a belt-and-suspenders fallback. Captured 2026-04-21 during the opportunity-table v2 merge.
+
+## Opportunity Table v2 (/requisitions2, gated by AVAIL_OPP_TABLE_V2)
+
+**Feature flag:** `AVAIL_OPP_TABLE_V2=true` (default). Flip to `false` +
+`docker compose restart app` to revert to legacy 5-col rendering without
+a redeploy. Turnaround ≈ 30 seconds.
+
+**Token set:** `app/static/styles.css` `:root { --opp-* }` variables for
+dot colors, urgency border/text, coverage fill, text primary/secondary/
+tertiary, separator. Component classes: `.opp-status-dot`, `.opp-status-label`,
+`.opp-time--{24h,72h,normal}`, `.opp-deal--tier-{primary-500,primary-400,tertiary}`,
+`.opp-deal--computed`, `.opp-deal--partial`, `.opp-coverage-seg`,
+`.opp-row--urgent-{24h,72h}`, `.opp-col-header`, `.opp-chip-row`,
+`.opp-chip-more`, `.opp-name-cell`, `.opp-action-rail*`, `.truncate-tip`.
+
+**Spec:** `docs/superpowers/specs/2026-04-21-opportunity-table-merged-design.md`.
+
+**Follow-up:** cleanup PR after 7 days stable flag-on removes legacy
+`{% else %}` branches and the flag itself.
+
+**Rollback procedure:**
+1. `.env` → `AVAIL_OPP_TABLE_V2=false`
+2. `docker compose restart app`
+3. Verify: `curl -s -b cookies.txt https://app/requisitions2 | grep -c opp-status-dot` — expect 0.

@@ -1,3 +1,5 @@
+> **SUPERSEDED** by `2026-04-21-opportunity-table-merged-design.md`. Retained for historical context only.
+
 # Requisitions Resizable Columns, Split, and Tooltips — Design
 
 **Date:** 2026-04-21

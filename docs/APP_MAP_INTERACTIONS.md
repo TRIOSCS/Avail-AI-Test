@@ -611,3 +611,35 @@ deploy.sh
     |       +---> Warn on any MISSING classes (safelist gap)
     +---> Step 7: Tail logs for errors
 ```
+
+---
+
+## Alpine.js Directives (htmx_app.js)
+
+### x-truncate-tip  (htmx_app.js)
+
+Hover tooltip that appears when the element overflows its box
+(`scrollWidth > clientWidth`), OR when the element has a `_tipNodes`
+DocumentFragment property attached at runtime. The `_tipNodes` path is
+the contract with `x-chip-overflow` — hidden chips flow as cloned DOM,
+never through HTML-string attributes. Re-entrant guard prevents
+orphaned tooltips on rapid mouseenter events; Alpine `cleanup()`
+callback removes any visible tip on element teardown.
+
+### x-chip-overflow  (htmx_app.js)
+
+Chip-row directive. ResizeObserver watches container inline-size; hides
+chips that don't fit (left-to-right walk), exposes a trailing
+`.opp-chip-more` button whose `_tipNodes` property holds a
+DocumentFragment of cloned hidden chips for `x-truncate-tip` to reveal
+on hover. Primaries-first DOM order (enforced by `_build_row_mpn_chips`
+service helper) guarantees primary MPNs never hide while subs are
+visible. Cleanup via Alpine's `cleanup()` disconnects the observer on
+element teardown.
+
+### rowActionRail  (htmx_app.js, Alpine.data)
+
+Component bound to `/requisitions2` `<tr>`. CSS handles hover reveal via
+`tr:hover .opp-action-rail`; this component exposes `show` state so
+`@focusin`/`@focusout`/`@keydown.enter` toggle visibility for keyboard
+users. `Escape` dismisses.
