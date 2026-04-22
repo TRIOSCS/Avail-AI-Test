@@ -138,3 +138,41 @@ test.describe('Chip overflow', () => {
     expect(tipChips).toBeGreaterThan(0);
   });
 });
+
+test.describe('Hover action rail', () => {
+  test('rail hidden at pageload', async ({ page }) => {
+    await gotoFresh(page);
+    const rails = await page.locator('.opp-action-rail').all();
+    for (const rail of rails) {
+      const opacity = await rail.evaluate((el) => getComputedStyle(el).opacity);
+      expect(parseFloat(opacity)).toBeLessThan(0.2);
+    }
+  });
+
+  test('mouse-hover reveals rail; leave hides', async ({ page }) => {
+    await gotoFresh(page);
+    const row = page.locator('.rq2-row').first();
+    await row.hover();
+    await page.waitForTimeout(150);
+    const rail = row.locator('.opp-action-rail');
+    const visibleOpacity = await rail.evaluate((el) => getComputedStyle(el).opacity);
+    expect(parseFloat(visibleOpacity)).toBeGreaterThan(0.5);
+    await page.mouse.move(0, 0);
+    await page.waitForTimeout(150);
+    const hiddenOpacity = await rail.evaluate((el) => getComputedStyle(el).opacity);
+    expect(parseFloat(hiddenOpacity)).toBeLessThan(0.2);
+  });
+
+  test('clicking a rail button does not trigger row hx-get detail', async ({ page }) => {
+    await gotoFresh(page);
+    const row = page.locator('.rq2-row').first();
+    await row.hover();
+    const clone = row.locator('.opp-action-rail [aria-label^="Clone"]');
+    if ((await clone.count()) === 0) test.skip();
+    await clone.click();
+    await page.waitForTimeout(300);
+    const after = await page.locator('#rq2-detail').innerHTML();
+    // Heuristic: detail pane stays empty-or-unchanged; no row-detail marker inserted.
+    expect(after).not.toMatch(/data-rq2-detail-id/);
+  });
+});
