@@ -652,13 +652,52 @@ def get_requisition_detail(
 def get_row_context(db: Session, req: Requisition, user) -> dict:
     """Build template context for a single row after inline edit.
 
-    Called by: app/routers/htmx_views.py (inline_save)
-    Depends on: Requisition model, User model
+    Mirrors the row-dict shape produced by list_requisitions() so the
+    v2 rendering in _single_row.html reads the same fields whether a row
+    is rendered in the list loop or swapped in after an inline edit.
+
+    Called by: app/routers/requisitions2.py (inline-save row swap),
+               app/routers/htmx_views.py (inline_save)
+    Depends on: Requisition, Requirement, Offer, User models
     """
+    requirements = list(req.requirements or [])
     # Requirement count
     req_cnt = db.query(sqlfunc.count(Requirement.id)).filter(Requirement.requisition_id == req.id).scalar() or 0
-    # Offer count
+    # Offer count (total offers under this requisition)
     offer_cnt = db.query(sqlfunc.count(Offer.id)).filter(Offer.requisition_id == req.id).scalar() or 0
+    # Coverage: distinct requirements with >=1 offer
+    coverage_filled = (
+        db.query(sqlfunc.count(sqlfunc.distinct(Offer.requirement_id)))
+        .join(Requirement, Offer.requirement_id == Requirement.id)
+        .filter(Requirement.requisition_id == req.id)
+        .scalar()
+        or 0
+    )
+    # Deal-value inputs — priced_sum + priced_count for the 4-arg helper.
+    priced_sum_val = (
+        db.query(
+            sqlfunc.coalesce(
+                sqlfunc.sum(
+                    case(
+                        (
+                            Requirement.target_price.isnot(None),
+                            Requirement.target_price * Requirement.target_qty,
+                        ),
+                        else_=0,
+                    )
+                ),
+                0,
+            )
+        )
+        .filter(Requirement.requisition_id == req.id)
+        .scalar()
+        or 0
+    )
+    priced_count = (
+        db.query(sqlfunc.count(Requirement.target_price)).filter(Requirement.requisition_id == req.id).scalar() or 0
+    )
+    opp_val = float(req.opportunity_value) if req.opportunity_value else None
+    deal_val, deal_src = _resolve_deal_value(opp_val, float(priced_sum_val), int(priced_count), int(req_cnt))
     # Creator name
     creator = db.query(User).filter(User.id == req.created_by).first()
     creator_name = creator.name or creator.email if creator else ""
@@ -681,6 +720,22 @@ def get_row_context(db: Session, req: Requisition, user) -> dict:
             "created_at": req.created_at,
             "claimed_by_id": req.claimed_by_id,
             "urgency": req.urgency or "normal",
+            # v2 row-dict fields — mirror list_requisitions() output shape
+            # so _single_row.html's v2 branch renders correctly after inline
+            # edits. See 2026-04-21 merged spec §Backend contract additions.
+            "hours_until_bid_due": _hours_until_bid_due(req.deadline),
+            "opportunity_value": opp_val,
+            "deal_value_display": deal_val,
+            "deal_value_source": deal_src,
+            "deal_value_priced_count": int(priced_count),
+            "deal_value_requirement_count": int(req_cnt),
+            "coverage_filled": int(coverage_filled),
+            "coverage_total": int(req_cnt),
+            "mpn_chip_items": _build_row_mpn_chips(requirements),
+            # Match-reason fields — only populated by the list-view aggregation
+            # (which classifies search matches); always None for single-row swaps.
+            "match_reason": None,
+            "matched_mpn": None,
         },
         "user": user,
     }

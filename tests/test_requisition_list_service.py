@@ -16,6 +16,7 @@ from app.services.requisition_list_service import (
     _hours_until_bid_due,
     _resolve_deal_value,
     get_requisition_detail,
+    get_row_context,
     get_team_users,
     list_requisitions,
 )
@@ -528,3 +529,46 @@ def test_list_row_coverage_counts_requirements_with_offers(db_session, test_user
     result = list_requisitions(db_session, filters, test_user.id, "buyer")
     req = result["requisitions"][0]
     assert req["coverage_filled"] == 0
+
+
+def test_get_row_context_exposes_v2_fields(db_session, test_user, test_requisition):
+    """Regression guard: get_row_context() must mirror list_requisitions() row-dict
+    shape so _single_row.html's v2 branch renders correctly after inline edits.
+
+    Without every v2 field, the v2 template access paths (req.mpn_chip_items,
+    req.hours_until_bid_due, req.coverage_*, req.deal_value_*) resolve to
+    Undefined, which silently corrupts the rendered row on every inline save.
+    """
+    ctx = get_row_context(db_session, test_requisition, test_user)
+    req = ctx["req"]
+
+    # Legacy fields — pre-existing contract
+    assert "id" in req and "name" in req and "status" in req
+    assert "customer_display" in req
+    assert "requirement_count" in req
+    assert "offer_count" in req
+    assert "urgency" in req
+
+    # v2 fields — must be present for v2 template rendering to work.
+    for key in (
+        "hours_until_bid_due",
+        "deal_value_display",
+        "deal_value_source",
+        "deal_value_priced_count",
+        "deal_value_requirement_count",
+        "coverage_filled",
+        "coverage_total",
+        "mpn_chip_items",
+        "match_reason",
+        "matched_mpn",
+    ):
+        assert key in req, f"get_row_context() missing v2 field: {key}"
+
+    # Types match list_requisitions() output
+    assert req["deal_value_source"] in {"entered", "computed", "partial", "none"}
+    assert isinstance(req["deal_value_priced_count"], int)
+    assert isinstance(req["deal_value_requirement_count"], int)
+    assert isinstance(req["coverage_filled"], int)
+    assert isinstance(req["coverage_total"], int)
+    assert isinstance(req["mpn_chip_items"], list)
+    assert req["coverage_filled"] <= req["coverage_total"]
