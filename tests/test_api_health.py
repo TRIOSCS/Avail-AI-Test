@@ -332,7 +332,7 @@ async def test_run_health_checks_ping(db_session):
     assert result["passed"] == 2
     assert result["failed"] == 0
     assert ping_mock.call_count == 2
-    mock_session.commit.assert_called_once()
+    assert mock_session.commit.call_count == 2  # one commit per source
     mock_session.close.assert_called_once()
 
 
@@ -410,7 +410,7 @@ async def test_run_health_checks_mixed_results(db_session):
     assert result["total"] == 2
     assert result["passed"] == 1
     assert result["failed"] == 1
-    mock_session.commit.assert_called_once()
+    assert mock_session.commit.call_count == 2  # one commit per source (failure is non-exception)
     mock_session.close.assert_called_once()
 
 
@@ -440,7 +440,8 @@ async def test_run_health_checks_source_crash(db_session):
     assert result["passed"] == 0
     assert result["failed"] == 1
     assert "unexpected crash" in result["sources"]["hc_crash"]["error"]
-    mock_session.commit.assert_called_once()
+    mock_session.commit.assert_not_called()  # exception → rollback, not commit
+    mock_session.rollback.assert_called_once()
     mock_session.close.assert_called_once()
 
 
@@ -478,7 +479,7 @@ async def test_run_health_checks_no_active_sources():
     assert result["total"] == 0
     assert result["passed"] == 0
     assert result["failed"] == 0
-    mock_session.commit.assert_called_once()
+    mock_session.commit.assert_not_called()  # no sources → loop never runs
     mock_session.close.assert_called_once()
 
 
