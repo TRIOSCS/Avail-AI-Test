@@ -332,7 +332,8 @@ async def test_run_health_checks_ping(db_session):
     assert result["passed"] == 2
     assert result["failed"] == 0
     assert ping_mock.call_count == 2
-    mock_session.commit.assert_called_once()
+    # Per-source commit (fix #4 / PR #90) — one commit per successful source.
+    assert mock_session.commit.call_count == 2
     mock_session.close.assert_called_once()
 
 
@@ -373,7 +374,8 @@ async def test_run_health_checks_deep(db_session):
     assert result["total"] == 1
     assert result["passed"] == 1
     assert deep_mock.call_count == 1
-    mock_session.commit.assert_called_once()
+    # Per-source commit — 1 source → 1 commit.
+    assert mock_session.commit.call_count == 1
     mock_session.close.assert_called_once()
 
 
@@ -410,7 +412,10 @@ async def test_run_health_checks_mixed_results(db_session):
     assert result["total"] == 2
     assert result["passed"] == 1
     assert result["failed"] == 1
-    mock_session.commit.assert_called_once()
+    # Per-source commit — ping_source returning success=False is still a clean
+    # return (no exception), so both sources complete the try-block and each
+    # triggers a commit. Rollback only fires on exception.
+    assert mock_session.commit.call_count == 2
     mock_session.close.assert_called_once()
 
 
@@ -440,7 +445,11 @@ async def test_run_health_checks_source_crash(db_session):
     assert result["passed"] == 0
     assert result["failed"] == 1
     assert "unexpected crash" in result["sources"]["hc_crash"]["error"]
-    mock_session.commit.assert_called_once()
+    # Per-source behaviour (fix #4): a raising check rolls back that source's
+    # changes; no commit for the failed source. Other sources would still commit
+    # independently.
+    assert mock_session.commit.call_count == 0
+    mock_session.rollback.assert_called_once()
     mock_session.close.assert_called_once()
 
 
@@ -478,7 +487,9 @@ async def test_run_health_checks_no_active_sources():
     assert result["total"] == 0
     assert result["passed"] == 0
     assert result["failed"] == 0
-    mock_session.commit.assert_called_once()
+    # Per-source commit (fix #4) — zero sources → zero commits. The previous
+    # end-of-loop commit was removed when the transaction scope shrank.
+    assert mock_session.commit.call_count == 0
     mock_session.close.assert_called_once()
 
 

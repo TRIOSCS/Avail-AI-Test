@@ -697,13 +697,19 @@ def test_inline_save_name(client, test_requisition):
 
 
 def test_inline_save_urgency(client, test_requisition):
-    """PATCH inline saves urgency."""
+    """PATCH inline saves urgency.
+
+    The response is the rendered row partial. Urgency=critical now maps to the `opp-row
+    --urgent-24h` CSS class in the v2 opportunity-table template (the literal word
+    "critical" is no longer in the rendered output — see the opp_row_* macros merged in
+    PR #81).
+    """
     resp = client.patch(
         f"/requisitions2/{test_requisition.id}/inline",
         data={"field": "urgency", "value": "critical"},
     )
     assert resp.status_code == 200
-    assert "critical" in resp.text
+    assert "opp-row--urgent-24h" in resp.text
 
 
 def test_inline_save_deadline(client, test_requisition):
