@@ -64,18 +64,10 @@
 <body class="bg-gray-50 text-gray-900">
 
   {# ── Main content area ────────────────────────────────────── #}
-  <div class="h-screen flex flex-col">
+  {# pb-[52px] reserves space for the fixed 52px mobile_nav below. #}
+  <div class="h-screen flex flex-col pb-[52px]">
 
-    {# Topbar #}
-    <header class="flex h-12 items-center justify-between gap-4 border-b border-brand-200 bg-white px-5 flex-shrink-0">
-      <div class="flex items-center gap-2 text-sm text-gray-600">
-        <a href="/requisitions2" class="text-brand-500 hover:text-brand-600">Requisitions</a>
-        <span class="ml-2 inline-block h-2 w-2 rounded-full bg-emerald-500 animate-pulse" title="Live updates active"></span>
-      </div>
-      <div class="text-sm font-medium text-gray-700">
-        {{ user.display_name or 'User' }}
-      </div>
-    </header>
+    {% include "htmx/partials/shared/topbar.html" %}
 
     {# Workspace area — fills remaining height #}
     <div id="rq2all-page"
@@ -93,7 +85,9 @@
         {% include "requisitions2/_bulk_bar.html" %}
       </div>
 
-      {# SSE listener — hidden, triggers table refresh #}
+      {# SSE listener — triggers table refresh; shows a small "live" dot
+         (preserved from the removed inline header) so users have a signal
+         that push updates are active. #}
       <div id="rq2-sse-source"
            sse-connect="/requisitions2/stream"
            hx-trigger="sse:table-refresh"
@@ -101,7 +95,11 @@
            hx-target="#rq2-table"
            hx-include="#rq2-filters"
            hx-swap="innerHTML"
-           class="hidden"></div>
+           class="pointer-events-none fixed bottom-[60px] right-3 z-10"
+           title="Live updates active"
+           aria-label="Live updates active">
+        <span class="inline-block h-2 w-2 rounded-full bg-emerald-500 animate-pulse"></span>
+      </div>
 
       {# ── Split-screen workspace ────────────────────────────── #}
       <div id="split-rq2"
@@ -147,5 +145,7 @@
            x-transition:leave-end="opacity-0"></div>
     </template>
   </div>
+
+  {% include "htmx/partials/shared/mobile_nav.html" %}
 </body>
 </html>

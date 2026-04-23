@@ -34,6 +34,24 @@ def test_page_load_contains_table(client):
     assert "rq2-rows" in resp.text or "No requisitions found" in resp.text
 
 
+def test_page_load_includes_shell_chrome(client):
+    """Direct page load renders shared topbar and bottom nav."""
+    resp = client.get("/requisitions2")
+    assert resp.status_code == 200
+    # Topbar: global search input is only rendered by topbar.html.
+    assert 'aria-label="Global search"' in resp.text
+    # Mobile nav: the bottom nav <nav> is only rendered by mobile_nav.html.
+    assert 'aria-label="Main navigation"' in resp.text
+
+
+def test_htmx_fragment_excludes_shell_chrome(client):
+    """HTMX fragment response must not wrap the table in the full shell."""
+    resp = client.get("/requisitions2", headers={"HX-Request": "true"})
+    assert resp.status_code == 200
+    assert 'aria-label="Global search"' not in resp.text
+    assert 'aria-label="Main navigation"' not in resp.text
+
+
 # ── HTMX detection ──────────────────────────────────────────────────
 
 
