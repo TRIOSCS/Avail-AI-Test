@@ -312,3 +312,85 @@ class TestEmailIntelligenceInActivity:
         assert resp.status_code == 200
         assert "Offer" in resp.text
         assert ">$</span>" in resp.text
+
+
+class TestPerformanceMetrics:
+    """Tests for CRM performance tab and JSON metrics endpoint."""
+
+    def test_performance_metrics_json_returns_200(self, client: TestClient):
+        """GET /api/crm/performance-metrics returns JSON with score arrays."""
+        resp = client.get("/api/crm/performance-metrics")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "names" in data
+        assert "scores" in data
+        assert "behaviors" in data
+        assert "outcomes" in data
+
+    def test_performance_metrics_json_arrays_same_length(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        """JSON response arrays have matching lengths."""
+        test_user.is_active = True
+        db_session.flush()
+
+        resp = client.get("/api/crm/performance-metrics")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["names"]) == len(data["scores"])
+        assert len(data["names"]) == len(data["behaviors"])
+        assert len(data["names"]) == len(data["outcomes"])
+
+    def test_crm_performance_partial_returns_html(self, client: TestClient):
+        """GET /v2/partials/crm/performance returns HTML."""
+        resp = client.get("/v2/partials/crm/performance")
+        assert resp.status_code == 200
+        assert "text/html" in resp.headers.get("content-type", "")
+
+
+class TestComputeUserScore:
+    """Tests for _compute_user_score helper (sales role and exception paths)."""
+
+    def test_sales_user_uses_sales_score_function(self, client: TestClient, db_session: Session, test_user: User):
+        """Sales users get compute_sales_avail_score called (not buyer)."""
+        from unittest.mock import patch
+
+        test_user.role = "sales"
+        test_user.is_active = True
+        db_session.flush()
+
+        sales_result = {"behavior_total": 80.0, "outcome_total": 70.0, "total_score": 75.0}
+        with (
+            patch(
+                "app.services.avail_score_service.compute_sales_avail_score",
+                return_value=sales_result,
+            ) as mock_sales,
+            patch(
+                "app.services.avail_score_service.compute_buyer_avail_score",
+            ) as mock_buyer,
+        ):
+            resp = client.get("/api/crm/performance-metrics")
+
+        assert resp.status_code == 200
+        # Sales score function was invoked; buyer was not
+        mock_sales.assert_called()
+        mock_buyer.assert_not_called()
+
+    def test_score_computation_exception_returns_zeros(self, client: TestClient, db_session: Session, test_user: User):
+        """When avail score computation raises, user gets zero scores (no crash)."""
+        from unittest.mock import patch
+
+        test_user.is_active = True
+        db_session.flush()
+
+        with patch(
+            "app.services.avail_score_service.compute_buyer_avail_score",
+            side_effect=RuntimeError("score service down"),
+        ):
+            resp = client.get("/api/crm/performance-metrics")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        # User still appears in response with zero scores
+        assert len(data["names"]) >= 1
+        assert all(s == 0.0 for s in data["scores"])
