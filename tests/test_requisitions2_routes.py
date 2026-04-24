@@ -697,13 +697,13 @@ def test_inline_save_name(client, test_requisition):
 
 
 def test_inline_save_urgency(client, test_requisition):
-    """PATCH inline saves urgency."""
+    """PATCH inline saves urgency — confirmed via toast trigger header."""
     resp = client.patch(
         f"/requisitions2/{test_requisition.id}/inline",
         data={"field": "urgency", "value": "critical"},
     )
     assert resp.status_code == 200
-    assert "critical" in resp.text
+    assert "critical" in resp.headers.get("HX-Trigger", "")
 
 
 def test_inline_save_deadline(client, test_requisition):

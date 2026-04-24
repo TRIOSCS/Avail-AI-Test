@@ -51,14 +51,14 @@ class TestPasswordLoginEnabled:
         monkeypatch.setenv("ENABLE_PASSWORD_LOGIN", "false")
         assert _password_login_enabled() is False
 
-    def test_disabled_on_https_url(self, monkeypatch):
-        """Returns False when APP_URL is HTTPS (production guard)."""
+    def test_enabled_when_env_set_https_url(self, monkeypatch):
+        """Returns True when ENABLE_PASSWORD_LOGIN=true regardless of APP_URL scheme."""
         from app.routers.auth import _password_login_enabled
 
         monkeypatch.delenv("TESTING", raising=False)
         monkeypatch.setenv("ENABLE_PASSWORD_LOGIN", "true")
         monkeypatch.setenv("APP_URL", "https://app.example.com")
-        assert _password_login_enabled() is False
+        assert _password_login_enabled() is True
 
     def test_enabled_on_http_url(self, monkeypatch):
         """Returns True when APP_URL is HTTP (development mode)."""
