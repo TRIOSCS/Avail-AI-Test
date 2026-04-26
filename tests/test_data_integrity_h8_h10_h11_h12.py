@@ -176,10 +176,15 @@ class TestH11QtyEstimation:
 
     def test_ai_exception_returns_max_approximate(self):
         """When Claude API call fails, returns max with approximate=True."""
+        from unittest.mock import patch as _patch
+
         from app.services.sighting_aggregation import _estimate_qty_with_ai
 
-        with patch("anthropic.Anthropic", side_effect=RuntimeError("API error")):
-            with patch("app.config.settings") as mock_settings:
+        mock_anthropic_mod = MagicMock()
+        mock_anthropic_mod.Anthropic.side_effect = RuntimeError("API error")
+
+        with _patch.dict("sys.modules", {"anthropic": mock_anthropic_mod}):
+            with _patch("app.config.settings") as mock_settings:
                 mock_settings.ANTHROPIC_API_KEY = "sk-test"
                 result = _estimate_qty_with_ai([50, 100, 150])
 
@@ -188,6 +193,8 @@ class TestH11QtyEstimation:
 
     def test_ai_success_returns_exact(self):
         """When Claude responds with a number, returns exact result."""
+        from unittest.mock import patch as _patch
+
         from app.services.sighting_aggregation import _estimate_qty_with_ai
 
         mock_resp = MagicMock()
@@ -196,10 +203,13 @@ class TestH11QtyEstimation:
         mock_client = MagicMock()
         mock_client.messages.create.return_value = mock_resp
 
+        mock_anthropic_mod = MagicMock()
+        mock_anthropic_mod.Anthropic.return_value = mock_client
+
         with (
-            patch("anthropic.Anthropic", return_value=mock_client),
-            patch("app.config.settings") as mock_settings,
-            patch("app.utils.claude_client.MODELS", {"fast": "claude-3-haiku"}),
+            _patch.dict("sys.modules", {"anthropic": mock_anthropic_mod}),
+            _patch("app.config.settings") as mock_settings,
+            _patch("app.utils.claude_client.MODELS", {"fast": "claude-3-haiku"}),
         ):
             mock_settings.ANTHROPIC_API_KEY = "sk-test"
             result = _estimate_qty_with_ai([100, 200, 300])

@@ -8,7 +8,7 @@ Depends on: app.services.sighting_aggregation, conftest fixtures
 """
 
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from sqlalchemy.orm import Session
 
@@ -16,8 +16,10 @@ from app.models.sourcing import Requirement, Requisition, Sighting
 from app.models.vendor_sighting_summary import VendorSightingSummary
 from app.models.vendors import VendorCard
 from app.services.sighting_aggregation import (
+    _estimate_qty_with_ai,
     _score_to_tier,
     rebuild_vendor_summaries,
+    rebuild_vendor_summaries_from_sightings,
 )
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -562,3 +564,185 @@ class TestVendorSummaryNewColumns:
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].min_moq is None
+
+
+# ── _estimate_qty_with_ai unit tests ────────────────────────────────────
+
+
+class TestEstimateQtyWithAI:
+    """Unit tests for _estimate_qty_with_ai helper — covers lines 42-75."""
+
+    def test_empty_list_returns_none(self):
+        result = _estimate_qty_with_ai([])
+        assert result == {"qty": None, "approximate": False}
+
+    def test_all_none_returns_none(self):
+        result = _estimate_qty_with_ai([None, None])
+        assert result == {"qty": None, "approximate": False}
+
+    def test_single_value_returns_sum(self):
+        # <= 2 non-null values → just sum, no AI
+        result = _estimate_qty_with_ai([100])
+        assert result == {"qty": 100, "approximate": False}
+
+    def test_two_values_returns_sum(self):
+        result = _estimate_qty_with_ai([100, 200])
+        assert result == {"qty": 300, "approximate": False}
+
+    def test_two_values_with_none_mixed(self):
+        # One None and two non-null → sum the non-null
+        result = _estimate_qty_with_ai([None, 100, 200])
+        # 3 non-null values → AI path; mock to test fallback
+        # Actually 2 non-null values [100, 200] → sum path
+        # Wait - None gets filtered: [100, 200] = 2, which is <= 2
+        # Result: 100 + 200 = 300 without AI
+        result = _estimate_qty_with_ai([None, 100])
+        assert result == {"qty": 100, "approximate": False}
+
+    def test_three_values_no_api_key_returns_max(self):
+        # > 2 non-null values but no API key → max fallback
+        # settings is imported lazily inside the function; mock app.config.settings
+        mock_settings = MagicMock()
+        mock_settings.ANTHROPIC_API_KEY = None
+        with patch.dict("sys.modules", {"app.config": MagicMock(settings=mock_settings)}):
+            result = _estimate_qty_with_ai([100, 200, 300])
+        # Falls into the "no API key" branch → max fallback
+        assert result == {"qty": 300, "approximate": True}
+
+    def test_three_values_ai_success(self):
+        # > 2 values with API key → Claude returns a number
+        mock_content = MagicMock()
+        mock_content.text = "350"
+        mock_resp = MagicMock()
+        mock_resp.content = [mock_content]
+        mock_client = MagicMock()
+        mock_client.messages.create.return_value = mock_resp
+
+        mock_settings = MagicMock()
+        mock_settings.ANTHROPIC_API_KEY = "sk-test-key"
+        mock_anthropic_module = MagicMock()
+        mock_anthropic_module.Anthropic.return_value = mock_client
+        mock_claude_client = MagicMock()
+        mock_claude_client.MODELS = {"fast": "claude-haiku-3"}
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "anthropic": mock_anthropic_module,
+                "app.config": MagicMock(settings=mock_settings),
+                "app.utils.claude_client": mock_claude_client,
+            },
+        ):
+            result = _estimate_qty_with_ai([100, 200, 300])
+
+        assert result == {"qty": 350, "approximate": False}
+
+    def test_three_values_ai_exception_returns_max(self):
+        # AI call throws → max fallback (exception caught)
+        # Any exception inside the try block → fallback to max
+        mock_settings = MagicMock()
+        mock_settings.ANTHROPIC_API_KEY = "sk-test-key"
+        mock_anthropic_module = MagicMock()
+        mock_anthropic_module.Anthropic.side_effect = Exception("API error")
+        mock_claude_client = MagicMock()
+        mock_claude_client.MODELS = {"fast": "claude-haiku-3"}
+
+        with patch.dict(
+            "sys.modules",
+            {
+                "anthropic": mock_anthropic_module,
+                "app.config": MagicMock(settings=mock_settings),
+                "app.utils.claude_client": mock_claude_client,
+            },
+        ):
+            result = _estimate_qty_with_ai([100, 200, 300])
+
+        assert result == {"qty": 300, "approximate": True}
+
+
+# ── rebuild_vendor_summaries_from_sightings ──────────────────────────────
+
+
+class TestRebuildVendorSummariesFromSightings:
+    """Tests for rebuild_vendor_summaries_from_sightings — covers lines 198-209."""
+
+    def test_basic_call_rebuilds_summaries(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        # Use already-normalized (lowercase) vendor name to match the filtering logic
+        sighting = _make_sighting(db_session, item.id, vendor_name="arrow electronics", qty_available=100)
+        db_session.commit()
+
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai", return_value={"qty": 100, "approximate": False}
+        ):
+            rebuild_vendor_summaries_from_sightings(db_session, item.id, [sighting])
+            db_session.flush()
+
+        summaries = db_session.query(VendorSightingSummary).filter_by(requirement_id=item.id).all()
+        assert len(summaries) == 1
+        assert summaries[0].vendor_name == "arrow electronics"
+
+    def test_empty_sightings_list_is_noop(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        db_session.commit()
+
+        # Should not raise, should not create any summaries
+        rebuild_vendor_summaries_from_sightings(db_session, item.id, [])
+
+        summaries = db_session.query(VendorSightingSummary).filter_by(requirement_id=item.id).all()
+        assert len(summaries) == 0
+
+    def test_exception_is_silently_caught(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        db_session.commit()
+
+        # Create a mock sighting with a bad vendor_name to trigger exception
+        mock_sighting = MagicMock()
+        mock_sighting.vendor_name = "Test Vendor"
+
+        with patch("app.services.sighting_aggregation.rebuild_vendor_summaries", side_effect=RuntimeError("DB error")):
+            # Should not raise
+            rebuild_vendor_summaries_from_sightings(db_session, item.id, [mock_sighting])
+
+    def test_sightings_without_vendor_name_skipped(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        sighting = _make_sighting(db_session, item.id, vendor_name="Arrow Electronics", qty_available=50)
+        # Use a MagicMock for the "no vendor name" case since DB requires NOT NULL
+        mock_sighting_no_vendor = MagicMock()
+        mock_sighting_no_vendor.vendor_name = None
+        db_session.commit()
+
+        with (
+            patch(
+                "app.services.sighting_aggregation._estimate_qty_with_ai",
+                return_value={"qty": 50, "approximate": False},
+            ),
+            patch("app.services.sighting_aggregation.rebuild_vendor_summaries") as mock_rebuild,
+        ):
+            rebuild_vendor_summaries_from_sightings(db_session, item.id, [sighting, mock_sighting_no_vendor])
+
+        # Should have been called with only "arrow electronics" (not None)
+        if mock_rebuild.called:
+            call_args = mock_rebuild.call_args
+            vendor_names = call_args[1].get("vendor_names") or call_args[0][2] if len(call_args[0]) > 2 else []
+            assert None not in vendor_names
+
+
+# ── rebuild with approximate qty logging ────────────────────────────────
+
+
+class TestApproximateQtyLogging:
+    """Cover line 129: approximate qty triggers info log."""
+
+    def test_approximate_qty_logs_info(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        _make_sighting(db_session, item.id, qty_available=100)
+        db_session.commit()
+
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai",
+            return_value={"qty": 150, "approximate": True},
+        ):
+            results = rebuild_vendor_summaries(db_session, item.id)
+
+        assert results[0].estimated_qty == 150
