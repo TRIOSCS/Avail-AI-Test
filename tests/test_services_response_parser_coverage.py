@@ -1,4 +1,5 @@
-"""test_services_response_parser_coverage_new.py — Coverage tests for missing error paths.
+"""test_services_response_parser_coverage_new.py — Coverage tests for missing error
+paths.
 
 Covers lines 156-161, 170-171, 189-190, 197-198 in app/services/response_parser.py.
 
