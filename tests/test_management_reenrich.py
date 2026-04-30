@@ -18,7 +18,8 @@ import pytest
 class TestReenrichMain:
     @pytest.mark.asyncio
     async def test_main_empty_cards_list(self):
-        """main() with no cards still runs without error and doesn't call record_spec."""
+        """Main() with no cards still runs without error and doesn't call
+        record_spec."""
         mock_db = MagicMock()
         mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
         mock_db.query.return_value.filter.return_value.all.return_value = []
@@ -44,7 +45,7 @@ class TestReenrichMain:
 
     @pytest.mark.asyncio
     async def test_main_calls_record_spec_for_spec_values(self):
-        """main() calls record_spec for each non-None spec value in specs_structured."""
+        """Main() calls record_spec for each non-None spec value in specs_structured."""
         mock_db = MagicMock()
 
         card = MagicMock()
@@ -88,7 +89,7 @@ class TestReenrichMain:
 
     @pytest.mark.asyncio
     async def test_main_skips_card_without_specs_structured(self):
-        """main() skips record_spec for cards with None specs_structured."""
+        """Main() skips record_spec for cards with None specs_structured."""
         mock_db = MagicMock()
 
         card = MagicMock()
@@ -119,7 +120,7 @@ class TestReenrichMain:
 
     @pytest.mark.asyncio
     async def test_main_skips_card_without_category(self):
-        """main() skips record_spec for cards with None category."""
+        """Main() skips record_spec for cards with None category."""
         mock_db = MagicMock()
 
         card = MagicMock()
@@ -150,7 +151,8 @@ class TestReenrichMain:
 
     @pytest.mark.asyncio
     async def test_main_handles_plain_string_spec_values(self):
-        """main() handles specs_structured where values are plain strings (not dicts)."""
+        """Main() handles specs_structured where values are plain strings (not
+        dicts)."""
         mock_db = MagicMock()
 
         card = MagicMock()
@@ -190,7 +192,7 @@ class TestReenrichMain:
 
     @pytest.mark.asyncio
     async def test_main_db_always_closed(self):
-        """main() closes DB session even if enrichment raises."""
+        """Main() closes DB session even if enrichment raises."""
         mock_db = MagicMock()
         mock_db.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
         mock_session_cls = MagicMock(return_value=mock_db)

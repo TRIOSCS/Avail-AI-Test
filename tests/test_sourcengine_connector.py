@@ -123,7 +123,7 @@ class TestSourcengineParseEdgeCases:
         assert result[0]["vendor_name"] == "Arrow"
 
     def test_supplier_as_string_not_dict(self):
-        """supplier field is a string → use str() directly."""
+        """Supplier field is a string → use str() directly."""
         connector = self._make_connector()
         data = {
             "offers": [
