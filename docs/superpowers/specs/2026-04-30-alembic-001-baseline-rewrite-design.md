@@ -12,11 +12,11 @@
 
 Main-branch CI has been red for weeks. The visible symptom alternates between `DuplicateTable` on `ix_vr_scanned_by` (migration 003 on a fresh DB) and `UndefinedTable` on `buy_plans` / `error_reports` (migration 003 on other DB states).
 
-Root cause: `alembic/versions/001_initial_schema.py` is 39 lines and uses `Base.metadata.create_all()` as its `upgrade()` body. This violates the project's ABSOLUTE rule (CLAUDE.md → Database & Migration Rules: "Never use Base.metadata.create_all() for schema changes"). The "baseline" silently drifts with today's models — so historical tables that were later renamed (`buy_plans` → `buy_plans_v3`) or restructured (`error_reports`) vanish from the baseline, while migrations 002 through 131 still reference them by their original names.
+Root cause: `alembic/versions/001_initial_schema.py` is 39 lines and uses `Base.metadata.create_all()` as its `upgrade()` body. This violates the project's ABSOLUTE rule (CLAUDE.md → Database & Migration Rules: "Never use Base.metadata.create_all() for schema changes"). The "baseline" silently drifts with today's models — so historical tables that were later renamed (`buy_plans` → `buy_plans_v3`) or restructured (`error_reports`) vanish from the baseline, while the rest of the migration chain (130 files on `origin/main` as of 2026-04-30, of which 002+ make up the forward chain after 001) still references them by their original names.
 
 The CI smoke test (`alembic upgrade head` → `alembic downgrade base` → `alembic upgrade head` on a fresh DB) exposes this every run.
 
-This rewrite replaces the 39-line `create_all()` body with explicit `op.create_table()` / `op.create_index()` / `op.create_foreign_key()` calls reflecting the schema as-of the Feb-2026 baseline commit. Migrations 002–131 are unchanged. Production is unaffected.
+This rewrite replaces the 39-line `create_all()` body with explicit `op.create_table()` / `op.create_index()` / `op.create_foreign_key()` calls reflecting the schema as-of the Feb-2026 baseline commit. All non-001 migrations are unchanged. Production is unaffected.
 
 ---
 
@@ -24,9 +24,9 @@ This rewrite replaces the 39-line `create_all()` body with explicit `op.create_t
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Reconstruction strategy | **Hybrid (a + b)**: git archaeology to generate first-draft DDL, then validate by walking migrations 002–131 | Reproducible from git AND validated against the forward chain. Highest rigor available. |
+| Reconstruction strategy | **Hybrid (a + b)**: git archaeology to generate first-draft DDL, then validate by walking migrations 002 through end-of-chain (verified 130 migration files on `origin/main` as of 2026-04-30) | Reproducible from git AND validated against the forward chain. Highest rigor available. |
 | Downgrade behavior | **Explicit `op.drop_table()` per table, reverse FK-dependency order** | Symmetric with upgrade; honors alembic convention; makes the roundtrip smoke test meaningful. |
-| Smoke test | **Full chain: fresh DB → `upgrade head` → `downgrade base` → `upgrade head`** | Catches missing-table failures, asymmetric drops, and non-idempotent leftovers in one test. This is the test currently failing on main. |
+| Smoke test | **Round trip + `Base.metadata` diff**: fresh DB → `upgrade head` → assert `alembic.autogenerate.compare_metadata()` returns an empty diff (modulo a small documented allowlist) → `downgrade base` → `upgrade head` | Round trip alone catches missing-table failures, asymmetric drops, and non-idempotent leftovers (the bug class currently red on main). The added metadata-diff catches a second class — model/migration drift — closing the loop the no-band-aids rule depends on going forward. |
 | Prod compatibility | **Fresh-DB bootstrap only; prod stays stamped at current head and is untouched** | Prod's `alembic_version` already equals current head. The new 001 never executes there. Verified via `alembic current` pre/post deploy. |
 
 ---
@@ -35,7 +35,7 @@ This rewrite replaces the 39-line `create_all()` body with explicit `op.create_t
 
 ### In scope
 - Rewrite `alembic/versions/001_initial_schema.py`: explicit `op.create_table()` / index / FK calls in `upgrade()`; symmetric `op.drop_*` in `downgrade()` in reverse FK order.
-- Migrations 002–131 unchanged.
+- All migrations other than 001 are unchanged (130-file chain on `origin/main` as of 2026-04-30; revision IDs are mixed numeric-prefix and hash-prefix — count is from `git ls-tree -r origin/main -- alembic/versions/`).
 - New `scripts/reconstruct_001_baseline.py` — committed reconstruction tool.
 - New `scripts/validate_001_against_chain.py` — committed validation tool.
 - Final validator output committed as `scripts/validate_001_against_chain.last_run.txt`.
@@ -90,11 +90,11 @@ The alembic revision ID `001_initial` does not change. The down_revision (`None`
 
 ### 2. Validation harness — `scripts/validate_001_against_chain.py`
 
-**Purpose:** confirm the new 001 provides everything migrations 002–131 assume.
+**Purpose:** confirm the new 001 provides everything migrations 002 through end-of-chain (verified 130 migration files on `origin/main` as of 2026-04-30) assume.
 
 **Steps:**
 1. Parse new `001_initial_schema.py` to build a model of the resulting schema state (tables, columns, indices, FKs, ENUMs).
-2. Walk `alembic/versions/002_*` through `alembic/versions/131_*` in revision order.
+2. Walk every revision after `001_initial` in revision order (resolved via `alembic history` rather than filename pattern, since revision IDs in this repo are mixed numeric-prefix and hash-prefix).
 3. For each operation in each migration, simulate its effect on the schema model:
    - `op.create_table` / `create_index` / `create_foreign_key` / `add_column` → add to model
    - `op.drop_table` / `drop_index` / `drop_constraint` / `drop_column` → require target exists in model; remove if so; report gap if not
@@ -109,7 +109,7 @@ The alembic revision ID `001_initial` does not change. The down_revision (`None`
 ### 3. Rewritten `alembic/versions/001_initial_schema.py`
 
 **Header docstring (verbatim — load-bearing for future readers):**
-> Initial schema — explicit DDL baseline. Generated 2026-04-30 from `d6ffe05d` models via `scripts/reconstruct_001_baseline.py`, validated against migrations 002–131 via `scripts/validate_001_against_chain.py`. **For fresh DBs only.** Production and any DB already stamped at any revision ≥ `001_initial` is unaffected — alembic's version table is not modified by this rewrite.
+> Initial schema — explicit DDL baseline. Generated 2026-04-30 from `d6ffe05d` models via `scripts/reconstruct_001_baseline.py`, validated against migrations 002 through end-of-chain (verified 130 migration files on `origin/main` as of 2026-04-30) via `scripts/validate_001_against_chain.py`. **For fresh DBs only.** Production and any DB already stamped at any revision ≥ `001_initial` is unaffected — alembic's version table is not modified by this rewrite.
 
 **Body:**
 - `revision: str = "001_initial"` — unchanged
@@ -123,12 +123,17 @@ The alembic revision ID `001_initial` does not change. The down_revision (`None`
 
 **What it runs (in order, on a fresh empty `postgres:16` container provisioned by the workflow):**
 1. `alembic upgrade head`
-2. `alembic downgrade base`
-3. `alembic upgrade head`
+2. **Schema-equivalence check** — assert `alembic.autogenerate.compare_metadata(MigrationContext.configure(connection), Base.metadata)` returns an empty diff list, modulo a small documented allowlist of accepted false-positive diff types (e.g., `Numeric(10,2)` rendering, server-side default representation). Allowlist lives inline in the test file with one comment per entry explaining the third-party-tool quirk.
+3. `alembic downgrade base`
+4. `alembic upgrade head`
 
-**Pass criteria:** all three steps exit 0.
+**Pass criteria:** all four steps pass (steps 1, 3, 4 exit 0; step 2's diff list is empty modulo the allowlist).
 
-**Plan responsibility:** verify the workflow file still contains this exact step before assuming it's there — guard against drift between this spec being written and the plan executing.
+**Why the diff layer was added:** without it, the smoke test only catches "the chain doesn't apply." With it, the test also catches "the chain applies, but it doesn't produce what the models say it should" — the very class of drift the create_all-baseline was hiding. This is the long-term regression detector the no-band-aids rule depends on.
+
+**Implementation note:** `alembic.autogenerate.compare_metadata` is alembic stdlib — no new dependency. Battle-tested. Returns `[]` on a clean match.
+
+**Plan responsibility:** verify the workflow file still contains this exact step before assuming it's there — guard against drift between this spec being written and the plan executing. If the existing workflow has only the round-trip test, the plan adds the diff step.
 
 ### 5. PR description / commit message
 
@@ -153,15 +158,16 @@ empty DB
 ```
 Today: fails at 003. After rewrite: clean.
 
-### Path 2 — CI roundtrip smoke test
+### Path 2 — CI roundtrip-plus-diff smoke test
 ```
 empty DB
-  → alembic upgrade head        (forward chain, 131 steps)
-  → alembic downgrade base      (reverse chain, 131 steps; 001's drop_table set runs last)
+  → alembic upgrade head        (forward chain)
+  → compare_metadata(...)       (assert empty diff vs. Base.metadata, modulo allowlist)
+  → alembic downgrade base      (reverse chain; 001's drop_table set runs last)
   → alembic upgrade head        (forward chain again)
-  ⇒ exit 0 on all three
+  ⇒ all four steps pass
 ```
-Step 3 catches any non-idempotent leftover after downgrade (orphan ENUMs, sequences, etc.).
+The diff step catches model/migration drift (e.g., a column added to a model but never migrated, or vice versa). The second `upgrade head` catches any non-idempotent leftover after downgrade (orphan ENUMs, sequences, etc.).
 
 ### Path 3 — prod (the no-op path; must be no-op)
 ```
@@ -227,21 +233,22 @@ The alembic_version table never sees a different value because of this PR. We're
 ## Testing
 
 ### CI gate (mandatory, blocking)
-The upgrade→downgrade→upgrade smoke test described in Component 4 / Path 2.
+The roundtrip-plus-diff smoke test described in Component 4 / Path 2. All four steps must pass: upgrade head, `compare_metadata` empty diff, downgrade base, upgrade head.
 
 ### Local developer smoke test (documented in PR)
 ```bash
 docker compose down -v && docker compose up -d db
 docker compose exec app alembic upgrade head
+docker compose exec app pytest tests/test_alembic_round_trip.py::test_schema_matches_models -v
 docker compose exec app alembic downgrade base
 docker compose exec app alembic upgrade head
 ```
-Reviewers run this before approving.
+Reviewers run this before approving. The `compare_metadata` assertion is exposed as a pytest test (lives in `tests/test_alembic_round_trip.py` per Component 4) so the local check is the same code path as the CI check.
 
 ### Schema-equivalence sanity check (one-time, during dev)
-After 001 is drafted: run the new chain on an empty DB, run `Base.metadata.create_all()` from current models on another empty DB, diff the two `pg_dump --schema-only` outputs. Should match modulo expected drift (alembic_version table, comment formatting, PG version-specific quirks). Any unexpected diff = bug to fix in 001 or somewhere in 002+ before merging.
+After 001 is drafted, before opening the PR: run the new chain on an empty DB, then run `Base.metadata.create_all()` from current models on another empty DB, and diff the two `pg_dump --schema-only` outputs. This is a stricter check than `compare_metadata` (it surfaces server-side comment-formatting and PG-version differences). Any unexpected diff = bug to fix in 001 before opening the PR.
 
-**Not a CI gate** — too noisy, too many environment-dependent diffs. One-time dev sanity check.
+**Not a CI gate** — too noisy, too many environment-dependent diffs. One-time dev sanity check that catches things `compare_metadata` waves through.
 
 ### Existing pytest suite
 Must still pass, modulo the 6 known failures tracked in the pre-rollout-checklist tech-debt register (the doc lands with PR #94 at `docs/PRE_ROLLOUT_CHECKLIST.md`; until #94 merges, the register lives only on that branch). The 001 rewrite is pure DDL; no Python application code paths should care.
