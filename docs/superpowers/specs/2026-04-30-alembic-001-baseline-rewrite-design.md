@@ -44,7 +44,7 @@ This rewrite replaces the 39-line `create_all()` body with explicit `op.create_t
 
 ### Out of scope (explicit)
 - Audit / fix of migration 049 (`reconcile_schema_drift`) which itself contains `if_not_exists` patterns. Separate problem; on a fresh chain run, 049's idempotency branches are dormant. Audit becomes a follow-up PR if those branches fire.
-- The other 130 migrations (no audit, no rewrite).
+- All migrations other than 001 (the rest of the chain — 129 files as of 2026-04-30 — get no audit and no rewrite in this PR).
 - PR #95 (`fix/requisitions2-shell-chrome`) closure — handled when shell-arch brainstorm resumes.
 - Dropping `stash@{0}` (cosmetic; do anytime).
 - Performance work on fresh-DB bootstrap time.
@@ -153,7 +153,7 @@ The alembic revision ID `001_initial` does not change. The down_revision (`None`
 empty DB
   → alembic upgrade head
     → 001_initial: CREATE TABLE × ~84 + indices + FKs + ENUMs
-    → 002 ... 131: ALTER/ADD/DROP/RENAME applied in order
+    → all subsequent revisions in alembic-history order: ALTER/ADD/DROP/RENAME applied
   → DB at "head" revision; schema matches current models
 ```
 Today: fails at 003. After rewrite: clean.
@@ -189,7 +189,7 @@ git show d6ffe05d:app/database.py   ─┴→ scripts/reconstruct_001_baseline.p
                                           │
                                           └→ alembic/versions/001_initial_schema.py.draft
 
-draft 001 + alembic/versions/002..131  ──→ scripts/validate_001_against_chain.py
+draft 001 + rest of alembic/versions/  ──→ scripts/validate_001_against_chain.py
                                           │
                                           ├→ "all references resolve"  → finalize 001 (rename .draft → real)
                                           └→ "gap list" → patch 001 → re-run
@@ -213,13 +213,18 @@ The alembic_version table never sees a different value because of this PR. We're
 **Hard rule:** never auto-add columns based on a later `op.add_column`. Always read the migration first. Some 002+ migrations create things that 001 should already have under a different name; auto-adding would mask the real fix.
 
 ### CI smoke-test failures
-| Where it fails | Likely cause | Action |
+| Where it fails (4-step smoke test) | Likely cause | Action |
 |---|---|---|
-| `upgrade head` step 1 | 001 still missing a table or column | Add to 001, re-run validator, push. |
-| `downgrade base` step 2 | Asymmetric drop somewhere in chain | If in 001 → fix here. If in 002+ → out of scope; mark smoke test xfail with linked follow-up issue, get this PR through. |
-| `upgrade head` step 3 (re-upgrade after downgrade) | Non-idempotent leftover (orphan ENUM, sequence) | Likely fix: explicit `DROP TYPE` in 001's downgrade. Or, if originating in 002+, same xfail-with-issue escape hatch. |
+| Step 1 `upgrade head` | 001 still missing a table or column | Add to 001, re-run validator, push. |
+| Step 2 `compare_metadata` non-empty diff | Model-vs-migration drift: a column added to a model but not in any migration, or vice versa. Could be 001's fault (bad reconstruction) or a later migration's fault (missing follow-up to a model change). | Read each diff entry. If 001 is the source → fix here. If a later migration is the source → in scope only if the fix is purely additive in 001 (the cleanest closure); otherwise raise as a follow-up issue and add the diff entry to the allowlist with a comment linking the issue. |
+| Step 3 `downgrade base` | Asymmetric drop somewhere in chain | If in 001 → fix here. If in 002+ → out of scope; mark smoke test xfail with linked follow-up issue, get this PR through. |
+| Step 4 `upgrade head` (re-upgrade after downgrade) | Non-idempotent leftover (orphan ENUM, sequence) | Likely fix: explicit `DROP TYPE` in 001's downgrade. Or, if originating in 002+, same xfail-with-issue escape hatch. |
 
-**xfail escape hatch:** the only band-aid permitted in this PR's scope, and only for failures *outside* 001 itself. Any 001-internal issue must be fixed in this PR. Each xfail must link to a follow-up issue and have an owner. The escape exists so that downgrade asymmetries we discover *elsewhere in the chain* don't blow up this PR's scope to "audit all 130 migrations" — which is explicitly out of scope.
+**Two escape hatches, both bounded:**
+- **xfail** (for downgrade-asymmetry or non-idempotency failures whose root cause is in a non-001 migration): mark the smoke-test step xfail with an inline comment linking a freshly-filed follow-up issue and named owner.
+- **`compare_metadata` allowlist** (for diff entries whose root cause is a non-001 migration that this PR's scope cannot fix): add the specific diff signature to the allowlist with a comment linking a freshly-filed follow-up issue.
+
+Both exist so that drift we discover *elsewhere in the chain* doesn't blow up this PR's scope to a chain-wide audit (out of scope). Any 001-internal issue must be fixed in this PR — escape hatches do not cover 001 itself.
 
 ### Post-merge prod surprise
 **Failure:** `alembic current` on prod after deploy shows a different revision than before.
