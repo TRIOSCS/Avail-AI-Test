@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rewrite `alembic/versions/001_initial_schema.py` from `Base.metadata.create_all()` to an explicit `op.create_table()` snapshot of the Feb-2026 schema, validated against the forward migration chain. Fix CI red on main, unblock 5 stacked PRs.
+**Goal:** Rewrite `alembic/versions/001_initial_schema.py` from `Base.metadata.create_all()` to an explicit `op.create_table()` snapshot of the Feb-2026 schema, validated against the forward migration chain. Fix CI red on `main`, then walk the 6 stacked Phase 4 PRs through the merge gauntlet so the backlog clears and `main` CI is green end-to-end.
 
 **Architecture:** Hybrid reconstruction strategy: (a) git-archaeology of commit `d6ffe05d` produces first-draft DDL via ephemeral Postgres + `pg_dump`; (b) a validator walks every migration after 001 and asserts each `op.alter`/`op.drop`/`op.add` references something in the draft. Iterate until the validator is clean. Add a CI step that runs `alembic.autogenerate.compare_metadata` against `Base.metadata` to catch ongoing drift. Same `revision = "001_initial"` ID — prod is untouched.
 
@@ -1732,6 +1732,127 @@ Verify the PR body links the spec at `docs/superpowers/specs/2026-04-30-alembic-
 
 ---
 
+### Task 14: Verify CI green, merge, capture post-merge prod alembic current
+
+**Files:**
+- None modified — git/GitHub operations + a prod read-only command.
+
+- [ ] **Step 1: Wait for CI green on the PR**
+
+```bash
+cd /root/availai
+gh pr checks --watch
+```
+Expected: every required check passes — most importantly `Alembic upgrade/downgrade/diff smoke test` (the renamed step from Task 8). If anything fails, return to the appropriate earlier task. Do NOT merge red.
+
+- [ ] **Step 2: Address all pr-review-toolkit findings (re-confirm Task 13 step 4 is done)**
+
+Per CLAUDE.md "PR Reviews": every finding fixed before merge. If a finding is genuinely a false positive, document why in a PR comment.
+
+- [ ] **Step 3: Squash-merge**
+
+```bash
+cd /root/availai
+gh pr merge --squash --auto
+```
+Squash keeps `main`'s history clean — the per-iteration commits during the gap-fixing loop (Task 6) are noisy.
+
+- [ ] **Step 4: Pull latest `main` locally**
+
+```bash
+git checkout main && git pull origin main
+git log --oneline -3
+```
+
+- [ ] **Step 5: Capture post-merge prod `alembic current` and verify byte-identical to pre-merge**
+
+After the deploy hook ships the merge to prod (typically <5 minutes after squash):
+
+```bash
+ssh root@app.availai.net "cd /root/availai && docker compose exec -T app alembic current 2>&1 | tail -5"
+```
+Diff against the pre-merge capture from Task 1 step 4. Must be byte-identical. The new 001's revision ID is unchanged, so the alembic_version table cannot have changed.
+
+- [ ] **Step 6: Post the verification result as a PR comment**
+
+```bash
+gh pr comment <PR_NUMBER> --body "Pre/post-merge prod \`alembic current\` byte-identical. (pre: <pre>; post: <post>)"
+```
+Substitute the actual values. This is the audit trail the spec's post-merge gate requires.
+
+If the two outputs differ — STOP. Do not merge anything else. Investigate before continuing. The new 001 should never have run on prod, so a different revision ID would mean alembic mis-applied something.
+
+---
+
+### Task 15: Phase 4 unblock — rebase and merge stacked PRs
+
+**Files:**
+- None modified in this repo (each PR's branch has its own changes; this task only does merge-queue work).
+
+**Rationale:** With main CI green again, the 6 Phase 4 PRs (#92, #93, #94, #96, #97, #98) can finally land. Merge order: **#96 first** (it carries test-assertion updates other PRs depend on), then the rest in any order. Each rebase + push + wait-for-green + merge is a checkpoint.
+
+- [ ] **Step 1: Confirm the open Phase 4 PRs and their states**
+
+```bash
+cd /root/availai
+gh pr list --state open --json number,title,headRefName,mergeable --limit 30
+```
+
+Expected: at minimum #92, #93, #94, #96, #97, #98 OPEN. Note: #95 (`fix/requisitions2-shell-chrome`) is intentionally being left open — it gets closed when the shell-arch brainstorm resumes, NOT here. Skip it.
+
+- [ ] **Step 2: Rebase + merge #96 first**
+
+```bash
+cd /root/availai
+gh pr checkout 96
+git rebase origin/main
+```
+If conflicts appear: most likely in `tests/test_alembic.py` (the 001 PR inverted assertions there). Take both changes — Task 11 of THIS plan added the inversion (in #96 already? confirm by reading), and #96's other test-assertion updates should be unaffected.
+
+```bash
+git push --force-with-lease
+gh pr checks --watch
+gh pr merge --squash --auto
+```
+
+- [ ] **Step 3: Pull main, then rebase+merge each remaining Phase 4 PR (#92, #93, #94, #97, #98)**
+
+For each `<NUMBER>`:
+
+```bash
+cd /root/availai
+git checkout main && git pull origin main
+gh pr checkout <NUMBER>
+git rebase origin/main
+git push --force-with-lease
+gh pr checks --watch
+gh pr merge --squash --auto
+```
+
+If any PR's CI fails AFTER the rebase, halt — it likely surfaced a real interaction with the new 001 or with a previously-merged Phase 4 PR. Diagnose before continuing the queue. Do not band-aid.
+
+- [ ] **Step 4: Verify all 6 Phase 4 PRs are merged**
+
+```bash
+cd /root/availai
+gh pr list --state open --json number,title --limit 30
+```
+
+Expected: zero of #92/#93/#94/#96/#97/#98 in the list. Only #95 (and any new ones opened since this plan was written) remain.
+
+- [ ] **Step 5: Confirm main CI green after the cascade**
+
+```bash
+cd /root/availai
+gh run list --branch main --limit 5
+```
+
+Expected: most recent run is green. If not — diagnose; the Phase 4 PRs are mostly cleanup/docs/lint with no runtime impact, so a failure here is a regression worth investigating.
+
+- [ ] **Step 6: No commit — this task is pure merge-queue work.**
+
+---
+
 ## Self-Review
 
 **Spec coverage:**
@@ -1748,6 +1869,8 @@ Verify the PR body links the spec at `docs/superpowers/specs/2026-04-30-alembic-
 - ✅ "xfail escape hatch" — referenced in Task 9 step 2 and Task 13 step 3
 
 **Spec deviation called out at the top:** test-file path is `scripts/check_schema_matches_models.py`, not `tests/test_alembic_round_trip.py`. Reason: conftest.py overrides `DATABASE_URL=sqlite://`. Functionally identical CI guarantee.
+
+**Sequencing & Phase 4 unblock:** Tasks 14–15 cover the post-merge prod-current verification and the rebase-and-merge cascade for the 6 stacked Phase 4 PRs (#92, #93, #94, #96, #97, #98 — #96 first per memory, then any order). The spec's "Hard gates / sequencing" rules (no merging Phase 4 until the 001 PR lands and main CI is green) map to Task 14 step 1 (CI green gate) → Task 14 step 3 (merge) → Task 15 (Phase 4 cascade).
 
 **Placeholder scan:** none. No TBD/TODO/XXX/FIXME left in plan steps. (The reconstruction script's emitter does include literal `FIXME unmapped` for unmapped pg_types — that's a self-flagging mechanism, not a plan placeholder; Task 5 step 4 handles it.)
 
