@@ -7,6 +7,8 @@ Depends on: app/management/reenrich.py
 """
 
 import os
+import runpy
+import sys
 
 os.environ["TESTING"] = "1"
 
@@ -211,3 +213,32 @@ class TestReenrichMain:
                 await main()
 
         mock_db.close.assert_called_once()
+
+
+class TestReenrichEntrypoint:
+    def test_main_block_runs_asyncio(self):
+        """The __main__ block parses args and calls asyncio.run(main(...))."""
+        with (
+            patch.object(sys, "argv", ["reenrich", "--limit", "10", "--batch-size", "5"]),
+            patch("asyncio.run") as mock_run,
+        ):
+            sys.modules.pop("app.management.reenrich", None)
+            runpy.run_module("app.management.reenrich", run_name="__main__", alter_sys=False)
+
+        mock_run.assert_called_once()
+
+    def test_main_block_uses_default_args(self):
+        """The __main__ block defaults to limit=500, batch_size=30."""
+        import asyncio
+
+        with (
+            patch.object(sys, "argv", ["reenrich"]),
+            patch("asyncio.run") as mock_run,
+        ):
+            sys.modules.pop("app.management.reenrich", None)
+            runpy.run_module("app.management.reenrich", run_name="__main__", alter_sys=False)
+
+        mock_run.assert_called_once()
+        coro = mock_run.call_args[0][0]
+        assert asyncio.iscoroutine(coro)
+        coro.close()
