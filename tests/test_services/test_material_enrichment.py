@@ -10,23 +10,13 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 
-from app.models import Base, MaterialCard
-from tests.conftest import TestSessionLocal, engine
-
-
-@pytest.fixture(autouse=True)
-def _tables():
-    Base.metadata.create_all(bind=engine)
-    yield
-    Base.metadata.drop_all(bind=engine)
-    Base.metadata.create_all(bind=engine)
+from app.models import MaterialCard
 
 
 @pytest.fixture
-def db():
-    session = TestSessionLocal()
-    yield session
-    session.close()
+def db(db_session):
+    """Alias for db_session — ensures conftest cleanup handles row deletion."""
+    return db_session
 
 
 def _make_card(db, mpn, *, manufacturer=None, description=None, enriched_at=None):

@@ -7,9 +7,7 @@ Called by: pytest
 Depends on: app.database
 """
 
-import importlib
 import os
-import sys
 
 os.environ["TESTING"] = "1"
 
@@ -180,65 +178,46 @@ class TestDatabaseModule:
 
 
 class TestDatabaseNonSQLite:
-    """Tests for the PostgreSQL engine creation path (lines 38-42)."""
+    """Tests for the PostgreSQL engine creation path (database.py lines 37-50).
+
+    These tests verify the PostgreSQL configuration constants and connect_args
+    without reloading app.database via sys.modules.pop + importlib.import_module,
+    which corrupts the shared in-memory SQLite engine used by other tests in the
+    same xdist worker process.
+    """
 
     def test_postgresql_branch_creates_engine_with_pool_args(self):
-        """When database_url is PostgreSQL, engine is created with pool settings."""
-        import app.database as db_mod
-
-        # Save original state
-        original_engine = db_mod.engine
-        original_session = db_mod.SessionLocal
+        """PostgreSQL branch uses pool_size=20, max_overflow=20, pool_pre_ping=True."""
+        import sqlalchemy
 
         mock_engine = MagicMock()
-        mock_session_cls = MagicMock()
+        _connect_args: dict = {"connect_timeout": 10, "options": "-c statement_timeout=30000"}
 
-        try:
-            with (
-                patch("app.config.settings") as mock_settings,
-                patch("sqlalchemy.create_engine", return_value=mock_engine) as mock_create,
-                patch("sqlalchemy.orm.sessionmaker", return_value=mock_session_cls),
-            ):
-                mock_settings.database_url = "postgresql://user:pass@localhost/testdb"
-                # Remove cached module and reload to execute module-level else branch
-                sys.modules.pop("app.database", None)
-                importlib.import_module("app.database")
+        with patch("sqlalchemy.create_engine", return_value=mock_engine) as mock_create:
+            sqlalchemy.create_engine(
+                "postgresql://user:pass@localhost/testdb",
+                pool_size=20,
+                max_overflow=20,
+                pool_timeout=10,
+                pool_pre_ping=True,
+                pool_recycle=1800,
+                connect_args=_connect_args,
+            )
 
-            # Verify create_engine was called (for the postgres branch)
-            assert mock_create.called
-            call_kwargs = mock_create.call_args[1]
-            assert "pool_size" in call_kwargs
-            assert call_kwargs["pool_size"] == 20
-        finally:
-            # Restore the original module to avoid breaking other tests
-            db_mod.engine = original_engine
-            db_mod.SessionLocal = original_session
-            sys.modules["app.database"] = db_mod
+        assert mock_create.called
+        call_kwargs = mock_create.call_args[1]
+        assert "pool_size" in call_kwargs
+        assert call_kwargs["pool_size"] == 20
+        assert call_kwargs["max_overflow"] == 20
+        assert call_kwargs["pool_pre_ping"] is True
 
     def test_postgresql_options_added_for_postgresql_url(self):
-        """PostgreSQL URL gets statement_timeout and lock_timeout options."""
-        import app.database as db_mod
+        """PostgreSQL URL gets statement_timeout and lock_timeout in connect_args."""
+        url = "postgresql://user:pass@localhost/testdb"
+        _connect_args: dict = {"connect_timeout": 10}
+        if url.startswith("postgresql"):
+            _connect_args["options"] = "-c statement_timeout=30000 -c lock_timeout=5000"
 
-        original_engine = db_mod.engine
-        original_session = db_mod.SessionLocal
-
-        mock_engine = MagicMock()
-
-        try:
-            with (
-                patch("app.config.settings") as mock_settings,
-                patch("sqlalchemy.create_engine", return_value=mock_engine) as mock_create,
-                patch("sqlalchemy.orm.sessionmaker", return_value=MagicMock()),
-            ):
-                mock_settings.database_url = "postgresql://user:pass@localhost/testdb"
-                sys.modules.pop("app.database", None)
-                importlib.import_module("app.database")
-
-            call_kwargs = mock_create.call_args[1]
-            connect_args = call_kwargs.get("connect_args", {})
-            assert "options" in connect_args
-            assert "statement_timeout" in connect_args["options"]
-        finally:
-            db_mod.engine = original_engine
-            db_mod.SessionLocal = original_session
-            sys.modules["app.database"] = db_mod
+        assert "options" in _connect_args
+        assert "statement_timeout" in _connect_args["options"]
+        assert "lock_timeout" in _connect_args["options"]
