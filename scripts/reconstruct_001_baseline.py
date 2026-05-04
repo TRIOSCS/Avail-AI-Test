@@ -55,6 +55,8 @@ class ForeignKey:
     referenced_table: str
     referenced_columns: list[str]
     name: str | None = None
+    ondelete: str | None = None  # 'CASCADE' | 'RESTRICT' | 'SET NULL' | 'SET DEFAULT' | 'NO ACTION' | None
+    onupdate: str | None = None  # same set as ondelete
 
 
 @dataclass
@@ -148,7 +150,9 @@ _RE_PRIMARY_KEY = re.compile(
 _RE_FOREIGN_KEY = re.compile(
     r"ALTER TABLE ONLY (?:public\.)?(\w+)\s+"
     r"ADD CONSTRAINT (\w+)\s+"
-    r"FOREIGN KEY \(([^)]+)\) REFERENCES (?:public\.)?(\w+)\(([^)]+)\)",
+    r"FOREIGN KEY \(([^)]+)\) REFERENCES (?:public\.)?(\w+)\(([^)]+)\)"
+    r"(?:\s+ON DELETE (CASCADE|RESTRICT|SET NULL|SET DEFAULT|NO ACTION))?"
+    r"(?:\s+ON UPDATE (CASCADE|RESTRICT|SET NULL|SET DEFAULT|NO ACTION))?",
     re.IGNORECASE,
 )
 _RE_INDEX = re.compile(
@@ -209,6 +213,8 @@ def parse_pg_dump(sql: str) -> ParseResult:
         local_cols = [c.strip() for c in m.group(3).split(",")]
         ref_table = m.group(4)
         ref_cols = [c.strip() for c in m.group(5).split(",")]
+        ondelete = m.group(6).upper() if m.group(6) else None
+        onupdate = m.group(7).upper() if m.group(7) else None
         if table in tables_by_name:
             tables_by_name[table].foreign_keys.append(
                 ForeignKey(
@@ -216,6 +222,8 @@ def parse_pg_dump(sql: str) -> ParseResult:
                     referenced_table=ref_table,
                     referenced_columns=ref_cols,
                     name=fk_name,
+                    ondelete=ondelete,
+                    onupdate=onupdate,
                 )
             )
 
@@ -233,6 +241,16 @@ def parse_pg_dump(sql: str) -> ParseResult:
 
 
 def render_op_create_table(t: Table) -> str:
+    """Render op.create_table for a single table.
+
+    Cross-table foreign keys are NOT inlined — they are emitted as separate
+    op.create_foreign_key calls AFTER all create_table calls complete (see
+    render_upgrade_body). This avoids "relation does not exist" errors when 001 creates
+    many tables in one batch with cross-references between them.
+
+    Self-reference foreign keys (parent_id → self.id) DO stay inline because the table
+    exists by the time the FK constraint is checked.
+    """
     lines = [f"op.create_table('{t.name}',"]
     for c in t.columns:
         attrs = [f"'{c.name}'", c.py_type]
@@ -244,10 +262,18 @@ def render_op_create_table(t: Table) -> str:
         pk_cols = ", ".join(f"'{c}'" for c in t.primary_key)
         lines.append(f"    sa.PrimaryKeyConstraint({pk_cols}),")
     for fk in t.foreign_keys:
+        if fk.referenced_table != t.name:
+            # Cross-table FK — emitted as a separate op.create_foreign_key
+            # call after all create_tables finish.
+            continue
         local = "[" + ", ".join(f"'{c}'" for c in fk.local_columns) + "]"
         ref = "[" + ", ".join(f"'{fk.referenced_table}.{c}'" for c in fk.referenced_columns) + "]"
-        name_arg = f", name='{fk.name}'" if fk.name else ""
-        lines.append(f"    sa.ForeignKeyConstraint({local}, {ref}{name_arg}),")
+        extras = f", name='{fk.name}'" if fk.name else ""
+        if fk.ondelete:
+            extras += f", ondelete='{fk.ondelete}'"
+        if fk.onupdate:
+            extras += f", onupdate='{fk.onupdate}'"
+        lines.append(f"    sa.ForeignKeyConstraint({local}, {ref}{extras}),")
     lines.append(")")
     return "\n".join(lines)
 
@@ -255,6 +281,67 @@ def render_op_create_table(t: Table) -> str:
 def render_op_create_index(ix: Index) -> str:
     cols = "[" + ", ".join(f"'{c}'" for c in ix.columns) + "]"
     return f"op.create_index('{ix.name}', '{ix.table}', {cols}, unique={ix.unique})"
+
+
+def render_op_create_foreign_key(src_table: str, fk: ForeignKey) -> str:
+    """Render `op.create_foreign_key(name, src, ref, [src_cols], [ref_cols], ondelete=…,
+    onupdate=…)` for a cross-table FK. Used by render_upgrade_body.
+
+    Cascade kwargs are emitted only when the parsed FK has them; default `NO ACTION` is
+    left implicit (no kwarg) to match alembic's convention.
+    """
+    local = "[" + ", ".join(f"'{c}'" for c in fk.local_columns) + "]"
+    remote = "[" + ", ".join(f"'{c}'" for c in fk.referenced_columns) + "]"
+    name = f"'{fk.name}'" if fk.name else "None"
+    extras = ""
+    if fk.ondelete:
+        extras += f", ondelete='{fk.ondelete}'"
+    if fk.onupdate:
+        extras += f", onupdate='{fk.onupdate}'"
+    return f"op.create_foreign_key({name}, '{src_table}', '{fk.referenced_table}', {local}, {remote}{extras})"
+
+
+def render_upgrade_body(parsed: ParseResult) -> list[str]:
+    """Render the body lines of upgrade() in three ordered passes:
+
+      1. all op.create_table calls (FK constraints inline ONLY for self-refs)
+      2. all op.create_index calls
+      3. all op.create_foreign_key calls (cross-table FKs only)
+
+    Pass 3 is what makes the FK separation safe — every referenced table
+    exists by the time op.create_foreign_key runs.
+    """
+    lines: list[str] = []
+    for t in parsed.tables:
+        lines.append(textwrap.indent(render_op_create_table(t), "    "))
+    for ix in parsed.indexes:
+        lines.append("    " + render_op_create_index(ix))
+    for t in parsed.tables:
+        for fk in t.foreign_keys:
+            if fk.referenced_table == t.name:
+                continue  # self-reference — already inline in create_table
+            lines.append("    " + render_op_create_foreign_key(t.name, fk))
+    return lines
+
+
+def render_downgrade_body(parsed: ParseResult) -> list[str]:
+    """Render the body lines of downgrade() — symmetric inverse of upgrade.
+
+    Order: drop_constraint (cross-table FKs) → drop_index → drop_table.
+    Dropping the FK first prevents PostgreSQL from refusing to drop a table
+    whose columns are referenced by another table's FK.
+    """
+    lines: list[str] = []
+    for t in reversed(parsed.tables):
+        for fk in reversed(t.foreign_keys):
+            if fk.referenced_table == t.name:
+                continue
+            lines.append(f"    op.drop_constraint('{fk.name}', '{t.name}', type_='foreignkey')")
+    for ix in reversed(parsed.indexes):
+        lines.append(f"    op.drop_index('{ix.name}', table_name='{ix.table}')")
+    for t in reversed(parsed.tables):
+        lines.append(f"    op.drop_table('{t.name}')")
+    return lines
 
 
 # ── Orchestration ──────────────────────────────────────────────────────
@@ -396,17 +483,11 @@ def main() -> int:
             "",
             "def upgrade() -> None:",
         ]
-        for t in parsed.tables:
-            body_lines.append(textwrap.indent(render_op_create_table(t), "    "))
-        for ix in parsed.indexes:
-            body_lines.append("    " + render_op_create_index(ix))
+        body_lines.extend(render_upgrade_body(parsed))
         body_lines.append("")
         body_lines.append("")
         body_lines.append("def downgrade() -> None:")
-        for ix in reversed(parsed.indexes):
-            body_lines.append(f"    op.drop_index('{ix.name}', table_name='{ix.table}')")
-        for t in reversed(parsed.tables):
-            body_lines.append(f"    op.drop_table('{t.name}')")
+        body_lines.extend(render_downgrade_body(parsed))
         args.out.write_text("\n".join(body_lines) + "\n")
         print(f"[reconstruct] wrote draft to {args.out}")
     finally:

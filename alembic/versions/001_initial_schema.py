@@ -1,14 +1,17 @@
-"""initial schema - baseline for all existing tables
+"""Initial schema — explicit DDL baseline.
 
-Revision ID: 001_initial
-Revises: None
-Create Date: 2026-02-14
+Generated 2026-05-04 from today's live app.models via
+scripts/reconstruct_001_baseline.py, then augmented with historical tables/columns
+referenced by migrations 002+ (per scripts/validate_001_against_chain.py's gap report).
 
-For EXISTING databases: run `alembic stamp 001_initial` (skip DDL, just mark as current).
-For NEW databases: run `alembic upgrade head` (creates all tables from models).
+For fresh DBs only. Production and any DB already stamped at any revision ≥ 001_initial
+is unaffected — alembic's version table is not modified by this rewrite.
 """
 
 from typing import Sequence, Union
+
+import sqlalchemy as sa
+from sqlalchemy.dialects import postgresql
 
 from alembic import op
 
@@ -19,21 +22,3686 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    """Create all tables from SQLAlchemy models.
-
-    Uses metadata.create_all with checkfirst=True so it's safe to run even if some
-    tables already exist (idempotent).
-    """
-    from app.models import Base
-
-    Base.metadata.create_all(bind=op.get_bind(), checkfirst=True)
+    op.create_table(
+        "activity_log",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=True),
+        sa.Column("activity_type", sa.String(length=20), nullable=False),
+        sa.Column("channel", sa.String(length=20), nullable=False),
+        sa.Column("company_id", sa.Integer(), nullable=True),
+        sa.Column("vendor_card_id", sa.Integer(), nullable=True),
+        sa.Column("vendor_contact_id", sa.Integer(), nullable=True),
+        sa.Column("requisition_id", sa.Integer(), nullable=True),
+        sa.Column("requirement_id", sa.Integer(), nullable=True),
+        sa.Column("quote_id", sa.Integer(), nullable=True),
+        sa.Column("customer_site_id", sa.Integer(), nullable=True),
+        sa.Column("site_contact_id", sa.Integer(), nullable=True),
+        sa.Column("buy_plan_id", sa.Integer(), nullable=True),
+        sa.Column("contact_email", sa.String(length=255), nullable=True),
+        sa.Column("contact_phone", sa.String(length=100), nullable=True),
+        sa.Column("contact_name", sa.String(length=255), nullable=True),
+        sa.Column("subject", sa.String(length=500), nullable=True),
+        sa.Column("duration_seconds", sa.Integer(), nullable=True),
+        sa.Column("external_id", sa.String(length=255), nullable=True),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("dismissed_at", sa.DateTime(), nullable=True),
+        sa.Column("auto_logged", sa.Boolean(), nullable=True),
+        sa.Column("occurred_at", sa.DateTime(), nullable=True),
+        sa.Column("direction", sa.String(length=20), nullable=True),
+        sa.Column("event_type", sa.String(length=30), nullable=True),
+        sa.Column("summary", sa.String(length=500), nullable=True),
+        sa.Column("details", sa.JSON(), nullable=True),
+        sa.Column("quality_score", sa.Float(), nullable=True),
+        sa.Column("quality_classification", sa.String(length=30), nullable=True),
+        sa.Column("quality_assessed_at", sa.DateTime(), nullable=True),
+        sa.Column("is_meaningful", sa.Boolean(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "api_sources",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("name", sa.String(length=100), nullable=False),
+        sa.Column("display_name", sa.String(length=255), nullable=False),
+        sa.Column("category", sa.String(length=50), nullable=False),
+        sa.Column("source_type", sa.String(length=50), nullable=False),
+        sa.Column("status", sa.String(length=20), nullable=False),
+        sa.Column("is_active", sa.Boolean(), nullable=True, server_default=sa.text("false")),
+        sa.Column("description", sa.String(length=500), nullable=True),
+        sa.Column("setup_notes", sa.Text(), nullable=True),
+        sa.Column("signup_url", sa.String(length=500), nullable=True),
+        sa.Column("env_vars", sa.JSON(), nullable=True),
+        sa.Column("credentials", postgresql.JSONB(), nullable=True),
+        sa.Column("last_success", sa.DateTime(), nullable=True),
+        sa.Column("last_error", sa.String(length=500), nullable=True),
+        sa.Column("last_error_at", sa.DateTime(), nullable=True),
+        sa.Column("error_count_24h", sa.Integer(), nullable=True, server_default=sa.text("0 NOT NULL")),
+        sa.Column("total_searches", sa.Integer(), nullable=True),
+        sa.Column("total_results", sa.Integer(), nullable=True),
+        sa.Column("avg_response_ms", sa.Integer(), nullable=True),
+        sa.Column("monthly_quota", sa.Integer(), nullable=True),
+        sa.Column("calls_this_month", sa.Integer(), nullable=True, server_default=sa.text("0")),
+        sa.Column("last_ping_at", sa.DateTime(), nullable=True),
+        sa.Column("last_deep_test_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "api_usage_log",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("source_id", sa.Integer(), nullable=False),
+        sa.Column("endpoint", sa.String(length=200), nullable=True),
+        sa.Column("status_code", sa.Integer(), nullable=True),
+        sa.Column("response_ms", sa.Integer(), nullable=True),
+        sa.Column("success", sa.Boolean(), nullable=False),
+        sa.Column("error_message", sa.String(length=500), nullable=True),
+        sa.Column("check_type", sa.String(length=20), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "avail_score_snapshot",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("month", sa.Date(), nullable=False),
+        sa.Column("role_type", sa.String(length=20), nullable=False),
+        sa.Column("b1_score", sa.Float(), nullable=True),
+        sa.Column("b1_label", sa.String(length=50), nullable=True),
+        sa.Column("b1_raw", sa.String(length=100), nullable=True),
+        sa.Column("b2_score", sa.Float(), nullable=True),
+        sa.Column("b2_label", sa.String(length=50), nullable=True),
+        sa.Column("b2_raw", sa.String(length=100), nullable=True),
+        sa.Column("b3_score", sa.Float(), nullable=True),
+        sa.Column("b3_label", sa.String(length=50), nullable=True),
+        sa.Column("b3_raw", sa.String(length=100), nullable=True),
+        sa.Column("b4_score", sa.Float(), nullable=True),
+        sa.Column("b4_label", sa.String(length=50), nullable=True),
+        sa.Column("b4_raw", sa.String(length=100), nullable=True),
+        sa.Column("b5_score", sa.Float(), nullable=True),
+        sa.Column("b5_label", sa.String(length=50), nullable=True),
+        sa.Column("b5_raw", sa.String(length=100), nullable=True),
+        sa.Column("behavior_total", sa.Float(), nullable=True),
+        sa.Column("o1_score", sa.Float(), nullable=True),
+        sa.Column("o1_label", sa.String(length=50), nullable=True),
+        sa.Column("o1_raw", sa.String(length=100), nullable=True),
+        sa.Column("o2_score", sa.Float(), nullable=True),
+        sa.Column("o2_label", sa.String(length=50), nullable=True),
+        sa.Column("o2_raw", sa.String(length=100), nullable=True),
+        sa.Column("o3_score", sa.Float(), nullable=True),
+        sa.Column("o3_label", sa.String(length=50), nullable=True),
+        sa.Column("o3_raw", sa.String(length=100), nullable=True),
+        sa.Column("o4_score", sa.Float(), nullable=True),
+        sa.Column("o4_label", sa.String(length=50), nullable=True),
+        sa.Column("o4_raw", sa.String(length=100), nullable=True),
+        sa.Column("o5_score", sa.Float(), nullable=True),
+        sa.Column("o5_label", sa.String(length=50), nullable=True),
+        sa.Column("o5_raw", sa.String(length=100), nullable=True),
+        sa.Column("outcome_total", sa.Float(), nullable=True),
+        sa.Column("total_score", sa.Float(), nullable=True),
+        sa.Column("rank", sa.Integer(), nullable=True),
+        sa.Column("qualified", sa.Boolean(), nullable=True),
+        sa.Column("bonus_amount", sa.Float(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "bid_solicitations",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("excess_line_item_id", sa.Integer(), nullable=False),
+        sa.Column("contact_id", sa.Integer(), nullable=False),
+        sa.Column("sent_by", sa.Integer(), nullable=False),
+        sa.Column("recipient_email", sa.String(length=255), nullable=True),
+        sa.Column("recipient_name", sa.String(length=255), nullable=True),
+        sa.Column("graph_message_id", sa.String(length=500), nullable=True),
+        sa.Column("subject", sa.String(length=500), nullable=True),
+        sa.Column("body_preview", sa.String(length=500), nullable=True),
+        sa.Column("response_received_at", sa.DateTime(), nullable=True),
+        sa.Column("parsed_bid_id", sa.Integer(), nullable=True),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("sent_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True, server_default=sa.text("now()")),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "bids",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("excess_line_item_id", sa.Integer(), nullable=False),
+        sa.Column("bidder_company_id", sa.Integer(), nullable=True),
+        sa.Column("bidder_vendor_card_id", sa.Integer(), nullable=True),
+        sa.Column("unit_price", sa.Numeric(precision=12, scale=4), nullable=False),
+        sa.Column("quantity_wanted", sa.Integer(), nullable=False),
+        sa.Column("lead_time_days", sa.Integer(), nullable=True),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("source", sa.String(length=20), nullable=True),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("created_by", sa.Integer(), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=True, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(), nullable=True, server_default=sa.text("now()")),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "buy_plan_lines",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("buy_plan_id", sa.Integer(), nullable=False),
+        sa.Column("requirement_id", sa.Integer(), nullable=True),
+        sa.Column("offer_id", sa.Integer(), nullable=True),
+        sa.Column("quantity", sa.Integer(), nullable=False),
+        sa.Column("unit_cost", sa.Numeric(precision=12, scale=4), nullable=True),
+        sa.Column("unit_sell", sa.Numeric(precision=12, scale=4), nullable=True),
+        sa.Column("margin_pct", sa.Numeric(precision=5, scale=2), nullable=True),
+        sa.Column("ai_score", sa.Float(), nullable=True),
+        sa.Column("buyer_id", sa.Integer(), nullable=True),
+        sa.Column("assignment_reason", sa.String(length=100), nullable=True),
+        sa.Column("status", sa.String(length=30), nullable=False),
+        sa.Column("po_number", sa.String(length=100), nullable=True),
+        sa.Column("estimated_ship_date", sa.DateTime(), nullable=True),
+        sa.Column("po_confirmed_at", sa.DateTime(), nullable=True),
+        sa.Column("po_verified_by_id", sa.Integer(), nullable=True),
+        sa.Column("po_verified_at", sa.DateTime(), nullable=True),
+        sa.Column("po_rejection_note", sa.Text(), nullable=True),
+        sa.Column("issue_type", sa.String(length=30), nullable=True),
+        sa.Column("issue_note", sa.Text(), nullable=True),
+        sa.Column("sales_note", sa.Text(), nullable=True),
+        sa.Column("manager_note", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "buy_plans",
+        # Column lengths — buy_plans was created via 001's original
+        # Base.metadata.create_all() body, not by any op.create_table or
+        # op.add_column in the chain. Lengths are inferred:
+        #
+        #   status              VARCHAR(30)   confirmed by analog: buy_plans_v3.status
+        #                                      = String(30) elsewhere in this file; v3 is
+        #                                      the structural successor and inherits the
+        #                                      same status enum semantics
+        #   sales_order_number  VARCHAR(100)  confirmed by analog: buy_plans_v3.sales_order_number
+        #                                      = String(100) elsewhere in this file
+        #   approval_token      VARCHAR(100)  confirmed by analog: buy_plans_v3.approval_token
+        #                                      = String(100) elsewhere in this file
+        #
+        # Column list itself is sourced from 076_migrate_buy_plans_v1_to_v3.py
+        # lines 41-53 (the SELECT clause that reads V1 buy_plans during the
+        # data migration to V3 — every column must exist for the SELECT to
+        # parse). Indexes from 003_perf_fk_indexes_dedup.py:76-78 (3 FK
+        # indexes) and 049_reconcile_schema_drift.py:81 (ix_buyplans_token).
+        #
+        # FK cascade behavior — original ON DELETE actions are not in the
+        # chain (this table predates the explicit-DDL rewrite). Defaulting
+        # to NO ACTION for all 6 FKs (conservative; matches "we don't know"
+        # semantics). Buy_plans is fresh-DB-only; on real prod, the chain
+        # migrates V1 → V3 (migration 076) and the table's cascades never
+        # actually fire against live data.
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("requisition_id", sa.Integer(), nullable=True),
+        sa.Column("quote_id", sa.Integer(), nullable=True),
+        sa.Column("status", sa.String(length=30), nullable=False),
+        sa.Column("line_items", sa.JSON(), nullable=True),
+        sa.Column("manager_notes", sa.Text(), nullable=True),
+        sa.Column("salesperson_notes", sa.Text(), nullable=True),
+        sa.Column("rejection_reason", sa.Text(), nullable=True),
+        sa.Column("sales_order_number", sa.String(length=100), nullable=True),
+        sa.Column("submitted_by_id", sa.Integer(), nullable=True),
+        sa.Column("approved_by_id", sa.Integer(), nullable=True),
+        sa.Column("completed_by_id", sa.Integer(), nullable=True),
+        sa.Column("cancelled_by_id", sa.Integer(), nullable=True),
+        sa.Column("submitted_at", sa.DateTime(), nullable=True),
+        sa.Column("approved_at", sa.DateTime(), nullable=True),
+        sa.Column("rejected_at", sa.DateTime(), nullable=True),
+        sa.Column("completed_at", sa.DateTime(), nullable=True),
+        sa.Column("cancelled_at", sa.DateTime(), nullable=True),
+        sa.Column("cancellation_reason", sa.Text(), nullable=True),
+        sa.Column("approval_token", sa.String(length=100), nullable=True),
+        sa.Column("token_expires_at", sa.DateTime(), nullable=True),
+        sa.Column("is_stock_sale", sa.Boolean(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "buy_plans_v3",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("quote_id", sa.Integer(), nullable=False),
+        sa.Column("requisition_id", sa.Integer(), nullable=False),
+        sa.Column("sales_order_number", sa.String(length=100), nullable=True),
+        sa.Column("customer_po_number", sa.String(length=100), nullable=True),
+        sa.Column("status", sa.String(length=30), nullable=False),
+        sa.Column("so_status", sa.String(length=30), nullable=False),
+        sa.Column("total_cost", sa.Numeric(precision=12, scale=2), nullable=True),
+        sa.Column("total_revenue", sa.Numeric(precision=12, scale=2), nullable=True),
+        sa.Column("total_margin_pct", sa.Numeric(precision=5, scale=2), nullable=True),
+        sa.Column("ai_summary", sa.Text(), nullable=True),
+        sa.Column("ai_flags", sa.JSON(), nullable=True),
+        sa.Column("auto_approved", sa.Boolean(), nullable=True),
+        sa.Column("approved_by_id", sa.Integer(), nullable=True),
+        sa.Column("approved_at", sa.DateTime(), nullable=True),
+        sa.Column("approval_notes", sa.Text(), nullable=True),
+        sa.Column("so_verified_by_id", sa.Integer(), nullable=True),
+        sa.Column("so_verified_at", sa.DateTime(), nullable=True),
+        sa.Column("so_rejection_note", sa.Text(), nullable=True),
+        sa.Column("submitted_by_id", sa.Integer(), nullable=True),
+        sa.Column("submitted_at", sa.DateTime(), nullable=True),
+        sa.Column("salesperson_notes", sa.Text(), nullable=True),
+        sa.Column("completed_at", sa.DateTime(), nullable=True),
+        sa.Column("case_report", sa.Text(), nullable=True),
+        sa.Column("cancelled_at", sa.DateTime(), nullable=True),
+        sa.Column("cancelled_by_id", sa.Integer(), nullable=True),
+        sa.Column("cancellation_reason", sa.Text(), nullable=True),
+        sa.Column("halted_by_id", sa.Integer(), nullable=True),
+        sa.Column("halted_at", sa.DateTime(), nullable=True),
+        sa.Column("is_stock_sale", sa.Boolean(), nullable=True),
+        sa.Column("approval_token", sa.String(length=100), nullable=True),
+        sa.Column("token_expires_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "buyer_leaderboard_snapshot",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("month", sa.Date(), nullable=False),
+        sa.Column("offers_logged", sa.Integer(), nullable=True),
+        sa.Column("offers_quoted", sa.Integer(), nullable=True),
+        sa.Column("offers_in_buyplan", sa.Integer(), nullable=True),
+        sa.Column("offers_po_confirmed", sa.Integer(), nullable=True),
+        sa.Column("stock_lists_uploaded", sa.Integer(), nullable=True),
+        sa.Column("points_offers", sa.Integer(), nullable=True),
+        sa.Column("points_quoted", sa.Integer(), nullable=True),
+        sa.Column("points_buyplan", sa.Integer(), nullable=True),
+        sa.Column("points_po", sa.Integer(), nullable=True),
+        sa.Column("points_stock", sa.Integer(), nullable=True),
+        sa.Column("total_points", sa.Integer(), nullable=True),
+        sa.Column("rank", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "buyer_vendor_stats",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("vendor_card_id", sa.Integer(), nullable=False),
+        sa.Column("rfqs_sent", sa.Integer(), nullable=True),
+        sa.Column("responses_received", sa.Integer(), nullable=True),
+        sa.Column("response_rate", sa.Float(), nullable=True),
+        sa.Column("offers_logged", sa.Integer(), nullable=True),
+        sa.Column("offers_won", sa.Integer(), nullable=True),
+        sa.Column("win_rate", sa.Float(), nullable=True),
+        sa.Column("avg_response_hours", sa.Float(), nullable=True),
+        sa.Column("last_contact_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "change_log",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("entity_type", sa.String(length=50), nullable=False),
+        sa.Column("entity_id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=True),
+        sa.Column("field_name", sa.String(length=100), nullable=False),
+        sa.Column("old_value", sa.Text(), nullable=True),
+        sa.Column("new_value", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "column_mapping_cache",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("vendor_domain", sa.Text(), nullable=False),
+        sa.Column("file_fingerprint", sa.Text(), nullable=False),
+        sa.Column("mapping", sa.JSON(), nullable=False),
+        sa.Column("confidence", sa.Float(), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "commodity_spec_schemas",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("commodity", sa.String(length=100), nullable=False),
+        sa.Column("spec_key", sa.String(length=100), nullable=False),
+        sa.Column("display_name", sa.String(length=100), nullable=False),
+        sa.Column("data_type", sa.String(length=20), nullable=False),
+        sa.Column("unit", sa.String(length=20), nullable=True),
+        sa.Column("canonical_unit", sa.String(length=20), nullable=True),
+        sa.Column("enum_values", postgresql.JSONB(), nullable=True),
+        sa.Column("numeric_range", postgresql.JSONB(), nullable=True),
+        sa.Column("sort_order", sa.Integer(), nullable=True),
+        sa.Column("is_filterable", sa.Boolean(), nullable=True, server_default=sa.text("true")),
+        sa.Column("is_primary", sa.Boolean(), nullable=True, server_default=sa.text("false")),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "companies",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("name", sa.String(length=255), nullable=False),
+        sa.Column("website", sa.String(length=500), nullable=True),
+        sa.Column("industry", sa.String(length=255), nullable=True),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("is_active", sa.Boolean(), nullable=True),
+        sa.Column("domain", sa.String(length=255), nullable=True),
+        sa.Column("linkedin_url", sa.String(length=500), nullable=True),
+        sa.Column("legal_name", sa.String(length=500), nullable=True),
+        sa.Column("employee_size", sa.String(length=50), nullable=True),
+        sa.Column("hq_city", sa.String(length=255), nullable=True),
+        sa.Column("hq_state", sa.String(length=100), nullable=True),
+        sa.Column("hq_country", sa.String(length=100), nullable=True),
+        sa.Column("last_enriched_at", sa.DateTime(), nullable=True),
+        sa.Column("enrichment_source", sa.String(length=50), nullable=True),
+        sa.Column("is_strategic", sa.Boolean(), nullable=True),
+        sa.Column("ownership_cleared_at", sa.DateTime(), nullable=True),
+        sa.Column("last_activity_at", sa.DateTime(), nullable=True),
+        sa.Column("account_owner_id", sa.Integer(), nullable=True),
+        sa.Column("account_type", sa.String(length=50), nullable=True),
+        sa.Column("phone", sa.String(length=100), nullable=True),
+        sa.Column("credit_terms", sa.String(length=100), nullable=True),
+        sa.Column("tax_id", sa.String(length=100), nullable=True),
+        sa.Column("currency", sa.String(length=10), nullable=True),
+        sa.Column("preferred_carrier", sa.String(length=100), nullable=True),
+        sa.Column("brand_tags", sa.JSON(), nullable=True),
+        sa.Column("commodity_tags", sa.JSON(), nullable=True),
+        sa.Column("material_tags_updated_at", sa.DateTime(), nullable=True),
+        sa.Column("site_count", sa.Integer(), nullable=True, server_default=sa.text("0 NOT NULL")),
+        sa.Column("open_req_count", sa.Integer(), nullable=True, server_default=sa.text("0 NOT NULL")),
+        sa.Column("source", sa.String(length=50), nullable=True),
+        sa.Column("sf_account_id", sa.String(length=255), nullable=True),
+        sa.Column("import_priority", sa.String(length=20), nullable=True),
+        sa.Column("deep_enrichment_at", sa.DateTime(), nullable=True),
+        sa.Column("customer_enrichment_at", sa.DateTime(), nullable=True),
+        sa.Column("customer_enrichment_status", sa.String(length=20), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "contacts",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("requisition_id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("contact_type", sa.String(length=20), nullable=False),
+        sa.Column("vendor_name", sa.String(length=255), nullable=False),
+        sa.Column("vendor_name_normalized", sa.String(length=255), nullable=True),
+        sa.Column("vendor_contact", sa.String(length=255), nullable=True),
+        sa.Column("parts_included", sa.JSON(), nullable=True),
+        sa.Column("subject", sa.String(length=500), nullable=True),
+        sa.Column("details", sa.Text(), nullable=True),
+        sa.Column("status", sa.String(length=50), nullable=True),
+        sa.Column("status_updated_at", sa.DateTime(), nullable=True),
+        sa.Column("graph_message_id", sa.String(length=500), nullable=True),
+        sa.Column("graph_conversation_id", sa.String(length=500), nullable=True),
+        sa.Column("needs_review", sa.Boolean(), nullable=True),
+        sa.Column("parse_result_json", sa.JSON(), nullable=True),
+        sa.Column("parse_confidence", sa.Float(), nullable=True),
+        sa.Column("error_message", sa.String(length=500), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "customer_part_history",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("company_id", sa.Integer(), nullable=False),
+        sa.Column("material_card_id", sa.Integer(), nullable=False),
+        sa.Column("mpn", sa.String(length=100), nullable=False),
+        sa.Column("source", sa.String(length=50), nullable=False),
+        sa.Column("last_purchased_at", sa.DateTime(), nullable=True),
+        sa.Column("purchase_count", sa.Integer(), nullable=True),
+        sa.Column("last_unit_price", sa.Numeric(precision=12, scale=4), nullable=True),
+        sa.Column("avg_unit_price", sa.Numeric(precision=12, scale=4), nullable=True),
+        sa.Column("last_quantity", sa.Integer(), nullable=True),
+        sa.Column("total_quantity", sa.Integer(), nullable=True),
+        sa.Column("source_ref", sa.String(length=255), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "customer_sites",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("company_id", sa.Integer(), nullable=False),
+        sa.Column("site_name", sa.String(length=255), nullable=False),
+        sa.Column("owner_id", sa.Integer(), nullable=True),
+        sa.Column("contact_name", sa.String(length=255), nullable=True),
+        sa.Column("contact_email", sa.String(length=255), nullable=True),
+        sa.Column("contact_phone", sa.String(length=100), nullable=True),
+        sa.Column("contact_phone_2", sa.String(length=100), nullable=True),
+        sa.Column("contact_title", sa.String(length=255), nullable=True),
+        sa.Column("contact_linkedin", sa.String(length=500), nullable=True),
+        sa.Column("address_line1", sa.String(length=500), nullable=True),
+        sa.Column("address_line2", sa.String(length=255), nullable=True),
+        sa.Column("city", sa.String(length=255), nullable=True),
+        sa.Column("state", sa.String(length=100), nullable=True),
+        sa.Column("zip", sa.String(length=20), nullable=True),
+        sa.Column("country", sa.String(length=100), nullable=True),
+        sa.Column("payment_terms", sa.String(length=100), nullable=True),
+        sa.Column("shipping_terms", sa.String(length=100), nullable=True),
+        sa.Column("site_type", sa.String(length=50), nullable=True),
+        sa.Column("timezone", sa.String(length=50), nullable=True),
+        sa.Column("receiving_hours", sa.String(length=100), nullable=True),
+        sa.Column("carrier_account", sa.String(length=100), nullable=True),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("is_active", sa.Boolean(), nullable=True),
+        sa.Column("last_activity_at", sa.DateTime(), nullable=True),
+        sa.Column("ownership_cleared_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "discovery_batches",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("batch_id", sa.String(length=100), nullable=False),
+        sa.Column("source", sa.String(length=50), nullable=False),
+        sa.Column("segment", sa.String(length=100), nullable=True),
+        sa.Column("regions", postgresql.JSONB(), nullable=True),
+        sa.Column("search_filters", postgresql.JSONB(), nullable=True),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("prospects_found", sa.Integer(), nullable=True),
+        sa.Column("prospects_new", sa.Integer(), nullable=True),
+        sa.Column("prospects_updated", sa.Integer(), nullable=True),
+        sa.Column("credits_used", sa.Integer(), nullable=True),
+        sa.Column("error_message", sa.Text(), nullable=True),
+        sa.Column("started_at", sa.DateTime(), nullable=False),
+        sa.Column("completed_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "email_intelligence",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("message_id", sa.String(length=255), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("sender_email", sa.String(length=255), nullable=False),
+        sa.Column("sender_domain", sa.String(length=255), nullable=False),
+        sa.Column("classification", sa.String(length=20), nullable=False),
+        sa.Column("confidence", sa.Float(), nullable=False),
+        sa.Column("has_pricing", sa.Boolean(), nullable=True),
+        sa.Column("parts_detected", sa.JSON(), nullable=True),
+        sa.Column("brands_detected", sa.JSON(), nullable=True),
+        sa.Column("commodities_detected", sa.JSON(), nullable=True),
+        sa.Column("parsed_quotes", sa.JSON(), nullable=True),
+        sa.Column("subject", sa.String(length=500), nullable=True),
+        sa.Column("received_at", sa.DateTime(), nullable=True),
+        sa.Column("conversation_id", sa.String(length=255), nullable=True),
+        sa.Column("auto_applied", sa.Boolean(), nullable=True),
+        sa.Column("needs_review", sa.Boolean(), nullable=True),
+        sa.Column("thread_summary", sa.JSON(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "email_signature_extracts",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("sender_email", sa.String(length=255), nullable=False),
+        sa.Column("sender_name", sa.String(length=255), nullable=True),
+        sa.Column("full_name", sa.String(length=255), nullable=True),
+        sa.Column("title", sa.String(length=255), nullable=True),
+        sa.Column("company_name", sa.String(length=255), nullable=True),
+        sa.Column("phone", sa.String(length=100), nullable=True),
+        sa.Column("mobile", sa.String(length=100), nullable=True),
+        sa.Column("website", sa.String(length=500), nullable=True),
+        sa.Column("address", sa.Text(), nullable=True),
+        sa.Column("linkedin_url", sa.String(length=500), nullable=True),
+        sa.Column("extraction_method", sa.String(length=20), nullable=True),
+        sa.Column("confidence", sa.Float(), nullable=True),
+        sa.Column("seen_count", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "error_reports",
+        # Column lengths — error_reports was created via 001's original
+        # Base.metadata.create_all() body, not by any op.create_table or
+        # op.add_column in the chain. Lengths are inferred:
+        #
+        #   status        VARCHAR(30)   confirmed by analog: trouble_tickets.status
+        #                                = String(30) in app/models/trouble_ticket.py
+        #                                (043 maps the values across)
+        #   browser_info  VARCHAR(512)  confirmed by analog: trouble_tickets.browser_info
+        #                                = String(512) in app/models/trouble_ticket.py
+        #   title         VARCHAR(200)  inferred from trouble_tickets.title (related
+        #                                but not direct successor; could be wrong)
+        #   current_url   VARCHAR(500)  inferred from trouble_tickets.current_page
+        #                                (semantic successor, not direct rename)
+        #   screen_size   VARCHAR(50)   reasonable default; no analog in chain
+        #   current_view  VARCHAR(100)  reasonable default; no analog in chain
+        #
+        # Column list itself is sourced from 043_unify_ticket_tables.py lines
+        # 54-80 (the SELECT FROM error_reports clause used to migrate data
+        # into trouble_tickets — every column must exist for the SELECT to
+        # parse). ai_prompt added by 005_add_ai_prompt.py. Index from
+        # 003_perf_fk_indexes_dedup.py:107 (ix_er_resolved_by). Table dropped
+        # by a3f9c1d82e47_drop_dead_tables.py.
+        #
+        # FK cascade behavior — original ON DELETE actions are not in the
+        # chain. Defaulting to NO ACTION for both user_id and resolved_by_id
+        # FKs (conservative). The table is dropped by a3f9c1d82e47 before any
+        # user could be deleted in a real chain run, so cascades never fire.
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=True),
+        sa.Column("status", sa.String(length=30), nullable=False),
+        sa.Column("title", sa.String(length=200), nullable=True),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("current_url", sa.String(length=500), nullable=True),
+        sa.Column("browser_info", sa.String(length=512), nullable=True),
+        sa.Column("screenshot_b64", sa.Text(), nullable=True),
+        sa.Column("screen_size", sa.String(length=50), nullable=True),
+        sa.Column("page_state", sa.Text(), nullable=True),
+        sa.Column("console_errors", sa.Text(), nullable=True),
+        sa.Column("current_view", sa.String(length=100), nullable=True),
+        sa.Column("ai_prompt", sa.Text(), nullable=True),
+        sa.Column("admin_notes", sa.Text(), nullable=True),
+        sa.Column("resolved_by_id", sa.Integer(), nullable=True),
+        sa.Column("resolved_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "enrichment_jobs",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("job_type", sa.String(length=50), nullable=False),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("total_items", sa.Integer(), nullable=True),
+        sa.Column("processed_items", sa.Integer(), nullable=True),
+        sa.Column("enriched_items", sa.Integer(), nullable=True),
+        sa.Column("error_count", sa.Integer(), nullable=True),
+        sa.Column("scope", postgresql.JSONB(), nullable=True),
+        sa.Column("started_by_id", sa.Integer(), nullable=True),
+        sa.Column("started_at", sa.DateTime(), nullable=True),
+        sa.Column("completed_at", sa.DateTime(), nullable=True),
+        sa.Column("error_log", postgresql.JSONB(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "enrichment_queue",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("vendor_card_id", sa.Integer(), nullable=True),
+        sa.Column("company_id", sa.Integer(), nullable=True),
+        sa.Column("vendor_contact_id", sa.Integer(), nullable=True),
+        sa.Column("enrichment_type", sa.String(length=50), nullable=False),
+        sa.Column("field_name", sa.String(length=100), nullable=False),
+        sa.Column("current_value", sa.Text(), nullable=True),
+        sa.Column("proposed_value", sa.Text(), nullable=False),
+        sa.Column("confidence", sa.Float(), nullable=False),
+        sa.Column("source", sa.String(length=50), nullable=False),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("batch_job_id", sa.Integer(), nullable=True),
+        sa.Column("reviewed_by_id", sa.Integer(), nullable=True),
+        sa.Column("reviewed_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "enrichment_runs",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("run_id", sa.String(length=100), nullable=False),
+        sa.Column("phase", sa.String(length=50), nullable=False),
+        sa.Column("status", sa.String(length=20), nullable=False),
+        sa.Column("batch_ids", postgresql.JSONB(), nullable=True),
+        sa.Column("request_map", postgresql.JSONB(), nullable=True),
+        sa.Column("progress", postgresql.JSONB(), nullable=True),
+        sa.Column("stats", postgresql.JSONB(), nullable=True),
+        sa.Column("error_message", sa.Text(), nullable=True),
+        sa.Column("started_at", sa.DateTime(), nullable=True),
+        sa.Column("completed_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "entity_tags",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("entity_type", sa.String(length=20), nullable=False),
+        sa.Column("entity_id", sa.Integer(), nullable=False),
+        sa.Column("tag_id", sa.Integer(), nullable=False),
+        sa.Column("interaction_count", sa.Float(), nullable=False),
+        sa.Column("total_entity_interactions", sa.Float(), nullable=False),
+        sa.Column("is_visible", sa.Boolean(), nullable=False),
+        sa.Column("first_seen_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "excess_line_items",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("excess_list_id", sa.Integer(), nullable=False),
+        sa.Column("part_number", sa.String(length=100), nullable=False),
+        sa.Column("normalized_part_number", sa.String(length=100), nullable=True),
+        sa.Column("description", sa.String(length=500), nullable=True),
+        sa.Column("manufacturer", sa.String(length=255), nullable=True),
+        sa.Column("quantity", sa.Integer(), nullable=False),
+        sa.Column("date_code", sa.String(length=50), nullable=True),
+        sa.Column("condition", sa.String(length=50), nullable=True),
+        sa.Column("asking_price", sa.Numeric(precision=12, scale=4), nullable=True),
+        sa.Column("demand_match_count", sa.Integer(), nullable=True),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(), nullable=True, server_default=sa.text("now()")),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "excess_lists",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("company_id", sa.Integer(), nullable=False),
+        sa.Column("customer_site_id", sa.Integer(), nullable=True),
+        sa.Column("owner_id", sa.Integer(), nullable=False),
+        sa.Column("title", sa.String(length=255), nullable=False),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("source_filename", sa.String(length=255), nullable=True),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("total_line_items", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(), nullable=True, server_default=sa.text("now()")),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "graph_subscriptions",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("subscription_id", sa.String(length=255), nullable=False),
+        sa.Column("resource", sa.String(length=255), nullable=False),
+        sa.Column("change_type", sa.String(length=100), nullable=False),
+        sa.Column("expiration_dt", sa.DateTime(), nullable=False),
+        sa.Column("client_state", sa.String(length=255), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "ics_search_log",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("queue_id", sa.Integer(), nullable=False),
+        sa.Column("searched_at", sa.DateTime(), nullable=True),
+        sa.Column("duration_ms", sa.Integer(), nullable=True),
+        sa.Column("results_found", sa.Integer(), nullable=True),
+        sa.Column("sightings_created", sa.Integer(), nullable=True),
+        sa.Column("page_html_hash", sa.String(length=64), nullable=True),
+        sa.Column("error", sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "ics_search_queue",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("requirement_id", sa.Integer(), nullable=False),
+        sa.Column("requisition_id", sa.Integer(), nullable=False),
+        sa.Column("mpn", sa.String(length=100), nullable=False),
+        sa.Column("normalized_mpn", sa.String(length=100), nullable=False),
+        sa.Column("manufacturer", sa.String(length=200), nullable=True),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("commodity_class", sa.String(length=50), nullable=True),
+        sa.Column("gate_decision", sa.String(length=20), nullable=True),
+        sa.Column("gate_reason", sa.String(length=200), nullable=True),
+        sa.Column("priority", sa.SmallInteger(), nullable=True),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("search_count", sa.Integer(), nullable=True),
+        sa.Column("last_searched_at", sa.DateTime(), nullable=True),
+        sa.Column("results_count", sa.Integer(), nullable=True),
+        sa.Column("error_message", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "ics_worker_status",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("is_running", sa.Boolean(), nullable=True),
+        sa.Column("last_heartbeat", sa.DateTime(), nullable=True),
+        sa.Column("last_search_at", sa.DateTime(), nullable=True),
+        sa.Column("searches_today", sa.Integer(), nullable=True),
+        sa.Column("sightings_today", sa.Integer(), nullable=True),
+        sa.Column("circuit_breaker_open", sa.Boolean(), nullable=True),
+        sa.Column("circuit_breaker_reason", sa.Text(), nullable=True),
+        sa.Column("daily_stats_json", sa.JSON(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "inventory_snapshots",
+        # Acctivate inventory-sync table dropped by 049_reconcile_schema_drift.py.
+        # Shape transcribed verbatim from 049's downgrade (lines 384-394).
+        # No FKs — table is referenced by no other table.
+        sa.Column("id", sa.INTEGER(), autoincrement=True, nullable=False),
+        sa.Column("product_id", sa.VARCHAR(length=255), nullable=False),
+        sa.Column("warehouse_id", sa.VARCHAR(length=100), nullable=True),
+        sa.Column("qty_on_hand", sa.INTEGER(), nullable=True),
+        sa.Column("synced_at", postgresql.TIMESTAMP(), nullable=True),
+        sa.PrimaryKeyConstraint("id", name="inventory_snapshots_pkey"),
+    )
+    op.create_table(
+        "intel_cache",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("cache_key", sa.String(length=500), nullable=False),
+        sa.Column("data", sa.JSON(), nullable=False),
+        sa.Column("ttl_days", sa.Integer(), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("expires_at", sa.DateTime(), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "knowledge_config",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("key", sa.String(length=50), nullable=False),
+        sa.Column("value", sa.String(length=255), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "knowledge_entries",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("entry_type", sa.String(length=20), nullable=False),
+        sa.Column("content", sa.Text(), nullable=False),
+        sa.Column("source", sa.String(length=20), nullable=False),
+        sa.Column("confidence", sa.Float(), nullable=True),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("is_resolved", sa.Boolean(), nullable=False),
+        sa.Column("parent_id", sa.Integer(), nullable=True),
+        sa.Column("assigned_to_ids", sa.JSON(), nullable=True),
+        sa.Column("created_by", sa.Integer(), nullable=True),
+        sa.Column("mpn", sa.String(length=255), nullable=True),
+        sa.Column("vendor_card_id", sa.Integer(), nullable=True),
+        sa.Column("company_id", sa.Integer(), nullable=True),
+        sa.Column("requisition_id", sa.Integer(), nullable=True),
+        sa.Column("requirement_id", sa.Integer(), nullable=True),
+        sa.Column("nudged_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("delivered_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("answered_via", sa.String(length=10), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(
+            ["parent_id"], ["knowledge_entries.id"], name="knowledge_entries_parent_id_fkey", ondelete="SET NULL"
+        ),
+    )
+    op.create_table(
+        "lead_evidence",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("evidence_id", sa.String(length=64), nullable=False),
+        sa.Column("lead_id", sa.Integer(), nullable=False),
+        sa.Column("signal_type", sa.String(length=64), nullable=False),
+        sa.Column("source_type", sa.String(length=64), nullable=False),
+        sa.Column("source_name", sa.String(length=128), nullable=False),
+        sa.Column("source_reference", sa.String(length=1000), nullable=True),
+        sa.Column("part_number_observed", sa.String(length=255), nullable=True),
+        sa.Column("vendor_name_observed", sa.String(length=255), nullable=True),
+        sa.Column("observed_text", sa.Text(), nullable=True),
+        sa.Column("observed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("freshness_age_days", sa.Float(), nullable=True),
+        sa.Column("weight", sa.Float(), nullable=True),
+        sa.Column("confidence_impact", sa.Float(), nullable=True),
+        sa.Column("explanation", sa.Text(), nullable=True),
+        sa.Column("source_reliability_band", sa.String(length=16), nullable=True),
+        sa.Column("verification_state", sa.String(length=32), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "lead_feedback_events",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("lead_id", sa.Integer(), nullable=False),
+        sa.Column("status", sa.String(length=32), nullable=False),
+        sa.Column("note", sa.Text(), nullable=True),
+        sa.Column("reason_code", sa.String(length=64), nullable=True),
+        sa.Column("contact_method", sa.String(length=32), nullable=True),
+        sa.Column("contact_attempt_count", sa.Integer(), nullable=True),
+        sa.Column("created_by_user_id", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "manufacturers",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("canonical_name", sa.String(length=255), nullable=False),
+        sa.Column("aliases", sa.JSON(), nullable=True),
+        sa.Column("website", sa.String(length=500), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "material_card_audit",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("material_card_id", sa.Integer(), nullable=True),
+        sa.Column("action", sa.String(length=50), nullable=False),
+        sa.Column("entity_type", sa.String(length=50), nullable=True),
+        sa.Column("entity_id", sa.Integer(), nullable=True),
+        sa.Column("old_card_id", sa.Integer(), nullable=True),
+        sa.Column("new_card_id", sa.Integer(), nullable=True),
+        sa.Column("normalized_mpn", sa.String(length=255), nullable=True),
+        sa.Column("details", sa.JSON(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("created_by", sa.String(length=255), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "material_cards",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("normalized_mpn", sa.String(length=255), nullable=False),
+        sa.Column("display_mpn", sa.String(length=255), nullable=False),
+        sa.Column("manufacturer", sa.String(length=255), nullable=True),
+        sa.Column("description", sa.String(length=1000), nullable=True),
+        sa.Column("search_count", sa.Integer(), nullable=True),
+        sa.Column("last_searched_at", sa.DateTime(), nullable=True),
+        sa.Column("search_vector", postgresql.TSVECTOR(), nullable=True),
+        sa.Column("lifecycle_status", sa.String(length=50), nullable=True),
+        sa.Column("package_type", sa.String(length=100), nullable=True),
+        sa.Column("category", sa.String(length=255), nullable=True),
+        sa.Column("rohs_status", sa.String(length=50), nullable=True),
+        sa.Column("pin_count", sa.Integer(), nullable=True),
+        sa.Column("datasheet_url", sa.String(length=1000), nullable=True),
+        sa.Column("cross_references", postgresql.JSONB(), nullable=True),
+        sa.Column("specs_summary", sa.Text(), nullable=True),
+        sa.Column("specs_structured", postgresql.JSONB(), nullable=True),
+        sa.Column("enrichment_source", sa.String(length=50), nullable=True),
+        sa.Column("enriched_at", sa.DateTime(), nullable=True),
+        sa.Column("is_internal_part", sa.Boolean(), nullable=True, server_default=sa.text("false")),
+        sa.Column("deleted_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        # Salesforce-integration column dropped by 049_reconcile_schema_drift.py;
+        # restored here so 049's drop_column has a target.
+        sa.Column("sf_material_id", sa.VARCHAR(length=255), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "material_price_snapshots",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("material_card_id", sa.Integer(), nullable=False),
+        sa.Column("vendor_name", sa.String(length=200), nullable=False),
+        sa.Column("price", sa.Numeric(precision=12, scale=4), nullable=False),
+        sa.Column("currency", sa.String(length=3), nullable=True),
+        sa.Column("quantity", sa.Integer(), nullable=True),
+        sa.Column("source", sa.String(length=50), nullable=False),
+        sa.Column("recorded_at", sa.DateTime(), nullable=True, server_default=sa.text("now()")),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "material_spec_facets",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("material_card_id", sa.Integer(), nullable=False),
+        sa.Column("category", sa.String(length=100), nullable=False),
+        sa.Column("spec_key", sa.String(length=100), nullable=False),
+        sa.Column("value_text", sa.String(length=255), nullable=True),
+        sa.Column("value_numeric", sa.Float(), nullable=True),
+        sa.Column("value_unit", sa.String(length=20), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "material_tags",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("material_card_id", sa.Integer(), nullable=False),
+        sa.Column("tag_id", sa.Integer(), nullable=False),
+        sa.Column("confidence", sa.Float(), nullable=False),
+        sa.Column("source", sa.String(length=30), nullable=False),
+        sa.Column("classified_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "material_vendor_history",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("material_card_id", sa.Integer(), nullable=False),
+        sa.Column("vendor_name", sa.String(length=255), nullable=False),
+        sa.Column("vendor_name_normalized", sa.String(length=255), nullable=True),
+        sa.Column("source_type", sa.String(length=50), nullable=True),
+        sa.Column("is_authorized", sa.Boolean(), nullable=True),
+        sa.Column("first_seen", sa.DateTime(), nullable=True),
+        sa.Column("last_seen", sa.DateTime(), nullable=True),
+        sa.Column("times_seen", sa.Integer(), nullable=True),
+        sa.Column("last_qty", sa.Integer(), nullable=True),
+        sa.Column("last_price", sa.Numeric(precision=12, scale=4), nullable=True),
+        sa.Column("last_currency", sa.String(length=10), nullable=True),
+        sa.Column("last_manufacturer", sa.String(length=255), nullable=True),
+        sa.Column("vendor_sku", sa.String(length=255), nullable=True),
+        sa.Column("source", sa.String(length=50), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        # Acctivate-integration columns dropped by 049_reconcile_schema_drift.py;
+        # restored here so 049's drop_columns have targets. Types match 049's
+        # downgrade verbatim.
+        sa.Column("acctivate_last_price", sa.DOUBLE_PRECISION(), nullable=True),
+        sa.Column("acctivate_rma_rate", sa.DOUBLE_PRECISION(), nullable=True),
+        sa.Column("acctivate_last_date", sa.DATE(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "multiplier_score_snapshot",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("month", sa.Date(), nullable=False),
+        sa.Column("role_type", sa.String(length=20), nullable=False),
+        sa.Column("offer_points", sa.Float(), nullable=True),
+        sa.Column("bonus_points", sa.Float(), nullable=True),
+        sa.Column("total_points", sa.Float(), nullable=True),
+        sa.Column("offers_total", sa.Integer(), nullable=True),
+        sa.Column("offers_base_count", sa.Integer(), nullable=True),
+        sa.Column("offers_base_pts", sa.Float(), nullable=True),
+        sa.Column("offers_quoted_count", sa.Integer(), nullable=True),
+        sa.Column("offers_quoted_pts", sa.Float(), nullable=True),
+        sa.Column("offers_bp_count", sa.Integer(), nullable=True),
+        sa.Column("offers_bp_pts", sa.Float(), nullable=True),
+        sa.Column("offers_po_count", sa.Integer(), nullable=True),
+        sa.Column("offers_po_pts", sa.Float(), nullable=True),
+        sa.Column("rfqs_sent_count", sa.Integer(), nullable=True),
+        sa.Column("rfqs_sent_pts", sa.Float(), nullable=True),
+        sa.Column("stock_lists_count", sa.Integer(), nullable=True),
+        sa.Column("stock_lists_pts", sa.Float(), nullable=True),
+        sa.Column("quotes_sent_count", sa.Integer(), nullable=True),
+        sa.Column("quotes_sent_pts", sa.Float(), nullable=True),
+        sa.Column("quotes_won_count", sa.Integer(), nullable=True),
+        sa.Column("quotes_won_pts", sa.Float(), nullable=True),
+        sa.Column("proactive_sent_count", sa.Integer(), nullable=True),
+        sa.Column("proactive_sent_pts", sa.Float(), nullable=True),
+        sa.Column("proactive_converted_count", sa.Integer(), nullable=True),
+        sa.Column("proactive_converted_pts", sa.Float(), nullable=True),
+        sa.Column("new_accounts_count", sa.Integer(), nullable=True),
+        sa.Column("new_accounts_pts", sa.Float(), nullable=True),
+        sa.Column("rank", sa.Integer(), nullable=True),
+        sa.Column("avail_score", sa.Float(), nullable=True),
+        sa.Column("qualified", sa.Boolean(), nullable=True),
+        sa.Column("bonus_amount", sa.Float(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "nc_search_log",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("queue_id", sa.Integer(), nullable=False),
+        sa.Column("searched_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("duration_ms", sa.Integer(), nullable=True),
+        sa.Column("results_found", sa.Integer(), nullable=True),
+        sa.Column("sightings_created", sa.Integer(), nullable=True),
+        sa.Column("page_html_hash", sa.String(length=64), nullable=True),
+        sa.Column("error", sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "nc_search_queue",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("requirement_id", sa.Integer(), nullable=False),
+        sa.Column("requisition_id", sa.Integer(), nullable=False),
+        sa.Column("mpn", sa.String(length=100), nullable=False),
+        sa.Column("normalized_mpn", sa.String(length=100), nullable=False),
+        sa.Column("manufacturer", sa.String(length=200), nullable=True),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("commodity_class", sa.String(length=50), nullable=True),
+        sa.Column("gate_decision", sa.String(length=20), nullable=True),
+        sa.Column("gate_reason", sa.String(length=200), nullable=True),
+        sa.Column("priority", sa.SmallInteger(), nullable=True),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("search_count", sa.Integer(), nullable=True),
+        sa.Column("last_searched_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("results_count", sa.Integer(), nullable=True),
+        sa.Column("error_message", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "nc_worker_status",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("is_running", sa.Boolean(), nullable=True),
+        sa.Column("last_heartbeat", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("last_search_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("searches_today", sa.Integer(), nullable=True),
+        sa.Column("sightings_today", sa.Integer(), nullable=True),
+        sa.Column("circuit_breaker_open", sa.Boolean(), nullable=True),
+        sa.Column("circuit_breaker_reason", sa.Text(), nullable=True),
+        sa.Column("daily_stats_json", sa.JSON(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "offer_attachments",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("offer_id", sa.Integer(), nullable=False),
+        sa.Column("file_name", sa.String(length=500), nullable=False),
+        sa.Column("onedrive_item_id", sa.String(length=500), nullable=True),
+        sa.Column("onedrive_url", sa.Text(), nullable=True),
+        sa.Column("thumbnail_url", sa.Text(), nullable=True),
+        sa.Column("content_type", sa.String(length=100), nullable=True),
+        sa.Column("size_bytes", sa.Integer(), nullable=True),
+        sa.Column("uploaded_by_id", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "offers",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("requisition_id", sa.Integer(), nullable=False),
+        sa.Column("requirement_id", sa.Integer(), nullable=True),
+        sa.Column("material_card_id", sa.Integer(), nullable=True),
+        sa.Column("vendor_card_id", sa.Integer(), nullable=True),
+        sa.Column("vendor_name", sa.String(length=255), nullable=False),
+        sa.Column("vendor_name_normalized", sa.String(length=255), nullable=True),
+        sa.Column("mpn", sa.String(length=255), nullable=False),
+        sa.Column("normalized_mpn", sa.String(length=255), nullable=True),
+        sa.Column("manufacturer", sa.String(length=255), nullable=True),
+        sa.Column("qty_available", sa.Integer(), nullable=True),
+        sa.Column("unit_price", sa.Numeric(precision=12, scale=4), nullable=True),
+        sa.Column("currency", sa.String(length=10), nullable=True),
+        sa.Column("lead_time", sa.String(length=100), nullable=True),
+        sa.Column("date_code", sa.String(length=100), nullable=True),
+        sa.Column("condition", sa.String(length=50), nullable=True),
+        sa.Column("packaging", sa.String(length=100), nullable=True),
+        sa.Column("firmware", sa.String(length=100), nullable=True),
+        sa.Column("hardware_code", sa.String(length=100), nullable=True),
+        sa.Column("moq", sa.Integer(), nullable=True),
+        sa.Column("spq", sa.Integer(), nullable=True),
+        sa.Column("valid_until", sa.Date(), nullable=True),
+        sa.Column("warranty", sa.String(length=100), nullable=True),
+        sa.Column("country_of_origin", sa.String(length=100), nullable=True),
+        sa.Column("source", sa.String(length=50), nullable=True),
+        sa.Column("vendor_response_id", sa.Integer(), nullable=True),
+        sa.Column("entered_by_id", sa.Integer(), nullable=True),
+        sa.Column("evidence_tier", sa.String(length=4), nullable=True),
+        sa.Column("parse_confidence", sa.Float(), nullable=True),
+        sa.Column("promoted_by_id", sa.Integer(), nullable=True),
+        sa.Column("promoted_at", sa.DateTime(), nullable=True),
+        sa.Column("excess_line_item_id", sa.Integer(), nullable=True),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("is_stale", sa.Boolean(), nullable=True, server_default=sa.text("false NOT NULL")),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_id", sa.Integer(), nullable=True),
+        sa.Column("approved_by_id", sa.Integer(), nullable=True),
+        sa.Column("approved_at", sa.DateTime(), nullable=True),
+        sa.Column("selected_for_quote", sa.Boolean(), nullable=True, server_default=sa.text("false NOT NULL")),
+        sa.Column("selected_at", sa.DateTime(), nullable=True),
+        sa.Column("expires_at", sa.DateTime(), nullable=True),
+        sa.Column("reconfirmed_at", sa.DateTime(), nullable=True),
+        sa.Column("reconfirm_count", sa.Integer(), nullable=True),
+        sa.Column("attribution_status", sa.String(length=20), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "pending_batches",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("batch_id", sa.String(), nullable=False),
+        sa.Column("batch_type", sa.String(length=50), nullable=True),
+        sa.Column("request_map", postgresql.JSONB(), nullable=True),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("submitted_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("result_count", sa.Integer(), nullable=True),
+        sa.Column("error_message", sa.Text(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "proactive_do_not_offer",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("mpn", sa.String(length=255), nullable=False),
+        sa.Column("company_id", sa.Integer(), nullable=False),
+        sa.Column("created_by_id", sa.Integer(), nullable=True),
+        sa.Column("reason", sa.String(length=255), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "proactive_matches",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("offer_id", sa.Integer(), nullable=False),
+        sa.Column("requirement_id", sa.Integer(), nullable=True),
+        sa.Column("requisition_id", sa.Integer(), nullable=True),
+        sa.Column("customer_site_id", sa.Integer(), nullable=True),
+        sa.Column("salesperson_id", sa.Integer(), nullable=True),
+        sa.Column("mpn", sa.String(length=255), nullable=False),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("material_card_id", sa.Integer(), nullable=True),
+        sa.Column("company_id", sa.Integer(), nullable=True),
+        sa.Column("match_score", sa.Integer(), nullable=True),
+        sa.Column("margin_pct", sa.Numeric(precision=5, scale=2), nullable=True),
+        sa.Column("customer_purchase_count", sa.Integer(), nullable=True),
+        sa.Column("customer_last_price", sa.Numeric(precision=12, scale=4), nullable=True),
+        sa.Column("customer_last_purchased_at", sa.DateTime(), nullable=True),
+        sa.Column("our_cost", sa.Numeric(precision=12, scale=4), nullable=True),
+        sa.Column("dismiss_reason", sa.String(length=255), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "proactive_offers",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("customer_site_id", sa.Integer(), nullable=True),
+        sa.Column("salesperson_id", sa.Integer(), nullable=True),
+        sa.Column("line_items", sa.JSON(), nullable=False),
+        sa.Column("recipient_contact_ids", sa.JSON(), nullable=True),
+        sa.Column("recipient_emails", sa.JSON(), nullable=True),
+        sa.Column("subject", sa.String(length=500), nullable=True),
+        sa.Column("email_body_html", sa.Text(), nullable=True),
+        sa.Column("graph_message_id", sa.String(length=500), nullable=True),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("sent_at", sa.DateTime(), nullable=True),
+        sa.Column("converted_requisition_id", sa.Integer(), nullable=True),
+        sa.Column("converted_quote_id", sa.Integer(), nullable=True),
+        sa.Column("converted_at", sa.DateTime(), nullable=True),
+        sa.Column("total_sell", sa.Numeric(precision=12, scale=2), nullable=True),
+        sa.Column("total_cost", sa.Numeric(precision=12, scale=2), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "proactive_throttle",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("mpn", sa.String(length=255), nullable=False),
+        sa.Column("customer_site_id", sa.Integer(), nullable=False),
+        sa.Column("last_offered_at", sa.DateTime(), nullable=False),
+        sa.Column("proactive_offer_id", sa.Integer(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "processed_messages",
+        sa.Column("message_id", sa.Text(), nullable=False),
+        sa.Column("processing_type", sa.Text(), nullable=False),
+        sa.Column("processed_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("message_id", "processing_type"),
+    )
+    op.create_table(
+        "prospect_accounts",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("name", sa.String(length=255), nullable=False),
+        sa.Column("domain", sa.String(length=255), nullable=False),
+        sa.Column("website", sa.String(length=500), nullable=True),
+        sa.Column("industry", sa.String(length=255), nullable=True),
+        sa.Column("naics_code", sa.String(length=10), nullable=True),
+        sa.Column("employee_count_range", sa.String(length=50), nullable=True),
+        sa.Column("revenue_range", sa.String(length=50), nullable=True),
+        sa.Column("hq_location", sa.String(length=255), nullable=True),
+        sa.Column("region", sa.String(length=50), nullable=True),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("parent_company_domain", sa.String(length=255), nullable=True),
+        sa.Column("fit_score", sa.Integer(), nullable=True),
+        sa.Column("fit_reasoning", sa.Text(), nullable=True),
+        sa.Column("readiness_score", sa.Integer(), nullable=True),
+        sa.Column("readiness_signals", postgresql.JSONB(), nullable=True),
+        sa.Column("discovery_source", sa.String(length=50), nullable=False),
+        sa.Column("discovery_batch_id", sa.Integer(), nullable=True),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("import_priority", sa.String(length=20), nullable=True),
+        sa.Column("historical_context", postgresql.JSONB(), nullable=True),
+        sa.Column("claimed_by", sa.Integer(), nullable=True),
+        sa.Column("claimed_at", sa.DateTime(), nullable=True),
+        sa.Column("dismissed_by", sa.Integer(), nullable=True),
+        sa.Column("dismissed_at", sa.DateTime(), nullable=True),
+        sa.Column("dismiss_reason", sa.String(length=255), nullable=True),
+        sa.Column("company_id", sa.Integer(), nullable=True),
+        sa.Column("contacts_preview", postgresql.JSONB(), nullable=True),
+        sa.Column("similar_customers", postgresql.JSONB(), nullable=True),
+        sa.Column("enrichment_data", postgresql.JSONB(), nullable=True),
+        sa.Column("email_pattern", sa.String(length=100), nullable=True),
+        sa.Column("ai_writeup", sa.Text(), nullable=True),
+        sa.Column("last_enriched_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "prospect_contacts",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("customer_site_id", sa.Integer(), nullable=True),
+        sa.Column("vendor_card_id", sa.Integer(), nullable=True),
+        sa.Column("full_name", sa.String(length=255), nullable=False),
+        sa.Column("title", sa.String(length=255), nullable=True),
+        sa.Column("email", sa.String(length=255), nullable=True),
+        sa.Column("email_status", sa.String(length=20), nullable=True),
+        sa.Column("phone", sa.String(length=100), nullable=True),
+        sa.Column("linkedin_url", sa.String(length=500), nullable=True),
+        sa.Column("source", sa.String(length=50), nullable=False),
+        sa.Column("confidence", sa.String(length=10), nullable=False),
+        sa.Column("found_at", sa.DateTime(), nullable=True),
+        sa.Column("is_saved", sa.Boolean(), nullable=True),
+        sa.Column("saved_by_id", sa.Integer(), nullable=True),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("promoted_to_type", sa.String(length=20), nullable=True),
+        sa.Column("promoted_to_id", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "quote_lines",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("quote_id", sa.Integer(), nullable=False),
+        sa.Column("material_card_id", sa.Integer(), nullable=True),
+        sa.Column("offer_id", sa.Integer(), nullable=True),
+        sa.Column("mpn", sa.String(length=255), nullable=False),
+        sa.Column("description", sa.String(length=500), nullable=True),
+        sa.Column("manufacturer", sa.String(length=255), nullable=True),
+        sa.Column("qty", sa.Integer(), nullable=True),
+        sa.Column("cost_price", sa.Numeric(precision=12, scale=4), nullable=True),
+        sa.Column("sell_price", sa.Numeric(precision=12, scale=4), nullable=True),
+        sa.Column("margin_pct", sa.Numeric(precision=5, scale=2), nullable=True),
+        sa.Column("currency", sa.String(length=10), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "quotes",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("requisition_id", sa.Integer(), nullable=False),
+        sa.Column("customer_site_id", sa.Integer(), nullable=True),
+        sa.Column("quote_number", sa.String(length=50), nullable=False),
+        sa.Column("revision", sa.Integer(), nullable=True),
+        sa.Column("line_items", sa.JSON(), nullable=False),
+        sa.Column("subtotal", sa.Numeric(precision=12, scale=2), nullable=True),
+        sa.Column("total_cost", sa.Numeric(precision=12, scale=2), nullable=True),
+        sa.Column("total_margin_pct", sa.Numeric(precision=5, scale=2), nullable=True),
+        sa.Column("payment_terms", sa.String(length=100), nullable=True),
+        sa.Column("shipping_terms", sa.String(length=100), nullable=True),
+        sa.Column("validity_days", sa.Integer(), nullable=True),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("status", sa.String(length=20), nullable=True),
+        sa.Column("sent_at", sa.DateTime(), nullable=True),
+        sa.Column("followup_alert_sent_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("result", sa.String(length=20), nullable=True),
+        sa.Column("result_reason", sa.String(length=255), nullable=True),
+        sa.Column("result_notes", sa.Text(), nullable=True),
+        sa.Column("result_at", sa.DateTime(), nullable=True),
+        sa.Column("won_revenue", sa.Numeric(precision=12, scale=2), nullable=True),
+        sa.Column("created_by_id", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "requirement_attachments",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("requirement_id", sa.Integer(), nullable=False),
+        sa.Column("file_name", sa.String(length=500), nullable=False),
+        sa.Column("onedrive_item_id", sa.String(length=500), nullable=True),
+        sa.Column("onedrive_url", sa.Text(), nullable=True),
+        sa.Column("thumbnail_url", sa.Text(), nullable=True),
+        sa.Column("content_type", sa.String(length=100), nullable=True),
+        sa.Column("size_bytes", sa.Integer(), nullable=True),
+        sa.Column("uploaded_by_id", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "requirements",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("requisition_id", sa.Integer(), nullable=False),
+        sa.Column("material_card_id", sa.Integer(), nullable=True),
+        sa.Column("primary_mpn", sa.String(length=255), nullable=True),
+        sa.Column("normalized_mpn", sa.String(length=255), nullable=True),
+        sa.Column("oem_pn", sa.String(length=255), nullable=True),
+        sa.Column("brand", sa.String(length=255), nullable=True),
+        sa.Column(
+            "manufacturer",
+            sa.String(length=255),
+            nullable=True,
+            server_default=sa.text("''::character varying NOT NULL"),
+        ),
+        sa.Column("sku", sa.String(length=255), nullable=True),
+        sa.Column("target_qty", sa.Integer(), nullable=True),
+        sa.Column("target_price", sa.Numeric(precision=12, scale=4), nullable=True),
+        sa.Column("substitutes", sa.JSON(), nullable=True),
+        sa.Column("substitutes_text", sa.Text(), nullable=True),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("firmware", sa.String(length=100), nullable=True),
+        sa.Column("date_codes", sa.String(length=100), nullable=True),
+        sa.Column("hardware_codes", sa.String(length=100), nullable=True),
+        sa.Column("packaging", sa.String(length=100), nullable=True),
+        sa.Column("condition", sa.String(length=50), nullable=True),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("package_type", sa.String(length=100), nullable=True),
+        sa.Column("revision", sa.String(length=100), nullable=True),
+        sa.Column("customer_pn", sa.String(length=255), nullable=True),
+        sa.Column("need_by_date", sa.Date(), nullable=True),
+        sa.Column("sale_notes", sa.Text(), nullable=True),
+        sa.Column("sourcing_status", sa.String(length=20), nullable=True),
+        sa.Column("priority_score", sa.Float(), nullable=True),
+        sa.Column("assigned_buyer_id", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("last_searched_at", sa.DateTime(), nullable=True),
+        # Salesforce-integration column dropped by 049_reconcile_schema_drift.py;
+        # restored here so 049's drop_column has a target.
+        sa.Column("sf_req_item_id", sa.VARCHAR(length=255), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "requisition_attachments",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("requisition_id", sa.Integer(), nullable=False),
+        sa.Column("file_name", sa.String(length=500), nullable=False),
+        sa.Column("onedrive_item_id", sa.String(length=500), nullable=True),
+        sa.Column("onedrive_url", sa.Text(), nullable=True),
+        sa.Column("thumbnail_url", sa.Text(), nullable=True),
+        sa.Column("content_type", sa.String(length=100), nullable=True),
+        sa.Column("size_bytes", sa.Integer(), nullable=True),
+        sa.Column("uploaded_by_id", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "requisition_tasks",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("requisition_id", sa.Integer(), nullable=False),
+        sa.Column("requirement_id", sa.Integer(), nullable=True),
+        sa.Column("title", sa.String(length=255), nullable=False),
+        sa.Column("description", sa.Text(), nullable=True),
+        sa.Column("task_type", sa.String(length=20), nullable=False),
+        sa.Column("status", sa.String(length=20), nullable=False),
+        sa.Column("priority", sa.Integer(), nullable=False),
+        sa.Column("ai_priority_score", sa.Float(), nullable=True),
+        sa.Column("ai_risk_flag", sa.String(length=255), nullable=True),
+        sa.Column("assigned_to_id", sa.Integer(), nullable=True),
+        sa.Column("created_by", sa.Integer(), nullable=True),
+        sa.Column("source", sa.String(length=20), nullable=False),
+        sa.Column("source_ref", sa.String(length=100), nullable=True),
+        sa.Column("completion_note", sa.Text(), nullable=True),
+        sa.Column("due_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "requisitions",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("name", sa.String(length=255), nullable=False),
+        sa.Column("customer_name", sa.String(length=255), nullable=True),
+        sa.Column("customer_site_id", sa.Integer(), nullable=True),
+        sa.Column("company_id", sa.Integer(), nullable=True),
+        sa.Column("status", sa.String(length=50), nullable=True),
+        sa.Column("cloned_from_id", sa.Integer(), nullable=True),
+        sa.Column("created_by", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("deadline", sa.String(length=50), nullable=True),
+        sa.Column("last_searched_at", sa.DateTime(), nullable=True),
+        sa.Column("offers_viewed_at", sa.DateTime(), nullable=True),
+        sa.Column("claimed_by_id", sa.Integer(), nullable=True),
+        sa.Column("claimed_at", sa.DateTime(), nullable=True),
+        sa.Column("urgency", sa.String(length=20), nullable=True),
+        sa.Column("opportunity_value", sa.Numeric(precision=12, scale=2), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_by_id", sa.Integer(), nullable=True),
+        # Salesforce-integration column dropped by 049_reconcile_schema_drift.py;
+        # restored here so 049's drop_column has a target.
+        sa.Column("sf_requisition_id", sa.VARCHAR(length=255), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(
+            ["cloned_from_id"], ["requisitions.id"], name="requisitions_cloned_from_id_fkey", ondelete="SET NULL"
+        ),
+    )
+    op.create_table(
+        "root_cause_groups",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("title", sa.String(length=200), nullable=False),
+        sa.Column("suggested_fix", sa.Text(), nullable=True),
+        sa.Column("status", sa.String(length=30), nullable=False),
+        sa.Column("created_at", sa.DateTime(), nullable=True, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(), nullable=True, server_default=sa.text("now()")),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "sightings",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("requirement_id", sa.Integer(), nullable=False),
+        sa.Column("material_card_id", sa.Integer(), nullable=True),
+        sa.Column("vendor_name", sa.String(length=255), nullable=False),
+        sa.Column("vendor_name_normalized", sa.String(length=255), nullable=True),
+        sa.Column("vendor_email", sa.String(length=255), nullable=True),
+        sa.Column("vendor_phone", sa.String(length=100), nullable=True),
+        sa.Column("mpn_matched", sa.String(length=255), nullable=True),
+        sa.Column("normalized_mpn", sa.String(length=255), nullable=True),
+        sa.Column("manufacturer", sa.String(length=255), nullable=True),
+        sa.Column("qty_available", sa.Integer(), nullable=True),
+        sa.Column("unit_price", sa.Numeric(precision=12, scale=4), nullable=True),
+        sa.Column("currency", sa.String(length=10), nullable=True),
+        sa.Column("moq", sa.Integer(), nullable=True),
+        sa.Column("source_type", sa.String(length=50), nullable=True),
+        sa.Column("is_authorized", sa.Boolean(), nullable=True),
+        sa.Column("confidence", sa.Float(), nullable=True),
+        sa.Column("score", sa.Float(), nullable=True),
+        sa.Column("raw_data", sa.JSON(), nullable=True),
+        sa.Column("is_unavailable", sa.Boolean(), nullable=True),
+        sa.Column("date_code", sa.String(length=50), nullable=True),
+        sa.Column("packaging", sa.String(length=50), nullable=True),
+        sa.Column("condition", sa.String(length=50), nullable=True),
+        sa.Column("lead_time_days", sa.Integer(), nullable=True),
+        sa.Column("lead_time", sa.String(length=100), nullable=True),
+        sa.Column("source_company_id", sa.Integer(), nullable=True),
+        sa.Column("source_searched_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("evidence_tier", sa.String(length=4), nullable=True),
+        sa.Column("score_components", sa.JSON(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "site_contacts",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("customer_site_id", sa.Integer(), nullable=False),
+        sa.Column("full_name", sa.String(length=255), nullable=False),
+        sa.Column("title", sa.String(length=255), nullable=True),
+        sa.Column("email", sa.String(length=255), nullable=True),
+        sa.Column("phone", sa.String(length=100), nullable=True),
+        sa.Column("notes", sa.Text(), nullable=True),
+        sa.Column("is_primary", sa.Boolean(), nullable=True),
+        sa.Column("is_active", sa.Boolean(), nullable=True),
+        sa.Column("contact_status", sa.String(length=20), nullable=True),
+        sa.Column("phone_verified", sa.Boolean(), nullable=True),
+        sa.Column("email_verified", sa.Boolean(), nullable=True),
+        sa.Column("email_verified_at", sa.DateTime(), nullable=True),
+        sa.Column("email_verification_status", sa.String(length=20), nullable=True),
+        sa.Column("enrichment_source", sa.String(length=50), nullable=True),
+        sa.Column("contact_role", sa.String(length=50), nullable=True),
+        sa.Column("needs_refresh", sa.Boolean(), nullable=True),
+        sa.Column("last_enriched_at", sa.DateTime(), nullable=True),
+        sa.Column("linkedin_url", sa.String(length=500), nullable=True),
+        sa.Column("enrichment_field_sources", sa.JSON(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "sourcing_leads",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("lead_id", sa.String(length=64), nullable=False),
+        sa.Column("requirement_id", sa.Integer(), nullable=False),
+        sa.Column("requisition_id", sa.Integer(), nullable=False),
+        sa.Column("part_number_requested", sa.String(length=255), nullable=False),
+        sa.Column("part_number_matched", sa.String(length=255), nullable=False),
+        sa.Column("match_type", sa.String(length=32), nullable=False),
+        sa.Column("vendor_name", sa.String(length=255), nullable=False),
+        sa.Column("vendor_name_normalized", sa.String(length=255), nullable=False),
+        sa.Column("canonical_vendor_id", sa.String(length=128), nullable=True),
+        sa.Column("vendor_card_id", sa.Integer(), nullable=True),
+        sa.Column("primary_source_type", sa.String(length=64), nullable=False),
+        sa.Column("primary_source_name", sa.String(length=128), nullable=False),
+        sa.Column("source_reference", sa.String(length=1000), nullable=True),
+        sa.Column("source_first_seen_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("source_last_seen_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("contact_name", sa.String(length=255), nullable=True),
+        sa.Column("contact_email", sa.String(length=255), nullable=True),
+        sa.Column("contact_phone", sa.String(length=100), nullable=True),
+        sa.Column("contact_url", sa.String(length=1000), nullable=True),
+        sa.Column("location", sa.String(length=255), nullable=True),
+        sa.Column("notes_for_buyer", sa.Text(), nullable=True),
+        sa.Column("suggested_next_action", sa.String(length=500), nullable=True),
+        sa.Column("confidence_score", sa.Float(), nullable=False),
+        sa.Column("confidence_band", sa.String(length=16), nullable=False),
+        sa.Column("freshness_score", sa.Float(), nullable=True),
+        sa.Column("source_reliability_score", sa.Float(), nullable=True),
+        sa.Column("contactability_score", sa.Float(), nullable=True),
+        sa.Column("historical_success_score", sa.Float(), nullable=True),
+        sa.Column("reason_summary", sa.Text(), nullable=False),
+        sa.Column("risk_flags", sa.JSON(), nullable=False),
+        sa.Column("evidence_count", sa.Integer(), nullable=False),
+        sa.Column("corroborated", sa.Boolean(), nullable=False),
+        sa.Column("vendor_safety_score", sa.Float(), nullable=True),
+        sa.Column("vendor_safety_band", sa.String(length=24), nullable=True),
+        sa.Column("vendor_safety_summary", sa.Text(), nullable=True),
+        sa.Column("vendor_safety_flags", sa.JSON(), nullable=False),
+        sa.Column("vendor_safety_last_checked_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("buyer_status", sa.String(length=32), nullable=False),
+        sa.Column("buyer_owner_user_id", sa.Integer(), nullable=True),
+        sa.Column("last_buyer_action_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("buyer_feedback_summary", sa.Text(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "stock_list_hashes",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("content_hash", sa.String(length=64), nullable=False),
+        sa.Column("vendor_card_id", sa.Integer(), nullable=True),
+        sa.Column("file_name", sa.String(length=500), nullable=True),
+        sa.Column("row_count", sa.Integer(), nullable=True),
+        sa.Column("first_seen_at", sa.DateTime(), nullable=False),
+        sa.Column("last_seen_at", sa.DateTime(), nullable=False),
+        sa.Column("upload_count", sa.Integer(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "strategic_vendors",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("vendor_card_id", sa.Integer(), nullable=False),
+        sa.Column("claimed_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("last_offer_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("released_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("release_reason", sa.String(length=20), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "sync_logs",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("source", sa.String(length=50), nullable=False),
+        sa.Column("status", sa.String(length=50), nullable=False),
+        sa.Column("started_at", sa.DateTime(), nullable=False),
+        sa.Column("finished_at", sa.DateTime(), nullable=True),
+        sa.Column("duration_seconds", sa.Float(), nullable=True),
+        sa.Column("row_counts", sa.JSON(), nullable=True),
+        sa.Column("errors", sa.JSON(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "sync_state",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("folder", sa.String(length=100), nullable=False),
+        sa.Column("delta_token", sa.Text(), nullable=True),
+        sa.Column("last_sync_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "system_config",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("key", sa.String(length=100), nullable=False),
+        sa.Column("value", sa.Text(), nullable=False),
+        sa.Column("description", sa.String(length=500), nullable=True),
+        sa.Column("updated_by", sa.String(length=255), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "tag_threshold_config",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("entity_type", sa.String(length=20), nullable=False),
+        sa.Column("tag_type", sa.String(length=20), nullable=False),
+        sa.Column("min_count", sa.Integer(), nullable=False),
+        sa.Column("min_percentage", sa.Float(), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "tags",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("name", sa.String(length=255), nullable=False),
+        sa.Column("tag_type", sa.String(length=20), nullable=False),
+        sa.Column("parent_id", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(["parent_id"], ["tags.id"], name="tags_parent_id_fkey", ondelete="SET NULL"),
+    )
+    op.create_table(
+        "trouble_tickets",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("ticket_number", sa.String(length=20), nullable=False),
+        sa.Column("submitted_by", sa.Integer(), nullable=True),
+        sa.Column("status", sa.String(length=30), nullable=False),
+        sa.Column("risk_tier", sa.String(length=10), nullable=True),
+        sa.Column("category", sa.String(length=20), nullable=True),
+        sa.Column("title", sa.String(length=200), nullable=False),
+        sa.Column("description", sa.Text(), nullable=False),
+        sa.Column("current_page", sa.String(length=500), nullable=True),
+        sa.Column("user_agent", sa.String(length=500), nullable=True),
+        sa.Column("auto_captured_context", sa.JSON(), nullable=True),
+        sa.Column("sanitized_context", sa.JSON(), nullable=True),
+        sa.Column("diagnosis", sa.JSON(), nullable=True),
+        sa.Column("generated_prompt", sa.Text(), nullable=True),
+        sa.Column("file_mapping", sa.JSON(), nullable=True),
+        sa.Column("fix_branch", sa.String(length=200), nullable=True),
+        sa.Column("fix_pr_url", sa.String(length=500), nullable=True),
+        sa.Column("iterations_used", sa.Integer(), nullable=True),
+        sa.Column("cost_tokens", sa.Integer(), nullable=True),
+        sa.Column("cost_usd", sa.Float(), nullable=True),
+        sa.Column("resolution_notes", sa.Text(), nullable=True),
+        sa.Column("parent_ticket_id", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True, server_default=sa.text("now()")),
+        sa.Column("updated_at", sa.DateTime(), nullable=True, server_default=sa.text("now()")),
+        sa.Column("diagnosed_at", sa.DateTime(), nullable=True),
+        sa.Column("resolved_at", sa.DateTime(), nullable=True),
+        sa.Column("screenshot_b64", sa.Text(), nullable=True),
+        sa.Column("browser_info", sa.String(length=512), nullable=True),
+        sa.Column("screen_size", sa.String(length=50), nullable=True),
+        sa.Column("page_state", sa.Text(), nullable=True),
+        sa.Column("console_errors", sa.Text(), nullable=True),
+        sa.Column("current_view", sa.String(length=100), nullable=True),
+        sa.Column("ai_prompt", sa.Text(), nullable=True),
+        sa.Column("admin_notes", sa.Text(), nullable=True),
+        sa.Column("resolved_by_id", sa.Integer(), nullable=True),
+        sa.Column("source", sa.String(length=20), nullable=True),
+        sa.Column("similarity_score", sa.Float(), nullable=True),
+        sa.Column("tested_area", sa.String(length=50), nullable=True),
+        sa.Column("dom_snapshot", sa.Text(), nullable=True),
+        sa.Column("network_errors", sa.JSON(), nullable=True),
+        sa.Column("performance_timings", sa.JSON(), nullable=True),
+        sa.Column("reproduction_steps", sa.JSON(), nullable=True),
+        sa.Column("screenshot_path", sa.String(length=255), nullable=True),
+        sa.Column("ai_summary", sa.Text(), nullable=True),
+        sa.Column("root_cause_group_id", sa.Integer(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+        sa.ForeignKeyConstraint(
+            ["parent_ticket_id"],
+            ["trouble_tickets.id"],
+            name="trouble_tickets_parent_ticket_id_fkey",
+            ondelete="SET NULL",
+        ),
+    )
+    op.create_table(
+        "unified_score_snapshot",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("month", sa.Date(), nullable=False),
+        sa.Column("prospecting_pct", sa.Float(), nullable=True),
+        sa.Column("execution_pct", sa.Float(), nullable=True),
+        sa.Column("followthrough_pct", sa.Float(), nullable=True),
+        sa.Column("closing_pct", sa.Float(), nullable=True),
+        sa.Column("depth_pct", sa.Float(), nullable=True),
+        sa.Column("unified_score", sa.Float(), nullable=True),
+        sa.Column("rank", sa.Integer(), nullable=True),
+        sa.Column("primary_role", sa.String(length=20), nullable=True),
+        sa.Column("avail_score_buyer", sa.Float(), nullable=True),
+        sa.Column("avail_score_sales", sa.Float(), nullable=True),
+        sa.Column("multiplier_points_buyer", sa.Float(), nullable=True),
+        sa.Column("multiplier_points_sales", sa.Float(), nullable=True),
+        sa.Column("ai_blurb_strength", sa.Text(), nullable=True),
+        sa.Column("ai_blurb_improvement", sa.Text(), nullable=True),
+        sa.Column("ai_blurb_generated_at", sa.DateTime(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "users",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("email", sa.String(length=255), nullable=False),
+        sa.Column("name", sa.String(length=255), nullable=True),
+        sa.Column("role", sa.String(length=20), nullable=True),
+        sa.Column("is_active", sa.Boolean(), nullable=True),
+        sa.Column("azure_id", sa.String(length=255), nullable=True),
+        sa.Column("refresh_token", sa.Text(), nullable=True),
+        sa.Column("access_token", sa.Text(), nullable=True),
+        sa.Column("password_hash", sa.Text(), nullable=True),
+        sa.Column("token_expires_at", sa.DateTime(), nullable=True),
+        sa.Column("email_signature", sa.Text(), nullable=True),
+        sa.Column("last_email_scan", sa.DateTime(), nullable=True),
+        sa.Column("last_inbox_scan", sa.DateTime(), nullable=True),
+        sa.Column("last_contacts_sync", sa.DateTime(), nullable=True),
+        sa.Column("m365_connected", sa.Boolean(), nullable=True),
+        sa.Column("m365_error_reason", sa.String(length=255), nullable=True),
+        sa.Column("m365_last_healthy", sa.DateTime(), nullable=True),
+        sa.Column("commodity_tags", sa.JSON(), nullable=True),
+        sa.Column("timezone", sa.String(length=100), nullable=True),
+        sa.Column("working_hours_start", sa.String(length=10), nullable=True),
+        sa.Column("working_hours_end", sa.String(length=10), nullable=True),
+        sa.Column("eight_by_eight_extension", sa.String(length=20), nullable=True),
+        sa.Column("eight_by_eight_enabled", sa.Boolean(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "vendor_cards",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("normalized_name", sa.String(length=255), nullable=False),
+        sa.Column("display_name", sa.String(length=255), nullable=False),
+        sa.Column("domain", sa.String(length=255), nullable=True),
+        sa.Column("domain_aliases", sa.JSON(), nullable=True),
+        sa.Column("website", sa.String(length=500), nullable=True),
+        sa.Column("emails", sa.JSON(), nullable=True),
+        sa.Column("phones", sa.JSON(), nullable=True),
+        sa.Column("contacts", sa.JSON(), nullable=True),
+        sa.Column("alternate_names", sa.JSON(), nullable=True),
+        sa.Column("sighting_count", sa.Integer(), nullable=True),
+        sa.Column("is_blacklisted", sa.Boolean(), nullable=True),
+        sa.Column("is_broadcast", sa.Boolean(), nullable=True),
+        sa.Column("source", sa.String(length=50), nullable=True),
+        sa.Column("linkedin_url", sa.String(length=500), nullable=True),
+        sa.Column("legal_name", sa.String(length=500), nullable=True),
+        sa.Column("employee_size", sa.String(length=50), nullable=True),
+        sa.Column("hq_city", sa.String(length=255), nullable=True),
+        sa.Column("hq_state", sa.String(length=100), nullable=True),
+        sa.Column("hq_country", sa.String(length=100), nullable=True),
+        sa.Column("industry", sa.String(length=255), nullable=True),
+        sa.Column("last_enriched_at", sa.DateTime(), nullable=True),
+        sa.Column("enrichment_source", sa.String(length=50), nullable=True),
+        sa.Column("cancellation_rate", sa.Float(), nullable=True),
+        sa.Column("total_outreach", sa.Integer(), nullable=True),
+        sa.Column("total_responses", sa.Integer(), nullable=True),
+        sa.Column("total_wins", sa.Integer(), nullable=True),
+        sa.Column("ghost_rate", sa.Float(), nullable=True),
+        sa.Column("response_velocity_hours", sa.Float(), nullable=True),
+        sa.Column("last_contact_at", sa.DateTime(), nullable=True),
+        sa.Column("relationship_months", sa.Integer(), nullable=True),
+        sa.Column("engagement_score", sa.Float(), nullable=True),
+        sa.Column("engagement_computed_at", sa.DateTime(), nullable=True),
+        sa.Column("vendor_score", sa.Float(), nullable=True),
+        sa.Column("advancement_score", sa.Float(), nullable=True),
+        sa.Column("is_new_vendor", sa.Boolean(), nullable=True),
+        sa.Column("vendor_score_computed_at", sa.DateTime(), nullable=True),
+        sa.Column("avg_response_hours", sa.Float(), nullable=True),
+        sa.Column("overall_win_rate", sa.Float(), nullable=True),
+        sa.Column("total_pos", sa.Integer(), nullable=True),
+        sa.Column("total_revenue", sa.Numeric(precision=12, scale=4), nullable=True),
+        sa.Column("last_activity_at", sa.DateTime(), nullable=True),
+        sa.Column("brand_tags", postgresql.JSONB(), nullable=True),
+        sa.Column("commodity_tags", postgresql.JSONB(), nullable=True),
+        sa.Column("material_tags_updated_at", sa.DateTime(), nullable=True),
+        sa.Column("email_health_score", sa.Float(), nullable=True),
+        sa.Column("email_health_computed_at", sa.DateTime(), nullable=True),
+        sa.Column("response_rate", sa.Float(), nullable=True),
+        sa.Column("quote_quality_rate", sa.Float(), nullable=True),
+        sa.Column("deep_enrichment_at", sa.DateTime(), nullable=True),
+        sa.Column("search_vector", postgresql.TSVECTOR(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        # Salesforce/Acctivate-integration columns dropped by
+        # 049_reconcile_schema_drift.py; restored here so 049's drop_columns
+        # have targets. Types match 049's downgrade verbatim.
+        #
+        # vendor_cards.sf_account_id uniqueness — the original column add is
+        # not in the migration chain (created via 001's original
+        # Base.metadata.create_all() body). UNIQUE inferred from:
+        #   1. 049's downgrade restores ix_vendor_cards_sf_account_id with
+        #      unique=True (alembic discipline: downgrade inverts upgrade
+        #      exactly)
+        #   2. 049's upgrade adds an analogous unique constraint to
+        #      companies.sf_account_id ("uq_companies_sf_account_id"),
+        #      establishing the "one Salesforce account ↔ one record"
+        #      invariant pattern across both tables
+        # Could be wrong if the original was a non-unique index and 049's
+        # downgrade is sloppy — verify against prod schema before merging.
+        sa.Column("acctivate_vendor_id", sa.VARCHAR(length=255), nullable=True),
+        sa.Column("acctivate_last_order_date", sa.DATE(), nullable=True),
+        sa.Column("acctivate_total_units", sa.INTEGER(), nullable=True),
+        sa.Column("acctivate_total_orders", sa.INTEGER(), nullable=True),
+        sa.Column("sf_account_id", sa.VARCHAR(length=255), nullable=True),
+        sa.Column("last_synced_at", postgresql.TIMESTAMP(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "vendor_contacts",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("vendor_card_id", sa.Integer(), nullable=False),
+        sa.Column("contact_type", sa.String(length=20), nullable=True),
+        sa.Column("full_name", sa.String(length=255), nullable=True),
+        sa.Column("first_name", sa.String(length=100), nullable=True),
+        sa.Column("last_name", sa.String(length=100), nullable=True),
+        sa.Column("title", sa.String(length=255), nullable=True),
+        sa.Column("label", sa.String(length=100), nullable=True),
+        sa.Column("email", sa.String(length=255), nullable=True),
+        sa.Column("phone", sa.String(length=100), nullable=True),
+        sa.Column("phone_mobile", sa.String(length=100), nullable=True),
+        sa.Column("phone_type", sa.String(length=20), nullable=True),
+        sa.Column("linkedin_url", sa.String(length=500), nullable=True),
+        sa.Column("source", sa.String(length=50), nullable=False),
+        sa.Column("is_verified", sa.Boolean(), nullable=True),
+        sa.Column("confidence", sa.Integer(), nullable=True),
+        sa.Column("interaction_count", sa.Integer(), nullable=True),
+        sa.Column("last_interaction_at", sa.DateTime(), nullable=True),
+        sa.Column("first_seen_at", sa.DateTime(), nullable=True),
+        sa.Column("last_seen_at", sa.DateTime(), nullable=True),
+        sa.Column("relationship_score", sa.Float(), nullable=True),
+        sa.Column("activity_trend", sa.String(length=20), nullable=True),
+        sa.Column("score_computed_at", sa.DateTime(), nullable=True),
+        sa.Column("is_ooo", sa.Boolean(), nullable=True),
+        sa.Column("ooo_return_date", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "vendor_metrics_snapshot",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("vendor_card_id", sa.Integer(), nullable=False),
+        sa.Column("snapshot_date", sa.Date(), nullable=False),
+        sa.Column("response_rate", sa.Float(), nullable=True),
+        sa.Column("quote_accuracy", sa.Float(), nullable=True),
+        sa.Column("on_time_delivery", sa.Float(), nullable=True),
+        sa.Column("cancellation_rate", sa.Float(), nullable=True),
+        sa.Column("rma_rate", sa.Float(), nullable=True),
+        sa.Column("lead_time_accuracy", sa.Float(), nullable=True),
+        sa.Column("quote_conversion", sa.Float(), nullable=True),
+        sa.Column("po_conversion", sa.Float(), nullable=True),
+        sa.Column("avg_review_rating", sa.Float(), nullable=True),
+        sa.Column("composite_score", sa.Float(), nullable=True),
+        sa.Column("interaction_count", sa.Integer(), nullable=True),
+        sa.Column("is_sufficient_data", sa.Boolean(), nullable=True),
+        sa.Column("rfqs_sent", sa.Integer(), nullable=True),
+        sa.Column("rfqs_answered", sa.Integer(), nullable=True),
+        sa.Column("pos_in_window", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "vendor_responses",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("contact_id", sa.Integer(), nullable=True),
+        sa.Column("requisition_id", sa.Integer(), nullable=True),
+        sa.Column("vendor_name", sa.String(length=255), nullable=True),
+        sa.Column("vendor_email", sa.String(length=255), nullable=True),
+        sa.Column("subject", sa.String(length=500), nullable=True),
+        sa.Column("body", sa.Text(), nullable=True),
+        sa.Column("received_at", sa.DateTime(), nullable=True),
+        sa.Column("parsed_data", sa.JSON(), nullable=True),
+        sa.Column("confidence", sa.Float(), nullable=True),
+        sa.Column("classification", sa.String(length=50), nullable=True),
+        sa.Column("needs_action", sa.Boolean(), nullable=True),
+        sa.Column("action_hint", sa.String(length=255), nullable=True),
+        sa.Column("status", sa.String(length=50), nullable=True),
+        sa.Column("message_id", sa.String(length=255), nullable=True),
+        sa.Column("graph_conversation_id", sa.String(length=500), nullable=True),
+        sa.Column("scanned_by_user_id", sa.Integer(), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.Column("match_method", sa.String(length=50), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "vendor_reviews",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("vendor_card_id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("rating", sa.Integer(), nullable=False),
+        sa.Column("comment", sa.String(length=500), nullable=True),
+        sa.Column("created_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "vendor_sighting_summary",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("requirement_id", sa.Integer(), nullable=False),
+        sa.Column("vendor_name", sa.String(), nullable=False),
+        sa.Column("vendor_phone", sa.String(), nullable=True),
+        sa.Column("estimated_qty", sa.Integer(), nullable=True),
+        sa.Column("avg_price", sa.Float(), nullable=True),
+        sa.Column("best_price", sa.Float(), nullable=True),
+        sa.Column("listing_count", sa.Integer(), nullable=False),
+        sa.Column("source_types", sa.JSON(), nullable=True),
+        sa.Column("score", sa.Float(), nullable=True),
+        sa.Column("tier", sa.String(length=20), nullable=True),
+        sa.Column("updated_at", sa.DateTime(), nullable=True),
+        sa.Column("vendor_card_id", sa.Integer(), nullable=True),
+        sa.Column("newest_sighting_at", sa.DateTime(), nullable=True),
+        sa.Column("best_lead_time_days", sa.Integer(), nullable=True),
+        sa.Column("min_moq", sa.Integer(), nullable=True),
+        sa.Column("has_contact_info", sa.Boolean(), nullable=True, server_default=sa.text("false")),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_table(
+        "verification_group_members",
+        sa.Column("id", sa.Integer(), nullable=False),
+        sa.Column("user_id", sa.Integer(), nullable=False),
+        sa.Column("is_active", sa.Boolean(), nullable=False),
+        sa.Column("added_at", sa.DateTime(), nullable=True),
+        sa.PrimaryKeyConstraint("id"),
+    )
+    op.create_index("ix_activity_created_at", "activity_log", ["created_at"], unique=False)
+    op.create_index("ix_activity_user", "activity_log", ["user_id", "created_at"], unique=False)
+    op.create_index("ix_ass_month_role_rank", "avail_score_snapshot", ["month", "role_type", "rank"], unique=False)
+    op.create_index(
+        "ix_ass_month_role_score", "avail_score_snapshot", ["month", "role_type", "total_score"], unique=False
+    )
+    op.create_index("ix_ass_user_month", "avail_score_snapshot", ["user_id", "month", "role_type"], unique=True)
+    op.create_index("ix_bid_solicitations_contact", "bid_solicitations", ["contact_id"], unique=False)
+    op.create_index("ix_bid_solicitations_graph_msg", "bid_solicitations", ["graph_message_id"], unique=False)
+    op.create_index("ix_bid_solicitations_line_item", "bid_solicitations", ["excess_line_item_id"], unique=False)
+    op.create_index("ix_bids_company", "bids", ["bidder_company_id"], unique=False)
+    op.create_index("ix_bids_line_item", "bids", ["excess_line_item_id"], unique=False)
+    op.create_index("ix_bids_status", "bids", ["status"], unique=False)
+    op.create_index("ix_bids_vendor_card", "bids", ["bidder_vendor_card_id"], unique=False)
+    op.create_index("ix_bp_approved_by", "buy_plans", ["approved_by_id"], unique=False)
+    op.create_index("ix_bp_cancelled_by", "buy_plans", ["cancelled_by_id"], unique=False)
+    op.create_index("ix_bp_completed_by", "buy_plans", ["completed_by_id"], unique=False)
+    op.create_index("ix_buyplans_token", "buy_plans", ["approval_token"], unique=False)
+    op.create_index("ix_bidsol_status", "bid_solicitations", ["status"], unique=False)
+    op.create_index("ix_bls_month_points", "buyer_leaderboard_snapshot", ["month", "total_points"], unique=False)
+    op.create_index("ix_bls_month_rank", "buyer_leaderboard_snapshot", ["month", "rank"], unique=False)
+    op.create_index("ix_bls_user_month", "buyer_leaderboard_snapshot", ["user_id", "month"], unique=True)
+    op.create_index("ix_bpl_buy_plan", "buy_plan_lines", ["buy_plan_id"], unique=False)
+    op.create_index("ix_bpl_buyer", "buy_plan_lines", ["buyer_id"], unique=False)
+    op.create_index("ix_bpl_offer", "buy_plan_lines", ["offer_id"], unique=False)
+    op.create_index("ix_bpl_plan_requirement", "buy_plan_lines", ["buy_plan_id", "requirement_id"], unique=False)
+    op.create_index("ix_bpl_requirement", "buy_plan_lines", ["requirement_id"], unique=False)
+    op.create_index("ix_bpl_status", "buy_plan_lines", ["status"], unique=False)
+    op.create_index("ix_bpv3_quote", "buy_plans_v3", ["quote_id"], unique=False)
+    op.create_index("ix_bpv3_requisition", "buy_plans_v3", ["requisition_id"], unique=False)
+    op.create_index("ix_bpv3_so_status", "buy_plans_v3", ["so_status"], unique=False)
+    op.create_index("ix_bpv3_status", "buy_plans_v3", ["status"], unique=False)
+    op.create_index("ix_bpv3_status_created", "buy_plans_v3", ["status", "created_at"], unique=False)
+    op.create_index("ix_bpv3_submitted_by", "buy_plans_v3", ["submitted_by_id"], unique=False)
+    op.create_index("ix_bpv3_token", "buy_plans_v3", ["approval_token"], unique=False)
+    op.create_index("ix_bvs_unique", "buyer_vendor_stats", ["user_id", "vendor_card_id"], unique=True)
+    op.create_index("ix_bvs_user", "buyer_vendor_stats", ["user_id"], unique=False)
+    op.create_index("ix_bvs_vendor", "buyer_vendor_stats", ["vendor_card_id"], unique=False)
+    op.create_index("ix_changelog_entity", "change_log", ["entity_type", "entity_id"], unique=False)
+    op.create_index("ix_changelog_user", "change_log", ["user_id"], unique=False)
+    op.create_index("ix_colmap_domain_fp", "column_mapping_cache", ["vendor_domain", "file_fingerprint"], unique=True)
+    op.create_index("ix_companies_account_owner", "companies", ["account_owner_id"], unique=False)
+    op.create_index("ix_companies_domain", "companies", ["domain"], unique=False)
+    op.create_index("ix_companies_is_active", "companies", ["is_active"], unique=False)
+    op.create_index("ix_companies_is_strategic", "companies", ["is_strategic"], unique=False)
+    op.create_index("ix_companies_last_activity_at", "companies", ["last_activity_at"], unique=False)
+    op.create_index("ix_companies_name", "companies", ["name"], unique=False)
+    op.create_index("ix_companies_owner_created", "companies", ["account_owner_id", "created_at"], unique=False)
+    op.create_index("ix_companies_sf_account_id", "companies", ["sf_account_id"], unique=True)
+    op.create_index("ix_contact_req", "contacts", ["requisition_id"], unique=False)
+    op.create_index("ix_contact_status", "contacts", ["status"], unique=False)
+    op.create_index("ix_contact_type_created", "contacts", ["contact_type", "created_at"], unique=False)
+    op.create_index("ix_contact_type_vendor", "contacts", ["contact_type", "vendor_name"], unique=False)
+    op.create_index("ix_contact_user_status", "contacts", ["user_id", "status", "created_at"], unique=False)
+    op.create_index("ix_contact_vendor_name", "contacts", ["vendor_name"], unique=False)
+    op.create_index("ix_contacts_vendor_norm", "contacts", ["vendor_name_normalized"], unique=False)
+    op.create_index("ix_cph_company_id", "customer_part_history", ["company_id"], unique=False)
+    op.create_index("ix_cph_last_purchased_at", "customer_part_history", ["last_purchased_at"], unique=False)
+    op.create_index("ix_cph_material_card_id", "customer_part_history", ["material_card_id"], unique=False)
+    op.create_index("ix_cs_company", "customer_sites", ["company_id"], unique=False)
+    op.create_index("ix_cs_owner", "customer_sites", ["owner_id"], unique=False)
+    op.create_index("ix_customer_sites_is_active", "customer_sites", ["is_active"], unique=False)
+    op.create_index("ix_discovery_batches_source_status", "discovery_batches", ["source", "status"], unique=False)
+    op.create_index("ix_discovery_batches_started_at", "discovery_batches", ["started_at"], unique=False)
+    op.create_index("ix_discovery_batches_status", "discovery_batches", ["status"], unique=False)
+    op.create_index("ix_ej_started_by", "enrichment_jobs", ["started_by_id"], unique=False)
+    op.create_index("ix_ej_status", "enrichment_jobs", ["status"], unique=False)
+    op.create_index("ix_ej_type_status", "enrichment_jobs", ["job_type", "status"], unique=False)
+    op.create_index("ix_email_intel_classification", "email_intelligence", ["classification"], unique=False)
+    op.create_index("ix_email_intel_needs_review", "email_intelligence", ["needs_review"], unique=False)
+    op.create_index("ix_email_intel_user_received", "email_intelligence", ["user_id", "received_at"], unique=False)
+    op.create_index("ix_email_intelligence_conversation_id", "email_intelligence", ["conversation_id"], unique=False)
+    op.create_index("ix_email_intelligence_message_id", "email_intelligence", ["message_id"], unique=False)
+    op.create_index("ix_email_intelligence_sender_domain", "email_intelligence", ["sender_domain"], unique=False)
+    op.create_index("ix_enrichment_runs_created_at", "enrichment_runs", ["created_at"], unique=False)
+    op.create_index("ix_enrichment_runs_phase", "enrichment_runs", ["phase"], unique=False)
+    op.create_index("ix_enrichment_runs_status", "enrichment_runs", ["status"], unique=False)
+    op.create_index("ix_er_resolved_by", "error_reports", ["resolved_by_id"], unique=False)
+    op.create_index("ix_entity_tags_type_id", "entity_tags", ["entity_type", "entity_id"], unique=False)
+    op.create_index(
+        "ix_entity_tags_type_tag_visible", "entity_tags", ["entity_type", "tag_id", "is_visible"], unique=False
+    )
+    op.create_index("ix_eq_batch", "enrichment_queue", ["batch_job_id"], unique=False)
+    op.create_index("ix_eq_company", "enrichment_queue", ["company_id"], unique=False)
+    op.create_index("ix_eq_reviewed_by", "enrichment_queue", ["reviewed_by_id"], unique=False)
+    op.create_index("ix_eq_status", "enrichment_queue", ["status"], unique=False)
+    op.create_index("ix_eq_status_created", "enrichment_queue", ["status", "created_at"], unique=False)
+    op.create_index("ix_eq_status_source", "enrichment_queue", ["status", "source"], unique=False)
+    op.create_index("ix_eq_vendor", "enrichment_queue", ["vendor_card_id"], unique=False)
+    op.create_index("ix_ese_company", "email_signature_extracts", ["company_name"], unique=False)
+    op.create_index("ix_excess_line_items_demand", "excess_line_items", ["demand_match_count", "status"], unique=False)
+    op.create_index("ix_excess_line_items_list", "excess_line_items", ["excess_list_id"], unique=False)
+    op.create_index(
+        "ix_excess_line_items_normalized_part_number", "excess_line_items", ["normalized_part_number"], unique=False
+    )
+    op.create_index("ix_excess_line_items_part_number", "excess_line_items", ["part_number"], unique=False)
+    op.create_index("ix_excess_line_items_pn_status", "excess_line_items", ["part_number", "status"], unique=False)
+    op.create_index("ix_excess_line_items_status", "excess_line_items", ["status"], unique=False)
+    op.create_index("ix_excess_lists_company", "excess_lists", ["company_id"], unique=False)
+    op.create_index("ix_excess_lists_owner", "excess_lists", ["owner_id"], unique=False)
+    op.create_index("ix_excess_lists_status", "excess_lists", ["status"], unique=False)
+    op.create_index("ix_graph_subscriptions_user_id", "graph_subscriptions", ["user_id"], unique=False)
+    op.create_index("ix_graphsub_expiry", "graph_subscriptions", ["expiration_dt"], unique=False)
+    op.create_index("ix_graphsub_user", "graph_subscriptions", ["user_id"], unique=False)
+    op.create_index("ix_ics_log_queue", "ics_search_log", ["queue_id"], unique=False)
+    op.create_index("ix_intel_cache_cache_key", "intel_cache", ["cache_key"], unique=True)
+    op.create_index("ix_inv_product_warehouse", "inventory_snapshots", ["product_id", "warehouse_id"], unique=True)
+    op.create_index("ix_inventory_snapshots_product_id", "inventory_snapshots", ["product_id"], unique=False)
+    op.create_index("ix_ke_company", "knowledge_entries", ["company_id", "created_at"], unique=False)
+    op.create_index("ix_ke_created_by", "knowledge_entries", ["created_by"], unique=False)
+    op.create_index("ix_ke_mpn", "knowledge_entries", ["mpn"], unique=False)
+    op.create_index("ix_ke_parent", "knowledge_entries", ["parent_id"], unique=False)
+    op.create_index("ix_ke_requisition", "knowledge_entries", ["requisition_id", "created_at"], unique=False)
+    op.create_index("ix_ke_vendor", "knowledge_entries", ["vendor_card_id"], unique=False)
+    op.create_index("ix_knowledge_entries_id", "knowledge_entries", ["id"], unique=False)
+    op.create_index("ix_lead_evidence_evidence_id", "lead_evidence", ["evidence_id"], unique=True)
+    op.create_index("ix_lead_evidence_lead_id", "lead_evidence", ["lead_id"], unique=False)
+    op.create_index("ix_lead_evidence_source_type", "lead_evidence", ["source_type"], unique=False)
+    op.create_index("ix_lead_evidence_verification", "lead_evidence", ["verification_state"], unique=False)
+    op.create_index(
+        "ix_lead_feedback_events_created_by_user_id", "lead_feedback_events", ["created_by_user_id"], unique=False
+    )
+    op.create_index("ix_lead_feedback_events_lead_id", "lead_feedback_events", ["lead_id"], unique=False)
+    op.create_index("ix_lead_feedback_lead_created", "lead_feedback_events", ["lead_id", "created_at"], unique=False)
+    op.create_index("ix_lead_feedback_status", "lead_feedback_events", ["status"], unique=False)
+    op.create_index("ix_manufacturers_canonical_name", "manufacturers", ["canonical_name"], unique=True)
+    op.create_index(
+        "ix_material_card_audit_material_card_id", "material_card_audit", ["material_card_id"], unique=False
+    )
+    op.create_index("ix_material_card_audit_normalized_mpn", "material_card_audit", ["normalized_mpn"], unique=False)
+    op.create_index("ix_material_cards_deleted_at", "material_cards", ["deleted_at"], unique=False)
+    op.create_index("ix_material_cards_lifecycle_status", "material_cards", ["lifecycle_status"], unique=False)
+    op.create_index("ix_material_cards_manufacturer", "material_cards", ["manufacturer"], unique=False)
+    op.create_index("ix_material_cards_normalized_mpn", "material_cards", ["normalized_mpn"], unique=True)
+    op.create_index(
+        "ix_material_price_snapshots_material_card_id", "material_price_snapshots", ["material_card_id"], unique=False
+    )
+    op.create_index(
+        "ix_material_price_snapshots_recorded_at", "material_price_snapshots", ["recorded_at"], unique=False
+    )
+    op.create_index("ix_material_tags_source", "material_tags", ["source"], unique=False)
+    op.create_index("ix_material_tags_tag_id", "material_tags", ["tag_id"], unique=False)
+    op.create_index("ix_mca_card_action", "material_card_audit", ["material_card_id", "action"], unique=False)
+    op.create_index("ix_msf_category_key", "material_spec_facets", ["category", "spec_key"], unique=False)
+    op.create_index(
+        "ix_msf_category_key_text", "material_spec_facets", ["category", "spec_key", "value_text"], unique=False
+    )
+    op.create_index(
+        "ix_mss_month_role_points", "multiplier_score_snapshot", ["month", "role_type", "total_points"], unique=False
+    )
+    op.create_index("ix_mss_month_role_rank", "multiplier_score_snapshot", ["month", "role_type", "rank"], unique=False)
+    op.create_index("ix_mss_user_month", "multiplier_score_snapshot", ["user_id", "month", "role_type"], unique=True)
+    op.create_index("ix_mvh_card_vendor", "material_vendor_history", ["material_card_id", "vendor_name"], unique=True)
+    op.create_index("ix_mvh_vendor", "material_vendor_history", ["vendor_name"], unique=False)
+    op.create_index("ix_mvh_vendor_norm", "material_vendor_history", ["vendor_name_normalized"], unique=False)
+    op.create_index("ix_nc_search_log_queue_id", "nc_search_log", ["queue_id"], unique=False)
+    op.create_index("ix_offer_attachments_offer", "offer_attachments", ["offer_id"], unique=False)
+    op.create_index("ix_offers_entered_by", "offers", ["entered_by_id"], unique=False)
+    op.create_index("ix_offers_entered_created", "offers", ["entered_by_id", "created_at"], unique=False)
+    op.create_index("ix_offers_material_card", "offers", ["material_card_id"], unique=False)
+    op.create_index("ix_offers_mpn", "offers", ["mpn"], unique=False)
+    op.create_index("ix_offers_normalized_mpn", "offers", ["normalized_mpn"], unique=False)
+    op.create_index("ix_offers_req", "offers", ["requisition_id"], unique=False)
+    op.create_index("ix_offers_req_created", "offers", ["requisition_id", "created_at"], unique=False)
+    op.create_index("ix_offers_req_status", "offers", ["requisition_id", "status"], unique=False)
+    op.create_index("ix_offers_requirement", "offers", ["requirement_id"], unique=False)
+    op.create_index("ix_offers_status", "offers", ["status"], unique=False)
+    op.create_index("ix_offers_vendor", "offers", ["vendor_card_id"], unique=False)
+    op.create_index("ix_offers_vendor_name", "offers", ["vendor_name"], unique=False)
+    op.create_index("ix_offers_vendor_norm", "offers", ["vendor_name_normalized"], unique=False)
+    op.create_index("ix_pdno_mpn_company", "proactive_do_not_offer", ["mpn", "company_id"], unique=True)
+    op.create_index("ix_pending_batches_batch_id", "pending_batches", ["batch_id"], unique=False)
+    op.create_index("ix_pending_batches_status", "pending_batches", ["status", "submitted_at"], unique=False)
+    op.create_index("ix_pm_company", "proactive_matches", ["company_id"], unique=False)
+    op.create_index("ix_pm_material_card", "proactive_matches", ["material_card_id"], unique=False)
+    op.create_index("ix_pm_mpn_site", "proactive_matches", ["mpn", "customer_site_id"], unique=False)
+    op.create_index("ix_pm_offer", "proactive_matches", ["offer_id"], unique=False)
+    op.create_index("ix_pm_req", "proactive_matches", ["requisition_id"], unique=False)
+    op.create_index("ix_pm_sales", "proactive_matches", ["salesperson_id"], unique=False)
+    op.create_index("ix_pm_score", "proactive_matches", ["match_score"], unique=False)
+    op.create_index("ix_pm_site", "proactive_matches", ["customer_site_id"], unique=False)
+    op.create_index("ix_pm_status", "proactive_matches", ["status"], unique=False)
+    op.create_index("ix_pm_status_sales", "proactive_matches", ["status", "salesperson_id"], unique=False)
+    op.create_index("ix_poff_sales", "proactive_offers", ["salesperson_id"], unique=False)
+    op.create_index("ix_poff_sent", "proactive_offers", ["sent_at"], unique=False)
+    op.create_index("ix_poff_site", "proactive_offers", ["customer_site_id"], unique=False)
+    op.create_index("ix_poff_status", "proactive_offers", ["status"], unique=False)
+    op.create_index(
+        "ix_price_snap_card_time", "material_price_snapshots", ["material_card_id", "recorded_at"], unique=False
+    )
+    op.create_index("ix_prospect_accounts_discovery_source", "prospect_accounts", ["discovery_source"], unique=False)
+    op.create_index("ix_prospect_accounts_fit_score", "prospect_accounts", ["fit_score"], unique=False)
+    op.create_index("ix_prospect_accounts_readiness_score", "prospect_accounts", ["readiness_score"], unique=False)
+    op.create_index("ix_prospect_accounts_region", "prospect_accounts", ["region"], unique=False)
+    op.create_index("ix_prospect_accounts_status", "prospect_accounts", ["status"], unique=False)
+    op.create_index("ix_prospect_accounts_status_fit", "prospect_accounts", ["status", "fit_score"], unique=False)
+    op.create_index("ix_prospect_contacts_email", "prospect_contacts", ["email"], unique=False)
+    op.create_index("ix_prospect_contacts_saved_by", "prospect_contacts", ["saved_by_id"], unique=False)
+    op.create_index("ix_prospect_contacts_site", "prospect_contacts", ["customer_site_id"], unique=False)
+    op.create_index("ix_prospect_contacts_vendor", "prospect_contacts", ["vendor_card_id"], unique=False)
+    op.create_index("ix_pt_last_offered", "proactive_throttle", ["last_offered_at"], unique=False)
+    op.create_index("ix_pt_mpn_site", "proactive_throttle", ["mpn", "customer_site_id"], unique=True)
+    op.create_index("ix_quote_lines_card", "quote_lines", ["material_card_id"], unique=False)
+    op.create_index("ix_quote_lines_mpn", "quote_lines", ["mpn"], unique=False)
+    op.create_index("ix_quote_lines_offer", "quote_lines", ["offer_id"], unique=False)
+    op.create_index("ix_quote_lines_quote", "quote_lines", ["quote_id"], unique=False)
+    op.create_index("ix_quotes_created_by", "quotes", ["created_by_id"], unique=False)
+    op.create_index("ix_quotes_req", "quotes", ["requisition_id"], unique=False)
+    op.create_index("ix_quotes_site", "quotes", ["customer_site_id"], unique=False)
+    op.create_index("ix_quotes_status", "quotes", ["status"], unique=False)
+    op.create_index("ix_req_primary_mpn", "requirements", ["primary_mpn"], unique=False)
+    op.create_index("ix_req_requisition", "requirements", ["requisition_id"], unique=False)
+    op.create_index(
+        "ix_requirement_attachments_requirement_id", "requirement_attachments", ["requirement_id"], unique=False
+    )
+    op.create_index("ix_requirements_material_card", "requirements", ["material_card_id"], unique=False)
+    op.create_index("ix_requirements_normalized_mpn", "requirements", ["normalized_mpn"], unique=False)
+    op.create_index("ix_requirements_sourcing_status", "requirements", ["sourcing_status"], unique=False)
+    op.create_index(
+        "ix_requisition_attachments_requisition_id", "requisition_attachments", ["requisition_id"], unique=False
+    )
+    op.create_index("ix_requisition_tasks_id", "requisition_tasks", ["id"], unique=False)
+    op.create_index("ix_requisitions_claimed_by", "requisitions", ["claimed_by_id"], unique=False)
+    op.create_index("ix_requisitions_company", "requisitions", ["company_id"], unique=False)
+    op.create_index("ix_requisitions_created_at", "requisitions", ["created_at"], unique=False)
+    op.create_index("ix_requisitions_created_by", "requisitions", ["created_by"], unique=False)
+    op.create_index("ix_requisitions_customer_name", "requisitions", ["customer_name"], unique=False)
+    op.create_index("ix_requisitions_name", "requisitions", ["name"], unique=False)
+    op.create_index("ix_requisitions_site", "requisitions", ["customer_site_id"], unique=False)
+    op.create_index("ix_requisitions_status", "requisitions", ["status"], unique=False)
+    op.create_index("ix_requisitions_urgency", "requisitions", ["urgency"], unique=False)
+    op.create_index("ix_review_user", "vendor_reviews", ["user_id"], unique=False)
+    op.create_index("ix_review_vendor", "vendor_reviews", ["vendor_card_id"], unique=False)
+    op.create_index("ix_root_cause_groups_title", "root_cause_groups", ["title"], unique=False)
+    op.create_index("ix_rt_assignee_status", "requisition_tasks", ["assigned_to_id", "status"], unique=False)
+    op.create_index("ix_rt_creator_status", "requisition_tasks", ["created_by", "status"], unique=False)
+    op.create_index("ix_rt_req_status", "requisition_tasks", ["requisition_id", "status"], unique=False)
+    op.create_index("ix_rt_requirement", "requisition_tasks", ["requirement_id"], unique=False)
+    op.create_index("ix_rt_status_due", "requisition_tasks", ["status", "due_at"], unique=False)
+    op.create_index("ix_sight_req", "sightings", ["requirement_id"], unique=False)
+    op.create_index("ix_sightings_manufacturer", "sightings", ["manufacturer"], unique=False)
+    op.create_index("ix_sightings_material_card", "sightings", ["material_card_id"], unique=False)
+    op.create_index(
+        "ix_sightings_mpn_vendor_norm", "sightings", ["normalized_mpn", "vendor_name_normalized"], unique=False
+    )
+    op.create_index("ix_sightings_normalized_mpn", "sightings", ["normalized_mpn"], unique=False)
+    op.create_index("ix_sightings_req_score", "sightings", ["requirement_id", "score DESC"], unique=False)
+    op.create_index("ix_sightings_req_vendor", "sightings", ["requirement_id", "vendor_name"], unique=False)
+    op.create_index("ix_sightings_source_company", "sightings", ["source_company_id"], unique=False)
+    op.create_index("ix_sightings_source_type", "sightings", ["source_type"], unique=False)
+    op.create_index("ix_sightings_vendor_name", "sightings", ["vendor_name"], unique=False)
+    op.create_index("ix_sightings_vendor_name_normalized", "sightings", ["vendor_name_normalized"], unique=False)
+    op.create_index("ix_sightings_vendor_norm", "sightings", ["vendor_name_normalized"], unique=False)
+    op.create_index("ix_site_contacts_email", "site_contacts", ["email"], unique=False)
+    op.create_index("ix_site_contacts_site", "site_contacts", ["customer_site_id"], unique=False)
+    op.create_index("ix_slh_hash", "stock_list_hashes", ["content_hash"], unique=False)
+    op.create_index("ix_slh_user_hash", "stock_list_hashes", ["user_id", "content_hash"], unique=True)
+    op.create_index("ix_slh_vendor", "stock_list_hashes", ["vendor_card_id"], unique=False)
+    op.create_index("ix_sourcing_leads_buyer_owner_user_id", "sourcing_leads", ["buyer_owner_user_id"], unique=False)
+    op.create_index("ix_sourcing_leads_confidence", "sourcing_leads", ["confidence_score"], unique=False)
+    op.create_index("ix_sourcing_leads_lead_id", "sourcing_leads", ["lead_id"], unique=True)
+    op.create_index("ix_sourcing_leads_req_status", "sourcing_leads", ["requisition_id", "buyer_status"], unique=False)
+    op.create_index("ix_sourcing_leads_requirement_id", "sourcing_leads", ["requirement_id"], unique=False)
+    op.create_index("ix_sourcing_leads_requisition_id", "sourcing_leads", ["requisition_id"], unique=False)
+    op.create_index("ix_sourcing_leads_safety", "sourcing_leads", ["vendor_safety_score"], unique=False)
+    op.create_index("ix_sourcing_leads_status", "sourcing_leads", ["buyer_status"], unique=False)
+    op.create_index("ix_sourcing_leads_vendor_card_id", "sourcing_leads", ["vendor_card_id"], unique=False)
+    op.create_index(
+        "ix_sourcing_leads_vendor_name_normalized", "sourcing_leads", ["vendor_name_normalized"], unique=False
+    )
+    op.create_index("ix_strategic_expires_released", "strategic_vendors", ["expires_at", "released_at"], unique=False)
+    op.create_index("ix_strategic_user_released", "strategic_vendors", ["user_id", "released_at"], unique=False)
+    op.create_index(
+        "ix_strategic_vendor_released", "strategic_vendors", ["vendor_card_id", "released_at"], unique=False
+    )
+    op.create_index("ix_sync_source_time", "sync_logs", ["source", "started_at"], unique=False)
+    op.create_index("ix_sync_state_user_folder", "sync_state", ["user_id", "folder"], unique=True)
+    op.create_index("ix_system_config_key", "system_config", ["key"], unique=True)
+    op.create_index("ix_tags_tag_type", "tags", ["tag_type"], unique=False)
+    op.create_index("ix_trouble_tickets_created_at", "trouble_tickets", ["created_at"], unique=False)
+    op.create_index("ix_trouble_tickets_risk_tier", "trouble_tickets", ["risk_tier"], unique=False)
+    op.create_index("ix_trouble_tickets_source", "trouble_tickets", ["source"], unique=False)
+    op.create_index(
+        "ix_trouble_tickets_source_status_created", "trouble_tickets", ["source", "status", "created_at"], unique=False
+    )
+    op.create_index("ix_trouble_tickets_status", "trouble_tickets", ["status"], unique=False)
+    op.create_index("ix_trouble_tickets_submitted_by", "trouble_tickets", ["submitted_by"], unique=False)
+    op.create_index("ix_usage_log_source_ts", "api_usage_log", ["source_id", '"timestamp"'], unique=False)
+    op.create_index("ix_uss_month_rank", "unified_score_snapshot", ["month", "rank"], unique=False)
+    op.create_index("ix_uss_user_month", "unified_score_snapshot", ["user_id", "month"], unique=True)
+    op.create_index("ix_vendor_cards_acctivate_vendor_id", "vendor_cards", ["acctivate_vendor_id"], unique=False)
+    op.create_index("ix_vendor_cards_created_at", "vendor_cards", ["created_at"], unique=False)
+    op.create_index("ix_vendor_cards_domain", "vendor_cards", ["domain"], unique=False)
+    op.create_index("ix_vendor_cards_normalized_name", "vendor_cards", ["normalized_name"], unique=True)
+    op.create_index("ix_vendor_cards_score_computed_at", "vendor_cards", ["vendor_score_computed_at"], unique=False)
+    op.create_index("ix_vendor_cards_sf_account_id", "vendor_cards", ["sf_account_id"], unique=True)
+    op.create_index("ix_vendor_contacts_card", "vendor_contacts", ["vendor_card_id"], unique=False)
+    op.create_index("ix_vendor_contacts_card_email", "vendor_contacts", ["vendor_card_id", "email"], unique=True)
+    op.create_index("ix_vendor_contacts_email", "vendor_contacts", ["email"], unique=False)
+    op.create_index("ix_vendor_responses_message_id", "vendor_responses", ["message_id"], unique=True)
+    op.create_index("ix_vgm_active", "verification_group_members", ["is_active"], unique=False)
+    op.create_index("ix_vms_composite", "vendor_metrics_snapshot", ["composite_score"], unique=False)
+    op.create_index("ix_vms_date", "vendor_metrics_snapshot", ["snapshot_date"], unique=False)
+    op.create_index("ix_vms_vendor_date", "vendor_metrics_snapshot", ["vendor_card_id", "snapshot_date"], unique=True)
+    op.create_index("ix_vr_classification", "vendor_responses", ["classification"], unique=False)
+    op.create_index("ix_vr_contact", "vendor_responses", ["contact_id"], unique=False)
+    op.create_index("ix_vr_received_email", "vendor_responses", ["received_at", "vendor_email"], unique=False)
+    op.create_index("ix_vr_received_status", "vendor_responses", ["received_at", "status"], unique=False)
+    op.create_index("ix_vr_req_email", "vendor_responses", ["requisition_id", "vendor_email"], unique=False)
+    op.create_index("ix_vr_requisition", "vendor_responses", ["requisition_id"], unique=False)
+    op.create_index("ix_vr_scanned_by", "vendor_responses", ["scanned_by_user_id"], unique=False)
+    op.create_index("ix_vr_vendor_name", "vendor_responses", ["vendor_name"], unique=False)
+    op.create_index("ix_vss_requirement", "vendor_sighting_summary", ["requirement_id"], unique=False)
+    op.create_index("ix_vss_score", "vendor_sighting_summary", ["score"], unique=False)
+    op.create_index("ix_vss_vendor", "vendor_sighting_summary", ["vendor_name"], unique=False)
+    op.create_index("ix_vss_vendor_card", "vendor_sighting_summary", ["vendor_card_id"], unique=False)
+    op.create_index("ix_vss_vendor_req", "vendor_sighting_summary", ["vendor_name", "requirement_id"], unique=False)
+    op.create_foreign_key(
+        "activity_log_buy_plan_id_fkey", "activity_log", "buy_plans_v3", ["buy_plan_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "activity_log_company_id_fkey", "activity_log", "companies", ["company_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "activity_log_customer_site_id_fkey",
+        "activity_log",
+        "customer_sites",
+        ["customer_site_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "activity_log_quote_id_fkey", "activity_log", "quotes", ["quote_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "activity_log_requirement_id_fkey",
+        "activity_log",
+        "requirements",
+        ["requirement_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "activity_log_requisition_id_fkey",
+        "activity_log",
+        "requisitions",
+        ["requisition_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "activity_log_site_contact_id_fkey",
+        "activity_log",
+        "site_contacts",
+        ["site_contact_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "activity_log_user_id_fkey", "activity_log", "users", ["user_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "activity_log_vendor_card_id_fkey",
+        "activity_log",
+        "vendor_cards",
+        ["vendor_card_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "activity_log_vendor_contact_id_fkey",
+        "activity_log",
+        "vendor_contacts",
+        ["vendor_contact_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "api_usage_log_source_id_fkey", "api_usage_log", "api_sources", ["source_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "avail_score_snapshot_user_id_fkey", "avail_score_snapshot", "users", ["user_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "bid_solicitations_excess_line_item_id_fkey",
+        "bid_solicitations",
+        "excess_line_items",
+        ["excess_line_item_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "bid_solicitations_parsed_bid_id_fkey",
+        "bid_solicitations",
+        "bids",
+        ["parsed_bid_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "bid_solicitations_sent_by_fkey", "bid_solicitations", "users", ["sent_by"], ["id"], ondelete="RESTRICT"
+    )
+    op.create_foreign_key(
+        "bids_bidder_company_id_fkey", "bids", "companies", ["bidder_company_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "bids_bidder_vendor_card_id_fkey",
+        "bids",
+        "vendor_cards",
+        ["bidder_vendor_card_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key("bids_created_by_fkey", "bids", "users", ["created_by"], ["id"], ondelete="RESTRICT")
+    op.create_foreign_key(
+        "bids_excess_line_item_id_fkey",
+        "bids",
+        "excess_line_items",
+        ["excess_line_item_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "buy_plan_lines_buy_plan_id_fkey", "buy_plan_lines", "buy_plans_v3", ["buy_plan_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "buy_plan_lines_buyer_id_fkey", "buy_plan_lines", "users", ["buyer_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "buy_plan_lines_offer_id_fkey", "buy_plan_lines", "offers", ["offer_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "buy_plan_lines_po_verified_by_id_fkey",
+        "buy_plan_lines",
+        "users",
+        ["po_verified_by_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "buy_plan_lines_requirement_id_fkey",
+        "buy_plan_lines",
+        "requirements",
+        ["requirement_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key("buy_plans_approved_by_id_fkey", "buy_plans", "users", ["approved_by_id"], ["id"])
+    op.create_foreign_key("buy_plans_cancelled_by_id_fkey", "buy_plans", "users", ["cancelled_by_id"], ["id"])
+    op.create_foreign_key("buy_plans_completed_by_id_fkey", "buy_plans", "users", ["completed_by_id"], ["id"])
+    op.create_foreign_key("buy_plans_quote_id_fkey", "buy_plans", "quotes", ["quote_id"], ["id"])
+    op.create_foreign_key("buy_plans_requisition_id_fkey", "buy_plans", "requisitions", ["requisition_id"], ["id"])
+    op.create_foreign_key("buy_plans_submitted_by_id_fkey", "buy_plans", "users", ["submitted_by_id"], ["id"])
+    op.create_foreign_key(
+        "buy_plans_v3_approved_by_id_fkey", "buy_plans_v3", "users", ["approved_by_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "buy_plans_v3_cancelled_by_id_fkey", "buy_plans_v3", "users", ["cancelled_by_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "buy_plans_v3_halted_by_id_fkey", "buy_plans_v3", "users", ["halted_by_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "buy_plans_v3_quote_id_fkey", "buy_plans_v3", "quotes", ["quote_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "buy_plans_v3_requisition_id_fkey",
+        "buy_plans_v3",
+        "requisitions",
+        ["requisition_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "buy_plans_v3_so_verified_by_id_fkey",
+        "buy_plans_v3",
+        "users",
+        ["so_verified_by_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "buy_plans_v3_submitted_by_id_fkey", "buy_plans_v3", "users", ["submitted_by_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "buyer_leaderboard_snapshot_user_id_fkey",
+        "buyer_leaderboard_snapshot",
+        "users",
+        ["user_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "buyer_vendor_stats_user_id_fkey", "buyer_vendor_stats", "users", ["user_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "buyer_vendor_stats_vendor_card_id_fkey",
+        "buyer_vendor_stats",
+        "vendor_cards",
+        ["vendor_card_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key("change_log_user_id_fkey", "change_log", "users", ["user_id"], ["id"], ondelete="SET NULL")
+    op.create_foreign_key(
+        "companies_account_owner_id_fkey", "companies", "users", ["account_owner_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "contacts_requisition_id_fkey", "contacts", "requisitions", ["requisition_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key("contacts_user_id_fkey", "contacts", "users", ["user_id"], ["id"], ondelete="CASCADE")
+    op.create_foreign_key(
+        "customer_part_history_company_id_fkey",
+        "customer_part_history",
+        "companies",
+        ["company_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "customer_part_history_material_card_id_fkey",
+        "customer_part_history",
+        "material_cards",
+        ["material_card_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "customer_sites_company_id_fkey", "customer_sites", "companies", ["company_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "customer_sites_owner_id_fkey", "customer_sites", "users", ["owner_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "email_intelligence_user_id_fkey", "email_intelligence", "users", ["user_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key("error_reports_resolved_by_id_fkey", "error_reports", "users", ["resolved_by_id"], ["id"])
+    op.create_foreign_key("error_reports_user_id_fkey", "error_reports", "users", ["user_id"], ["id"])
+    op.create_foreign_key(
+        "enrichment_jobs_started_by_id_fkey", "enrichment_jobs", "users", ["started_by_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "enrichment_queue_batch_job_id_fkey",
+        "enrichment_queue",
+        "enrichment_jobs",
+        ["batch_job_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "enrichment_queue_company_id_fkey", "enrichment_queue", "companies", ["company_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "enrichment_queue_reviewed_by_id_fkey",
+        "enrichment_queue",
+        "users",
+        ["reviewed_by_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "enrichment_queue_vendor_card_id_fkey",
+        "enrichment_queue",
+        "vendor_cards",
+        ["vendor_card_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "enrichment_queue_vendor_contact_id_fkey",
+        "enrichment_queue",
+        "vendor_contacts",
+        ["vendor_contact_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key("entity_tags_tag_id_fkey", "entity_tags", "tags", ["tag_id"], ["id"], ondelete="CASCADE")
+    op.create_foreign_key(
+        "excess_line_items_excess_list_id_fkey",
+        "excess_line_items",
+        "excess_lists",
+        ["excess_list_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "excess_lists_company_id_fkey", "excess_lists", "companies", ["company_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "excess_lists_customer_site_id_fkey",
+        "excess_lists",
+        "customer_sites",
+        ["customer_site_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "excess_lists_owner_id_fkey", "excess_lists", "users", ["owner_id"], ["id"], ondelete="RESTRICT"
+    )
+    op.create_foreign_key(
+        "graph_subscriptions_user_id_fkey", "graph_subscriptions", "users", ["user_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "ics_search_log_queue_id_fkey", "ics_search_log", "ics_search_queue", ["queue_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "ics_search_queue_requirement_id_fkey",
+        "ics_search_queue",
+        "requirements",
+        ["requirement_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "ics_search_queue_requisition_id_fkey",
+        "ics_search_queue",
+        "requisitions",
+        ["requisition_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "knowledge_entries_company_id_fkey",
+        "knowledge_entries",
+        "companies",
+        ["company_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "knowledge_entries_created_by_fkey", "knowledge_entries", "users", ["created_by"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "knowledge_entries_requirement_id_fkey",
+        "knowledge_entries",
+        "requirements",
+        ["requirement_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "knowledge_entries_requisition_id_fkey",
+        "knowledge_entries",
+        "requisitions",
+        ["requisition_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "knowledge_entries_vendor_card_id_fkey",
+        "knowledge_entries",
+        "vendor_cards",
+        ["vendor_card_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "lead_evidence_lead_id_fkey", "lead_evidence", "sourcing_leads", ["lead_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "lead_feedback_events_created_by_user_id_fkey",
+        "lead_feedback_events",
+        "users",
+        ["created_by_user_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "lead_feedback_events_lead_id_fkey",
+        "lead_feedback_events",
+        "sourcing_leads",
+        ["lead_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "material_price_snapshots_material_card_id_fkey",
+        "material_price_snapshots",
+        "material_cards",
+        ["material_card_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "material_spec_facets_material_card_id_fkey",
+        "material_spec_facets",
+        "material_cards",
+        ["material_card_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "material_tags_material_card_id_fkey",
+        "material_tags",
+        "material_cards",
+        ["material_card_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key("material_tags_tag_id_fkey", "material_tags", "tags", ["tag_id"], ["id"], ondelete="CASCADE")
+    op.create_foreign_key(
+        "material_vendor_history_material_card_id_fkey",
+        "material_vendor_history",
+        "material_cards",
+        ["material_card_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "multiplier_score_snapshot_user_id_fkey",
+        "multiplier_score_snapshot",
+        "users",
+        ["user_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "nc_search_log_queue_id_fkey", "nc_search_log", "nc_search_queue", ["queue_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "nc_search_queue_requirement_id_fkey",
+        "nc_search_queue",
+        "requirements",
+        ["requirement_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "nc_search_queue_requisition_id_fkey",
+        "nc_search_queue",
+        "requisitions",
+        ["requisition_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "offer_attachments_offer_id_fkey", "offer_attachments", "offers", ["offer_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "offer_attachments_uploaded_by_id_fkey",
+        "offer_attachments",
+        "users",
+        ["uploaded_by_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "offers_approved_by_id_fkey", "offers", "users", ["approved_by_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "offers_entered_by_id_fkey", "offers", "users", ["entered_by_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "offers_excess_line_item_id_fkey",
+        "offers",
+        "excess_line_items",
+        ["excess_line_item_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "offers_material_card_id_fkey", "offers", "material_cards", ["material_card_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "offers_promoted_by_id_fkey", "offers", "users", ["promoted_by_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "offers_requirement_id_fkey", "offers", "requirements", ["requirement_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "offers_requisition_id_fkey", "offers", "requisitions", ["requisition_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "offers_updated_by_id_fkey", "offers", "users", ["updated_by_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "offers_vendor_card_id_fkey", "offers", "vendor_cards", ["vendor_card_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "offers_vendor_response_id_fkey",
+        "offers",
+        "vendor_responses",
+        ["vendor_response_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "proactive_do_not_offer_company_id_fkey",
+        "proactive_do_not_offer",
+        "companies",
+        ["company_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "proactive_do_not_offer_created_by_id_fkey",
+        "proactive_do_not_offer",
+        "users",
+        ["created_by_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "proactive_matches_company_id_fkey",
+        "proactive_matches",
+        "companies",
+        ["company_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "proactive_matches_customer_site_id_fkey",
+        "proactive_matches",
+        "customer_sites",
+        ["customer_site_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "proactive_matches_material_card_id_fkey",
+        "proactive_matches",
+        "material_cards",
+        ["material_card_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "proactive_matches_offer_id_fkey", "proactive_matches", "offers", ["offer_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "proactive_matches_requirement_id_fkey",
+        "proactive_matches",
+        "requirements",
+        ["requirement_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "proactive_matches_requisition_id_fkey",
+        "proactive_matches",
+        "requisitions",
+        ["requisition_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "proactive_matches_salesperson_id_fkey",
+        "proactive_matches",
+        "users",
+        ["salesperson_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "proactive_offers_converted_quote_id_fkey",
+        "proactive_offers",
+        "quotes",
+        ["converted_quote_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "proactive_offers_converted_requisition_id_fkey",
+        "proactive_offers",
+        "requisitions",
+        ["converted_requisition_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "proactive_offers_customer_site_id_fkey",
+        "proactive_offers",
+        "customer_sites",
+        ["customer_site_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "proactive_offers_salesperson_id_fkey",
+        "proactive_offers",
+        "users",
+        ["salesperson_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "proactive_throttle_customer_site_id_fkey",
+        "proactive_throttle",
+        "customer_sites",
+        ["customer_site_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "proactive_throttle_proactive_offer_id_fkey",
+        "proactive_throttle",
+        "proactive_offers",
+        ["proactive_offer_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "prospect_accounts_claimed_by_fkey", "prospect_accounts", "users", ["claimed_by"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "prospect_accounts_company_id_fkey",
+        "prospect_accounts",
+        "companies",
+        ["company_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "prospect_accounts_discovery_batch_id_fkey",
+        "prospect_accounts",
+        "discovery_batches",
+        ["discovery_batch_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "prospect_accounts_dismissed_by_fkey",
+        "prospect_accounts",
+        "users",
+        ["dismissed_by"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "prospect_contacts_customer_site_id_fkey",
+        "prospect_contacts",
+        "customer_sites",
+        ["customer_site_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "prospect_contacts_saved_by_id_fkey", "prospect_contacts", "users", ["saved_by_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "prospect_contacts_vendor_card_id_fkey",
+        "prospect_contacts",
+        "vendor_cards",
+        ["vendor_card_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "quote_lines_material_card_id_fkey",
+        "quote_lines",
+        "material_cards",
+        ["material_card_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "quote_lines_offer_id_fkey", "quote_lines", "offers", ["offer_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "quote_lines_quote_id_fkey", "quote_lines", "quotes", ["quote_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "quotes_created_by_id_fkey", "quotes", "users", ["created_by_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "quotes_customer_site_id_fkey", "quotes", "customer_sites", ["customer_site_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "quotes_requisition_id_fkey", "quotes", "requisitions", ["requisition_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "requirement_attachments_requirement_id_fkey",
+        "requirement_attachments",
+        "requirements",
+        ["requirement_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "requirement_attachments_uploaded_by_id_fkey",
+        "requirement_attachments",
+        "users",
+        ["uploaded_by_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "requirements_assigned_buyer_id_fkey",
+        "requirements",
+        "users",
+        ["assigned_buyer_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "requirements_material_card_id_fkey",
+        "requirements",
+        "material_cards",
+        ["material_card_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "requirements_requisition_id_fkey",
+        "requirements",
+        "requisitions",
+        ["requisition_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "requisition_attachments_requisition_id_fkey",
+        "requisition_attachments",
+        "requisitions",
+        ["requisition_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "requisition_attachments_uploaded_by_id_fkey",
+        "requisition_attachments",
+        "users",
+        ["uploaded_by_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "requisition_tasks_assigned_to_id_fkey",
+        "requisition_tasks",
+        "users",
+        ["assigned_to_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "requisition_tasks_created_by_fkey", "requisition_tasks", "users", ["created_by"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "requisition_tasks_requirement_id_fkey",
+        "requisition_tasks",
+        "requirements",
+        ["requirement_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "requisition_tasks_requisition_id_fkey",
+        "requisition_tasks",
+        "requisitions",
+        ["requisition_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "requisitions_claimed_by_id_fkey", "requisitions", "users", ["claimed_by_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "requisitions_company_id_fkey", "requisitions", "companies", ["company_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "requisitions_created_by_fkey", "requisitions", "users", ["created_by"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "requisitions_customer_site_id_fkey",
+        "requisitions",
+        "customer_sites",
+        ["customer_site_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "requisitions_updated_by_id_fkey", "requisitions", "users", ["updated_by_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "sightings_material_card_id_fkey",
+        "sightings",
+        "material_cards",
+        ["material_card_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "sightings_requirement_id_fkey", "sightings", "requirements", ["requirement_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "sightings_source_company_id_fkey", "sightings", "companies", ["source_company_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "site_contacts_customer_site_id_fkey",
+        "site_contacts",
+        "customer_sites",
+        ["customer_site_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "sourcing_leads_buyer_owner_user_id_fkey",
+        "sourcing_leads",
+        "users",
+        ["buyer_owner_user_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "sourcing_leads_requirement_id_fkey",
+        "sourcing_leads",
+        "requirements",
+        ["requirement_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "sourcing_leads_requisition_id_fkey",
+        "sourcing_leads",
+        "requisitions",
+        ["requisition_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "sourcing_leads_vendor_card_id_fkey",
+        "sourcing_leads",
+        "vendor_cards",
+        ["vendor_card_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "stock_list_hashes_user_id_fkey", "stock_list_hashes", "users", ["user_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "stock_list_hashes_vendor_card_id_fkey",
+        "stock_list_hashes",
+        "vendor_cards",
+        ["vendor_card_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "strategic_vendors_user_id_fkey", "strategic_vendors", "users", ["user_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "strategic_vendors_vendor_card_id_fkey",
+        "strategic_vendors",
+        "vendor_cards",
+        ["vendor_card_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key("sync_state_user_id_fkey", "sync_state", "users", ["user_id"], ["id"], ondelete="CASCADE")
+    op.create_foreign_key(
+        "trouble_tickets_resolved_by_id_fkey",
+        "trouble_tickets",
+        "users",
+        ["resolved_by_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "trouble_tickets_root_cause_group_id_fkey",
+        "trouble_tickets",
+        "root_cause_groups",
+        ["root_cause_group_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "trouble_tickets_submitted_by_fkey", "trouble_tickets", "users", ["submitted_by"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "unified_score_snapshot_user_id_fkey",
+        "unified_score_snapshot",
+        "users",
+        ["user_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "vendor_contacts_vendor_card_id_fkey",
+        "vendor_contacts",
+        "vendor_cards",
+        ["vendor_card_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "vendor_metrics_snapshot_vendor_card_id_fkey",
+        "vendor_metrics_snapshot",
+        "vendor_cards",
+        ["vendor_card_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "vendor_responses_contact_id_fkey", "vendor_responses", "contacts", ["contact_id"], ["id"], ondelete="SET NULL"
+    )
+    op.create_foreign_key(
+        "vendor_responses_requisition_id_fkey",
+        "vendor_responses",
+        "requisitions",
+        ["requisition_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "vendor_responses_scanned_by_user_id_fkey",
+        "vendor_responses",
+        "users",
+        ["scanned_by_user_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "vendor_reviews_user_id_fkey", "vendor_reviews", "users", ["user_id"], ["id"], ondelete="CASCADE"
+    )
+    op.create_foreign_key(
+        "vendor_reviews_vendor_card_id_fkey",
+        "vendor_reviews",
+        "vendor_cards",
+        ["vendor_card_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "vendor_sighting_summary_requirement_id_fkey",
+        "vendor_sighting_summary",
+        "requirements",
+        ["requirement_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
+    op.create_foreign_key(
+        "vendor_sighting_summary_vendor_card_id_fkey",
+        "vendor_sighting_summary",
+        "vendor_cards",
+        ["vendor_card_id"],
+        ["id"],
+        ondelete="SET NULL",
+    )
+    op.create_foreign_key(
+        "verification_group_members_user_id_fkey",
+        "verification_group_members",
+        "users",
+        ["user_id"],
+        ["id"],
+        ondelete="CASCADE",
+    )
 
 
 def downgrade() -> None:
-    """Drop all tables.
-
-    ⚠️ DESTRUCTIVE — only for dev/test environments.
-    """
-    from app.models import Base
-
-    Base.metadata.drop_all(bind=op.get_bind())
+    op.drop_constraint("verification_group_members_user_id_fkey", "verification_group_members", type_="foreignkey")
+    op.drop_constraint("vendor_sighting_summary_vendor_card_id_fkey", "vendor_sighting_summary", type_="foreignkey")
+    op.drop_constraint("vendor_sighting_summary_requirement_id_fkey", "vendor_sighting_summary", type_="foreignkey")
+    op.drop_constraint("vendor_reviews_vendor_card_id_fkey", "vendor_reviews", type_="foreignkey")
+    op.drop_constraint("vendor_reviews_user_id_fkey", "vendor_reviews", type_="foreignkey")
+    op.drop_constraint("vendor_responses_scanned_by_user_id_fkey", "vendor_responses", type_="foreignkey")
+    op.drop_constraint("vendor_responses_requisition_id_fkey", "vendor_responses", type_="foreignkey")
+    op.drop_constraint("vendor_responses_contact_id_fkey", "vendor_responses", type_="foreignkey")
+    op.drop_constraint("vendor_metrics_snapshot_vendor_card_id_fkey", "vendor_metrics_snapshot", type_="foreignkey")
+    op.drop_constraint("vendor_contacts_vendor_card_id_fkey", "vendor_contacts", type_="foreignkey")
+    op.drop_constraint("unified_score_snapshot_user_id_fkey", "unified_score_snapshot", type_="foreignkey")
+    op.drop_constraint("trouble_tickets_submitted_by_fkey", "trouble_tickets", type_="foreignkey")
+    op.drop_constraint("trouble_tickets_root_cause_group_id_fkey", "trouble_tickets", type_="foreignkey")
+    op.drop_constraint("trouble_tickets_resolved_by_id_fkey", "trouble_tickets", type_="foreignkey")
+    op.drop_constraint("sync_state_user_id_fkey", "sync_state", type_="foreignkey")
+    op.drop_constraint("strategic_vendors_vendor_card_id_fkey", "strategic_vendors", type_="foreignkey")
+    op.drop_constraint("strategic_vendors_user_id_fkey", "strategic_vendors", type_="foreignkey")
+    op.drop_constraint("stock_list_hashes_vendor_card_id_fkey", "stock_list_hashes", type_="foreignkey")
+    op.drop_constraint("stock_list_hashes_user_id_fkey", "stock_list_hashes", type_="foreignkey")
+    op.drop_constraint("sourcing_leads_vendor_card_id_fkey", "sourcing_leads", type_="foreignkey")
+    op.drop_constraint("sourcing_leads_requisition_id_fkey", "sourcing_leads", type_="foreignkey")
+    op.drop_constraint("sourcing_leads_requirement_id_fkey", "sourcing_leads", type_="foreignkey")
+    op.drop_constraint("sourcing_leads_buyer_owner_user_id_fkey", "sourcing_leads", type_="foreignkey")
+    op.drop_constraint("site_contacts_customer_site_id_fkey", "site_contacts", type_="foreignkey")
+    op.drop_constraint("sightings_source_company_id_fkey", "sightings", type_="foreignkey")
+    op.drop_constraint("sightings_requirement_id_fkey", "sightings", type_="foreignkey")
+    op.drop_constraint("sightings_material_card_id_fkey", "sightings", type_="foreignkey")
+    op.drop_constraint("requisitions_updated_by_id_fkey", "requisitions", type_="foreignkey")
+    op.drop_constraint("requisitions_customer_site_id_fkey", "requisitions", type_="foreignkey")
+    op.drop_constraint("requisitions_created_by_fkey", "requisitions", type_="foreignkey")
+    op.drop_constraint("requisitions_company_id_fkey", "requisitions", type_="foreignkey")
+    op.drop_constraint("requisitions_claimed_by_id_fkey", "requisitions", type_="foreignkey")
+    op.drop_constraint("requisition_tasks_requisition_id_fkey", "requisition_tasks", type_="foreignkey")
+    op.drop_constraint("requisition_tasks_requirement_id_fkey", "requisition_tasks", type_="foreignkey")
+    op.drop_constraint("requisition_tasks_created_by_fkey", "requisition_tasks", type_="foreignkey")
+    op.drop_constraint("requisition_tasks_assigned_to_id_fkey", "requisition_tasks", type_="foreignkey")
+    op.drop_constraint("requisition_attachments_uploaded_by_id_fkey", "requisition_attachments", type_="foreignkey")
+    op.drop_constraint("requisition_attachments_requisition_id_fkey", "requisition_attachments", type_="foreignkey")
+    op.drop_constraint("requirements_requisition_id_fkey", "requirements", type_="foreignkey")
+    op.drop_constraint("requirements_material_card_id_fkey", "requirements", type_="foreignkey")
+    op.drop_constraint("requirements_assigned_buyer_id_fkey", "requirements", type_="foreignkey")
+    op.drop_constraint("requirement_attachments_uploaded_by_id_fkey", "requirement_attachments", type_="foreignkey")
+    op.drop_constraint("requirement_attachments_requirement_id_fkey", "requirement_attachments", type_="foreignkey")
+    op.drop_constraint("quotes_requisition_id_fkey", "quotes", type_="foreignkey")
+    op.drop_constraint("quotes_customer_site_id_fkey", "quotes", type_="foreignkey")
+    op.drop_constraint("quotes_created_by_id_fkey", "quotes", type_="foreignkey")
+    op.drop_constraint("quote_lines_quote_id_fkey", "quote_lines", type_="foreignkey")
+    op.drop_constraint("quote_lines_offer_id_fkey", "quote_lines", type_="foreignkey")
+    op.drop_constraint("quote_lines_material_card_id_fkey", "quote_lines", type_="foreignkey")
+    op.drop_constraint("prospect_contacts_vendor_card_id_fkey", "prospect_contacts", type_="foreignkey")
+    op.drop_constraint("prospect_contacts_saved_by_id_fkey", "prospect_contacts", type_="foreignkey")
+    op.drop_constraint("prospect_contacts_customer_site_id_fkey", "prospect_contacts", type_="foreignkey")
+    op.drop_constraint("prospect_accounts_dismissed_by_fkey", "prospect_accounts", type_="foreignkey")
+    op.drop_constraint("prospect_accounts_discovery_batch_id_fkey", "prospect_accounts", type_="foreignkey")
+    op.drop_constraint("prospect_accounts_company_id_fkey", "prospect_accounts", type_="foreignkey")
+    op.drop_constraint("prospect_accounts_claimed_by_fkey", "prospect_accounts", type_="foreignkey")
+    op.drop_constraint("proactive_throttle_proactive_offer_id_fkey", "proactive_throttle", type_="foreignkey")
+    op.drop_constraint("proactive_throttle_customer_site_id_fkey", "proactive_throttle", type_="foreignkey")
+    op.drop_constraint("proactive_offers_salesperson_id_fkey", "proactive_offers", type_="foreignkey")
+    op.drop_constraint("proactive_offers_customer_site_id_fkey", "proactive_offers", type_="foreignkey")
+    op.drop_constraint("proactive_offers_converted_requisition_id_fkey", "proactive_offers", type_="foreignkey")
+    op.drop_constraint("proactive_offers_converted_quote_id_fkey", "proactive_offers", type_="foreignkey")
+    op.drop_constraint("proactive_matches_salesperson_id_fkey", "proactive_matches", type_="foreignkey")
+    op.drop_constraint("proactive_matches_requisition_id_fkey", "proactive_matches", type_="foreignkey")
+    op.drop_constraint("proactive_matches_requirement_id_fkey", "proactive_matches", type_="foreignkey")
+    op.drop_constraint("proactive_matches_offer_id_fkey", "proactive_matches", type_="foreignkey")
+    op.drop_constraint("proactive_matches_material_card_id_fkey", "proactive_matches", type_="foreignkey")
+    op.drop_constraint("proactive_matches_customer_site_id_fkey", "proactive_matches", type_="foreignkey")
+    op.drop_constraint("proactive_matches_company_id_fkey", "proactive_matches", type_="foreignkey")
+    op.drop_constraint("proactive_do_not_offer_created_by_id_fkey", "proactive_do_not_offer", type_="foreignkey")
+    op.drop_constraint("proactive_do_not_offer_company_id_fkey", "proactive_do_not_offer", type_="foreignkey")
+    op.drop_constraint("offers_vendor_response_id_fkey", "offers", type_="foreignkey")
+    op.drop_constraint("offers_vendor_card_id_fkey", "offers", type_="foreignkey")
+    op.drop_constraint("offers_updated_by_id_fkey", "offers", type_="foreignkey")
+    op.drop_constraint("offers_requisition_id_fkey", "offers", type_="foreignkey")
+    op.drop_constraint("offers_requirement_id_fkey", "offers", type_="foreignkey")
+    op.drop_constraint("offers_promoted_by_id_fkey", "offers", type_="foreignkey")
+    op.drop_constraint("offers_material_card_id_fkey", "offers", type_="foreignkey")
+    op.drop_constraint("offers_excess_line_item_id_fkey", "offers", type_="foreignkey")
+    op.drop_constraint("offers_entered_by_id_fkey", "offers", type_="foreignkey")
+    op.drop_constraint("offers_approved_by_id_fkey", "offers", type_="foreignkey")
+    op.drop_constraint("offer_attachments_uploaded_by_id_fkey", "offer_attachments", type_="foreignkey")
+    op.drop_constraint("offer_attachments_offer_id_fkey", "offer_attachments", type_="foreignkey")
+    op.drop_constraint("nc_search_queue_requisition_id_fkey", "nc_search_queue", type_="foreignkey")
+    op.drop_constraint("nc_search_queue_requirement_id_fkey", "nc_search_queue", type_="foreignkey")
+    op.drop_constraint("nc_search_log_queue_id_fkey", "nc_search_log", type_="foreignkey")
+    op.drop_constraint("multiplier_score_snapshot_user_id_fkey", "multiplier_score_snapshot", type_="foreignkey")
+    op.drop_constraint("material_vendor_history_material_card_id_fkey", "material_vendor_history", type_="foreignkey")
+    op.drop_constraint("material_tags_tag_id_fkey", "material_tags", type_="foreignkey")
+    op.drop_constraint("material_tags_material_card_id_fkey", "material_tags", type_="foreignkey")
+    op.drop_constraint("material_spec_facets_material_card_id_fkey", "material_spec_facets", type_="foreignkey")
+    op.drop_constraint("material_price_snapshots_material_card_id_fkey", "material_price_snapshots", type_="foreignkey")
+    op.drop_constraint("lead_feedback_events_lead_id_fkey", "lead_feedback_events", type_="foreignkey")
+    op.drop_constraint("lead_feedback_events_created_by_user_id_fkey", "lead_feedback_events", type_="foreignkey")
+    op.drop_constraint("lead_evidence_lead_id_fkey", "lead_evidence", type_="foreignkey")
+    op.drop_constraint("knowledge_entries_vendor_card_id_fkey", "knowledge_entries", type_="foreignkey")
+    op.drop_constraint("knowledge_entries_requisition_id_fkey", "knowledge_entries", type_="foreignkey")
+    op.drop_constraint("knowledge_entries_requirement_id_fkey", "knowledge_entries", type_="foreignkey")
+    op.drop_constraint("knowledge_entries_created_by_fkey", "knowledge_entries", type_="foreignkey")
+    op.drop_constraint("knowledge_entries_company_id_fkey", "knowledge_entries", type_="foreignkey")
+    op.drop_constraint("ics_search_queue_requisition_id_fkey", "ics_search_queue", type_="foreignkey")
+    op.drop_constraint("ics_search_queue_requirement_id_fkey", "ics_search_queue", type_="foreignkey")
+    op.drop_constraint("ics_search_log_queue_id_fkey", "ics_search_log", type_="foreignkey")
+    op.drop_constraint("graph_subscriptions_user_id_fkey", "graph_subscriptions", type_="foreignkey")
+    op.drop_constraint("excess_lists_owner_id_fkey", "excess_lists", type_="foreignkey")
+    op.drop_constraint("excess_lists_customer_site_id_fkey", "excess_lists", type_="foreignkey")
+    op.drop_constraint("excess_lists_company_id_fkey", "excess_lists", type_="foreignkey")
+    op.drop_constraint("excess_line_items_excess_list_id_fkey", "excess_line_items", type_="foreignkey")
+    op.drop_constraint("entity_tags_tag_id_fkey", "entity_tags", type_="foreignkey")
+    op.drop_constraint("enrichment_queue_vendor_contact_id_fkey", "enrichment_queue", type_="foreignkey")
+    op.drop_constraint("enrichment_queue_vendor_card_id_fkey", "enrichment_queue", type_="foreignkey")
+    op.drop_constraint("enrichment_queue_reviewed_by_id_fkey", "enrichment_queue", type_="foreignkey")
+    op.drop_constraint("enrichment_queue_company_id_fkey", "enrichment_queue", type_="foreignkey")
+    op.drop_constraint("enrichment_queue_batch_job_id_fkey", "enrichment_queue", type_="foreignkey")
+    op.drop_constraint("enrichment_jobs_started_by_id_fkey", "enrichment_jobs", type_="foreignkey")
+    op.drop_constraint("error_reports_user_id_fkey", "error_reports", type_="foreignkey")
+    op.drop_constraint("error_reports_resolved_by_id_fkey", "error_reports", type_="foreignkey")
+    op.drop_constraint("email_intelligence_user_id_fkey", "email_intelligence", type_="foreignkey")
+    op.drop_constraint("customer_sites_owner_id_fkey", "customer_sites", type_="foreignkey")
+    op.drop_constraint("customer_sites_company_id_fkey", "customer_sites", type_="foreignkey")
+    op.drop_constraint("customer_part_history_material_card_id_fkey", "customer_part_history", type_="foreignkey")
+    op.drop_constraint("customer_part_history_company_id_fkey", "customer_part_history", type_="foreignkey")
+    op.drop_constraint("contacts_user_id_fkey", "contacts", type_="foreignkey")
+    op.drop_constraint("contacts_requisition_id_fkey", "contacts", type_="foreignkey")
+    op.drop_constraint("companies_account_owner_id_fkey", "companies", type_="foreignkey")
+    op.drop_constraint("change_log_user_id_fkey", "change_log", type_="foreignkey")
+    op.drop_constraint("buyer_vendor_stats_vendor_card_id_fkey", "buyer_vendor_stats", type_="foreignkey")
+    op.drop_constraint("buyer_vendor_stats_user_id_fkey", "buyer_vendor_stats", type_="foreignkey")
+    op.drop_constraint("buyer_leaderboard_snapshot_user_id_fkey", "buyer_leaderboard_snapshot", type_="foreignkey")
+    op.drop_constraint("buy_plans_v3_submitted_by_id_fkey", "buy_plans_v3", type_="foreignkey")
+    op.drop_constraint("buy_plans_v3_so_verified_by_id_fkey", "buy_plans_v3", type_="foreignkey")
+    op.drop_constraint("buy_plans_v3_requisition_id_fkey", "buy_plans_v3", type_="foreignkey")
+    op.drop_constraint("buy_plans_v3_quote_id_fkey", "buy_plans_v3", type_="foreignkey")
+    op.drop_constraint("buy_plans_v3_halted_by_id_fkey", "buy_plans_v3", type_="foreignkey")
+    op.drop_constraint("buy_plans_v3_cancelled_by_id_fkey", "buy_plans_v3", type_="foreignkey")
+    op.drop_constraint("buy_plans_v3_approved_by_id_fkey", "buy_plans_v3", type_="foreignkey")
+    op.drop_constraint("buy_plans_submitted_by_id_fkey", "buy_plans", type_="foreignkey")
+    op.drop_constraint("buy_plans_requisition_id_fkey", "buy_plans", type_="foreignkey")
+    op.drop_constraint("buy_plans_quote_id_fkey", "buy_plans", type_="foreignkey")
+    op.drop_constraint("buy_plans_completed_by_id_fkey", "buy_plans", type_="foreignkey")
+    op.drop_constraint("buy_plans_cancelled_by_id_fkey", "buy_plans", type_="foreignkey")
+    op.drop_constraint("buy_plans_approved_by_id_fkey", "buy_plans", type_="foreignkey")
+    op.drop_constraint("buy_plan_lines_requirement_id_fkey", "buy_plan_lines", type_="foreignkey")
+    op.drop_constraint("buy_plan_lines_po_verified_by_id_fkey", "buy_plan_lines", type_="foreignkey")
+    op.drop_constraint("buy_plan_lines_offer_id_fkey", "buy_plan_lines", type_="foreignkey")
+    op.drop_constraint("buy_plan_lines_buyer_id_fkey", "buy_plan_lines", type_="foreignkey")
+    op.drop_constraint("buy_plan_lines_buy_plan_id_fkey", "buy_plan_lines", type_="foreignkey")
+    op.drop_constraint("bids_excess_line_item_id_fkey", "bids", type_="foreignkey")
+    op.drop_constraint("bids_created_by_fkey", "bids", type_="foreignkey")
+    op.drop_constraint("bids_bidder_vendor_card_id_fkey", "bids", type_="foreignkey")
+    op.drop_constraint("bids_bidder_company_id_fkey", "bids", type_="foreignkey")
+    op.drop_constraint("bid_solicitations_sent_by_fkey", "bid_solicitations", type_="foreignkey")
+    op.drop_constraint("bid_solicitations_parsed_bid_id_fkey", "bid_solicitations", type_="foreignkey")
+    op.drop_constraint("bid_solicitations_excess_line_item_id_fkey", "bid_solicitations", type_="foreignkey")
+    op.drop_constraint("avail_score_snapshot_user_id_fkey", "avail_score_snapshot", type_="foreignkey")
+    op.drop_constraint("api_usage_log_source_id_fkey", "api_usage_log", type_="foreignkey")
+    op.drop_constraint("activity_log_vendor_contact_id_fkey", "activity_log", type_="foreignkey")
+    op.drop_constraint("activity_log_vendor_card_id_fkey", "activity_log", type_="foreignkey")
+    op.drop_constraint("activity_log_user_id_fkey", "activity_log", type_="foreignkey")
+    op.drop_constraint("activity_log_site_contact_id_fkey", "activity_log", type_="foreignkey")
+    op.drop_constraint("activity_log_requisition_id_fkey", "activity_log", type_="foreignkey")
+    op.drop_constraint("activity_log_requirement_id_fkey", "activity_log", type_="foreignkey")
+    op.drop_constraint("activity_log_quote_id_fkey", "activity_log", type_="foreignkey")
+    op.drop_constraint("activity_log_customer_site_id_fkey", "activity_log", type_="foreignkey")
+    op.drop_constraint("activity_log_company_id_fkey", "activity_log", type_="foreignkey")
+    op.drop_constraint("activity_log_buy_plan_id_fkey", "activity_log", type_="foreignkey")
+    op.drop_index("ix_vss_vendor_req", table_name="vendor_sighting_summary")
+    op.drop_index("ix_vss_vendor_card", table_name="vendor_sighting_summary")
+    op.drop_index("ix_vss_vendor", table_name="vendor_sighting_summary")
+    op.drop_index("ix_vss_score", table_name="vendor_sighting_summary")
+    op.drop_index("ix_vss_requirement", table_name="vendor_sighting_summary")
+    op.drop_index("ix_vr_vendor_name", table_name="vendor_responses")
+    op.drop_index("ix_vr_scanned_by", table_name="vendor_responses")
+    op.drop_index("ix_vr_requisition", table_name="vendor_responses")
+    op.drop_index("ix_vr_req_email", table_name="vendor_responses")
+    op.drop_index("ix_vr_received_status", table_name="vendor_responses")
+    op.drop_index("ix_vr_received_email", table_name="vendor_responses")
+    op.drop_index("ix_vr_contact", table_name="vendor_responses")
+    op.drop_index("ix_vr_classification", table_name="vendor_responses")
+    op.drop_index("ix_vms_vendor_date", table_name="vendor_metrics_snapshot")
+    op.drop_index("ix_vms_date", table_name="vendor_metrics_snapshot")
+    op.drop_index("ix_vms_composite", table_name="vendor_metrics_snapshot")
+    op.drop_index("ix_vgm_active", table_name="verification_group_members")
+    op.drop_index("ix_vendor_responses_message_id", table_name="vendor_responses")
+    op.drop_index("ix_vendor_contacts_email", table_name="vendor_contacts")
+    op.drop_index("ix_vendor_contacts_card_email", table_name="vendor_contacts")
+    op.drop_index("ix_vendor_contacts_card", table_name="vendor_contacts")
+    op.drop_index("ix_vendor_cards_sf_account_id", table_name="vendor_cards")
+    op.drop_index("ix_vendor_cards_score_computed_at", table_name="vendor_cards")
+    op.drop_index("ix_vendor_cards_normalized_name", table_name="vendor_cards")
+    op.drop_index("ix_vendor_cards_domain", table_name="vendor_cards")
+    op.drop_index("ix_vendor_cards_created_at", table_name="vendor_cards")
+    op.drop_index("ix_vendor_cards_acctivate_vendor_id", table_name="vendor_cards")
+    op.drop_index("ix_uss_user_month", table_name="unified_score_snapshot")
+    op.drop_index("ix_uss_month_rank", table_name="unified_score_snapshot")
+    op.drop_index("ix_usage_log_source_ts", table_name="api_usage_log")
+    op.drop_index("ix_trouble_tickets_submitted_by", table_name="trouble_tickets")
+    op.drop_index("ix_trouble_tickets_status", table_name="trouble_tickets")
+    op.drop_index("ix_trouble_tickets_source_status_created", table_name="trouble_tickets")
+    op.drop_index("ix_trouble_tickets_source", table_name="trouble_tickets")
+    op.drop_index("ix_trouble_tickets_risk_tier", table_name="trouble_tickets")
+    op.drop_index("ix_trouble_tickets_created_at", table_name="trouble_tickets")
+    op.drop_index("ix_tags_tag_type", table_name="tags")
+    op.drop_index("ix_system_config_key", table_name="system_config")
+    op.drop_index("ix_sync_state_user_folder", table_name="sync_state")
+    op.drop_index("ix_sync_source_time", table_name="sync_logs")
+    op.drop_index("ix_strategic_vendor_released", table_name="strategic_vendors")
+    op.drop_index("ix_strategic_user_released", table_name="strategic_vendors")
+    op.drop_index("ix_strategic_expires_released", table_name="strategic_vendors")
+    op.drop_index("ix_sourcing_leads_vendor_name_normalized", table_name="sourcing_leads")
+    op.drop_index("ix_sourcing_leads_vendor_card_id", table_name="sourcing_leads")
+    op.drop_index("ix_sourcing_leads_status", table_name="sourcing_leads")
+    op.drop_index("ix_sourcing_leads_safety", table_name="sourcing_leads")
+    op.drop_index("ix_sourcing_leads_requisition_id", table_name="sourcing_leads")
+    op.drop_index("ix_sourcing_leads_requirement_id", table_name="sourcing_leads")
+    op.drop_index("ix_sourcing_leads_req_status", table_name="sourcing_leads")
+    op.drop_index("ix_sourcing_leads_lead_id", table_name="sourcing_leads")
+    op.drop_index("ix_sourcing_leads_confidence", table_name="sourcing_leads")
+    op.drop_index("ix_sourcing_leads_buyer_owner_user_id", table_name="sourcing_leads")
+    op.drop_index("ix_slh_vendor", table_name="stock_list_hashes")
+    op.drop_index("ix_slh_user_hash", table_name="stock_list_hashes")
+    op.drop_index("ix_slh_hash", table_name="stock_list_hashes")
+    op.drop_index("ix_site_contacts_site", table_name="site_contacts")
+    op.drop_index("ix_site_contacts_email", table_name="site_contacts")
+    op.drop_index("ix_sightings_vendor_norm", table_name="sightings")
+    op.drop_index("ix_sightings_vendor_name_normalized", table_name="sightings")
+    op.drop_index("ix_sightings_vendor_name", table_name="sightings")
+    op.drop_index("ix_sightings_source_type", table_name="sightings")
+    op.drop_index("ix_sightings_source_company", table_name="sightings")
+    op.drop_index("ix_sightings_req_vendor", table_name="sightings")
+    op.drop_index("ix_sightings_req_score", table_name="sightings")
+    op.drop_index("ix_sightings_normalized_mpn", table_name="sightings")
+    op.drop_index("ix_sightings_mpn_vendor_norm", table_name="sightings")
+    op.drop_index("ix_sightings_material_card", table_name="sightings")
+    op.drop_index("ix_sightings_manufacturer", table_name="sightings")
+    op.drop_index("ix_sight_req", table_name="sightings")
+    op.drop_index("ix_rt_status_due", table_name="requisition_tasks")
+    op.drop_index("ix_rt_requirement", table_name="requisition_tasks")
+    op.drop_index("ix_rt_req_status", table_name="requisition_tasks")
+    op.drop_index("ix_rt_creator_status", table_name="requisition_tasks")
+    op.drop_index("ix_rt_assignee_status", table_name="requisition_tasks")
+    op.drop_index("ix_root_cause_groups_title", table_name="root_cause_groups")
+    op.drop_index("ix_review_vendor", table_name="vendor_reviews")
+    op.drop_index("ix_review_user", table_name="vendor_reviews")
+    op.drop_index("ix_requisitions_urgency", table_name="requisitions")
+    op.drop_index("ix_requisitions_status", table_name="requisitions")
+    op.drop_index("ix_requisitions_site", table_name="requisitions")
+    op.drop_index("ix_requisitions_name", table_name="requisitions")
+    op.drop_index("ix_requisitions_customer_name", table_name="requisitions")
+    op.drop_index("ix_requisitions_created_by", table_name="requisitions")
+    op.drop_index("ix_requisitions_created_at", table_name="requisitions")
+    op.drop_index("ix_requisitions_company", table_name="requisitions")
+    op.drop_index("ix_requisitions_claimed_by", table_name="requisitions")
+    op.drop_index("ix_requisition_tasks_id", table_name="requisition_tasks")
+    op.drop_index("ix_requisition_attachments_requisition_id", table_name="requisition_attachments")
+    op.drop_index("ix_requirements_sourcing_status", table_name="requirements")
+    op.drop_index("ix_requirements_normalized_mpn", table_name="requirements")
+    op.drop_index("ix_requirements_material_card", table_name="requirements")
+    op.drop_index("ix_requirement_attachments_requirement_id", table_name="requirement_attachments")
+    op.drop_index("ix_req_requisition", table_name="requirements")
+    op.drop_index("ix_req_primary_mpn", table_name="requirements")
+    op.drop_index("ix_quotes_status", table_name="quotes")
+    op.drop_index("ix_quotes_site", table_name="quotes")
+    op.drop_index("ix_quotes_req", table_name="quotes")
+    op.drop_index("ix_quotes_created_by", table_name="quotes")
+    op.drop_index("ix_quote_lines_quote", table_name="quote_lines")
+    op.drop_index("ix_quote_lines_offer", table_name="quote_lines")
+    op.drop_index("ix_quote_lines_mpn", table_name="quote_lines")
+    op.drop_index("ix_quote_lines_card", table_name="quote_lines")
+    op.drop_index("ix_pt_mpn_site", table_name="proactive_throttle")
+    op.drop_index("ix_pt_last_offered", table_name="proactive_throttle")
+    op.drop_index("ix_prospect_contacts_vendor", table_name="prospect_contacts")
+    op.drop_index("ix_prospect_contacts_site", table_name="prospect_contacts")
+    op.drop_index("ix_prospect_contacts_saved_by", table_name="prospect_contacts")
+    op.drop_index("ix_prospect_contacts_email", table_name="prospect_contacts")
+    op.drop_index("ix_prospect_accounts_status_fit", table_name="prospect_accounts")
+    op.drop_index("ix_prospect_accounts_status", table_name="prospect_accounts")
+    op.drop_index("ix_prospect_accounts_region", table_name="prospect_accounts")
+    op.drop_index("ix_prospect_accounts_readiness_score", table_name="prospect_accounts")
+    op.drop_index("ix_prospect_accounts_fit_score", table_name="prospect_accounts")
+    op.drop_index("ix_prospect_accounts_discovery_source", table_name="prospect_accounts")
+    op.drop_index("ix_price_snap_card_time", table_name="material_price_snapshots")
+    op.drop_index("ix_poff_status", table_name="proactive_offers")
+    op.drop_index("ix_poff_site", table_name="proactive_offers")
+    op.drop_index("ix_poff_sent", table_name="proactive_offers")
+    op.drop_index("ix_poff_sales", table_name="proactive_offers")
+    op.drop_index("ix_pm_status_sales", table_name="proactive_matches")
+    op.drop_index("ix_pm_status", table_name="proactive_matches")
+    op.drop_index("ix_pm_site", table_name="proactive_matches")
+    op.drop_index("ix_pm_score", table_name="proactive_matches")
+    op.drop_index("ix_pm_sales", table_name="proactive_matches")
+    op.drop_index("ix_pm_req", table_name="proactive_matches")
+    op.drop_index("ix_pm_offer", table_name="proactive_matches")
+    op.drop_index("ix_pm_mpn_site", table_name="proactive_matches")
+    op.drop_index("ix_pm_material_card", table_name="proactive_matches")
+    op.drop_index("ix_pm_company", table_name="proactive_matches")
+    op.drop_index("ix_pending_batches_status", table_name="pending_batches")
+    op.drop_index("ix_pending_batches_batch_id", table_name="pending_batches")
+    op.drop_index("ix_pdno_mpn_company", table_name="proactive_do_not_offer")
+    op.drop_index("ix_offers_vendor_norm", table_name="offers")
+    op.drop_index("ix_offers_vendor_name", table_name="offers")
+    op.drop_index("ix_offers_vendor", table_name="offers")
+    op.drop_index("ix_offers_status", table_name="offers")
+    op.drop_index("ix_offers_requirement", table_name="offers")
+    op.drop_index("ix_offers_req_status", table_name="offers")
+    op.drop_index("ix_offers_req_created", table_name="offers")
+    op.drop_index("ix_offers_req", table_name="offers")
+    op.drop_index("ix_offers_normalized_mpn", table_name="offers")
+    op.drop_index("ix_offers_mpn", table_name="offers")
+    op.drop_index("ix_offers_material_card", table_name="offers")
+    op.drop_index("ix_offers_entered_created", table_name="offers")
+    op.drop_index("ix_offers_entered_by", table_name="offers")
+    op.drop_index("ix_offer_attachments_offer", table_name="offer_attachments")
+    op.drop_index("ix_nc_search_log_queue_id", table_name="nc_search_log")
+    op.drop_index("ix_mvh_vendor_norm", table_name="material_vendor_history")
+    op.drop_index("ix_mvh_vendor", table_name="material_vendor_history")
+    op.drop_index("ix_mvh_card_vendor", table_name="material_vendor_history")
+    op.drop_index("ix_mss_user_month", table_name="multiplier_score_snapshot")
+    op.drop_index("ix_mss_month_role_rank", table_name="multiplier_score_snapshot")
+    op.drop_index("ix_mss_month_role_points", table_name="multiplier_score_snapshot")
+    op.drop_index("ix_msf_category_key_text", table_name="material_spec_facets")
+    op.drop_index("ix_msf_category_key", table_name="material_spec_facets")
+    op.drop_index("ix_mca_card_action", table_name="material_card_audit")
+    op.drop_index("ix_material_tags_tag_id", table_name="material_tags")
+    op.drop_index("ix_material_tags_source", table_name="material_tags")
+    op.drop_index("ix_material_price_snapshots_recorded_at", table_name="material_price_snapshots")
+    op.drop_index("ix_material_price_snapshots_material_card_id", table_name="material_price_snapshots")
+    op.drop_index("ix_material_cards_normalized_mpn", table_name="material_cards")
+    op.drop_index("ix_material_cards_manufacturer", table_name="material_cards")
+    op.drop_index("ix_material_cards_lifecycle_status", table_name="material_cards")
+    op.drop_index("ix_material_cards_deleted_at", table_name="material_cards")
+    op.drop_index("ix_material_card_audit_normalized_mpn", table_name="material_card_audit")
+    op.drop_index("ix_material_card_audit_material_card_id", table_name="material_card_audit")
+    op.drop_index("ix_manufacturers_canonical_name", table_name="manufacturers")
+    op.drop_index("ix_lead_feedback_status", table_name="lead_feedback_events")
+    op.drop_index("ix_lead_feedback_lead_created", table_name="lead_feedback_events")
+    op.drop_index("ix_lead_feedback_events_lead_id", table_name="lead_feedback_events")
+    op.drop_index("ix_lead_feedback_events_created_by_user_id", table_name="lead_feedback_events")
+    op.drop_index("ix_lead_evidence_verification", table_name="lead_evidence")
+    op.drop_index("ix_lead_evidence_source_type", table_name="lead_evidence")
+    op.drop_index("ix_lead_evidence_lead_id", table_name="lead_evidence")
+    op.drop_index("ix_lead_evidence_evidence_id", table_name="lead_evidence")
+    op.drop_index("ix_knowledge_entries_id", table_name="knowledge_entries")
+    op.drop_index("ix_ke_vendor", table_name="knowledge_entries")
+    op.drop_index("ix_ke_requisition", table_name="knowledge_entries")
+    op.drop_index("ix_ke_parent", table_name="knowledge_entries")
+    op.drop_index("ix_ke_mpn", table_name="knowledge_entries")
+    op.drop_index("ix_ke_created_by", table_name="knowledge_entries")
+    op.drop_index("ix_ke_company", table_name="knowledge_entries")
+    op.drop_index("ix_inventory_snapshots_product_id", table_name="inventory_snapshots")
+    op.drop_index("ix_inv_product_warehouse", table_name="inventory_snapshots")
+    op.drop_index("ix_intel_cache_cache_key", table_name="intel_cache")
+    op.drop_index("ix_ics_log_queue", table_name="ics_search_log")
+    op.drop_index("ix_graphsub_user", table_name="graph_subscriptions")
+    op.drop_index("ix_graphsub_expiry", table_name="graph_subscriptions")
+    op.drop_index("ix_graph_subscriptions_user_id", table_name="graph_subscriptions")
+    op.drop_index("ix_excess_lists_status", table_name="excess_lists")
+    op.drop_index("ix_excess_lists_owner", table_name="excess_lists")
+    op.drop_index("ix_excess_lists_company", table_name="excess_lists")
+    op.drop_index("ix_excess_line_items_status", table_name="excess_line_items")
+    op.drop_index("ix_excess_line_items_pn_status", table_name="excess_line_items")
+    op.drop_index("ix_excess_line_items_part_number", table_name="excess_line_items")
+    op.drop_index("ix_excess_line_items_normalized_part_number", table_name="excess_line_items")
+    op.drop_index("ix_excess_line_items_list", table_name="excess_line_items")
+    op.drop_index("ix_excess_line_items_demand", table_name="excess_line_items")
+    op.drop_index("ix_ese_company", table_name="email_signature_extracts")
+    op.drop_index("ix_eq_vendor", table_name="enrichment_queue")
+    op.drop_index("ix_eq_status_source", table_name="enrichment_queue")
+    op.drop_index("ix_eq_status_created", table_name="enrichment_queue")
+    op.drop_index("ix_eq_status", table_name="enrichment_queue")
+    op.drop_index("ix_eq_reviewed_by", table_name="enrichment_queue")
+    op.drop_index("ix_eq_company", table_name="enrichment_queue")
+    op.drop_index("ix_eq_batch", table_name="enrichment_queue")
+    op.drop_index("ix_entity_tags_type_tag_visible", table_name="entity_tags")
+    op.drop_index("ix_entity_tags_type_id", table_name="entity_tags")
+    op.drop_index("ix_er_resolved_by", table_name="error_reports")
+    op.drop_index("ix_enrichment_runs_status", table_name="enrichment_runs")
+    op.drop_index("ix_enrichment_runs_phase", table_name="enrichment_runs")
+    op.drop_index("ix_enrichment_runs_created_at", table_name="enrichment_runs")
+    op.drop_index("ix_email_intelligence_sender_domain", table_name="email_intelligence")
+    op.drop_index("ix_email_intelligence_message_id", table_name="email_intelligence")
+    op.drop_index("ix_email_intelligence_conversation_id", table_name="email_intelligence")
+    op.drop_index("ix_email_intel_user_received", table_name="email_intelligence")
+    op.drop_index("ix_email_intel_needs_review", table_name="email_intelligence")
+    op.drop_index("ix_email_intel_classification", table_name="email_intelligence")
+    op.drop_index("ix_ej_type_status", table_name="enrichment_jobs")
+    op.drop_index("ix_ej_status", table_name="enrichment_jobs")
+    op.drop_index("ix_ej_started_by", table_name="enrichment_jobs")
+    op.drop_index("ix_discovery_batches_status", table_name="discovery_batches")
+    op.drop_index("ix_discovery_batches_started_at", table_name="discovery_batches")
+    op.drop_index("ix_discovery_batches_source_status", table_name="discovery_batches")
+    op.drop_index("ix_customer_sites_is_active", table_name="customer_sites")
+    op.drop_index("ix_cs_owner", table_name="customer_sites")
+    op.drop_index("ix_cs_company", table_name="customer_sites")
+    op.drop_index("ix_cph_material_card_id", table_name="customer_part_history")
+    op.drop_index("ix_cph_last_purchased_at", table_name="customer_part_history")
+    op.drop_index("ix_cph_company_id", table_name="customer_part_history")
+    op.drop_index("ix_contacts_vendor_norm", table_name="contacts")
+    op.drop_index("ix_contact_vendor_name", table_name="contacts")
+    op.drop_index("ix_contact_user_status", table_name="contacts")
+    op.drop_index("ix_contact_type_vendor", table_name="contacts")
+    op.drop_index("ix_contact_type_created", table_name="contacts")
+    op.drop_index("ix_contact_status", table_name="contacts")
+    op.drop_index("ix_contact_req", table_name="contacts")
+    op.drop_index("ix_companies_sf_account_id", table_name="companies")
+    op.drop_index("ix_companies_owner_created", table_name="companies")
+    op.drop_index("ix_companies_name", table_name="companies")
+    op.drop_index("ix_companies_last_activity_at", table_name="companies")
+    op.drop_index("ix_companies_is_strategic", table_name="companies")
+    op.drop_index("ix_companies_is_active", table_name="companies")
+    op.drop_index("ix_companies_domain", table_name="companies")
+    op.drop_index("ix_companies_account_owner", table_name="companies")
+    op.drop_index("ix_colmap_domain_fp", table_name="column_mapping_cache")
+    op.drop_index("ix_changelog_user", table_name="change_log")
+    op.drop_index("ix_changelog_entity", table_name="change_log")
+    op.drop_index("ix_bvs_vendor", table_name="buyer_vendor_stats")
+    op.drop_index("ix_bvs_user", table_name="buyer_vendor_stats")
+    op.drop_index("ix_bvs_unique", table_name="buyer_vendor_stats")
+    op.drop_index("ix_bpv3_token", table_name="buy_plans_v3")
+    op.drop_index("ix_bpv3_submitted_by", table_name="buy_plans_v3")
+    op.drop_index("ix_bpv3_status_created", table_name="buy_plans_v3")
+    op.drop_index("ix_bpv3_status", table_name="buy_plans_v3")
+    op.drop_index("ix_bpv3_so_status", table_name="buy_plans_v3")
+    op.drop_index("ix_bpv3_requisition", table_name="buy_plans_v3")
+    op.drop_index("ix_bpv3_quote", table_name="buy_plans_v3")
+    op.drop_index("ix_bpl_status", table_name="buy_plan_lines")
+    op.drop_index("ix_bpl_requirement", table_name="buy_plan_lines")
+    op.drop_index("ix_bpl_plan_requirement", table_name="buy_plan_lines")
+    op.drop_index("ix_bpl_offer", table_name="buy_plan_lines")
+    op.drop_index("ix_bpl_buyer", table_name="buy_plan_lines")
+    op.drop_index("ix_bpl_buy_plan", table_name="buy_plan_lines")
+    op.drop_index("ix_bls_user_month", table_name="buyer_leaderboard_snapshot")
+    op.drop_index("ix_bls_month_rank", table_name="buyer_leaderboard_snapshot")
+    op.drop_index("ix_bls_month_points", table_name="buyer_leaderboard_snapshot")
+    op.drop_index("ix_bidsol_status", table_name="bid_solicitations")
+    op.drop_index("ix_buyplans_token", table_name="buy_plans")
+    op.drop_index("ix_bp_completed_by", table_name="buy_plans")
+    op.drop_index("ix_bp_cancelled_by", table_name="buy_plans")
+    op.drop_index("ix_bp_approved_by", table_name="buy_plans")
+    op.drop_index("ix_bids_vendor_card", table_name="bids")
+    op.drop_index("ix_bids_status", table_name="bids")
+    op.drop_index("ix_bids_line_item", table_name="bids")
+    op.drop_index("ix_bids_company", table_name="bids")
+    op.drop_index("ix_bid_solicitations_line_item", table_name="bid_solicitations")
+    op.drop_index("ix_bid_solicitations_graph_msg", table_name="bid_solicitations")
+    op.drop_index("ix_bid_solicitations_contact", table_name="bid_solicitations")
+    op.drop_index("ix_ass_user_month", table_name="avail_score_snapshot")
+    op.drop_index("ix_ass_month_role_score", table_name="avail_score_snapshot")
+    op.drop_index("ix_ass_month_role_rank", table_name="avail_score_snapshot")
+    op.drop_index("ix_activity_user", table_name="activity_log")
+    op.drop_index("ix_activity_created_at", table_name="activity_log")
+    op.drop_table("verification_group_members")
+    op.drop_table("vendor_sighting_summary")
+    op.drop_table("vendor_reviews")
+    op.drop_table("vendor_responses")
+    op.drop_table("vendor_metrics_snapshot")
+    op.drop_table("vendor_contacts")
+    op.drop_table("vendor_cards")
+    op.drop_table("users")
+    op.drop_table("unified_score_snapshot")
+    op.drop_table("trouble_tickets")
+    op.drop_table("tags")
+    op.drop_table("tag_threshold_config")
+    op.drop_table("system_config")
+    op.drop_table("sync_state")
+    op.drop_table("sync_logs")
+    op.drop_table("strategic_vendors")
+    op.drop_table("stock_list_hashes")
+    op.drop_table("sourcing_leads")
+    op.drop_table("site_contacts")
+    op.drop_table("sightings")
+    op.drop_table("root_cause_groups")
+    op.drop_table("requisitions")
+    op.drop_table("requisition_tasks")
+    op.drop_table("requisition_attachments")
+    op.drop_table("requirements")
+    op.drop_table("requirement_attachments")
+    op.drop_table("quotes")
+    op.drop_table("quote_lines")
+    op.drop_table("prospect_contacts")
+    op.drop_table("prospect_accounts")
+    op.drop_table("processed_messages")
+    op.drop_table("proactive_throttle")
+    op.drop_table("proactive_offers")
+    op.drop_table("proactive_matches")
+    op.drop_table("proactive_do_not_offer")
+    op.drop_table("pending_batches")
+    op.drop_table("offers")
+    op.drop_table("offer_attachments")
+    op.drop_table("nc_worker_status")
+    op.drop_table("nc_search_queue")
+    op.drop_table("nc_search_log")
+    op.drop_table("multiplier_score_snapshot")
+    op.drop_table("material_vendor_history")
+    op.drop_table("material_tags")
+    op.drop_table("material_spec_facets")
+    op.drop_table("material_price_snapshots")
+    op.drop_table("material_cards")
+    op.drop_table("material_card_audit")
+    op.drop_table("manufacturers")
+    op.drop_table("lead_feedback_events")
+    op.drop_table("lead_evidence")
+    op.drop_table("knowledge_entries")
+    op.drop_table("knowledge_config")
+    op.drop_table("inventory_snapshots")
+    op.drop_table("intel_cache")
+    op.drop_table("ics_worker_status")
+    op.drop_table("ics_search_queue")
+    op.drop_table("ics_search_log")
+    op.drop_table("graph_subscriptions")
+    op.drop_table("excess_lists")
+    op.drop_table("excess_line_items")
+    op.drop_table("entity_tags")
+    op.drop_table("enrichment_runs")
+    op.drop_table("enrichment_queue")
+    op.drop_table("error_reports")
+    op.drop_table("enrichment_jobs")
+    op.drop_table("email_signature_extracts")
+    op.drop_table("email_intelligence")
+    op.drop_table("discovery_batches")
+    op.drop_table("customer_sites")
+    op.drop_table("customer_part_history")
+    op.drop_table("contacts")
+    op.drop_table("companies")
+    op.drop_table("commodity_spec_schemas")
+    op.drop_table("column_mapping_cache")
+    op.drop_table("change_log")
+    op.drop_table("buyer_vendor_stats")
+    op.drop_table("buyer_leaderboard_snapshot")
+    op.drop_table("buy_plans_v3")
+    op.drop_table("buy_plans")
+    op.drop_table("buy_plan_lines")
+    op.drop_table("bids")
+    op.drop_table("bid_solicitations")
+    op.drop_table("avail_score_snapshot")
+    op.drop_table("api_usage_log")
+    op.drop_table("api_sources")
+    op.drop_table("activity_log")
