@@ -152,7 +152,19 @@ def walk_migration_ops(model: SchemaModel, migration_paths: list[Path]) -> list[
             tree = ast.parse(path.read_text())
         except SyntaxError:
             continue
-        for node in ast.walk(tree):
+        # Walk only def upgrade(): the chain validator's contract is forward-only.
+        # Walking the whole module flat-walks downgrade() too, and ast.walk's BFS
+        # visits depth-3 unguarded downgrade ops (e.g. `op.drop_column(...)`)
+        # BEFORE depth-5 idempotent-guarded upgrade ops (e.g.
+        # `if _column_exists(...): op.add_column(...)`), producing spurious
+        # "column not in model" gaps for any migration that uses if-guarded adds.
+        upgrade_func = next(
+            (n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "upgrade"),
+            None,
+        )
+        if upgrade_func is None:
+            continue
+        for node in ast.walk(upgrade_func):
             if not isinstance(node, ast.Call):
                 continue
             if not isinstance(node.func, ast.Attribute):
