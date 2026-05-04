@@ -1,725 +1,274 @@
-# CLAUDE.md — AvailAI Documentation
+# CLAUDE.md — AvailAI
 
-**PROJECT:** AvailAI — Electronic component sourcing platform and CRM for Trio Supply Chain Solutions
-**VERSION:** See `app/config.py` → `APP_VERSION`
-**STACK:** FastAPI + SQLAlchemy 2.0 + PostgreSQL 16 + HTMX 2.x + Alpine.js 3.x + Jinja2 + Tailwind CSS
-**DEPLOY:** Docker Compose (app, db, redis, caddy, enrichment-worker [disabled], db-backup) on DigitalOcean
-**LEVEL:** Intermediate
+Operating manual for Claude Code sessions in this repo. Read top to bottom on a cold start. Long-form architecture lives in `docs/APP_MAP_*.md`; this file is the lean operating contract.
 
----
+## 1. What this is
 
-## What This Is
+AvailAI — electronic-component sourcing engine and CRM for Trio Supply Chain Solutions. FastAPI + SQLAlchemy 2.0 + PostgreSQL 16 + HTMX 2 + Alpine.js 3 + Jinja2 + Tailwind. Hosted on a single DigitalOcean droplet at `app.availai.net`. Deployed via Docker Compose.
 
-AvailAI is an **electronic component sourcing engine** that automates vendor discovery and RFQ workflows. It:
-- **Searches** 10 supplier APIs in parallel (BrokerBin, Nexar, DigiKey, Mouser, OEMSecrets, Element14, Sourcengine, eBay, AI web search, email mining)
-- **Tracks** vendor intelligence via material cards and proactive matching
-- **Automates** RFQ workflows via Microsoft Graph API
-- **Mines** email inboxes for vendor offers using Claude AI
-- **Manages** full CRM for companies, quotes, buy plans, and customer matching
+- **Python:** 3.12 (pinned in `Dockerfile`, `ruff.toml`, `pyproject.toml [tool.mypy]`).
+- **Compose services:** `app, db, redis, caddy, db-backup`. `enrichment-worker` exists but is permanently disabled (`docker-compose.yml:113` — replaced by AI-based enrichment).
+- **Architecture deep-dives:** `docs/APP_MAP_ARCHITECTURE.md`, `docs/APP_MAP_DATABASE.md`, `docs/APP_MAP_INTERACTIONS.md`. Update the relevant doc after any code change.
+- **Do-not-touch list:** `STABLE.md` in repo root (entry points, auth, critical routers, the `AVAIL_OPP_TABLE_V2` feature flag, rollback SOP).
 
----
+## 2. Hard rules — read before touching anything
 
-## Tech Stack
+These are blast-radius rules. Violate them and you break production.
 
-| Layer | Technology | Purpose |
-|-------|-----------|---------|
-| **Runtime** | Python 3.11+ | Backend runtime |
-| **Framework** | FastAPI 0.100+ | API and HTMX route server |
-| **Database** | PostgreSQL 16 | Primary data store (see `alembic/versions/`) |
-| **Cache** | Redis (optional) | Endpoint caching, scheduler coordination |
-| **ORM** | SQLAlchemy 2.0 | Type-safe database access (see `app/models/`) |
-| **Frontend** | HTMX 2.x + Alpine.js 3.x | Progressive enhancement, no SPA |
-| **Templates** | Jinja2 | Server-side rendering (see `app/templates/`) |
-| **Styling** | Tailwind CSS + custom | Responsive, dark-mode ready |
-| **Build** | Vite 6.x | Frontend asset bundling |
-| **Auth** | Azure AD OAuth2 | Microsoft Graph API integration |
-| **AI** | Anthropic Claude API | Email parsing, query enrichment |
-| **Scheduling** | APScheduler | Background jobs (see `app/jobs/`) |
-| **Linting** | Ruff + mypy + pre-commit | Code quality enforcement |
-| **Testing** | pytest + Playwright | Comprehensive test suite, E2E coverage |
+1. **HTMX-not-React is load-bearing.** Server returns HTML fragments; HTMX swaps them; Alpine.js holds local state via `Alpine.store(...)`. Never introduce React, Vue, Svelte, or any client-side router. No JSON-driven SPA patterns.
+2. **All schema changes go through Alembic.** Never use `Base.metadata.create_all()`. Never run raw DDL outside a migration (no `CREATE/ALTER/DROP` in `startup.py`, services, routers, scripts). Migrations live in `alembic/versions/` (130 files; `alembic.ini` at repo root).
+3. **Migration workflow:** edit model → `alembic revision --autogenerate -m "..."` → review the generated file → test upgrade/downgrade/upgrade → commit migration with the model change. After creating one, run `alembic heads` and merge if multiple heads.
+4. **`startup.py` is runtime-only.** FTS triggers, seed data, ANALYZE, idempotent backfills. Nothing that creates/alters/drops tables, columns, indexes, or constraints.
+5. **Deploy via `./deploy.sh`** (commits, pushes, builds with `--no-cache`, recreates app container, runs 30×2s health-check loop). Never bare `docker compose up -d --build` — Docker layer cache silently keeps stale templates and code, producing "code didn't update" bugs. Use `./deploy.sh --no-commit` to redeploy current branch without committing.
+6. **Status values come from `app/constants.py` StrEnums.** 26 enums (`RequisitionStatus`, `RequirementStatus`, `OfferStatus`, `UserRole`, …). Never hardcode `"open"`, `"sent"`, `"archived"`, etc. — the strings change, the enums don't.
+7. **Files listed in `STABLE.md` are frozen** unless the task explicitly calls them out. Re-read `STABLE.md` before editing `app/main.py`, `app/startup.py`, `app/config.py`, `app/database.py`, `app/dependencies.py`, the auth/requisitions/crm/rfq routers, or the named frontend assets.
+8. **`AVAIL_OPP_TABLE_V2` gates `/requisitions2` rendering.** Default true. Flippable via `.env` + `docker compose restart app` (≈30s). Don't remove the flag or its `{% else %}` branches without explicit approval — see `STABLE.md:38-60`.
+9. **Hosted-CLI environment.** No GUI, no browser preview, no screenshots. Don't suggest commands that assume a desktop. Verify UI changes via `curl`, log inspection, or by asking the user to test.
+10. **Root-cause fixes only.** No band-aids, no half-measures, no `try/except: pass`. If you find a band-aid PR, default is to close it and write the real fix.
 
----
+## 3. Workflow — how to work in this repo
 
-## Quick Start
+- **Use subagents for multi-step tasks.** Run independent work in parallel.
+- **Pipeline for any non-trivial change:** brainstorm → plan → TDD → execute → simplify → review → verify. Skip a step only when truly redundant.
+- **Pre-commit is auto-installed for both `pre-commit` and `pre-push` stages** (see `.pre-commit-config.yaml`). The pre-push gate runs the full suite against `--all-files` to catch branch-wide drift. Don't bypass with `--no-verify`; fix the root cause.
+- **Verify before claiming done.** Run the actual command, read the actual output, then claim success. Type-check and tests verify code; for UI changes you can't browser-test, say so explicitly.
+- **Update `docs/APP_MAP_*.md`** after the change lands; it's the second source of truth for future sessions.
+- **Memory references with line numbers can be stale.** Re-read the file before acting on a memory that cites `file.py:123`.
 
-### Prerequisites
-- **Docker & Docker Compose** (v2.20+)
-- **Git**
-- **Python 3.11+** (for local development)
-- **Node.js / Bun** (for frontend work)
+## 4. Repo layout
 
-### Local Development (Docker)
+```
+availai/
+├── app/                  # 22 top-level .py modules + subdirs
+│   ├── main.py           # FastAPI app, middleware stack, router includes, exception handlers
+│   ├── startup.py        # Runtime ops (FTS triggers, seeds, ANALYZE) — NO DDL
+│   ├── config.py         # Pydantic Settings (env vars, MVP_MODE, feature flags)
+│   ├── database.py       # SQLAlchemy engine, SessionLocal, UTCDateTime type
+│   ├── dependencies.py   # require_user / require_buyer / require_admin / require_fresh_token
+│   ├── constants.py      # 26 StrEnums — the only valid source for status strings
+│   ├── shared_constants.py # JUNK_DOMAINS, JUNK_EMAIL_PREFIXES — import, don't duplicate
+│   ├── scheduler.py      # APScheduler coordinator
+│   ├── search_service.py # Multi-source search orchestrator (uses its own write session)
+│   ├── email_service.py  # Microsoft Graph: batch RFQ send, inbox monitor, AI parse
+│   ├── enrichment_service.py
+│   ├── scoring.py        # 6-factor sighting / vendor / lead scoring
+│   ├── vendor_utils.py   # fuzzy_score_vendor() — rapidfuzz wrapper
+│   ├── rate_limit.py     # slowapi config
+│   ├── http_client.py / connector_status.py / evidence_tiers.py / company_utils.py / file_utils.py / logging_config.py / template_env.py
+│   ├── cache/decorators.py # @cached_endpoint(prefix, ttl_hours, key_params)
+│   ├── connectors/       # 10 external API modules. `sources.py` houses NexarConnector + BrokerBinConnector; standalone modules: digikey, mouser, oemsecrets, element14, sourcengine, ebay, apollo, ai_live_web, email_mining
+│   ├── jobs/             # APScheduler job definitions (inbox_monitor, requirement_refresh, …)
+│   ├── models/           # SQLAlchemy ORM
+│   ├── routers/          # HTTP entry points (htmx_views.py serves /v2/*)
+│   ├── schemas/          # 25 Pydantic schema modules (NOT one monolith). errors.py defines the canonical error shape
+│   ├── services/         # Business logic (search_worker_base, ics_worker, nc_worker, response_parser, …)
+│   ├── static/           # htmx_app.js (Alpine bootstrap, stores), styles.css, dist/ (Vite build)
+│   ├── templates/        # Jinja2; htmx/partials/ for HTMX fragments; documents/ for PDFs
+│   └── utils/            # claude_client, graph_client, normalization (MPN), encrypted_type, …
+├── alembic/versions/     # 130 migration files
+├── tests/                # 471 test_*.py files across e2e/, frontend/, scripts/, test_models/, test_services/, ux_mega/, test_scripts/
+├── scripts/              # 24 ops utilities (enrich_*, data_cleanup, *_backfill, weekly_cleanup.sh, nightly_tests.sh, …)
+├── docs/                 # APP_MAP_* and specs
+├── specs/                # UI specs (specs/ui/)
+└── (Caddyfile, deploy.sh, docker-compose.yml, docker-compose.local.yml, Dockerfile, .pre-commit-config.yaml, ruff.toml, pyproject.toml, pytest.ini)
+```
 
+## 5. Major subsystems
+
+- **Search engine.** `app/search_service.py` orchestrates parallel queries via `asyncio.gather()` across **9 active `BaseConnector` subclasses**: DigiKey, Mouser, OEMSecrets, Element14, Sourcengine, eBay, AI live web (standalone modules), plus Nexar and BrokerBin (both inside `app/connectors/sources.py`). Results dedup by MPN+vendor, scored by 6 weighted factors, persisted as Sightings + MaterialCard upserts. Uses a separate write session — caller's ORM objects are stale after `search_requirement()` returns; call `db.expire(requirement)` before rendering. Two more `.py` files live alongside in `app/connectors/` but aren't search connectors: `apollo.py` (CRM enrichment) and `email_mining.py` (inbox scraping). Total directory: 11 `.py` files (10 modules + `__init__.py`); 9 of them are search connectors.
+- **RFQ pipeline.** `app/email_service.py` sends batch RFQs via Microsoft Graph (subject tagged `[AVAIL-{id}]`); `app/jobs/inbox_monitor.py` polls every 30 min; `app/services/response_parser.py` runs replies through Claude; confidence ≥0.8 auto-creates Offers, 0.5–0.8 flags for review.
+- **NetComponents (NC) worker.** Browser-driven scraping via Patchright (Chromium baked into the Docker image at `Dockerfile:39-40`). `app/services/nc_worker/` + `app/connectors/`. Throttled by `NC_MAX_DAILY_SEARCHES`.
+- **8x8 phone analytics.** Work-call telemetry pulled via 8x8 PBX API. Env vars `EIGHT_BY_EIGHT_*` + `_ENABLED` flag (off by default). Tests under `tests/test_8x8_*`.
+- **Email mining.** Inbox scraping for vendor offers, gated by `EMAIL_MINING_ENABLED`. Pipeline lives in `app/services/` + jobs.
+- **Enrichment.** AI-driven vendor/customer enrichment. `app/enrichment_service.py` orchestrates; batch utilities in `scripts/enrich_*.py`. The `enrichment-worker` compose service is intentionally disabled.
+- **Click-to-call (Azure Communication).** `requirements.txt` pulls `azure-communication-callautomation` + `-identity`.
+
+## 6. Conventions
+
+- **Logging:** use Loguru. `from loguru import logger`. Never `print()`. Structured context auto-injects `request_id`.
+- **DB lookups:** `db.get(Model, id)` for PK reads — SQLAlchemy 2.0 style. Never `db.query(Model).get(id)`.
+- **Pydantic config:** `model_config = ConfigDict(...)`. Never `class Config:`.
+- **Status strings:** import from `app/constants.py`. Period.
+- **Schemas:** 25 modules in `app/schemas/`, not a monolith. Error shape is defined in `app/schemas/errors.py:9-13` and emitted by the three `@app.exception_handler` decorators in `app/main.py` (`StarletteHTTPException`, `RequestValidationError`, generic `Exception`). Tests assert `response.json()["error"]`, not `["detail"]`.
+- **Response shapes:** error → `{"error": str, "status_code": int, "request_id": str}`; list → `{"items": [...], "total": int, "limit": int, "offset": int}`; HTMX → `HTMLResponse` from Jinja2.
+- **Routers stay thin.** HTTP only. Business logic belongs in `app/services/`.
+- **MPN handling:** `normalize_mpn()` lives in `app/utils/normalization.py` (search `def normalize_mpn`); `strip_packaging_suffixes()` lives in `app/services/search_worker_base/mpn_normalizer.py:39`. The `@validates` hook on Requirement auto-uppercases identifiers. Use the `|sub_mpns` Jinja filter for substitutes (handles legacy `["str"]` and current `[{"mpn":..., "manufacturer":...}]`).
+- **Vendor matching:** `fuzzy_score_vendor()` from `app/vendor_utils.py`. Don't inline rapidfuzz.
+- **Caching:** `@cached_endpoint("prefix", ttl_hours=N, key_params=[...])` from `app/cache/decorators.py`.
+- **Junk filtering:** `JUNK_DOMAINS` / `JUNK_EMAIL_PREFIXES` from `app/shared_constants.py`. Don't duplicate.
+- **Direct DOM HTML writes** (`el.inner` + `HTML` property): prefer reactive Alpine bindings or `htmx.ajax()`. Existing uses (email-parse, paste-offer, parsed-results, trouble-report) only clear DOM; don't add new ones.
+- **New file headers:** every new module gets a docstring covering what it does, what calls it, and what it depends on. Convention is universal across `app/routers/` and `app/services/`.
+- **`Alpine.store(...)`** is the state pattern (never `_x_dataStack`). The toast store is `$store.toast` with `message`/`type`/`show` properties — `show` is a boolean, never a method call.
+- **Mypy is permissive.** `pyproject.toml [tool.mypy]` sets `no_strict_optional = true` and overrides `app.routers.*, app.services.*, app.connectors.*, app.jobs.*, app.schemas.*` plus three named utils (`claude_client, llm_router, vendor_helpers`) and five core modules (`app.enrichment_service, app.email_service, app.search_service, app.scoring, app.startup`) to `ignore_errors = true`. Mypy mostly checks core modules. Don't add `# type: ignore` without a comment, and don't claim "mypy passed" as proof a service-layer change is type-safe.
+
+### Auth & permissions
+Azure AD OAuth2 flow lives in `app/routers/auth.py`. Session middleware stores `user_id` in HTTP-only cookies (15-min expiry). Dependencies: `require_user`, `require_buyer`, `require_admin`, `require_fresh_token` (15-min buffer for Graph calls).
+
+## 7. Testing
+
+- **Invocation:** `TESTING=1 pytest tests/...`. PYTHONPATH is not required (CI sets it for paranoia, but pytest finds `tests/conftest.py` regardless).
+- **Engine:** in-memory SQLite via `StaticPool` (`tests/conftest.py`, search `TEST_DB_URL = "sqlite://"`). `RATE_LIMIT_ENABLED=false` and `REDIS_URL=""` are set at import time. `TESTING=1` short-circuits the scheduler, real API calls, and live AI search across `app/main.py`, `app/startup.py` (search `TESTING mode — skipping`), `app/search_service.py`, `app/utils/graph_client.py` (retries → 0).
+- **Parallelism / timeouts:** `pytest.ini` sets `addopts = -n auto --timeout=30 --timeout-method=thread`, ignores `tests/e2e/` and `tests/test_browser_e2e.py`.
+- **Coverage:** CI floor is **50%** (`--cov-fail-under=50` in `.github/workflows/ci.yml`, search `--cov-fail-under`), not 100%. Don't add `--cov` to dev iteration runs — only before PR.
+- **Markers:** `slow` and `integration` are registered. `slow` is currently used in only ~6 of 471 files — don't rely on `-m "not slow"` to materially shrink the suite.
+- **Single-file run with xdist disabled:** `TESTING=1 pytest tests/test_foo.py -v --override-ini="addopts="`.
+- **E2E (pytest, not Playwright TS):** `tests/e2e/test_*.py`. Run with `pytest tests/e2e/ --headed`.
+- **Playwright projects** (defined in `playwright.config.ts:28-39`): `api, auth, smoke, data-validation, accessibility, visual, dead-ends, workflows, requisitions2-resize, requisitions2-visuals`. Invoke via `npx playwright test --project=<name>`.
+- **Frontend tests:** Node native test runner — `npm run test:frontend` (unit + e2e). Vitest available via `npm run test:vitest`. HTML validation: `npm run test:html`.
+
+## 8. Build, deploy, ops
+
+### Local dev
 ```bash
-# Clone and navigate
-git clone https://github.com/YOUR_REPO/availai.git
-cd availai
-
-# Copy and configure environment
-cp .env.example .env
-# Edit .env with your API keys and database URL
-
-# Start all services
-docker compose up -d
-
-# Initialize database (runs automatically at startup)
-docker compose exec app alembic upgrade head
-
-# View logs
-docker compose logs -f app
-
-# Open in browser
-# https://app.yourdomain.com (or http://localhost:8000 for local)
-```
-
-### Frontend Development (Hot Reload)
-
-```bash
-# Terminal 1: Start Vite dev server (watches src, rebuilds on change)
-npm run dev
-
-# Terminal 2: Run the FastAPI server (in Docker or locally)
-docker compose up app
-
-# Browser: http://localhost:5173 (Vite dev proxy)
-```
-
----
-
-## CODE RULES
-
-- Always write tests with any new code. Don't ask, just include them.
-- Give exact file paths for everything.
-- Never use placeholder comments like "# rest of code here" — give complete code.
-- Keep responses under 150 lines. Break big tasks into steps.
-- Simple beats clever. 20 readable lines > 10 clever lines.
-- Use Loguru for logging, never print().
-- Use Ruff for linting.
-- Use Alembic for database migrations. Always include rollback steps.
-
-## Standing Workflow Rules
-
-### Execution Model
-- Always use subagent-driven execution for multi-step tasks — never ask, never offer inline
-- Maximize parallel subagents for all independent work — never serialize what can parallelize
-- Run the full skill pipeline on every task: brainstorm → plan → TDD → execute → simplify → review → verify (this order is canonical)
-- Never skip a step because it seems "overkill" — use every available tool and skill aggressively
-- Fix ALL review findings immediately — never defer as "lower priority" or "MVP acceptable"
-
-### UI Guardrails
-- Never add, remove, or rearrange UI elements without explicit user approval
-- Follow existing codebase patterns — find a working example before creating new UI conventions
-
-### Code Anti-Patterns (never introduce — in addition to Coding Conventions section)
-- `innerHTML` → use `htmx.ajax()` or Alpine reactive binding
-- Pydantic `class Config` → use `model_config = ConfigDict()`
-- Alpine `_x_dataStack` → use `Alpine.store()`
-- `db.query(Model).get(id)` → use `db.get(Model, id)`
-
-### Linear Development
-- Memory references specific code (line numbers, function names)? Verify against current files before acting
-- Plans or specs with line numbers? Verify those lines are still correct before editing
-- Never mix old patterns with new — if the codebase has moved to a new pattern, follow the new one
-- Always read the actual codebase before making changes — never rely on cached assumptions
-
-### PR Reviews
-- Run ALL pr-review-toolkit agents on every PR: comment-analyzer, pr-test-analyzer, type-design-analyzer, silent-failure-hunter, code-simplifier, code-reviewer
-- Also run feature-dev:code-reviewer
-
-## Project Structure
-
-```
-app/
-├── main.py                    # FastAPI app, router registration, middleware stack, lifespan
-├── config.py                  # Pydantic Settings (env vars, APP_VERSION, MVP_MODE)
-├── database.py                # SQLAlchemy engine, SessionLocal, UTCDateTime type
-├── dependencies.py            # Auth middleware: require_user, require_admin, require_buyer, require_fresh_token
-├── constants.py               # StrEnum status enums — ALWAYS use, never raw strings
-├── shared_constants.py        # JUNK_DOMAINS, JUNK_EMAIL_PREFIXES
-├── startup.py                 # Runtime operations: triggers, seeds, ANALYZE (NO DDL)
-├── scheduler.py               # APScheduler coordinator (see app/jobs/)
-├── scoring.py                 # Sighting/lead/vendor scoring (6-factor weighted algorithm)
-├── vendor_utils.py            # fuzzy_score_vendor() — vendor matching utility
-├── search_service.py          # Requirement search orchestrator (all 10 sources)
-├── email_service.py           # Graph API: batch RFQ send, inbox monitor, AI parse replies
-├── enrichment_service.py      # Customer/vendor enrichment orchestrator
-├── rate_limit.py              # Slowapi rate limiting configuration
-│
-├── models/                    # SQLAlchemy ORM models
-├── schemas/                   # Pydantic request/response schemas
-├── routers/                   # API route handlers (see main.py for registration)
-│   ├── auth.py                # /auth/* — Azure AD OAuth2 flow
-│   ├── htmx_views.py          # /v2/* — Main HTMX frontend (page + partial routes)
-│   ├── ai.py                  # /api/ai/* — AI features (parsing, enrichment)
-│   ├── requisitions/          # Requisition core workflow
-│   ├── crm/                   # Company, vendor, quote, buy plan management
-│   ├── excess.py              # Excess inventory management
-│   ├── materials.py           # Material card storage and retrieval
-│   ├── proactive.py           # Vendor offer matching to purchase history
-│   └── ...                    # Additional routers (vendors, contacts, activity, etc.)
-│
-├── services/                  # Business logic (decoupled from HTTP)
-│   ├── search_worker_base/    # Search connector base + MPN normalizer
-│   ├── ics_worker/            # ICS (In-stock capability) search worker
-│   ├── nc_worker/             # NC (Normally closable) search worker
-│   ├── response_parser.py      # Claude AI email reply parser
-│   └── ...                    # AI, enrichment, proactive, tagging, scoring
-│
-├── connectors/                # External API integrations (DigiKey, Mouser, Nexar, etc.)
-├── jobs/                      # APScheduler job definitions
-│   ├── inbox_monitor.py       # Check for RFQ replies every 30min
-│   ├── requirement_refresh.py # Re-search stale requirements
-│   └── ...
-│
-├── cache/                     # Redis caching utilities
-│   └── decorators.py          # @cached_endpoint(prefix, ttl_hours, key_params)
-│
-├── utils/                     # Shared utilities
-│   ├── claude_client.py       # Anthropic API client wrapper
-│   ├── graph_client.py        # Microsoft Graph API client
-│   ├── normalization.py       # MPN/part number normalization
-│   └── ...
-│
-├── templates/                 # Jinja2 templates
-│   ├── base.html              # App shell (topbar, mobile nav, modal, toast)
-│   ├── htmx/base_page.html    # Lazy-loader: spinner → hx-get partial
-│   ├── htmx/partials/         # HTMX partials
-│   └── documents/             # PDF templates (quote_report, rfq_summary)
-│
-├── static/                    # Frontend assets
-│   ├── htmx_app.js            # Alpine.js + HTMX bootstrap, stores, components
-│   ├── styles.css             # Tailwind + component styles
-│   ├── htmx_mobile.css        # Mobile-specific overrides
-│   └── dist/                  # Vite build output (minified, content-hashed)
-│
-├── migrations/                # Alembic migration files
-└── logs/                      # Loguru output (structured, request_id context)
-
-tests/
-├── test_models.py             # ORM model tests
-├── test_routers.py            # HTTP endpoint tests
-├── test_services.py           # Business logic tests
-├── conftest.py                # pytest fixtures, in-memory SQLite engine
-└── e2e/                       # End-to-end Playwright tests
-```
-
----
-
-## Architecture Overview
-
-### Request Flow
-
-**HTMX Page Request:**
-```
-Browser → HTMX Link (hx-get) → FastAPI Router → HTTP Response (HTML partial)
-→ HTMX swaps into #main-content → Alpine.js updates state
-```
-
-**API Request:**
-```
-Client → FastAPI endpoint → Service layer → Database/External API
-→ JSON response
-```
-
-**Background Job:**
-```
-APScheduler fires at interval → Job function → Service layer → Database/External API
-```
-
-### Key Workflows
-
-**Search Pipeline** (`search_service.py`):
-1. User submits part numbers with target quantity
-2. `search_requirement()` fires all 10 connectors via `asyncio.gather()`
-3. Results deduplicated (by MPN + vendor)
-4. Scored by 6 weighted factors (recency, qty match, vendor reliability, data completeness, source credibility, price)
-5. Material cards auto-upserted, sightings created
-
-**RFQ Workflow** (`email_service.py`):
-1. User selects vendors → Click "Send RFQ"
-2. `send_batch_rfq()` sends via Microsoft Graph API, tagged with `[AVAIL-{id}]`
-3. APScheduler polls inbox every 30 minutes (`inbox_monitor.py`)
-4. New replies forwarded to Claude via `response_parser.py`
-5. Claude extracts: price, quantity, lead time, condition, date code
-6. Confidence ≥0.8 → auto-create Offer, 0.5-0.8 → flag for manual review
-7. Vendor reliability scores update based on reply speed and accuracy
-
-**Proactive Matching** (`proactive_service.py`):
-1. New vendor offers compared to customer purchase history
-2. SQL scorecard (0-100): part match, quantity fit, price vs. historical, vendor reliability
-3. Batch prepare/send workflow
-4. Grouped by customer, ready for RFQ approval
-
-### Data Model Layers
-
-```
-Requisitions (search + RFQ workflow)
-  ├── Requirements (parts to find)
-  ├── Sightings (vendor quotes, auto-created from search)
-  └── Responses (RFQ replies)
-
-CRM (vendor intelligence + customer relationships)
-  ├── Companies (customers + vendors)
-  ├── Contacts
-  ├── Offers (vendor proposals)
-  ├── Quotes (customer orders)
-  └── BuyPlans (fulfillment tracking)
-
-Materials (inventory + search cache)
-  ├── MaterialCards (deduplicated parts)
-  ├── Vendors (supplier info + scores)
-  └── SourceStocks (external supplier stock levels)
-```
-
----
-
-## Frontend
-
-### Technology Stack
-- **HTMX 2.x** — HTTP-driven frontend, no SPA
-- **Alpine.js 3.x** — Component state, reactivity
-- **Jinja2** — Server-side HTML rendering
-- **Tailwind CSS** — Utility-first styling
-- **Vite 6.x** — Build tool and dev server
-
-### Core Concepts
-
-**Navigation is HTMX-driven:**
-- Link (`<a>`) fires `hx-get="/partial/path"`
-- Server returns HTML fragment
-- HTMX swaps into `#main-content`
-- **No page reloads, no JSON, no client-side routing**
-
-**State is Alpine.js:**
-```javascript
-// stores/sidebar.js - persisted via @persist plugin
-export default {
-  open: false,
-  toggle() { this.open = !this.open }
-}
-
-// In template:
-<button @click="$store.sidebar.toggle()">Menu</button>
-<div x-show="$store.sidebar.open">...</div>
-```
-
-**Styling uses Tailwind + custom CSS:**
-- DM Sans font family
-- Brand color palette (50-900 shades)
-- Dark mode via `dark:` prefix
-- Component classes in `styles.css`
-
-**Toast System:**
-- `$store.toast` has properties: `message`, `type`, `show` (boolean)
-- Set properties directly: `$store.toast.message='msg'; $store.toast.type='success'; $store.toast.show=true`
-- Do NOT call `$store.toast.show()` as a function — it is a boolean, not a method
-- `_oob_toast()` in `sightings.py` returns OOB HTML that sets these properties
-
-### Plugins & Extensions
-
-**Alpine.js Plugins:** See `htmx_app.js` for current plugin list
-**HTMX Extensions:** See `htmx_app.js` and `base.html` for current extension list
-
-### Build & Deployment
-
-```bash
-# Development (watch mode)
-npm run dev              # Vite dev server on localhost:5173
-
-# Production
-npm run build            # Minify → app/static/dist/
-npm run lint             # ESLint check
-```
-
-**Vite config:** Bundles JS/CSS, fingerprints assets (`[hash].js`), configured in `vite.config.js`
-
-### Template Routing (CRITICAL)
-
-**Golden Rule:** Always trace `router → view function → template_response()` before editing any template.
-
-**Key gotcha:** Requisitions parts tab loads `app/templates/htmx/partials/parts/list.html`, NOT `requisitions/list.html`. Follow the router!
-
-## Authentication & Authorization
-
-**OAuth2 via Azure AD:**
-- `app/routers/auth.py` handles login/callback/logout
-- Session middleware stores `user_id` in HTTP-only cookie (15-minute expiry)
-- Fresh token validation via `require_fresh_token` dependency (15-min buffer)
-
-**Permission Levels:**
-- `require_user` — Any logged-in user
-- `require_buyer` — Buyer role (can search, send RFQ)
-- `require_admin` — Admin role (settings, user management)
-
-## Response Format Standards
-
-**JSON errors**: `{"error": "message", "status_code": 400, "request_id": "abc123"}`
-- Tests check `response.json()["error"]`, NOT `["detail"]`
-
-**List responses**: `{"items": [...], "total": 100, "limit": 50, "offset": 0}`
-- Companies list returns this format — NOT a plain array
-
-**HTMX responses**: HTMLResponse from Jinja2 templates
-
-**Schemas**: All in `app/schemas/responses.py`, use `extra="allow"` on Pydantic models
-
-## Coding Conventions
-
-### Database
-- Use `db.get(Model, id)` NOT `db.query(Model).get(id)` (SQLAlchemy 2.0 style)
-- Status values: **Always** use StrEnum constants from `app/constants.py`, never raw strings
-- Status enum example: `RequisitionStatus.OPEN`, `RequirementStatus.FOUND`
-
-### Search & Matching
-- Vendor matching: use `fuzzy_score_vendor()` from `app/vendor_utils.py` (rapidfuzz wrapper)
-- MPN dedup: use `strip_packaging_suffixes()` from `app/services/search_worker_base/mpn_normalizer.py`
-- Never inline rapidfuzz or fuzzy matching logic
-- `search_requirement()` uses a separate write session — caller's ORM objects are stale after it returns. Call `db.expire(requirement)` before rendering templates.
-
-### MPN Normalization
-- `normalize_mpn()` uppercases, strips noise, returns `None` for MPNs < 3 chars
-- `@validates` on Requirement auto-uppercases `primary_mpn`, `customer_pn`, `oem_pn` on every save
-- CSS `uppercase` class on MPN display cells as belt-and-suspenders
-- Use `|sub_mpns` Jinja2 filter for displaying substitutes (handles both string and dict formats)
-
-### Substitutes Format
-- Canonical format: `[{"mpn": "ABC123", "manufacturer": "TI"}, ...]` (list of dicts)
-- Legacy rows may contain plain strings `["ABC123"]` — always handle both formats
-- Use `parse_substitute_mpns()` from `app/utils/normalization.py` for write paths
-
-### Shared Constants
-- Junk email domains: use `JUNK_DOMAINS` from `app/shared_constants.py`
-- Junk email prefixes: use `JUNK_EMAIL_PREFIXES` from `app/shared_constants.py`
-- Don't duplicate; import and reuse
-
-### Caching
-```python
-from app.cache.decorators import cached_endpoint
-
-@cached_endpoint("vendor_list", ttl_hours=24, key_params=["supplier"])
-async def get_vendors(supplier: str):
-    ...
-```
-
-### Logging
-- **Always** use Loguru: `from loguru import logger`
-- Never use `print()`
-- Structured logging with request_id context (auto-injected)
-- Example: `logger.info("RFQ sent", extra={"requisition_id": 123})`
-
-### Testing
-- `TESTING=1` env var disables scheduler and real API calls
-- Tests use in-memory SQLite (no real DB)
-- `conftest.py` sets `RATE_LIMIT_ENABLED=false` in tests
-- Import test engine: `from tests.conftest import engine`
-- Mock lazy imports at source module, not at import site
-- Target: 100% coverage, no commit reduces it
-
-### Code Quality
-- Ruff for linting: `ruff check app/`
-- Mypy for type checking (enabled in pre-commit)
-- Pyright LSP plugin active — stage only intentionally changed files
-- Pre-commit hooks: ruff, ruff-format, mypy, docformatter, detect-private-key
-- Keep routers thin (HTTP only), put business logic in `app/services/`
-- New files must have header comment: what it does, what calls it, what it depends on
-- Simple beats clever: 20 readable lines > 10 clever lines
-
-## MVP Mode
-
-`config.py: mvp_mode = True` — gates Dashboard, Enrichment, Teams, Task Manager.
-Core MVP: Requisitions, Customers, Vendors, Sourcing Engine.
-
-## Commands
-
-### Docker (Full Stack)
-```bash
-docker compose up -d                # Start all containers
-docker compose up -d --build        # Rebuild and start
-docker compose logs -f app          # Tail app logs
-docker compose restart              # Restart all containers
-docker compose down                 # Stop everything
-docker compose ps                   # Show status
-```
-
-### Frontend
-```bash
-npm run dev                   # Start Vite dev server (localhost:5173)
-npm run build                 # Production build to app/static/dist/
-npm run lint                  # ESLint check
-npm run lint:fix              # Auto-fix ESLint issues
-```
-
-### Python Linting & Type Checking
-```bash
-ruff check app/               # Lint Python code
-ruff format app/              # Auto-format Python code
-mypy app/                     # Type check
-```
-
-### Database Migrations
-```bash
-alembic upgrade head                              # Apply all pending migrations
-alembic downgrade -1                              # Rollback one revision
-alembic revision --autogenerate -m "description"  # Generate new migration
-alembic current                                   # Show current revision
-alembic history                                   # Show all revisions
-```
-
-**Workflow:** Edit models → `alembic revision --autogenerate` → review → `alembic upgrade head` → test
-
-## Testing
-
-### Strategy: Tiered Approach
-
-**During development: Run only changed module tests**
-```bash
-TESTING=1 PYTHONPATH=/root/availai pytest tests/test_<module>.py -v
-```
-
-**Before commit: Full test suite**
-```bash
-TESTING=1 PYTHONPATH=/root/availai pytest tests/ -v
-```
-
-**Coverage check: Before PR only**
-```bash
-TESTING=1 PYTHONPATH=/root/availai pytest tests/ --cov=app --cov-report=term-missing --tb=no -q
-```
-
-**Fast subset (skip slow tests):**
-```bash
-TESTING=1 PYTHONPATH=/root/availai pytest -m "not slow" -v
-```
-- Slowest tests are marked `@pytest.mark.slow` — skip with `-m "not slow"` for ~1:10 runtime
-- NEVER add `--cov` to iterative dev runs — only before PR
-
-### Test Configuration
-- **Parallel execution:** pytest-xdist (`-n auto` in pytest.ini) for faster runs
-- **Timeout:** 30 seconds per test
-- **Async mode:** `asyncio_mode = auto`
-- **Database:** In-memory SQLite (no real DB needed)
-- **Fixtures:** In `tests/conftest.py` — import `engine` from there
-
-### Focused Test Runs
-pytest.ini configures `-n auto` (xdist parallel). For single-file runs, disable with:
-`TESTING=1 PYTHONPATH=/root/availai pytest tests/test_foo.py -v --override-ini="addopts="`
-
-### E2E Tests (Playwright)
-```bash
-npx playwright test --project=workflows    # Workflow E2E tests
-npx playwright test --project=dead-ends    # Dead-end / error path tests
-pytest tests/e2e/ --headed                 # Run with browser visible
-```
-
-### Test Types
-| Type | Location | Pattern | When |
-|------|----------|---------|------|
-| Unit | tests/ | test_<module>.py | Changed module logic |
-| Integration | tests/ | test_<module>.py | Router/service interaction |
-| E2E | tests/e2e/, playwright | .spec.ts | Before PR, full workflows |
-| Smoke | scripts/ | smoke-test-bundles.mjs | After npm build |
-
-### Database Backup & Restore
-- **Automated:** db-backup service runs `pg_dump` every 6 hours
-- **Manual restore:** `scripts/restore.sh`
-- **Current production:** Run `alembic current` to check
-
-## Database & Migration Rules
-
-### ABSOLUTE RULES — NEVER VIOLATE
-1. **ALL schema changes go through Alembic.** Never use raw DDL in startup.py, services, routers, or scripts.
-2. **Never use Base.metadata.create_all() for schema changes.**
-3. **Never run raw SQL against production** outside of a migration.
-4. **Migration workflow — every time:**
-   a. Make model change in `app/models/`
-   b. Run: `alembic revision --autogenerate -m "description"`
-   c. REVIEW the generated migration
-   d. Test: upgrade → downgrade → upgrade
-   e. Commit migration with model change
-
-5. **After creating a migration, ALWAYS run `alembic heads`** to verify a single head. If multiple heads: `alembic merge heads -m "merge_description"`. Data-only migrations (no schema changes) use `op.get_bind()` + raw SQL via `text()`.
-
-6. **startup.py is for runtime operations ONLY:**
-   - FTS triggers (PostgreSQL-specific)
-   - Seed data (system_config defaults)
-   - ANALYZE on hot tables
-   - Idempotent backfill queries
-   - Count triggers (PG-specific)
-   - NOTHING that creates, alters, or drops tables/columns/indexes/constraints
-
-## Deployment
-
-**Full deployment (preferred):**
-```bash
-./deploy.sh    # Commits, pushes, rebuilds, verifies logs with health checks
-```
-
-**Manual fallback:**
-```bash
-cd /root/availai
-git pull origin main
-docker compose up -d --build
+docker compose -f docker-compose.yml -f docker-compose.local.yml up -d   # hot-reload + ports 8000/6379
+npm run dev                                                              # Vite watch mode
 docker compose logs -f app
 ```
 
-**What "deploy" means:** Commit + push + rebuild + verify logs. No questions asked.
-
-**IMPORTANT:** `deploy.sh` uses `--no-cache` on build (prevents stale cached layers) and `--force-recreate` on up (prevents reusing old containers). Never use bare `docker compose up -d --build` — it causes "code didn't update" bugs. For rebuild without commit: `./deploy.sh --no-commit`.
-
-### Pre-Deploy Checklist
-- [ ] All tests pass: `TESTING=1 PYTHONPATH=/root/availai pytest tests/ -v`
-- [ ] Linting passes: `ruff check app/`
-- [ ] No migrations pending
-- [ ] `.env` configured for target environment
-- [ ] Docker images built locally (no surprises at deploy time)
-
----
-
-## Safety & Quality
-
-### Before Destructive Operations
-- **WARN** before DROP, DELETE, or bulk data changes
-- Include backup procedure and rollback steps
-- For production: verify backup exists before executing
-
-### Code Review Checklist
-- Security: SQL injection, XSS, auth bypass, exposed secrets
-- Performance: N+1 queries, missing indexes, inefficient loops
-- Error handling: All exceptions caught, user-facing errors clear
-- Tests: New code has tests, coverage not reduced
-- Types: No `type: ignore` without explanation
-
-## File Rules
-
-- Every new file needs a header comment explaining: what it does, what calls it, what it depends on.
-
-## Session Rules
-
-- End sessions with: what changed, git commands, what to test, any tech debt.
-
-## Triggers
-
-- "new feature" = make a plan first, don't just start coding
-- "bug" or "error" = ask for the full error message before trying to fix
-- "refactor" = check what's stable first
-- "quick" or "just" = warn about hidden complexity
-
-## Configuration
-
-All config via `.env` (see `.env.example`). Key groups:
-
-**Azure OAuth:**
-```
-AZURE_CLIENT_ID=...
-AZURE_CLIENT_SECRET=...
-AZURE_TENANT_ID=...
-AZURE_REDIRECT_URI=https://app.yourdomain.com/auth/callback
-```
-
-**AI (Anthropic):**
-```
-ANTHROPIC_API_KEY=sk-...
-ANTHROPIC_MODEL=claude-3-5-sonnet-20241022
-```
-
-**Database:**
-```
-DATABASE_URL=postgresql://availai:availai@db:5432/availai
-```
-
-**Suppliers (Optional — feature disabled if not set):**
-```
-OCTOPART_API_KEY=...
-BROKERBIN_API_KEY=...
-DIGIKEY_CLIENT_ID=...
-# ... (other API keys)
-```
-
-**Feature Flags:**
-```
-MVP_MODE=false
-EMAIL_MINING_ENABLED=true
-ACTIVITY_TRACKING_ENABLED=true
-CONTACTS_SYNC_ENABLED=true
-```
-
-**Email:**
-```
-MICROSOFT_GRAPH_ENDPOINT=https://graph.microsoft.com/v1.0
-SMTP_FROM=noreply@yourdomain.com
-```
-
----
-
-## Debugging Tips
-
-**Can't find a route?**
-Trace the HTMX link → search routers/ → find `@router.get()` or `@router.post()` → check `template_response()`
-
-**Search returns empty?**
-Check `.env` for API keys (Octopart, BrokerBin, etc.). No keys = no results. You can upload vendor stock lists to build a local database.
-
-**"Check Inbox" finds nothing?**
-- Verify replies are in the same email thread as the RFQ you sent
-- Check that `Mail.Read` permission is granted in Azure
-- Look at `app/jobs/inbox_monitor.py` logs
-
-**Tests fail with "TESTING not set"?**
-Run with: `TESTING=1 PYTHONPATH=/root/availai pytest tests/ -v`
-
-**Docker container won't start?**
+### Migrations
 ```bash
-docker compose logs app          # See the error
-docker compose restart app       # Try again
-docker compose up -d --build     # Rebuild from scratch
+alembic revision --autogenerate -m "description"   # then REVIEW the generated file
+alembic upgrade head
+alembic downgrade -1
+alembic heads                                       # ensure single head
 ```
 
+### Deploy
+```bash
+./deploy.sh                 # commit + push + build --no-cache + recreate + health check
+./deploy.sh --no-commit     # rebuild current branch without committing
+```
+**Pre-deploy checklist:** droplet's local `main` is fast-forward-only with `origin/main` (`git fetch && git checkout main && git merge --ff-only origin/main`). If it isn't, stop and investigate — `deploy.sh` currently swallows non-fast-forward rejection.
+
+**deploy.sh safety nets:** Step 5 round-trips `BUILD_COMMIT` through the running container (`docker compose exec app printenv BUILD_COMMIT`) and exits non-zero if the deployed value doesn't match what was just built — this catches stale-image deploys where Docker thinks it built but the container didn't pick up the new layer. Step 6 scans `/app/app/templates/` for Tailwind utility patterns (`bg|text|border|hover:bg|hover:text-…-N`) and reports any class missing from the compiled CSS bundle; **currently warn-only — a missing class still ships.**
+
+### CI (`.github/workflows/`)
+- `ci.yml` — push/PR to main: pytest with `--cov-fail-under=50`, pre-commit, ruff, alembic validation + smoke, npm build, frontend tests.
+- `deploy.yml` — release-triggered: SSH to droplet, backup DB+code, download release zip, rebuild, 12×5s health probe with rollback.
+- `security.yml` — push/PR + Mondays 08:00 UTC: bandit, pip-audit, npm audit.
+
+### Environment
+
+Required (deploy fails or auth breaks without these):
+```
+AZURE_CLIENT_ID, AZURE_CLIENT_SECRET, AZURE_TENANT_ID
+ANTHROPIC_API_KEY
+SESSION_SECRET                # cookie signing + EncryptedType derivation
+DATABASE_URL, POSTGRES_USER, POSTGRES_PASSWORD, POSTGRES_DB
+APP_URL                       # https://app.availai.net
+ADMIN_EMAILS
+```
+
+Jointly load-bearing: `ENCRYPTION_SALT` is mixed with `SESSION_SECRET` to derive Fernet keys for `EncryptedType` columns (refresh/access tokens, password hashes). Rotating either after data is encrypted produces `Fernet InvalidToken` and silent `None` reads — see `app/utils/encrypted_type.py`.
+
+Optional (feature gates / data sources):
+```
+NEXAR_CLIENT_ID/SECRET, BROKERBIN_API_KEY/SECRET, EBAY_CLIENT_ID/SECRET,
+DIGIKEY_CLIENT_ID/SECRET, MOUSER_API_KEY, OEMSECRETS_API_KEY,
+SOURCENGINE_API_KEY, ELEMENT14_API_KEY, EXPLORIUM_API_KEY,
+DO_GRADIENT_API_KEY/MODEL,
+EIGHT_BY_EIGHT_*, EIGHT_BY_EIGHT_ENABLED,
+NC_USERNAME, NC_PASSWORD, NC_MAX_DAILY_SEARCHES, NC_BROWSER_PROFILE_DIR,
+EMAIL_MINING_ENABLED, AVAIL_OPP_TABLE_V2,
+REDIS_URL, BACKUP_INTERVAL_HOURS, BACKUP_RETENTION_DAYS,
+DO_SPACES_KEY/SECRET/BUCKET/REGION, SPACES_RETENTION_DAYS
+```
+
+### Docker stack
+- `app` — uvicorn FastAPI on `:8000`, runs as non-root user, `tini` PID-1, `docker-entrypoint.sh` runs migrations on boot.
+- `db` — postgres:16-alpine.
+- `redis` — redis:7-alpine.
+- `caddy` — auto-TLS reverse proxy fronting `app.availai.net`. Blocks `/metrics` (returns 403); HSTS/CSP applied via FastAPI middleware (not Caddy).
+- `db-backup` — `pg_dump` every `BACKUP_INTERVAL_HOURS` (default 6), retains `BACKUP_RETENTION_DAYS` (default 30). Optional off-site to DO Spaces.
+- `enrichment-worker` — disabled (entrypoint is a no-op echo).
+
+## 9. Toolkit — pick the right one at the right time
+
+Use these aggressively; many run in parallel.
+
+### Process skills (drive *how* you work)
+| Trigger | Skill |
+|---|---|
+| Starting any non-trivial task with unclear intent | `superpowers:brainstorming` |
+| Have a spec / requirements, need a step-by-step plan | `superpowers:writing-plans` |
+| Plan in hand, executing with checkpoints | `superpowers:executing-plans` |
+| Plan has independent steps you can dispatch | `superpowers:subagent-driven-development` |
+| 2+ truly independent investigations / fixes | `superpowers:dispatching-parallel-agents` |
+| Implementing any feature or bugfix | `superpowers:test-driven-development` |
+| Bug, test failure, or unexpected behavior | `superpowers:systematic-debugging` |
+| About to claim "done" / "fixed" / "passing" | `superpowers:verification-before-completion` |
+| Major work complete, want review before merge | `superpowers:requesting-code-review` |
+| Receiving review feedback (especially if it seems wrong) | `superpowers:receiving-code-review` |
+| Need to isolate work from current workspace | `superpowers:using-git-worktrees` |
+| Branch is done — decide merge / PR / cleanup | `superpowers:finishing-a-development-branch` |
+
+### Domain skills (drive *what* you write)
+| Working on | Skill |
+|---|---|
+| SQLAlchemy 2.0 ORM models, queries, relationships, fixtures | `sqlalchemy` |
+| Anthropic SDK / Claude API code (caching, tool use, batch, thinking, model migrations) | `claude-api` |
+| Distinctive HTMX + Alpine + Tailwind UI | `frontend-design:frontend-design` |
+
+### Aggregate / one-shot toolkits
+| Need | Skill |
+|---|---|
+| Comprehensive multi-agent PR review on the current branch | `pr-review-toolkit:review-pr` |
+| Guided feature dev with codebase grounding | `feature-dev:feature-dev` |
+| Security review of pending diff | `security-review` |
+
+### Operational skills
+| Need | Skill |
+|---|---|
+| Settings hooks / permissions / env vars | `update-config` |
+| Reduce permission prompts in this project | `fewer-permission-prompts` |
+| Recommend automations / skills / hooks for this codebase | `claude-code-setup:claude-automation-recommender` |
+| Quick commit | `commit-commands:commit` |
+| Commit + push + PR | `commit-commands:commit-push-pr` |
+| Clean up branches that are gone on remote | `commit-commands:clean_gone` |
+| Update CLAUDE.md with session learnings | `claude-md-management:revise-claude-md` |
+| Audit & rebuild CLAUDE.md | `claude-md-management:claude-md-improver` |
+| Recurring/polled task | `loop` (foreground) or `schedule` (cron-style remote agent) |
+| Hook authoring | `hookify:*` (`writing-rules`, `hookify`, `configure`) |
+| Tighten recently-changed code | `simplify` |
+
+### Subagents (Agent tool — run in parallel where independent)
+
+| Task | `subagent_type` |
+|---|---|
+| Locate a file/symbol/keyword | `Explore` (specify quick / medium / very thorough) |
+| Plan an implementation strategy | `Plan` |
+| Design a feature blueprint with file-by-file build order | `feature-dev:code-architect` |
+| Map an unfamiliar feature/subsystem | `feature-dev:code-explorer` |
+| Review code for bugs / quality | `feature-dev:code-reviewer` |
+| Simplify recently-modified code | `code-simplifier:code-simplifier` |
+| Verify accuracy of comments / docstrings | `pr-review-toolkit:comment-analyzer` |
+| Find silent failures / inadequate error handling | `pr-review-toolkit:silent-failure-hunter` |
+| Audit type design on new types | `pr-review-toolkit:type-design-analyzer` |
+| Audit PR test coverage | `pr-review-toolkit:pr-test-analyzer` |
+| Review PR adherence to this CLAUDE.md | `pr-review-toolkit:code-reviewer` |
+| Open-ended research spanning the codebase | `general-purpose` |
+| Claude Code / SDK / API questions | `claude-code-guide` |
+
+### PR review default
+Run all pr-review-toolkit specialists (the `pr-review-toolkit:review-pr` skill aggregates them) **plus** `feature-dev:code-reviewer`. Fix every finding immediately; never defer as "lower priority."
+
+## 10. Operational gotchas
+
+- **Tailwind classes added in templates that don't appear in compiled CSS** → check `tailwind.config.js` content globs, the Tailwind safelist, and deploy warnings. Always `--no-cache` deploy when introducing new utility classes.
+- **`Fernet InvalidToken` / mysteriously `None` token columns** → `SESSION_SECRET` or `ENCRYPTION_SALT` rotated after data was written. Restore the prior values or re-encrypt.
+- **Empty search results** → no supplier API keys set; you can also seed via vendor stock list uploads.
+- **`Check Inbox` returns nothing** → reply has to be in the same Graph thread as the RFQ; verify `Mail.Read` is granted and consented in Azure.
+- **HTMX-swapped subtree contains Alpine directives that don't bind** → `app/static/htmx_app.js` uses a hardcoded ID allowlist for `htmx:afterSwap` `Alpine.initTree`. Add the new region's id (see `STABLE.md`).
+
+## 11. Project state (current)
+
+- Active branch focus: search session lifecycle, test-coverage hardening, requisitions2 polish.
+- Last 30 days: ~110 commits — heavy infrastructure and stability work, no major feature pushes.
+- DB on the droplet is intentionally fresh; SFDC import has no scheduled date and is gated on rollout readiness — don't sequence work around it.
+- Migration 001 rewrite to explicit DDL snapshot (no `Base.metadata.create_all`) is the current top-priority infra item, blocking five open PRs.
+
+For deeper project context, recent decisions, and roadmap snapshots, check the dev's auto-memory and the open PRs — this section will go stale fast.
+
 ---
 
-## Quick Reference
-
-| Task | Command |
-|------|---------|
-| Start everything | `docker compose up -d` |
-| Start frontend dev | `npm run dev` |
-| Run tests (single) | `TESTING=1 pytest tests/test_<module>.py -v` |
-| Run all tests | `TESTING=1 pytest tests/ -v` |
-| Check coverage | `TESTING=1 pytest tests/ --cov=app --cov-report=term-missing` |
-| Create migration | `alembic revision --autogenerate -m "..."` |
-| Deploy | `./deploy.sh` |
-| View logs | `docker compose logs -f app` |
-| Lint code | `ruff check app/` |
-| Type check | `mypy app/` |
-| Stop everything | `docker compose down` |
-
----
-
-**Maintained by:** Development team
-**Questions?** Check existing tests (`tests/`) or browse `app/services/` for similar patterns.
-
-
-## Skill Usage Guide
-
-When working on tasks involving these technologies, invoke the corresponding skill:
-
-| Skill | Invoke When |
-|-------|-------------|
-| fastapi | Builds FastAPI routes, dependency injection, and middleware |
-| htmx | Implements HTMX attributes for server-driven UI updates |
-| jinja2 | Renders server-side templates with Jinja2 syntax and inheritance |
-| vite | Configures Vite build system, asset bundling, and dev server |
-| frontend-design | Designs UI with HTMX, Alpine.js, and Tailwind CSS styling |
-| pytest | Writes pytest tests with fixtures and async support |
-| redis | Configures Redis caching with decorators and TTL |
-| mypy | Enforces mypy strict type checking on Python code |
-| playwright | Implements end-to-end tests with Playwright |
-| mapping-user-journeys | Maps in-app journeys and identifies friction points in code |
-| clarifying-market-fit | Aligns ICP, positioning, and value narrative for on-page messaging |
-| designing-onboarding-paths | Designs onboarding paths, checklists, and first-run UI |
-| instrumenting-product-metrics | Defines product events, funnels, and activation metrics |
-| crafting-page-messaging | Writes conversion-focused messaging for pages and key CTAs |
-| tuning-landing-journeys | Improves landing page flow, hierarchy, and conversion paths |
-| mapping-conversion-events | Defines funnel events, tracking, and success signals |
-| structuring-offer-ladders | Frames plan tiers, value ladders, and upgrade logic |
-| inspecting-search-coverage | Audits technical and on-page search coverage |
-| adding-structured-signals | Adds structured data for rich results |
+See also: `docs/APP_MAP_*.md` (architecture), `STABLE.md` (frozen files), `README.md` (operator setup), `LOCAL_SETUP.md` (local dev), `DATA_SOURCES.md` (sourcing reference).
