@@ -119,6 +119,41 @@ search_service.py (orchestrator)
     +---> connector_status.py --> DB: UPDATE api_sources
 ```
 
+### 2b. Streaming Part-Search (`/v2/partials/search/run`)
+
+```
+Browser POST /v2/partials/search/run  (manual MPN entry)
+    |
+    v
+htmx_views.py: search_run()
+    |
+    +---> Returns HTML shell + spinner immediately (200 OK)
+    |
+    +---> _safe_bg(stream_search_mpn(search_id, mpn))   # fire-and-forget asyncio.Task
+              |
+              v
+    search_service.stream_search_mpn(search_id, mpn)
+        |
+        +---> db = SessionLocal()      # OWNS its own session — must NOT
+        |                                receive the request session: FastAPI's
+        |                                get_db() finalizer closes that the moment
+        |                                the response is sent, so a request-scoped
+        |                                session would be dead before the worker's
+        |                                first db.query(...). _safe_bg would swallow
+        |                                the exception and the SSE channel would
+        |                                stay silent. Same pattern as _enrich_cards.
+        |
+        +---> try:
+        |       _build_connectors(db) → run each in asyncio.wait(FIRST_COMPLETED)
+        |       publish "source-status" / "results" / "card-update" events as
+        |       each connector returns; "done" once all settle
+        |     finally:
+        |       db.close()
+```
+
+Browser opens `GET /v2/partials/search/stream?search_id=...` (SSE long-poll) in
+parallel to the POST so it receives events as the worker publishes them.
+
 ## 3. RFQ Email Sending
 
 ```
