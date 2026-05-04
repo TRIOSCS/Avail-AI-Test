@@ -135,20 +135,27 @@ htmx_views.py: search_run()
     search_service.stream_search_mpn(search_id, mpn)
         |
         +---> db = SessionLocal()      # OWNS its own session — must NOT
-        |                                receive the request session: FastAPI's
-        |                                get_db() finalizer closes that the moment
-        |                                the response is sent, so a request-scoped
+        |                                receive a request-scoped session: web
+        |                                framework finalizers close those as soon
+        |                                as the response is sent, so a request
         |                                session would be dead before the worker's
-        |                                first db.query(...). _safe_bg would swallow
-        |                                the exception and the SSE channel would
-        |                                stay silent. Same pattern as _enrich_cards.
+        |                                first db.query(...). The fire-and-forget
+        |                                wrapper swallows exceptions, so the
+        |                                failure would surface only as a hung SSE
+        |                                stream. Same pattern as _enrich_cards.
         |
-        +---> try:
-        |       _build_connectors(db) → run each in asyncio.wait(FIRST_COMPLETED)
-        |       publish "source-status" / "results" / "card-update" events as
-        |       each connector returns; "done" once all settle
-        |     finally:
-        |       db.close()
+        +---> connectors = _build_connectors(db)         # one-shot setup query
+        |     vendor_score_map = db.query(VendorCard...) # one-shot setup query
+        |
+        +---> for each connector: asyncio.create_task(connector.search(mpn))
+        |     loop with asyncio.wait(FIRST_COMPLETED):
+        |       publish "source-status" / "results" / "card-update" per connector
+        |     publish terminal "done" once all settle
+        |
+        +---> Always publishes a terminal "done" — including on uncaught
+              exceptions (pool exhaustion, broker outage, render errors). The
+              SSE client only knows the stream is complete via the done event,
+              so worker death without done means a hung browser spinner.
 ```
 
 Browser opens `GET /v2/partials/search/stream?search_id=...` (SSE long-poll) in
