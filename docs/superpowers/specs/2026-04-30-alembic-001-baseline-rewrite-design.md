@@ -8,13 +8,13 @@
 
 ## Reconstruction strategy revision (2026-05-04)
 
-The original strategy (git-archaeology of commit `d6ffe05d`) was abandoned during execution. `git ls-tree -r d6ffe05d -- app/models.py` shows that commit's `app/models.py` declared ~28 tables. Migrations 002–130 collectively touch ~94 tables (today's 84 + ~10 since-removed). Starting from the 28-table d6ffe05d snapshot would surface ~60 missing tables in the validator (a much heavier triage burden than starting from today's models). Starting from today's live `app.models` (84 tables) and letting the validator surface only the ~10 since-removed tables/columns minimizes the triage workload while still satisfying the chain.
+The original strategy (git-archaeology of commit `d6ffe05d`) was abandoned during execution. `git ls-tree -r d6ffe05d -- app/models.py` shows that commit's `app/models.py` declared ~28 tables. Migrations 002–130 collectively touch ~94 tables (today's 84 + ~10 since-removed). Starting from the 28-table d6ffe05d snapshot would surface ~60 missing tables in the validator (a much heavier triage burden than starting from today's models). Starting from today's live `app.models` (84 tables) and letting the validator surface only the 5 tables + ~10 columns that were since removed minimizes the triage workload while still satisfying the chain.
 
 **The new strategy:** run `Base.metadata.create_all()` from today's live `app.models` against an ephemeral Postgres container, capture `pg_dump --schema-only`, transcribe to explicit `op.create_table()` calls. Then walk migrations 002–130 with the validator and add back any historical tables/columns the chain references (buy_plans, error_reports, trouble_tickets, inventory_snapshots, material_card_audit, plus ~10 since-dropped columns).
 
 **Validator outcome (one-shot run):** 129 migrations walked, **203 gaps reported** — these are the historical tables/columns that need to be added back to 001 in Task 6 Step 2 triage. Concentrated in 5 historical tables and ~10 columns (the 203 count is mostly duplicate references from many migrations to the same dropped table).
 
-This spec is preserved as the design record; sections below describing "Feb-2026 baseline commit `d6ffe05d`" / "git archaeology" reflect the original design intent. The committed `scripts/reconstruct_001_baseline.py` and `scripts/validate_001_against_chain.py` implement the live-models strategy. Where the two diverge, **the script is authoritative**.
+This spec is preserved as the design record; sections below describing "Feb-2026 baseline commit `d6ffe05d`" / "git archaeology" reflect the original design intent. The committed `scripts/reconstruct_001_baseline.py` and `scripts/validate_001_against_chain.py` implement the live-models strategy. Where the two diverge, **the scripts are authoritative**.
 
 ---
 

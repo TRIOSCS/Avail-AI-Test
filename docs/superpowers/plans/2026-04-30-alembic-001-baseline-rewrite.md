@@ -16,7 +16,7 @@ The original plan called for git-archaeology of commit `d6ffe05d` to seed the fi
 
 **Tech Stack:** SQLAlchemy 2.0.48, Alembic 1.18.4, Postgres 16, Python 3.11+, pytest, ruff, mypy. Existing CI workflow at `.github/workflows/ci.yml` already provisions a Postgres service and runs the round trip — we extend that step.
 
-**Spec source:** `docs/superpowers/specs/2026-04-30-alembic-001-baseline-rewrite-design.md` (commit `fe833627`). Read it before starting.
+**Spec source:** `docs/superpowers/specs/2026-04-30-alembic-001-baseline-rewrite-design.md`. Read it before starting.
 
 **Spec deviation (single):** the spec mentions `tests/test_alembic_round_trip.py` as the test-file location for the metadata-diff. `tests/conftest.py` forcibly overrides `DATABASE_URL=sqlite://` and patches SQLite type compilers, so a Postgres-backed pytest in `tests/` would have to fight conftest. Instead, the metadata-diff lives in `scripts/check_schema_matches_models.py`, called from CI between `upgrade head` and `downgrade base`, and from the local smoke command. Rationale: simpler than a SQLite-skip dance; uses the existing CI Postgres service directly. Functionally identical guarantee.
 
@@ -70,7 +70,7 @@ If branch isn't `fix/ci-unblock-alembic-and-audit`, switch: `git checkout fix/ci
 git fetch origin
 git rebase origin/main
 ```
-Expected: clean rebase, no conflicts. Branch should be 0 behind, 1+ ahead after the spec-doc commit (`fe833627`) is rebased on top.
+Expected: clean rebase, no conflicts. Branch should be 0 behind, 1+ ahead after the spec-doc commit is rebased on top.
 
 If a conflict appears in `requirements.txt`, resolve manually preserving both the CVE bumps (`cryptography 46.0.5→46.0.7`, `python-multipart 0.0.22→0.0.26`) and any new lines from main. `git rebase --continue`.
 
@@ -294,6 +294,8 @@ EOF
 ---
 
 ### Task 3: Build `scripts/reconstruct_001_baseline.py` (TDD)
+
+> **STALE — committed scripts are authoritative.** This task body was written for the original git-archaeology strategy (see "Strategy revision (2026-05-04)" at the top of this plan). The script now seeds from today's live `app.models`, not from `d6ffe05d`. Code listings, expected stdout, and the `BASELINE_COMMIT` constant in this task no longer match `scripts/reconstruct_001_baseline.py` at HEAD. Read for design intent only.
 
 **Files:**
 - Create: `scripts/reconstruct_001_baseline.py`
@@ -833,11 +835,13 @@ EOF
 
 ### Task 4: Build `scripts/validate_001_against_chain.py` (TDD)
 
+> **STALE — committed scripts are authoritative.** This task body predates the live-models pivot AND a subsequent fix to `walk_migration_ops` (see commit `7af6e7ac`: validator now walks only `def upgrade()` to avoid BFS-ordering false positives from idempotent-guarded upgrades vs. bare downgrade ops). Code listings here may not match `scripts/validate_001_against_chain.py` at HEAD. Read for design intent only.
+
 **Files:**
 - Create: `scripts/validate_001_against_chain.py`
 - Test: `tests/scripts/test_validate_001_against_chain.py`
 
-This walks every migration after 001 and asserts every operation references something the schema model already contains. Heart of the hybrid (a+b) strategy.
+This walks every migration after 001 and asserts every operation references something the schema model already contains. Heart of the live-models + chain validator strategy.
 
 - [ ] **Step 1: Write the failing tests (schema-model class + walker)**
 
@@ -1226,8 +1230,8 @@ feat(alembic): add 001-vs-chain validator
 scripts/validate_001_against_chain.py walks every migration after 001 in
 revision order via alembic.ScriptDirectory, AST-parses each, and asserts
 every op.alter/op.drop/op.add/op.rename references something the seeded
-schema model contains. Non-zero exit on gap. Heart of the hybrid (a+b)
-reconstruction strategy.
+schema model contains. Non-zero exit on gap. Heart of the live-models
++ chain validator reconstruction strategy.
 
 Co-Authored-By: Claude Opus 4.7 (1M context) <noreply@anthropic.com>
 EOF
@@ -1237,6 +1241,8 @@ EOF
 ---
 
 ### Task 5: Run reconstruction — produce draft 001
+
+> **STALE — committed scripts are authoritative.** Expected stdout in this task ("checking out d6ffe05d models...") was written for the abandoned git-archaeology path. The current script prints "running Base.metadata.create_all() from live app.models against ephemeral DB" and produces an ~85-table draft. The reconstruction has already been run once on 2026-05-04; the draft sits at `alembic/versions/001_initial_schema.py.draft` awaiting Task 6 gap triage. Re-run only if the draft is regenerated from scratch.
 
 **Files:**
 - Create: `alembic/versions/001_initial_schema.py.draft` (uncommitted intermediate; deleted before final commit)
@@ -1869,7 +1875,7 @@ Expected: most recent run is green. If not — diagnose; the Phase 4 PRs are mos
 
 **Spec coverage:**
 - ✅ "Rewrite 001 as explicit DDL" → Tasks 5, 6, 7
-- ✅ "Hybrid (a+b) reconstruction strategy" → Tasks 3, 4 (tooling) + Tasks 5, 6 (execution)
+- ✅ "Live-models + chain validator reconstruction strategy" → Tasks 3, 4 (tooling) + Tasks 5, 6 (execution)
 - ✅ "Symmetric reverse drops" → reconstruct script's `downgrade()` emitter (Task 3 step 3)
 - ✅ "Round trip + Base.metadata diff smoke test" → Task 8 (CI wiring) + Task 2 (the diff script)
 - ✅ "Fresh-DB only, prod stamped at HEAD untouched" → Task 1 step 4 (pre-merge check) + Task 13 step 2 (PR body) + post-merge verification noted in PR test plan
