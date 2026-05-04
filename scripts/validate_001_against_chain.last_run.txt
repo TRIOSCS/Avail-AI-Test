@@ -1,0 +1,207 @@
+validate_001_against_chain — baseline: alembic/versions/001_initial_schema.py.draft
+  walked 129 migrations after 001
+  found 203 gap(s)
+
+  [003_perf_fk_indexes_dedup.py] create_index(buy_plans) — target table 'buy_plans' not in model
+  [003_perf_fk_indexes_dedup.py] create_index(buy_plans) — target table 'buy_plans' not in model
+  [003_perf_fk_indexes_dedup.py] create_index(buy_plans) — target table 'buy_plans' not in model
+  [003_perf_fk_indexes_dedup.py] create_index(error_reports) — target table 'error_reports' not in model
+  [003_perf_fk_indexes_dedup.py] drop_index(error_reports) — target table 'error_reports' not in model
+  [003_perf_fk_indexes_dedup.py] drop_index(buy_plans) — target table 'buy_plans' not in model
+  [003_perf_fk_indexes_dedup.py] drop_index(buy_plans) — target table 'buy_plans' not in model
+  [003_perf_fk_indexes_dedup.py] drop_index(buy_plans) — target table 'buy_plans' not in model
+  [003_perf_fk_indexes_dedup.py] create_index(buy_plans) — target table 'buy_plans' not in model
+  [005_add_ai_prompt.py] add_column(error_reports) — target table 'error_reports' not in model
+  [005_add_ai_prompt.py] drop_column(error_reports) — target table 'error_reports' not in model
+  [043_unify_ticket_tables.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] create_index(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] drop_index(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [043_unify_ticket_tables.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [049_reconcile_schema_drift.py] drop_index(inventory_snapshots) — target table 'inventory_snapshots' not in model
+  [049_reconcile_schema_drift.py] drop_index(inventory_snapshots) — target table 'inventory_snapshots' not in model
+  [049_reconcile_schema_drift.py] drop_table(inventory_snapshots) — target table 'inventory_snapshots' not in model
+  [049_reconcile_schema_drift.py] drop_column(material_cards.sf_material_id) — column 'sf_material_id' not in 'material_cards'
+  [049_reconcile_schema_drift.py] drop_column(requirements.sf_req_item_id) — column 'sf_req_item_id' not in 'requirements'
+  [049_reconcile_schema_drift.py] drop_column(requisitions.sf_requisition_id) — column 'sf_requisition_id' not in 'requisitions'
+  [049_reconcile_schema_drift.py] drop_column(vendor_cards.acctivate_vendor_id) — column 'acctivate_vendor_id' not in 'vendor_cards'
+  [049_reconcile_schema_drift.py] drop_column(vendor_cards.acctivate_last_order_date) — column 'acctivate_last_order_date' not in 'vendor_cards'
+  [049_reconcile_schema_drift.py] drop_column(vendor_cards.acctivate_total_units) — column 'acctivate_total_units' not in 'vendor_cards'
+  [049_reconcile_schema_drift.py] drop_column(vendor_cards.acctivate_total_orders) — column 'acctivate_total_orders' not in 'vendor_cards'
+  [049_reconcile_schema_drift.py] drop_column(vendor_cards.sf_account_id) — column 'sf_account_id' not in 'vendor_cards'
+  [049_reconcile_schema_drift.py] drop_column(vendor_cards.last_synced_at) — column 'last_synced_at' not in 'vendor_cards'
+  [049_reconcile_schema_drift.py] drop_column(material_vendor_history.acctivate_last_price) — column 'acctivate_last_price' not in 'material_vendor_history'
+  [049_reconcile_schema_drift.py] drop_column(material_vendor_history.acctivate_rma_rate) — column 'acctivate_rma_rate' not in 'material_vendor_history'
+  [049_reconcile_schema_drift.py] drop_column(material_vendor_history.acctivate_last_date) — column 'acctivate_last_date' not in 'material_vendor_history'
+  [049_reconcile_schema_drift.py] drop_index(buy_plans) — target table 'buy_plans' not in model
+  [049_reconcile_schema_drift.py] drop_index(buy_plans) — target table 'buy_plans' not in model
+  [049_reconcile_schema_drift.py] drop_index(buy_plans) — target table 'buy_plans' not in model
+  [049_reconcile_schema_drift.py] create_index(buy_plans) — target table 'buy_plans' not in model
+  [049_reconcile_schema_drift.py] drop_index(error_reports) — target table 'error_reports' not in model
+  [049_reconcile_schema_drift.py] drop_index(material_card_audit) — target table 'material_card_audit' not in model
+  [049_reconcile_schema_drift.py] drop_index(material_card_audit) — target table 'material_card_audit' not in model
+  [049_reconcile_schema_drift.py] drop_index(notifications) — target table 'notifications' not in model
+  [049_reconcile_schema_drift.py] create_index(notifications) — target table 'notifications' not in model
+  [049_reconcile_schema_drift.py] drop_index(notifications) — target table 'notifications' not in model
+  [049_reconcile_schema_drift.py] create_index(notifications) — target table 'notifications' not in model
+  [049_reconcile_schema_drift.py] create_index(material_card_audit) — target table 'material_card_audit' not in model
+  [049_reconcile_schema_drift.py] create_index(material_card_audit) — target table 'material_card_audit' not in model
+  [049_reconcile_schema_drift.py] create_index(error_reports) — target table 'error_reports' not in model
+  [049_reconcile_schema_drift.py] drop_index(buy_plans) — target table 'buy_plans' not in model
+  [049_reconcile_schema_drift.py] create_index(buy_plans) — target table 'buy_plans' not in model
+  [049_reconcile_schema_drift.py] create_index(buy_plans) — target table 'buy_plans' not in model
+  [049_reconcile_schema_drift.py] create_index(buy_plans) — target table 'buy_plans' not in model
+  [050_increase_notification_title_to_500.py] alter_column(notifications) — target table 'notifications' not in model
+  [050_increase_notification_title_to_500.py] alter_column(notifications) — target table 'notifications' not in model
+  [053_ticket_refinement_columns.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [053_ticket_refinement_columns.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [053_ticket_refinement_columns.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [053_ticket_refinement_columns.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [053_ticket_refinement_columns.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [053_ticket_refinement_columns.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [053_ticket_refinement_columns.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [053_ticket_refinement_columns.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [053_ticket_refinement_columns.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [053_ticket_refinement_columns.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [053_ticket_refinement_columns.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [053_ticket_refinement_columns.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [062_notification_intelligence.py] add_column(teams_alert_config) — target table 'teams_alert_config' not in model
+  [062_notification_intelligence.py] add_column(teams_alert_config) — target table 'teams_alert_config' not in model
+  [062_notification_intelligence.py] add_column(teams_alert_config) — target table 'teams_alert_config' not in model
+  [062_notification_intelligence.py] add_column(teams_alert_config) — target table 'teams_alert_config' not in model
+  [062_notification_intelligence.py] add_column(teams_notification_log) — target table 'teams_notification_log' not in model
+  [062_notification_intelligence.py] add_column(teams_notification_log) — target table 'teams_notification_log' not in model
+  [062_notification_intelligence.py] add_column(teams_notification_log) — target table 'teams_notification_log' not in model
+  [062_notification_intelligence.py] add_column(teams_notification_log) — target table 'teams_notification_log' not in model
+  [062_notification_intelligence.py] drop_column(teams_notification_log) — target table 'teams_notification_log' not in model
+  [062_notification_intelligence.py] drop_column(teams_notification_log) — target table 'teams_notification_log' not in model
+  [062_notification_intelligence.py] drop_column(teams_notification_log) — target table 'teams_notification_log' not in model
+  [062_notification_intelligence.py] drop_column(teams_notification_log) — target table 'teams_notification_log' not in model
+  [062_notification_intelligence.py] drop_column(teams_alert_config) — target table 'teams_alert_config' not in model
+  [062_notification_intelligence.py] drop_column(teams_alert_config) — target table 'teams_alert_config' not in model
+  [062_notification_intelligence.py] drop_column(teams_alert_config) — target table 'teams_alert_config' not in model
+  [062_notification_intelligence.py] drop_column(teams_alert_config) — target table 'teams_alert_config' not in model
+  [064_teams_qa_routing.py] add_column(knowledge_entries) — target table 'knowledge_entries' not in model
+  [064_teams_qa_routing.py] add_column(knowledge_entries) — target table 'knowledge_entries' not in model
+  [064_teams_qa_routing.py] add_column(knowledge_entries) — target table 'knowledge_entries' not in model
+  [064_teams_qa_routing.py] add_column(teams_alert_config) — target table 'teams_alert_config' not in model
+  [064_teams_qa_routing.py] drop_column(teams_alert_config) — target table 'teams_alert_config' not in model
+  [064_teams_qa_routing.py] drop_column(knowledge_entries) — target table 'knowledge_entries' not in model
+  [064_teams_qa_routing.py] drop_column(knowledge_entries) — target table 'knowledge_entries' not in model
+  [064_teams_qa_routing.py] drop_column(knowledge_entries) — target table 'knowledge_entries' not in model
+  [073_add_task_completion_note.py] add_column(requisition_tasks) — target table 'requisition_tasks' not in model
+  [073_add_task_completion_note.py] create_index(requisition_tasks) — target table 'requisition_tasks' not in model
+  [073_add_task_completion_note.py] drop_index(requisition_tasks) — target table 'requisition_tasks' not in model
+  [073_add_task_completion_note.py] drop_column(requisition_tasks) — target table 'requisition_tasks' not in model
+  [075_add_approval_token_to_buy_plans_v3.py] add_column(buy_plans_v3) — target table 'buy_plans_v3' not in model
+  [075_add_approval_token_to_buy_plans_v3.py] add_column(buy_plans_v3) — target table 'buy_plans_v3' not in model
+  [075_add_approval_token_to_buy_plans_v3.py] create_index(buy_plans_v3) — target table 'buy_plans_v3' not in model
+  [075_add_approval_token_to_buy_plans_v3.py] drop_index(buy_plans_v3) — target table 'buy_plans_v3' not in model
+  [075_add_approval_token_to_buy_plans_v3.py] drop_column(buy_plans_v3) — target table 'buy_plans_v3' not in model
+  [075_add_approval_token_to_buy_plans_v3.py] drop_column(buy_plans_v3) — target table 'buy_plans_v3' not in model
+  [080_add_requirement_id_to_tasks_and_column_prefs.py] add_column(requisition_tasks) — target table 'requisition_tasks' not in model
+  [080_add_requirement_id_to_tasks_and_column_prefs.py] create_index(requisition_tasks) — target table 'requisition_tasks' not in model
+  [080_add_requirement_id_to_tasks_and_column_prefs.py] drop_index(requisition_tasks) — target table 'requisition_tasks' not in model
+  [080_add_requirement_id_to_tasks_and_column_prefs.py] drop_column(requisition_tasks) — target table 'requisition_tasks' not in model
+  [8e2994d58df3_drop_material_spec_conflicts_table.py] drop_table(material_spec_conflicts) — target table 'material_spec_conflicts' not in model
+  [04423c49a688_clean_up_material_spec_facets_indexes.py] drop_index(material_spec_facets) — target table 'material_spec_facets' not in model
+  [04423c49a688_clean_up_material_spec_facets_indexes.py] drop_index(material_spec_facets) — target table 'material_spec_facets' not in model
+  [04423c49a688_clean_up_material_spec_facets_indexes.py] drop_index(material_spec_facets) — target table 'material_spec_facets' not in model
+  [04423c49a688_clean_up_material_spec_facets_indexes.py] create_index(material_spec_facets) — target table 'material_spec_facets' not in model
+  [04423c49a688_clean_up_material_spec_facets_indexes.py] drop_index(material_spec_facets) — target table 'material_spec_facets' not in model
+  [04423c49a688_clean_up_material_spec_facets_indexes.py] create_index(material_spec_facets) — target table 'material_spec_facets' not in model
+  [04423c49a688_clean_up_material_spec_facets_indexes.py] create_index(material_spec_facets) — target table 'material_spec_facets' not in model
+  [04423c49a688_clean_up_material_spec_facets_indexes.py] create_index(material_spec_facets) — target table 'material_spec_facets' not in model
+  [c19a184db289_add_demand_match_count_to_excess_line_.py] add_column(excess_line_items) — target table 'excess_line_items' not in model
+  [c19a184db289_add_demand_match_count_to_excess_line_.py] drop_column(excess_line_items) — target table 'excess_line_items' not in model
+  [d1a2b3c4e5f6_add_excess_phase4_columns.py] drop_index(excess_line_items) — target table 'excess_line_items' not in model
+  [d1a2b3c4e5f6_add_excess_phase4_columns.py] drop_column(excess_line_items) — target table 'excess_line_items' not in model
+  [d1a2b3c4e5f6_add_excess_phase4_columns.py] add_column(excess_line_items) — target table 'excess_line_items' not in model
+  [d1a2b3c4e5f6_add_excess_phase4_columns.py] create_index(excess_line_items) — target table 'excess_line_items' not in model
+  [8aad37e73b45_add_req_offer_user_columns.py] drop_column(users.offers_column_prefs) — column 'offers_column_prefs' not in 'users'
+  [8aad37e73b45_add_req_offer_user_columns.py] drop_column(users.requirements_column_prefs) — column 'requirements_column_prefs' not in 'users'
+  [5c6736d6381f_add_screenshot_path_ai_summary_root_.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [5c6736d6381f_add_screenshot_path_ai_summary_root_.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [5c6736d6381f_add_screenshot_path_ai_summary_root_.py] add_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [5c6736d6381f_add_screenshot_path_ai_summary_root_.py] create_foreign_key(trouble_tickets) — target table 'trouble_tickets' not in model
+  [5c6736d6381f_add_screenshot_path_ai_summary_root_.py] drop_constraint(trouble_tickets) — target table 'trouble_tickets' not in model
+  [5c6736d6381f_add_screenshot_path_ai_summary_root_.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [5c6736d6381f_add_screenshot_path_ai_summary_root_.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [5c6736d6381f_add_screenshot_path_ai_summary_root_.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [b7e2a1f3c4d5_add_ticket_indexes.py] create_index(trouble_tickets) — target table 'trouble_tickets' not in model
+  [b7e2a1f3c4d5_add_ticket_indexes.py] create_index(root_cause_groups) — target table 'root_cause_groups' not in model
+  [b7e2a1f3c4d5_add_ticket_indexes.py] drop_index(root_cause_groups) — target table 'root_cause_groups' not in model
+  [b7e2a1f3c4d5_add_ticket_indexes.py] drop_index(trouble_tickets) — target table 'trouble_tickets' not in model
+  [b7e2a4c91f35_add_unique_constraint_on_site_contacts_and_non_nullable_count_columns.py] alter_column(companies.site_count) — column 'site_count' not in 'companies'
+  [b7e2a4c91f35_add_unique_constraint_on_site_contacts_and_non_nullable_count_columns.py] alter_column(companies.open_req_count) — column 'open_req_count' not in 'companies'
+  [b7e2a4c91f35_add_unique_constraint_on_site_contacts_and_non_nullable_count_columns.py] alter_column(companies.site_count) — column 'site_count' not in 'companies'
+  [b7e2a4c91f35_add_unique_constraint_on_site_contacts_and_non_nullable_count_columns.py] alter_column(companies.open_req_count) — column 'open_req_count' not in 'companies'
+  [4724fcfde85e_float_to_numeric_indexes_ondelete.py] alter_column(proactive_matches.customer_last_price) — column 'customer_last_price' not in 'proactive_matches'
+  [4724fcfde85e_float_to_numeric_indexes_ondelete.py] alter_column(proactive_matches.our_cost) — column 'our_cost' not in 'proactive_matches'
+  [4724fcfde85e_float_to_numeric_indexes_ondelete.py] alter_column(material_price_snapshots) — target table 'material_price_snapshots' not in model
+  [4724fcfde85e_float_to_numeric_indexes_ondelete.py] create_index(nc_search_log) — target table 'nc_search_log' not in model
+  [4724fcfde85e_float_to_numeric_indexes_ondelete.py] create_index(notifications) — target table 'notifications' not in model
+  [4724fcfde85e_float_to_numeric_indexes_ondelete.py] drop_index(notifications) — target table 'notifications' not in model
+  [4724fcfde85e_float_to_numeric_indexes_ondelete.py] drop_index(nc_search_log) — target table 'nc_search_log' not in model
+  [4724fcfde85e_float_to_numeric_indexes_ondelete.py] alter_column(material_price_snapshots) — target table 'material_price_snapshots' not in model
+  [4724fcfde85e_float_to_numeric_indexes_ondelete.py] alter_column(proactive_matches.our_cost) — column 'our_cost' not in 'proactive_matches'
+  [4724fcfde85e_float_to_numeric_indexes_ondelete.py] alter_column(proactive_matches.customer_last_price) — column 'customer_last_price' not in 'proactive_matches'
+  [d2bea118f720_fix_remaining_ondelete_server_default_.py] alter_column(proactive_matches.margin_pct) — column 'margin_pct' not in 'proactive_matches'
+  [d2bea118f720_fix_remaining_ondelete_server_default_.py] alter_column(proactive_matches.margin_pct) — column 'margin_pct' not in 'proactive_matches'
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] create_index(excess_line_items) — target table 'excess_line_items' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] create_index(excess_line_items) — target table 'excess_line_items' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] drop_constraint(manufacturers) — target table 'manufacturers' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] create_index(quote_lines) — target table 'quote_lines' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] add_column(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] add_column(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] add_column(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] add_column(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] add_column(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] create_index(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] create_index(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] create_foreign_key(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] drop_constraint(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] drop_index(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] drop_index(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] drop_column(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] drop_column(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] drop_column(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] drop_column(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] drop_column(vendor_sighting_summary) — target table 'vendor_sighting_summary' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] drop_index(quote_lines) — target table 'quote_lines' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] create_unique_constraint(manufacturers) — target table 'manufacturers' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] drop_index(excess_line_items) — target table 'excess_line_items' not in model
+  [838cd7ddccf1_add_vendor_card_id_and_pre_aggregated_.py] drop_index(excess_line_items) — target table 'excess_line_items' not in model
+  [8c22bd2f6837_add_check_constraints_on_status_and_numeric_columns.py] create_check_constraint(buy_plans_v3) — target table 'buy_plans_v3' not in model
+  [8c22bd2f6837_add_check_constraints_on_status_and_numeric_columns.py] drop_constraint(buy_plans_v3) — target table 'buy_plans_v3' not in model
+  [a3f9c1d82e47_drop_dead_tables.py] drop_table(error_reports) — target table 'error_reports' not in model
+  [a3f9c1d82e47_drop_dead_tables.py] drop_table(reactivation_signals) — target table 'reactivation_signals' not in model
+  [a3f9c1d82e47_drop_dead_tables.py] drop_table(ics_classification_cache) — target table 'ics_classification_cache' not in model
+  [a3f9c1d82e47_drop_dead_tables.py] drop_table(nc_classification_cache) — target table 'nc_classification_cache' not in model
+  [a3f9c1d82e47_drop_dead_tables.py] drop_table(teams_notification_log) — target table 'teams_notification_log' not in model
+  [a3f9c1d82e47_drop_dead_tables.py] drop_table(teams_alert_config) — target table 'teams_alert_config' not in model
+  [a3f9c1d82e47_drop_dead_tables.py] drop_table(risk_flags) — target table 'risk_flags' not in model
+  [a3f9c1d82e47_drop_dead_tables.py] drop_column(trouble_tickets) — target table 'trouble_tickets' not in model
+  [084_add_description_to_quote_lines_and_excess.py] add_column(quote_lines) — target table 'quote_lines' not in model
+  [084_add_description_to_quote_lines_and_excess.py] add_column(excess_line_items) — target table 'excess_line_items' not in model
+  [084_add_description_to_quote_lines_and_excess.py] drop_column(excess_line_items) — target table 'excess_line_items' not in model
+  [084_add_description_to_quote_lines_and_excess.py] drop_column(quote_lines) — target table 'quote_lines' not in model
