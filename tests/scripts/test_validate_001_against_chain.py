@@ -113,3 +113,82 @@ def test_walk_migration_ops_skips_migrations_without_upgrade(tmp_path):
     gaps = walk_migration_ops(m, [mig])
     assert gaps == []
     assert m.has_table("users"), "downgrade()'s drop_table should be ignored"
+
+
+def test_walk_migration_ops_create_index_resolves_table_at_arg_1(tmp_path):
+    """`op.create_index('ix_name', 'table', cols)` puts the table at arg 1, not arg 0.
+
+    Bug class: an earlier validator version resolved arg 0 ('ix_name') as
+    the table name and then flagged 'ix_name' as missing from the model.
+    The dispatch must look at arg 1 for create_index.
+    """
+    # Known table — must NOT gap.
+    mig_ok = tmp_path / "002_create_index_known.py"
+    mig_ok.write_text("def upgrade():\n    op.create_index('ix_users_email', 'users', ['email'])\n")
+    m = SchemaModel()
+    m.add_table("users", ["id", "email"])
+    gaps = walk_migration_ops(m, [mig_ok])
+    assert gaps == [], f"create_index against known table should not gap; got {gaps}"
+
+    # Unknown table — must gap on the table name (arg 1), not the index name (arg 0).
+    mig_bad = tmp_path / "002_create_index_unknown.py"
+    mig_bad.write_text("def upgrade():\n    op.create_index('ix_ghost_email', 'ghost', ['email'])\n")
+    m2 = SchemaModel()
+    m2.add_table("users", ["id"])
+    gaps = walk_migration_ops(m2, [mig_bad])
+    assert len(gaps) == 1
+    assert gaps[0].target == "ghost", f"gap should target the table 'ghost', not the index name; got {gaps[0].target!r}"
+
+
+def test_walk_migration_ops_drop_constraint_resolves_table_via_kwarg(tmp_path):
+    """`op.drop_constraint('uq_x', table_name='users', type_='unique')` puts the table
+    only in the `table_name` kwarg.
+
+    Dispatch must read the kwarg first for drop_constraint / drop_index (the only ops
+    where table is exclusively kwarg-addressable in real alembic call sites).
+    """
+    mig = tmp_path / "002_drop_constraint.py"
+    mig.write_text("def upgrade():\n    op.drop_constraint('uq_users_email', table_name='users', type_='unique')\n")
+    m = SchemaModel()
+    m.add_table("users", ["id", "email"])
+    gaps = walk_migration_ops(m, [mig])
+    assert gaps == [], f"drop_constraint with kwarg table_name='users' should resolve; got {gaps}"
+
+    # Same op against an unknown table — must gap on the kwarg value.
+    mig_bad = tmp_path / "002_drop_constraint_unknown.py"
+    mig_bad.write_text("def upgrade():\n    op.drop_constraint('uq_x', table_name='ghost', type_='unique')\n")
+    m2 = SchemaModel()
+    m2.add_table("users", ["id"])
+    gaps = walk_migration_ops(m2, [mig_bad])
+    assert len(gaps) == 1
+    assert gaps[0].target == "ghost"
+
+
+def test_walk_migration_ops_create_foreign_key_resolves_source_table_at_arg_1(tmp_path):
+    """`op.create_foreign_key('fk_name', 'src', 'ref', ['col'], ['id'])`: source table
+    is at arg 1; ref table is at arg 2.
+
+    The validator only checks the source table exists in the model
+    (the ref table is checked transitively via the FK column on src).
+    Bug class: earlier code resolved arg 0 ('fk_name') as the source.
+    """
+    mig = tmp_path / "002_create_fk.py"
+    mig.write_text(
+        "def upgrade():\n    op.create_foreign_key('fk_orders_user', 'orders', 'users', ['user_id'], ['id'])\n"
+    )
+    m = SchemaModel()
+    m.add_table("users", ["id"])
+    m.add_table("orders", ["id", "user_id"])
+    gaps = walk_migration_ops(m, [mig])
+    assert gaps == [], f"create_foreign_key against known src/ref should not gap; got {gaps}"
+
+    # Unknown source table — must gap on 'orders' (arg 1), not 'fk_name' (arg 0).
+    mig_bad = tmp_path / "002_create_fk_unknown.py"
+    mig_bad.write_text(
+        "def upgrade():\n    op.create_foreign_key('fk_x', 'ghost_orders', 'users', ['user_id'], ['id'])\n"
+    )
+    m2 = SchemaModel()
+    m2.add_table("users", ["id"])
+    gaps = walk_migration_ops(m2, [mig_bad])
+    assert len(gaps) == 1
+    assert gaps[0].target == "ghost_orders"
