@@ -2,9 +2,17 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Rewrite `alembic/versions/001_initial_schema.py` from `Base.metadata.create_all()` to an explicit `op.create_table()` snapshot of the Feb-2026 schema, validated against the forward migration chain. Fix CI red on `main`, then walk the 6 stacked Phase 4 PRs through the merge gauntlet so the backlog clears and `main` CI is green end-to-end.
+**Goal:** Rewrite `alembic/versions/001_initial_schema.py` from `Base.metadata.create_all()` to an explicit `op.create_table()` snapshot covering every table the migration chain (002+) references, validated against the forward chain. Fix CI red on `main`, then walk the 6 stacked Phase 4 PRs through the merge gauntlet so the backlog clears and `main` CI is green end-to-end.
 
-**Architecture:** Hybrid reconstruction strategy: (a) git-archaeology of commit `d6ffe05d` produces first-draft DDL via ephemeral Postgres + `pg_dump`; (b) a validator walks every migration after 001 and asserts each `op.alter`/`op.drop`/`op.add` references something in the draft. Iterate until the validator is clean. Add a CI step that runs `alembic.autogenerate.compare_metadata` against `Base.metadata` to catch ongoing drift. Same `revision = "001_initial"` ID — prod is untouched.
+**Architecture:** Live-models + chain-validator strategy (revised 2026-05-04, see "Strategy revision" below): (a) `Base.metadata.create_all()` from today's `app.models` against an ephemeral Postgres → `pg_dump --schema-only` → transcribe to explicit `op.create_table()` calls; (b) the validator walks every migration after 001 and reports every `op.alter`/`op.drop`/`op.add` whose target isn't in the draft. Triage each gap by adding back the historical table/column the chain still references. Add a CI step that runs `alembic.autogenerate.compare_metadata` against `Base.metadata` to catch ongoing drift. Same `revision = "001_initial"` ID — prod is untouched.
+
+## Strategy revision (2026-05-04)
+
+The original plan called for git-archaeology of commit `d6ffe05d` to seed the first-draft DDL. That commit's `app/models.py` declared ~28 tables, but the migration chain (002–130) collectively touches ~94 tables (today's 84 + ~10 since-removed). A 28-table seed would have surfaced ~60 missing tables in the validator (a much heavier triage burden) than starting from today's models. The strategy was switched to live-models seeding before the script was first run; the script and validator at HEAD on `fix/ci-unblock-alembic-and-audit` implement the live-models path.
+
+**One-shot validator outcome (2026-05-04):** 129 migrations walked, **203 gaps**. Concentrated in 5 since-removed tables (`buy_plans`, `error_reports`, `trouble_tickets`, `inventory_snapshots`, `material_card_audit`) and ~10 since-removed columns. These are the historical objects that need to be added back to 001 as part of Task 6 Step 2 (gap triage).
+
+**Code listings below were written for the original git-archaeology approach.** Where they diverge from `scripts/reconstruct_001_baseline.py` and `scripts/validate_001_against_chain.py` at HEAD, **the committed scripts are authoritative.** Tasks 2, 3, 4 (script-creation tasks) are effectively complete — their committed outputs are in place. The active task is Task 6 Step 2 (gap triage).
 
 **Tech Stack:** SQLAlchemy 2.0.48, Alembic 1.18.4, Postgres 16, Python 3.11+, pytest, ruff, mypy. Existing CI workflow at `.github/workflows/ci.yml` already provisions a Postgres service and runs the round trip — we extend that step.
 
@@ -18,16 +26,16 @@
 
 | File | Status | Responsibility |
 |---|---|---|
-| `alembic/versions/001_initial_schema.py` | **Replace body** | Explicit `op.create_table()` / `op.create_index()` / `op.create_foreign_key()` snapshot of Feb-2026 schema. Symmetric `downgrade()`. Same `revision = "001_initial"`. |
-| `scripts/reconstruct_001_baseline.py` | **Create** | Dev tool: checks out `d6ffe05d`-era models, runs `Base.metadata.create_all()` against an ephemeral Postgres container, captures `pg_dump --schema-only`, emits a draft `op.create_table()` body. Runnable, idempotent (tears down its own container). |
-| `scripts/validate_001_against_chain.py` | **Create** | Dev tool: builds an in-memory schema model from the draft 001, walks every later migration in revision order, asserts every `op.alter_table`/`op.drop_*`/`op.add_*`/`op.alter_column`/`op.rename_table` references something the model already contains. Emits structured gap report. Exit non-zero on gaps. |
-| `scripts/validate_001_against_chain.last_run.txt` | **Create** | Validation evidence: the clean output of the validator's final run. Committed so reviewers can see the validation actually passed. |
-| `scripts/check_schema_matches_models.py` | **Create** | Dev + CI tool: connects to `DATABASE_URL`, runs `alembic.autogenerate.compare_metadata(MigrationContext, Base.metadata)`, asserts the diff list is empty modulo a documented allowlist. Exit 0 on match, exit 1 on drift. |
-| `tests/scripts/test_check_schema_matches_models.py` | **Create** | Unit tests for the diff comparator + allowlist filtering. |
-| `tests/scripts/test_validate_001_against_chain.py` | **Create** | Unit tests for the schema-model class (add_table, drop_table, add_column, etc.) and integration tests against tiny synthetic migration directories. |
-| `tests/scripts/test_reconstruct_001_baseline.py` | **Create** | Unit tests for the SQL→`op.create_table()` translator (the parsing portion is the only safely testable part without spinning Postgres). |
+| `alembic/versions/001_initial_schema.py` | **Replace body** | Explicit `op.create_table()` / `op.create_index()` / `op.create_foreign_key()` calls covering every table the chain (002+) references — today's 84 + the 5 since-removed historical tables. Symmetric `downgrade()`. Same `revision = "001_initial"`. |
+| `scripts/reconstruct_001_baseline.py` | **Done (committed)** | Dev tool: runs `Base.metadata.create_all()` from today's `app.models` against an ephemeral Postgres container, captures `pg_dump --schema-only`, emits a draft `op.create_table()` body. Runnable, idempotent (tears down its own container). |
+| `scripts/validate_001_against_chain.py` | **Done (committed)** | Dev tool: builds an in-memory schema model from the draft 001, walks every later migration in revision order, asserts every `op.alter_table`/`op.drop_*`/`op.add_*`/`op.alter_column`/`op.rename_table` references something the model already contains. Emits structured gap report. Exit non-zero on gaps. |
+| `scripts/validate_001_against_chain.last_run.txt` | **Generated, committed at the end of Task 6** | Validation evidence: the clean output of the validator's final run. The 2026-05-04 first-pass output (203 gaps) is the triage input for Task 6 Step 2 — the *clean* output gets committed once triage is done. |
+| `scripts/check_schema_matches_models.py` | **Done (committed)** | Dev + CI tool: connects to `DATABASE_URL`, runs `alembic.autogenerate.compare_metadata(MigrationContext, Base.metadata)`, asserts the diff list is empty modulo a documented allowlist. Exit 0 on match, exit 1 on drift. |
+| `tests/scripts/test_check_schema_matches_models.py` | **Done (committed)** | Unit tests for the diff comparator + allowlist filtering. |
+| `tests/scripts/test_validate_001_against_chain.py` | **Done (committed)** | Unit tests for the schema-model class (add_table, drop_table, add_column, etc.) and integration tests against tiny synthetic migration directories. |
+| `tests/scripts/test_reconstruct_001_baseline.py` | **Done (committed)** | Unit tests for the SQL→`op.create_table()` translator (the parsing portion is the only safely testable part without spinning Postgres). |
 | `.github/workflows/ci.yml` | **Modify** | Extend the existing `Alembic upgrade/downgrade smoke test` step to invoke `scripts/check_schema_matches_models.py` between `upgrade head` and `downgrade base`. |
-| `requirements.txt` | **Already modified on branch** | CVE bumps already in working tree — preserved, committed in its own commit on the branch. |
+| `requirements.txt` | **Already modified on branch (uncommitted)** | CVE bumps in working tree — `cryptography 46.0.5→46.0.7`, `python-multipart 0.0.22→0.0.26`. Committed in its own commit per Task 12. |
 
 ---
 
@@ -1409,9 +1417,13 @@ fix(alembic): rewrite 001 baseline as explicit DDL snapshot
 
 Replaces the 39-line Base.metadata.create_all() body with explicit
 op.create_table() / op.create_index() / op.create_foreign_key() calls
-reflecting the schema as-of the Feb-2026 baseline commit d6ffe05d.
-Generated by scripts/reconstruct_001_baseline.py and validated against
-all later migrations by scripts/validate_001_against_chain.py.
+covering today's app.models tables plus the historical tables/columns
+that migrations 002+ still reference (buy_plans, error_reports,
+trouble_tickets, inventory_snapshots, material_card_audit, plus a
+handful of since-removed columns). Generated by
+scripts/reconstruct_001_baseline.py (Base.metadata.create_all from
+live models against ephemeral postgres) and validated against all
+later migrations by scripts/validate_001_against_chain.py.
 
 Same revision = "001_initial" — production stays stamped at HEAD,
 the new upgrade() body never runs there. Fresh-DB-only semantics.
@@ -1666,7 +1678,7 @@ Root cause: `alembic/versions/001_initial_schema.py` used `Base.metadata.create_
 ## What changed
 
 - `alembic/versions/001_initial_schema.py` — replaced 39 lines of `create_all()` with explicit `op.create_table()` / `op.create_index()` / `op.create_foreign_key()` calls. Symmetric `downgrade()`. Same `revision = "001_initial"` — **prod stays stamped at HEAD; the new upgrade body never runs there**.
-- `scripts/reconstruct_001_baseline.py` — committed dev tool that regenerates the body from `d6ffe05d` via ephemeral Postgres + `pg_dump`.
+- `scripts/reconstruct_001_baseline.py` — committed dev tool that regenerates the body from today's `app.models` via `Base.metadata.create_all()` against ephemeral Postgres + `pg_dump` (live-models strategy; see spec §"Reconstruction strategy revision").
 - `scripts/validate_001_against_chain.py` — committed dev tool that walks every later migration and asserts every op.* references something the seeded model contains.
 - `scripts/validate_001_against_chain.last_run.txt` — clean validator output (proof the chain references resolve).
 - `scripts/check_schema_matches_models.py` — committed dev + CI tool that runs `alembic.autogenerate.compare_metadata` against `Base.metadata` and exits non-zero on drift.
@@ -1675,7 +1687,7 @@ Root cause: `alembic/versions/001_initial_schema.py` used `Base.metadata.create_
 
 ## Reconstruction provenance
 
-- Strategy: hybrid (a) git-archaeology of `d6ffe05d` + (b) forward-chain validation of every later migration.
+- Strategy: live-models seeding (`Base.metadata.create_all()` from today's `app.models`) + forward-chain validation of every later migration. Historical tables/columns no longer in live models are added back during gap triage (Task 6 Step 2). See spec §"Reconstruction strategy revision".
 - See spec: `docs/superpowers/specs/2026-04-30-alembic-001-baseline-rewrite-design.md`.
 - Validator output: `scripts/validate_001_against_chain.last_run.txt` (re-runnable via `python scripts/validate_001_against_chain.py`).
 

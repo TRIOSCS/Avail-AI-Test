@@ -1,10 +1,20 @@
 # Alembic Migration 001 — Explicit-DDL Baseline Rewrite
 
 **Status:** Design approved. Awaiting user review of written spec, then writing-plans.
-**Date:** 2026-04-30
+**Date:** 2026-04-30 (revised 2026-05-04 — reconstruction strategy switched from git-archaeology to live-models; see "Reconstruction strategy revision" below)
 **Branch:** `fix/ci-unblock-alembic-and-audit`
 **Drives PR:** Single cohesive "unblock CI" PR containing the 001 rewrite + already-staged CVE bumps.
 **Origin:** Brainstorm started 2026-04-23, paused at reconstruction-strategy question, resumed and completed 2026-04-30.
+
+## Reconstruction strategy revision (2026-05-04)
+
+The original strategy (git-archaeology of commit `d6ffe05d`) was abandoned during execution. `git ls-tree -r d6ffe05d -- app/models.py` shows that commit's `app/models.py` declared ~28 tables. Migrations 002–130 collectively touch ~94 tables (today's 84 + ~10 since-removed). Starting from the 28-table d6ffe05d snapshot would surface ~60 missing tables in the validator (a much heavier triage burden than starting from today's models). Starting from today's live `app.models` (84 tables) and letting the validator surface only the ~10 since-removed tables/columns minimizes the triage workload while still satisfying the chain.
+
+**The new strategy:** run `Base.metadata.create_all()` from today's live `app.models` against an ephemeral Postgres container, capture `pg_dump --schema-only`, transcribe to explicit `op.create_table()` calls. Then walk migrations 002–130 with the validator and add back any historical tables/columns the chain references (buy_plans, error_reports, trouble_tickets, inventory_snapshots, material_card_audit, plus ~10 since-dropped columns).
+
+**Validator outcome (one-shot run):** 129 migrations walked, **203 gaps reported** — these are the historical tables/columns that need to be added back to 001 in Task 6 Step 2 triage. Concentrated in 5 historical tables and ~10 columns (the 203 count is mostly duplicate references from many migrations to the same dropped table).
+
+This spec is preserved as the design record; sections below describing "Feb-2026 baseline commit `d6ffe05d`" / "git archaeology" reflect the original design intent. The committed `scripts/reconstruct_001_baseline.py` and `scripts/validate_001_against_chain.py` implement the live-models strategy. Where the two diverge, **the script is authoritative**.
 
 ---
 
@@ -16,7 +26,7 @@ Root cause: `alembic/versions/001_initial_schema.py` is 39 lines and uses `Base.
 
 The CI smoke test (`alembic upgrade head` → `alembic downgrade base` → `alembic upgrade head` on a fresh DB) exposes this every run.
 
-This rewrite replaces the 39-line `create_all()` body with explicit `op.create_table()` / `op.create_index()` / `op.create_foreign_key()` calls reflecting the schema as-of the Feb-2026 baseline commit. All non-001 migrations are unchanged. Production is unaffected.
+This rewrite replaces the 39-line `create_all()` body with explicit `op.create_table()` / `op.create_index()` / `op.create_foreign_key()` calls covering today's 84 model tables plus the historical tables/columns that migrations 002+ still reference (per the live-models + validator strategy — see "Reconstruction strategy revision" above). All non-001 migrations are unchanged. Production is unaffected.
 
 ---
 
@@ -24,7 +34,7 @@ This rewrite replaces the 39-line `create_all()` body with explicit `op.create_t
 
 | Decision | Choice | Rationale |
 |---|---|---|
-| Reconstruction strategy | **Hybrid (a + b)**: git archaeology to generate first-draft DDL, then validate by walking migrations 002 through end-of-chain (verified 130 migration files on `origin/main` as of 2026-04-30) | Reproducible from git AND validated against the forward chain. Highest rigor available. |
+| Reconstruction strategy | **Live-models + chain validator** (revised 2026-05-04, see "Reconstruction strategy revision" above): `Base.metadata.create_all()` from today's `app.models` → `pg_dump --schema-only` → transcribe to explicit `op.create_table()`. Then walk migrations 002 through end-of-chain (verified 130 migration files on `origin/main` as of 2026-04-30) and add back any historical tables/columns the chain references but live models no longer have. | Live models cover ~84 of ~94 tables the chain ever references; d6ffe05d would have covered only ~28. Live-models minimizes triage workload while still surfacing the ~10 since-removed tables/columns via the validator. |
 | Downgrade behavior | **Explicit `op.drop_table()` per table, reverse FK-dependency order** | Symmetric with upgrade; honors alembic convention; makes the roundtrip smoke test meaningful. |
 | Smoke test | **Round trip + `Base.metadata` diff**: fresh DB → `upgrade head` → assert `alembic.autogenerate.compare_metadata()` returns an empty diff (modulo a small documented allowlist) → `downgrade base` → `upgrade head` | Round trip alone catches missing-table failures, asymmetric drops, and non-idempotent leftovers (the bug class currently red on main). The added metadata-diff catches a second class — model/migration drift — closing the loop the no-band-aids rule depends on going forward. |
 | Prod compatibility | **Fresh-DB bootstrap only; prod stays stamped at current head and is untouched** | Prod's `alembic_version` already equals current head. The new 001 never executes there. Verified via `alembic current` pre/post deploy. |
@@ -73,20 +83,16 @@ The alembic revision ID `001_initial` does not change. The down_revision (`None`
 
 ### 1. Reconstruction script — `scripts/reconstruct_001_baseline.py`
 
-**Purpose:** generate the first-draft explicit DDL from the Feb-2026 baseline commit `d6ffe05d`.
+**Purpose:** generate the first-draft explicit DDL from today's live `app.models` (revised 2026-05-04 — see "Reconstruction strategy revision" at the top of this spec).
 
 **Steps:**
-1. `git show d6ffe05d:app/models.py > <tempfile>` and `git show d6ffe05d:app/database.py > <tempfile>` (does not pollute working tree)
-2. Load the two files into an isolated namespace via `importlib.util.spec_from_file_location`. If import-time side effects break this, fall back to a subprocess with curated `PYTHONPATH` and shim modules for any missing dependencies.
-3. Spin up an ephemeral `postgres:16` container (matching prod and CI versions): `docker run --rm -d postgres:16` with a random port.
-4. Run `Base.metadata.create_all()` against the ephemeral DB.
-5. `pg_dump --schema-only --no-owner --no-privileges` against the ephemeral DB.
-6. Parse the dump and emit a Python file of `op.create_table()`, `op.create_index()`, `op.create_foreign_key()` calls in FK-dependency order. Output goes to `alembic/versions/001_initial_schema.py.draft`.
-7. Tear down the container.
+1. Spin up an ephemeral `postgres:16` container (matching prod and CI versions): `docker run --rm -d postgres:16` with a random port.
+2. In a subprocess with `PYTHONPATH` set to the repo root and `DATABASE_URL`/`SECRET_KEY`/`SESSION_SECRET` env vars set to throwaway values, `from app.models import Base` and run `Base.metadata.create_all(bind=engine)` against the ephemeral DB.
+3. `pg_dump --schema-only --no-owner --no-privileges` against the ephemeral DB.
+4. Parse the dump and emit a Python file of `op.create_table()`, `op.create_index()`, `op.create_foreign_key()` calls in FK-dependency order. Output goes to `alembic/versions/001_initial_schema.py.draft`.
+5. Tear down the container.
 
-**Fallback if step 2 fails (Feb-2026 models can't load cleanly):** drop steps 2 and skip create_all-from-models. Hand-define a minimal SQLAlchemy `Base` with just the table definitions transcribed from a known-good production schema dump. Then resume from step 4. The validation pass (component 2) catches any drift this introduces.
-
-**Decision rule:** if loading Feb-2026 models needs more than ~2 hours of shimming, fall back. Time-box, don't rabbit-hole.
+**The live-models choice has a known cost:** today's models don't include historical tables/columns that earlier migrations (002–130) still reference (e.g. `buy_plans` was renamed to `buy_plans_v3`; `error_reports`, `trouble_tickets`, `inventory_snapshots`, `material_card_audit` were dropped; ~10 columns like `sf_*` and `acctivate_*` were removed). The validator (Component 2) surfaces these gaps; Task 6 Step 2 triages them by adding the missing definitions back into 001. This is by-design — the validator's whole job is to enumerate what the chain assumes vs. what the draft provides.
 
 ### 2. Validation harness — `scripts/validate_001_against_chain.py`
 
@@ -109,7 +115,7 @@ The alembic revision ID `001_initial` does not change. The down_revision (`None`
 ### 3. Rewritten `alembic/versions/001_initial_schema.py`
 
 **Header docstring (verbatim — load-bearing for future readers):**
-> Initial schema — explicit DDL baseline. Generated 2026-04-30 from `d6ffe05d` models via `scripts/reconstruct_001_baseline.py`, validated against migrations 002 through end-of-chain (verified 130 migration files on `origin/main` as of 2026-04-30) via `scripts/validate_001_against_chain.py`. **For fresh DBs only.** Production and any DB already stamped at any revision ≥ `001_initial` is unaffected — alembic's version table is not modified by this rewrite.
+> Initial schema — explicit DDL baseline. Generated 2026-05-04 from today's live `app.models` via `scripts/reconstruct_001_baseline.py`, then augmented with historical tables/columns referenced by migrations 002+ (per `scripts/validate_001_against_chain.py`'s gap report). Validated against migrations 002 through end-of-chain (verified 130 migration files on `origin/main` as of 2026-04-30). **For fresh DBs only.** Production and any DB already stamped at any revision ≥ `001_initial` is unaffected — alembic's version table is not modified by this rewrite.
 
 **Body:**
 - `revision: str = "001_initial"` — unchanged
@@ -140,7 +146,7 @@ The alembic revision ID `001_initial` does not change. The down_revision (`None`
 **Required content (load-bearing):**
 - Explicit "fresh-DB bootstrap only, prod untouched" callout in both the commit body and the PR description's TL;DR.
 - Link to this design spec.
-- Reconstruction provenance (commit `d6ffe05d`, hybrid a+b strategy).
+- Reconstruction provenance (live-models strategy, see spec §"Reconstruction strategy revision").
 - Validation method + reference to committed `last_run.txt`.
 - Pre/post `alembic current` output from prod (proving zero version-table change).
 
@@ -180,19 +186,19 @@ Verification: `alembic current` byte-identical pre and post deploy.
 
 ### Path 4 — reconstruction & validation (one-time, dev machine)
 ```
-git show d6ffe05d:app/models.py     ─┐
-git show d6ffe05d:app/database.py   ─┴→ scripts/reconstruct_001_baseline.py
-                                          │
-                                          ├→ ephemeral postgres
-                                          │   └→ Base.metadata.create_all()
-                                          │   └→ pg_dump --schema-only
-                                          │
-                                          └→ alembic/versions/001_initial_schema.py.draft
+app.models (live)  ──→ scripts/reconstruct_001_baseline.py
+                          │
+                          ├→ ephemeral postgres:16
+                          │   └→ Base.metadata.create_all()
+                          │   └→ pg_dump --schema-only
+                          │
+                          └→ alembic/versions/001_initial_schema.py.draft (~85 tables)
 
-draft 001 + rest of alembic/versions/  ──→ scripts/validate_001_against_chain.py
+draft 001 + alembic/versions/002+  ──→ scripts/validate_001_against_chain.py
                                           │
                                           ├→ "all references resolve"  → finalize 001 (rename .draft → real)
-                                          └→ "gap list" → patch 001 → re-run
+                                          └→ "gap list" → triage each gap → patch 001 with historical
+                                              tables/columns the chain still references → re-run
 ```
 
 ### Invariant
@@ -203,12 +209,12 @@ The alembic_version table never sees a different value because of this PR. We're
 ## Error handling
 
 ### Reconstruction-script failures
-**Failure:** Feb-2026 models can't load cleanly (import-time side effects, missing relative-import contexts, env-dependent code).
-**Mitigation:** load via subprocess with curated PYTHONPATH; stub missing imports with shim modules.
-**Time-box:** if shimming exceeds ~2 hours of work, fall back to handwriting `op.create_table()` from a known-good prod schema dump. Lean on the validation pass to catch any drift this introduces.
+**Failure:** today's `app.models` import fails inside the subprocess (e.g. missing env vars, importable side-effects).
+**Mitigation:** the script sets `DATABASE_URL`, `SECRET_KEY`, `SESSION_SECRET` to throwaway values and prepends repo root to `PYTHONPATH`. If a new module-level side effect breaks import, fix it at the source (the model module shouldn't have hard runtime requirements at import time anyway).
+**Note on the abandoned d6ffe05d path:** the original spec called for shimming Feb-2026 models with a `~2-hour time-box`. The 2026-05-04 strategy revision rendered this moot — see "Reconstruction strategy revision" at the top of the spec.
 
 ### Validation-harness output
-**This is the expected path, not a failure** — the validator's whole purpose is to surface drift between Feb-2026 models and what 002+ assumed.
+**This is the expected path, not a failure** — the validator's whole purpose is to surface what migrations 002+ reference that the live-models snapshot doesn't include. The 2026-05-04 one-shot run reported 203 gaps clustered around 5 since-removed tables (`buy_plans`, `error_reports`, `trouble_tickets`, `inventory_snapshots`, `material_card_audit`) and ~10 since-removed columns.
 **Process for each gap:** read the offending migration, decide what 001 needs to provide, patch 001, re-run.
 **Hard rule:** never auto-add columns based on a later `op.add_column`. Always read the migration first. Some 002+ migrations create things that 001 should already have under a different name; auto-adding would mask the real fix.
 
