@@ -124,6 +124,31 @@ def _column_names_from_create_table(node: ast.Call) -> list[str]:
     return cols
 
 
+_TABLE_AT_ARG_0 = {"drop_table", "rename_table", "add_column", "drop_column", "alter_column"}
+_TABLE_AT_ARG_1 = {
+    "create_index",
+    "create_foreign_key",
+    "create_unique_constraint",
+    "create_check_constraint",
+}
+_TABLE_AT_KWARG = {"drop_index", "drop_constraint"}
+
+
+def _resolve_table(node: ast.Call, op_name: str) -> str | None:
+    """Locate the table name for an op call based on alembic's positional convention."""
+    if op_name in _TABLE_AT_ARG_0:
+        return _string_arg(node, 0) or _kw_str(node, "table_name")
+    if op_name in _TABLE_AT_ARG_1:
+        return (
+            _string_arg(node, 1)
+            or _kw_str(node, "table_name")
+            or _kw_str(node, "source_table")
+        )
+    if op_name in _TABLE_AT_KWARG:
+        return _kw_str(node, "table_name") or _string_arg(node, 1)
+    return None
+
+
 def walk_migration_ops(model: SchemaModel, migration_paths: list[Path]) -> list[Gap]:
     gaps: list[Gap] = []
     for path in migration_paths:
@@ -148,7 +173,7 @@ def walk_migration_ops(model: SchemaModel, migration_paths: list[Path]) -> list[
                 continue
             if op_name not in _SCHEMA_OPS_NEEDING_TABLE:
                 continue
-            table = _string_arg(node, 0) or _kw_str(node, "table_name") or _kw_str(node, "source_table")
+            table = _resolve_table(node, op_name)
             if not table:
                 continue
             if op_name == "rename_table":

@@ -19,6 +19,7 @@ Depends on: docker, git, postgres pg_dump, sqlalchemy, app.* (only at runtime
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -99,6 +100,7 @@ _PG_TO_SA = [
     (r"^jsonb$", "postgresql.JSONB()"),
     (r"^uuid$", "postgresql.UUID()"),
     (r"^bytea$", "sa.LargeBinary()"),
+    (r"^tsvector$", "postgresql.TSVECTOR()"),
     (
         r"^([a-z_]+)\[\]$",
         lambda m: f"postgresql.ARRAY(sa.{_simple_array_inner(m.group(1))})",
@@ -259,12 +261,16 @@ def _run(cmd: list[str], **kwargs) -> str:
     return proc.stdout
 
 
-def _checkout_baseline_models(dest_dir: Path) -> tuple[Path, Path]:
-    models = dest_dir / "models.py"
-    database = dest_dir / "database.py"
-    models.write_text(_run(["git", "show", f"{BASELINE_COMMIT}:app/models.py"], cwd=REPO_ROOT))
-    database.write_text(_run(["git", "show", f"{BASELINE_COMMIT}:app/database.py"], cwd=REPO_ROOT))
-    return models, database
+def _checkout_baseline_models(dest_dir: Path) -> Path | None:
+    """Legacy git-archaeology path — UNUSED in the current reconstruction strategy.
+
+    The d6ffe05d snapshot was 28 tables; migrations 002+ implicitly assume
+    today's ~84-table schema (because 001 used to be Base.metadata.create_all
+    against today's live models). The right baseline for the explicit-DDL
+    rewrite is therefore today's models, not the Feb-2026 snapshot. See
+    _create_all_against_live_models below.
+    """
+    return None
 
 
 def _start_pg_container(name: str, port: int) -> None:
@@ -301,24 +307,27 @@ def _stop_pg_container(name: str) -> None:
     subprocess.run(["docker", "stop", name], check=False, capture_output=True)
 
 
-def _create_all_against(models_path: Path, database_path: Path, dsn: str) -> None:
-    """Load Feb-2026 models in an isolated namespace and run create_all().
+def _create_all_against_live_models(dsn: str) -> None:
+    """Run Base.metadata.create_all() from today's app.models against the ephemeral DB.
 
-    Done in a subprocess so import-time side effects from app/* don't leak.
+    Done in a subprocess so the temporary connection doesn't pollute test state.
+    Uses today's models (not the Feb-2026 snapshot) because the migration chain
+    002+ has been built against today's create_all output — it is the de-facto
+    contract that 002+ depends on.
     """
     script = f"""
-import importlib.util, sys
-spec_db = importlib.util.spec_from_file_location("frozen_database", {str(database_path)!r})
-mod_db = importlib.util.module_from_spec(spec_db); sys.modules["frozen_database"] = mod_db
-spec_db.loader.exec_module(mod_db)
-spec_m = importlib.util.spec_from_file_location("frozen_models", {str(models_path)!r})
-mod_m = importlib.util.module_from_spec(spec_m); sys.modules["frozen_models"] = mod_m
-spec_m.loader.exec_module(mod_m)
+import os
+os.environ.setdefault("DATABASE_URL", {dsn!r})
+os.environ.setdefault("SECRET_KEY", "reconstruct")
+os.environ.setdefault("SESSION_SECRET", "reconstruct")
 from sqlalchemy import create_engine
+from app.models import Base
 engine = create_engine({dsn!r})
-mod_m.Base.metadata.create_all(bind=engine)
+Base.metadata.create_all(bind=engine)
 """
-    subprocess.run([sys.executable, "-c", script], check=True)
+    env = os.environ.copy()
+    env["PYTHONPATH"] = str(REPO_ROOT) + (os.pathsep + env.get("PYTHONPATH", "") if env.get("PYTHONPATH") else "")
+    subprocess.run([sys.executable, "-c", script], check=True, env=env)
 
 
 def _pg_dump(dsn: str, container: str) -> str:
@@ -365,10 +374,9 @@ def main() -> int:
     try:
         with tempfile.TemporaryDirectory() as tmp:
             tmp_path = Path(tmp)
-            print(f"[reconstruct] checking out d6ffe05d models to {tmp_path}")
-            models, database = _checkout_baseline_models(tmp_path)
-            print("[reconstruct] running Base.metadata.create_all() against ephemeral DB")
-            _create_all_against(models, database, dsn_local)
+            print("[reconstruct] running Base.metadata.create_all() from live app.models against ephemeral DB")
+            _ = tmp_path  # tmp dir kept only as a scratch space marker
+            _create_all_against_live_models(dsn_local)
             print("[reconstruct] running pg_dump --schema-only")
             sql = _pg_dump(dsn_local, container)
             print(f"[reconstruct] parsing pg_dump output ({len(sql)} chars)")
