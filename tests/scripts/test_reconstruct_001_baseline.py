@@ -102,6 +102,196 @@ def test_render_op_create_index_emits_valid_python():
     assert out == "op.create_index('ix_users_email', 'users', ['email'], unique=False)"
 
 
+# ── Index expression-handling regression tests ──
+#
+# These cover bug classes the reconstruct script silently mishandled when run
+# against a real production schema:
+#
+#   1. DESC ordering on index columns: pg_dump emits ``(score DESC)``; the old
+#      parser treated 'score DESC' as a single column name. alembic then tried
+#      to create an index on a column literally named "score DESC" → SQL error.
+#   2. Partial indexes: pg_dump emits ``... (cols) WHERE (predicate);``; the old
+#      regex was anchored on ``);`` and didn't match partial-index lines at all,
+#      so 17 partial indexes were silently dropped from the regenerated 001.
+#
+# Fix: parser captures per-column ordering qualifiers and the optional WHERE
+# predicate; emitter falls back to op.execute("CREATE INDEX ...;") for any
+# index with ordering or a where_clause. Simple indexes still take the native
+# alembic op.create_index path unchanged.
+
+
+def test_parse_pg_dump_extracts_index_with_desc_ordering():
+    """An index column with trailing ASC/DESC must be parsed as (column, ordering) not
+    as a single column named 'col DESC'."""
+    sql = textwrap.dedent("""
+    CREATE TABLE public.sightings (id integer NOT NULL, requirement_id integer, score double precision);
+    CREATE INDEX ix_sightings_req_score ON public.sightings USING btree (requirement_id, score DESC);
+    """)
+    result = parse_pg_dump(sql)
+    assert len(result.indexes) == 1
+    ix = result.indexes[0]
+    assert ix.columns == ["requirement_id", "score"], f"DESC must split off the column name; got columns={ix.columns!r}"
+    assert ix.column_orderings == [None, "DESC"]
+    assert ix.where_clause is None
+
+
+def test_parse_pg_dump_extracts_partial_index():
+    """An index with WHERE clause must capture the predicate and still parse columns.
+
+    The old regex (anchored on ``);``) silently dropped these.
+    """
+    sql = textwrap.dedent("""
+    CREATE TABLE public.activity_log (id integer NOT NULL, company_id integer, created_at timestamp without time zone);
+    CREATE INDEX ix_activity_company ON public.activity_log USING btree (company_id, created_at) WHERE (company_id IS NOT NULL);
+    """)
+    result = parse_pg_dump(sql)
+    assert len(result.indexes) == 1, (
+        f"partial index must still be parsed (the old regex dropped it); got {len(result.indexes)}"
+    )
+    ix = result.indexes[0]
+    assert ix.columns == ["company_id", "created_at"]
+    assert ix.column_orderings == [None, None]
+    assert ix.where_clause == "(company_id IS NOT NULL)"
+
+
+def test_parse_pg_dump_extracts_index_with_both_desc_and_where():
+    """Real-world combo from this codebase: ``ix_ics_queue_dedup`` /
+    ``ix_nc_queue_dedup``. Both DESC ordering AND a partial-index WHERE clause
+    on the same index. Both must be captured."""
+    sql = textwrap.dedent("""
+    CREATE TABLE public.ics_search_queue (id integer NOT NULL, normalized_mpn varchar(255), last_searched_at timestamp without time zone, status varchar(50));
+    CREATE INDEX ix_ics_queue_dedup ON public.ics_search_queue USING btree (normalized_mpn, last_searched_at DESC) WHERE ((status)::text = 'completed'::text);
+    """)
+    result = parse_pg_dump(sql)
+    assert len(result.indexes) == 1
+    ix = result.indexes[0]
+    assert ix.columns == ["normalized_mpn", "last_searched_at"]
+    assert ix.column_orderings == [None, "DESC"]
+    assert ix.where_clause == "((status)::text = 'completed'::text)"
+
+
+def test_render_op_create_index_falls_back_to_execute_for_complex_indexes():
+    """An index with ordering OR where_clause must round-trip through
+    op.execute(verbatim CREATE INDEX) — alembic's op.create_index can't express either
+    feature."""
+    from scripts.reconstruct_001_baseline import Index
+
+    # DESC ordering only
+    ix_desc = Index(
+        name="ix_sightings_req_score",
+        table="sightings",
+        columns=["requirement_id", "score"],
+        unique=False,
+        column_orderings=[None, "DESC"],
+        where_clause=None,
+    )
+    out = render_op_create_index(ix_desc)
+    assert out.startswith("op.execute("), "DESC-ordering index must use op.execute fallback; got: " + out
+    assert "CREATE INDEX ix_sightings_req_score ON sightings (requirement_id, score DESC);" in out
+
+    # Partial index only
+    ix_partial = Index(
+        name="ix_activity_company",
+        table="activity_log",
+        columns=["company_id", "created_at"],
+        unique=False,
+        column_orderings=[None, None],
+        where_clause="(company_id IS NOT NULL)",
+    )
+    out = render_op_create_index(ix_partial)
+    assert out.startswith("op.execute(")
+    assert (
+        "CREATE INDEX ix_activity_company ON activity_log (company_id, created_at) WHERE (company_id IS NOT NULL);"
+        in out
+    )
+
+    # Combined: DESC + partial + UNIQUE
+    ix_combined = Index(
+        name="ix_ics_queue_dedup",
+        table="ics_search_queue",
+        columns=["normalized_mpn", "last_searched_at"],
+        unique=True,
+        column_orderings=[None, "DESC"],
+        where_clause="((status)::text = 'completed'::text)",
+    )
+    out = render_op_create_index(ix_combined)
+    assert out.startswith("op.execute(")
+    assert "CREATE UNIQUE INDEX ix_ics_queue_dedup" in out
+    assert "DESC" in out
+    assert "WHERE ((status)::text = 'completed'::text)" in out
+
+    # Simple index — must NOT use the fallback (preserves alembic-native form)
+    ix_simple = Index(
+        name="ix_users_email",
+        table="users",
+        columns=["email"],
+        unique=False,
+        column_orderings=[None],
+        where_clause=None,
+    )
+    out = render_op_create_index(ix_simple)
+    assert out == "op.create_index('ix_users_email', 'users', ['email'], unique=False)", (
+        "Simple index must keep the native op.create_index form; got: " + out
+    )
+
+
+def test_render_downgrade_body_emits_drop_index_if_exists_for_complex_indexes():
+    """Complex indexes (created via op.execute) must be dropped via op.execute('DROP
+    INDEX IF EXISTS ...;') — symmetric with how they were created.
+
+    Simple indexes still use op.drop_index.
+    """
+    from scripts.reconstruct_001_baseline import (
+        Column,
+        Index,
+        ParseResult,
+        Table,
+        render_downgrade_body,
+    )
+
+    parsed = ParseResult(
+        tables=[
+            Table(
+                name="users",
+                columns=[Column(name="id", py_type="sa.Integer()", nullable=False)],
+                primary_key=["id"],
+            ),
+        ],
+        indexes=[
+            Index(name="ix_simple", table="users", columns=["id"], unique=False),
+            Index(
+                name="ix_partial",
+                table="users",
+                columns=["id"],
+                unique=False,
+                column_orderings=[None],
+                where_clause="(id IS NOT NULL)",
+            ),
+            Index(
+                name="ix_desc",
+                table="users",
+                columns=["id"],
+                unique=False,
+                column_orderings=["DESC"],
+                where_clause=None,
+            ),
+        ],
+    )
+    body = render_downgrade_body(parsed)
+
+    # ix_simple uses op.drop_index
+    assert any("op.drop_index('ix_simple'" in line for line in body), (
+        "simple index must use op.drop_index; got body=\n" + "\n".join(body)
+    )
+    # ix_partial and ix_desc use op.execute('DROP INDEX IF EXISTS ...;')
+    assert any("op.execute('DROP INDEX IF EXISTS public.ix_partial;')" in line for line in body), (
+        "partial index must use op.execute DROP INDEX IF EXISTS; got body=\n" + "\n".join(body)
+    )
+    assert any("op.execute('DROP INDEX IF EXISTS public.ix_desc;')" in line for line in body), (
+        "DESC-ordering index must use op.execute DROP INDEX IF EXISTS; got body=\n" + "\n".join(body)
+    )
+
+
 # ── FK separation regression tests ──
 #
 # These cover the bug class where 001 fails to apply because cross-table FK

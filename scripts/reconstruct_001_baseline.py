@@ -74,6 +74,11 @@ class Index:
     table: str
     columns: list[str]
     unique: bool = False
+    # Per-column ordering qualifier ('ASC' / 'DESC' / None). Same length as columns.
+    column_orderings: list[str | None] = field(default_factory=list)
+    # WHERE predicate for partial indexes (verbatim from pg_dump, including outer
+    # parens), or None for non-partial indexes.
+    where_clause: str | None = None
 
 
 @dataclass
@@ -156,9 +161,35 @@ _RE_FOREIGN_KEY = re.compile(
     re.IGNORECASE,
 )
 _RE_INDEX = re.compile(
-    r"CREATE (UNIQUE )?INDEX (\w+) ON (?:public\.)?(\w+)(?:\s+USING \w+)?\s*\(([^)]+)\);",
+    r"CREATE (UNIQUE )?INDEX (\w+) ON (?:public\.)?(\w+)(?:\s+USING \w+)?\s*\(([^)]+)\)"
+    r"(?:\s+WHERE\s+(.+))?;",
     re.IGNORECASE,
 )
+
+
+def _parse_index_columns(col_str: str) -> tuple[list[str], list[str | None]]:
+    """Split an index column list into (column_names, per_column_orderings).
+
+    pg_dump emits index columns as ``a, b DESC, c`` — the trailing ``ASC``/``DESC``
+    is an ordering qualifier on each column, not part of the column name. We split
+    the qualifier off so render_op_create_index can decide whether to emit the
+    simple op.create_index form (no orderings) or fall back to op.execute with
+    verbatim CREATE INDEX SQL (any orderings).
+    """
+    cols: list[str] = []
+    orderings: list[str | None] = []
+    for raw in col_str.split(","):
+        part = raw.strip()
+        if not part:
+            continue
+        toks = part.rsplit(None, 1)
+        if len(toks) == 2 and toks[1].upper() in ("ASC", "DESC"):
+            cols.append(toks[0])
+            orderings.append(toks[1].upper())
+        else:
+            cols.append(part)
+            orderings.append(None)
+    return cols, orderings
 
 
 def _parse_columns(body: str) -> list[Column]:
@@ -231,8 +262,18 @@ def parse_pg_dump(sql: str) -> ParseResult:
         unique = bool(m.group(1))
         ix_name = m.group(2)
         table = m.group(3)
-        cols = [c.strip() for c in m.group(4).split(",")]
-        result.indexes.append(Index(name=ix_name, table=table, columns=cols, unique=unique))
+        cols, orderings = _parse_index_columns(m.group(4))
+        where_clause = m.group(5).strip() if m.group(5) else None
+        result.indexes.append(
+            Index(
+                name=ix_name,
+                table=table,
+                columns=cols,
+                unique=unique,
+                column_orderings=orderings,
+                where_clause=where_clause,
+            )
+        )
 
     return result
 
@@ -279,8 +320,48 @@ def render_op_create_table(t: Table) -> str:
 
 
 def render_op_create_index(ix: Index) -> str:
-    cols = "[" + ", ".join(f"'{c}'" for c in ix.columns) + "]"
-    return f"op.create_index('{ix.name}', '{ix.table}', {cols}, unique={ix.unique})"
+    """Render an index creation as a single line.
+
+    Two paths:
+
+    - **Simple** (no per-column ordering, no WHERE predicate): use alembic's
+      native ``op.create_index('name', 'table', [cols], unique=…)`` form. Same
+      behavior as before this function gained ordering/where_clause awareness.
+
+    - **Complex** (any column has ASC/DESC, or there's a WHERE predicate):
+      fall back to ``op.execute('CREATE INDEX ... ;')`` with verbatim SQL
+      reconstructed from the parsed parts. Alembic's create_index can't
+      express partial indexes or per-column ordering, so we emit raw DDL.
+    """
+    has_orderings = any(o is not None for o in ix.column_orderings)
+    has_where = ix.where_clause is not None
+    if not has_orderings and not has_where:
+        cols = "[" + ", ".join(f"'{c}'" for c in ix.columns) + "]"
+        return f"op.create_index('{ix.name}', '{ix.table}', {cols}, unique={ix.unique})"
+
+    # Complex path — verbatim SQL via op.execute.
+    # column_orderings may be empty (legacy Index() construction); pad to len(columns).
+    orderings = list(ix.column_orderings) + [None] * (len(ix.columns) - len(ix.column_orderings))
+    col_parts: list[str] = []
+    for col, ordering in zip(ix.columns, orderings):
+        col_parts.append(f"{col} {ordering}" if ordering else col)
+    cols_sql = ", ".join(col_parts)
+    unique_kw = "UNIQUE " if ix.unique else ""
+    sql = f"CREATE {unique_kw}INDEX {ix.name} ON {ix.table} ({cols_sql})"
+    if ix.where_clause:
+        sql += f" WHERE {ix.where_clause}"
+    sql += ";"
+    return f"op.execute({sql!r})"
+
+
+def _is_complex_index(ix: Index) -> bool:
+    """True if the index has per-column ordering or a WHERE predicate.
+
+    Complex indexes are emitted as op.execute(...) by render_op_create_index
+    and must use op.execute(DROP INDEX IF EXISTS …) on the downgrade side.
+    Used by render_downgrade_body to mirror the upgrade emission.
+    """
+    return any(o is not None for o in ix.column_orderings) or ix.where_clause is not None
 
 
 def render_op_create_foreign_key(src_table: str, fk: ForeignKey) -> str:
@@ -338,7 +419,14 @@ def render_downgrade_body(parsed: ParseResult) -> list[str]:
                 continue
             lines.append(f"    op.drop_constraint('{fk.name}', '{t.name}', type_='foreignkey')")
     for ix in reversed(parsed.indexes):
-        lines.append(f"    op.drop_index('{ix.name}', table_name='{ix.table}')")
+        if _is_complex_index(ix):
+            # Complex indexes were created via op.execute("CREATE INDEX ...;")
+            # Mirror with op.execute("DROP INDEX IF EXISTS ...;") — IF EXISTS
+            # tolerates partial-index quirks where the index might already be
+            # gone (e.g., alembic_version-only states during downgrade-base).
+            lines.append(f"    op.execute('DROP INDEX IF EXISTS public.{ix.name};')")
+        else:
+            lines.append(f"    op.drop_index('{ix.name}', table_name='{ix.table}')")
     for t in reversed(parsed.tables):
         lines.append(f"    op.drop_table('{t.name}')")
     return lines

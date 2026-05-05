@@ -1917,12 +1917,82 @@ def upgrade() -> None:
         sa.Column("added_at", sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
     )
-    op.create_index("ix_activity_created_at", "activity_log", ["created_at"], unique=False)
-    op.create_index("ix_activity_user", "activity_log", ["user_id", "created_at"], unique=False)
-    op.create_index("ix_ass_month_role_rank", "avail_score_snapshot", ["month", "role_type", "rank"], unique=False)
     op.create_index(
         "ix_ass_month_role_score", "avail_score_snapshot", ["month", "role_type", "total_score"], unique=False
     )
+    op.create_index(
+        "ix_entity_tags_type_tag_visible", "entity_tags", ["entity_type", "tag_id", "is_visible"], unique=False
+    )
+    op.create_index(
+        "ix_excess_line_items_normalized_part_number", "excess_line_items", ["normalized_part_number"], unique=False
+    )
+    op.create_index(
+        "ix_lead_feedback_events_created_by_user_id", "lead_feedback_events", ["created_by_user_id"], unique=False
+    )
+    op.create_index(
+        "ix_material_card_audit_material_card_id", "material_card_audit", ["material_card_id"], unique=False
+    )
+    op.create_index(
+        "ix_material_price_snapshots_material_card_id", "material_price_snapshots", ["material_card_id"], unique=False
+    )
+    op.create_index(
+        "ix_material_price_snapshots_recorded_at", "material_price_snapshots", ["recorded_at"], unique=False
+    )
+    op.create_index(
+        "ix_msf_category_key_text", "material_spec_facets", ["category", "spec_key", "value_text"], unique=False
+    )
+    op.create_index(
+        "ix_mss_month_role_points", "multiplier_score_snapshot", ["month", "role_type", "total_points"], unique=False
+    )
+    op.create_index(
+        "ix_price_snap_card_time", "material_price_snapshots", ["material_card_id", "recorded_at"], unique=False
+    )
+    op.create_index(
+        "ix_requirement_attachments_requirement_id", "requirement_attachments", ["requirement_id"], unique=False
+    )
+    op.create_index(
+        "ix_requisition_attachments_requisition_id", "requisition_attachments", ["requisition_id"], unique=False
+    )
+    op.create_index(
+        "ix_sightings_mpn_vendor_norm", "sightings", ["normalized_mpn", "vendor_name_normalized"], unique=False
+    )
+    op.create_index(
+        "ix_sourcing_leads_vendor_name_normalized", "sourcing_leads", ["vendor_name_normalized"], unique=False
+    )
+    op.create_index(
+        "ix_strategic_vendor_released", "strategic_vendors", ["vendor_card_id", "released_at"], unique=False
+    )
+    op.create_index(
+        "ix_trouble_tickets_source_status_created", "trouble_tickets", ["source", "status", "created_at"], unique=False
+    )
+    op.execute(
+        "CREATE INDEX ix_activity_company ON activity_log (company_id, created_at) WHERE (company_id IS NOT NULL);"
+    )
+    op.create_index("ix_activity_created_at", "activity_log", ["created_at"], unique=False)
+    op.execute("CREATE INDEX ix_activity_external ON activity_log (external_id) WHERE (external_id IS NOT NULL);")
+    op.execute(
+        "CREATE INDEX ix_activity_req_channel ON activity_log (requisition_id, channel, created_at) WHERE (requisition_id IS NOT NULL);"
+    )
+    op.execute(
+        "CREATE INDEX ix_activity_requirement ON activity_log (requirement_id, created_at) WHERE (requirement_id IS NOT NULL);"
+    )
+    op.execute(
+        "CREATE INDEX ix_activity_requisition ON activity_log (requisition_id, vendor_card_id, created_at) WHERE (requisition_id IS NOT NULL);"
+    )
+    op.execute(
+        "CREATE INDEX ix_activity_site_contact ON activity_log (site_contact_id, created_at) WHERE (site_contact_id IS NOT NULL);"
+    )
+    op.create_index("ix_activity_user", "activity_log", ["user_id", "created_at"], unique=False)
+    op.execute(
+        "CREATE INDEX ix_activity_user_notif ON activity_log (user_id, activity_type, created_at) WHERE (dismissed_at IS NULL);"
+    )
+    op.execute(
+        "CREATE INDEX ix_activity_vendor ON activity_log (vendor_card_id, created_at) WHERE (vendor_card_id IS NOT NULL);"
+    )
+    op.execute(
+        "CREATE INDEX ix_activity_vendor_contact ON activity_log (vendor_contact_id, created_at) WHERE (vendor_contact_id IS NOT NULL);"
+    )
+    op.create_index("ix_ass_month_role_rank", "avail_score_snapshot", ["month", "role_type", "rank"], unique=False)
     op.create_index("ix_ass_user_month", "avail_score_snapshot", ["user_id", "month", "role_type"], unique=True)
     op.create_index("ix_bid_solicitations_contact", "bid_solicitations", ["contact_id"], unique=False)
     op.create_index("ix_bid_solicitations_graph_msg", "bid_solicitations", ["graph_message_id"], unique=False)
@@ -1931,14 +2001,13 @@ def upgrade() -> None:
     op.create_index("ix_bids_line_item", "bids", ["excess_line_item_id"], unique=False)
     op.create_index("ix_bids_status", "bids", ["status"], unique=False)
     op.create_index("ix_bids_vendor_card", "bids", ["bidder_vendor_card_id"], unique=False)
-    op.create_index("ix_bp_approved_by", "buy_plans", ["approved_by_id"], unique=False)
-    op.create_index("ix_bp_cancelled_by", "buy_plans", ["cancelled_by_id"], unique=False)
-    op.create_index("ix_bp_completed_by", "buy_plans", ["completed_by_id"], unique=False)
-    op.create_index("ix_buyplans_token", "buy_plans", ["approval_token"], unique=False)
     op.create_index("ix_bidsol_status", "bid_solicitations", ["status"], unique=False)
     op.create_index("ix_bls_month_points", "buyer_leaderboard_snapshot", ["month", "total_points"], unique=False)
     op.create_index("ix_bls_month_rank", "buyer_leaderboard_snapshot", ["month", "rank"], unique=False)
     op.create_index("ix_bls_user_month", "buyer_leaderboard_snapshot", ["user_id", "month"], unique=True)
+    op.create_index("ix_bp_approved_by", "buy_plans", ["approved_by_id"], unique=False)
+    op.create_index("ix_bp_cancelled_by", "buy_plans", ["cancelled_by_id"], unique=False)
+    op.create_index("ix_bp_completed_by", "buy_plans", ["completed_by_id"], unique=False)
     op.create_index("ix_bpl_buy_plan", "buy_plan_lines", ["buy_plan_id"], unique=False)
     op.create_index("ix_bpl_buyer", "buy_plan_lines", ["buyer_id"], unique=False)
     op.create_index("ix_bpl_offer", "buy_plan_lines", ["offer_id"], unique=False)
@@ -1952,6 +2021,7 @@ def upgrade() -> None:
     op.create_index("ix_bpv3_status_created", "buy_plans_v3", ["status", "created_at"], unique=False)
     op.create_index("ix_bpv3_submitted_by", "buy_plans_v3", ["submitted_by_id"], unique=False)
     op.create_index("ix_bpv3_token", "buy_plans_v3", ["approval_token"], unique=False)
+    op.create_index("ix_buyplans_token", "buy_plans", ["approval_token"], unique=False)
     op.create_index("ix_bvs_unique", "buyer_vendor_stats", ["user_id", "vendor_card_id"], unique=True)
     op.create_index("ix_bvs_user", "buyer_vendor_stats", ["user_id"], unique=False)
     op.create_index("ix_bvs_vendor", "buyer_vendor_stats", ["vendor_card_id"], unique=False)
@@ -1994,11 +2064,7 @@ def upgrade() -> None:
     op.create_index("ix_enrichment_runs_created_at", "enrichment_runs", ["created_at"], unique=False)
     op.create_index("ix_enrichment_runs_phase", "enrichment_runs", ["phase"], unique=False)
     op.create_index("ix_enrichment_runs_status", "enrichment_runs", ["status"], unique=False)
-    op.create_index("ix_er_resolved_by", "error_reports", ["resolved_by_id"], unique=False)
     op.create_index("ix_entity_tags_type_id", "entity_tags", ["entity_type", "entity_id"], unique=False)
-    op.create_index(
-        "ix_entity_tags_type_tag_visible", "entity_tags", ["entity_type", "tag_id", "is_visible"], unique=False
-    )
     op.create_index("ix_eq_batch", "enrichment_queue", ["batch_job_id"], unique=False)
     op.create_index("ix_eq_company", "enrichment_queue", ["company_id"], unique=False)
     op.create_index("ix_eq_reviewed_by", "enrichment_queue", ["reviewed_by_id"], unique=False)
@@ -2006,12 +2072,10 @@ def upgrade() -> None:
     op.create_index("ix_eq_status_created", "enrichment_queue", ["status", "created_at"], unique=False)
     op.create_index("ix_eq_status_source", "enrichment_queue", ["status", "source"], unique=False)
     op.create_index("ix_eq_vendor", "enrichment_queue", ["vendor_card_id"], unique=False)
+    op.create_index("ix_er_resolved_by", "error_reports", ["resolved_by_id"], unique=False)
     op.create_index("ix_ese_company", "email_signature_extracts", ["company_name"], unique=False)
     op.create_index("ix_excess_line_items_demand", "excess_line_items", ["demand_match_count", "status"], unique=False)
     op.create_index("ix_excess_line_items_list", "excess_line_items", ["excess_list_id"], unique=False)
-    op.create_index(
-        "ix_excess_line_items_normalized_part_number", "excess_line_items", ["normalized_part_number"], unique=False
-    )
     op.create_index("ix_excess_line_items_part_number", "excess_line_items", ["part_number"], unique=False)
     op.create_index("ix_excess_line_items_pn_status", "excess_line_items", ["part_number", "status"], unique=False)
     op.create_index("ix_excess_line_items_status", "excess_line_items", ["status"], unique=False)
@@ -2022,11 +2086,18 @@ def upgrade() -> None:
     op.create_index("ix_graphsub_expiry", "graph_subscriptions", ["expiration_dt"], unique=False)
     op.create_index("ix_graphsub_user", "graph_subscriptions", ["user_id"], unique=False)
     op.create_index("ix_ics_log_queue", "ics_search_log", ["queue_id"], unique=False)
+    op.execute(
+        "CREATE INDEX ix_ics_queue_dedup ON ics_search_queue (normalized_mpn, last_searched_at DESC) WHERE ((status)::text = 'completed'::text);"
+    )
+    op.execute(
+        "CREATE INDEX ix_ics_queue_poll ON ics_search_queue (status, priority, created_at) WHERE ((status)::text = 'queued'::text);"
+    )
     op.create_index("ix_intel_cache_cache_key", "intel_cache", ["cache_key"], unique=True)
     op.create_index("ix_inv_product_warehouse", "inventory_snapshots", ["product_id", "warehouse_id"], unique=True)
     op.create_index("ix_inventory_snapshots_product_id", "inventory_snapshots", ["product_id"], unique=False)
     op.create_index("ix_ke_company", "knowledge_entries", ["company_id", "created_at"], unique=False)
     op.create_index("ix_ke_created_by", "knowledge_entries", ["created_by"], unique=False)
+    op.execute("CREATE INDEX ix_ke_expires ON knowledge_entries (expires_at) WHERE (expires_at IS NOT NULL);")
     op.create_index("ix_ke_mpn", "knowledge_entries", ["mpn"], unique=False)
     op.create_index("ix_ke_parent", "knowledge_entries", ["parent_id"], unique=False)
     op.create_index("ix_ke_requisition", "knowledge_entries", ["requisition_id", "created_at"], unique=False)
@@ -2036,42 +2107,33 @@ def upgrade() -> None:
     op.create_index("ix_lead_evidence_lead_id", "lead_evidence", ["lead_id"], unique=False)
     op.create_index("ix_lead_evidence_source_type", "lead_evidence", ["source_type"], unique=False)
     op.create_index("ix_lead_evidence_verification", "lead_evidence", ["verification_state"], unique=False)
-    op.create_index(
-        "ix_lead_feedback_events_created_by_user_id", "lead_feedback_events", ["created_by_user_id"], unique=False
-    )
     op.create_index("ix_lead_feedback_events_lead_id", "lead_feedback_events", ["lead_id"], unique=False)
     op.create_index("ix_lead_feedback_lead_created", "lead_feedback_events", ["lead_id", "created_at"], unique=False)
     op.create_index("ix_lead_feedback_status", "lead_feedback_events", ["status"], unique=False)
     op.create_index("ix_manufacturers_canonical_name", "manufacturers", ["canonical_name"], unique=True)
-    op.create_index(
-        "ix_material_card_audit_material_card_id", "material_card_audit", ["material_card_id"], unique=False
-    )
     op.create_index("ix_material_card_audit_normalized_mpn", "material_card_audit", ["normalized_mpn"], unique=False)
     op.create_index("ix_material_cards_deleted_at", "material_cards", ["deleted_at"], unique=False)
     op.create_index("ix_material_cards_lifecycle_status", "material_cards", ["lifecycle_status"], unique=False)
     op.create_index("ix_material_cards_manufacturer", "material_cards", ["manufacturer"], unique=False)
     op.create_index("ix_material_cards_normalized_mpn", "material_cards", ["normalized_mpn"], unique=True)
-    op.create_index(
-        "ix_material_price_snapshots_material_card_id", "material_price_snapshots", ["material_card_id"], unique=False
-    )
-    op.create_index(
-        "ix_material_price_snapshots_recorded_at", "material_price_snapshots", ["recorded_at"], unique=False
-    )
     op.create_index("ix_material_tags_source", "material_tags", ["source"], unique=False)
     op.create_index("ix_material_tags_tag_id", "material_tags", ["tag_id"], unique=False)
     op.create_index("ix_mca_card_action", "material_card_audit", ["material_card_id", "action"], unique=False)
     op.create_index("ix_msf_category_key", "material_spec_facets", ["category", "spec_key"], unique=False)
-    op.create_index(
-        "ix_msf_category_key_text", "material_spec_facets", ["category", "spec_key", "value_text"], unique=False
-    )
-    op.create_index(
-        "ix_mss_month_role_points", "multiplier_score_snapshot", ["month", "role_type", "total_points"], unique=False
+    op.execute(
+        "CREATE INDEX ix_msf_key_numeric ON material_spec_facets (category, spec_key, value_numeric) WHERE (value_numeric IS NOT NULL);"
     )
     op.create_index("ix_mss_month_role_rank", "multiplier_score_snapshot", ["month", "role_type", "rank"], unique=False)
     op.create_index("ix_mss_user_month", "multiplier_score_snapshot", ["user_id", "month", "role_type"], unique=True)
     op.create_index("ix_mvh_card_vendor", "material_vendor_history", ["material_card_id", "vendor_name"], unique=True)
     op.create_index("ix_mvh_vendor", "material_vendor_history", ["vendor_name"], unique=False)
     op.create_index("ix_mvh_vendor_norm", "material_vendor_history", ["vendor_name_normalized"], unique=False)
+    op.execute(
+        "CREATE INDEX ix_nc_queue_dedup ON nc_search_queue (normalized_mpn, last_searched_at DESC) WHERE ((status)::text = 'completed'::text);"
+    )
+    op.execute(
+        "CREATE INDEX ix_nc_queue_poll ON nc_search_queue (status, priority, created_at) WHERE ((status)::text = 'queued'::text);"
+    )
     op.create_index("ix_nc_search_log_queue_id", "nc_search_log", ["queue_id"], unique=False)
     op.create_index("ix_offer_attachments_offer", "offer_attachments", ["offer_id"], unique=False)
     op.create_index("ix_offers_entered_by", "offers", ["entered_by_id"], unique=False)
@@ -2104,9 +2166,6 @@ def upgrade() -> None:
     op.create_index("ix_poff_sent", "proactive_offers", ["sent_at"], unique=False)
     op.create_index("ix_poff_site", "proactive_offers", ["customer_site_id"], unique=False)
     op.create_index("ix_poff_status", "proactive_offers", ["status"], unique=False)
-    op.create_index(
-        "ix_price_snap_card_time", "material_price_snapshots", ["material_card_id", "recorded_at"], unique=False
-    )
     op.create_index("ix_prospect_accounts_discovery_source", "prospect_accounts", ["discovery_source"], unique=False)
     op.create_index("ix_prospect_accounts_fit_score", "prospect_accounts", ["fit_score"], unique=False)
     op.create_index("ix_prospect_accounts_readiness_score", "prospect_accounts", ["readiness_score"], unique=False)
@@ -2129,15 +2188,9 @@ def upgrade() -> None:
     op.create_index("ix_quotes_status", "quotes", ["status"], unique=False)
     op.create_index("ix_req_primary_mpn", "requirements", ["primary_mpn"], unique=False)
     op.create_index("ix_req_requisition", "requirements", ["requisition_id"], unique=False)
-    op.create_index(
-        "ix_requirement_attachments_requirement_id", "requirement_attachments", ["requirement_id"], unique=False
-    )
     op.create_index("ix_requirements_material_card", "requirements", ["material_card_id"], unique=False)
     op.create_index("ix_requirements_normalized_mpn", "requirements", ["normalized_mpn"], unique=False)
     op.create_index("ix_requirements_sourcing_status", "requirements", ["sourcing_status"], unique=False)
-    op.create_index(
-        "ix_requisition_attachments_requisition_id", "requisition_attachments", ["requisition_id"], unique=False
-    )
     op.create_index("ix_requisition_tasks_id", "requisition_tasks", ["id"], unique=False)
     op.create_index("ix_requisitions_claimed_by", "requisitions", ["claimed_by_id"], unique=False)
     op.create_index("ix_requisitions_company", "requisitions", ["company_id"], unique=False)
@@ -2159,11 +2212,8 @@ def upgrade() -> None:
     op.create_index("ix_sight_req", "sightings", ["requirement_id"], unique=False)
     op.create_index("ix_sightings_manufacturer", "sightings", ["manufacturer"], unique=False)
     op.create_index("ix_sightings_material_card", "sightings", ["material_card_id"], unique=False)
-    op.create_index(
-        "ix_sightings_mpn_vendor_norm", "sightings", ["normalized_mpn", "vendor_name_normalized"], unique=False
-    )
     op.create_index("ix_sightings_normalized_mpn", "sightings", ["normalized_mpn"], unique=False)
-    op.create_index("ix_sightings_req_score", "sightings", ["requirement_id", "score DESC"], unique=False)
+    op.execute("CREATE INDEX ix_sightings_req_score ON sightings (requirement_id, score DESC);")
     op.create_index("ix_sightings_req_vendor", "sightings", ["requirement_id", "vendor_name"], unique=False)
     op.create_index("ix_sightings_source_company", "sightings", ["source_company_id"], unique=False)
     op.create_index("ix_sightings_source_type", "sightings", ["source_type"], unique=False)
@@ -2184,14 +2234,8 @@ def upgrade() -> None:
     op.create_index("ix_sourcing_leads_safety", "sourcing_leads", ["vendor_safety_score"], unique=False)
     op.create_index("ix_sourcing_leads_status", "sourcing_leads", ["buyer_status"], unique=False)
     op.create_index("ix_sourcing_leads_vendor_card_id", "sourcing_leads", ["vendor_card_id"], unique=False)
-    op.create_index(
-        "ix_sourcing_leads_vendor_name_normalized", "sourcing_leads", ["vendor_name_normalized"], unique=False
-    )
     op.create_index("ix_strategic_expires_released", "strategic_vendors", ["expires_at", "released_at"], unique=False)
     op.create_index("ix_strategic_user_released", "strategic_vendors", ["user_id", "released_at"], unique=False)
-    op.create_index(
-        "ix_strategic_vendor_released", "strategic_vendors", ["vendor_card_id", "released_at"], unique=False
-    )
     op.create_index("ix_sync_source_time", "sync_logs", ["source", "started_at"], unique=False)
     op.create_index("ix_sync_state_user_folder", "sync_state", ["user_id", "folder"], unique=True)
     op.create_index("ix_system_config_key", "system_config", ["key"], unique=True)
@@ -2199,15 +2243,13 @@ def upgrade() -> None:
     op.create_index("ix_trouble_tickets_created_at", "trouble_tickets", ["created_at"], unique=False)
     op.create_index("ix_trouble_tickets_risk_tier", "trouble_tickets", ["risk_tier"], unique=False)
     op.create_index("ix_trouble_tickets_source", "trouble_tickets", ["source"], unique=False)
-    op.create_index(
-        "ix_trouble_tickets_source_status_created", "trouble_tickets", ["source", "status", "created_at"], unique=False
-    )
     op.create_index("ix_trouble_tickets_status", "trouble_tickets", ["status"], unique=False)
     op.create_index("ix_trouble_tickets_submitted_by", "trouble_tickets", ["submitted_by"], unique=False)
     op.create_index("ix_usage_log_source_ts", "api_usage_log", ["source_id", '"timestamp"'], unique=False)
     op.create_index("ix_uss_month_rank", "unified_score_snapshot", ["month", "rank"], unique=False)
     op.create_index("ix_uss_user_month", "unified_score_snapshot", ["user_id", "month"], unique=True)
     op.create_index("ix_vendor_cards_acctivate_vendor_id", "vendor_cards", ["acctivate_vendor_id"], unique=False)
+    op.execute("CREATE INDEX ix_vendor_cards_active ON vendor_cards (created_at) WHERE (is_blacklisted IS FALSE);")
     op.create_index("ix_vendor_cards_created_at", "vendor_cards", ["created_at"], unique=False)
     op.create_index("ix_vendor_cards_domain", "vendor_cards", ["domain"], unique=False)
     op.create_index("ix_vendor_cards_normalized_name", "vendor_cards", ["normalized_name"], unique=True)
@@ -2234,6 +2276,9 @@ def upgrade() -> None:
     op.create_index("ix_vss_vendor", "vendor_sighting_summary", ["vendor_name"], unique=False)
     op.create_index("ix_vss_vendor_card", "vendor_sighting_summary", ["vendor_card_id"], unique=False)
     op.create_index("ix_vss_vendor_req", "vendor_sighting_summary", ["vendor_name", "requirement_id"], unique=False)
+    op.execute(
+        "CREATE UNIQUE INDEX uq_active_vendor_claim ON strategic_vendors (vendor_card_id) WHERE (released_at IS NULL);"
+    )
     op.create_foreign_key(
         "activity_log_buy_plan_id_fkey", "activity_log", "buy_plans_v3", ["buy_plan_id"], ["id"], ondelete="SET NULL"
     )
@@ -3333,6 +3378,7 @@ def downgrade() -> None:
     op.drop_constraint("activity_log_customer_site_id_fkey", "activity_log", type_="foreignkey")
     op.drop_constraint("activity_log_company_id_fkey", "activity_log", type_="foreignkey")
     op.drop_constraint("activity_log_buy_plan_id_fkey", "activity_log", type_="foreignkey")
+    op.execute("DROP INDEX IF EXISTS public.uq_active_vendor_claim;")
     op.drop_index("ix_vss_vendor_req", table_name="vendor_sighting_summary")
     op.drop_index("ix_vss_vendor_card", table_name="vendor_sighting_summary")
     op.drop_index("ix_vss_vendor", table_name="vendor_sighting_summary")
@@ -3359,6 +3405,7 @@ def downgrade() -> None:
     op.drop_index("ix_vendor_cards_normalized_name", table_name="vendor_cards")
     op.drop_index("ix_vendor_cards_domain", table_name="vendor_cards")
     op.drop_index("ix_vendor_cards_created_at", table_name="vendor_cards")
+    op.execute("DROP INDEX IF EXISTS public.ix_vendor_cards_active;")
     op.drop_index("ix_vendor_cards_acctivate_vendor_id", table_name="vendor_cards")
     op.drop_index("ix_uss_user_month", table_name="unified_score_snapshot")
     op.drop_index("ix_uss_month_rank", table_name="unified_score_snapshot")
@@ -3397,7 +3444,7 @@ def downgrade() -> None:
     op.drop_index("ix_sightings_source_type", table_name="sightings")
     op.drop_index("ix_sightings_source_company", table_name="sightings")
     op.drop_index("ix_sightings_req_vendor", table_name="sightings")
-    op.drop_index("ix_sightings_req_score", table_name="sightings")
+    op.execute("DROP INDEX IF EXISTS public.ix_sightings_req_score;")
     op.drop_index("ix_sightings_normalized_mpn", table_name="sightings")
     op.drop_index("ix_sightings_mpn_vendor_norm", table_name="sightings")
     op.drop_index("ix_sightings_material_card", table_name="sightings")
@@ -3481,12 +3528,15 @@ def downgrade() -> None:
     op.drop_index("ix_offers_entered_by", table_name="offers")
     op.drop_index("ix_offer_attachments_offer", table_name="offer_attachments")
     op.drop_index("ix_nc_search_log_queue_id", table_name="nc_search_log")
+    op.execute("DROP INDEX IF EXISTS public.ix_nc_queue_poll;")
+    op.execute("DROP INDEX IF EXISTS public.ix_nc_queue_dedup;")
     op.drop_index("ix_mvh_vendor_norm", table_name="material_vendor_history")
     op.drop_index("ix_mvh_vendor", table_name="material_vendor_history")
     op.drop_index("ix_mvh_card_vendor", table_name="material_vendor_history")
     op.drop_index("ix_mss_user_month", table_name="multiplier_score_snapshot")
     op.drop_index("ix_mss_month_role_rank", table_name="multiplier_score_snapshot")
     op.drop_index("ix_mss_month_role_points", table_name="multiplier_score_snapshot")
+    op.execute("DROP INDEX IF EXISTS public.ix_msf_key_numeric;")
     op.drop_index("ix_msf_category_key_text", table_name="material_spec_facets")
     op.drop_index("ix_msf_category_key", table_name="material_spec_facets")
     op.drop_index("ix_mca_card_action", table_name="material_card_audit")
@@ -3514,11 +3564,14 @@ def downgrade() -> None:
     op.drop_index("ix_ke_requisition", table_name="knowledge_entries")
     op.drop_index("ix_ke_parent", table_name="knowledge_entries")
     op.drop_index("ix_ke_mpn", table_name="knowledge_entries")
+    op.execute("DROP INDEX IF EXISTS public.ix_ke_expires;")
     op.drop_index("ix_ke_created_by", table_name="knowledge_entries")
     op.drop_index("ix_ke_company", table_name="knowledge_entries")
     op.drop_index("ix_inventory_snapshots_product_id", table_name="inventory_snapshots")
     op.drop_index("ix_inv_product_warehouse", table_name="inventory_snapshots")
     op.drop_index("ix_intel_cache_cache_key", table_name="intel_cache")
+    op.execute("DROP INDEX IF EXISTS public.ix_ics_queue_poll;")
+    op.execute("DROP INDEX IF EXISTS public.ix_ics_queue_dedup;")
     op.drop_index("ix_ics_log_queue", table_name="ics_search_log")
     op.drop_index("ix_graphsub_user", table_name="graph_subscriptions")
     op.drop_index("ix_graphsub_expiry", table_name="graph_subscriptions")
@@ -3533,6 +3586,7 @@ def downgrade() -> None:
     op.drop_index("ix_excess_line_items_list", table_name="excess_line_items")
     op.drop_index("ix_excess_line_items_demand", table_name="excess_line_items")
     op.drop_index("ix_ese_company", table_name="email_signature_extracts")
+    op.drop_index("ix_er_resolved_by", table_name="error_reports")
     op.drop_index("ix_eq_vendor", table_name="enrichment_queue")
     op.drop_index("ix_eq_status_source", table_name="enrichment_queue")
     op.drop_index("ix_eq_status_created", table_name="enrichment_queue")
@@ -3542,7 +3596,6 @@ def downgrade() -> None:
     op.drop_index("ix_eq_batch", table_name="enrichment_queue")
     op.drop_index("ix_entity_tags_type_tag_visible", table_name="entity_tags")
     op.drop_index("ix_entity_tags_type_id", table_name="entity_tags")
-    op.drop_index("ix_er_resolved_by", table_name="error_reports")
     op.drop_index("ix_enrichment_runs_status", table_name="enrichment_runs")
     op.drop_index("ix_enrichment_runs_phase", table_name="enrichment_runs")
     op.drop_index("ix_enrichment_runs_created_at", table_name="enrichment_runs")
@@ -3585,6 +3638,7 @@ def downgrade() -> None:
     op.drop_index("ix_bvs_vendor", table_name="buyer_vendor_stats")
     op.drop_index("ix_bvs_user", table_name="buyer_vendor_stats")
     op.drop_index("ix_bvs_unique", table_name="buyer_vendor_stats")
+    op.drop_index("ix_buyplans_token", table_name="buy_plans")
     op.drop_index("ix_bpv3_token", table_name="buy_plans_v3")
     op.drop_index("ix_bpv3_submitted_by", table_name="buy_plans_v3")
     op.drop_index("ix_bpv3_status_created", table_name="buy_plans_v3")
@@ -3598,14 +3652,13 @@ def downgrade() -> None:
     op.drop_index("ix_bpl_offer", table_name="buy_plan_lines")
     op.drop_index("ix_bpl_buyer", table_name="buy_plan_lines")
     op.drop_index("ix_bpl_buy_plan", table_name="buy_plan_lines")
+    op.drop_index("ix_bp_completed_by", table_name="buy_plans")
+    op.drop_index("ix_bp_cancelled_by", table_name="buy_plans")
+    op.drop_index("ix_bp_approved_by", table_name="buy_plans")
     op.drop_index("ix_bls_user_month", table_name="buyer_leaderboard_snapshot")
     op.drop_index("ix_bls_month_rank", table_name="buyer_leaderboard_snapshot")
     op.drop_index("ix_bls_month_points", table_name="buyer_leaderboard_snapshot")
     op.drop_index("ix_bidsol_status", table_name="bid_solicitations")
-    op.drop_index("ix_buyplans_token", table_name="buy_plans")
-    op.drop_index("ix_bp_completed_by", table_name="buy_plans")
-    op.drop_index("ix_bp_cancelled_by", table_name="buy_plans")
-    op.drop_index("ix_bp_approved_by", table_name="buy_plans")
     op.drop_index("ix_bids_vendor_card", table_name="bids")
     op.drop_index("ix_bids_status", table_name="bids")
     op.drop_index("ix_bids_line_item", table_name="bids")
@@ -3616,8 +3669,17 @@ def downgrade() -> None:
     op.drop_index("ix_ass_user_month", table_name="avail_score_snapshot")
     op.drop_index("ix_ass_month_role_score", table_name="avail_score_snapshot")
     op.drop_index("ix_ass_month_role_rank", table_name="avail_score_snapshot")
+    op.execute("DROP INDEX IF EXISTS public.ix_activity_vendor_contact;")
+    op.execute("DROP INDEX IF EXISTS public.ix_activity_vendor;")
+    op.execute("DROP INDEX IF EXISTS public.ix_activity_user_notif;")
     op.drop_index("ix_activity_user", table_name="activity_log")
+    op.execute("DROP INDEX IF EXISTS public.ix_activity_site_contact;")
+    op.execute("DROP INDEX IF EXISTS public.ix_activity_requisition;")
+    op.execute("DROP INDEX IF EXISTS public.ix_activity_requirement;")
+    op.execute("DROP INDEX IF EXISTS public.ix_activity_req_channel;")
+    op.execute("DROP INDEX IF EXISTS public.ix_activity_external;")
     op.drop_index("ix_activity_created_at", table_name="activity_log")
+    op.execute("DROP INDEX IF EXISTS public.ix_activity_company;")
     op.drop_table("verification_group_members")
     op.drop_table("vendor_sighting_summary")
     op.drop_table("vendor_reviews")
