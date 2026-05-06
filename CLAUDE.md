@@ -1,10 +1,19 @@
 # CLAUDE.md — AvailAI Documentation
 
 **PROJECT:** AvailAI — Electronic component sourcing platform and CRM for Trio Supply Chain Solutions
-**VERSION:** See `app/config.py` → `APP_VERSION`
+**VERSION:** See `app/config.py` (module-level constant `APP_VERSION`)
 **STACK:** FastAPI + SQLAlchemy 2.0 + PostgreSQL 16 + HTMX 2.x + Alpine.js 3.x + Jinja2 + Tailwind CSS
 **DEPLOY:** Docker Compose (app, db, redis, caddy, enrichment-worker [disabled], db-backup) on DigitalOcean
 **LEVEL:** Intermediate
+
+---
+
+## Authoritative Maps (read these before exploring code)
+- `docs/APP_MAP_ARCHITECTURE.md` — stack, infra, project structure
+- `docs/APP_MAP_DATABASE.md` — models, tables, relationships
+- `docs/APP_MAP_INTERACTIONS.md` — service interactions, data flows, integration patterns
+
+**After any code change**, update the relevant APP_MAP doc(s) in the same PR. They are the canonical reference; CLAUDE.md just points at them.
 
 ---
 
@@ -88,6 +97,14 @@ docker compose up app
 
 ## CODE RULES
 
+### Non-Negotiables
+- **Stack is HTMX + Alpine.js + Jinja2 — NOT React.** Reject React/SPA patterns; if a problem seems to need React, you're modeling it wrong. Server-render + HTMX swap.
+- **No band-aids, no half-measures.** Root-cause fixes only, even if interim breakage shows. Workarounds get the PR closed.
+- **Quality > speed. Zero ambiguity in designs.** Resolve every decision in the spec; no TBDs, no "options A/B".
+- **Hosted CLI only.** No GUI, no screenshots, no desktop-dependent suggestions, no browser visual companion.
+- **Before pushing big PRs:** run `pre-commit run --all-files` (local git-hook scope is narrower than CI and bites otherwise).
+- **Deploy is `./deploy.sh` only** — uses `--no-cache` and `--force-recreate`. Bare `docker compose up -d --build` ships stale templates. After deploy, verify any new Tailwind classes actually appear in built CSS.
+
 - Always write tests with any new code. Don't ask, just include them.
 - Give exact file paths for everything.
 - Never use placeholder comments like "# rest of code here" — give complete code.
@@ -167,8 +184,8 @@ app/
 │
 ├── connectors/                # External API integrations (DigiKey, Mouser, Nexar, etc.)
 ├── jobs/                      # APScheduler job definitions
-│   ├── inbox_monitor.py       # Check for RFQ replies every 30min
-│   ├── requirement_refresh.py # Re-search stale requirements
+│   ├── email_jobs.py          # RFQ inbox monitoring + reply parsing
+│   ├── sourcing_refresh_jobs.py # Re-search stale requirements
 │   └── ...
 │
 ├── cache/                     # Redis caching utilities
@@ -192,8 +209,9 @@ app/
 │   ├── htmx_mobile.css        # Mobile-specific overrides
 │   └── dist/                  # Vite build output (minified, content-hashed)
 │
-├── migrations/                # Alembic migration files
 └── logs/                      # Loguru output (structured, request_id context)
+
+# Note: Alembic migrations live at repo-root `alembic/versions/`, NOT under app/.
 
 tests/
 ├── test_models.py             # ORM model tests
@@ -238,7 +256,7 @@ APScheduler fires at interval → Job function → Service layer → Database/Ex
 **RFQ Workflow** (`email_service.py`):
 1. User selects vendors → Click "Send RFQ"
 2. `send_batch_rfq()` sends via Microsoft Graph API, tagged with `[AVAIL-{id}]`
-3. APScheduler polls inbox every 30 minutes (`inbox_monitor.py`)
+3. APScheduler polls inbox every 30 minutes (`email_jobs.py`)
 4. New replies forwarded to Claude via `response_parser.py`
 5. Claude extracts: price, quantity, lead time, condition, date code
 6. Confidence ≥0.8 → auto-create Offer, 0.5-0.8 → flag for manual review
@@ -662,7 +680,7 @@ Check `.env` for API keys (Octopart, BrokerBin, etc.). No keys = no results. You
 **"Check Inbox" finds nothing?**
 - Verify replies are in the same email thread as the RFQ you sent
 - Check that `Mail.Read` permission is granted in Azure
-- Look at `app/jobs/inbox_monitor.py` logs
+- Look at `app/jobs/email_jobs.py` logs
 
 **Tests fail with "TESTING not set"?**
 Run with: `TESTING=1 PYTHONPATH=/root/availai pytest tests/ -v`
@@ -700,26 +718,22 @@ docker compose up -d --build     # Rebuild from scratch
 
 ## Skill Usage Guide
 
-When working on tasks involving these technologies, invoke the corresponding skill:
+Invoke skills proactively — don't ask. Triggers:
 
-| Skill | Invoke When |
-|-------|-------------|
-| fastapi | Builds FastAPI routes, dependency injection, and middleware |
-| htmx | Implements HTMX attributes for server-driven UI updates |
-| jinja2 | Renders server-side templates with Jinja2 syntax and inheritance |
-| vite | Configures Vite build system, asset bundling, and dev server |
-| frontend-design | Designs UI with HTMX, Alpine.js, and Tailwind CSS styling |
-| pytest | Writes pytest tests with fixtures and async support |
-| redis | Configures Redis caching with decorators and TTL |
-| mypy | Enforces mypy strict type checking on Python code |
-| playwright | Implements end-to-end tests with Playwright |
-| mapping-user-journeys | Maps in-app journeys and identifies friction points in code |
-| clarifying-market-fit | Aligns ICP, positioning, and value narrative for on-page messaging |
-| designing-onboarding-paths | Designs onboarding paths, checklists, and first-run UI |
-| instrumenting-product-metrics | Defines product events, funnels, and activation metrics |
-| crafting-page-messaging | Writes conversion-focused messaging for pages and key CTAs |
-| tuning-landing-journeys | Improves landing page flow, hierarchy, and conversion paths |
-| mapping-conversion-events | Defines funnel events, tracking, and success signals |
-| structuring-offer-ladders | Frames plan tiers, value ladders, and upgrade logic |
-| inspecting-search-coverage | Audits technical and on-page search coverage |
-| adding-structured-signals | Adds structured data for rich results |
+| Trigger | Skill |
+|---|---|
+| Adding/modifying FastAPI routes, deps, middleware | `fastapi` |
+| Writing SQLAlchemy 2.0 models, queries, relationships, fixtures | `sqlalchemy` |
+| Adding HTMX attributes, partials, inline edits, lazy-loads, modals | `htmx` |
+| Editing Jinja2 templates, macros, custom filters, partials | `jinja2` |
+| Touching `vite.config.js`, JS/CSS entry points, Vitest specs | `vite` |
+| Building/styling UI (HTMX + Alpine + Tailwind) | `frontend-design` |
+| Writing/fixing pytest tests, fixtures, mocks | `pytest` |
+| Adding/invalidating Redis cache, `@cached_endpoint` | `redis` |
+| Fixing pre-commit lint errors, ruff rules, noqa | `ruff` |
+| Fixing mypy errors, adding type annotations | `mypy` |
+| Writing/extending Playwright E2E specs | `playwright` |
+| Empty states, first-run flows, onboarding nudges | `designing-onboarding-paths`, `orchestrating-feature-adoption` |
+| Funnel events, activity tracking, activation metrics | `mapping-conversion-events`, `instrumenting-product-metrics` |
+| Page copy, CTAs, microcopy | `crafting-page-messaging`, `tuning-landing-journeys` |
+| SEO/meta/structured data on public pages | `inspecting-search-coverage`, `adding-structured-signals` |
