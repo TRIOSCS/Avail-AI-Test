@@ -304,7 +304,7 @@ async def promote_prospect_contact(
     return result
 
 
-# ── Feature 2a: Parse RFQ Email (Gradient) ────────────────────────────────
+# ── Feature 2a: Parse RFQ Email (Claude) ──────────────────────────────────
 
 
 @router.post("/api/ai/parse-email", response_model=AiParseEmailResponse)
@@ -314,7 +314,7 @@ async def ai_parse_email(
     request: Request,
     user: User = Depends(require_user),
 ):
-    """Parse a vendor email reply into structured quotes using Gradient AI."""
+    """Parse a vendor email reply into structured quotes using Claude."""
     if not _ai_enabled(user):
         raise HTTPException(403, "AI features not enabled")
 
