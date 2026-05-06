@@ -571,7 +571,9 @@ class NexarConnector(BaseConnector):
 class BrokerBinConnector(BaseConnector):
     """BrokerBin REST API v2.
 
-    Auth: Bearer token in Authorization header + login header for user.
+    Auth: HTTP Basic (username + API key). BrokerBin rejects Bearer tokens with
+    a misleading "Must use secure protocol" 401, even over HTTPS — Basic auth is
+    the only accepted method as of 2026-05.
     Endpoint: GET https://search.brokerbin.com/api/v2/part/search?query={mpn}&size=100
     Response: { meta: {...}, data: [{ company, country, part, mfg, cond, description, price, qty, age_in_days }] }
     """
@@ -582,20 +584,12 @@ class BrokerBinConnector(BaseConnector):
 
     def __init__(self, api_key: str, api_secret: str = ""):
         super().__init__()
-        self.token = api_key  # Bearer token
-        self.login = api_secret  # BrokerBin username (e.g. "triomhk")
+        self.token = api_key  # API key (Basic auth password)
+        self.login = api_secret  # BrokerBin username (Basic auth user, e.g. "triomhk")
 
     async def _do_search(self, part_number: str) -> list[dict]:
-        if not self.token:
+        if not self.token or not self.login:
             return []
-
-        headers = {
-            "Authorization": f"Bearer {self.token}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-        if self.login:
-            headers["login"] = self.login
 
         params = {
             "query": part_number,
@@ -604,7 +598,13 @@ class BrokerBinConnector(BaseConnector):
 
         from ..http_client import http_redirect
 
-        r = await http_redirect.get(self.API_URL, params=params, headers=headers, timeout=self.timeout)
+        r = await http_redirect.get(
+            self.API_URL,
+            params=params,
+            headers={"Accept": "application/json"},
+            auth=(self.login, self.token),
+            timeout=self.timeout,
+        )
 
         if r.status_code != 200:
             logger.warning(f"BrokerBin: HTTP {r.status_code} for {part_number}: {r.text[:200]}")

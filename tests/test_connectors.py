@@ -1507,18 +1507,31 @@ class TestBrokerBinConnector:
             assert results == []
 
     @pytest.mark.asyncio
-    async def test_search_no_login_header(self):
+    async def test_search_returns_empty_when_login_missing(self):
+        """Login is the Basic auth username — without it, no request can be made."""
         from app.connectors.sources import BrokerBinConnector
 
         c = BrokerBinConnector(api_key="token", api_secret="")
+        with patch("app.http_client.http_redirect") as mock_client:
+            mock_client.get = AsyncMock()
+            results = await c._do_search("LM317T")
+            assert results == []
+            mock_client.get.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_search_uses_http_basic_auth(self):
+        """Regression: BrokerBin requires HTTP Basic (user, key); Bearer is rejected with 401."""
+        c = self._make_connector()
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"data": [], "meta": {"total": 0}}
 
         with patch("app.http_client.http_redirect") as mock_client:
             mock_client.get = AsyncMock(return_value=mock_resp)
-            results = await c._do_search("LM317T")
-            assert results == []
+            await c._do_search("LM317T")
+            kwargs = mock_client.get.call_args.kwargs
+            assert kwargs["auth"] == ("triomhk", "bb-token")
+            assert "Authorization" not in kwargs.get("headers", {})
 
 
 # ═══════════════════════════════════════════════════════════════════════
