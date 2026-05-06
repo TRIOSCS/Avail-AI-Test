@@ -86,7 +86,7 @@ def _get_connector_for_source(name: str, db: Session = None):
 
     bb_key = _cred("BROKERBIN_API_KEY")
     bb_sec = _cred("BROKERBIN_API_SECRET")
-    if name == "brokerbin" and bb_key:
+    if name == "brokerbin" and bb_key and bb_sec:
         return BrokerBinConnector(bb_key, bb_sec)
 
     ebay_id = _cred("EBAY_CLIENT_ID")

@@ -1393,12 +1393,16 @@ class TestBrokerBinConnector:
         return BrokerBinConnector(api_key="bb-token", api_secret="triomhk")
 
     @pytest.mark.asyncio
-    async def test_empty_token(self):
+    async def test_search_returns_empty_when_token_missing(self):
+        """Token is the Basic auth password — without it, no request can be made."""
         from app.connectors.sources import BrokerBinConnector
 
-        c = BrokerBinConnector(api_key="", api_secret="")
-        results = await c._do_search("LM317T")
-        assert results == []
+        c = BrokerBinConnector(api_key="", api_secret="triomhk")
+        with patch("app.http_client.http_redirect") as mock_client:
+            mock_client.get = AsyncMock()
+            results = await c._do_search("LM317T")
+            assert results == []
+            mock_client.get.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_search_200_with_results(self):

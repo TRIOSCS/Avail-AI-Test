@@ -51,6 +51,38 @@ def test_build_connectors_instantiates_with_creds(db_session):
     assert stats["nexar"]["status"] == "skipped"
 
 
+def test_build_connectors_brokerbin_requires_both_credentials(db_session):
+    """BrokerBin uses HTTP Basic auth — both username and key are required.
+
+    Regression: half-configured deployments (key set, secret unset, or vice
+    versa) used to pass the boot filter and silently return empty results
+    on every search.
+    """
+    from app.connectors.sources import BrokerBinConnector
+    from app.search_service import _build_connectors
+
+    only_key = {("brokerbin", "BROKERBIN_API_KEY"): "key-only"}
+    with patch("app.search_service.get_credentials_batch", return_value=only_key):
+        connectors, stats, _ = _build_connectors(db_session)
+    assert not any(isinstance(c, BrokerBinConnector) for c in connectors)
+    assert stats["brokerbin"]["status"] == "skipped"
+
+    only_secret = {("brokerbin", "BROKERBIN_API_SECRET"): "user-only"}
+    with patch("app.search_service.get_credentials_batch", return_value=only_secret):
+        connectors, stats, _ = _build_connectors(db_session)
+    assert not any(isinstance(c, BrokerBinConnector) for c in connectors)
+    assert stats["brokerbin"]["status"] == "skipped"
+
+    both = {
+        ("brokerbin", "BROKERBIN_API_KEY"): "the-key",
+        ("brokerbin", "BROKERBIN_API_SECRET"): "the-user",
+    }
+    with patch("app.search_service.get_credentials_batch", return_value=both):
+        connectors, stats, _ = _build_connectors(db_session)
+    assert any(isinstance(c, BrokerBinConnector) for c in connectors)
+    assert "brokerbin" not in stats
+
+
 # ── Aggressive dedup tests ──────────────────────────────────────────────
 
 
