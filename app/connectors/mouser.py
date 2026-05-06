@@ -90,7 +90,12 @@ class MouserConnector(BaseConnector):
             )
             if is_auth_error:
                 logger.warning(f"Mouser: auth error for {part_number}: {msg}")
-                return []
+                # Raise so health_monitor.ping_source catches and flips status to
+                # 'error' — otherwise the connector keeps getting pinged every
+                # 15min, burning Mouser API quota with bad creds. Search-time
+                # callers (search_service._run_one) catch this exception and
+                # surface it as a per-source error chip in the UI.
+                raise RuntimeError(f"Mouser auth error: {msg}")
             logger.warning(f"Mouser API errors for {part_number}: {errors}")
             raise RuntimeError(f"Mouser API: {msg}")
 
