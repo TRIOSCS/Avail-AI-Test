@@ -180,10 +180,10 @@ class TestDatabaseModule:
 class TestDatabaseNonSQLite:
     """Tests for the PostgreSQL engine creation path (database.py lines 37-50).
 
-    These tests verify the PostgreSQL configuration constants and connect_args
-    without reloading app.database via sys.modules.pop + importlib.import_module,
-    which corrupts the shared in-memory SQLite engine used by other tests in the
-    same xdist worker process.
+    These tests verify the PostgreSQL configuration constants and connect_args without
+    reloading app.database via sys.modules.pop + importlib.import_module, which corrupts
+    the shared in-memory SQLite engine used by other tests in the same xdist worker
+    process.
     """
 
     def test_postgresql_branch_creates_engine_with_pool_args(self):
