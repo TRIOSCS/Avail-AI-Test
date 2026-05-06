@@ -408,6 +408,13 @@ class NexarConnector(BaseConnector):
                 data = await self._run_query(self.AGGREGATE_QUERY, part_number)
                 results_data = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
                 return self._parse_aggregate(results_data, part_number) if results_data else []
+            # Quota / billing failures are hard errors — raise so the health
+            # monitor catches and flips status to 'error', stopping the
+            # 15-min ping loop from continuing to burn API calls against an
+            # exhausted quota.
+            msg_lower = msg.lower()
+            if "exceed" in msg_lower and ("limit" in msg_lower or "quota" in msg_lower or "plan" in msg_lower):
+                raise RuntimeError(f"Nexar quota exceeded: {msg[:200]}")
             return []
 
         results_data = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
