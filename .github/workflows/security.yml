@@ -44,10 +44,12 @@ jobs:
         run: bandit -r app/ -c pyproject.toml -ll
 
       - name: pip-audit vulnerability scan
-        # --requirement scopes the audit to our app deps (requirements.txt + its
-        # transitive resolution), excluding the CI runner's bundled pip itself.
-        # The runner's pip CVEs are out of scope for app security review.
-        run: pip-audit --desc --requirement requirements.txt
+        # --requirement scopes the audit to declared deps (app + dev) and their
+        # transitive resolution, excluding the CI runner's pre-installed packages
+        # (e.g. the runner-bundled pip itself), whose CVEs are not actionable
+        # for this app. Both files are audited so dev tooling (pytest, ruff,
+        # mypy, bandit, playwright-python, etc.) is covered.
+        run: pip-audit --desc --requirement requirements.txt --requirement requirements-dev.txt
 
       - name: npm audit vulnerability scan
         run: npm audit --audit-level=high
