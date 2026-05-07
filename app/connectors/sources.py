@@ -606,6 +606,14 @@ class BrokerBinConnector(BaseConnector):
             timeout=self.timeout,
         )
 
+        # Hard errors raise so health_monitor.ping_source flips the source's
+        # status to 'error' and excludes it from the 15-min ping loop. Soft
+        # errors (5xx, transient) keep returning [] for the search-time path
+        # which the caller already surfaces as an error chip in the UI.
+        if r.status_code in (401, 403):
+            raise RuntimeError(f"BrokerBin auth error: HTTP {r.status_code} {r.text[:200]}")
+        if r.status_code == 429:
+            raise RuntimeError(f"BrokerBin rate limited: {r.text[:200]}")
         if r.status_code != 200:
             logger.warning(f"BrokerBin: HTTP {r.status_code} for {part_number}: {r.text[:200]}")
             return []

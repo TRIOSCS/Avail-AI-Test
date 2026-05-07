@@ -1463,6 +1463,42 @@ class TestBrokerBinConnector:
             assert results == []
 
     @pytest.mark.asyncio
+    async def test_search_429_raises_for_health_monitor(self):
+        """Rate-limit responses must raise so health_monitor flips status.
+
+        Regression: BrokerBin used to silently swallow 429s as `return []`,
+        leaving the source's status as 'live' so the 15-min ping loop kept
+        burning quota with no operator signal — exactly the bug we fixed for
+        Mouser/Nexar in commit 644b823c.
+        """
+        import pytest as _pytest
+
+        c = self._make_connector()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 429
+        mock_resp.text = '{"error":"Too many requests! Request limit reached..."}'
+
+        with patch("app.http_client.http_redirect") as mock_client:
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            with _pytest.raises(RuntimeError, match="rate limited"):
+                await c._do_search("LM317T")
+
+    @pytest.mark.asyncio
+    async def test_search_401_raises_for_health_monitor(self):
+        """401/403 (auth) responses must raise — same pattern as 429."""
+        import pytest as _pytest
+
+        c = self._make_connector()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_resp.text = '{"message":"Unauthenticated. Must use secure protocol."}'
+
+        with patch("app.http_client.http_redirect") as mock_client:
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            with _pytest.raises(RuntimeError, match="auth error"):
+                await c._do_search("LM317T")
+
+    @pytest.mark.asyncio
     async def test_search_non_json(self):
         c = self._make_connector()
         mock_resp = MagicMock()
