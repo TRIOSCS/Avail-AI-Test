@@ -553,6 +553,167 @@ BROWSER (HTMX + Alpine.js)
 
 ---
 
+## HTMX Click-to-Refresh Pattern (Sightings)
+
+The sightings page uses a structural HTMX pattern that avoids the
+GET-then-POST race conditions and SSE re-trigger loops the codebase used
+to suffer from. It's the canonical pattern for any panel where a
+user-initiated swap and a background SSE-driven refresh can both target
+the same DOM region.
+
+**Authoritative do/don't rules live in `docs/htmx-conventions.md`** — this
+section documents the data flow only, not the rules.
+
+### Click-to-Refresh Data Flow (end to end)
+
+```
+USER clicks a sightings row
+    |
+    v
+Alpine selectReq() in partials/sightings/list.html
+    |
+    +---> $store.sightingSelection.selectedReqId = <id>
+    +---> $store.sightingSelection.clickPending++
+    |
+    +---> htmx.ajax('POST', '/v2/partials/sightings/refresh', {
+    |         target: '#sightings-detail',
+    |         swap:   'innerHTML',
+    |         indicator: '#sightings-detail-skeleton',
+    |         values: { requirement_id: <id> }
+    |     })
+    |     -- single POST, no parallel GET. The skeleton shows during flight.
+    |
+    v
+SERVER: sightings_refresh(source="user", ...) [app/routers/sightings.py]
+    |
+    +---> search_requirement() runs the full connector fan-out
+    |       (subject to rate-guard cooldown — skipped if recent)
+    |
+    +---> renders sightings_detail() partial (HTMX response body)
+    |       +---> resp.headers["X-Rendered-Req-Id"] = str(requirement_id)
+    |               (set unconditionally in sightings_detail; sightings_refresh
+    |                inherits via `await sightings_detail(...)`)
+    |
+    +---> (source="user" only) await _publish_if_user_source(...)
+    |       +---> sse_broker.publish("sighting-updated", {requirement_id})
+    |               on the user's channel
+    |
+    +---> (source="user" only) HX-Trigger toast on rate-guard or
+    |     refresh-failure. SSE-source POSTs suppress these toasts.
+    |
+    v
+CLIENT: htmx:beforeSwap listener in app/static/htmx_app.js
+    |
+    +---> Reads X-Rendered-Req-Id from response.
+    +---> Compares to $store.sightingSelection.selectedReqId.
+    +---> If they differ, evt.preventDefault() — drop the stale swap.
+    |     (User clicked a different row mid-flight.)
+    |
+    v
+CLIENT: htmx:afterRequest listener in app/static/htmx_app.js
+    |
+    +---> store.clickPending = Math.max(0, store.clickPending - 1)
+    |     -- decrements on EVERY outcome (swap, error, abort, stale-reject)
+    |     so the counter never gets stuck.
+    |
+    v
+SSE channel for the user fires "sighting-updated" event
+    |
+    v
+SSE listener in partials/sightings/list.html
+    |
+    +---> if ($store.sightingSelection.clickPending > 0) return;
+    |     -- user has an in-flight click; skip background refresh to avoid
+    |        target collisions.
+    |
+    +---> if (eventReqId !== $store.sightingSelection.selectedReqId) return;
+    |     -- only refresh the currently-displayed requirement.
+    |
+    +---> htmx.ajax('POST', '/v2/partials/sightings/refresh?source=sse', {
+    |         target: '#sightings-detail',
+    |         swap:   'innerHTML',
+    |         indicator: '#sightings-detail-skeleton',
+    |         values: { requirement_id: <id> }
+    |     })
+    |
+    v
+SERVER: sightings_refresh(source="sse", ...)
+    |
+    +---> Runs the connector fan-out and re-renders detail.
+    +---> Skips broker.publish (loop break — see do-not rule in
+    |     docs/htmx-conventions.md).
+    +---> Skips HX-Trigger toasts (background-triggered toasts are not
+    |     surfaced to the user).
+    +---> Still sets X-Rendered-Req-Id; client guard still runs.
+```
+
+### X-Rendered-Req-Id Correlation Header
+
+**Why it exists.** Out-of-order swap protection. If the user clicks rows
+A then B in quick succession, both POSTs are in flight simultaneously and
+either response can arrive first. Without correlation, the A response can
+clobber the B response that already swapped — leaving the wrong detail
+panel for row B.
+
+**Server side.** Set on every response from any endpoint that renders
+into `#sightings-detail`. Endpoints today:
+- `sightings_detail()` — the canonical setter; inherited by
+  `sightings_refresh()` via `await sightings_detail(...)`.
+- `sightings_log_activity()` — sets the header on its rendered detail
+  response too.
+
+**Client side.** `htmx:beforeSwap` listener in `app/static/htmx_app.js`
+reads the header off the XHR, compares to
+`Alpine.store('sightingSelection').selectedReqId`, and calls
+`evt.preventDefault()` if they differ.
+
+### `?source=user|sse` Query-Param Convention
+
+**Why it exists.** Break the SSE → broker.publish → SSE → endpoint loop
+that occurs when a refresh handler both consumes and re-emits the same
+event. Also: gate user-facing toasts so background-triggered refreshes
+stay silent.
+
+**Type contract.** `source: Literal["user", "sse"] = Query(default="user")`.
+The `Literal` type is load-bearing — a plain `str` would silently fall
+back to the user-path branch on typos like `?source=SSE` and re-introduce
+the loop. `Literal` makes FastAPI return HTTP 422 on unknown values.
+
+**Endpoints that use the gate.** All mutation endpoints under
+`app/routers/sightings.py` whose response can land in `#sightings-detail`
+or whose state change should propagate via SSE:
+- `sightings_refresh`
+- `sightings_batch_refresh`
+- `sightings_mark_unavailable`
+- `sightings_assign_buyer`
+- `sightings_advance_status`
+- `sightings_log_activity`
+
+**Shared helpers** (`app/routers/sightings.py`):
+- `_publish_if_user_source(source, user_id, requirement_id)` — calls
+  `broker.publish` only when `source != "sse"`. Used at the point where a
+  handler would otherwise emit the looped SSE event.
+- `_toast_suppressed_for_sse(source) -> bool` — guards `HX-Trigger`
+  emission. Rate-guard toasts ("Already searched within X minutes") and
+  refresh-failure toasts only fire when `source == "user"`.
+
+### Static-Analysis Enforcement
+
+The conventions are not just guidance — `tests/test_static_analysis.py`
+walks the source tree and fails CI on regressions:
+- `broker.publish` calls inside source-gated handlers must be guarded by
+  `_publish_if_user_source` or an equivalent `if source != "sse"` check.
+- `htmx.ajax()` call sites whose target is a content-sensitive panel
+  must pass an `indicator:` option (HTMX does not read `hx-indicator`
+  from the target element on imperative calls).
+- Endpoints that render into `#sightings-detail` must set
+  `X-Rendered-Req-Id`.
+
+See `docs/htmx-conventions.md` for the do/don't rules and pointers into
+the current implementation.
+
+---
+
 ## Routes Summary (400+ endpoints)
 
 | Domain | Routes | Key Operations |

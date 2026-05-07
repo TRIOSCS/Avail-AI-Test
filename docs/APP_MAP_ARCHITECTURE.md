@@ -81,6 +81,18 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
 - **Build:** Vite bundles `htmx_app.js` + `styles.css` -> content-hashed dist/
 - **Tailwind safelist:** Broadened to cover all color families (slate, red, amber, emerald, etc.) + Python content scanning so dynamic classes survive tree-shaking
 
+### HTMX Conventions
+
+HTMX is the primary client/server interaction layer; the canonical
+click-to-refresh data flow (single POST, `X-Rendered-Req-Id` correlation
+header, `?source=user|sse` query-param gate) is documented in
+`APP_MAP_INTERACTIONS.md`. The do/don't rules for imperative
+`htmx.ajax()` calls live in `docs/htmx-conventions.md` and are the
+authoritative reference. Static-analysis tests in
+`tests/test_static_analysis.py` enforce the conventions in CI:
+`broker.publish` source-gating, `htmx.ajax()` indicator coverage, and
+`X-Rendered-Req-Id` header coverage on context-sensitive responses.
+
 ### Templates by Feature
 
 | Feature | Count | Directory |
