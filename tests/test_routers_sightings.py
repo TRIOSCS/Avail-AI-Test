@@ -244,3 +244,52 @@ class TestSightingsRefreshFailureToast:
         assert resp.status_code == 200
         assert "HX-Trigger" in resp.headers
         assert "Search refresh failed" in resp.headers["HX-Trigger"]
+
+
+class TestSightingsClickPendingCounter:
+    """Static-grep regression: click-pending state is a counter, not a bool.
+
+    The earlier `clickInFlight` boolean broke under multi-click races: clicking
+    row A then row B before A returns let A's afterRequest clear the flag
+    while B's POST was still in-flight, opening a window for SSE-fired
+    redundant POSTs (correctness preserved by X-Rendered-Req-Id, but the
+    suppression invariant was broken). Replaced with `clickPending` counter.
+    These tests catch a future revert.
+    """
+
+    def test_no_click_in_flight_field_in_htmx_app_js(self):
+        """htmx_app.js must not reintroduce the clickInFlight boolean."""
+        from pathlib import Path
+
+        js = Path("app/static/htmx_app.js").read_text()
+        assert "clickInFlight" not in js, (
+            "clickInFlight reintroduced in htmx_app.js — multi-click race regression. Use clickPending counter instead."
+        )
+
+    def test_no_click_in_flight_field_in_sightings_list_template(self):
+        """sightings/list.html must not reintroduce the clickInFlight boolean."""
+        from pathlib import Path
+
+        html = Path("app/templates/htmx/partials/sightings/list.html").read_text()
+        assert "clickInFlight" not in html, (
+            "clickInFlight reintroduced in sightings/list.html — multi-click race regression. "
+            "Use clickPending counter instead."
+        )
+
+    def test_click_pending_counter_present_in_htmx_app_js(self):
+        """htmx_app.js exposes the clickPending counter on the sightingSelection
+        store."""
+        from pathlib import Path
+
+        js = Path("app/static/htmx_app.js").read_text()
+        assert "clickPending: 0" in js, "clickPending counter missing from sightingSelection store"
+        # Decrement uses Math.max clamp to guard against double-decrement.
+        assert "Math.max(0, store.clickPending - 1)" in js, "clickPending decrement must clamp at 0 via Math.max"
+
+    def test_click_pending_counter_present_in_sightings_list_template(self):
+        """sightings/list.html increments on click and gates SSE on counter > 0."""
+        from pathlib import Path
+
+        html = Path("app/templates/htmx/partials/sightings/list.html").read_text()
+        assert "store.clickPending += 1" in html, "selectReq() must increment clickPending"
+        assert "store.clickPending > 0" in html, "SSE handler must gate on clickPending > 0"

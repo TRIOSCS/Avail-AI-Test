@@ -138,7 +138,7 @@ Alpine.store('shortlist', {
 Alpine.store('sightingSelection', {
     _map: {},
     selectedReqId: null,
-    clickInFlight: false,    // true while a click-initiated POST is outstanding
+    clickPending: 0,    // count of click-initiated POSTs currently in-flight
     toggle(id) {
         if (this._map[id]) { delete this._map[id]; }
         else { this._map[id] = true; }
@@ -181,9 +181,9 @@ document.body.addEventListener('htmx:beforeSwap', (evt) => {
         const reqId = evt.detail.xhr?.getResponseHeader('X-Rendered-Req-Id');
         if (reqId) {
             if (store.selectedReqId && String(store.selectedReqId) !== String(reqId)) {
-                // Stale response — clear in-flight flag so subsequent SSE
-                // updates aren't suppressed, then drop the swap.
-                store.clickInFlight = false;
+                // Stale response — drop the swap. The htmx:afterRequest
+                // handler owns the clickPending counter and will decrement
+                // it for this completed (rejected) request.
                 evt.detail.shouldSwap = false;
                 return;
             }
@@ -193,14 +193,17 @@ document.body.addEventListener('htmx:beforeSwap', (evt) => {
     }
 });
 
-// Always clear clickInFlight when a #sightings-detail request finishes —
-// success, error, timeout, abort, or stale-reject all funnel through here.
-// Without this, a single failed request leaves the flag stuck-true and
-// subsequent SSE refreshes are silently suppressed forever.
+// Decrement the clickPending counter when a #sightings-detail request
+// finishes — success, error, timeout, abort, or stale-reject all funnel
+// through here. Counter (vs. bool) handles the multi-click race where a
+// user clicks row A then row B before A returns: each completion
+// decrements once, and SSE suppression stays active until both clear.
+// Math.max(0, …) clamps in case of an unexpected double-decrement.
 htmx.on('htmx:afterRequest', function(evt) {
     var target = evt.detail.target || evt.detail.elt;
     if (target && target.id === 'sightings-detail') {
-        Alpine.store('sightingSelection').clickInFlight = false;
+        var store = Alpine.store('sightingSelection');
+        store.clickPending = Math.max(0, store.clickPending - 1);
     }
 });
 

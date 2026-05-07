@@ -59,7 +59,7 @@
          const store = Alpine.store('sightingSelection');
          this.selectedReqId = id;
          store.selectedReqId = id;
-         store.clickInFlight = true;
+         store.clickPending += 1;
          if (window.innerWidth < 1024) { this.mobileDetailOpen = true; }
          htmx.ajax('POST', '/v2/partials/sightings/' + id + '/refresh', {
            target: '#sightings-detail',
@@ -96,7 +96,7 @@
              const store = Alpine.store('sightingSelection');
              const sel = store.selectedReqId;
              if (!reqId || !sel || String(reqId) !== String(sel)) return;
-             if (store.clickInFlight) return;
+             if (store.clickPending > 0) return;
              htmx.ajax('POST', '/v2/partials/sightings/' + reqId + '/refresh?source=sse', {
                target: '#sightings-detail',
                swap: 'innerHTML',
