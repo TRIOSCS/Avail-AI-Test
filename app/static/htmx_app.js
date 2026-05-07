@@ -138,6 +138,8 @@ Alpine.store('shortlist', {
 Alpine.store('sightingSelection', {
     _map: {},
     selectedReqId: null,
+    clickController: null,   // AbortController for the in-flight click POST
+    clickInFlight: false,    // true while a click-initiated POST is outstanding
     toggle(id) {
         if (this._map[id]) { delete this._map[id]; }
         else { this._map[id] = true; }
@@ -169,6 +171,20 @@ htmx.on('htmx:responseError', (evt) => {
     Alpine.store('toast').message = 'Request failed. Please try again.';
     Alpine.store('toast').type = 'error';
     Alpine.store('toast').show = true;
+});
+
+// ── Stale click-response guard — discard if selection changed ──
+document.body.addEventListener('htmx:beforeSwap', (evt) => {
+    if (evt.detail.target.id === 'sightings-detail') {
+        const store = Alpine.store('sightingSelection');
+        const reqId = evt.detail.xhr?.getResponseHeader('X-Rendered-Req-Id');
+        if (reqId && store.selectedReqId && String(store.selectedReqId) !== String(reqId)) {
+            evt.detail.shouldSwap = false;
+            return;
+        }
+        store.clickInFlight = false;
+        store.clickController = null;
+    }
 });
 
 // ── Clear stuck loading/swapping states after errors or timeouts ──

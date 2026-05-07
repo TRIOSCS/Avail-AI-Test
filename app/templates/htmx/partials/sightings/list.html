@@ -56,9 +56,17 @@
          }
        },
        selectReq(id) {
+         const store = Alpine.store('sightingSelection');
          this.selectedReqId = id;
-         Alpine.store('sightingSelection').selectedReqId = id;
+         store.selectedReqId = id;
+         store.clickInFlight = true;
          if (window.innerWidth < 1024) { this.mobileDetailOpen = true; }
+         htmx.ajax('POST', '/v2/partials/sightings/' + id + '/refresh', {
+           target: '#sightings-detail',
+           swap: 'innerHTML',
+           indicator: '#sightings-detail-skeleton',
+           headers: { 'X-Click-Req-Id': String(id) },
+         });
        },
        closeMobileDetail() {
          this.mobileDetailOpen = false;
@@ -80,11 +88,15 @@
              try {
                const data = JSON.parse(e.data || '{}');
                const reqId = data.requirement_id;
-               const sel = Alpine.store('sightingSelection')?.selectedReqId;
-               if (reqId && sel && String(reqId) === String(sel)) {
-                 htmx.ajax('GET', '/v2/partials/sightings/' + reqId + '/detail',
-                            {target: '#sightings-detail', swap: 'innerHTML'});
-               }
+               const store = Alpine.store('sightingSelection');
+               const sel = store.selectedReqId;
+               if (!reqId || !sel || String(reqId) !== String(sel)) return;
+               if (store.clickInFlight) return;
+               htmx.ajax('POST', '/v2/partials/sightings/' + reqId + '/refresh?source=sse', {
+                 target: '#sightings-detail',
+                 swap: 'innerHTML',
+                 indicator: '#sightings-detail-skeleton',
+               });
              } catch(err) { /* ignore parse errors */ }
            });
            this._sse.onerror = () => {
@@ -179,7 +191,5 @@
     {# Detail content — loaded via HTMX when row selected #}
     <div x-show="selectedReqId" x-cloak id="sightings-detail" class="sightings-fade p-3"
          hx-indicator="#sightings-detail-skeleton"></div>
-    {# Hidden sink for background refresh — triggers search pipeline without blocking detail load #}
-    <div id="sightings-refresh-sink" class="hidden"></div>
   </div>
 </div>

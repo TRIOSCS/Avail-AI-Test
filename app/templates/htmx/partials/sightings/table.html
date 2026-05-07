@@ -130,7 +130,7 @@
       {% set cov_pct = [cov_pct, 100]|min %}
       <tr class="group cursor-pointer {{ 'bg-rose-50/30' if is_hot else '' }}"
           :class="selectedReqId == {{ r.id }} ? 'row-selected' : ''"
-          @click="selectReq({{ r.id }}); htmx.ajax('GET', '/v2/partials/sightings/{{ r.id }}/detail', {target: '#sightings-detail', swap: 'innerHTML'}); htmx.ajax('POST', '/v2/partials/sightings/{{ r.id }}/refresh', {target: '#sightings-refresh-sink', swap: 'innerHTML'})"
+          @click="selectReq({{ r.id }})"
           data-req-id="{{ r.id }}">
         <td class="px-2 py-2" @click.stop>
           <input aria-label="Select requirement {{ r.primary_mpn }}" type="checkbox" class="req-checkbox rounded border-gray-300" value="{{ r.id }}"
@@ -164,6 +164,8 @@
                     hx-post="/v2/partials/sightings/{{ r.id }}/refresh"
                     hx-target="#sightings-detail"
                     hx-swap="innerHTML"
+                    hx-indicator="#sightings-detail-skeleton"
+                    data-loading-disable
                     @click.stop="refreshing = true"
                     hx-on::after-request="refreshing = false">
               <svg class="h-3 w-3" :class="refreshing ? 'animate-spin' : ''" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
@@ -214,7 +216,7 @@
     {% set cov_pct = [cov_pct, 100]|min %}
     <div class="bg-white border border-gray-200 rounded-lg p-3 sightings-slide-up cursor-pointer"
          :class="selectedReqId == {{ r.id }} ? 'ring-2 ring-brand-300' : ''"
-         @click="selectReq({{ r.id }}); htmx.ajax('GET', '/v2/partials/sightings/{{ r.id }}/detail', {target: '#sightings-detail', swap: 'innerHTML'}); htmx.ajax('POST', '/v2/partials/sightings/{{ r.id }}/refresh', {target: '#sightings-refresh-sink', swap: 'innerHTML'})">
+         @click="selectReq({{ r.id }})">
       <div class="flex items-center justify-between mb-1.5">
         <div class="flex-1 min-w-0">{{ mpn_chips(r, link_map=link_map) }}</div>
         <span class="transition-colors duration-200 ml-2 flex-shrink-0">{{ m.status_badge(r.sourcing_status) }}</span>
