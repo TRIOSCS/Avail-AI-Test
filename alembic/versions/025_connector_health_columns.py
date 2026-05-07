@@ -26,5 +26,5 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("ALTER TABLE api_sources DROP COLUMN IF EXISTS error_count_24h")
-    op.execute("ALTER TABLE api_sources DROP COLUMN IF EXISTS last_error_at")
+    op.execute("ALTER TABLE IF EXISTS api_sources DROP COLUMN IF EXISTS error_count_24h")
+    op.execute("ALTER TABLE IF EXISTS api_sources DROP COLUMN IF EXISTS last_error_at")

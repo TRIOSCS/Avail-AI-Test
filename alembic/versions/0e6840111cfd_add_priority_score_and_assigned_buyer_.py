@@ -32,5 +32,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE requirements DROP COLUMN IF EXISTS assigned_buyer_id")
-    op.execute("ALTER TABLE requirements DROP COLUMN IF EXISTS priority_score")
+    op.execute("ALTER TABLE IF EXISTS requirements DROP COLUMN IF EXISTS assigned_buyer_id")
+    op.execute("ALTER TABLE IF EXISTS requirements DROP COLUMN IF EXISTS priority_score")

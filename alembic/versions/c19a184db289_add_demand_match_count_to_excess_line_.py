@@ -20,4 +20,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE excess_line_items DROP COLUMN IF EXISTS demand_match_count")
+    op.execute("ALTER TABLE IF EXISTS excess_line_items DROP COLUMN IF EXISTS demand_match_count")

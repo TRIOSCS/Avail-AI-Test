@@ -50,7 +50,7 @@ def upgrade():
 
 def downgrade():
     op.drop_index("ix_activity_unscored", table_name="activity_log", if_exists=True)
-    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS is_meaningful")
-    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS quality_assessed_at")
-    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS quality_classification")
-    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS quality_score")
+    op.execute("ALTER TABLE IF EXISTS activity_log DROP COLUMN IF EXISTS is_meaningful")
+    op.execute("ALTER TABLE IF EXISTS activity_log DROP COLUMN IF EXISTS quality_assessed_at")
+    op.execute("ALTER TABLE IF EXISTS activity_log DROP COLUMN IF EXISTS quality_classification")
+    op.execute("ALTER TABLE IF EXISTS activity_log DROP COLUMN IF EXISTS quality_score")

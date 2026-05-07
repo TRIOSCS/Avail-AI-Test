@@ -24,5 +24,5 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS eight_by_eight_enabled")
-    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS eight_by_eight_extension")
+    op.execute("ALTER TABLE IF EXISTS users DROP COLUMN IF EXISTS eight_by_eight_enabled")
+    op.execute("ALTER TABLE IF EXISTS users DROP COLUMN IF EXISTS eight_by_eight_extension")

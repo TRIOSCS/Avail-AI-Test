@@ -35,10 +35,10 @@ def downgrade() -> None:
     op.drop_index("ix_offers_evidence_tier", table_name="offers", if_exists=True)
     op.drop_index("ix_sightings_evidence_tier", table_name="sightings", if_exists=True)
 
-    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS promoted_at")
-    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS promoted_by_id")
-    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS parse_confidence")
-    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS evidence_tier")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS promoted_at")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS promoted_by_id")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS parse_confidence")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS evidence_tier")
 
-    op.execute("ALTER TABLE sightings DROP COLUMN IF EXISTS score_components")
-    op.execute("ALTER TABLE sightings DROP COLUMN IF EXISTS evidence_tier")
+    op.execute("ALTER TABLE IF EXISTS sightings DROP COLUMN IF EXISTS score_components")
+    op.execute("ALTER TABLE IF EXISTS sightings DROP COLUMN IF EXISTS evidence_tier")

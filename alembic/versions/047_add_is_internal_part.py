@@ -24,4 +24,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_mc_internal_part", table_name="material_cards", if_exists=True)
-    op.execute("ALTER TABLE material_cards DROP COLUMN IF EXISTS is_internal_part")
+    op.execute("ALTER TABLE IF EXISTS material_cards DROP COLUMN IF EXISTS is_internal_part")

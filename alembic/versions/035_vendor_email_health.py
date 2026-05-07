@@ -22,7 +22,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE vendor_cards DROP COLUMN IF EXISTS quote_quality_rate")
-    op.execute("ALTER TABLE vendor_cards DROP COLUMN IF EXISTS response_rate")
-    op.execute("ALTER TABLE vendor_cards DROP COLUMN IF EXISTS email_health_computed_at")
-    op.execute("ALTER TABLE vendor_cards DROP COLUMN IF EXISTS email_health_score")
+    op.execute("ALTER TABLE IF EXISTS vendor_cards DROP COLUMN IF EXISTS quote_quality_rate")
+    op.execute("ALTER TABLE IF EXISTS vendor_cards DROP COLUMN IF EXISTS response_rate")
+    op.execute("ALTER TABLE IF EXISTS vendor_cards DROP COLUMN IF EXISTS email_health_computed_at")
+    op.execute("ALTER TABLE IF EXISTS vendor_cards DROP COLUMN IF EXISTS email_health_score")

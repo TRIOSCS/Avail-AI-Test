@@ -18,4 +18,4 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("ALTER TABLE quotes DROP COLUMN IF EXISTS followup_alert_sent_at")
+    op.execute("ALTER TABLE IF EXISTS quotes DROP COLUMN IF EXISTS followup_alert_sent_at")

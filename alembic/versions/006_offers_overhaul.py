@@ -46,12 +46,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE requisitions DROP COLUMN IF EXISTS updated_by_id")
-    op.execute("ALTER TABLE requisitions DROP COLUMN IF EXISTS updated_at")
-    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS approved_at")
-    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS approved_by_id")
-    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS updated_by_id")
-    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS updated_at")
+    op.execute("ALTER TABLE IF EXISTS requisitions DROP COLUMN IF EXISTS updated_by_id")
+    op.execute("ALTER TABLE IF EXISTS requisitions DROP COLUMN IF EXISTS updated_at")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS approved_at")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS approved_by_id")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS updated_by_id")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS updated_at")
     op.drop_index("ix_changelog_user", "change_log", if_exists=True)
     op.drop_index("ix_changelog_entity", "change_log", if_exists=True)
     op.drop_table("change_log", if_exists=True)

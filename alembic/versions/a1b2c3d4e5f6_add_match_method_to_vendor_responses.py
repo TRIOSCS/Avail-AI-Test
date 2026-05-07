@@ -21,4 +21,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE vendor_responses DROP COLUMN IF EXISTS match_method")
+    op.execute("ALTER TABLE IF EXISTS vendor_responses DROP COLUMN IF EXISTS match_method")

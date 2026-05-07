@@ -38,7 +38,7 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_usage_log_source_ts", table_name="api_usage_log", if_exists=True)
     op.drop_table("api_usage_log", if_exists=True)
-    op.execute("ALTER TABLE api_sources DROP COLUMN IF EXISTS last_deep_test_at")
-    op.execute("ALTER TABLE api_sources DROP COLUMN IF EXISTS last_ping_at")
-    op.execute("ALTER TABLE api_sources DROP COLUMN IF EXISTS calls_this_month")
-    op.execute("ALTER TABLE api_sources DROP COLUMN IF EXISTS monthly_quota")
+    op.execute("ALTER TABLE IF EXISTS api_sources DROP COLUMN IF EXISTS last_deep_test_at")
+    op.execute("ALTER TABLE IF EXISTS api_sources DROP COLUMN IF EXISTS last_ping_at")
+    op.execute("ALTER TABLE IF EXISTS api_sources DROP COLUMN IF EXISTS calls_this_month")
+    op.execute("ALTER TABLE IF EXISTS api_sources DROP COLUMN IF EXISTS monthly_quota")

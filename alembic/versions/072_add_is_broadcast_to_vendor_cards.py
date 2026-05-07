@@ -34,4 +34,4 @@ def upgrade():
 
 def downgrade():
     op.drop_index("ix_vendor_cards_broadcast", table_name="vendor_cards", if_exists=True)
-    op.execute("ALTER TABLE vendor_cards DROP COLUMN IF EXISTS is_broadcast")
+    op.execute("ALTER TABLE IF EXISTS vendor_cards DROP COLUMN IF EXISTS is_broadcast")

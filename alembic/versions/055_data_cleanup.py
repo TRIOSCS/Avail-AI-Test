@@ -116,4 +116,4 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("ALTER TABLE customer_sites DROP COLUMN IF EXISTS contact_phone_2")
+    op.execute("ALTER TABLE IF EXISTS customer_sites DROP COLUMN IF EXISTS contact_phone_2")

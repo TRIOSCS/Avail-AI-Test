@@ -110,6 +110,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE companies DROP COLUMN IF EXISTS source")
+    op.execute("ALTER TABLE IF EXISTS companies DROP COLUMN IF EXISTS source")
     op.drop_table("prospect_accounts", if_exists=True)
     op.drop_table("discovery_batches", if_exists=True)

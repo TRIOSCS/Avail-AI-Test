@@ -23,5 +23,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS country_of_origin")
-    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS warranty")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS country_of_origin")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS warranty")

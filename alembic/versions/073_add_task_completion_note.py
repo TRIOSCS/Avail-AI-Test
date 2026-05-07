@@ -21,4 +21,4 @@ def upgrade():
 
 def downgrade():
     op.drop_index("ix_rt_creator_status", table_name="requisition_tasks", if_exists=True)
-    op.execute("ALTER TABLE requisition_tasks DROP COLUMN IF EXISTS completion_note")
+    op.execute("ALTER TABLE IF EXISTS requisition_tasks DROP COLUMN IF EXISTS completion_note")

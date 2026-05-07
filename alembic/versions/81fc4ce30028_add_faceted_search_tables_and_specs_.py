@@ -108,7 +108,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # --- Drop column ---
-    op.execute("ALTER TABLE material_cards DROP COLUMN IF EXISTS specs_structured")
+    op.execute("ALTER TABLE IF EXISTS material_cards DROP COLUMN IF EXISTS specs_structured")
 
     # --- Drop indexes then tables (reverse order) ---
     op.drop_index("ix_msf_key_text_card", table_name="material_spec_facets", if_exists=True)

@@ -20,4 +20,4 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS commodity_tags")
+    op.execute("ALTER TABLE IF EXISTS users DROP COLUMN IF EXISTS commodity_tags")

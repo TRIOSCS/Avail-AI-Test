@@ -30,29 +30,37 @@ from app.models import Base  # noqa: F401 — imports all models via Base.metada
 # errors. We wrap the relevant op functions to no-op when the target
 # already matches the desired state. Idempotent forward-migration is also
 # a defensive win for replays in any environment.
+def _table_exists(bind, table: str, schema: str | None = None) -> bool:
+    insp = sa.inspect(bind)
+    return table in insp.get_table_names(schema=schema)
+
+
 def _column_exists(bind, table: str, column: str, schema: str | None = None) -> bool:
+    if not _table_exists(bind, table, schema):
+        return False
     insp = sa.inspect(bind)
     return column in {c["name"] for c in insp.get_columns(table, schema=schema)}
 
 
 def _fk_exists(bind, table: str, fk_name: str, schema: str | None = None) -> bool:
+    if not _table_exists(bind, table, schema):
+        return False
     insp = sa.inspect(bind)
     return fk_name in {fk.get("name") for fk in insp.get_foreign_keys(table, schema=schema)}
 
 
 def _unique_constraint_exists(bind, table: str, name: str, schema: str | None = None) -> bool:
+    if not _table_exists(bind, table, schema):
+        return False
     insp = sa.inspect(bind)
     return name in {uc.get("name") for uc in insp.get_unique_constraints(table, schema=schema)}
 
 
 def _check_constraint_exists(bind, table: str, name: str, schema: str | None = None) -> bool:
+    if not _table_exists(bind, table, schema):
+        return False
     insp = sa.inspect(bind)
     return name in {cc.get("name") for cc in insp.get_check_constraints(table, schema=schema)}
-
-
-def _table_exists(bind, table: str, schema: str | None = None) -> bool:
-    insp = sa.inspect(bind)
-    return table in insp.get_table_names(schema=schema)
 
 
 _orig_add_column = op.add_column
@@ -63,6 +71,28 @@ _orig_create_check_constraint = op.create_check_constraint
 _orig_drop_constraint = op.drop_constraint
 _orig_create_table = op.create_table
 _orig_drop_table = op.drop_table
+_orig_create_index = op.create_index
+_orig_drop_index = op.drop_index
+
+
+def _idempotent_create_index(index_name, table_name, *args, **kwargs):
+    """Skip if the target table is gone — CREATE INDEX has no IF EXISTS for the table.
+
+    Necessary on downgrade-base where earlier steps may have dropped the table via
+    CASCADE before later upgrades try to create indexes on it (during round-trip).
+    """
+    bind = op.get_bind()
+    if not _table_exists(bind, table_name, kwargs.get("schema")):
+        return None
+    return _orig_create_index(index_name, table_name, *args, **kwargs)
+
+
+def _idempotent_drop_index(index_name, table_name=None, **kwargs):
+    """Pass through with `if_exists=True` to be safe under downgrade replays."""
+    if table_name and not _table_exists(op.get_bind(), table_name, kwargs.get("schema")):
+        return None
+    kwargs.setdefault("if_exists", True)
+    return _orig_drop_index(index_name, table_name=table_name, **kwargs)
 
 
 def _idempotent_create_table(table_name, *columns, **kwargs):
@@ -80,44 +110,80 @@ def _idempotent_create_table(table_name, *columns, **kwargs):
 
 
 def _idempotent_drop_table(table_name, **kwargs):
-    if not _table_exists(op.get_bind(), table_name, kwargs.get("schema")):
+    """Drop with CASCADE to avoid DependentObjectsStillExist errors during downgrade-
+    base when FKs from later-created tables still reference earlier tables.
+
+    The default alembic op.drop_table emits ``DROP TABLE`` (no cascade)
+    and relies on the migration author getting drop ordering right — which
+    breaks down when migrations are replayed in environments that already had
+    later additions (e.g., via the explicit-DDL baseline).
+    """
+    bind = op.get_bind()
+    schema = kwargs.get("schema")
+    if not _table_exists(bind, table_name, schema):
         return None
-    kwargs.pop("if_exists", None)
-    return _orig_drop_table(table_name, **kwargs)
+    quoted = f'"{schema}"."{table_name}"' if schema else f'"{table_name}"'
+    op.execute(f"DROP TABLE IF EXISTS {quoted} CASCADE")
+    return None
 
 
 def _idempotent_add_column(table_name, column, *, schema=None):
-    if _column_exists(op.get_bind(), table_name, column.name, schema):
+    bind = op.get_bind()
+    if not _table_exists(bind, table_name, schema):
+        return
+    if _column_exists(bind, table_name, column.name, schema):
         return
     return _orig_add_column(table_name, column, schema=schema)
 
 
 def _idempotent_alter_column(table_name, column_name, **kwargs):
-    if not _column_exists(op.get_bind(), table_name, column_name, kwargs.get("schema")):
+    bind = op.get_bind()
+    schema = kwargs.get("schema")
+    if not _table_exists(bind, table_name, schema):
+        return
+    if not _column_exists(bind, table_name, column_name, schema):
         return
     return _orig_alter_column(table_name, column_name, **kwargs)
 
 
 def _idempotent_create_foreign_key(constraint_name, source_table, referent_table, *args, **kwargs):
-    if constraint_name and _fk_exists(op.get_bind(), source_table, constraint_name, kwargs.get("source_schema")):
+    bind = op.get_bind()
+    schema = kwargs.get("source_schema")
+    # Source or referent missing → can't create FK; skip silently (the chain
+    # may have dropped the table earlier).
+    if not _table_exists(bind, source_table, schema):
+        return
+    if not _table_exists(bind, referent_table, kwargs.get("referent_schema") or schema):
+        return
+    if constraint_name and _fk_exists(bind, source_table, constraint_name, schema):
         return
     return _orig_create_foreign_key(constraint_name, source_table, referent_table, *args, **kwargs)
 
 
 def _idempotent_create_unique_constraint(constraint_name, table_name, *args, **kwargs):
-    if constraint_name and _unique_constraint_exists(op.get_bind(), table_name, constraint_name, kwargs.get("schema")):
+    bind = op.get_bind()
+    schema = kwargs.get("schema")
+    if not _table_exists(bind, table_name, schema):
+        return
+    if constraint_name and _unique_constraint_exists(bind, table_name, constraint_name, schema):
         return
     return _orig_create_unique_constraint(constraint_name, table_name, *args, **kwargs)
 
 
 def _idempotent_create_check_constraint(constraint_name, table_name, *args, **kwargs):
-    if constraint_name and _check_constraint_exists(op.get_bind(), table_name, constraint_name, kwargs.get("schema")):
+    bind = op.get_bind()
+    schema = kwargs.get("schema")
+    if not _table_exists(bind, table_name, schema):
+        return
+    if constraint_name and _check_constraint_exists(bind, table_name, constraint_name, schema):
         return
     return _orig_create_check_constraint(constraint_name, table_name, *args, **kwargs)
 
 
 def _idempotent_drop_constraint(constraint_name, table_name, type_=None, *, schema=None):
     bind = op.get_bind()
+    if not _table_exists(bind, table_name, schema):
+        return
     insp = sa.inspect(bind)
     existing = set()
     if type_ in (None, "foreignkey"):
@@ -139,6 +205,8 @@ op.create_check_constraint = _idempotent_create_check_constraint
 op.drop_constraint = _idempotent_drop_constraint
 op.create_table = _idempotent_create_table
 op.drop_table = _idempotent_drop_table
+op.create_index = _idempotent_create_index
+op.drop_index = _idempotent_drop_index
 
 # Alembic Config object
 config = context.config

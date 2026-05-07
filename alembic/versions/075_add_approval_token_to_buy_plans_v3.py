@@ -26,5 +26,5 @@ def upgrade():
 
 def downgrade():
     op.drop_index("ix_bpv3_token", table_name="buy_plans_v3", if_exists=True)
-    op.execute("ALTER TABLE buy_plans_v3 DROP COLUMN IF EXISTS token_expires_at")
-    op.execute("ALTER TABLE buy_plans_v3 DROP COLUMN IF EXISTS approval_token")
+    op.execute("ALTER TABLE IF EXISTS buy_plans_v3 DROP COLUMN IF EXISTS token_expires_at")
+    op.execute("ALTER TABLE IF EXISTS buy_plans_v3 DROP COLUMN IF EXISTS approval_token")

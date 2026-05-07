@@ -56,15 +56,15 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("ALTER TABLE teams_notification_log DROP COLUMN IF EXISTS batch_id")
-    op.execute("ALTER TABLE teams_notification_log DROP COLUMN IF EXISTS ai_decision")
-    op.execute("ALTER TABLE teams_notification_log DROP COLUMN IF EXISTS ai_priority")
-    op.execute("ALTER TABLE teams_notification_log DROP COLUMN IF EXISTS user_id")
+    op.execute("ALTER TABLE IF EXISTS teams_notification_log DROP COLUMN IF EXISTS batch_id")
+    op.execute("ALTER TABLE IF EXISTS teams_notification_log DROP COLUMN IF EXISTS ai_decision")
+    op.execute("ALTER TABLE IF EXISTS teams_notification_log DROP COLUMN IF EXISTS ai_priority")
+    op.execute("ALTER TABLE IF EXISTS teams_notification_log DROP COLUMN IF EXISTS user_id")
 
-    op.execute("ALTER TABLE teams_alert_config DROP COLUMN IF EXISTS quiet_hours_end")
-    op.execute("ALTER TABLE teams_alert_config DROP COLUMN IF EXISTS quiet_hours_start")
-    op.execute("ALTER TABLE teams_alert_config DROP COLUMN IF EXISTS batch_digest_enabled")
-    op.execute("ALTER TABLE teams_alert_config DROP COLUMN IF EXISTS priority_threshold")
+    op.execute("ALTER TABLE IF EXISTS teams_alert_config DROP COLUMN IF EXISTS quiet_hours_end")
+    op.execute("ALTER TABLE IF EXISTS teams_alert_config DROP COLUMN IF EXISTS quiet_hours_start")
+    op.execute("ALTER TABLE IF EXISTS teams_alert_config DROP COLUMN IF EXISTS batch_digest_enabled")
+    op.execute("ALTER TABLE IF EXISTS teams_alert_config DROP COLUMN IF EXISTS priority_threshold")
 
     op.drop_index("ix_notif_engage_user_action", "notification_engagement", if_exists=True)
     op.drop_index("ix_notif_engage_created", "notification_engagement", if_exists=True)

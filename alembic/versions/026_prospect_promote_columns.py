@@ -21,5 +21,5 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("ALTER TABLE prospect_contacts DROP COLUMN IF EXISTS promoted_to_id")
-    op.execute("ALTER TABLE prospect_contacts DROP COLUMN IF EXISTS promoted_to_type")
+    op.execute("ALTER TABLE IF EXISTS prospect_contacts DROP COLUMN IF EXISTS promoted_to_id")
+    op.execute("ALTER TABLE IF EXISTS prospect_contacts DROP COLUMN IF EXISTS promoted_to_type")

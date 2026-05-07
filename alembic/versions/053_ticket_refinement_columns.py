@@ -25,9 +25,9 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS reproduction_steps")
-    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS performance_timings")
-    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS network_errors")
-    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS dom_snapshot")
-    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS tested_area")
-    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS similarity_score")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS reproduction_steps")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS performance_timings")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS network_errors")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS dom_snapshot")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS tested_area")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS similarity_score")

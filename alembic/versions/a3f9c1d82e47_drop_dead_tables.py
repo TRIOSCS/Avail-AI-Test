@@ -24,7 +24,7 @@ def upgrade() -> None:
     op.drop_table("teams_notification_log", if_exists=True)
     op.drop_table("teams_alert_config", if_exists=True)
     op.drop_table("risk_flags", if_exists=True)
-    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS legacy_error_report_id")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS legacy_error_report_id")
 
 
 def downgrade() -> None:

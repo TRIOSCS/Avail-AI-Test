@@ -101,11 +101,11 @@ def downgrade() -> None:
     op.drop_constraint(None, "vendor_sighting_summary", type_="foreignkey")
     op.drop_index("ix_vss_vendor_req", table_name="vendor_sighting_summary", if_exists=True)
     op.drop_index("ix_vss_vendor_card", table_name="vendor_sighting_summary", if_exists=True)
-    op.execute("ALTER TABLE vendor_sighting_summary DROP COLUMN IF EXISTS has_contact_info")
-    op.execute("ALTER TABLE vendor_sighting_summary DROP COLUMN IF EXISTS min_moq")
-    op.execute("ALTER TABLE vendor_sighting_summary DROP COLUMN IF EXISTS best_lead_time_days")
-    op.execute("ALTER TABLE vendor_sighting_summary DROP COLUMN IF EXISTS newest_sighting_at")
-    op.execute("ALTER TABLE vendor_sighting_summary DROP COLUMN IF EXISTS vendor_card_id")
+    op.execute("ALTER TABLE IF EXISTS vendor_sighting_summary DROP COLUMN IF EXISTS has_contact_info")
+    op.execute("ALTER TABLE IF EXISTS vendor_sighting_summary DROP COLUMN IF EXISTS min_moq")
+    op.execute("ALTER TABLE IF EXISTS vendor_sighting_summary DROP COLUMN IF EXISTS best_lead_time_days")
+    op.execute("ALTER TABLE IF EXISTS vendor_sighting_summary DROP COLUMN IF EXISTS newest_sighting_at")
+    op.execute("ALTER TABLE IF EXISTS vendor_sighting_summary DROP COLUMN IF EXISTS vendor_card_id")
     op.drop_index("ix_vr_received_status", table_name="vendor_responses", if_exists=True)
     op.drop_index(
         "ix_vendor_cards_active",

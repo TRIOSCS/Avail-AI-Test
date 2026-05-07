@@ -109,7 +109,7 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("ALTER TABLE sightings DROP COLUMN IF EXISTS source_searched_at")
+    op.execute("ALTER TABLE IF EXISTS sightings DROP COLUMN IF EXISTS source_searched_at")
     op.drop_table("nc_search_log", if_exists=True)
     op.drop_index("ix_nc_queue_dedup", table_name="nc_search_queue", if_exists=True)
     op.drop_index("ix_nc_queue_poll", table_name="nc_search_queue", if_exists=True)

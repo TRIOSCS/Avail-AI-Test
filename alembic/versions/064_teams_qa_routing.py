@@ -47,7 +47,7 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("knowledge_config", if_exists=True)
-    op.execute("ALTER TABLE teams_alert_config DROP COLUMN IF EXISTS knowledge_digest_hour")
-    op.execute("ALTER TABLE knowledge_entries DROP COLUMN IF EXISTS answered_via")
-    op.execute("ALTER TABLE knowledge_entries DROP COLUMN IF EXISTS delivered_at")
-    op.execute("ALTER TABLE knowledge_entries DROP COLUMN IF EXISTS nudged_at")
+    op.execute("ALTER TABLE IF EXISTS teams_alert_config DROP COLUMN IF EXISTS knowledge_digest_hour")
+    op.execute("ALTER TABLE IF EXISTS knowledge_entries DROP COLUMN IF EXISTS answered_via")
+    op.execute("ALTER TABLE IF EXISTS knowledge_entries DROP COLUMN IF EXISTS delivered_at")
+    op.execute("ALTER TABLE IF EXISTS knowledge_entries DROP COLUMN IF EXISTS nudged_at")

@@ -37,4 +37,4 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS buy_plan_id")
+    op.execute("ALTER TABLE IF EXISTS activity_log DROP COLUMN IF EXISTS buy_plan_id")

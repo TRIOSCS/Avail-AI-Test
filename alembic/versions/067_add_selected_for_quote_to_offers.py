@@ -21,5 +21,5 @@ def upgrade():
 
 
 def downgrade():
-    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS selected_at")
-    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS selected_for_quote")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS selected_at")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS selected_for_quote")

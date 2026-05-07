@@ -47,5 +47,5 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_activity_site_contact", table_name="activity_log", if_exists=True)
-    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS site_contact_id")
-    op.execute("ALTER TABLE site_contacts DROP COLUMN IF EXISTS is_active")
+    op.execute("ALTER TABLE IF EXISTS activity_log DROP COLUMN IF EXISTS site_contact_id")
+    op.execute("ALTER TABLE IF EXISTS site_contacts DROP COLUMN IF EXISTS is_active")

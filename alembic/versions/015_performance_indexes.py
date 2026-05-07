@@ -34,6 +34,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS is_stale")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS is_stale")
     op.drop_index("ix_poff_status_sent", table_name="proactive_offers", if_exists=True)
     op.drop_index("ix_offers_status_created", table_name="offers", if_exists=True)

@@ -25,4 +25,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE site_contacts DROP COLUMN IF EXISTS contact_status")
+    op.execute("ALTER TABLE IF EXISTS site_contacts DROP COLUMN IF EXISTS contact_status")

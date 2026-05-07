@@ -27,4 +27,4 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_index("ix_requirements_manufacturer", if_exists=True)
-    op.execute("ALTER TABLE requirements DROP COLUMN IF EXISTS manufacturer")
+    op.execute("ALTER TABLE IF EXISTS requirements DROP COLUMN IF EXISTS manufacturer")

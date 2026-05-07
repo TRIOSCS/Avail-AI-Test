@@ -54,8 +54,8 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     op.drop_table("material_card_audit", if_exists=True)
-    op.execute("ALTER TABLE material_cards DROP COLUMN IF EXISTS deleted_at")
+    op.execute("ALTER TABLE IF EXISTS material_cards DROP COLUMN IF EXISTS deleted_at")
     op.drop_index("ix_offers_normalized_mpn", "offers", if_exists=True)
-    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS normalized_mpn")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS normalized_mpn")
     op.drop_index("ix_sightings_normalized_mpn", "sightings", if_exists=True)
-    op.execute("ALTER TABLE sightings DROP COLUMN IF EXISTS normalized_mpn")
+    op.execute("ALTER TABLE IF EXISTS sightings DROP COLUMN IF EXISTS normalized_mpn")

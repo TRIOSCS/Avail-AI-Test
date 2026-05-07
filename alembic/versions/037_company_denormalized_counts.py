@@ -38,5 +38,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE companies DROP COLUMN IF EXISTS open_req_count")
-    op.execute("ALTER TABLE companies DROP COLUMN IF EXISTS site_count")
+    op.execute("ALTER TABLE IF EXISTS companies DROP COLUMN IF EXISTS open_req_count")
+    op.execute("ALTER TABLE IF EXISTS companies DROP COLUMN IF EXISTS site_count")
