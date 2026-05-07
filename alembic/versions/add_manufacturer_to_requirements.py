@@ -19,7 +19,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE requirements ADD COLUMN IF NOT EXISTS manufacturer VARCHAR(255)")
+    op.add_column("requirements", sa.Column("manufacturer", sa.String(255), nullable=True))
     op.execute("UPDATE requirements SET manufacturer = COALESCE(brand, '') WHERE manufacturer IS NULL")
     op.alter_column("requirements", "manufacturer", nullable=False, server_default=sa.text("''"))
     op.create_index("ix_requirements_manufacturer", "requirements", ["manufacturer"], if_not_exists=True)

@@ -23,9 +23,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Add columns to knowledge_entries
-    op.execute("ALTER TABLE knowledge_entries ADD COLUMN IF NOT EXISTS nudged_at TIMESTAMP WITH TIME ZONE")
-    op.execute("ALTER TABLE knowledge_entries ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMP WITH TIME ZONE")
-    op.execute("ALTER TABLE knowledge_entries ADD COLUMN IF NOT EXISTS answered_via VARCHAR(10)")
+    op.add_column("knowledge_entries", sa.Column("nudged_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column("knowledge_entries", sa.Column("delivered_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column("knowledge_entries", sa.Column("answered_via", sa.String(10), nullable=True))
 
     # Add digest hour to teams_alert_config
     op.execute(

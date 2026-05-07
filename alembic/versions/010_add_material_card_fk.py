@@ -5,6 +5,8 @@ Revises: 009_prospect_accounts_discovery_batches
 Create Date: 2026-02-25
 """
 
+import sqlalchemy as sa
+
 from alembic import op
 
 revision = "010_add_material_card_fk"
@@ -15,9 +17,9 @@ depends_on = None
 
 def upgrade() -> None:
     # Add nullable material_card_id to all three tables (backfill later, then set NOT NULL)
-    op.execute("ALTER TABLE requirements ADD COLUMN IF NOT EXISTS material_card_id INTEGER")
-    op.execute("ALTER TABLE sightings ADD COLUMN IF NOT EXISTS material_card_id INTEGER")
-    op.execute("ALTER TABLE offers ADD COLUMN IF NOT EXISTS material_card_id INTEGER")
+    op.add_column("requirements", sa.Column("material_card_id", sa.Integer(), nullable=True))
+    op.add_column("sightings", sa.Column("material_card_id", sa.Integer(), nullable=True))
+    op.add_column("offers", sa.Column("material_card_id", sa.Integer(), nullable=True))
 
     # Foreign keys
     op.create_foreign_key(

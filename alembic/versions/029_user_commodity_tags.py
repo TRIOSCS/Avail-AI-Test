@@ -7,6 +7,8 @@ Revises: 028_reactivation_signals
 Create Date: 2026-02-27
 """
 
+import sqlalchemy as sa
+
 from alembic import op
 
 revision = "029_user_commodity_tags"
@@ -16,7 +18,7 @@ depends_on = None
 
 
 def upgrade():
-    op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS commodity_tags JSON")
+    op.add_column("users", sa.Column("commodity_tags", sa.JSON(), nullable=True))
 
 
 def downgrade():

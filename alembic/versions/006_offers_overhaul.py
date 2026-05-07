@@ -35,14 +35,14 @@ def upgrade() -> None:
     op.create_index("ix_changelog_user", "change_log", ["user_id"], if_not_exists=True)
 
     # Add audit fields to offers
-    op.execute("ALTER TABLE offers ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITHOUT TIME ZONE")
-    op.execute("ALTER TABLE offers ADD COLUMN IF NOT EXISTS updated_by_id INTEGER")
-    op.execute("ALTER TABLE offers ADD COLUMN IF NOT EXISTS approved_by_id INTEGER")
-    op.execute("ALTER TABLE offers ADD COLUMN IF NOT EXISTS approved_at TIMESTAMP WITHOUT TIME ZONE")
+    op.add_column("offers", sa.Column("updated_at", sa.DateTime(), nullable=True))
+    op.add_column("offers", sa.Column("updated_by_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True))
+    op.add_column("offers", sa.Column("approved_by_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True))
+    op.add_column("offers", sa.Column("approved_at", sa.DateTime(), nullable=True))
 
     # Add audit fields to requisitions
-    op.execute("ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITHOUT TIME ZONE")
-    op.execute("ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS updated_by_id INTEGER")
+    op.add_column("requisitions", sa.Column("updated_at", sa.DateTime(), nullable=True))
+    op.add_column("requisitions", sa.Column("updated_by_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True))
 
 
 def downgrade() -> None:

@@ -73,13 +73,15 @@ def upgrade() -> None:
     op.create_index(
         "ix_vr_received_status", "vendor_responses", ["received_at", "status"], unique=False, if_not_exists=True
     )
-    op.execute("ALTER TABLE vendor_sighting_summary ADD COLUMN IF NOT EXISTS vendor_card_id INTEGER")
+    op.add_column("vendor_sighting_summary", sa.Column("vendor_card_id", sa.Integer(), nullable=True))
     op.execute(
         "ALTER TABLE vendor_sighting_summary ADD COLUMN IF NOT EXISTS newest_sighting_at TIMESTAMP WITHOUT TIME ZONE"
     )
-    op.execute("ALTER TABLE vendor_sighting_summary ADD COLUMN IF NOT EXISTS best_lead_time_days INTEGER")
-    op.execute("ALTER TABLE vendor_sighting_summary ADD COLUMN IF NOT EXISTS min_moq INTEGER")
-    op.execute("ALTER TABLE vendor_sighting_summary ADD COLUMN IF NOT EXISTS has_contact_info BOOLEAN DEFAULT 'false'")
+    op.add_column("vendor_sighting_summary", sa.Column("best_lead_time_days", sa.Integer(), nullable=True))
+    op.add_column("vendor_sighting_summary", sa.Column("min_moq", sa.Integer(), nullable=True))
+    op.add_column(
+        "vendor_sighting_summary", sa.Column("has_contact_info", sa.Boolean(), server_default="false", nullable=True)
+    )
     op.create_index(
         "ix_vss_vendor_card", "vendor_sighting_summary", ["vendor_card_id"], unique=False, if_not_exists=True
     )

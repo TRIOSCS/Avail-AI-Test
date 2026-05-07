@@ -31,7 +31,7 @@ def upgrade() -> None:
         sa.PrimaryKeyConstraint("id"),
         if_not_exists=True,
     )
-    op.execute("ALTER TABLE offers ADD COLUMN IF NOT EXISTS excess_line_item_id INTEGER")
+    op.add_column("offers", sa.Column("excess_line_item_id", sa.Integer(), nullable=True))
     op.create_foreign_key(
         "offers_excess_line_item_id_fkey",
         "offers",
@@ -40,9 +40,9 @@ def upgrade() -> None:
         ["id"],
         ondelete="SET NULL",
     )
-    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS screenshot_path VARCHAR(255)")
-    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS ai_summary TEXT")
-    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS root_cause_group_id INTEGER")
+    op.add_column("trouble_tickets", sa.Column("screenshot_path", sa.String(length=255), nullable=True))
+    op.add_column("trouble_tickets", sa.Column("ai_summary", sa.Text(), nullable=True))
+    op.add_column("trouble_tickets", sa.Column("root_cause_group_id", sa.Integer(), nullable=True))
     op.create_foreign_key(
         "trouble_tickets_root_cause_group_id_fkey",
         "trouble_tickets",

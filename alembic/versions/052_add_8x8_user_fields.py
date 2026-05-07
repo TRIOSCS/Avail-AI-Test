@@ -17,7 +17,7 @@ depends_on = None
 
 
 def upgrade():
-    op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS eight_by_eight_extension VARCHAR(20)")
+    op.add_column("users", sa.Column("eight_by_eight_extension", sa.String(20), nullable=True))
     op.add_column(
         "users", sa.Column("eight_by_eight_enabled", sa.Boolean(), nullable=False, server_default=sa.text("false"))
     )

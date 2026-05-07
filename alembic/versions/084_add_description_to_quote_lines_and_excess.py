@@ -5,6 +5,8 @@ Revises: eabe89205d07
 Create Date: 2026-03-30
 """
 
+import sqlalchemy as sa
+
 from alembic import op
 
 revision = "084_description"
@@ -14,8 +16,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE quote_lines ADD COLUMN IF NOT EXISTS description VARCHAR(500)")
-    op.execute("ALTER TABLE excess_line_items ADD COLUMN IF NOT EXISTS description VARCHAR(500)")
+    op.add_column("quote_lines", sa.Column("description", sa.String(500), nullable=True))
+    op.add_column("excess_line_items", sa.Column("description", sa.String(500), nullable=True))
 
 
 def downgrade() -> None:

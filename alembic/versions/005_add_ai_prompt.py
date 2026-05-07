@@ -7,6 +7,8 @@ Create Date: 2026-02-21
 
 from typing import Sequence, Union
 
+import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "005_ai_prompt"
@@ -16,7 +18,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE error_reports ADD COLUMN IF NOT EXISTS ai_prompt TEXT")
+    op.add_column("error_reports", sa.Column("ai_prompt", sa.Text(), nullable=True))
 
 
 def downgrade() -> None:

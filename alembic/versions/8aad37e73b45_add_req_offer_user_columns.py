@@ -33,19 +33,19 @@ def _column_exists(table: str, column: str) -> bool:
 def upgrade() -> None:
     # Requirements: customer part number and need-by date
     if not _column_exists("requirements", "customer_pn"):
-        op.execute("ALTER TABLE requirements ADD COLUMN IF NOT EXISTS customer_pn VARCHAR(255)")
+        op.add_column("requirements", sa.Column("customer_pn", sa.String(255), nullable=True))
     if not _column_exists("requirements", "need_by_date"):
-        op.execute("ALTER TABLE requirements ADD COLUMN IF NOT EXISTS need_by_date DATE")
+        op.add_column("requirements", sa.Column("need_by_date", sa.Date(), nullable=True))
 
     # Offers: standard pack quantity
     if not _column_exists("offers", "spq"):
-        op.execute("ALTER TABLE offers ADD COLUMN IF NOT EXISTS spq INTEGER")
+        op.add_column("offers", sa.Column("spq", sa.Integer(), nullable=True))
 
     # Users: column visibility preferences for requirements and offers tables
     if not _column_exists("users", "requirements_column_prefs"):
-        op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS requirements_column_prefs JSON")
+        op.add_column("users", sa.Column("requirements_column_prefs", sa.JSON(), nullable=True))
     if not _column_exists("users", "offers_column_prefs"):
-        op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS offers_column_prefs JSON")
+        op.add_column("users", sa.Column("offers_column_prefs", sa.JSON(), nullable=True))
 
 
 def downgrade() -> None:

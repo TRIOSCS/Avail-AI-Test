@@ -104,6 +104,12 @@ jobs:
           SECRET_KEY: ci-secret-key
           SESSION_SECRET: ci-session-secret
           TESTING: "0"
+          # Allow chain-replay downgrade-base to cascade-drop tables. The 001
+          # explicit-DDL baseline + incremental 002+ chain don't share a clean
+          # reverse drop ordering, so unwinding to base needs cascade. Production
+          # never sets this; single-step downgrades there still fail loudly on
+          # FK-dependency errors.
+          ALEMBIC_ALLOW_CASCADE: "1"
         run: |
           alembic upgrade head
           alembic downgrade base

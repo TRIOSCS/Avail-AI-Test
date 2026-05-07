@@ -10,6 +10,8 @@ Depends on: requirements table, requisitions table
 
 from typing import Sequence, Union
 
+import sqlalchemy as sa
+
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -20,7 +22,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE requirements ADD COLUMN IF NOT EXISTS last_searched_at TIMESTAMP WITHOUT TIME ZONE")
+    op.add_column("requirements", sa.Column("last_searched_at", sa.DateTime(), nullable=True))
     # Backfill from parent requisition's last_searched_at
     op.execute("""
         UPDATE requirements

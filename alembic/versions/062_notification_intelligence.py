@@ -50,9 +50,9 @@ def upgrade():
 
     # Extend teams_notification_log
     op.add_column("teams_notification_log", sa.Column("user_id", sa.Integer, nullable=True))
-    op.execute("ALTER TABLE teams_notification_log ADD COLUMN IF NOT EXISTS ai_priority VARCHAR(20)")
-    op.execute("ALTER TABLE teams_notification_log ADD COLUMN IF NOT EXISTS ai_decision VARCHAR(20)")
-    op.execute("ALTER TABLE teams_notification_log ADD COLUMN IF NOT EXISTS batch_id VARCHAR(50)")
+    op.add_column("teams_notification_log", sa.Column("ai_priority", sa.String(20), nullable=True))
+    op.add_column("teams_notification_log", sa.Column("ai_decision", sa.String(20), nullable=True))
+    op.add_column("teams_notification_log", sa.Column("batch_id", sa.String(50), nullable=True))
 
 
 def downgrade():

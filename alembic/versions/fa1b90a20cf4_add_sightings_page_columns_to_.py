@@ -20,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Add priority_score and assigned_buyer_id to requirements
-    op.execute("ALTER TABLE requirements ADD COLUMN IF NOT EXISTS priority_score DOUBLE PRECISION")
+    op.add_column("requirements", sa.Column("priority_score", sa.Float(), nullable=True))
     op.add_column(
         "requirements",
         sa.Column(

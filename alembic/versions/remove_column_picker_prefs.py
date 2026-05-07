@@ -40,6 +40,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS parts_column_prefs JSON")
-    op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS requirements_column_prefs JSON")
-    op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS offers_column_prefs JSON")
+    op.add_column("users", sa.Column("parts_column_prefs", sa.JSON(), nullable=True))
+    op.add_column("users", sa.Column("requirements_column_prefs", sa.JSON(), nullable=True))
+    op.add_column("users", sa.Column("offers_column_prefs", sa.JSON(), nullable=True))

@@ -7,6 +7,8 @@ Revision ID: 067
 Revises: 066
 """
 
+import sqlalchemy as sa
+
 from alembic import op
 
 revision = "067"
@@ -16,8 +18,8 @@ depends_on = None
 
 
 def upgrade():
-    op.execute("ALTER TABLE offers ADD COLUMN IF NOT EXISTS selected_for_quote BOOLEAN NOT NULL DEFAULT 'false'")
-    op.execute("ALTER TABLE offers ADD COLUMN IF NOT EXISTS selected_at TIMESTAMP WITHOUT TIME ZONE")
+    op.add_column("offers", sa.Column("selected_for_quote", sa.Boolean(), nullable=False, server_default="false"))
+    op.add_column("offers", sa.Column("selected_at", sa.DateTime(), nullable=True))
 
 
 def downgrade():

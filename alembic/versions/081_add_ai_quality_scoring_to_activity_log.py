@@ -24,13 +24,13 @@ def _column_exists(table, column):
 
 def upgrade():
     if not _column_exists("activity_log", "quality_score"):
-        op.execute("ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS quality_score DOUBLE PRECISION")
+        op.add_column("activity_log", sa.Column("quality_score", sa.Float(), nullable=True))
     if not _column_exists("activity_log", "quality_classification"):
-        op.execute("ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS quality_classification VARCHAR(30)")
+        op.add_column("activity_log", sa.Column("quality_classification", sa.String(30), nullable=True))
     if not _column_exists("activity_log", "quality_assessed_at"):
-        op.execute("ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS quality_assessed_at TIMESTAMP WITHOUT TIME ZONE")
+        op.add_column("activity_log", sa.Column("quality_assessed_at", sa.DateTime(), nullable=True))
     if not _column_exists("activity_log", "is_meaningful"):
-        op.execute("ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS is_meaningful BOOLEAN")
+        op.add_column("activity_log", sa.Column("is_meaningful", sa.Boolean(), nullable=True))
 
     # Guard index creation for idempotent re-runs
     from sqlalchemy import inspect

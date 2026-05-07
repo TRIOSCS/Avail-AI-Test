@@ -19,7 +19,7 @@ depends_on = None
 
 
 def upgrade():
-    op.execute("ALTER TABLE buy_plans_v3 ADD COLUMN IF NOT EXISTS approval_token VARCHAR(100)")
+    op.add_column("buy_plans_v3", sa.Column("approval_token", sa.String(100), unique=True))
     op.add_column("buy_plans_v3", sa.Column("token_expires_at", sa.DateTime()))
     op.create_index("ix_bpv3_token", "buy_plans_v3", ["approval_token"], if_not_exists=True)
 

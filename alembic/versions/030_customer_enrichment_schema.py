@@ -20,13 +20,13 @@ depends_on = None
 
 def upgrade():
     # SiteContact enrichment columns
-    op.execute("ALTER TABLE site_contacts ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT 'false'")
-    op.execute("ALTER TABLE site_contacts ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT 'false'")
+    op.add_column("site_contacts", sa.Column("phone_verified", sa.Boolean(), server_default="false"))
+    op.add_column("site_contacts", sa.Column("email_verified", sa.Boolean(), server_default="false"))
     op.add_column("site_contacts", sa.Column("email_verified_at", sa.DateTime()))
     op.add_column("site_contacts", sa.Column("email_verification_status", sa.String(20)))
     op.add_column("site_contacts", sa.Column("enrichment_source", sa.String(50)))
     op.add_column("site_contacts", sa.Column("contact_role", sa.String(50)))
-    op.execute("ALTER TABLE site_contacts ADD COLUMN IF NOT EXISTS needs_refresh BOOLEAN DEFAULT 'false'")
+    op.add_column("site_contacts", sa.Column("needs_refresh", sa.Boolean(), server_default="false"))
     op.add_column("site_contacts", sa.Column("last_enriched_at", sa.DateTime()))
     op.add_column("site_contacts", sa.Column("linkedin_url", sa.String(500)))
     op.add_column("site_contacts", sa.Column("enrichment_field_sources", sa.JSON()))

@@ -14,10 +14,10 @@ down_revision = "037_company_denormalized_counts"
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS monthly_quota INTEGER")
-    op.execute("ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS calls_this_month INTEGER DEFAULT '0'")
-    op.execute("ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS last_ping_at TIMESTAMP WITHOUT TIME ZONE")
-    op.execute("ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS last_deep_test_at TIMESTAMP WITHOUT TIME ZONE")
+    op.add_column("api_sources", sa.Column("monthly_quota", sa.Integer(), nullable=True))
+    op.add_column("api_sources", sa.Column("calls_this_month", sa.Integer(), server_default="0"))
+    op.add_column("api_sources", sa.Column("last_ping_at", sa.DateTime(), nullable=True))
+    op.add_column("api_sources", sa.Column("last_deep_test_at", sa.DateTime(), nullable=True))
 
     op.create_table(
         "api_usage_log",

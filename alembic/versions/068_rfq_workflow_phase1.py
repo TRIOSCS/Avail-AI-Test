@@ -9,6 +9,8 @@ Revises: 067
 Create Date: 2026-03-10
 """
 
+import sqlalchemy as sa
+
 from alembic import op
 
 revision = "068"
@@ -19,10 +21,10 @@ depends_on = None
 
 def upgrade() -> None:
     # -- Requisition: buyer claim + sales context --
-    op.execute("ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS claimed_by_id INTEGER")
-    op.execute("ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP WITHOUT TIME ZONE")
-    op.execute("ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS urgency VARCHAR(20) DEFAULT 'normal'")
-    op.execute("ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS opportunity_value NUMERIC(12, 2)")
+    op.add_column("requisitions", sa.Column("claimed_by_id", sa.Integer(), nullable=True))
+    op.add_column("requisitions", sa.Column("claimed_at", sa.DateTime(), nullable=True))
+    op.add_column("requisitions", sa.Column("urgency", sa.String(20), server_default="normal", nullable=True))
+    op.add_column("requisitions", sa.Column("opportunity_value", sa.Numeric(12, 2), nullable=True))
 
     op.create_foreign_key(
         "fk_requisitions_claimed_by",
@@ -36,7 +38,7 @@ def upgrade() -> None:
     op.create_index("ix_requisitions_urgency", "requisitions", ["urgency"], if_not_exists=True)
 
     # -- Requirement: per-part sourcing status --
-    op.execute("ALTER TABLE requirements ADD COLUMN IF NOT EXISTS sourcing_status VARCHAR(20) DEFAULT 'open'")
+    op.add_column("requirements", sa.Column("sourcing_status", sa.String(20), server_default="open", nullable=True))
     op.create_index("ix_requirements_sourcing_status", "requirements", ["sourcing_status"], if_not_exists=True)
 
 

@@ -7,6 +7,8 @@ Create Date: 2026-03-20 04:16:22.630884
 
 from typing import Sequence, Union
 
+import sqlalchemy as sa
+
 from alembic import op
 
 revision: str = "c19a184db289"
@@ -16,7 +18,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.execute("ALTER TABLE excess_line_items ADD COLUMN IF NOT EXISTS demand_match_count INTEGER DEFAULT '0'")
+    op.add_column("excess_line_items", sa.Column("demand_match_count", sa.Integer(), nullable=True, server_default="0"))
 
 
 def downgrade() -> None:

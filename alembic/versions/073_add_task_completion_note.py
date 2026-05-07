@@ -8,6 +8,8 @@ Revises: 072
 Create Date: 2026-03-11
 """
 
+import sqlalchemy as sa
+
 from alembic import op
 
 revision = "073"
@@ -15,7 +17,7 @@ down_revision = "072"
 
 
 def upgrade():
-    op.execute("ALTER TABLE requisition_tasks ADD COLUMN IF NOT EXISTS completion_note TEXT")
+    op.add_column("requisition_tasks", sa.Column("completion_note", sa.Text(), nullable=True))
     op.create_index("ix_rt_creator_status", "requisition_tasks", ["created_by", "status"], if_not_exists=True)
 
 
