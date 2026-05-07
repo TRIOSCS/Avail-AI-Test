@@ -15,6 +15,15 @@
 app.availai.net {
 	encode gzip zstd
 
+	# Access logging — visible via `docker compose logs caddy`. Diagnoses
+	# client-side issues (which assets the browser fetches, 200 vs 404, what
+	# hash is requested, what HTMX endpoints fire on UI clicks).
+	log {
+		output stdout
+		format json
+		level INFO
+	}
+
 	header {
 		Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
 		X-Frame-Options "SAMEORIGIN"
