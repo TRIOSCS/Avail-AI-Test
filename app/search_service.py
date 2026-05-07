@@ -1035,9 +1035,22 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
                 is_obsolete = True
                 break
 
-        # Months since last sighting for primary PN
+        # Months since last sighting for primary PN.
+        # NOTE: Sighting has no `mpn` column — the stored fields are
+        # `mpn_matched` (raw MPN as returned by the connector) and
+        # `normalized_mpn` (canonical dedup key from normalize_mpn_key).
+        # Use the normalized key + the indexed column so the lookup is both
+        # correct and uses the Sighting.normalized_mpn index.
         months_since_last_sighting = None
-        latest_sighting = db.query(Sighting).filter(Sighting.mpn.in_(pns)).order_by(Sighting.created_at.desc()).first()
+        normalized_pns = [k for k in (normalize_mpn_key(pn) for pn in pns) if k]
+        latest_sighting = (
+            db.query(Sighting)
+            .filter(Sighting.normalized_mpn.in_(normalized_pns))
+            .order_by(Sighting.created_at.desc())
+            .first()
+            if normalized_pns
+            else None
+        )
         if latest_sighting and latest_sighting.created_at:
             delta = (
                 datetime.now(timezone.utc) - latest_sighting.created_at.replace(tzinfo=timezone.utc)
