@@ -22,6 +22,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # Postgres extensions used by indexes / functions in this baseline.
+    # pg_trgm: gin_trgm_ops on vendor_cards.normalized_name etc.
+    op.execute("CREATE EXTENSION IF NOT EXISTS pg_trgm")
     op.create_table(
         "activity_log",
         sa.Column("id", sa.Integer(), nullable=False),
@@ -91,6 +94,7 @@ def upgrade() -> None:
         "api_usage_log",
         sa.Column("id", sa.Integer(), nullable=False),
         sa.Column("source_id", sa.Integer(), nullable=False),
+        sa.Column("timestamp", sa.DateTime(), nullable=False),
         sa.Column("endpoint", sa.String(length=200), nullable=True),
         sa.Column("status_code", sa.Integer(), nullable=True),
         sa.Column("response_ms", sa.Integer(), nullable=True),
@@ -2245,7 +2249,7 @@ def upgrade() -> None:
     op.create_index("ix_trouble_tickets_source", "trouble_tickets", ["source"], unique=False)
     op.create_index("ix_trouble_tickets_status", "trouble_tickets", ["status"], unique=False)
     op.create_index("ix_trouble_tickets_submitted_by", "trouble_tickets", ["submitted_by"], unique=False)
-    op.create_index("ix_usage_log_source_ts", "api_usage_log", ["source_id", '"timestamp"'], unique=False)
+    op.create_index("ix_usage_log_source_ts", "api_usage_log", ["source_id", "timestamp"], unique=False)
     op.create_index("ix_uss_month_rank", "unified_score_snapshot", ["month", "rank"], unique=False)
     op.create_index("ix_uss_user_month", "unified_score_snapshot", ["user_id", "month"], unique=True)
     op.create_index("ix_vendor_cards_acctivate_vendor_id", "vendor_cards", ["acctivate_vendor_id"], unique=False)
