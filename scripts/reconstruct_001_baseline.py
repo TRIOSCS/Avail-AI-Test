@@ -167,14 +167,28 @@ _RE_INDEX = re.compile(
 )
 
 
+def _strip_outer_quotes(s: str) -> str:
+    """Strip exactly one pair of outer double quotes from a SQL identifier.
+
+    pg_dump quotes reserved-word column names like ``"timestamp"``. Our parser
+    sees the quotes as part of the captured token; if we propagate them into
+    the alembic emitter, alembic will re-quote, producing triple-nested quote
+    pairs in the SQL output → UndefinedColumn at runtime. Stripping here lets
+    alembic do its own correct quoting of reserved words.
+    """
+    s = s.strip()
+    if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
+        return s[1:-1]
+    return s
+
+
 def _parse_index_columns(col_str: str) -> tuple[list[str], list[str | None]]:
     """Split an index column list into (column_names, per_column_orderings).
 
-    pg_dump emits index columns as ``a, b DESC, c`` — the trailing ``ASC``/``DESC``
-    is an ordering qualifier on each column, not part of the column name. We split
-    the qualifier off so render_op_create_index can decide whether to emit the
-    simple op.create_index form (no orderings) or fall back to op.execute with
-    verbatim CREATE INDEX SQL (any orderings).
+    pg_dump emits index columns as ``a, b DESC, "timestamp"`` — the trailing
+    ``ASC``/``DESC`` is an ordering qualifier on each column, not part of the
+    column name. Quoted column names (reserved words) get stripped to the bare
+    identifier so alembic's identifier preparer can re-quote correctly.
     """
     cols: list[str] = []
     orderings: list[str | None] = []
@@ -184,10 +198,10 @@ def _parse_index_columns(col_str: str) -> tuple[list[str], list[str | None]]:
             continue
         toks = part.rsplit(None, 1)
         if len(toks) == 2 and toks[1].upper() in ("ASC", "DESC"):
-            cols.append(toks[0])
+            cols.append(_strip_outer_quotes(toks[0]))
             orderings.append(toks[1].upper())
         else:
-            cols.append(part)
+            cols.append(_strip_outer_quotes(part))
             orderings.append(None)
     return cols, orderings
 
@@ -199,8 +213,11 @@ def _parse_columns(body: str) -> list[Column]:
         if not line or line.upper().startswith("CONSTRAINT"):
             continue
         # name TYPE [NOT NULL] [DEFAULT ...]
+        # The optional `"`s around the column name handle pg_dump's quoting of
+        # reserved-word identifiers (e.g., `"timestamp"`); the captured group
+        # is the bare identifier so alembic can quote correctly downstream.
         m = re.match(
-            r"(\w+)\s+([a-z][a-z0-9_ ()\[\],]*?)(\s+NOT NULL)?(\s+DEFAULT\s+(.+))?$",
+            r'"?(\w+)"?\s+([a-z][a-z0-9_ ()\[\],]*?)(\s+NOT NULL)?(\s+DEFAULT\s+(.+))?$',
             line,
             re.IGNORECASE,
         )

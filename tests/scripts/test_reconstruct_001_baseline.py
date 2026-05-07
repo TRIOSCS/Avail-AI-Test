@@ -235,6 +235,56 @@ def test_render_op_create_index_falls_back_to_execute_for_complex_indexes():
     )
 
 
+def test_parse_pg_dump_extracts_quoted_reserved_word_column_in_table():
+    """pg_dump quotes reserved-word column names like ``"timestamp" timestamp NOT
+    NULL``. Our parser must capture the bare identifier ``timestamp`` (no embedded
+    quotes) so alembic can quote it correctly via its identifier preparer.
+
+    The old ``(\\w+)`` regex rejected quoted names entirely, silently dropping
+    the column from the parsed Table — ``api_usage_log.timestamp`` was missing
+    from the regenerated 001 because of this.
+    """
+    sql = textwrap.dedent("""
+    CREATE TABLE public.api_usage_log (
+        id integer NOT NULL,
+        source_id integer NOT NULL,
+        "timestamp" timestamp without time zone NOT NULL
+    );
+    """)
+    result = parse_pg_dump(sql)
+    assert len(result.tables) == 1
+    t = result.tables[0]
+    col_names = [c.name for c in t.columns]
+    assert "timestamp" in col_names, (
+        f"Reserved-word column 'timestamp' must be parsed; got cols={col_names}. "
+        "Quotes must be stripped — alembic will re-quote on emit."
+    )
+    ts = next(c for c in t.columns if c.name == "timestamp")
+    assert ts.nullable is False
+    assert "datetime" in ts.py_type.lower() or "timestamp" in ts.py_type.lower()
+
+
+def test_parse_pg_dump_strips_outer_quotes_from_reserved_word_index_column():
+    """Index columns referencing reserved-word names (e.g., ``(source_id,
+    "timestamp")``) must produce bare identifiers, not strings containing quotes.
+
+    Otherwise alembic re-quotes → triple-nested ``\"\"\"timestamp\"\"\"`` →
+    UndefinedColumn at upgrade time.
+    """
+    sql = textwrap.dedent("""
+    CREATE TABLE public.api_usage_log (id integer NOT NULL, source_id integer, "timestamp" timestamp without time zone);
+    CREATE INDEX ix_usage_log_source_ts ON public.api_usage_log USING btree (source_id, "timestamp");
+    """)
+    result = parse_pg_dump(sql)
+    assert len(result.indexes) == 1
+    ix = result.indexes[0]
+    assert ix.columns == ["source_id", "timestamp"], (
+        f"Outer quotes must be stripped from index column names; got {ix.columns!r}. "
+        "alembic will re-quote reserved-word names automatically."
+    )
+    assert ix.column_orderings == [None, None]
+
+
 def test_render_downgrade_body_emits_drop_index_if_exists_for_complex_indexes():
     """Complex indexes (created via op.execute) must be dropped via op.execute('DROP
     INDEX IF EXISTS ...;') — symmetric with how they were created.
