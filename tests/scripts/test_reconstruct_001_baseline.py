@@ -7,11 +7,30 @@ Depends on: scripts.reconstruct_001_baseline
 
 import textwrap
 
+import pytest
+from loguru import logger
+
 from scripts.reconstruct_001_baseline import (
+    _parse_columns,
+    _strip_outer_quotes,
     parse_pg_dump,
     render_op_create_index,
     render_op_create_table,
 )
+
+
+@pytest.fixture
+def loguru_warnings():
+    """Capture loguru WARNING-level messages into a list for assertions.
+
+    Loguru isn't bridged to stdlib logging in this repo's conftest, so caplog
+    won't see logger.warning(...) calls. This fixture attaches a list-sink at
+    WARNING level, yields the list, and removes the sink on teardown.
+    """
+    captured: list[str] = []
+    sink_id = logger.add(lambda msg: captured.append(str(msg)), level="WARNING")
+    yield captured
+    logger.remove(sink_id)
 
 
 def test_parse_pg_dump_extracts_simple_table():
@@ -691,4 +710,51 @@ def test_render_downgrade_body_omits_drop_constraint_for_self_reference():
     body = render_downgrade_body(parsed)
     assert not any("op.drop_constraint(" in line and "categories_parent_id_fkey" in line for line in body), (
         "self-reference FK should not get a separate drop_constraint — it gets dropped with the table"
+    )
+
+
+# ── Silent-failure logging regression tests ──
+#
+# PR #108 review surfaced that _parse_columns and _strip_outer_quotes can
+# silently drop input when their inputs are malformed. These tests assert that
+# the warning paths are wired up and fire on the expected inputs.
+
+
+def test_parse_columns_warns_on_unmatched_line(loguru_warnings):
+    """A non-empty, non-CONSTRAINT line that fails the column regex must log a WARNING —
+    silently dropping such a line caused PR #108's bug class."""
+    body = textwrap.dedent("""
+    id integer NOT NULL,
+    !!!totally garbage line that won't match the column regex!!!
+    """)
+    cols = _parse_columns(body)
+    # The valid 'id' column is still parsed.
+    assert any(c.name == "id" for c in cols)
+    # The garbage line emits a warning rather than disappearing silently.
+    assert any("could not parse column line" in msg for msg in loguru_warnings), (
+        f"expected a WARNING for the unparseable column line; got messages={loguru_warnings!r}"
+    )
+
+
+def test_strip_outer_quotes_warns_on_single_quote(loguru_warnings):
+    """Exactly ONE double-quote in the input is malformed (pg_dump always emits balanced
+    pairs).
+
+    Must log a WARNING rather than silently returning the string unmodified.
+    """
+    out = _strip_outer_quotes('"timestamp')
+    # Behavior preserved: returns input unmodified, doesn't raise.
+    assert out == '"timestamp'
+    assert any("malformed quote in identifier" in msg for msg in loguru_warnings), (
+        f"expected WARNING for malformed quote; got messages={loguru_warnings!r}"
+    )
+
+
+def test_strip_outer_quotes_no_warning_for_balanced_or_unquoted(loguru_warnings):
+    """No warning when input is well-formed: both quoted (balanced pair) and
+    unquoted bare identifiers are valid pg_dump output."""
+    assert _strip_outer_quotes('"timestamp"') == "timestamp"
+    assert _strip_outer_quotes("plain_id") == "plain_id"
+    assert not any("malformed quote in identifier" in msg for msg in loguru_warnings), (
+        f"unexpected warning on well-formed input; got messages={loguru_warnings!r}"
     )

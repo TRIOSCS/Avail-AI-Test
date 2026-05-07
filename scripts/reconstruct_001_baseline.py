@@ -9,10 +9,10 @@ Workflow:
   4. Parse the dump, emit op.create_table() / op.create_index() / FK calls.
   5. Tear down the container.
 
-The live-models seed covers ~84 tables. Migrations 002+ reference ~10 more
-tables/columns that have since been removed from today's models — those are
-surfaced by scripts/validate_001_against_chain.py and added back via Task 6
-gap triage.
+The live-models seed covers all tables in `Base.metadata` at script-run time.
+Migrations 002+ may reference historical tables/columns that have since been
+removed from today's models — those gaps are surfaced by
+scripts/validate_001_against_chain.py and added back via Task 6 gap triage.
 
 Output: writes draft body to alembic/versions/001_initial_schema.py.draft
 
@@ -34,6 +34,8 @@ import uuid
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
+
+from loguru import logger
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -175,10 +177,19 @@ def _strip_outer_quotes(s: str) -> str:
     the alembic emitter, alembic will re-quote, producing triple-nested quote
     pairs in the SQL output → UndefinedColumn at runtime. Stripping here lets
     alembic do its own correct quoting of reserved words.
+
+    Example failure (when this stripping is missing or buggy):
+    ``"timestamp"`` → alembic re-quotes → ``"\\"timestamp\\""`` →
+    ``UndefinedColumn: column "\\"timestamp\\"" does not exist``.
     """
     s = s.strip()
     if len(s) >= 2 and s[0] == '"' and s[-1] == '"':
         return s[1:-1]
+    # Malformed: exactly one quote — pg_dump should always emit balanced pairs,
+    # so this signals upstream parser drift. Warn so the engineer notices rather
+    # than silently emitting a broken identifier into the alembic draft.
+    if s.count('"') == 1:
+        logger.warning("malformed quote in identifier: {}", s)
     return s
 
 
@@ -222,6 +233,11 @@ def _parse_columns(body: str) -> list[Column]:
             re.IGNORECASE,
         )
         if not m:
+            # Non-empty, non-CONSTRAINT line failed the column regex. Don't
+            # raise — this is a one-shot reconstruction tool — but warn so
+            # the engineer notices a column being silently dropped from the
+            # alembic draft.
+            logger.warning("could not parse column line: {}", line)
             continue
         name = m.group(1)
         pg_type = m.group(2).strip()
