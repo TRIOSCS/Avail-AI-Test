@@ -13,7 +13,7 @@ import asyncio
 import json
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Final
+from typing import Any, Final, Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
@@ -625,16 +625,23 @@ async def sightings_detail(
 async def sightings_refresh(
     request: Request,
     requirement_id: int,
-    source: str = Query(default="user"),
+    source: Literal["user", "sse"] = Query(default="user"),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
     """Re-run search pipeline for a requirement.
 
-    source="user" (default) or "sse". When "sse", suppresses the rate-guard toast and
-    skips broker.publish to avoid a self-trigger loop.
+    source="user" (default) or "sse". When "sse", suppresses the rate-guard and refresh-
+    failure toasts and skips broker.publish to avoid a self-trigger loop. FastAPI
+    rejects any other value with HTTP 422.
+
+    Returns the rendered detail panel HTML on success; returns the cached detail panel +
+    info toast (HX-Trigger header) when called within the rate-limit cooldown. The
+    X-Rendered-Req-Id header is inherited from sightings_detail on every response.
     """
     from ..search_service import search_requirement
+
+    is_sse = source == "sse"
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
@@ -644,8 +651,7 @@ async def sightings_refresh(
     cooldown_minutes = REFRESH_RATE_LIMIT_SECONDS // 60
     if _within_rate_limit(requirement.last_searched_at, now):
         response = await sightings_detail(request, requirement_id, db, user)
-        response.headers["X-Rendered-Req-Id"] = str(requirement_id)
-        if source != "sse":
+        if not is_sse:
             response.headers["HX-Trigger"] = (
                 f'{{"showToast": {{"message": "Already searched within the last {cooldown_minutes} minutes.", "type": "info"}}}}'
             )
@@ -658,9 +664,10 @@ async def sightings_refresh(
         logger.warning("Search refresh failed for requirement %s", requirement_id, exc_info=True)
         refresh_failed = True
 
+    # search_requirement uses a separate write session — expire stale ORM state
     db.expire(requirement)
 
-    if source != "sse":
+    if not is_sse:
         await broker.publish(
             f"user:{user.id}",
             "sighting-updated",
@@ -668,8 +675,7 @@ async def sightings_refresh(
         )
 
     response = await sightings_detail(request, requirement_id, db, user)
-    response.headers["X-Rendered-Req-Id"] = str(requirement_id)
-    if refresh_failed:
+    if refresh_failed and not is_sse:
         response.headers["HX-Trigger"] = (
             '{"showToast": {"message": "Search refresh failed - showing cached results", "type": "warning"}}'
         )

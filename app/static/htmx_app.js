@@ -138,7 +138,6 @@ Alpine.store('shortlist', {
 Alpine.store('sightingSelection', {
     _map: {},
     selectedReqId: null,
-    clickController: null,   // AbortController for the in-flight click POST
     clickInFlight: false,    // true while a click-initiated POST is outstanding
     toggle(id) {
         if (this._map[id]) { delete this._map[id]; }
@@ -173,17 +172,35 @@ htmx.on('htmx:responseError', (evt) => {
     Alpine.store('toast').show = true;
 });
 
-// ── Stale click-response guard — discard if selection changed ──
+// Stale-response guard: HTMX swaps can arrive out of order when the user
+// clicks a new row before the previous /refresh resolves. Correlate via
+// X-Rendered-Req-Id and drop swaps for the wrong row.
 document.body.addEventListener('htmx:beforeSwap', (evt) => {
     if (evt.detail.target.id === 'sightings-detail') {
         const store = Alpine.store('sightingSelection');
         const reqId = evt.detail.xhr?.getResponseHeader('X-Rendered-Req-Id');
-        if (reqId && store.selectedReqId && String(store.selectedReqId) !== String(reqId)) {
-            evt.detail.shouldSwap = false;
-            return;
+        if (reqId) {
+            if (store.selectedReqId && String(store.selectedReqId) !== String(reqId)) {
+                // Stale response — clear in-flight flag so subsequent SSE
+                // updates aren't suppressed, then drop the swap.
+                store.clickInFlight = false;
+                evt.detail.shouldSwap = false;
+                return;
+            }
+        } else {
+            console.debug('[sightings] response to #sightings-detail missing X-Rendered-Req-Id');
         }
-        store.clickInFlight = false;
-        store.clickController = null;
+    }
+});
+
+// Always clear clickInFlight when a #sightings-detail request finishes —
+// success, error, timeout, abort, or stale-reject all funnel through here.
+// Without this, a single failed request leaves the flag stuck-true and
+// subsequent SSE refreshes are silently suppressed forever.
+htmx.on('htmx:afterRequest', function(evt) {
+    var target = evt.detail.target || evt.detail.elt;
+    if (target && target.id === 'sightings-detail') {
+        Alpine.store('sightingSelection').clickInFlight = false;
     }
 });
 

@@ -156,3 +156,91 @@ class TestSightingsRenderedReqIdHeader:
         )
         assert resp.status_code == 200
         assert resp.headers.get("X-Rendered-Req-Id") == str(item.id)
+
+    def test_sightings_refresh_within_cooldown_echoes_req_id_header(
+        self, client: TestClient, req_with_item: tuple, db_session: Session
+    ):
+        """Rate-limited (cooldown) path explicitly returns X-Rendered-Req-Id.
+
+        Pins the contract that the header is set even when the search is
+        skipped — the detail endpoint sets it once on every response and
+        sightings_refresh inherits via `await sightings_detail(...)`.
+        """
+        _, item = req_with_item
+        item.last_searched_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=10)
+        db_session.commit()
+
+        resp = client.post(
+            f"/v2/partials/sightings/{item.id}/refresh",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 200
+        assert resp.headers.get("X-Rendered-Req-Id") == str(item.id)
+
+
+class TestSightingsRefreshSourceValidation:
+    """Source=Literal[user|sse] — FastAPI rejects unknown values with 422."""
+
+    def test_sightings_refresh_unknown_source_rejected_with_422(self, client: TestClient, req_with_item: tuple):
+        """?source=foo → 422.
+
+        Closes the silent re-enable of toast + broker.publish loop on typos like
+        ?source=SSE (any value other than user/sse used to fall into the user-path
+        branch).
+        """
+        _, item = req_with_item
+        resp = client.post(
+            f"/v2/partials/sightings/{item.id}/refresh?source=foo",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 422
+
+    def test_sightings_refresh_uppercase_sse_rejected_with_422(self, client: TestClient, req_with_item: tuple):
+        """?source=SSE → 422 (Literal is case-sensitive)."""
+        _, item = req_with_item
+        resp = client.post(
+            f"/v2/partials/sightings/{item.id}/refresh?source=SSE",
+            headers={"HX-Request": "true"},
+        )
+        assert resp.status_code == 422
+
+
+class TestSightingsRefreshFailureToast:
+    """Refresh-failure toast must surface for user clicks but never for SSE."""
+
+    def test_sightings_refresh_sse_suppresses_failure_toast(self, client: TestClient, req_with_item: tuple):
+        """search_requirement raises + ?source=sse → 200, no HX-Trigger.
+
+        Background-fired SSE refreshes must not surface user-targeted warning toasts.
+        """
+        from unittest.mock import AsyncMock
+
+        _, item = req_with_item
+        boom = AsyncMock(side_effect=RuntimeError("connector down"))
+        with patch("app.search_service.search_requirement", new=boom):
+            with patch("app.routers.sightings.broker") as mock_broker:
+                mock_broker.publish = AsyncMock()
+                resp = client.post(
+                    f"/v2/partials/sightings/{item.id}/refresh?source=sse",
+                    headers={"HX-Request": "true"},
+                )
+        assert resp.status_code == 200
+        assert "HX-Trigger" not in resp.headers
+
+    def test_sightings_refresh_user_emits_failure_toast(self, client: TestClient, req_with_item: tuple):
+        """search_requirement raises + no source param → 200, HX-Trigger contains
+        'Search refresh failed'."""
+        from unittest.mock import AsyncMock
+
+        _, item = req_with_item
+        boom = AsyncMock(side_effect=RuntimeError("connector down"))
+        with patch("app.search_service.search_requirement", new=boom):
+            with patch("app.routers.sightings.broker") as mock_broker:
+                mock_broker.publish = AsyncMock()
+                resp = client.post(
+                    f"/v2/partials/sightings/{item.id}/refresh",
+                    headers={"HX-Request": "true"},
+                )
+        assert resp.status_code == 200
+        assert "HX-Trigger" in resp.headers
+        assert "Search refresh failed" in resp.headers["HX-Trigger"]

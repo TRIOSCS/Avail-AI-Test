@@ -85,19 +85,23 @@
          init() {
            this._sse = new EventSource('/api/events/stream');
            this._sse.addEventListener('sighting-updated', (e) => {
+             let data;
              try {
-               const data = JSON.parse(e.data || '{}');
-               const reqId = data.requirement_id;
-               const store = Alpine.store('sightingSelection');
-               const sel = store.selectedReqId;
-               if (!reqId || !sel || String(reqId) !== String(sel)) return;
-               if (store.clickInFlight) return;
-               htmx.ajax('POST', '/v2/partials/sightings/' + reqId + '/refresh?source=sse', {
-                 target: '#sightings-detail',
-                 swap: 'innerHTML',
-                 indicator: '#sightings-detail-skeleton',
-               });
-             } catch(err) { /* ignore parse errors */ }
+               data = JSON.parse(e.data || '{}');
+             } catch (err) {
+               console.debug('[sightings] sse handler parse error', err);
+               return;
+             }
+             const reqId = data.requirement_id;
+             const store = Alpine.store('sightingSelection');
+             const sel = store.selectedReqId;
+             if (!reqId || !sel || String(reqId) !== String(sel)) return;
+             if (store.clickInFlight) return;
+             htmx.ajax('POST', '/v2/partials/sightings/' + reqId + '/refresh?source=sse', {
+               target: '#sightings-detail',
+               swap: 'innerHTML',
+               indicator: '#sightings-detail-skeleton',
+             });
            });
            this._sse.onerror = () => {
              window.dispatchEvent(new CustomEvent('sse-error'));
