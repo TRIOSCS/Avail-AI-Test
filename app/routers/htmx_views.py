@@ -861,7 +861,7 @@ async def customer_lookup(
               if(meta)document.dispatchEvent(new CustomEvent('customer-created',{{
                 detail:{{siteId:meta.dataset.siteId,displayName:meta.dataset.display}}
               }}));
-            }}catch(e){{btn.textContent='Failed — retry';btn.disabled=false;}}
+            }}catch(e){{console.error('quick-create failed:',e);btn.textContent='Failed — retry';btn.disabled=false;}}
           }})(this)"
                 class="px-3 py-1 text-xs font-semibold bg-emerald-600 text-white rounded hover:bg-emerald-700">
           Use This Customer

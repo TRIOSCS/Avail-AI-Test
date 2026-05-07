@@ -604,6 +604,7 @@ Alpine.data('materialsFilter', () => ({
         }
       }
     } catch (e) {
+      console.warn('[materialsFilter] Broken URL — resetting filters', e);
       // Broken URL — reset to defaults
       this.commodity = '';
       this.q = '';

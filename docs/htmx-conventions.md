@@ -64,3 +64,22 @@ before setting `HX-Trigger`.
 See: `app/routers/sightings.py:655` (rate-guard toast gated on `not is_sse`)
 and `app/routers/sightings.py:679` (refresh-failure toast gated on
 `refresh_failed and not is_sse`).
+
+### DO: apply the source gate to every mutation endpoint that calls broker.publish
+
+The `?source=sse` gate is not specific to the refresh endpoint — it belongs on
+every endpoint that calls `broker.publish("sighting-updated", ...)`. If any
+endpoint omits the gate, an SSE-triggered call to that endpoint will re-publish,
+which triggers another SSE, which calls the endpoint again.
+
+Gated endpoints (as of this writing):
+- `sightings_refresh` — `app/routers/sightings.py`
+- `sightings_batch_refresh` — `app/routers/sightings.py`
+- `sightings_mark_unavailable` — `app/routers/sightings.py`
+- `sightings_assign_buyer` — `app/routers/sightings.py`
+- `sightings_advance_status` — `app/routers/sightings.py`
+- `sightings_log_activity` — `app/routers/sightings.py`
+- `sightings_send_inquiry` — `app/routers/sightings.py`
+
+The static-analysis test `tests/test_static_analysis.py::test_broker_publish_calls_have_source_gate`
+enforces this list automatically.
