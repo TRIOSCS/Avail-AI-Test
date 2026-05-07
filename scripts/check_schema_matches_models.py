@@ -19,10 +19,10 @@ import sys
 from collections.abc import Callable
 from typing import Iterable
 
-from sqlalchemy import create_engine
-
 from alembic.autogenerate import compare_metadata
 from alembic.runtime.migration import MigrationContext
+from sqlalchemy import create_engine
+
 from app.models import Base
 
 # Each entry is a (diff_kind, predicate) tuple. The predicate gets the raw diff
@@ -36,7 +36,7 @@ _ALLOWLIST: list[tuple[str, Callable[..., bool]]] = [
     # objects (real alembic output) or their string representations (tests).
     (
         "modify_type",
-        lambda d: (len(d) >= 7 and "NUMERIC" in str(d[5]).upper() and "numeric" in str(d[6]).lower()),
+        lambda d: len(d) >= 7 and "NUMERIC" in str(d[5]).upper() and "numeric" in str(d[6]).lower(),
     ),
 ]
 
