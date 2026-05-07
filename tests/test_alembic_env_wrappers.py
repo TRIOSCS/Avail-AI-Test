@@ -30,10 +30,9 @@ from pathlib import Path
 
 import pytest
 import sqlalchemy as sa
-from loguru import logger
-
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from loguru import logger
 
 ENV_PATH = Path(__file__).resolve().parent.parent / "alembic" / "env.py"
 
