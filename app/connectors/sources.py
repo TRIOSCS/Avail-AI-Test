@@ -571,9 +571,9 @@ class NexarConnector(BaseConnector):
 class BrokerBinConnector(BaseConnector):
     """BrokerBin REST API v2.
 
-    Auth: HTTP Basic (username + API key). BrokerBin rejects Bearer tokens with
-    a misleading "Must use secure protocol" 401, even over HTTPS — Basic auth is
-    the only accepted method as of 2026-05.
+    Auth: ``Authorization: Bearer <token>`` per the v2 docs. Older keys that
+    only worked with HTTP Basic have been retired — the bearer token format
+    is the v2.x standard.
     Endpoint: GET https://search.brokerbin.com/api/v2/part/search?query={mpn}&size=100
     Response: { meta: {...}, data: [{ company, country, part, mfg, cond, description, price, qty, age_in_days }] }
     """
@@ -584,11 +584,14 @@ class BrokerBinConnector(BaseConnector):
 
     def __init__(self, api_key: str, api_secret: str = ""):
         super().__init__()
-        self.token = api_key  # API key (Basic auth password)
-        self.login = api_secret  # BrokerBin username (Basic auth user, e.g. "triomhk")
+        self.token = api_key  # Bearer token (the v2.x API key)
+        # Legacy field — Basic-auth keys used a username+key pair. Bearer doesn't
+        # need a username; we keep the param so _build_connectors signatures don't
+        # have to change, but we never read this for v2.x auth.
+        self.login = api_secret
 
     async def _do_search(self, part_number: str) -> list[dict]:
-        if not self.token or not self.login:
+        if not self.token:
             return []
 
         params = {
@@ -601,8 +604,10 @@ class BrokerBinConnector(BaseConnector):
         r = await http_redirect.get(
             self.API_URL,
             params=params,
-            headers={"Accept": "application/json"},
-            auth=(self.login, self.token),
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.token}",
+            },
             timeout=self.timeout,
         )
 

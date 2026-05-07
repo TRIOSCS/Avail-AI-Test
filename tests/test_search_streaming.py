@@ -51,36 +51,29 @@ def test_build_connectors_instantiates_with_creds(db_session):
     assert stats["nexar"]["status"] == "skipped"
 
 
-def test_build_connectors_brokerbin_requires_both_credentials(db_session):
-    """BrokerBin uses HTTP Basic auth — both username and key are required.
+def test_build_connectors_brokerbin_gates_on_bearer_token(db_session):
+    """BrokerBin v2.x uses Bearer auth — only the API key (token) is required.
 
-    Regression: half-configured deployments (key set, secret unset, or vice
-    versa) used to pass the boot filter and silently return empty results
-    on every search.
+    The legacy ``BROKERBIN_API_SECRET`` slot is no longer load-bearing for v2.x
+    keys; it remains in the schema for backward compatibility but is ignored at
+    request time.
     """
     from app.connectors.sources import BrokerBinConnector
     from app.search_service import _build_connectors
 
+    # Token only → connector built (Bearer doesn't need a username)
     only_key = {("brokerbin", "BROKERBIN_API_KEY"): "key-only"}
     with patch("app.search_service.get_credentials_batch", return_value=only_key):
         connectors, stats, _ = _build_connectors(db_session)
-    assert not any(isinstance(c, BrokerBinConnector) for c in connectors)
-    assert stats["brokerbin"]["status"] == "skipped"
+    assert any(isinstance(c, BrokerBinConnector) for c in connectors)
+    assert "brokerbin" not in stats
 
+    # No token → skipped (Bearer auth requires the token)
     only_secret = {("brokerbin", "BROKERBIN_API_SECRET"): "user-only"}
     with patch("app.search_service.get_credentials_batch", return_value=only_secret):
         connectors, stats, _ = _build_connectors(db_session)
     assert not any(isinstance(c, BrokerBinConnector) for c in connectors)
     assert stats["brokerbin"]["status"] == "skipped"
-
-    both = {
-        ("brokerbin", "BROKERBIN_API_KEY"): "the-key",
-        ("brokerbin", "BROKERBIN_API_SECRET"): "the-user",
-    }
-    with patch("app.search_service.get_credentials_batch", return_value=both):
-        connectors, stats, _ = _build_connectors(db_session)
-    assert any(isinstance(c, BrokerBinConnector) for c in connectors)
-    assert "brokerbin" not in stats
 
 
 # ── Aggressive dedup tests ──────────────────────────────────────────────

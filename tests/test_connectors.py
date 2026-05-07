@@ -1394,7 +1394,7 @@ class TestBrokerBinConnector:
 
     @pytest.mark.asyncio
     async def test_search_returns_empty_when_token_missing(self):
-        """Token is the Basic auth password — without it, no request can be made."""
+        """Without the bearer token, no request can be made."""
         from app.connectors.sources import BrokerBinConnector
 
         c = BrokerBinConnector(api_key="", api_secret="triomhk")
@@ -1547,20 +1547,27 @@ class TestBrokerBinConnector:
             assert results == []
 
     @pytest.mark.asyncio
-    async def test_search_returns_empty_when_login_missing(self):
-        """Login is the Basic auth username — without it, no request can be made."""
+    async def test_search_proceeds_without_login(self):
+        """Bearer auth doesn't need a username — login field is legacy/ignored."""
         from app.connectors.sources import BrokerBinConnector
 
-        c = BrokerBinConnector(api_key="token", api_secret="")
+        c = BrokerBinConnector(api_key="bb-token", api_secret="")
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": [], "meta": {"total": 0}}
+
         with patch("app.http_client.http_redirect") as mock_client:
-            mock_client.get = AsyncMock()
+            mock_client.get = AsyncMock(return_value=mock_resp)
             results = await c._do_search("LM317T")
             assert results == []
-            mock_client.get.assert_not_called()
+            mock_client.get.assert_called_once()
 
     @pytest.mark.asyncio
-    async def test_search_uses_http_basic_auth(self):
-        """Regression: BrokerBin requires HTTP Basic (user, key); Bearer is rejected with 401."""
+    async def test_search_uses_bearer_auth(self):
+        """v2.x docs: ``Authorization: Bearer <token>``.
+
+        No HTTP Basic auth tuple.
+        """
         c = self._make_connector()
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -1570,8 +1577,8 @@ class TestBrokerBinConnector:
             mock_client.get = AsyncMock(return_value=mock_resp)
             await c._do_search("LM317T")
             kwargs = mock_client.get.call_args.kwargs
-            assert kwargs["auth"] == ("triomhk", "bb-token")
-            assert "Authorization" not in kwargs.get("headers", {})
+            assert kwargs.get("headers", {}).get("Authorization") == "Bearer bb-token"
+            assert "auth" not in kwargs, "Must not send HTTP Basic alongside Bearer"
 
 
 # ═══════════════════════════════════════════════════════════════════════

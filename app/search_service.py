@@ -830,7 +830,10 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
 
     bb_key = _c("brokerbin", "BROKERBIN_API_KEY")
     bb_sec = _c("brokerbin", "BROKERBIN_API_SECRET")
-    _add_or_skip("brokerbin", bb_key and bb_sec, lambda: BrokerBinConnector(bb_key, bb_sec))
+    # BrokerBin v2.x uses Bearer auth — only the API key is required. The
+    # bb_sec slot is retained for legacy Basic-auth keys but is ignored at
+    # request time.
+    _add_or_skip("brokerbin", bb_key, lambda: BrokerBinConnector(bb_key, bb_sec))
 
     ebay_id = _c("ebay", "EBAY_CLIENT_ID")
     ebay_sec = _c("ebay", "EBAY_CLIENT_SECRET")
