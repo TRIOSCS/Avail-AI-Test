@@ -3,8 +3,8 @@ name: Security Scanning
 on:
   push:
     branches: [main]
+  # Run security scans for PRs targeting any branch (stacked-PR support).
   pull_request:
-    branches: [main]
   schedule:
     - cron: "0 8 * * 1"  # Weekly Monday 8am UTC
 
