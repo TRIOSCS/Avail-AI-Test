@@ -48,18 +48,21 @@ def upgrade():
         sa.Column("error_message", sa.Text),
         sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime, server_default=sa.func.now()),
+        if_not_exists=True,
     )
     op.create_index(
         "ix_ics_queue_poll",
         "ics_search_queue",
         ["status", "priority", "created_at"],
         postgresql_where=sa.text("status = 'queued'"),
+        if_not_exists=True,
     )
     op.create_index(
         "ix_ics_queue_dedup",
         "ics_search_queue",
         ["normalized_mpn", sa.text("last_searched_at DESC")],
         postgresql_where=sa.text("status = 'completed'"),
+        if_not_exists=True,
     )
 
     # ── ics_search_log ────────────────────────────────────────────────
@@ -78,6 +81,7 @@ def upgrade():
         sa.Column("sightings_created", sa.Integer),
         sa.Column("page_html_hash", sa.String(64)),
         sa.Column("error", sa.Text),
+        if_not_exists=True,
     )
 
     # ── ics_worker_status (singleton) ─────────────────────────────────
@@ -94,6 +98,7 @@ def upgrade():
         sa.Column("daily_stats_json", sa.JSON),
         sa.Column("updated_at", sa.DateTime, server_default=sa.func.now()),
         sa.CheckConstraint("id = 1", name="ck_ics_worker_status_singleton"),
+        if_not_exists=True,
     )
     # Seed singleton row
     op.execute("INSERT INTO ics_worker_status (id) VALUES (1)")
@@ -109,13 +114,14 @@ def upgrade():
         sa.Column("gate_reason", sa.String(200)),
         sa.Column("classified_at", sa.DateTime, server_default=sa.func.now()),
         sa.UniqueConstraint("normalized_mpn", "manufacturer", name="uq_ics_cache_mpn_mfr"),
+        if_not_exists=True,
     )
 
 
 def downgrade():
-    op.drop_table("ics_classification_cache")
-    op.drop_table("ics_worker_status")
-    op.drop_table("ics_search_log")
-    op.drop_index("ix_ics_queue_dedup", table_name="ics_search_queue")
-    op.drop_index("ix_ics_queue_poll", table_name="ics_search_queue")
-    op.drop_table("ics_search_queue")
+    op.drop_table("ics_classification_cache", if_exists=True)
+    op.drop_table("ics_worker_status", if_exists=True)
+    op.drop_table("ics_search_log", if_exists=True)
+    op.drop_index("ix_ics_queue_dedup", table_name="ics_search_queue", if_exists=True)
+    op.drop_index("ix_ics_queue_poll", table_name="ics_search_queue", if_exists=True)
+    op.drop_table("ics_search_queue", if_exists=True)

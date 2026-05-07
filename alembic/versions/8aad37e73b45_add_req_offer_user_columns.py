@@ -33,24 +33,24 @@ def _column_exists(table: str, column: str) -> bool:
 def upgrade() -> None:
     # Requirements: customer part number and need-by date
     if not _column_exists("requirements", "customer_pn"):
-        op.add_column("requirements", sa.Column("customer_pn", sa.String(255), nullable=True))
+        op.execute("ALTER TABLE requirements ADD COLUMN IF NOT EXISTS customer_pn VARCHAR(255)")
     if not _column_exists("requirements", "need_by_date"):
-        op.add_column("requirements", sa.Column("need_by_date", sa.Date(), nullable=True))
+        op.execute("ALTER TABLE requirements ADD COLUMN IF NOT EXISTS need_by_date DATE")
 
     # Offers: standard pack quantity
     if not _column_exists("offers", "spq"):
-        op.add_column("offers", sa.Column("spq", sa.Integer(), nullable=True))
+        op.execute("ALTER TABLE offers ADD COLUMN IF NOT EXISTS spq INTEGER")
 
     # Users: column visibility preferences for requirements and offers tables
     if not _column_exists("users", "requirements_column_prefs"):
-        op.add_column("users", sa.Column("requirements_column_prefs", sa.JSON(), nullable=True))
+        op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS requirements_column_prefs JSON")
     if not _column_exists("users", "offers_column_prefs"):
-        op.add_column("users", sa.Column("offers_column_prefs", sa.JSON(), nullable=True))
+        op.execute("ALTER TABLE users ADD COLUMN IF NOT EXISTS offers_column_prefs JSON")
 
 
 def downgrade() -> None:
-    op.drop_column("users", "offers_column_prefs")
-    op.drop_column("users", "requirements_column_prefs")
-    op.drop_column("offers", "spq")
-    op.drop_column("requirements", "need_by_date")
-    op.drop_column("requirements", "customer_pn")
+    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS offers_column_prefs")
+    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS requirements_column_prefs")
+    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS spq")
+    op.execute("ALTER TABLE requirements DROP COLUMN IF EXISTS need_by_date")
+    op.execute("ALTER TABLE requirements DROP COLUMN IF EXISTS customer_pn")

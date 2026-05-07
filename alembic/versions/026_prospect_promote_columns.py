@@ -7,8 +7,6 @@ Revises: 025_connector_health
 Create Date: 2026-02-27
 """
 
-import sqlalchemy as sa
-
 from alembic import op
 
 revision = "026_prospect_promote"
@@ -18,10 +16,10 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("prospect_contacts", sa.Column("promoted_to_type", sa.String(20), nullable=True))
-    op.add_column("prospect_contacts", sa.Column("promoted_to_id", sa.Integer(), nullable=True))
+    op.execute("ALTER TABLE prospect_contacts ADD COLUMN IF NOT EXISTS promoted_to_type VARCHAR(20)")
+    op.execute("ALTER TABLE prospect_contacts ADD COLUMN IF NOT EXISTS promoted_to_id INTEGER")
 
 
 def downgrade():
-    op.drop_column("prospect_contacts", "promoted_to_id")
-    op.drop_column("prospect_contacts", "promoted_to_type")
+    op.execute("ALTER TABLE prospect_contacts DROP COLUMN IF EXISTS promoted_to_id")
+    op.execute("ALTER TABLE prospect_contacts DROP COLUMN IF EXISTS promoted_to_type")

@@ -8,8 +8,6 @@ Revision ID: 043_unify_ticket_tables
 Revises: 042_add_tagging_tables
 """
 
-import sqlalchemy as sa
-
 from alembic import op
 
 revision = "043_unify_ticket_tables"
@@ -20,23 +18,19 @@ depends_on = None
 
 def upgrade() -> None:
     # 1. Add new columns to trouble_tickets
-    op.add_column("trouble_tickets", sa.Column("screenshot_b64", sa.Text(), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("browser_info", sa.String(512), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("screen_size", sa.String(50), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("page_state", sa.Text(), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("ai_prompt", sa.Text(), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("admin_notes", sa.Text(), nullable=True))
-    op.add_column(
-        "trouble_tickets",
-        sa.Column("resolved_by_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
-    )
-    op.add_column("trouble_tickets", sa.Column("source", sa.String(20), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("legacy_error_report_id", sa.Integer(), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("console_errors", sa.Text(), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("current_view", sa.String(100), nullable=True))
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS screenshot_b64 TEXT")
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS browser_info VARCHAR(512)")
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS screen_size VARCHAR(50)")
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS page_state TEXT")
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS ai_prompt TEXT")
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS admin_notes TEXT")
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS resolved_by_id INTEGER")
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS legacy_error_report_id INTEGER")
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS console_errors TEXT")
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS current_view VARCHAR(100)")
 
     # 2. Index on source for filtered queries
-    op.create_index("ix_trouble_tickets_source", "trouble_tickets", ["source"])
+    op.create_index("ix_trouble_tickets_source", "trouble_tickets", ["source"], if_not_exists=True)
 
     # 3. Migrate data from error_reports into trouble_tickets
     #    Map statuses: open → submitted, in_progress → diagnosed, resolved → resolved, closed → rejected
@@ -97,15 +91,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_trouble_tickets_source", table_name="trouble_tickets")
-    op.drop_column("trouble_tickets", "current_view")
-    op.drop_column("trouble_tickets", "console_errors")
-    op.drop_column("trouble_tickets", "legacy_error_report_id")
-    op.drop_column("trouble_tickets", "source")
-    op.drop_column("trouble_tickets", "resolved_by_id")
-    op.drop_column("trouble_tickets", "admin_notes")
-    op.drop_column("trouble_tickets", "ai_prompt")
-    op.drop_column("trouble_tickets", "page_state")
-    op.drop_column("trouble_tickets", "screen_size")
-    op.drop_column("trouble_tickets", "browser_info")
-    op.drop_column("trouble_tickets", "screenshot_b64")
+    op.drop_index("ix_trouble_tickets_source", table_name="trouble_tickets", if_exists=True)
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS current_view")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS console_errors")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS legacy_error_report_id")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS source")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS resolved_by_id")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS admin_notes")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS ai_prompt")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS page_state")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS screen_size")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS browser_info")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS screenshot_b64")

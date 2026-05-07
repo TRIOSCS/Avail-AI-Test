@@ -20,14 +20,16 @@ def upgrade() -> None:
         "ix_trouble_tickets_source_status_created",
         "trouble_tickets",
         ["source", "status", "created_at"],
+        if_not_exists=True,
     )
     op.create_index(
         "ix_root_cause_groups_title",
         "root_cause_groups",
         ["title"],
+        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_root_cause_groups_title", table_name="root_cause_groups")
-    op.drop_index("ix_trouble_tickets_source_status_created", table_name="trouble_tickets")
+    op.drop_index("ix_root_cause_groups_title", table_name="root_cause_groups", if_exists=True)
+    op.drop_index("ix_trouble_tickets_source_status_created", table_name="trouble_tickets", if_exists=True)

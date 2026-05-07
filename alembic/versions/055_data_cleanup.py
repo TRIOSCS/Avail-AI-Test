@@ -7,7 +7,6 @@ Create Date: 2026-03-07
 
 import re
 
-import sqlalchemy as sa
 from sqlalchemy import text
 
 from alembic import op
@@ -109,7 +108,7 @@ def _extract_phones_from_site_name(conn):
 
 
 def upgrade():
-    op.add_column("customer_sites", sa.Column("contact_phone_2", sa.String(100), nullable=True))
+    op.execute("ALTER TABLE customer_sites ADD COLUMN IF NOT EXISTS contact_phone_2 VARCHAR(100)")
     conn = op.get_bind()
     _dedup_site_contacts(conn)
     _normalize_phones(conn)
@@ -117,4 +116,4 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_column("customer_sites", "contact_phone_2")
+    op.execute("ALTER TABLE customer_sites DROP COLUMN IF EXISTS contact_phone_2")

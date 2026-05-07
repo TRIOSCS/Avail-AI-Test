@@ -8,8 +8,6 @@ Adds site_count and open_req_count columns to companies table,
 then backfills from customer_sites and requisitions.
 """
 
-import sqlalchemy as sa
-
 from alembic import op
 
 revision = "037_company_denormalized_counts"
@@ -17,8 +15,8 @@ down_revision = "036_unified_score_snapshot"
 
 
 def upgrade() -> None:
-    op.add_column("companies", sa.Column("site_count", sa.Integer(), server_default="0"))
-    op.add_column("companies", sa.Column("open_req_count", sa.Integer(), server_default="0"))
+    op.execute("ALTER TABLE companies ADD COLUMN IF NOT EXISTS site_count INTEGER DEFAULT '0'")
+    op.execute("ALTER TABLE companies ADD COLUMN IF NOT EXISTS open_req_count INTEGER DEFAULT '0'")
 
     # Backfill site_count
     op.execute("""
@@ -40,5 +38,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("companies", "open_req_count")
-    op.drop_column("companies", "site_count")
+    op.execute("ALTER TABLE companies DROP COLUMN IF EXISTS open_req_count")
+    op.execute("ALTER TABLE companies DROP COLUMN IF EXISTS site_count")

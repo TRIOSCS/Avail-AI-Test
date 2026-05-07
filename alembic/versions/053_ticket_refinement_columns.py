@@ -7,8 +7,6 @@ Revision ID: 053
 Revises: 052
 """
 
-import sqlalchemy as sa
-
 from alembic import op
 
 revision = "053"
@@ -18,18 +16,18 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("trouble_tickets", sa.Column("similarity_score", sa.Float(), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("tested_area", sa.String(50), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("dom_snapshot", sa.Text(), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("network_errors", sa.JSON(), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("performance_timings", sa.JSON(), nullable=True))
-    op.add_column("trouble_tickets", sa.Column("reproduction_steps", sa.JSON(), nullable=True))
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS similarity_score DOUBLE PRECISION")
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS tested_area VARCHAR(50)")
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS dom_snapshot TEXT")
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS network_errors JSON")
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS performance_timings JSON")
+    op.execute("ALTER TABLE trouble_tickets ADD COLUMN IF NOT EXISTS reproduction_steps JSON")
 
 
 def downgrade():
-    op.drop_column("trouble_tickets", "reproduction_steps")
-    op.drop_column("trouble_tickets", "performance_timings")
-    op.drop_column("trouble_tickets", "network_errors")
-    op.drop_column("trouble_tickets", "dom_snapshot")
-    op.drop_column("trouble_tickets", "tested_area")
-    op.drop_column("trouble_tickets", "similarity_score")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS reproduction_steps")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS performance_timings")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS network_errors")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS dom_snapshot")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS tested_area")
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS similarity_score")

@@ -17,14 +17,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.drop_table("error_reports")
-    op.drop_table("reactivation_signals")
-    op.drop_table("ics_classification_cache")
-    op.drop_table("nc_classification_cache")
-    op.drop_table("teams_notification_log")
-    op.drop_table("teams_alert_config")
-    op.drop_table("risk_flags")
-    op.drop_column("trouble_tickets", "legacy_error_report_id")
+    op.drop_table("error_reports", if_exists=True)
+    op.drop_table("reactivation_signals", if_exists=True)
+    op.drop_table("ics_classification_cache", if_exists=True)
+    op.drop_table("nc_classification_cache", if_exists=True)
+    op.drop_table("teams_notification_log", if_exists=True)
+    op.drop_table("teams_alert_config", if_exists=True)
+    op.drop_table("risk_flags", if_exists=True)
+    op.execute("ALTER TABLE trouble_tickets DROP COLUMN IF EXISTS legacy_error_report_id")
 
 
 def downgrade() -> None:

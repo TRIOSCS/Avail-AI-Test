@@ -9,8 +9,6 @@ Revises: 067
 Create Date: 2026-03-10
 """
 
-import sqlalchemy as sa
-
 from alembic import op
 
 revision = "068"
@@ -21,10 +19,10 @@ depends_on = None
 
 def upgrade() -> None:
     # -- Requisition: buyer claim + sales context --
-    op.add_column("requisitions", sa.Column("claimed_by_id", sa.Integer(), nullable=True))
-    op.add_column("requisitions", sa.Column("claimed_at", sa.DateTime(), nullable=True))
-    op.add_column("requisitions", sa.Column("urgency", sa.String(20), server_default="normal", nullable=True))
-    op.add_column("requisitions", sa.Column("opportunity_value", sa.Numeric(12, 2), nullable=True))
+    op.execute("ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS claimed_by_id INTEGER")
+    op.execute("ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS claimed_at TIMESTAMP WITHOUT TIME ZONE")
+    op.execute("ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS urgency VARCHAR(20) DEFAULT 'normal'")
+    op.execute("ALTER TABLE requisitions ADD COLUMN IF NOT EXISTS opportunity_value NUMERIC(12, 2)")
 
     op.create_foreign_key(
         "fk_requisitions_claimed_by",
@@ -34,22 +32,22 @@ def upgrade() -> None:
         ["id"],
         ondelete="SET NULL",
     )
-    op.create_index("ix_requisitions_claimed_by", "requisitions", ["claimed_by_id"])
-    op.create_index("ix_requisitions_urgency", "requisitions", ["urgency"])
+    op.create_index("ix_requisitions_claimed_by", "requisitions", ["claimed_by_id"], if_not_exists=True)
+    op.create_index("ix_requisitions_urgency", "requisitions", ["urgency"], if_not_exists=True)
 
     # -- Requirement: per-part sourcing status --
-    op.add_column("requirements", sa.Column("sourcing_status", sa.String(20), server_default="open", nullable=True))
-    op.create_index("ix_requirements_sourcing_status", "requirements", ["sourcing_status"])
+    op.execute("ALTER TABLE requirements ADD COLUMN IF NOT EXISTS sourcing_status VARCHAR(20) DEFAULT 'open'")
+    op.create_index("ix_requirements_sourcing_status", "requirements", ["sourcing_status"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_requirements_sourcing_status", table_name="requirements")
-    op.drop_column("requirements", "sourcing_status")
+    op.drop_index("ix_requirements_sourcing_status", table_name="requirements", if_exists=True)
+    op.execute("ALTER TABLE requirements DROP COLUMN IF EXISTS sourcing_status")
 
-    op.drop_index("ix_requisitions_urgency", table_name="requisitions")
-    op.drop_index("ix_requisitions_claimed_by", table_name="requisitions")
+    op.drop_index("ix_requisitions_urgency", table_name="requisitions", if_exists=True)
+    op.drop_index("ix_requisitions_claimed_by", table_name="requisitions", if_exists=True)
     op.drop_constraint("fk_requisitions_claimed_by", "requisitions", type_="foreignkey")
-    op.drop_column("requisitions", "opportunity_value")
-    op.drop_column("requisitions", "urgency")
-    op.drop_column("requisitions", "claimed_at")
-    op.drop_column("requisitions", "claimed_by_id")
+    op.execute("ALTER TABLE requisitions DROP COLUMN IF EXISTS opportunity_value")
+    op.execute("ALTER TABLE requisitions DROP COLUMN IF EXISTS urgency")
+    op.execute("ALTER TABLE requisitions DROP COLUMN IF EXISTS claimed_at")
+    op.execute("ALTER TABLE requisitions DROP COLUMN IF EXISTS claimed_by_id")

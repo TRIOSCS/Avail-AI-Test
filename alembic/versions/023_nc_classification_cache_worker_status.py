@@ -38,6 +38,7 @@ def upgrade():
             "manufacturer",
             name="uq_nc_cache_mpn_mfr",
         ),
+        if_not_exists=True,
     )
 
     # ── nc_worker_status (singleton) ─────────────────────────────────
@@ -58,6 +59,7 @@ def upgrade():
             server_default=sa.func.now(),
         ),
         sa.CheckConstraint("id = 1", name="ck_nc_worker_status_singleton"),
+        if_not_exists=True,
     )
 
     # Insert the singleton row
@@ -65,5 +67,5 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_table("nc_worker_status")
-    op.drop_table("nc_classification_cache")
+    op.drop_table("nc_worker_status", if_exists=True)
+    op.drop_table("nc_classification_cache", if_exists=True)

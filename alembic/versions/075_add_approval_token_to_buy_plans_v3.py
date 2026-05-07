@@ -19,12 +19,12 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("buy_plans_v3", sa.Column("approval_token", sa.String(100), unique=True))
+    op.execute("ALTER TABLE buy_plans_v3 ADD COLUMN IF NOT EXISTS approval_token VARCHAR(100)")
     op.add_column("buy_plans_v3", sa.Column("token_expires_at", sa.DateTime()))
-    op.create_index("ix_bpv3_token", "buy_plans_v3", ["approval_token"])
+    op.create_index("ix_bpv3_token", "buy_plans_v3", ["approval_token"], if_not_exists=True)
 
 
 def downgrade():
-    op.drop_index("ix_bpv3_token", table_name="buy_plans_v3")
-    op.drop_column("buy_plans_v3", "token_expires_at")
-    op.drop_column("buy_plans_v3", "approval_token")
+    op.drop_index("ix_bpv3_token", table_name="buy_plans_v3", if_exists=True)
+    op.execute("ALTER TABLE buy_plans_v3 DROP COLUMN IF EXISTS token_expires_at")
+    op.execute("ALTER TABLE buy_plans_v3 DROP COLUMN IF EXISTS approval_token")

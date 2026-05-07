@@ -7,8 +7,6 @@ Create Date: 2026-03-30 02:50:00.000000
 
 from typing import Sequence, Union
 
-import sqlalchemy as sa
-
 from alembic import op
 
 # revision identifiers, used by Alembic.
@@ -19,8 +17,8 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column("vendor_responses", sa.Column("match_method", sa.String(50), nullable=True))
+    op.execute("ALTER TABLE vendor_responses ADD COLUMN IF NOT EXISTS match_method VARCHAR(50)")
 
 
 def downgrade() -> None:
-    op.drop_column("vendor_responses", "match_method")
+    op.execute("ALTER TABLE vendor_responses DROP COLUMN IF EXISTS match_method")

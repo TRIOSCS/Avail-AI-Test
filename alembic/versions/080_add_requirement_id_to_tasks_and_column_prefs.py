@@ -23,7 +23,7 @@ def upgrade():
         "requisition_tasks",
         sa.Column("requirement_id", sa.Integer(), sa.ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True),
     )
-    op.create_index("ix_rt_requirement", "requisition_tasks", ["requirement_id"])
+    op.create_index("ix_rt_requirement", "requisition_tasks", ["requirement_id"], if_not_exists=True)
 
     op.add_column(
         "users",
@@ -32,6 +32,6 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_column("users", "parts_column_prefs")
-    op.drop_index("ix_rt_requirement", table_name="requisition_tasks")
-    op.drop_column("requisition_tasks", "requirement_id")
+    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS parts_column_prefs")
+    op.drop_index("ix_rt_requirement", table_name="requisition_tasks", if_exists=True)
+    op.execute("ALTER TABLE requisition_tasks DROP COLUMN IF EXISTS requirement_id")

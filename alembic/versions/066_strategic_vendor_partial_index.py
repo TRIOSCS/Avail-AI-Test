@@ -32,19 +32,26 @@ def upgrade() -> None:
             sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
             sa.Column("released_at", sa.DateTime(timezone=True), nullable=True),
             sa.Column("release_reason", sa.String(20), nullable=True),
+            if_not_exists=True,
         )
         # Create with the partial unique index from the start
         op.execute(
-            "CREATE UNIQUE INDEX uq_active_vendor_claim ON strategic_vendors (vendor_card_id) WHERE released_at IS NULL"
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_active_vendor_claim ON strategic_vendors (vendor_card_id) WHERE released_at IS NULL"
         )
-        op.create_index("ix_strategic_user_released", "strategic_vendors", ["user_id", "released_at"])
-        op.create_index("ix_strategic_expires_released", "strategic_vendors", ["expires_at", "released_at"])
-        op.create_index("ix_strategic_vendor_released", "strategic_vendors", ["vendor_card_id", "released_at"])
+        op.create_index(
+            "ix_strategic_user_released", "strategic_vendors", ["user_id", "released_at"], if_not_exists=True
+        )
+        op.create_index(
+            "ix_strategic_expires_released", "strategic_vendors", ["expires_at", "released_at"], if_not_exists=True
+        )
+        op.create_index(
+            "ix_strategic_vendor_released", "strategic_vendors", ["vendor_card_id", "released_at"], if_not_exists=True
+        )
     else:
         # Table exists — replace lifetime unique with partial unique
         op.drop_constraint("uq_user_vendor_strategic", "strategic_vendors", type_="unique")
         op.execute(
-            "CREATE UNIQUE INDEX uq_active_vendor_claim ON strategic_vendors (vendor_card_id) WHERE released_at IS NULL"
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_active_vendor_claim ON strategic_vendors (vendor_card_id) WHERE released_at IS NULL"
         )
 
 

@@ -37,6 +37,7 @@ def upgrade() -> None:
         sa.Column("is_primary", sa.Boolean(), server_default="false", nullable=True),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("commodity", "spec_key", name="uq_css_commodity_spec_key"),
+        if_not_exists=True,
     )
     op.create_table(
         "material_spec_conflicts",
@@ -54,6 +55,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
         sa.ForeignKeyConstraint(["material_card_id"], ["material_cards.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
+        if_not_exists=True,
     )
     op.create_table(
         "material_spec_facets",
@@ -67,11 +69,18 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["material_card_id"], ["material_cards.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("material_card_id", "spec_key", name="uq_msf_card_spec"),
+        if_not_exists=True,
     )
-    op.create_index("ix_msf_card", "material_spec_facets", ["material_card_id"], unique=False)
-    op.create_index("ix_msf_category_key", "material_spec_facets", ["category", "spec_key"], unique=False)
+    op.create_index("ix_msf_card", "material_spec_facets", ["material_card_id"], unique=False, if_not_exists=True)
     op.create_index(
-        "ix_msf_category_key_text", "material_spec_facets", ["category", "spec_key", "value_text"], unique=False
+        "ix_msf_category_key", "material_spec_facets", ["category", "spec_key"], unique=False, if_not_exists=True
+    )
+    op.create_index(
+        "ix_msf_category_key_text",
+        "material_spec_facets",
+        ["category", "spec_key", "value_text"],
+        unique=False,
+        if_not_exists=True,
     )
     op.create_index(
         "ix_msf_key_numeric",
@@ -79,9 +88,14 @@ def upgrade() -> None:
         ["spec_key", "value_numeric"],
         unique=False,
         postgresql_where=sa.text("value_numeric IS NOT NULL"),
+        if_not_exists=True,
     )
     op.create_index(
-        "ix_msf_key_text_card", "material_spec_facets", ["spec_key", "value_text", "material_card_id"], unique=False
+        "ix_msf_key_text_card",
+        "material_spec_facets",
+        ["spec_key", "value_text", "material_card_id"],
+        unique=False,
+        if_not_exists=True,
     )
 
     # --- New column on material_cards ---
@@ -94,16 +108,19 @@ def upgrade() -> None:
 
 def downgrade() -> None:
     # --- Drop column ---
-    op.drop_column("material_cards", "specs_structured")
+    op.execute("ALTER TABLE material_cards DROP COLUMN IF EXISTS specs_structured")
 
     # --- Drop indexes then tables (reverse order) ---
-    op.drop_index("ix_msf_key_text_card", table_name="material_spec_facets")
+    op.drop_index("ix_msf_key_text_card", table_name="material_spec_facets", if_exists=True)
     op.drop_index(
-        "ix_msf_key_numeric", table_name="material_spec_facets", postgresql_where=sa.text("value_numeric IS NOT NULL")
+        "ix_msf_key_numeric",
+        table_name="material_spec_facets",
+        postgresql_where=sa.text("value_numeric IS NOT NULL"),
+        if_exists=True,
     )
-    op.drop_index("ix_msf_category_key_text", table_name="material_spec_facets")
-    op.drop_index("ix_msf_category_key", table_name="material_spec_facets")
-    op.drop_index("ix_msf_card", table_name="material_spec_facets")
-    op.drop_table("material_spec_facets")
-    op.drop_table("material_spec_conflicts")
-    op.drop_table("commodity_spec_schemas")
+    op.drop_index("ix_msf_category_key_text", table_name="material_spec_facets", if_exists=True)
+    op.drop_index("ix_msf_category_key", table_name="material_spec_facets", if_exists=True)
+    op.drop_index("ix_msf_card", table_name="material_spec_facets", if_exists=True)
+    op.drop_table("material_spec_facets", if_exists=True)
+    op.drop_table("material_spec_conflicts", if_exists=True)
+    op.drop_table("commodity_spec_schemas", if_exists=True)

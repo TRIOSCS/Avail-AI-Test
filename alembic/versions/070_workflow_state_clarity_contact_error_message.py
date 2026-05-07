@@ -7,8 +7,6 @@ Revises: 069
 Create Date: 2026-03-10
 """
 
-import sqlalchemy as sa
-
 from alembic import op
 
 revision = "070"
@@ -18,8 +16,8 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("contacts", sa.Column("error_message", sa.String(500), nullable=True))
+    op.execute("ALTER TABLE contacts ADD COLUMN IF NOT EXISTS error_message VARCHAR(500)")
 
 
 def downgrade() -> None:
-    op.drop_column("contacts", "error_message")
+    op.execute("ALTER TABLE contacts DROP COLUMN IF EXISTS error_message")

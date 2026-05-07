@@ -14,10 +14,10 @@ down_revision = "037_company_denormalized_counts"
 
 
 def upgrade() -> None:
-    op.add_column("api_sources", sa.Column("monthly_quota", sa.Integer(), nullable=True))
-    op.add_column("api_sources", sa.Column("calls_this_month", sa.Integer(), server_default="0"))
-    op.add_column("api_sources", sa.Column("last_ping_at", sa.DateTime(), nullable=True))
-    op.add_column("api_sources", sa.Column("last_deep_test_at", sa.DateTime(), nullable=True))
+    op.execute("ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS monthly_quota INTEGER")
+    op.execute("ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS calls_this_month INTEGER DEFAULT '0'")
+    op.execute("ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS last_ping_at TIMESTAMP WITHOUT TIME ZONE")
+    op.execute("ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS last_deep_test_at TIMESTAMP WITHOUT TIME ZONE")
 
     op.create_table(
         "api_usage_log",
@@ -30,14 +30,15 @@ def upgrade() -> None:
         sa.Column("success", sa.Boolean(), nullable=False),
         sa.Column("error_message", sa.String(500)),
         sa.Column("check_type", sa.String(20), nullable=False),
+        if_not_exists=True,
     )
-    op.create_index("ix_usage_log_source_ts", "api_usage_log", ["source_id", "timestamp"])
+    op.create_index("ix_usage_log_source_ts", "api_usage_log", ["source_id", "timestamp"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_usage_log_source_ts", table_name="api_usage_log")
-    op.drop_table("api_usage_log")
-    op.drop_column("api_sources", "last_deep_test_at")
-    op.drop_column("api_sources", "last_ping_at")
-    op.drop_column("api_sources", "calls_this_month")
-    op.drop_column("api_sources", "monthly_quota")
+    op.drop_index("ix_usage_log_source_ts", table_name="api_usage_log", if_exists=True)
+    op.drop_table("api_usage_log", if_exists=True)
+    op.execute("ALTER TABLE api_sources DROP COLUMN IF EXISTS last_deep_test_at")
+    op.execute("ALTER TABLE api_sources DROP COLUMN IF EXISTS last_ping_at")
+    op.execute("ALTER TABLE api_sources DROP COLUMN IF EXISTS calls_this_month")
+    op.execute("ALTER TABLE api_sources DROP COLUMN IF EXISTS monthly_quota")

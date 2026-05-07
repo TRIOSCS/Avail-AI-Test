@@ -19,14 +19,14 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.create_index("ix_companies_is_active", "companies", ["is_active"])
-    op.create_index("ix_companies_last_activity_at", "companies", ["last_activity_at"])
-    op.create_index("ix_companies_is_strategic", "companies", ["is_strategic"])
-    op.create_index("ix_customer_sites_is_active", "customer_sites", ["is_active"])
+    op.create_index("ix_companies_is_active", "companies", ["is_active"], if_not_exists=True)
+    op.create_index("ix_companies_last_activity_at", "companies", ["last_activity_at"], if_not_exists=True)
+    op.create_index("ix_companies_is_strategic", "companies", ["is_strategic"], if_not_exists=True)
+    op.create_index("ix_customer_sites_is_active", "customer_sites", ["is_active"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_customer_sites_is_active", table_name="customer_sites")
-    op.drop_index("ix_companies_is_strategic", table_name="companies")
-    op.drop_index("ix_companies_last_activity_at", table_name="companies")
-    op.drop_index("ix_companies_is_active", table_name="companies")
+    op.drop_index("ix_customer_sites_is_active", table_name="customer_sites", if_exists=True)
+    op.drop_index("ix_companies_is_strategic", table_name="companies", if_exists=True)
+    op.drop_index("ix_companies_last_activity_at", table_name="companies", if_exists=True)
+    op.drop_index("ix_companies_is_active", table_name="companies", if_exists=True)

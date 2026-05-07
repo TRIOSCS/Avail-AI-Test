@@ -49,13 +49,14 @@ def upgrade() -> None:
         "ix_activity_user_channel_created",
         "activity_log",
         ["user_id", "channel", "created_at"],
+        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_activity_user_channel_created", table_name="activity_log")
-    op.drop_column("activity_log", "details")
-    op.drop_column("activity_log", "source_url")
-    op.drop_column("activity_log", "summary")
-    op.drop_column("activity_log", "event_type")
-    op.drop_column("activity_log", "direction")
+    op.drop_index("ix_activity_user_channel_created", table_name="activity_log", if_exists=True)
+    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS details")
+    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS source_url")
+    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS summary")
+    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS event_type")
+    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS direction")

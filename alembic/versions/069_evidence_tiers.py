@@ -8,8 +8,6 @@ Revises: 068
 Create Date: 2026-03-10
 """
 
-import sqlalchemy as sa
-
 from alembic import op
 
 revision = "069"
@@ -20,31 +18,27 @@ depends_on = None
 
 def upgrade() -> None:
     # Sighting columns
-    op.add_column("sightings", sa.Column("evidence_tier", sa.String(4), nullable=True))
-    op.add_column("sightings", sa.Column("score_components", sa.JSON(), nullable=True))
+    op.execute("ALTER TABLE sightings ADD COLUMN IF NOT EXISTS evidence_tier VARCHAR(4)")
+    op.execute("ALTER TABLE sightings ADD COLUMN IF NOT EXISTS score_components JSON")
 
     # Offer columns
-    op.add_column("offers", sa.Column("evidence_tier", sa.String(4), nullable=True))
-    op.add_column("offers", sa.Column("parse_confidence", sa.Float(), nullable=True))
-    op.add_column(
-        "offers",
-        sa.Column("promoted_by_id", sa.Integer(), sa.ForeignKey("users.id"), nullable=True),
-    )
-    op.add_column("offers", sa.Column("promoted_at", sa.DateTime(), nullable=True))
+    op.execute("ALTER TABLE offers ADD COLUMN IF NOT EXISTS evidence_tier VARCHAR(4)")
+    op.execute("ALTER TABLE offers ADD COLUMN IF NOT EXISTS parse_confidence DOUBLE PRECISION")
+    op.execute("ALTER TABLE offers ADD COLUMN IF NOT EXISTS promoted_by_id INTEGER")
 
     # Index for filtering by evidence tier
-    op.create_index("ix_sightings_evidence_tier", "sightings", ["evidence_tier"])
-    op.create_index("ix_offers_evidence_tier", "offers", ["evidence_tier"])
+    op.create_index("ix_sightings_evidence_tier", "sightings", ["evidence_tier"], if_not_exists=True)
+    op.create_index("ix_offers_evidence_tier", "offers", ["evidence_tier"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_offers_evidence_tier", table_name="offers")
-    op.drop_index("ix_sightings_evidence_tier", table_name="sightings")
+    op.drop_index("ix_offers_evidence_tier", table_name="offers", if_exists=True)
+    op.drop_index("ix_sightings_evidence_tier", table_name="sightings", if_exists=True)
 
-    op.drop_column("offers", "promoted_at")
-    op.drop_column("offers", "promoted_by_id")
-    op.drop_column("offers", "parse_confidence")
-    op.drop_column("offers", "evidence_tier")
+    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS promoted_at")
+    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS promoted_by_id")
+    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS parse_confidence")
+    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS evidence_tier")
 
-    op.drop_column("sightings", "score_components")
-    op.drop_column("sightings", "evidence_tier")
+    op.execute("ALTER TABLE sightings DROP COLUMN IF EXISTS score_components")
+    op.execute("ALTER TABLE sightings DROP COLUMN IF EXISTS evidence_tier")

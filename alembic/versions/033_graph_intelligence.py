@@ -29,8 +29,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("users", "working_hours_end")
-    op.drop_column("users", "working_hours_start")
-    op.drop_column("users", "timezone")
-    op.drop_column("vendor_contacts", "ooo_return_date")
-    op.drop_column("vendor_contacts", "is_ooo")
+    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS working_hours_end")
+    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS working_hours_start")
+    op.execute("ALTER TABLE users DROP COLUMN IF EXISTS timezone")
+    op.execute("ALTER TABLE vendor_contacts DROP COLUMN IF EXISTS ooo_return_date")
+    op.execute("ALTER TABLE vendor_contacts DROP COLUMN IF EXISTS is_ooo")

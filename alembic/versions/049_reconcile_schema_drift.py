@@ -60,6 +60,7 @@ def upgrade() -> None:
         ["external_id"],
         unique=False,
         postgresql_where=sa.text("external_id IS NOT NULL"),
+        if_not_exists=True,
     )
     op.create_index(
         "ix_activity_site_contact",
@@ -67,6 +68,7 @@ def upgrade() -> None:
         ["site_contact_id", "created_at"],
         unique=False,
         postgresql_where=sa.text("site_contact_id IS NOT NULL"),
+        if_not_exists=True,
     )
     op.create_index(
         "ix_activity_user_notif",
@@ -74,6 +76,7 @@ def upgrade() -> None:
         ["user_id", "activity_type", "created_at"],
         unique=False,
         postgresql_where=sa.text("dismissed_at IS NULL"),
+        if_not_exists=True,
     )
 
     # ── BUCKET 1: Index reconciliation — buy_plans ──
@@ -84,15 +87,21 @@ def upgrade() -> None:
 
     # ── BUCKET 1: Index reconciliation — companies ──
     op.drop_index("ix_companies_owner", table_name="companies", if_exists=True)
-    op.create_index("ix_companies_account_owner", "companies", ["account_owner_id"], unique=False)
-    op.create_index("ix_companies_owner_created", "companies", ["account_owner_id", "created_at"], unique=False)
+    op.create_index("ix_companies_account_owner", "companies", ["account_owner_id"], unique=False, if_not_exists=True)
+    op.create_index(
+        "ix_companies_owner_created", "companies", ["account_owner_id", "created_at"], unique=False, if_not_exists=True
+    )
     op.create_unique_constraint("uq_companies_sf_account_id", "companies", ["sf_account_id"])
 
     # ── BUCKET 1: Index reconciliation — contacts ──
     op.drop_index("ix_contact_conv_id", table_name="contacts", if_exists=True)
     op.drop_index("ix_contacts_vendor_name", table_name="contacts", if_exists=True)
-    op.create_index("ix_contact_type_created", "contacts", ["contact_type", "created_at"], unique=False)
-    op.create_index("ix_contact_type_vendor", "contacts", ["contact_type", "vendor_name"], unique=False)
+    op.create_index(
+        "ix_contact_type_created", "contacts", ["contact_type", "created_at"], unique=False, if_not_exists=True
+    )
+    op.create_index(
+        "ix_contact_type_vendor", "contacts", ["contact_type", "vendor_name"], unique=False, if_not_exists=True
+    )
 
     # ── BUCKET 1: Index reconciliation — email_signature_extracts ──
     op.create_index("ix_ese_email", "email_signature_extracts", ["sender_email"], unique=True, if_not_exists=True)
@@ -101,7 +110,7 @@ def upgrade() -> None:
     op.drop_index("ix_ej_started_by", table_name="enrichment_jobs", if_exists=True)
     op.drop_index("ix_eq_reviewed_by", table_name="enrichment_queue", if_exists=True)
     op.drop_index("ix_eq_vendor_contact", table_name="enrichment_queue", if_exists=True)
-    op.create_index("ix_eq_status_source", "enrichment_queue", ["status", "source"], unique=False)
+    op.create_index("ix_eq_status_source", "enrichment_queue", ["status", "source"], unique=False, if_not_exists=True)
 
     # ── BUCKET 1: Index reconciliation — error_reports, material_card_audit, material_cards ──
     op.drop_index("ix_er_resolved_by", table_name="error_reports", if_exists=True)
@@ -111,7 +120,7 @@ def upgrade() -> None:
 
     # ── BUCKET 1: Index reconciliation — notifications ──
     op.drop_index("ix_notifications_user_unread", table_name="notifications", if_exists=True)
-    op.create_index("ix_notifications_id", "notifications", ["id"], unique=False)
+    op.create_index("ix_notifications_id", "notifications", ["id"], unique=False, if_not_exists=True)
 
     # ── BUCKET 1: Index reconciliation — offer_attachments, offers ──
     op.drop_index("ix_oa_uploaded_by", table_name="offer_attachments", if_exists=True)
@@ -120,15 +129,21 @@ def upgrade() -> None:
     op.drop_index("ix_offers_updated_by_id", table_name="offers", if_exists=True)
     op.drop_index("ix_offers_vendor_card", table_name="offers", if_exists=True)
     op.drop_index("ix_offers_vr", table_name="offers", if_exists=True)
-    op.create_index("ix_offers_entered_created", "offers", ["entered_by_id", "created_at"], unique=False)
-    op.create_index("ix_offers_req_created", "offers", ["requisition_id", "created_at"], unique=False)
-    op.create_index("ix_offers_req_status", "offers", ["requisition_id", "status"], unique=False)
-    op.create_index("ix_offers_status", "offers", ["status"], unique=False)
+    op.create_index(
+        "ix_offers_entered_created", "offers", ["entered_by_id", "created_at"], unique=False, if_not_exists=True
+    )
+    op.create_index(
+        "ix_offers_req_created", "offers", ["requisition_id", "created_at"], unique=False, if_not_exists=True
+    )
+    op.create_index("ix_offers_req_status", "offers", ["requisition_id", "status"], unique=False, if_not_exists=True)
+    op.create_index("ix_offers_status", "offers", ["status"], unique=False, if_not_exists=True)
 
     # ── BUCKET 1: Index reconciliation — pending_batches ──
     op.drop_index("ix_pending_batches_status", table_name="pending_batches", if_exists=True)
-    op.create_index("ix_pending_batches_status", "pending_batches", ["status", "submitted_at"], unique=False)
-    op.create_index("ix_pending_batches_batch_id", "pending_batches", ["batch_id"], unique=False)
+    op.create_index(
+        "ix_pending_batches_status", "pending_batches", ["status", "submitted_at"], unique=False, if_not_exists=True
+    )
+    op.create_index("ix_pending_batches_batch_id", "pending_batches", ["batch_id"], unique=False, if_not_exists=True)
 
     # ── BUCKET 1: Index reconciliation — proactive_*, prospect_contacts ──
     op.drop_index("ix_pm_requirement", table_name="proactive_matches", if_exists=True)
@@ -142,7 +157,7 @@ def upgrade() -> None:
     op.drop_index("ix_requirements_mpn_trgm", table_name="requirements", if_exists=True)
     op.drop_index("ix_requirements_primary_mpn", table_name="requirements", if_exists=True)
     op.drop_index("ix_requirements_subs_trgm", table_name="requirements", if_exists=True)
-    op.create_index("ix_req_primary_mpn", "requirements", ["primary_mpn"], unique=False)
+    op.create_index("ix_req_primary_mpn", "requirements", ["primary_mpn"], unique=False, if_not_exists=True)
 
     # ── BUCKET 1: Index reconciliation — requisitions ──
     op.drop_index("ix_req_cloned_from", table_name="requisitions", if_exists=True)
@@ -151,25 +166,35 @@ def upgrade() -> None:
     op.drop_index("ix_requisitions_customer_name_trgm", table_name="requisitions", if_exists=True)
     op.drop_index("ix_requisitions_name_trgm", table_name="requisitions", if_exists=True)
     op.drop_index("ix_requisitions_updated_by_id", table_name="requisitions", if_exists=True)
-    op.create_index("ix_requisitions_created_at", "requisitions", ["created_at"], unique=False)
-    op.create_index("ix_requisitions_created_by", "requisitions", ["created_by"], unique=False)
-    op.create_index("ix_requisitions_customer_name", "requisitions", ["customer_name"], unique=False)
+    op.create_index("ix_requisitions_created_at", "requisitions", ["created_at"], unique=False, if_not_exists=True)
+    op.create_index("ix_requisitions_created_by", "requisitions", ["created_by"], unique=False, if_not_exists=True)
+    op.create_index(
+        "ix_requisitions_customer_name", "requisitions", ["customer_name"], unique=False, if_not_exists=True
+    )
     op.create_index("ix_requisitions_name", "requisitions", ["name"], unique=False, if_not_exists=True)
-    op.create_index("ix_requisitions_site", "requisitions", ["customer_site_id"], unique=False)
-    op.create_index("ix_requisitions_status", "requisitions", ["status"], unique=False)
+    op.create_index("ix_requisitions_site", "requisitions", ["customer_site_id"], unique=False, if_not_exists=True)
+    op.create_index("ix_requisitions_status", "requisitions", ["status"], unique=False, if_not_exists=True)
 
     # ── BUCKET 1: Index reconciliation — sightings ──
     op.create_index(
-        "ix_sightings_req_score", "sightings", ["requirement_id", sa.literal_column("score DESC")], unique=False
+        "ix_sightings_req_score",
+        "sightings",
+        ["requirement_id", sa.literal_column("score DESC")],
+        unique=False,
+        if_not_exists=True,
     )
-    op.create_index("ix_sightings_req_vendor", "sightings", ["requirement_id", "vendor_name"], unique=False)
-    op.create_index("ix_sightings_vendor_name", "sightings", ["vendor_name"], unique=False)
-    op.create_index("ix_sightings_vendor_name_normalized", "sightings", ["vendor_name_normalized"], unique=False)
+    op.create_index(
+        "ix_sightings_req_vendor", "sightings", ["requirement_id", "vendor_name"], unique=False, if_not_exists=True
+    )
+    op.create_index("ix_sightings_vendor_name", "sightings", ["vendor_name"], unique=False, if_not_exists=True)
+    op.create_index(
+        "ix_sightings_vendor_name_normalized", "sightings", ["vendor_name_normalized"], unique=False, if_not_exists=True
+    )
 
     # ── BUCKET 1: Index reconciliation — site_contacts, system_config ──
-    op.create_index("ix_site_contacts_email", "site_contacts", ["email"], unique=False)
+    op.create_index("ix_site_contacts_email", "site_contacts", ["email"], unique=False, if_not_exists=True)
     op.drop_constraint("system_config_key_key", "system_config", type_="unique")
-    op.create_index("ix_system_config_key", "system_config", ["key"], unique=True)
+    op.create_index("ix_system_config_key", "system_config", ["key"], unique=True, if_not_exists=True)
 
     # ── BUCKET 1: Index reconciliation — vendor_cards (also drop orphan indexes) ──
     op.drop_index("ix_vc_fts", table_name="vendor_cards", if_exists=True)
@@ -177,25 +202,31 @@ def upgrade() -> None:
     op.drop_index("ix_vendor_cards_blacklisted", table_name="vendor_cards", if_exists=True)
     op.drop_index("ix_vendor_cards_name_trgm", table_name="vendor_cards", if_exists=True)
     op.drop_index("ix_vendor_cards_sf_account_id", table_name="vendor_cards", if_exists=True)
-    op.create_index("ix_vendor_cards_created_at", "vendor_cards", ["created_at"], unique=False)
+    op.create_index("ix_vendor_cards_created_at", "vendor_cards", ["created_at"], unique=False, if_not_exists=True)
 
     # ── BUCKET 1: Index reconciliation — vendor_contacts, vendor_metrics_snapshot ──
-    op.create_index("ix_vendor_contacts_email", "vendor_contacts", ["email"], unique=False)
-    op.create_index("ix_vms_composite", "vendor_metrics_snapshot", ["composite_score"], unique=False)
-    op.create_index("ix_vms_date", "vendor_metrics_snapshot", ["snapshot_date"], unique=False)
+    op.create_index("ix_vendor_contacts_email", "vendor_contacts", ["email"], unique=False, if_not_exists=True)
+    op.create_index(
+        "ix_vms_composite", "vendor_metrics_snapshot", ["composite_score"], unique=False, if_not_exists=True
+    )
+    op.create_index("ix_vms_date", "vendor_metrics_snapshot", ["snapshot_date"], unique=False, if_not_exists=True)
 
     # ── BUCKET 1: Index reconciliation — vendor_responses ──
     op.drop_index("ix_vendor_responses_vendor_name", table_name="vendor_responses", if_exists=True)
-    op.create_index("ix_vr_classification", "vendor_responses", ["classification"], unique=False)
+    op.create_index("ix_vr_classification", "vendor_responses", ["classification"], unique=False, if_not_exists=True)
     op.create_index("ix_vr_contact", "vendor_responses", ["contact_id"], unique=False, if_not_exists=True)
-    op.create_index("ix_vr_received_email", "vendor_responses", ["received_at", "vendor_email"], unique=False)
-    op.create_index("ix_vr_req_email", "vendor_responses", ["requisition_id", "vendor_email"], unique=False)
+    op.create_index(
+        "ix_vr_received_email", "vendor_responses", ["received_at", "vendor_email"], unique=False, if_not_exists=True
+    )
+    op.create_index(
+        "ix_vr_req_email", "vendor_responses", ["requisition_id", "vendor_email"], unique=False, if_not_exists=True
+    )
     op.create_index("ix_vr_scanned_by", "vendor_responses", ["scanned_by_user_id"], unique=False, if_not_exists=True)
-    op.create_index("ix_vr_vendor_name", "vendor_responses", ["vendor_name"], unique=False)
+    op.create_index("ix_vr_vendor_name", "vendor_responses", ["vendor_name"], unique=False, if_not_exists=True)
 
     # ── BUCKET 1: Index reconciliation — vendor_reviews ──
     op.drop_index("ix_vrev_user", table_name="vendor_reviews", if_exists=True)
-    op.create_index("ix_review_user", "vendor_reviews", ["user_id"], unique=False)
+    op.create_index("ix_review_user", "vendor_reviews", ["user_id"], unique=False, if_not_exists=True)
 
     # ── BUCKET 6: FK constraint upgrades — add ondelete rules ──
     op.drop_constraint("activity_log_site_contact_id_fkey", "activity_log", type_="foreignkey")
@@ -269,101 +300,117 @@ def downgrade() -> None:
     )
 
     # ── Reverse index changes (restore old indexes, drop new) ──
-    op.drop_index("ix_review_user", table_name="vendor_reviews")
-    op.create_index("ix_vrev_user", "vendor_reviews", ["user_id"], unique=False)
+    op.drop_index("ix_review_user", table_name="vendor_reviews", if_exists=True)
+    op.create_index("ix_vrev_user", "vendor_reviews", ["user_id"], unique=False, if_not_exists=True)
 
-    op.drop_index("ix_vr_vendor_name", table_name="vendor_responses")
-    op.drop_index("ix_vr_scanned_by", table_name="vendor_responses")
-    op.drop_index("ix_vr_req_email", table_name="vendor_responses")
-    op.drop_index("ix_vr_received_email", table_name="vendor_responses")
-    op.drop_index("ix_vr_contact", table_name="vendor_responses")
-    op.drop_index("ix_vr_classification", table_name="vendor_responses")
-    op.create_index("ix_vendor_responses_vendor_name", "vendor_responses", ["vendor_name"], unique=False)
+    op.drop_index("ix_vr_vendor_name", table_name="vendor_responses", if_exists=True)
+    op.drop_index("ix_vr_scanned_by", table_name="vendor_responses", if_exists=True)
+    op.drop_index("ix_vr_req_email", table_name="vendor_responses", if_exists=True)
+    op.drop_index("ix_vr_received_email", table_name="vendor_responses", if_exists=True)
+    op.drop_index("ix_vr_contact", table_name="vendor_responses", if_exists=True)
+    op.drop_index("ix_vr_classification", table_name="vendor_responses", if_exists=True)
+    op.create_index(
+        "ix_vendor_responses_vendor_name", "vendor_responses", ["vendor_name"], unique=False, if_not_exists=True
+    )
 
-    op.drop_index("ix_vms_date", table_name="vendor_metrics_snapshot")
-    op.drop_index("ix_vms_composite", table_name="vendor_metrics_snapshot")
-    op.drop_index("ix_vendor_contacts_email", table_name="vendor_contacts")
-    op.drop_index("ix_vendor_cards_created_at", table_name="vendor_cards")
+    op.drop_index("ix_vms_date", table_name="vendor_metrics_snapshot", if_exists=True)
+    op.drop_index("ix_vms_composite", table_name="vendor_metrics_snapshot", if_exists=True)
+    op.drop_index("ix_vendor_contacts_email", table_name="vendor_contacts", if_exists=True)
+    op.drop_index("ix_vendor_cards_created_at", table_name="vendor_cards", if_exists=True)
 
-    op.drop_index("ix_site_contacts_email", table_name="site_contacts")
-    op.drop_index("ix_system_config_key", table_name="system_config")
+    op.drop_index("ix_site_contacts_email", table_name="site_contacts", if_exists=True)
+    op.drop_index("ix_system_config_key", table_name="system_config", if_exists=True)
     op.create_unique_constraint("system_config_key_key", "system_config", ["key"])
 
-    op.drop_index("ix_sightings_vendor_name_normalized", table_name="sightings")
-    op.drop_index("ix_sightings_vendor_name", table_name="sightings")
-    op.drop_index("ix_sightings_req_vendor", table_name="sightings")
-    op.drop_index("ix_sightings_req_score", table_name="sightings")
+    op.drop_index("ix_sightings_vendor_name_normalized", table_name="sightings", if_exists=True)
+    op.drop_index("ix_sightings_vendor_name", table_name="sightings", if_exists=True)
+    op.drop_index("ix_sightings_req_vendor", table_name="sightings", if_exists=True)
+    op.drop_index("ix_sightings_req_score", table_name="sightings", if_exists=True)
 
-    op.drop_index("ix_requisitions_status", table_name="requisitions")
-    op.drop_index("ix_requisitions_site", table_name="requisitions")
-    op.drop_index("ix_requisitions_name", table_name="requisitions")
-    op.drop_index("ix_requisitions_customer_name", table_name="requisitions")
-    op.drop_index("ix_requisitions_created_by", table_name="requisitions")
-    op.drop_index("ix_requisitions_created_at", table_name="requisitions")
-    op.create_index("ix_requisitions_updated_by_id", "requisitions", ["updated_by_id"], unique=False)
-    op.create_index("ix_req_site", "requisitions", ["customer_site_id"], unique=False)
-    op.create_index("ix_req_created_by", "requisitions", ["created_by"], unique=False)
-    op.create_index("ix_req_cloned_from", "requisitions", ["cloned_from_id"], unique=False)
+    op.drop_index("ix_requisitions_status", table_name="requisitions", if_exists=True)
+    op.drop_index("ix_requisitions_site", table_name="requisitions", if_exists=True)
+    op.drop_index("ix_requisitions_name", table_name="requisitions", if_exists=True)
+    op.drop_index("ix_requisitions_customer_name", table_name="requisitions", if_exists=True)
+    op.drop_index("ix_requisitions_created_by", table_name="requisitions", if_exists=True)
+    op.drop_index("ix_requisitions_created_at", table_name="requisitions", if_exists=True)
+    op.create_index(
+        "ix_requisitions_updated_by_id", "requisitions", ["updated_by_id"], unique=False, if_not_exists=True
+    )
+    op.create_index("ix_req_site", "requisitions", ["customer_site_id"], unique=False, if_not_exists=True)
+    op.create_index("ix_req_created_by", "requisitions", ["created_by"], unique=False, if_not_exists=True)
+    op.create_index("ix_req_cloned_from", "requisitions", ["cloned_from_id"], unique=False, if_not_exists=True)
 
-    op.drop_index("ix_req_primary_mpn", table_name="requirements")
+    op.drop_index("ix_req_primary_mpn", table_name="requirements", if_exists=True)
 
-    op.create_index("ix_pc_saved_by", "prospect_contacts", ["saved_by_id"], unique=False)
-    op.create_index("ix_pt_offer", "proactive_throttle", ["proactive_offer_id"], unique=False)
-    op.create_index("ix_poff_status_sent", "proactive_offers", ["status", "sent_at"], unique=False)
-    op.create_index("ix_poff_conv_req", "proactive_offers", ["converted_requisition_id"], unique=False)
-    op.create_index("ix_poff_conv_quote", "proactive_offers", ["converted_quote_id"], unique=False)
-    op.create_index("ix_pm_requirement", "proactive_matches", ["requirement_id"], unique=False)
+    op.create_index("ix_pc_saved_by", "prospect_contacts", ["saved_by_id"], unique=False, if_not_exists=True)
+    op.create_index("ix_pt_offer", "proactive_throttle", ["proactive_offer_id"], unique=False, if_not_exists=True)
+    op.create_index("ix_poff_status_sent", "proactive_offers", ["status", "sent_at"], unique=False, if_not_exists=True)
+    op.create_index(
+        "ix_poff_conv_req", "proactive_offers", ["converted_requisition_id"], unique=False, if_not_exists=True
+    )
+    op.create_index("ix_poff_conv_quote", "proactive_offers", ["converted_quote_id"], unique=False, if_not_exists=True)
+    op.create_index("ix_pm_requirement", "proactive_matches", ["requirement_id"], unique=False, if_not_exists=True)
 
-    op.drop_index("ix_pending_batches_batch_id", table_name="pending_batches")
-    op.drop_index("ix_pending_batches_status", table_name="pending_batches")
-    op.create_index("ix_pending_batches_status", "pending_batches", ["status"], unique=False)
+    op.drop_index("ix_pending_batches_batch_id", table_name="pending_batches", if_exists=True)
+    op.drop_index("ix_pending_batches_status", table_name="pending_batches", if_exists=True)
+    op.create_index("ix_pending_batches_status", "pending_batches", ["status"], unique=False, if_not_exists=True)
 
-    op.drop_index("ix_offers_status", table_name="offers")
-    op.drop_index("ix_offers_req_status", table_name="offers")
-    op.drop_index("ix_offers_req_created", table_name="offers")
-    op.drop_index("ix_offers_entered_created", table_name="offers")
-    op.create_index("ix_offers_vr", "offers", ["vendor_response_id"], unique=False)
-    op.create_index("ix_offers_vendor_card", "offers", ["vendor_card_id"], unique=False)
-    op.create_index("ix_offers_updated_by_id", "offers", ["updated_by_id"], unique=False)
-    op.create_index("ix_offers_status_created", "offers", ["status", "created_at"], unique=False)
-    op.create_index("ix_offers_approved_by_id", "offers", ["approved_by_id"], unique=False)
-    op.create_index("ix_oa_uploaded_by", "offer_attachments", ["uploaded_by_id"], unique=False)
+    op.drop_index("ix_offers_status", table_name="offers", if_exists=True)
+    op.drop_index("ix_offers_req_status", table_name="offers", if_exists=True)
+    op.drop_index("ix_offers_req_created", table_name="offers", if_exists=True)
+    op.drop_index("ix_offers_entered_created", table_name="offers", if_exists=True)
+    op.create_index("ix_offers_vr", "offers", ["vendor_response_id"], unique=False, if_not_exists=True)
+    op.create_index("ix_offers_vendor_card", "offers", ["vendor_card_id"], unique=False, if_not_exists=True)
+    op.create_index("ix_offers_updated_by_id", "offers", ["updated_by_id"], unique=False, if_not_exists=True)
+    op.create_index("ix_offers_status_created", "offers", ["status", "created_at"], unique=False, if_not_exists=True)
+    op.create_index("ix_offers_approved_by_id", "offers", ["approved_by_id"], unique=False, if_not_exists=True)
+    op.create_index("ix_oa_uploaded_by", "offer_attachments", ["uploaded_by_id"], unique=False, if_not_exists=True)
 
-    op.drop_index("ix_notifications_id", table_name="notifications")
-    op.create_index("ix_notifications_user_unread", "notifications", ["user_id", "is_read"], unique=False)
+    op.drop_index("ix_notifications_id", table_name="notifications", if_exists=True)
+    op.create_index(
+        "ix_notifications_user_unread", "notifications", ["user_id", "is_read"], unique=False, if_not_exists=True
+    )
 
-    op.create_index("ix_mc_internal_part", "material_cards", ["is_internal_part"], unique=False)
-    op.create_index("ix_mca_normalized_mpn", "material_card_audit", ["normalized_mpn"], unique=False)
-    op.create_index("ix_mca_material_card_id", "material_card_audit", ["material_card_id"], unique=False)
-    op.create_index("ix_er_resolved_by", "error_reports", ["resolved_by_id"], unique=False)
+    op.create_index("ix_mc_internal_part", "material_cards", ["is_internal_part"], unique=False, if_not_exists=True)
+    op.create_index(
+        "ix_mca_normalized_mpn", "material_card_audit", ["normalized_mpn"], unique=False, if_not_exists=True
+    )
+    op.create_index(
+        "ix_mca_material_card_id", "material_card_audit", ["material_card_id"], unique=False, if_not_exists=True
+    )
+    op.create_index("ix_er_resolved_by", "error_reports", ["resolved_by_id"], unique=False, if_not_exists=True)
 
-    op.drop_index("ix_eq_status_source", table_name="enrichment_queue")
-    op.create_index("ix_eq_vendor_contact", "enrichment_queue", ["vendor_contact_id"], unique=False)
-    op.create_index("ix_eq_reviewed_by", "enrichment_queue", ["reviewed_by_id"], unique=False)
-    op.create_index("ix_ej_started_by", "enrichment_jobs", ["started_by_id"], unique=False)
+    op.drop_index("ix_eq_status_source", table_name="enrichment_queue", if_exists=True)
+    op.create_index("ix_eq_vendor_contact", "enrichment_queue", ["vendor_contact_id"], unique=False, if_not_exists=True)
+    op.create_index("ix_eq_reviewed_by", "enrichment_queue", ["reviewed_by_id"], unique=False, if_not_exists=True)
+    op.create_index("ix_ej_started_by", "enrichment_jobs", ["started_by_id"], unique=False, if_not_exists=True)
 
-    op.drop_index("ix_ese_email", table_name="email_signature_extracts")
+    op.drop_index("ix_ese_email", table_name="email_signature_extracts", if_exists=True)
 
-    op.drop_index("ix_contact_type_vendor", table_name="contacts")
-    op.drop_index("ix_contact_type_created", table_name="contacts")
-    op.create_index("ix_contacts_vendor_name", "contacts", ["vendor_name"], unique=False)
-    op.create_index("ix_contact_conv_id", "contacts", ["graph_conversation_id"], unique=False)
+    op.drop_index("ix_contact_type_vendor", table_name="contacts", if_exists=True)
+    op.drop_index("ix_contact_type_created", table_name="contacts", if_exists=True)
+    op.create_index("ix_contacts_vendor_name", "contacts", ["vendor_name"], unique=False, if_not_exists=True)
+    op.create_index("ix_contact_conv_id", "contacts", ["graph_conversation_id"], unique=False, if_not_exists=True)
 
     op.drop_constraint("uq_companies_sf_account_id", "companies", type_="unique")
-    op.drop_index("ix_companies_owner_created", table_name="companies")
-    op.drop_index("ix_companies_account_owner", table_name="companies")
-    op.create_index("ix_companies_owner", "companies", ["account_owner_id"], unique=False)
+    op.drop_index("ix_companies_owner_created", table_name="companies", if_exists=True)
+    op.drop_index("ix_companies_account_owner", table_name="companies", if_exists=True)
+    op.create_index("ix_companies_owner", "companies", ["account_owner_id"], unique=False, if_not_exists=True)
 
-    op.drop_index("ix_buyplans_token", table_name="buy_plans")
-    op.create_index("ix_bp_completed_by", "buy_plans", ["completed_by_id"], unique=False)
-    op.create_index("ix_bp_cancelled_by", "buy_plans", ["cancelled_by_id"], unique=False)
-    op.create_index("ix_bp_approved_by", "buy_plans", ["approved_by_id"], unique=False)
+    op.drop_index("ix_buyplans_token", table_name="buy_plans", if_exists=True)
+    op.create_index("ix_bp_completed_by", "buy_plans", ["completed_by_id"], unique=False, if_not_exists=True)
+    op.create_index("ix_bp_cancelled_by", "buy_plans", ["cancelled_by_id"], unique=False, if_not_exists=True)
+    op.create_index("ix_bp_approved_by", "buy_plans", ["approved_by_id"], unique=False, if_not_exists=True)
 
-    op.drop_index("ix_activity_user_notif", table_name="activity_log")
-    op.drop_index("ix_activity_site_contact", table_name="activity_log")
-    op.drop_index("ix_activity_external", table_name="activity_log")
-    op.create_index("ix_activity_log_site_contact_id", "activity_log", ["site_contact_id"], unique=False)
-    op.create_index("ix_activity_log_customer_site_id", "activity_log", ["customer_site_id"], unique=False)
+    op.drop_index("ix_activity_user_notif", table_name="activity_log", if_exists=True)
+    op.drop_index("ix_activity_site_contact", table_name="activity_log", if_exists=True)
+    op.drop_index("ix_activity_external", table_name="activity_log", if_exists=True)
+    op.create_index(
+        "ix_activity_log_site_contact_id", "activity_log", ["site_contact_id"], unique=False, if_not_exists=True
+    )
+    op.create_index(
+        "ix_activity_log_customer_site_id", "activity_log", ["customer_site_id"], unique=False, if_not_exists=True
+    )
 
     # ── Restore orphan columns ──
     op.add_column("material_vendor_history", sa.Column("acctivate_last_date", sa.DATE(), nullable=True))
@@ -375,8 +422,10 @@ def downgrade() -> None:
     op.add_column("vendor_cards", sa.Column("acctivate_total_units", sa.INTEGER(), nullable=True))
     op.add_column("vendor_cards", sa.Column("acctivate_last_order_date", sa.DATE(), nullable=True))
     op.add_column("vendor_cards", sa.Column("acctivate_vendor_id", sa.VARCHAR(length=255), nullable=True))
-    op.create_index("ix_vendor_cards_sf_account_id", "vendor_cards", ["sf_account_id"], unique=True)
-    op.create_index("ix_vendor_cards_acctivate_vendor_id", "vendor_cards", ["acctivate_vendor_id"], unique=False)
+    op.create_index("ix_vendor_cards_sf_account_id", "vendor_cards", ["sf_account_id"], unique=True, if_not_exists=True)
+    op.create_index(
+        "ix_vendor_cards_acctivate_vendor_id", "vendor_cards", ["acctivate_vendor_id"], unique=False, if_not_exists=True
+    )
     op.add_column("requisitions", sa.Column("sf_requisition_id", sa.VARCHAR(length=255), nullable=True))
     op.add_column("requirements", sa.Column("sf_req_item_id", sa.VARCHAR(length=255), nullable=True))
     op.add_column("material_cards", sa.Column("sf_material_id", sa.VARCHAR(length=255), nullable=True))
@@ -390,6 +439,15 @@ def downgrade() -> None:
         sa.Column("qty_on_hand", sa.INTEGER(), nullable=True),
         sa.Column("synced_at", postgresql.TIMESTAMP(), nullable=True),
         sa.PrimaryKeyConstraint("id", name="inventory_snapshots_pkey"),
+        if_not_exists=True,
     )
-    op.create_index("ix_inventory_snapshots_product_id", "inventory_snapshots", ["product_id"], unique=False)
-    op.create_index("ix_inv_product_warehouse", "inventory_snapshots", ["product_id", "warehouse_id"], unique=True)
+    op.create_index(
+        "ix_inventory_snapshots_product_id", "inventory_snapshots", ["product_id"], unique=False, if_not_exists=True
+    )
+    op.create_index(
+        "ix_inv_product_warehouse",
+        "inventory_snapshots",
+        ["product_id", "warehouse_id"],
+        unique=True,
+        if_not_exists=True,
+    )

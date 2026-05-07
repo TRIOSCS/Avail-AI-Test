@@ -20,13 +20,13 @@ depends_on = None
 
 def upgrade():
     # SiteContact enrichment columns
-    op.add_column("site_contacts", sa.Column("phone_verified", sa.Boolean(), server_default="false"))
-    op.add_column("site_contacts", sa.Column("email_verified", sa.Boolean(), server_default="false"))
+    op.execute("ALTER TABLE site_contacts ADD COLUMN IF NOT EXISTS phone_verified BOOLEAN DEFAULT 'false'")
+    op.execute("ALTER TABLE site_contacts ADD COLUMN IF NOT EXISTS email_verified BOOLEAN DEFAULT 'false'")
     op.add_column("site_contacts", sa.Column("email_verified_at", sa.DateTime()))
     op.add_column("site_contacts", sa.Column("email_verification_status", sa.String(20)))
     op.add_column("site_contacts", sa.Column("enrichment_source", sa.String(50)))
     op.add_column("site_contacts", sa.Column("contact_role", sa.String(50)))
-    op.add_column("site_contacts", sa.Column("needs_refresh", sa.Boolean(), server_default="false"))
+    op.execute("ALTER TABLE site_contacts ADD COLUMN IF NOT EXISTS needs_refresh BOOLEAN DEFAULT 'false'")
     op.add_column("site_contacts", sa.Column("last_enriched_at", sa.DateTime()))
     op.add_column("site_contacts", sa.Column("linkedin_url", sa.String(500)))
     op.add_column("site_contacts", sa.Column("enrichment_field_sources", sa.JSON()))
@@ -45,22 +45,25 @@ def upgrade():
         sa.Column("credits_limit", sa.Integer(), nullable=False),
         sa.Column("created_at", sa.DateTime()),
         sa.Column("updated_at", sa.DateTime()),
+        if_not_exists=True,
     )
-    op.create_index("ix_ecu_provider_month", "enrichment_credit_usage", ["provider", "month"], unique=True)
+    op.create_index(
+        "ix_ecu_provider_month", "enrichment_credit_usage", ["provider", "month"], unique=True, if_not_exists=True
+    )
 
 
 def downgrade():
-    op.drop_index("ix_ecu_provider_month", "enrichment_credit_usage")
-    op.drop_table("enrichment_credit_usage")
-    op.drop_column("companies", "customer_enrichment_status")
-    op.drop_column("companies", "customer_enrichment_at")
-    op.drop_column("site_contacts", "enrichment_field_sources")
-    op.drop_column("site_contacts", "linkedin_url")
-    op.drop_column("site_contacts", "last_enriched_at")
-    op.drop_column("site_contacts", "needs_refresh")
-    op.drop_column("site_contacts", "contact_role")
-    op.drop_column("site_contacts", "enrichment_source")
-    op.drop_column("site_contacts", "email_verification_status")
-    op.drop_column("site_contacts", "email_verified_at")
-    op.drop_column("site_contacts", "email_verified")
-    op.drop_column("site_contacts", "phone_verified")
+    op.drop_index("ix_ecu_provider_month", "enrichment_credit_usage", if_exists=True)
+    op.drop_table("enrichment_credit_usage", if_exists=True)
+    op.execute("ALTER TABLE companies DROP COLUMN IF EXISTS customer_enrichment_status")
+    op.execute("ALTER TABLE companies DROP COLUMN IF EXISTS customer_enrichment_at")
+    op.execute("ALTER TABLE site_contacts DROP COLUMN IF EXISTS enrichment_field_sources")
+    op.execute("ALTER TABLE site_contacts DROP COLUMN IF EXISTS linkedin_url")
+    op.execute("ALTER TABLE site_contacts DROP COLUMN IF EXISTS last_enriched_at")
+    op.execute("ALTER TABLE site_contacts DROP COLUMN IF EXISTS needs_refresh")
+    op.execute("ALTER TABLE site_contacts DROP COLUMN IF EXISTS contact_role")
+    op.execute("ALTER TABLE site_contacts DROP COLUMN IF EXISTS enrichment_source")
+    op.execute("ALTER TABLE site_contacts DROP COLUMN IF EXISTS email_verification_status")
+    op.execute("ALTER TABLE site_contacts DROP COLUMN IF EXISTS email_verified_at")
+    op.execute("ALTER TABLE site_contacts DROP COLUMN IF EXISTS email_verified")
+    op.execute("ALTER TABLE site_contacts DROP COLUMN IF EXISTS phone_verified")

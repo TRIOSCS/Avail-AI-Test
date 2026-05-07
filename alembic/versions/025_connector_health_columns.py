@@ -18,7 +18,7 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("api_sources", sa.Column("last_error_at", sa.DateTime(), nullable=True))
+    op.execute("ALTER TABLE api_sources ADD COLUMN IF NOT EXISTS last_error_at TIMESTAMP WITHOUT TIME ZONE")
     op.add_column(
         "api_sources",
         sa.Column("error_count_24h", sa.Integer(), nullable=False, server_default="0"),
@@ -26,5 +26,5 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_column("api_sources", "error_count_24h")
-    op.drop_column("api_sources", "last_error_at")
+    op.execute("ALTER TABLE api_sources DROP COLUMN IF EXISTS error_count_24h")
+    op.execute("ALTER TABLE api_sources DROP COLUMN IF EXISTS last_error_at")

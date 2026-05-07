@@ -54,9 +54,9 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_contacts_vendor_norm", table_name="contacts")
-    op.drop_index("ix_offers_vendor_norm", table_name="offers")
-    op.drop_index("ix_mvh_vendor_norm", table_name="material_vendor_history")
-    op.drop_column("contacts", "vendor_name_normalized")
-    op.drop_column("offers", "vendor_name_normalized")
-    op.drop_column("material_vendor_history", "vendor_name_normalized")
+    op.drop_index("ix_contacts_vendor_norm", table_name="contacts", if_exists=True)
+    op.drop_index("ix_offers_vendor_norm", table_name="offers", if_exists=True)
+    op.drop_index("ix_mvh_vendor_norm", table_name="material_vendor_history", if_exists=True)
+    op.execute("ALTER TABLE contacts DROP COLUMN IF EXISTS vendor_name_normalized")
+    op.execute("ALTER TABLE offers DROP COLUMN IF EXISTS vendor_name_normalized")
+    op.execute("ALTER TABLE material_vendor_history DROP COLUMN IF EXISTS vendor_name_normalized")

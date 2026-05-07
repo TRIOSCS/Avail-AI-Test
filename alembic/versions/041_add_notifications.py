@@ -25,12 +25,13 @@ def upgrade() -> None:
         sa.Column("body", sa.Text(), nullable=True),
         sa.Column("is_read", sa.Boolean(), default=False, nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        if_not_exists=True,
     )
-    op.create_index("ix_notifications_user_id", "notifications", ["user_id"])
-    op.create_index("ix_notifications_user_unread", "notifications", ["user_id", "is_read"])
+    op.create_index("ix_notifications_user_id", "notifications", ["user_id"], if_not_exists=True)
+    op.create_index("ix_notifications_user_unread", "notifications", ["user_id", "is_read"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_notifications_user_unread")
-    op.drop_index("ix_notifications_user_id")
-    op.drop_table("notifications")
+    op.drop_index("ix_notifications_user_unread", if_exists=True)
+    op.drop_index("ix_notifications_user_id", if_exists=True)
+    op.drop_table("notifications", if_exists=True)

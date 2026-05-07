@@ -24,13 +24,13 @@ def _column_exists(table, column):
 
 def upgrade():
     if not _column_exists("activity_log", "quality_score"):
-        op.add_column("activity_log", sa.Column("quality_score", sa.Float(), nullable=True))
+        op.execute("ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS quality_score DOUBLE PRECISION")
     if not _column_exists("activity_log", "quality_classification"):
-        op.add_column("activity_log", sa.Column("quality_classification", sa.String(30), nullable=True))
+        op.execute("ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS quality_classification VARCHAR(30)")
     if not _column_exists("activity_log", "quality_assessed_at"):
-        op.add_column("activity_log", sa.Column("quality_assessed_at", sa.DateTime(), nullable=True))
+        op.execute("ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS quality_assessed_at TIMESTAMP WITHOUT TIME ZONE")
     if not _column_exists("activity_log", "is_meaningful"):
-        op.add_column("activity_log", sa.Column("is_meaningful", sa.Boolean(), nullable=True))
+        op.execute("ALTER TABLE activity_log ADD COLUMN IF NOT EXISTS is_meaningful BOOLEAN")
 
     # Guard index creation for idempotent re-runs
     from sqlalchemy import inspect
@@ -44,12 +44,13 @@ def upgrade():
             "activity_log",
             ["quality_assessed_at"],
             postgresql_where=sa.text("quality_assessed_at IS NULL"),
+            if_not_exists=True,
         )
 
 
 def downgrade():
-    op.drop_index("ix_activity_unscored", table_name="activity_log")
-    op.drop_column("activity_log", "is_meaningful")
-    op.drop_column("activity_log", "quality_assessed_at")
-    op.drop_column("activity_log", "quality_classification")
-    op.drop_column("activity_log", "quality_score")
+    op.drop_index("ix_activity_unscored", table_name="activity_log", if_exists=True)
+    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS is_meaningful")
+    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS quality_assessed_at")
+    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS quality_classification")
+    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS quality_score")

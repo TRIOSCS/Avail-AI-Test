@@ -8,8 +8,6 @@ Adds email_health_score, email_health_computed_at, response_rate,
 and quote_quality_rate columns to vendor_cards table.
 """
 
-import sqlalchemy as sa
-
 from alembic import op
 
 revision = "035_vendor_email_health"
@@ -17,14 +15,14 @@ down_revision = "034_thread_summaries"
 
 
 def upgrade() -> None:
-    op.add_column("vendor_cards", sa.Column("email_health_score", sa.Float(), nullable=True))
-    op.add_column("vendor_cards", sa.Column("email_health_computed_at", sa.DateTime(), nullable=True))
-    op.add_column("vendor_cards", sa.Column("response_rate", sa.Float(), nullable=True))
-    op.add_column("vendor_cards", sa.Column("quote_quality_rate", sa.Float(), nullable=True))
+    op.execute("ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS email_health_score DOUBLE PRECISION")
+    op.execute("ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS email_health_computed_at TIMESTAMP WITHOUT TIME ZONE")
+    op.execute("ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS response_rate DOUBLE PRECISION")
+    op.execute("ALTER TABLE vendor_cards ADD COLUMN IF NOT EXISTS quote_quality_rate DOUBLE PRECISION")
 
 
 def downgrade() -> None:
-    op.drop_column("vendor_cards", "quote_quality_rate")
-    op.drop_column("vendor_cards", "response_rate")
-    op.drop_column("vendor_cards", "email_health_computed_at")
-    op.drop_column("vendor_cards", "email_health_score")
+    op.execute("ALTER TABLE vendor_cards DROP COLUMN IF EXISTS quote_quality_rate")
+    op.execute("ALTER TABLE vendor_cards DROP COLUMN IF EXISTS response_rate")
+    op.execute("ALTER TABLE vendor_cards DROP COLUMN IF EXISTS email_health_computed_at")
+    op.execute("ALTER TABLE vendor_cards DROP COLUMN IF EXISTS email_health_score")

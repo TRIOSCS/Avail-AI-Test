@@ -5,8 +5,6 @@ Revises: 060
 Create Date: 2026-03-07
 """
 
-import sqlalchemy as sa
-
 from alembic import op
 
 revision = "061"
@@ -16,8 +14,8 @@ depends_on = None
 
 
 def upgrade():
-    op.add_column("quotes", sa.Column("followup_alert_sent_at", sa.DateTime(timezone=True), nullable=True))
+    op.execute("ALTER TABLE quotes ADD COLUMN IF NOT EXISTS followup_alert_sent_at TIMESTAMP WITH TIME ZONE")
 
 
 def downgrade():
-    op.drop_column("quotes", "followup_alert_sent_at")
+    op.execute("ALTER TABLE quotes DROP COLUMN IF EXISTS followup_alert_sent_at")

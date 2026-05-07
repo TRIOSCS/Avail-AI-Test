@@ -41,10 +41,11 @@ def upgrade() -> None:
         "activity_log",
         ["site_contact_id", "created_at"],
         postgresql_where=sa.text("site_contact_id IS NOT NULL"),
+        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_activity_site_contact", table_name="activity_log")
-    op.drop_column("activity_log", "site_contact_id")
-    op.drop_column("site_contacts", "is_active")
+    op.drop_index("ix_activity_site_contact", table_name="activity_log", if_exists=True)
+    op.execute("ALTER TABLE activity_log DROP COLUMN IF EXISTS site_contact_id")
+    op.execute("ALTER TABLE site_contacts DROP COLUMN IF EXISTS is_active")
