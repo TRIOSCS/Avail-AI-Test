@@ -6,6 +6,10 @@ export default defineConfig({
     environment: 'jsdom',
     include: ['tests/frontend/**/*.test.ts'],
     globals: true,
+    // Fail loudly if the include glob matches no files. Without this an
+    // accidentally-empty tests/frontend/ would silently pass CI and re-introduce
+    // the "frontend tests don't run" regression that PR #109 was created to fix.
+    passWithNoTests: false,
   },
   resolve: {
     alias: {

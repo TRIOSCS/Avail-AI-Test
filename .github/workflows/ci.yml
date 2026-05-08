@@ -3,8 +3,9 @@ name: CI — Tests
 on:
   push:
     branches: [main]
+  # Run CI for PRs targeting any branch — supports stacked PRs where a feature
+  # PR is based on another open feature branch rather than directly on main.
   pull_request:
-    branches: [main]
 
 jobs:
   test:
