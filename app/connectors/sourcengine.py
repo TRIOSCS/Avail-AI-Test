@@ -4,6 +4,7 @@ from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
+from .errors import ConnectorAuthError, ConnectorRateLimitError
 from .sources import BaseConnector
 
 
@@ -35,12 +36,17 @@ class SourcengineConnector(BaseConnector):
 
         r = await http.get(self.SEARCH_URL, headers=headers, params=params, timeout=self.timeout)
 
-        # Hard errors raise so health_monitor flips status to 'error' and excludes
-        # the connector from subsequent pings.
+        # Hard errors raise typed ConnectorError subclasses so
+        # health_monitor.ping_source flips api_sources.status to 'error'.
+        # search_service excludes the source from user searches with an
+        # 'error_skipped' chip until the next ping returns 200, at which
+        # point status auto-recovers to 'live'. Persistent failures
+        # (revoked key) keep flipping back to 'error' on each ping. See
+        # docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
         if r.status_code in (401, 403):
-            raise RuntimeError(f"Sourcengine auth error: HTTP {r.status_code} {r.text[:200]}")
+            raise ConnectorAuthError(f"Sourcengine auth error: HTTP {r.status_code} {r.text[:200]}")
         if r.status_code == 429:
-            raise RuntimeError(f"Sourcengine rate limited: {r.text[:200]}")
+            raise ConnectorRateLimitError(f"Sourcengine rate limited: {r.text[:200]}")
 
         r.raise_for_status()
         data = r.json()

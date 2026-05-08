@@ -123,46 +123,63 @@ search_service.py (orchestrator)
 
 External-API connectors (`app/connectors/*.py`) follow a single contract
 for upstream failures: **auth, quota, and rate-limit conditions raise
-`RuntimeError`; do not silently return `[]`**. The exception propagates
-through `BaseConnector.search()` to the caller (search orchestrator or
-`health_monitor.ping_source`).
+typed `ConnectorError` subclasses; do not silently return `[]`**. The
+exception propagates through `BaseConnector.search()` to the caller
+(search orchestrator or `health_monitor.ping_source`).
 
 ```
 connector._do_search(part_number)
     |
-    +-- 200 OK  ----------> parse + return list[dict]
-    +-- 400 (bad input) --> log + return []   (input is the user's, not the upstream)
-    +-- 401/403 (auth)  --> raise RuntimeError("<Source> auth error: ...")
-    +-- 429   (rate)    --> raise RuntimeError("<Source> rate limited: ...")
+    +-- 200 OK         ----> parse + return list[dict]
+    +-- 400 (bad input) --> log + return []   (input-domain error, not contract)
+    +-- 401/403 (auth)  --> raise ConnectorAuthError
+    +-- 429 (rate)      --> raise ConnectorRateLimitError
+    +-- explicit quota  --> raise ConnectorQuotaError
     +-- 5xx             --> raise (httpx.HTTPStatusError via raise_for_status)
 ```
 
-`health_monitor.ping_source` catches the raise and flips
-`api_sources.status` to `'error'`. Two consequences fan out from there:
+The `BaseConnector.search` wrapper:
+- Re-raises `ConnectorError` immediately without retry (hard failures
+  are not transient; retrying just burns more upstream calls).
+- Raises `ConnectorError` on open circuit breaker (was: silently `[]`,
+  which masked the contract — health_monitor saw success and flipped
+  status back to live).
+- Raises `ConnectorRateLimitError` on httpx 429 retries exhausted.
 
-- The 15-min `health_jobs.py` ping loop stops hitting that connector
-  until the operator manually re-enables it. Prevents quota-burn loops
-  against a key that isn't going to recover on its own.
-- `search_service._build_connectors` excludes connectors whose
-  `api_sources.status == 'error'` from the next user-triggered search,
-  emitting `source_stats` with `status='error_skipped'` and an
-  operator-actionable message ("Skipped due to prior error — rotate
-  credentials and re-enable"). The user sees a per-source chip rather
-  than a silent missing column.
+`health_monitor.ping_source` catches each subtype and writes a
+type-specific `last_error` message:
 
-The single 401/403/429 exception in this rule is **Mouser HTTP-level
-403/429** (not body-level): Mouser's HTTP-403 path is intentionally
-silent because the upstream serves 403 for transient overload that
-recovers within the search budget. Mouser body-level auth errors
-(JSON `Errors[].Code` = "Invalid unique identifier") still raise.
+| Exception | last_error prefix | Operator action |
+|---|---|---|
+| `ConnectorAuthError` | "Auth error — rotate credentials: ..." | Rotate API key in Admin > API Sources |
+| `ConnectorRateLimitError` | "Rate limited — auto-recovers when window expires: ..." | Usually none |
+| `ConnectorQuotaError` | "Quota exhausted — upgrade plan or wait for cycle: ..." | Upgrade plan or wait |
 
-This contract was the fix for the silent-sourcing-engine bug class:
-prior code returned `[]` on auth/quota errors "to avoid tripping the
-circuit breaker," which made the engine look healthy when it wasn't —
-the user saw an empty search and no signal that a source had broken
-creds or exhausted quota. Test enforcement lives in
-`tests/test_connectors.py`, `tests/test_connector_rate_limits.py`,
-and `tests/test_sourcengine_connector.py`.
+In all cases `api_sources.status` flips to `'error'`, and
+`search_service._build_connectors` excludes the source from the next
+user search with a `source_stats[i].status = 'error_skipped'` chip.
+`stream_search_mpn` publishes a `source-status` SSE event for every
+non-ok source at search start so the chip strip renders the right
+state immediately.
+
+**Auto-recovery.** The 15-min ping loop continues to ping all
+`is_active=True` sources, including those at `status='error'`. On the
+first ping that returns 200, status flips back to `'live'` and the
+source rejoins user searches automatically. Persistent failures
+(revoked key, exhausted quota) keep flipping back to `'error'` on each
+ping, keeping the source excluded until the operator intervenes.
+
+**No carve-outs.** All seven connectors (Mouser, BrokerBin, Nexar,
+DigiKey, Element14, OEMSecrets, Sourcengine) follow this contract
+uniformly. The Mouser HTTP-403/429 silent-empty path that existed prior
+to round-2 was the silent-failure mode the contract is designed to
+eliminate; it has been removed.
+
+**Test enforcement** lives in `tests/test_connectors.py`,
+`tests/test_connector_rate_limits.py`,
+`tests/test_sourcengine_connector.py`, `tests/test_connector_errors.py`,
+`tests/test_constants.py`, `tests/test_search_streaming.py`, and
+`tests/test_health_monitor.py`.
 
 ## 3. RFQ Email Sending
 

@@ -14,6 +14,7 @@ from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
+from .errors import ConnectorAuthError, ConnectorRateLimitError
 from .sources import BaseConnector
 
 
@@ -58,13 +59,18 @@ class Element14Connector(BaseConnector):
             logger.debug(f"element14: 400 Bad Request for term '{term}' — skipping")
             return []
 
-        # Hard errors raise so health_monitor flips status to 'error' and excludes
-        # the connector from subsequent pings. The first 401 raised by an exact
-        # MPN search also short-circuits the keyword fallback in _do_search.
-        if r.status_code == 401:
-            raise RuntimeError(f"element14 auth error: HTTP 401 {r.text[:200]}")
+        # Hard errors raise typed ConnectorError subclasses so
+        # health_monitor.ping_source flips api_sources.status to 'error'.
+        # The first 401/403 raised by an exact MPN search also short-
+        # circuits the keyword fallback in _do_search — auto-recovers
+        # when the next ping returns 200. See
+        # docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
+        if r.status_code in (401, 403):
+            # 401 = bad/expired API key; 403 = key rejected for the requested
+            # store/region. Both require operator credential rotation.
+            raise ConnectorAuthError(f"element14 auth error: HTTP {r.status_code} {r.text[:200]}")
         if r.status_code == 429:
-            raise RuntimeError(f"element14 rate limited: {r.text[:200]}")
+            raise ConnectorRateLimitError(f"element14 rate limited: {r.text[:200]}")
 
         r.raise_for_status()
         data = r.json()

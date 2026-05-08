@@ -11,6 +11,7 @@ import httpx
 from loguru import logger
 
 from ..utils import safe_float, safe_int
+from .errors import ConnectorAuthError, ConnectorError, ConnectorQuotaError, ConnectorRateLimitError
 
 # ── Async-compatible circuit breaker ─────────────────────────────────
 # Opens after `fail_max` consecutive failures, resets after `reset_timeout` seconds.
@@ -88,10 +89,13 @@ class BaseConnector(ABC):
         self._semaphore = _get_connector_semaphore(self.__class__.__name__)
 
     async def search(self, part_number: str) -> list[dict]:
-        # Short-circuit if the breaker is open (service is known-down)
+        # Short-circuit if the breaker is open (service is known-down).
+        # Raise (don't return []) so health_monitor catches and stays at
+        # status='error', and search-time _run_one renders the per-source
+        # error chip. Returning [] here masks the contract — see
+        # docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
         if self._breaker.current_state == "open":
-            logger.warning(f"{self.__class__.__name__} circuit breaker OPEN — skipping {part_number}")
-            return []
+            raise ConnectorError(f"{self.__class__.__name__} circuit breaker open")
 
         # Per-connector concurrency limit — avoids hammering one API
         async with self._semaphore:
@@ -104,6 +108,12 @@ class BaseConnector(ABC):
                 result = await self._do_search(part_number)
                 self._breaker.record_success()
                 return result
+            except ConnectorError:
+                # Hard error from the connector — auth, quota, persistent
+                # rate-limit. Do NOT retry; fast-fail so health_monitor
+                # flips status='error' and the upstream stops getting hit.
+                self._breaker.record_failure()
+                raise
             except (httpx.ConnectTimeout, httpx.ConnectError) as e:
                 # Server unreachable — no point retrying
                 self._breaker.record_failure()
@@ -123,9 +133,12 @@ class BaseConnector(ABC):
                         await asyncio.sleep(retry_after)
                         last_err = e
                         continue
-                    # Final attempt exhausted — return empty instead of crashing
+                    # Final attempt exhausted — raise so health_monitor flips
+                    # status='error'. Was: return [] (silent failure).
                     self._breaker.record_failure()
-                    return []
+                    raise ConnectorRateLimitError(
+                        f"{self.__class__.__name__} rate limited (persistent 429): {e.response.text[:200]}"
+                    )
 
                 # Auth/permission errors — fail fast (connector-specific
                 # _do_search can override to handle gracefully)
@@ -409,12 +422,13 @@ class NexarConnector(BaseConnector):
                 results_data = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
                 return self._parse_aggregate(results_data, part_number) if results_data else []
             # Quota / billing failures are hard errors — raise so the health
-            # monitor catches and flips status to 'error', stopping the
-            # 15-min ping loop from continuing to burn API calls against an
-            # exhausted quota.
+            # monitor flips api_sources.status to 'error'. search_service
+            # then excludes this source from user searches; auto-recovers
+            # when the next ping returns 200. Persistent quota exhaustion
+            # keeps flipping back to 'error' until operator upgrades plan.
             msg_lower = msg.lower()
             if "exceed" in msg_lower and ("limit" in msg_lower or "quota" in msg_lower or "plan" in msg_lower):
-                raise RuntimeError(f"Nexar quota exceeded: {msg[:200]}")
+                raise ConnectorQuotaError(f"Nexar quota exceeded: {msg[:200]}")
             return []
 
         results_data = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
@@ -611,14 +625,15 @@ class BrokerBinConnector(BaseConnector):
             timeout=self.timeout,
         )
 
-        # Hard errors raise so health_monitor.ping_source flips the source's
-        # status to 'error' and excludes it from the 15-min ping loop. Soft
-        # errors (5xx, transient) keep returning [] for the search-time path
-        # which the caller already surfaces as an error chip in the UI.
+        # Hard errors raise typed ConnectorError subclasses so
+        # health_monitor.ping_source flips api_sources.status to 'error' and
+        # search_service excludes the source from the next user search with
+        # an 'error_skipped' chip. Auto-recovers when the next ping returns
+        # 200. See docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
         if r.status_code in (401, 403):
-            raise RuntimeError(f"BrokerBin auth error: HTTP {r.status_code} {r.text[:200]}")
+            raise ConnectorAuthError(f"BrokerBin auth error: HTTP {r.status_code} {r.text[:200]}")
         if r.status_code == 429:
-            raise RuntimeError(f"BrokerBin rate limited: {r.text[:200]}")
+            raise ConnectorRateLimitError(f"BrokerBin rate limited: {r.text[:200]}")
         if r.status_code != 200:
             logger.warning(f"BrokerBin: HTTP {r.status_code} for {part_number}: {r.text[:200]}")
             return []

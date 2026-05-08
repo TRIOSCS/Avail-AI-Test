@@ -12,6 +12,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
+from app.connectors.errors import ConnectorAuthError, ConnectorRateLimitError
+
 
 def _mock_response(status_code=200, json_data=None, text="", headers=None):
     """Build a fake httpx.Response with optional headers."""
@@ -109,18 +111,18 @@ class TestDigiKey429:
     @pytest.mark.asyncio
     async def test_429_twice_raises_for_health_monitor(self):
         """DigiKey raises RuntimeError after persistent 429 so health_monitor flips
-        api_sources.status to 'error' and stops the 15-min ping loop from continuing to
-        burn quota against an upstream that's not coming back.
+        api_sources.status to 'error'; search_service excludes the source from user
+        searches; auto-recovers on next successful ping.
 
-        Replaces the prior silent-empty contract per connector convention shipped in
-        644b823c.
+        Replaces the prior silent-empty contract per connector convention. See
+        docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
         """
         c = self._make_connector()
         rate_limited = _mock_response(429, headers={"Retry-After": "0.01"})
 
         with patch("app.connectors.digikey.http") as mock_http:
             mock_http.post = AsyncMock(return_value=rate_limited)
-            with pytest.raises(RuntimeError, match="DigiKey rate limited"):
+            with pytest.raises(ConnectorRateLimitError, match="DigiKey rate limited"):
                 await c._do_search("LM317T")
 
     @pytest.mark.asyncio
@@ -148,36 +150,56 @@ class TestDigiKey429:
 
 
 class TestMouser403:
+    """Mouser HTTP-403/429 must raise (not return []).
+
+    Revoked keys also return 403; the prior silent-empty carve-out hid that case. Auto-
+    recovery handles transient overload — when upstream returns 200 on the next ping,
+    status flips back to 'live' automatically.
+    """
+
     def _make_connector(self):
         from app.connectors.mouser import MouserConnector
 
         return MouserConnector(api_key="test-key")
 
     @pytest.mark.asyncio
-    async def test_403_returns_empty(self):
-        """Mouser 403 returns empty list, no exception."""
+    async def test_403_raises_auth_error(self):
+        """HTTP 403 raises ConnectorAuthError so health_monitor flips status to 'error'.
+
+        Bad/revoked keys, quota-rejected keys, and region-locked keys all surface the
+        same operator action.
+        """
+        from app.connectors.errors import ConnectorAuthError
+
         c = self._make_connector()
         resp_403 = _mock_response(403, text="Forbidden")
 
         with patch("app.connectors.mouser.http") as mock_http:
             mock_http.post = AsyncMock(return_value=resp_403)
-            results = await c._do_search("SN74HC595N")
-            assert results == []
+            with pytest.raises(ConnectorAuthError, match="Mouser auth error"):
+                await c._do_search("SN74HC595N")
 
     @pytest.mark.asyncio
-    async def test_429_returns_empty(self):
-        """Mouser 429 returns empty list, no exception."""
+    async def test_429_raises_rate_limit_error(self):
+        """HTTP 429 raises ConnectorRateLimitError.
+
+        Auto-recovers on next ping success.
+        """
+        from app.connectors.errors import ConnectorRateLimitError
+
         c = self._make_connector()
         resp_429 = _mock_response(429, text="Too Many Requests")
 
         with patch("app.connectors.mouser.http") as mock_http:
             mock_http.post = AsyncMock(return_value=resp_429)
-            results = await c._do_search("SN74HC595N")
-            assert results == []
+            with pytest.raises(ConnectorRateLimitError, match="Mouser rate limited"):
+                await c._do_search("SN74HC595N")
 
     @pytest.mark.asyncio
-    async def test_body_rate_error_returns_empty(self):
-        """Mouser rate error in body (HTTP 200) returns empty."""
+    async def test_body_rate_error_raises_rate_limit(self):
+        """Mouser body-level 'too many requests' raises (was return [])."""
+        from app.connectors.errors import ConnectorRateLimitError
+
         c = self._make_connector()
         resp = _mock_response(
             200,
@@ -189,8 +211,8 @@ class TestMouser403:
 
         with patch("app.connectors.mouser.http") as mock_http:
             mock_http.post = AsyncMock(return_value=resp)
-            results = await c._do_search("SN74HC595N")
-            assert results == []
+            with pytest.raises(ConnectorRateLimitError, match="Mouser rate"):
+                await c._do_search("SN74HC595N")
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -207,18 +229,20 @@ class TestOEMSecrets401:
     @pytest.mark.asyncio
     async def test_401_quota_raises_for_health_monitor(self):
         """OEMSecrets 401 (bad key OR quota exhausted) raises RuntimeError so
-        health_monitor flips api_sources.status to 'error' and the 15-min ping loop
-        stops burning calls on a key that won't recover.
+        health_monitor flips api_sources.status to 'error' and search_service excludes
+        from user searches; persistent failures keep flipping back to 'error' on each
+        ping until operator rotates the key (or tops up quota), at which point auto-
+        recovery on the next 200 ping kicks in.
 
-        Operator must rotate the key (or top up quota) and re-enable manually. Replaces
-        the prior silent-empty contract per connector convention.
+        Replaces the prior silent-empty contract per connector convention. See
+        docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
         """
         c = self._make_connector()
         resp_401 = _mock_response(401, text="User is not accepted or has run out of api calls")
 
         with patch("app.connectors.oemsecrets.http") as mock_http:
             mock_http.get = AsyncMock(return_value=resp_401)
-            with pytest.raises(RuntimeError, match="OEMSecrets auth/quota error"):
+            with pytest.raises(ConnectorAuthError, match="OEMSecrets auth/quota error"):
                 await c._do_search("LM358N")
 
     @pytest.mark.asyncio
@@ -229,7 +253,7 @@ class TestOEMSecrets401:
 
         with patch("app.connectors.oemsecrets.http") as mock_http:
             mock_http.get = AsyncMock(return_value=resp_429)
-            with pytest.raises(RuntimeError, match="OEMSecrets rate limited"):
+            with pytest.raises(ConnectorRateLimitError, match="OEMSecrets rate limited"):
                 await c._do_search("LM358N")
 
     @pytest.mark.asyncio
@@ -286,8 +310,13 @@ class TestBaseConnector429:
         assert c.call_count == 3
 
     @pytest.mark.asyncio
-    async def test_429_exhausted_returns_empty(self):
-        """BaseConnector returns empty after all 429 retries exhausted."""
+    async def test_429_exhausted_raises_rate_limit_error(self):
+        """BaseConnector raises ConnectorRateLimitError after all 429 retries exhausted.
+
+        Replaces the prior silent-empty contract — see docs/APP_MAP_INTERACTIONS.md §
+        Connector Failure Contract.
+        """
+        from app.connectors.errors import ConnectorRateLimitError
         from app.connectors.sources import BaseConnector
 
         class FakeConnector(BaseConnector):
@@ -296,5 +325,94 @@ class TestBaseConnector429:
                 raise httpx.HTTPStatusError("429", request=MagicMock(), response=resp)
 
         c = FakeConnector(timeout=5.0, max_retries=1)
-        results = await c.search("TEST123")
-        assert results == []
+        with pytest.raises(ConnectorRateLimitError):
+            await c.search("TEST123")
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  BaseConnector contract — open breaker raises, ConnectorError fast-fails
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestBaseConnectorContract:
+    """Verify BaseConnector wraps the connector contract correctly.
+
+    The new contract (per docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract):
+    open circuit breaker raises ConnectorError, ConnectorError from _do_search bypasses
+    retry, persistent httpx 429 raises ConnectorRateLimitError instead of silently
+    returning [].
+    """
+
+    @pytest.mark.asyncio
+    async def test_open_breaker_raises_connector_error(self):
+        """When the breaker is open, BaseConnector.search() must raise ConnectorError
+        (not return []).
+
+        Returning [] previously masked the contract — health_monitor saw 'success' and
+        flipped status back to 'live', defeating the whole fix.
+        """
+        from app.connectors.errors import ConnectorError
+        from app.connectors.sources import BaseConnector
+
+        class FakeConnector(BaseConnector):
+            async def _do_search(self, part_number):
+                return [{"ok": True}]
+
+        c = FakeConnector(timeout=5.0, max_retries=0)
+        # Force the breaker open by recording enough failures
+        for _ in range(10):
+            c._breaker.record_failure()
+        assert c._breaker.current_state == "open"
+
+        with pytest.raises(ConnectorError, match="circuit breaker open"):
+            await c.search("TEST123")
+
+    @pytest.mark.asyncio
+    async def test_connector_error_in_do_search_bypasses_retry(self):
+        """When _do_search raises a ConnectorError, BaseConnector must re-raise
+        immediately without retrying.
+
+        ConnectorError signals a hard failure (auth/quota); retrying just burns more
+        upstream calls against an already-broken endpoint.
+        """
+        from app.connectors.errors import ConnectorAuthError
+        from app.connectors.sources import BaseConnector
+
+        class FakeConnector(BaseConnector):
+            call_count = 0
+
+            async def _do_search(self, part_number):
+                self.call_count += 1
+                raise ConnectorAuthError("test auth error")
+
+        c = FakeConnector(timeout=5.0, max_retries=2)
+        # Breakers are cached globally by class name — reset so prior tests
+        # in this class don't leave the breaker open.
+        c._breaker.record_success()
+        with pytest.raises(ConnectorAuthError):
+            await c.search("TEST123")
+        # Exactly one attempt — no retry
+        assert c.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_httpx_429_exhausted_raises_rate_limit_error(self):
+        """When BaseConnector exhausts retries on httpx 429, it must raise
+        ConnectorRateLimitError (not return []).
+
+        Returning [] was a pre-existing silent-failure path that contradicts the new
+        contract.
+        """
+        from app.connectors.errors import ConnectorRateLimitError
+        from app.connectors.sources import BaseConnector
+
+        class FakeConnector(BaseConnector):
+            async def _do_search(self, part_number):
+                resp = _mock_response(429, headers={"Retry-After": "0.01"})
+                raise httpx.HTTPStatusError("429", request=MagicMock(), response=resp)
+
+        c = FakeConnector(timeout=5.0, max_retries=1)
+        # Breakers are cached globally by class name — reset so prior tests
+        # in this class don't leave the breaker open.
+        c._breaker.record_success()
+        with pytest.raises(ConnectorRateLimitError, match="rate limited"):
+            await c.search("TEST123")

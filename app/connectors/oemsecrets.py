@@ -12,6 +12,7 @@ from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
+from .errors import ConnectorAuthError, ConnectorRateLimitError
 from .sources import BaseConnector
 
 
@@ -39,13 +40,20 @@ class OEMSecretsConnector(BaseConnector):
 
         r = await http.get(self.SEARCH_URL, params=params, timeout=httpx.Timeout(self.timeout, connect=5.0))
 
-        # Hard errors raise so health_monitor flips status to 'error' and excludes
-        # the connector from subsequent pings. OEMSecrets returns 401 for both bad
-        # API key AND quota exhaustion; either way the operator must intervene.
+        # Hard errors raise typed ConnectorError subclasses so
+        # health_monitor.ping_source flips api_sources.status to 'error'.
+        # OEMSecrets returns 401 for both bad API key AND quota
+        # exhaustion; either way the operator must rotate the key (or
+        # top up quota) and the source auto-recovers when the next ping
+        # returns 200. See docs/APP_MAP_INTERACTIONS.md § Connector
+        # Failure Contract.
         if r.status_code == 401:
-            raise RuntimeError(f"OEMSecrets auth/quota error: HTTP 401 {r.text[:200]}")
+            # OEMSecrets returns 401 for both bad/expired key AND quota
+            # exhaustion. Operator action is the same in both cases (rotate
+            # key or top up quota), so we treat both as auth.
+            raise ConnectorAuthError(f"OEMSecrets auth/quota error: HTTP 401 {r.text[:200]}")
         if r.status_code == 429:
-            raise RuntimeError(f"OEMSecrets rate limited: {r.text[:200]}")
+            raise ConnectorRateLimitError(f"OEMSecrets rate limited: {r.text[:200]}")
 
         if r.status_code != 200:
             logger.warning(f"OEMSecrets: HTTP {r.status_code} for {part_number}: {r.text[:200]}")

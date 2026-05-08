@@ -23,6 +23,12 @@ from datetime import datetime, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from ..connectors.errors import (
+    ConnectorAuthError,
+    ConnectorQuotaError,
+    ConnectorRateLimitError,
+)
+from ..constants import ApiSourceStatus
 from ..models.config import ApiSource, ApiUsageLog
 
 # Quota warning thresholds (percentage of monthly_quota)
@@ -149,7 +155,7 @@ async def ping_source(source: ApiSource, db: Session) -> dict:
     connector = _get_connector(source, db)
 
     if not connector:
-        source.status = "disabled"
+        source.status = ApiSourceStatus.DISABLED.value
         source.last_ping_at = now
         db.flush()
         return {"success": False, "error": "No connector available", "elapsed_ms": 0}
@@ -159,7 +165,7 @@ async def ping_source(source: ApiSource, db: Session) -> dict:
         await connector.search(DEEP_TEST_MPN)
         elapsed_ms = int((time.time() - start) * 1000)
 
-        source.status = "live"
+        source.status = ApiSourceStatus.LIVE.value
         source.last_success = now
         source.last_ping_at = now
         source.last_error = None
@@ -182,11 +188,80 @@ async def ping_source(source: ApiSource, db: Session) -> dict:
 
         return {"success": True, "elapsed_ms": elapsed_ms, "error": None}
 
+    except ConnectorAuthError as e:
+        elapsed_ms = int((time.time() - start) * 1000)
+        error_msg = f"Auth error — rotate credentials: {str(e)[:380]}"
+        source.status = ApiSourceStatus.ERROR.value
+        source.last_error = error_msg
+        source.last_error_at = now
+        source.last_ping_at = now
+        source.error_count_24h = (source.error_count_24h or 0) + 1
+        _check_status_transition(source, old_status, "error", db, error_msg)
+        log = ApiUsageLog(
+            source_id=source.id,
+            timestamp=now,
+            endpoint="ping",
+            response_ms=elapsed_ms,
+            success=False,
+            error_message=error_msg,
+            check_type="ping",
+        )
+        db.add(log)
+        db.flush()
+        logger.warning("Health ping auth error for {}: {}", source.name, error_msg)
+        return {"success": False, "elapsed_ms": elapsed_ms, "error": error_msg}
+
+    except ConnectorRateLimitError as e:
+        elapsed_ms = int((time.time() - start) * 1000)
+        error_msg = f"Rate limited — auto-recovers when window expires: {str(e)[:340]}"
+        source.status = ApiSourceStatus.ERROR.value
+        source.last_error = error_msg
+        source.last_error_at = now
+        source.last_ping_at = now
+        source.error_count_24h = (source.error_count_24h or 0) + 1
+        _check_status_transition(source, old_status, "error", db, error_msg)
+        log = ApiUsageLog(
+            source_id=source.id,
+            timestamp=now,
+            endpoint="ping",
+            response_ms=elapsed_ms,
+            success=False,
+            error_message=error_msg,
+            check_type="ping",
+        )
+        db.add(log)
+        db.flush()
+        logger.warning("Health ping rate-limited for {}: {}", source.name, error_msg)
+        return {"success": False, "elapsed_ms": elapsed_ms, "error": error_msg}
+
+    except ConnectorQuotaError as e:
+        elapsed_ms = int((time.time() - start) * 1000)
+        error_msg = f"Quota exhausted — upgrade plan or wait for cycle: {str(e)[:340]}"
+        source.status = ApiSourceStatus.ERROR.value
+        source.last_error = error_msg
+        source.last_error_at = now
+        source.last_ping_at = now
+        source.error_count_24h = (source.error_count_24h or 0) + 1
+        _check_status_transition(source, old_status, "error", db, error_msg)
+        log = ApiUsageLog(
+            source_id=source.id,
+            timestamp=now,
+            endpoint="ping",
+            response_ms=elapsed_ms,
+            success=False,
+            error_message=error_msg,
+            check_type="ping",
+        )
+        db.add(log)
+        db.flush()
+        logger.warning("Health ping quota exhausted for {}: {}", source.name, error_msg)
+        return {"success": False, "elapsed_ms": elapsed_ms, "error": error_msg}
+
     except Exception as e:
         elapsed_ms = int((time.time() - start) * 1000)
         error_msg = str(e)[:500]
 
-        source.status = "error"
+        source.status = ApiSourceStatus.ERROR.value
         source.last_error = error_msg
         source.last_error_at = now
         source.last_ping_at = now
@@ -230,7 +305,7 @@ async def deep_test_source(source: ApiSource, db: Session) -> dict:
             check_type="deep",
         )
         db.add(log)
-        source.status = "disabled"
+        source.status = ApiSourceStatus.DISABLED.value
         source.last_deep_test_at = now
         db.flush()
         return {"success": False, "results_count": 0, "elapsed_ms": 0, "error": "No connector"}
@@ -240,7 +315,7 @@ async def deep_test_source(source: ApiSource, db: Session) -> dict:
         results = await connector.search(DEEP_TEST_MPN)
         elapsed_ms = int((time.time() - start) * 1000)
 
-        source.status = "live"
+        source.status = ApiSourceStatus.LIVE.value
         source.last_success = now
         source.last_deep_test_at = now
         source.last_error = None
@@ -262,11 +337,80 @@ async def deep_test_source(source: ApiSource, db: Session) -> dict:
 
         return {"success": True, "results_count": len(results), "elapsed_ms": elapsed_ms, "error": None}
 
+    except ConnectorAuthError as e:
+        elapsed_ms = int((time.time() - start) * 1000)
+        error_msg = f"Auth error — rotate credentials: {str(e)[:380]}"
+        source.status = ApiSourceStatus.ERROR.value
+        source.last_error = error_msg
+        source.last_error_at = now
+        source.last_deep_test_at = now
+        source.error_count_24h = (source.error_count_24h or 0) + 1
+        _check_status_transition(source, old_status, "error", db, error_msg)
+        log = ApiUsageLog(
+            source_id=source.id,
+            timestamp=now,
+            endpoint="deep_test",
+            response_ms=elapsed_ms,
+            success=False,
+            error_message=error_msg,
+            check_type="deep",
+        )
+        db.add(log)
+        db.flush()
+        logger.warning("Deep test auth error for {}: {}", source.name, error_msg)
+        return {"success": False, "results_count": 0, "elapsed_ms": elapsed_ms, "error": error_msg}
+
+    except ConnectorRateLimitError as e:
+        elapsed_ms = int((time.time() - start) * 1000)
+        error_msg = f"Rate limited — auto-recovers when window expires: {str(e)[:340]}"
+        source.status = ApiSourceStatus.ERROR.value
+        source.last_error = error_msg
+        source.last_error_at = now
+        source.last_deep_test_at = now
+        source.error_count_24h = (source.error_count_24h or 0) + 1
+        _check_status_transition(source, old_status, "error", db, error_msg)
+        log = ApiUsageLog(
+            source_id=source.id,
+            timestamp=now,
+            endpoint="deep_test",
+            response_ms=elapsed_ms,
+            success=False,
+            error_message=error_msg,
+            check_type="deep",
+        )
+        db.add(log)
+        db.flush()
+        logger.warning("Deep test rate-limited for {}: {}", source.name, error_msg)
+        return {"success": False, "results_count": 0, "elapsed_ms": elapsed_ms, "error": error_msg}
+
+    except ConnectorQuotaError as e:
+        elapsed_ms = int((time.time() - start) * 1000)
+        error_msg = f"Quota exhausted — upgrade plan or wait for cycle: {str(e)[:340]}"
+        source.status = ApiSourceStatus.ERROR.value
+        source.last_error = error_msg
+        source.last_error_at = now
+        source.last_deep_test_at = now
+        source.error_count_24h = (source.error_count_24h or 0) + 1
+        _check_status_transition(source, old_status, "error", db, error_msg)
+        log = ApiUsageLog(
+            source_id=source.id,
+            timestamp=now,
+            endpoint="deep_test",
+            response_ms=elapsed_ms,
+            success=False,
+            error_message=error_msg,
+            check_type="deep",
+        )
+        db.add(log)
+        db.flush()
+        logger.warning("Deep test quota exhausted for {}: {}", source.name, error_msg)
+        return {"success": False, "results_count": 0, "elapsed_ms": elapsed_ms, "error": error_msg}
+
     except Exception as e:
         elapsed_ms = int((time.time() - start) * 1000)
         error_msg = str(e)[:500]
 
-        source.status = "error"
+        source.status = ApiSourceStatus.ERROR.value
         source.last_error = error_msg
         source.last_error_at = now
         source.last_deep_test_at = now

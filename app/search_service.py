@@ -26,6 +26,7 @@ from .connectors.mouser import MouserConnector
 from .connectors.oemsecrets import OEMSecretsConnector
 from .connectors.sourcengine import SourcengineConnector
 from .connectors.sources import BrokerBinConnector, NexarConnector
+from .constants import ApiSourceStatus, SourceRunStatus
 from .models import (
     ApiSource,
     MaterialCard,
@@ -216,7 +217,9 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
             return {"sightings": [], "source_stats": source_stats}
 
         succeeded_sources = {
-            stat["source"] for stat in source_stats if stat["status"] == "ok" and not stat.get("error")
+            stat["source"]
+            for stat in source_stats
+            if stat["status"] == SourceRunStatus.OK.value and not stat.get("error")
         }
         sightings = _save_sightings(fresh, write_req, write_db, succeeded_sources)
         logger.info(f"Req {req_id} ({pns[0]}): {len(sightings)} fresh sightings")
@@ -771,26 +774,26 @@ def should_trigger_ai_search(
 # ── Private helpers ──────────────────────────────────────────────────────
 
 
-def _make_stat(source_name: str, status: str, error: str | None = None) -> dict:
-    """Build a source stat entry."""
-    return {"source": source_name, "results": 0, "ms": 0, "error": error, "status": status}
+def _make_stat(source_name: str, status: SourceRunStatus | str, error: str | None = None) -> dict:
+    """Build a source stat entry.
+
+    Accepts a SourceRunStatus enum or its string value; normalizes to string for
+    downstream JSON serialization.
+    """
+    status_str = status.value if isinstance(status, SourceRunStatus) else status
+    return {"source": source_name, "results": 0, "ms": 0, "error": error, "status": status_str}
 
 
 def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
     """Build enabled connectors with credentials, returning (connectors,
     source_stats_map, disabled_sources).
 
-    Checks disabled / errored sources in DB, loads credentials per-connector.
-    Sources with status='error' (flipped by health_monitor when a connector
-    raises on bad creds / quota exhaustion) are excluded from user search runs
-    so we don't keep hitting a known-broken upstream and surfacing per-source
-    error chips. Operator must re-enable manually after rotating credentials.
-
-    Called by: _fetch_fresh
-    Depends on: services/credential_service, connectors/*, models.ApiSource
+    Sources with status='disabled' or status='error' (set by health_monitor) are
+    excluded; their entries are seeded into source_stats_map with 'disabled' or
+    'error_skipped' chips so the UI renders them.
     """
-    disabled_sources = {src.name for src in db.query(ApiSource).filter_by(status="disabled").all()}
-    errored_sources = {src.name for src in db.query(ApiSource).filter_by(status="error").all()}
+    disabled_sources = {src.name for src in db.query(ApiSource).filter_by(status=ApiSourceStatus.DISABLED.value).all()}
+    errored_sources = {src.name for src in db.query(ApiSource).filter_by(status=ApiSourceStatus.ERROR.value).all()}
 
     # Batch-load all credentials in a single DB query
     creds = get_credentials_batch(
@@ -820,15 +823,17 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
 
     def _add_or_skip(source_name, has_creds, connector_factory):
         if source_name in disabled_sources:
-            source_stats_map[source_name] = _make_stat(source_name, "disabled")
+            source_stats_map[source_name] = _make_stat(source_name, SourceRunStatus.DISABLED)
         elif source_name in errored_sources:
             # health_monitor flipped status to 'error' on a prior raise — exclude
             # from this run so we don't keep DOSing a known-broken upstream.
             source_stats_map[source_name] = _make_stat(
-                source_name, "error_skipped", "Skipped due to prior error — rotate credentials and re-enable"
+                source_name,
+                SourceRunStatus.ERROR_SKIPPED,
+                "Skipped due to prior error — auto-recovers when next ping returns 200; rotate credentials if persistent",
             )
         elif not has_creds:
-            source_stats_map[source_name] = _make_stat(source_name, "skipped", "No API key configured")
+            source_stats_map[source_name] = _make_stat(source_name, SourceRunStatus.SKIPPED, "No API key configured")
         else:
             connectors.append(connector_factory())
 
@@ -870,14 +875,12 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
 
 
 async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[dict]]:
-    """Returns (results, source_stats) where source_stats is a list of {"source": name,
-    "results": count, "ms": elapsed, "error": str|None, "status":
+    """Run all enabled connectors against pns and return (results, source_stats).
 
-    "ok"|"error"|"error_skipped"|"skipped"|"disabled"}.
-
-    "error_skipped" indicates the source was excluded because health_monitor
-    previously flipped its status to 'error' (bad creds / quota exhausted);
-    operator must re-enable manually after rotation.
+    source_stats[i] follows SourceRunStatus: 'ok' (ran successfully), 'error' (this run
+    failed), 'error_skipped' (excluded because health_monitor previously flipped
+    api_sources.status to 'error' — auto-recovers on next ping success), 'skipped' (no
+    creds), or 'disabled' (operator turned the source off).
     """
     connectors, source_stats_map, disabled_sources = _build_connectors(db)
 
@@ -886,9 +889,9 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     has_ai_live = bool(ai_key) and not bool(os.environ.get("TESTING"))
     ai_connector = None
     if "ai_live_web" in disabled_sources:
-        source_stats_map["ai_live_web"] = _make_stat("ai_live_web", "disabled")
+        source_stats_map["ai_live_web"] = _make_stat("ai_live_web", SourceRunStatus.DISABLED)
     elif not has_ai_live:
-        source_stats_map["ai_live_web"] = _make_stat("ai_live_web", "skipped", "No API key configured")
+        source_stats_map["ai_live_web"] = _make_stat("ai_live_web", SourceRunStatus.SKIPPED, "No API key configured")
     else:
         ai_connector = AIWebSearchConnector(ai_key)
 
@@ -1003,7 +1006,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
                 src.last_success = datetime.now(timezone.utc)
                 prev = src.avg_response_ms or elapsed_ms
                 src.avg_response_ms = (prev * 3 + elapsed_ms) // 4
-                src.status = "live"
+                src.status = ApiSourceStatus.LIVE.value
                 src.last_error = None
             else:
                 src.last_error = error
@@ -1118,13 +1121,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
                 is_obsolete,
                 months_since_last_sighting,
             )
-            source_stats_map["ai_live_web"] = {
-                "source": "ai_live_web",
-                "results": 0,
-                "ms": 0,
-                "error": None,
-                "status": "skipped",
-            }
+            source_stats_map["ai_live_web"] = _make_stat("ai_live_web", SourceRunStatus.SKIPPED)
 
     # Build source_stats from stats_updates (connectors that actually ran)
     # Aggregate per source (a connector may run for multiple PNs)
@@ -1135,14 +1132,14 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
             agg[source_name]["ms"] = max(agg[source_name]["ms"], elapsed_ms)
             if error and not agg[source_name]["error"]:
                 agg[source_name]["error"] = error
-                agg[source_name]["status"] = "error"
+                agg[source_name]["status"] = SourceRunStatus.ERROR.value
         else:
             agg[source_name] = {
                 "source": source_name,
                 "results": hit_count,
                 "ms": elapsed_ms,
                 "error": error,
-                "status": "error" if error else "ok",
+                "status": SourceRunStatus.ERROR.value if error else SourceRunStatus.OK.value,
             }
     # Merge with skipped/disabled entries
     for name, entry in agg.items():
@@ -2012,6 +2009,29 @@ async def stream_search_mpn(search_id: str, mpn: str, db: Session) -> None:
 
     connectors, source_stats_map, _disabled = _build_connectors(db)
 
+    # Publish source-status SSE events for every non-ok source so the chip
+    # strip renders the right state immediately. Without this the operator
+    # never sees error_skipped / disabled / skipped chips — the connector
+    # contract's UI hop is dead because only connectors that actually run
+    # later emit per-source events.
+    for _src_name, _stat in source_stats_map.items():
+        _status = _stat.get("status")
+        if _status and _status != SourceRunStatus.OK.value:
+            await active_broker.publish(
+                channel,
+                "source-status",
+                json.dumps(
+                    {
+                        "source": _stat.get("source", _src_name),
+                        "status": _status,
+                        "error": _stat.get("error"),
+                        "results": _stat.get("results", 0),
+                        "ms": _stat.get("ms", 0),
+                    },
+                    default=str,
+                ),
+            )
+
     if not connectors:
         await active_broker.publish(
             channel,
@@ -2069,7 +2089,7 @@ async def stream_search_mpn(search_id: str, mpn: str, db: Session) -> None:
                     json.dumps(
                         {
                             "source": source_name,
-                            "status": "ok",
+                            "status": SourceRunStatus.OK.value,
                             "results": hit_count,
                             "ms": elapsed_ms,
                         },
@@ -2111,7 +2131,7 @@ async def stream_search_mpn(search_id: str, mpn: str, db: Session) -> None:
                     json.dumps(
                         {
                             "source": source_name,
-                            "status": "error",
+                            "status": SourceRunStatus.ERROR.value,
                             "error": str(e)[:500],
                             "results": 0,
                             "ms": 0,
