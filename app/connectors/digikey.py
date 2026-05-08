@@ -110,8 +110,7 @@ class DigiKeyConnector(BaseConnector):
                 timeout=self.timeout,
             )
             if r.status_code == 429:
-                logger.warning(f"DigiKey: still rate limited for {part_number}, returning empty")
-                return []
+                raise RuntimeError(f"DigiKey rate limited (persistent 429): {r.text[:200]}")
 
         r.raise_for_status()
         data = r.json()

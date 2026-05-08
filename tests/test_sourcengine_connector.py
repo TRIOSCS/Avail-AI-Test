@@ -28,34 +28,39 @@ class TestSourcengineDoSearch:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_status_429_returns_empty(self):
-        """HTTP 429 → log warning and return []."""
+    async def test_status_429_raises_for_health_monitor(self):
+        """Sourcengine 429 raises RuntimeError so health_monitor flips
+        api_sources.status to 'error' and stops the 15-min ping loop from continuing to
+        hit a rate-limited upstream.
+
+        Replaces the prior silent-empty contract per connector convention.
+        """
         from app.connectors.sourcengine import SourcengineConnector
 
         connector = SourcengineConnector(api_key="test-key")
 
         mock_response = MagicMock()
         mock_response.status_code = 429
+        mock_response.text = "Too Many Requests"
 
         with patch("app.connectors.sourcengine.http.get", new_callable=AsyncMock, return_value=mock_response):
-            result = await connector._do_search("LM317T")
-
-        assert result == []
+            with pytest.raises(RuntimeError, match="Sourcengine rate limited"):
+                await connector._do_search("LM317T")
 
     @pytest.mark.asyncio
-    async def test_status_401_returns_empty(self):
-        """HTTP 401 → log error and return []."""
+    async def test_status_401_raises_for_health_monitor(self):
+        """Sourcengine 401 (auth) raises RuntimeError — same contract as 429."""
         from app.connectors.sourcengine import SourcengineConnector
 
         connector = SourcengineConnector(api_key="bad-key")
 
         mock_response = MagicMock()
         mock_response.status_code = 401
+        mock_response.text = "Unauthorized"
 
         with patch("app.connectors.sourcengine.http.get", new_callable=AsyncMock, return_value=mock_response):
-            result = await connector._do_search("LM317T")
-
-        assert result == []
+            with pytest.raises(RuntimeError, match="Sourcengine auth error"):
+                await connector._do_search("LM317T")
 
     @pytest.mark.asyncio
     async def test_successful_search_returns_results(self):

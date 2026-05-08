@@ -58,15 +58,13 @@ class Element14Connector(BaseConnector):
             logger.debug(f"element14: 400 Bad Request for term '{term}' — skipping")
             return []
 
-        # 429 — rate limited; return empty instead of tripping circuit breaker
-        if r.status_code == 429:
-            logger.warning(f"element14: 429 rate limited for term '{term}', returning empty results")
-            return []
-
-        # 401 — auth failure; return empty and log error
+        # Hard errors raise so health_monitor flips status to 'error' and excludes
+        # the connector from subsequent pings. The first 401 raised by an exact
+        # MPN search also short-circuits the keyword fallback in _do_search.
         if r.status_code == 401:
-            logger.error(f"element14: 401 Unauthorized for term '{term}' — check API key")
-            return []
+            raise RuntimeError(f"element14 auth error: HTTP 401 {r.text[:200]}")
+        if r.status_code == 429:
+            raise RuntimeError(f"element14 rate limited: {r.text[:200]}")
 
         r.raise_for_status()
         data = r.json()

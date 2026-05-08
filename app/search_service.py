@@ -780,12 +780,17 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
     """Build enabled connectors with credentials, returning (connectors,
     source_stats_map, disabled_sources).
 
-    Checks disabled sources in DB, loads credentials per-connector.
+    Checks disabled / errored sources in DB, loads credentials per-connector.
+    Sources with status='error' (flipped by health_monitor when a connector
+    raises on bad creds / quota exhaustion) are excluded from user search runs
+    so we don't keep hitting a known-broken upstream and surfacing per-source
+    error chips. Operator must re-enable manually after rotating credentials.
 
     Called by: _fetch_fresh
     Depends on: services/credential_service, connectors/*, models.ApiSource
     """
     disabled_sources = {src.name for src in db.query(ApiSource).filter_by(status="disabled").all()}
+    errored_sources = {src.name for src in db.query(ApiSource).filter_by(status="error").all()}
 
     # Batch-load all credentials in a single DB query
     creds = get_credentials_batch(
@@ -816,6 +821,12 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
     def _add_or_skip(source_name, has_creds, connector_factory):
         if source_name in disabled_sources:
             source_stats_map[source_name] = _make_stat(source_name, "disabled")
+        elif source_name in errored_sources:
+            # health_monitor flipped status to 'error' on a prior raise — exclude
+            # from this run so we don't keep DOSing a known-broken upstream.
+            source_stats_map[source_name] = _make_stat(
+                source_name, "error_skipped", "Skipped due to prior error — rotate credentials and re-enable"
+            )
         elif not has_creds:
             source_stats_map[source_name] = _make_stat(source_name, "skipped", "No API key configured")
         else:
@@ -862,7 +873,11 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     """Returns (results, source_stats) where source_stats is a list of {"source": name,
     "results": count, "ms": elapsed, "error": str|None, "status":
 
-    "ok"|"error"|"skipped"|"disabled"}.
+    "ok"|"error"|"error_skipped"|"skipped"|"disabled"}.
+
+    "error_skipped" indicates the source was excluded because health_monitor
+    previously flipped its status to 'error' (bad creds / quota exhausted);
+    operator must re-enable manually after rotation.
     """
     connectors, source_stats_map, disabled_sources = _build_connectors(db)
 

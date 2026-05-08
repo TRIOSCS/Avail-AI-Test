@@ -107,15 +107,21 @@ class TestDigiKey429:
             assert mock_http.post.call_count == 2
 
     @pytest.mark.asyncio
-    async def test_429_twice_returns_empty(self):
-        """DigiKey returns empty after two 429s (no raise)."""
+    async def test_429_twice_raises_for_health_monitor(self):
+        """DigiKey raises RuntimeError after persistent 429 so health_monitor flips
+        api_sources.status to 'error' and stops the 15-min ping loop from continuing to
+        burn quota against an upstream that's not coming back.
+
+        Replaces the prior silent-empty contract per connector convention shipped in
+        644b823c.
+        """
         c = self._make_connector()
         rate_limited = _mock_response(429, headers={"Retry-After": "0.01"})
 
         with patch("app.connectors.digikey.http") as mock_http:
             mock_http.post = AsyncMock(return_value=rate_limited)
-            results = await c._do_search("LM317T")
-            assert results == []
+            with pytest.raises(RuntimeError, match="DigiKey rate limited"):
+                await c._do_search("LM317T")
 
     @pytest.mark.asyncio
     async def test_token_expiry_refresh(self):
@@ -199,26 +205,32 @@ class TestOEMSecrets401:
         return OEMSecretsConnector(api_key="test-key")
 
     @pytest.mark.asyncio
-    async def test_401_quota_returns_empty(self):
-        """OEMSecrets 401 quota exhaustion returns empty, no exception."""
+    async def test_401_quota_raises_for_health_monitor(self):
+        """OEMSecrets 401 (bad key OR quota exhausted) raises RuntimeError so
+        health_monitor flips api_sources.status to 'error' and the 15-min ping loop
+        stops burning calls on a key that won't recover.
+
+        Operator must rotate the key (or top up quota) and re-enable manually. Replaces
+        the prior silent-empty contract per connector convention.
+        """
         c = self._make_connector()
         resp_401 = _mock_response(401, text="User is not accepted or has run out of api calls")
 
         with patch("app.connectors.oemsecrets.http") as mock_http:
             mock_http.get = AsyncMock(return_value=resp_401)
-            results = await c._do_search("LM358N")
-            assert results == []
+            with pytest.raises(RuntimeError, match="OEMSecrets auth/quota error"):
+                await c._do_search("LM358N")
 
     @pytest.mark.asyncio
-    async def test_429_returns_empty(self):
-        """OEMSecrets 429 returns empty, no exception."""
+    async def test_429_raises_for_health_monitor(self):
+        """OEMSecrets 429 raises RuntimeError — same contract as 401."""
         c = self._make_connector()
         resp_429 = _mock_response(429, text="Too Many Requests")
 
         with patch("app.connectors.oemsecrets.http") as mock_http:
             mock_http.get = AsyncMock(return_value=resp_429)
-            results = await c._do_search("LM358N")
-            assert results == []
+            with pytest.raises(RuntimeError, match="OEMSecrets rate limited"):
+                await c._do_search("LM358N")
 
     @pytest.mark.asyncio
     async def test_200_still_works(self):

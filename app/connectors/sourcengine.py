@@ -35,15 +35,12 @@ class SourcengineConnector(BaseConnector):
 
         r = await http.get(self.SEARCH_URL, headers=headers, params=params, timeout=self.timeout)
 
-        # 429 — rate limited; return empty instead of tripping circuit breaker
+        # Hard errors raise so health_monitor flips status to 'error' and excludes
+        # the connector from subsequent pings.
+        if r.status_code in (401, 403):
+            raise RuntimeError(f"Sourcengine auth error: HTTP {r.status_code} {r.text[:200]}")
         if r.status_code == 429:
-            logger.warning(f"Sourcengine: 429 rate limited for {part_number}, returning empty results")
-            return []
-
-        # 401 — auth failure; return empty and log error
-        if r.status_code == 401:
-            logger.error(f"Sourcengine: 401 Unauthorized for {part_number} — check API key")
-            return []
+            raise RuntimeError(f"Sourcengine rate limited: {r.text[:200]}")
 
         r.raise_for_status()
         data = r.json()
