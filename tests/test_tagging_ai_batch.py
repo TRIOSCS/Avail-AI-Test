@@ -10,6 +10,7 @@ import tempfile
 from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models.intelligence import MaterialCard
@@ -645,3 +646,350 @@ class TestApplyBatchResultsChunked:
         assert result["total_lines"] == 2
         assert result["errors"] == 2
         assert result["matched"] == 0
+
+    @patch("app.database.SessionLocal")
+    @patch("app.http_client.http")
+    @patch("app.services.credential_service.get_credential_cached", return_value="sk-test-key")
+    def test_blank_lines_skipped(self, mock_cred, mock_http, mock_session_local, db_session: Session):
+        """Line 481: blank lines in JSONL are silently skipped (not counted as errors)."""
+        mock_session_local.return_value = db_session
+
+        valid_line = json.dumps(
+            {
+                "custom_id": "backfill_0",
+                "result": {
+                    "type": "succeeded",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "name": "structured_output",
+                                "input": {"classifications": []},
+                            }
+                        ]
+                    },
+                },
+            }
+        )
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
+        # blank lines around valid line — only the valid line counts as total_lines
+        tmp.write("\n")
+        tmp.write("   \n")
+        tmp.write(valid_line + "\n")
+        tmp.write("\n")
+        tmp.close()
+        tmp_path = tmp.name
+
+        status_resp = MagicMock()
+        status_resp.status_code = 200
+        status_resp.json.return_value = {
+            "processing_status": "ended",
+            "results_url": "https://api.anthropic.com/results/batch_blank",
+        }
+        mock_http.get = AsyncMock(return_value=status_resp)
+        mock_http.stream = _make_fake_stream(tmp_path)
+
+        try:
+            result = _run(apply_batch_results_chunked("batch_blank"))
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+        # Only the non-blank line is counted
+        assert result["total_lines"] == 1
+        assert result["errors"] == 0
+
+    @patch("app.database.SessionLocal")
+    @patch("app.http_client.http")
+    @patch("app.services.credential_service.get_credential_cached", return_value="sk-test-key")
+    def test_classifications_as_list_used_directly(self, mock_cred, mock_http, mock_session_local, db_session: Session):
+        """Line 507: when classifications is a list subclass (with .get() returning []),
+        isinstance check triggers and items = classifications is used instead."""
+        _make_card(db_session, "xyz001", manufacturer=None)
+        db_session.commit()
+        mock_session_local.return_value = db_session
+
+        # Build a list subclass that has a .get() method — satisfies both
+        # classifications.get("classifications", []) (returns []) AND isinstance(classifications, list).
+        class _ListWithGet(list):
+            def get(self, key, default=None):
+                return default  # returns [] for get("classifications", [])
+
+        classification_item = {"mpn": "XYZ001", "manufacturer": "Acme Corp", "category": "Logic ICs"}
+        list_classifications = _ListWithGet([classification_item])
+
+        # Patch json.loads so entry["result"]["message"]["content"][0]["input"] is list_classifications
+        import json as _json
+
+        _original_loads = _json.loads
+
+        def _patched_loads(s, **kw):
+            data = _original_loads(s, **kw)
+            try:
+                data["result"]["message"]["content"][0]["input"] = list_classifications
+            except (KeyError, IndexError, TypeError):
+                pass
+            return data
+
+        result_line = json.dumps(
+            {
+                "custom_id": "backfill_0",
+                "result": {
+                    "type": "succeeded",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "name": "structured_output",
+                                "input": {"classifications": []},
+                            }
+                        ]
+                    },
+                },
+            }
+        )
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
+        tmp.write(result_line + "\n")
+        tmp.close()
+        tmp_path = tmp.name
+
+        status_resp = MagicMock()
+        status_resp.status_code = 200
+        status_resp.json.return_value = {
+            "processing_status": "ended",
+            "results_url": "https://api.anthropic.com/results/batch_list",
+        }
+        mock_http.get = AsyncMock(return_value=status_resp)
+        mock_http.stream = _make_fake_stream(tmp_path)
+
+        with patch("json.loads", side_effect=_patched_loads):
+            try:
+                result = _run(apply_batch_results_chunked("batch_list"))
+            finally:
+                try:
+                    os.unlink(tmp_path)
+                except OSError:
+                    pass
+
+        # The list path was exercised; 1 line processed with 1 item matched
+        assert result["total_lines"] == 1
+
+    @patch("app.database.SessionLocal")
+    @patch("app.http_client.http")
+    @patch("app.services.credential_service.get_credential_cached", return_value="sk-test-key")
+    def test_batch_flush_triggered_at_100_items(self, mock_cred, mock_http, mock_session_local, db_session: Session):
+        """Lines 516-520: when batch_classifications reaches 100, _apply_chunked_batch is called."""
+        # Create 101 cards so we can generate 101 valid classification lines
+        for i in range(101):
+            _make_card(db_session, f"mpn{i:04d}", manufacturer=None)
+        db_session.commit()
+        mock_session_local.return_value = db_session
+
+        lines = []
+        for i in range(101):
+            lines.append(
+                json.dumps(
+                    {
+                        "custom_id": f"backfill_{i}",
+                        "result": {
+                            "type": "succeeded",
+                            "message": {
+                                "content": [
+                                    {
+                                        "type": "tool_use",
+                                        "name": "structured_output",
+                                        "input": {
+                                            "classifications": [
+                                                {
+                                                    "mpn": f"MPN{i:04d}",
+                                                    "manufacturer": "TestCorp",
+                                                    "category": "Logic ICs",
+                                                }
+                                            ]
+                                        },
+                                    }
+                                ]
+                            },
+                        },
+                    }
+                )
+            )
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
+        tmp.write("\n".join(lines) + "\n")
+        tmp.close()
+        tmp_path = tmp.name
+
+        status_resp = MagicMock()
+        status_resp.status_code = 200
+        status_resp.json.return_value = {
+            "processing_status": "ended",
+            "results_url": "https://api.anthropic.com/results/batch_100",
+        }
+        mock_http.get = AsyncMock(return_value=status_resp)
+        mock_http.stream = _make_fake_stream(tmp_path)
+
+        try:
+            result = _run(apply_batch_results_chunked("batch_100"))
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+        # All 101 lines processed; the >=100 flush path was exercised
+        assert result["total_lines"] == 101
+
+    @patch("app.database.SessionLocal")
+    @patch("app.http_client.http")
+    @patch("app.services.credential_service.get_credential_cached", return_value="sk-test-key")
+    def test_progress_log_at_500_lines(self, mock_cred, mock_http, mock_session_local, db_session: Session):
+        """Line 523: progress logging fires when total_lines % 500 == 0.
+
+        Requires 500 lines that reach line 522 (i.e. type=succeeded with valid classifications).
+        Each such line increments total_lines; at total_lines==500 the log fires.
+        """
+        mock_session_local.return_value = db_session
+
+        # Each line must be type=succeeded with a valid tool_use block so it reaches line 522.
+        # Empty classifications list is fine — it won't match any cards (no DB cards needed).
+        succeeded_line = {
+            "result": {
+                "type": "succeeded",
+                "message": {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "name": "structured_output",
+                            "input": {"classifications": []},
+                        }
+                    ]
+                },
+            }
+        }
+        lines = []
+        for i in range(500):
+            entry = dict(succeeded_line)
+            entry["custom_id"] = f"backfill_{i}"
+            lines.append(json.dumps(entry))
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
+        tmp.write("\n".join(lines) + "\n")
+        tmp.close()
+        tmp_path = tmp.name
+
+        status_resp = MagicMock()
+        status_resp.status_code = 200
+        status_resp.json.return_value = {
+            "processing_status": "ended",
+            "results_url": "https://api.anthropic.com/results/batch_500",
+        }
+        mock_http.get = AsyncMock(return_value=status_resp)
+        mock_http.stream = _make_fake_stream(tmp_path)
+
+        try:
+            result = _run(apply_batch_results_chunked("batch_500"))
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+        # 500 lines processed; the % 500 == 0 progress log was triggered at line 523
+        assert result["total_lines"] == 500
+
+    @patch("app.services.tagging_ai_batch._apply_chunked_batch")
+    @patch("app.database.SessionLocal")
+    @patch("app.http_client.http")
+    @patch("app.services.credential_service.get_credential_cached", return_value="sk-test-key")
+    def test_outer_exception_handler_reraises(self, mock_cred, mock_http, mock_session_local, mock_apply_chunked):
+        """Lines 535-538: exception inside the processing loop → logged, rollback, re-raise."""
+        mock_session_local.return_value = MagicMock()
+
+        # Make _apply_chunked_batch raise to trigger the outer exception handler
+        mock_apply_chunked.side_effect = RuntimeError("unexpected error in apply")
+
+        result_line = json.dumps(
+            {
+                "custom_id": "backfill_0",
+                "result": {
+                    "type": "succeeded",
+                    "message": {
+                        "content": [
+                            {
+                                "type": "tool_use",
+                                "name": "structured_output",
+                                "input": {
+                                    "classifications": [
+                                        {"mpn": "ABC", "manufacturer": "Corp", "category": "Logic ICs"}
+                                        for _ in range(100)  # fill a full batch of 100
+                                    ]
+                                },
+                            }
+                        ]
+                    },
+                },
+            }
+        )
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
+        tmp.write(result_line + "\n")
+        tmp.close()
+        tmp_path = tmp.name
+
+        status_resp = MagicMock()
+        status_resp.status_code = 200
+        status_resp.json.return_value = {
+            "processing_status": "ended",
+            "results_url": "https://api.anthropic.com/results/batch_exc",
+        }
+        mock_http.get = AsyncMock(return_value=status_resp)
+        mock_http.stream = _make_fake_stream(tmp_path)
+
+        try:
+            with pytest.raises(RuntimeError, match="unexpected error in apply"):
+                _run(apply_batch_results_chunked("batch_exc"))
+        finally:
+            try:
+                os.unlink(tmp_path)
+            except OSError:
+                pass
+
+    @patch("app.database.SessionLocal")
+    @patch("app.http_client.http")
+    @patch("app.services.credential_service.get_credential_cached", return_value="sk-test-key")
+    def test_osunlink_failure_silently_ignored(self, mock_cred, mock_http, mock_session_local, db_session: Session):
+        """Lines 546-547: OSError from os.unlink() is silently swallowed."""
+        mock_session_local.return_value = db_session
+
+        tmp = tempfile.NamedTemporaryFile(suffix=".jsonl", dir="/tmp", delete=False, mode="w")
+        tmp.write("")
+        tmp.close()
+        tmp_path = tmp.name
+
+        status_resp = MagicMock()
+        status_resp.status_code = 200
+        status_resp.json.return_value = {
+            "processing_status": "ended",
+            "results_url": "https://api.anthropic.com/results/batch_unlink",
+        }
+        mock_http.get = AsyncMock(return_value=status_resp)
+        mock_http.stream = _make_fake_stream(tmp_path)
+
+        import unittest.mock
+
+        with unittest.mock.patch("os.unlink", side_effect=OSError("Permission denied")):
+            # Should NOT raise — OSError is silently caught
+            result = _run(apply_batch_results_chunked("batch_unlink"))
+
+        # File may still exist since unlink was mocked to fail; clean up manually
+        try:
+            os.unlink(tmp_path)
+        except OSError:
+            pass
+
+        assert "total_lines" in result

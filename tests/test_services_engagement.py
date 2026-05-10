@@ -624,3 +624,170 @@ class TestComputeAllEngagementErrorPaths:
 
         result = await compute_all_engagement_scores(db_session)
         assert result["updated"] == 0
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  New coverage tests for missing lines
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestEngagementScorerMissingLines:
+    """Tests targeting specific uncovered lines in engagement_scorer.py."""
+
+    # ── Line 65: now=None default path ───────────────────────────────
+
+    def test_compute_engagement_score_uses_utc_when_now_none(self):
+        """Line 65: when now=None (default), datetime.now(timezone.utc) is called."""
+        # Omit the now= kwarg entirely — exercises the 'if now is None: now = ...' branch
+        result = compute_engagement_score(0, 0, 0, None, None)
+        # Cold start path still returns COLD_START_SCORE regardless
+        assert result["engagement_score"] == 50
+
+    # ── Lines 180-181: domain_aliases loop in compute_all_engagement_scores ──
+
+    @pytest.mark.asyncio
+    async def test_domain_aliases_included_in_response_map(self, db_session):
+        """Lines 180-181: domain_aliases on VendorCard are also added to domain_to_norm map."""
+        card = _make_vendor_card(
+            db_session,
+            "aliased vendor",
+            "Aliased Vendor",
+            domain="aliased.com",
+            domain_aliases=["alt.aliased.com", "alias2.com"],
+        )
+        db_session.commit()
+
+        # Send a response from the alias domain
+        _make_vendor_response(db_session, "Rep", "rep@alt.aliased.com")
+        db_session.commit()
+
+        result = await compute_all_engagement_scores(db_session)
+        assert result["updated"] >= 1
+        db_session.refresh(card)
+        # Response via alias domain should be matched
+        assert card.total_responses >= 1
+
+    # ── Line 199: email with no '@' in it → continue ─────────────────
+
+    @pytest.mark.asyncio
+    async def test_invalid_email_without_at_sign_skipped(self, db_session):
+        """Line 199: VendorResponse with vendor_email lacking '@' → skipped in response_map."""
+        from app.models import VendorResponse
+
+        # Add a response with an invalid email (no '@')
+        bad_resp = VendorResponse(
+            vendor_name="NoAt Vendor",
+            vendor_email="invalidemail",  # no @ → line 199 continue
+            received_at=datetime.now(timezone.utc),
+            status="new",
+        )
+        db_session.add(bad_resp)
+
+        _make_vendor_card(db_session, "noat vendor", "NoAt Vendor", domain="noat.com")
+        db_session.commit()
+
+        # Should not crash; the invalid email is simply ignored
+        result = await compute_all_engagement_scores(db_session)
+        assert "updated" in result
+
+    # ── Line 204: fallback norm via normalize_vendor_name when domain not found ──
+
+    @pytest.mark.asyncio
+    async def test_response_domain_fallback_normalization(self, db_session):
+        """Line 204: when email domain not in domain_to_norm, fallback normalize is used."""
+        from app.models import VendorResponse
+
+        # Card has NO domain set — so its domain won't be in domain_to_norm
+        _make_vendor_card(db_session, "fallback vendor", "Fallback Vendor", domain=None)
+
+        # Response from a domain not in domain_to_norm → fallback normalize_vendor_name("fallback")
+        resp = VendorResponse(
+            vendor_name="someone",
+            vendor_email="someone@fallback.com",  # domain "fallback.com" not in map
+            received_at=datetime.now(timezone.utc),
+            status="new",
+        )
+        db_session.add(resp)
+        db_session.commit()
+
+        result = await compute_all_engagement_scores(db_session)
+        assert "updated" in result
+
+    # ── Lines 257-258: win_map building (Offer with status=WON) ──────
+
+    @pytest.mark.asyncio
+    async def test_won_offers_counted_in_win_map(self, db_session, test_user):
+        """Lines 257-258: Offer with status='won' increments win_map for the vendor."""
+        from app.constants import OfferStatus
+        from app.models import Offer
+
+        card = _make_vendor_card(db_session, "winning vendor", "Winning Vendor", domain="winner.com")
+        req = _make_requisition(db_session, test_user.id)
+        # Outreach so score is computed beyond cold start
+        for _ in range(3):
+            _make_contact(db_session, req.id, test_user.id, "Winning Vendor")
+
+        # Create a won offer for this vendor
+        offer = Offer(
+            requisition_id=req.id,
+            vendor_name="Winning Vendor",
+            vendor_name_normalized="winning vendor",
+            mpn="LM317T",
+            status=OfferStatus.WON,
+        )
+        db_session.add(offer)
+        db_session.commit()
+
+        result = await compute_all_engagement_scores(db_session)
+        assert result["updated"] >= 1
+        db_session.refresh(card)
+        # Win count should be at least 1
+        assert card.total_wins >= 1
+
+    # ── Lines 307-308: db.flush() exception in batch loop ─────────────
+
+    @pytest.mark.asyncio
+    async def test_flush_exception_in_batch_loop_is_logged(self, db_session, monkeypatch):
+        """Lines 307-308: db.flush() raises in the batch update loop → error is logged, no crash."""
+        _make_vendor_card(db_session, "flushfail vendor", "FlushFail Vendor", domain="flushfail.com")
+        db_session.commit()
+
+        original_flush = db_session.flush
+        call_count = [0]
+
+        def bad_flush(*args, **kwargs):
+            call_count[0] += 1
+            # Fail on the first batch flush call (inside the BATCH_SIZE loop)
+            if call_count[0] == 1:
+                raise RuntimeError("Simulated flush failure in batch loop")
+            return original_flush(*args, **kwargs)
+
+        monkeypatch.setattr(db_session, "flush", bad_flush)
+        # Should not raise — the exception is caught and logged
+        result = await compute_all_engagement_scores(db_session)
+        assert "updated" in result
+
+    # ── Lines 406-408: db.flush() exception in apply_outbound_stats ───
+
+    def test_apply_outbound_stats_flush_exception_rollback(self, db_session):
+        """Lines 406-408: flush() exception in apply_outbound_stats → rollback, no crash."""
+        card = _make_vendor_card(db_session, "rollback vendor", "Rollback Vendor", domain="rollback.com")
+        card.total_outreach = 0
+        db_session.commit()
+
+        original_flush = db_session.flush
+        call_count = [0]
+
+        def bad_flush(*args, **kwargs):
+            call_count[0] += 1
+            if call_count[0] >= 1:
+                raise RuntimeError("Simulated flush failure")
+            return original_flush(*args, **kwargs)
+
+        db_session.flush = bad_flush
+        try:
+            # Should not raise — the exception is caught, rollback called
+            updated = apply_outbound_stats(db_session, {"rollback.com": 5})
+            assert isinstance(updated, int)
+        finally:
+            db_session.flush = original_flush

@@ -24,6 +24,7 @@ import asyncio
 from datetime import date, datetime, timedelta, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.models import (
@@ -854,6 +855,138 @@ class TestStrategicVendorService:
 
         vendors2, total2 = get_open_pool(db_session, search="NONEXISTENT_XYZZY")
         assert total2 == 0
+
+    # ── New tests for uncovered lines ─────────────────────────────────
+
+    def test_claim_vendor_already_claimed_by_different_user(
+        self, db_session: Session, test_user: User, test_vendor_card: VendorCard
+    ):
+        """Line 96: another buyer already owns the vendor → returns 'claimed by another buyer'."""
+        from app.services.strategic_vendor_service import claim_vendor
+
+        # user1 claims the vendor
+        record, err = claim_vendor(db_session, test_user.id, test_vendor_card.id)
+        assert err is None
+        assert record is not None
+
+        # Create a second user
+        second_user = User(
+            email="buyer2@trioscs.com",
+            name="Buyer Two",
+            role="buyer",
+            azure_id="test-azure-id-svs-002",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(second_user)
+        db_session.flush()
+
+        # Second user tries to claim the same vendor
+        record2, err2 = claim_vendor(db_session, second_user.id, test_vendor_card.id)
+        assert record2 is None
+        assert err2 is not None
+        assert "another buyer" in err2.lower()
+
+    def test_claim_vendor_integrity_error_on_commit(
+        self, db_session: Session, test_user: User, test_vendor_card: VendorCard
+    ):
+        """Lines 117-119: IntegrityError during commit → rollback, return error message."""
+        from sqlalchemy.exc import IntegrityError
+
+        from app.services.strategic_vendor_service import claim_vendor
+
+        original_commit = db_session.commit
+        call_count = [0]
+
+        def _fail_commit():
+            call_count[0] += 1
+            # Raise on the first commit inside claim_vendor
+            if call_count[0] == 1:
+                raise IntegrityError("UNIQUE constraint failed", params={}, orig=Exception("unique"))
+            return original_commit()
+
+        db_session.commit = _fail_commit
+        try:
+            record, err = claim_vendor(db_session, test_user.id, test_vendor_card.id)
+        finally:
+            db_session.commit = original_commit
+
+        assert record is None
+        assert err is not None
+        assert "just claimed" in err.lower()
+
+    def test_replace_vendor_drop_fails(self, db_session: Session, test_user: User):
+        """Lines 170-171: drop_vendor fails inside replace_vendor → rollback, return error."""
+        from app.services.strategic_vendor_service import replace_vendor
+
+        vc1 = VendorCard(
+            normalized_name="replace_fail_a",
+            display_name="Replace Fail A",
+            sighting_count=1,
+            created_at=datetime.now(timezone.utc),
+        )
+        vc2 = VendorCard(
+            normalized_name="replace_fail_b",
+            display_name="Replace Fail B",
+            sighting_count=1,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add_all([vc1, vc2])
+        db_session.flush()
+
+        # vc1 is NOT claimed — so drop_vendor will return (False, error)
+        record, err = replace_vendor(db_session, test_user.id, vc1.id, vc2.id)
+        assert record is None
+        assert err is not None
+        assert "not in your" in err.lower()
+
+    def test_replace_vendor_claim_fails(self, db_session: Session, test_user: User):
+        """Lines 175-176: claim_vendor returns no record inside replace_vendor → rollback, return error."""
+        from app.services.strategic_vendor_service import claim_vendor, replace_vendor
+
+        vc1 = VendorCard(
+            normalized_name="replace_claim_fail_a",
+            display_name="Replace Claim Fail A",
+            sighting_count=1,
+            created_at=datetime.now(timezone.utc),
+        )
+        # vc2 does not exist — claim will fail with "not found"
+        db_session.add(vc1)
+        db_session.flush()
+        claim_vendor(db_session, test_user.id, vc1.id)
+
+        record, err = replace_vendor(db_session, test_user.id, vc1.id, 99999)
+        assert record is None
+        assert err is not None
+
+    def test_replace_vendor_exception_reraises(self, db_session: Session, test_user: User):
+        """Lines 179-181: exception inside replace_vendor transaction → rollback then re-raise."""
+        from unittest.mock import patch
+
+        from app.services.strategic_vendor_service import claim_vendor, replace_vendor
+
+        vc1 = VendorCard(
+            normalized_name="replace_exc_a",
+            display_name="Replace Exc A",
+            sighting_count=1,
+            created_at=datetime.now(timezone.utc),
+        )
+        vc2 = VendorCard(
+            normalized_name="replace_exc_b",
+            display_name="Replace Exc B",
+            sighting_count=1,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add_all([vc1, vc2])
+        db_session.flush()
+        claim_vendor(db_session, test_user.id, vc1.id)
+
+        # Patch claim_vendor inside the service module to raise after drop succeeds
+        with patch(
+            "app.services.strategic_vendor_service.claim_vendor",
+            side_effect=RuntimeError("unexpected failure"),
+        ):
+            with pytest.raises(RuntimeError, match="unexpected failure"):
+                replace_vendor(db_session, test_user.id, vc1.id, vc2.id)
 
 
 # ═══════════════════════════════════════════════════════════════════════

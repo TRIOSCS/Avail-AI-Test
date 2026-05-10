@@ -16,12 +16,16 @@ from app.models import (
     Requisition,
     User,
 )
+from app.models.config import SystemConfig
 from app.models.intelligence import ProactiveDoNotOffer, ProactiveThrottle
 from app.models.purchase_history import CustomerPartHistory
 from app.services.proactive_matching import (
+    _find_matches,
+    _get_watermark,
     _score_frequency,
     _score_margin,
     _score_recency,
+    _set_watermark,
     compute_match_score,
     dismiss_match,
     expire_old_matches,
@@ -989,3 +993,119 @@ class TestScoringBoundaries:
         dt = datetime.now(timezone.utc) - timedelta(days=90)  # recency=100
         score, margin = compute_match_score(dt, 5, 100.0, 70.0)
         assert score == 100  # 100*0.4 + 100*0.3 + 100*0.3 = 100
+
+
+# ── Watermark helper tests ──────────────────────────────────────────────────
+
+
+class TestWatermarkHelpers:
+    """Tests for _get_watermark and _set_watermark (lines 124-138)."""
+
+    def test_get_watermark_naive_timestamp_gets_utc(self, db_session):
+        """Naive ISO timestamp stored in SystemConfig gets UTC tzinfo attached."""
+        naive_iso = "2025-01-15T10:00:00"  # no tzinfo
+        db_session.add(SystemConfig(key="proactive_last_scan", value=naive_iso, description="test"))
+        db_session.commit()
+
+        result = _get_watermark(db_session)
+        assert result.tzinfo is not None
+
+    def test_get_watermark_invalid_value_returns_default(self, db_session):
+        """Corrupt watermark value falls back to default lookback window."""
+        db_session.add(SystemConfig(key="proactive_last_scan", value="not-a-date", description="test"))
+        db_session.commit()
+
+        result = _get_watermark(db_session)
+        assert result.tzinfo is not None
+        assert result < datetime.now(timezone.utc)
+
+    def test_set_watermark_creates_new_row_when_missing(self, db_session):
+        """_set_watermark creates a new SystemConfig row if none exists."""
+        ts = datetime.now(timezone.utc) - timedelta(hours=1)
+        _set_watermark(db_session, ts)
+        db_session.commit()
+
+        row = db_session.query(SystemConfig).filter(SystemConfig.key == "proactive_last_scan").first()
+        assert row is not None
+        assert ts.isoformat() in row.value
+
+
+# ── _find_matches with source_offer=None ──────────────────────────────────
+
+
+class TestFindMatchesSourceOfferNone:
+    """Tests for _find_matches when source_offer is None (lines 214-224)."""
+
+    def test_find_matches_no_source_offer_uses_fallback(self, db_session):
+        """_find_matches with source_offer=None queries fallback offer from DB."""
+        data = _setup_scenario(db_session)
+
+        offer = Offer(
+            requisition_id=data["requisition"].id,
+            requirement_id=data["requirement"].id,
+            material_card_id=data["card"].id,
+            vendor_name="Arrow",
+            mpn="STM32F407",
+            unit_price=Decimal("8.00"),
+            status="active",
+        )
+        db_session.add(offer)
+        db_session.commit()
+
+        matches = _find_matches(
+            db_session,
+            material_card_id=data["card"].id,
+            mpn="STM32F407",
+            our_cost=8.0,
+            source_offer=None,
+        )
+        assert isinstance(matches, list)
+
+    def test_find_matches_no_source_offer_no_fallback_returns_empty(self, db_session):
+        """_find_matches with source_offer=None and no existing offer returns []."""
+        data = _setup_scenario(db_session)
+
+        matches = _find_matches(
+            db_session,
+            material_card_id=data["card"].id,
+            mpn="STM32F407",
+            our_cost=8.0,
+            source_offer=None,
+        )
+        assert matches == []
+
+
+# ── run_proactive_scan cap warning ─────────────────────────────────────────
+
+
+class TestProactiveScanCapWarning:
+    """Test the 5000-offer cap warning in run_proactive_scan (line 336)."""
+
+    def test_scan_logs_warning_at_5000_cap(self, db_session):
+        """run_proactive_scan warns when 5000 offers are returned (cap hit)."""
+        import unittest.mock as um
+
+        fake_offers = [
+            um.MagicMock(material_card_id=i, id=i, created_at=datetime.now(timezone.utc)) for i in range(5000)
+        ]
+
+        mock_chain = um.MagicMock()
+        mock_chain.filter.return_value = mock_chain
+        mock_chain.order_by.return_value = mock_chain
+        mock_chain.limit.return_value = mock_chain
+        mock_chain.all.return_value = fake_offers
+
+        with (
+            patch(
+                "app.services.proactive_matching._get_watermark",
+                return_value=datetime.now(timezone.utc) - timedelta(hours=1),
+            ),
+            patch("app.services.proactive_matching._set_watermark"),
+            patch("app.services.proactive_matching.find_matches_for_offer", return_value=[]),
+            patch("app.services.proactive_matching.logger") as mock_logger,
+        ):
+            with patch.object(db_session, "query", return_value=mock_chain):
+                run_proactive_scan(db_session)
+
+        mock_logger.warning.assert_called_once()
+        assert "5000" in mock_logger.warning.call_args[0][0]

@@ -503,3 +503,169 @@ async def test_process_batch_handles_empty_parts_list(db):
         stats = await process_material_batch_results(db)
 
     assert stats["errors"] >= 1
+
+
+# ── Missing line coverage ─────────────────────────────────────────────
+
+
+@pytest.mark.asyncio
+async def test_enrich_batch_wrong_part_count_skips_batch(db):
+    """Lines 153-155: AI returns wrong number of parts → batch skipped, errors incremented."""
+    from app.services.material_enrichment_service import _enrich_batch
+
+    c1 = _make_card(db, "PARTA")
+    c2 = _make_card(db, "PARTB")
+    stats = {"enriched": 0, "skipped": 0, "errors": 0}
+
+    # Return 3 parts for 2 cards — count mismatch triggers the skip path
+    mock_result = {
+        "parts": [
+            {"mpn": "PARTA", "description": "Part A", "category": "other", "lifecycle_status": "active"},
+            {"mpn": "PARTB", "description": "Part B", "category": "other", "lifecycle_status": "active"},
+            {"mpn": "PARTC", "description": "Extra", "category": "other", "lifecycle_status": "active"},
+        ]
+    }
+
+    with patch(
+        "app.utils.claude_client.claude_structured",
+        new_callable=AsyncMock,
+        return_value=mock_result,
+    ):
+        await _enrich_batch([c1, c2], db, stats)
+
+    assert stats["enriched"] == 0
+    assert stats["errors"] == 2
+
+
+@pytest.mark.asyncio
+async def test_batch_enrich_empty_batch_queue_returns_none(db):
+    """Line 295: bq.build_batch() returns empty list → return None before calling claude."""
+    from app.services.batch_queue import BatchQueue
+    from app.services.material_enrichment_service import batch_enrich_materials
+
+    _make_card(db, "QUEUED-CARD")
+
+    mock_redis = MagicMock()
+    mock_redis.get.return_value = None
+
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+        patch.object(BatchQueue, "build_batch", return_value=[]),
+    ):
+        result = await batch_enrich_materials(db)
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_process_batch_card_id_parse_value_error(db):
+    """Lines 360-362: custom_id part after '-' is not an integer → error counted."""
+    from app.services.material_enrichment_service import process_material_batch_results
+
+    batch_results = {
+        "mat_enrich-xyz": {
+            "parts": [{"mpn": "X", "description": "x", "category": "other", "lifecycle_status": "active"}]
+        }
+    }
+    mock_redis = MagicMock()
+    mock_redis.get.return_value = b"batch-valueerr"
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+        patch(
+            "app.services.material_enrichment_service.claude_batch_results",
+            new_callable=AsyncMock,
+            return_value=batch_results,
+        ),
+    ):
+        stats = await process_material_batch_results(db)
+
+    assert stats is not None
+    assert stats["errors"] >= 1
+    assert stats["applied"] == 0
+
+
+@pytest.mark.asyncio
+async def test_process_batch_apply_enrichment_raises_exception(db):
+    """Lines 379-381: _apply_enrichment_result raises → error counted, apply continues."""
+    from app.services.material_enrichment_service import process_material_batch_results
+
+    card = _make_card(db, "RAISE-CARD")
+    batch_results = {
+        f"mat_enrich-{card.id}": {
+            "parts": [
+                {
+                    "mpn": "RAISE-CARD",
+                    "description": "A part",
+                    "category": "other",
+                    "lifecycle_status": "active",
+                }
+            ]
+        }
+    }
+    mock_redis = MagicMock()
+    mock_redis.get.return_value = b"batch-raise"
+    with (
+        patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+        patch(
+            "app.services.material_enrichment_service.claude_batch_results",
+            new_callable=AsyncMock,
+            return_value=batch_results,
+        ),
+        patch(
+            "app.services.material_enrichment_service._apply_enrichment_result",
+            side_effect=RuntimeError("apply failed"),
+        ),
+    ):
+        stats = await process_material_batch_results(db)
+
+    assert stats is not None
+    assert stats["errors"] >= 1
+    assert stats["applied"] == 0
+
+
+@pytest.mark.asyncio
+async def test_process_batch_commit_exception_returns_stats(db):
+    """Lines 385-388: db.commit() raises after processing → stats returned, rollback called."""
+    from app.services.material_enrichment_service import process_material_batch_results
+
+    card = _make_card(db, "COMMIT-FAIL-CARD")
+    batch_results = {
+        f"mat_enrich-{card.id}": {
+            "parts": [
+                {
+                    "mpn": "COMMIT-FAIL-CARD",
+                    "description": "A part",
+                    "category": "other",
+                    "lifecycle_status": "active",
+                }
+            ]
+        }
+    }
+    mock_redis = MagicMock()
+    mock_redis.get.return_value = b"batch-commitfail"
+
+    original_commit = db.commit
+    call_count = [0]
+
+    def bad_commit():
+        call_count[0] += 1
+        if call_count[0] == 1:
+            raise Exception("Simulated commit failure")
+        return original_commit()
+
+    db.commit = bad_commit
+    try:
+        with (
+            patch("app.services.material_enrichment_service._get_redis", return_value=mock_redis),
+            patch(
+                "app.services.material_enrichment_service.claude_batch_results",
+                new_callable=AsyncMock,
+                return_value=batch_results,
+            ),
+        ):
+            stats = await process_material_batch_results(db)
+    finally:
+        db.commit = original_commit
+
+    assert stats is not None
+    assert "applied" in stats
