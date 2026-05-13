@@ -55,13 +55,23 @@
            localStorage.setItem('sightings-split', this.splitRatio.toFixed(3));
          }
        },
+       // GET /detail renders cached panel <100ms; POST /refresh runs search in
+       // background and swaps in fresh results when done. clickPending+=2 keeps
+       // the SSE handler suppressed for both legs; X-Rendered-Req-Id correlation
+       // already protects against mid-flight row changes.
        selectReq(id) {
          const store = Alpine.store('sightingSelection');
          this.selectedReqId = id;
          store.selectedReqId = id;
-         store.clickPending += 1;
+         store.clickPending += 2;
          if (window.innerWidth < 1024) { this.mobileDetailOpen = true; }
-         htmx.ajax('POST', '/v2/partials/sightings/' + id + '/refresh', {
+         htmx.ajax('GET', '/v2/partials/sightings/' + id + '/detail', {
+           target: '#sightings-detail',
+           swap: 'innerHTML',
+           indicator: '#sightings-detail-skeleton',
+           headers: { 'X-Click-Req-Id': String(id) },
+         });
+         htmx.ajax('POST', '/v2/partials/sightings/' + id + '/refresh?source=user', {
            target: '#sightings-detail',
            swap: 'innerHTML',
            indicator: '#sightings-detail-skeleton',

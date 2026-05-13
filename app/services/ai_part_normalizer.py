@@ -138,7 +138,7 @@ async def _call_normalizer(parts: list[str]) -> list[dict] | None:
         logger.info("Claude not configured — skipping part normalization")
         return None
     except ClaudeError as e:
-        logger.warning("Claude AI failed for part normalization: %s", e)
+        logger.warning("Claude AI failed for part normalization: {}", e)
         return None
 
     if not result:

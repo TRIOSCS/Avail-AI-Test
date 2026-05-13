@@ -122,7 +122,7 @@ class EmailMiner:
             savepoint.rollback()
         except Exception:
             savepoint.rollback()
-            logger.warning("Unexpected error marking message %s as processed", message_id, exc_info=True)
+            logger.warning("Unexpected error marking message {} as processed", message_id, exc_info=True)
 
     # ── H8: Delta Query helpers ──────────────────────────────────────
 
@@ -346,7 +346,7 @@ class EmailMiner:
                         regex_offer_matches=regex_matches,
                     )
                 except Exception as e:
-                    logger.warning("AI classification skipped for %s: %s", msg["id"], e)
+                    logger.warning("AI classification skipped for {}: {}", msg["id"], e)
 
             # H2: Mark as processed
             self._mark_processed(msg["id"], "mining")

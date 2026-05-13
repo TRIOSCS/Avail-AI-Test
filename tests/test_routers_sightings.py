@@ -287,9 +287,88 @@ class TestSightingsClickPendingCounter:
         assert "Math.max(0, store.clickPending - 1)" in js, "clickPending decrement must clamp at 0 via Math.max"
 
     def test_click_pending_counter_present_in_sightings_list_template(self):
-        """sightings/list.html increments on click and gates SSE on counter > 0."""
+        """sightings/list.html increments on click and gates SSE on counter > 0.
+
+        selectReq() fires both GET /detail (cached panel ~100ms) and POST /refresh
+        (background search), so clickPending must increment by 2 — once per in-flight
+        request targeting #sightings-detail. The htmx:afterRequest listener decrements
+        once per response, returning the counter to 0.
+        """
         from pathlib import Path
 
         html = Path("app/templates/htmx/partials/sightings/list.html").read_text()
-        assert "store.clickPending += 1" in html, "selectReq() must increment clickPending"
+        assert "store.clickPending += 2" in html, (
+            "selectReq() must increment clickPending by 2 (one for /detail, one for /refresh)"
+        )
         assert "store.clickPending > 0" in html, "SSE handler must gate on clickPending > 0"
+
+
+class TestSightingsDetailDoesNotSearch:
+    """GET /detail must NOT run the search pipeline.
+
+    The frontend selectReq() fires GET /detail in parallel with POST /refresh so the
+    cached panel paints in ~100ms while the search runs in the background. If /detail
+    ever started calling search_requirement(), it would defeat the fast-feedback
+    contract and double the search load on every click.
+    """
+
+    def test_sightings_detail_does_not_call_search_requirement(self, client: TestClient, req_with_item: tuple):
+        """GET /detail returns 200 + rendered detail without invoking
+        search_requirement."""
+        _, item = req_with_item
+        with patch("app.search_service.search_requirement", new=AsyncMock()) as mock_search:
+            resp = client.get(
+                f"/v2/partials/sightings/{item.id}/detail",
+                headers={"HX-Request": "true"},
+            )
+        assert resp.status_code == 200
+        assert resp.headers.get("X-Rendered-Req-Id") == str(item.id)
+        mock_search.assert_not_called()
+
+    def test_sightings_refresh_does_call_search_requirement(self, client: TestClient, req_with_item: tuple):
+        """POST /refresh DOES call search_requirement (contract counter-test to
+        /detail).
+
+        Pins the asymmetry the frontend relies on: /detail is fast cached read,
+        /refresh runs the pipeline. Together they form the click-to-refresh
+        pattern in selectReq().
+        """
+        _, item = req_with_item
+        with patch("app.search_service.search_requirement", new=AsyncMock()) as mock_search:
+            with patch("app.routers.sightings.broker") as mock_broker:
+                mock_broker.publish = AsyncMock()
+                resp = client.post(
+                    f"/v2/partials/sightings/{item.id}/refresh?source=user",
+                    headers={"HX-Request": "true"},
+                )
+        assert resp.status_code == 200
+        assert resp.headers.get("X-Rendered-Req-Id") == str(item.id)
+        mock_search.assert_called_once()
+
+
+class TestSightingsListTemplateSelectReqShape:
+    """Static-grep guard: selectReq fires both GET /detail and POST /refresh.
+
+    The earlier single-POST shape blocked the UI for ~6s because every click
+    waited on the full search pipeline. The current shape fires GET /detail
+    (cached, ~100ms) concurrently with POST /refresh?source=user. These
+    static-grep checks ensure neither leg is silently removed.
+    """
+
+    def test_selectreq_fires_detail_get(self):
+        """SelectReq must call htmx.ajax GET /detail."""
+        from pathlib import Path
+
+        html = Path("app/templates/htmx/partials/sightings/list.html").read_text()
+        assert "htmx.ajax('GET', '/v2/partials/sightings/' + id + '/detail'" in html, (
+            "selectReq must fire GET /detail for fast cached paint"
+        )
+
+    def test_selectreq_fires_refresh_post_with_user_source(self):
+        """SelectReq must call htmx.ajax POST /refresh?source=user."""
+        from pathlib import Path
+
+        html = Path("app/templates/htmx/partials/sightings/list.html").read_text()
+        assert "htmx.ajax('POST', '/v2/partials/sightings/' + id + '/refresh?source=user'" in html, (
+            "selectReq must fire POST /refresh?source=user for background search"
+        )

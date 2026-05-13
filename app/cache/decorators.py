@@ -55,13 +55,13 @@ def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | N
             try:
                 cached = get_cached(cache_key)
                 if cached is not None:
-                    logger.debug("Cache HIT: %s", cache_key)
+                    logger.debug("Cache HIT: {}", cache_key)
                     return cached
             except Exception as e:
-                logger.warning("Cache read failed for %s: %s", cache_key, e)
+                logger.warning("Cache read failed for {}: {}", cache_key, e)
 
             # Cache miss — call the real function
-            logger.debug("Cache MISS: %s", cache_key)
+            logger.debug("Cache MISS: {}", cache_key)
             result = func(*args, **kwargs)
 
             # Don't cache error responses
@@ -73,7 +73,7 @@ def cached_endpoint(prefix: str, ttl_hours: float = 4, key_params: list[str] | N
                 try:
                     set_cached(cache_key, result, ttl_days=ttl_days)
                 except Exception as e:
-                    logger.warning("Cache write failed for %s: %s", cache_key, e)
+                    logger.warning("Cache write failed for {}: {}", cache_key, e)
 
             return result
 
@@ -104,7 +104,7 @@ def invalidate_prefix(prefix: str) -> None:
                 if cursor == 0:
                     break
         except Exception as e:
-            logger.warning("Redis prefix invalidation error for %s: %s", prefix, e)
+            logger.warning("Redis prefix invalidation error for {}: {}", prefix, e)
 
     # PostgreSQL: delete by LIKE pattern
     try:
@@ -119,4 +119,4 @@ def invalidate_prefix(prefix: str) -> None:
             )
             db.commit()
     except Exception as e:
-        logger.warning("PG prefix invalidation error for %s: %s", prefix, e)
+        logger.warning("PG prefix invalidation error for {}: {}", prefix, e)

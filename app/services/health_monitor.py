@@ -95,7 +95,7 @@ def _get_connector(source: ApiSource, db: Session):
     try:
         return _get_connector_for_source(source.name, db)
     except Exception:
-        logger.error("Failed to create connector for source '%s'", source.name, exc_info=True)
+        logger.error("Failed to create connector for source '{}'", source.name, exc_info=True)
         return None
 
 

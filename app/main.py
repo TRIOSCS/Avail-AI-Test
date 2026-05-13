@@ -46,7 +46,7 @@ async def lifespan(app):
         if not settings.azure_tenant_id:
             missing.append("AZURE_TENANT_ID")
         if missing:
-            logger.warning("Missing env vars (some features disabled): %s", ", ".join(missing))
+            logger.warning("Missing env vars (some features disabled): {}", ", ".join(missing))
 
     # Sentry error tracking (conditional on DSN being set)
     if settings.sentry_dsn:

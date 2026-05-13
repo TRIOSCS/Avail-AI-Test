@@ -70,13 +70,13 @@ def submit_buy_plan(
         plan.status = BuyPlanStatus.ACTIVE.value
         plan.auto_approved = True
         plan.approved_at = datetime.now(timezone.utc)
-        logger.info("Buy plan %d auto-approved (cost=%.2f)", plan_id, float(plan.total_cost or 0))
+        logger.info("Buy plan {} auto-approved (cost={:.2f})", plan_id, float(plan.total_cost or 0))
         _generate_buyer_tasks(plan, db)
     else:
         plan.status = BuyPlanStatus.PENDING.value
         plan.approval_token = secrets.token_urlsafe(32)
         plan.token_expires_at = datetime.now(timezone.utc) + timedelta(days=30)
-        logger.info("Buy plan %d pending approval (cost=%.2f)", plan_id, float(plan.total_cost or 0))
+        logger.info("Buy plan {} pending approval (cost={:.2f})", plan_id, float(plan.total_cost or 0))
 
     db.flush()
     return plan
@@ -117,12 +117,12 @@ def approve_buy_plan(
         plan.approved_by_id = user.id
         plan.approved_at = now
         plan.approval_notes = notes
-        logger.info("Buy plan %d approved by %s", plan_id, user.email)
+        logger.info("Buy plan {} approved by {}", plan_id, user.email)
         _generate_buyer_tasks(plan, db)
     elif action == "reject":
         plan.status = BuyPlanStatus.DRAFT.value
         plan.approval_notes = notes
-        logger.info("Buy plan %d rejected by %s: %s", plan_id, user.email, notes)
+        logger.info("Buy plan {} rejected by {}: {}", plan_id, user.email, notes)
     else:
         raise ValueError(f"Invalid action: {action}")
 
@@ -164,18 +164,18 @@ def verify_so(
 
     if action == "approve":
         plan.so_status = SOVerificationStatus.APPROVED.value
-        logger.info("SO verified for plan %d by %s", plan_id, user.email)
+        logger.info("SO verified for plan {} by {}", plan_id, user.email)
     elif action == "reject":
         plan.so_status = SOVerificationStatus.REJECTED.value
         plan.so_rejection_note = rejection_note
-        logger.info("SO rejected for plan %d: %s", plan_id, rejection_note)
+        logger.info("SO rejected for plan {}: {}", plan_id, rejection_note)
     elif action == "halt":
         plan.so_status = SOVerificationStatus.REJECTED.value
         plan.so_rejection_note = rejection_note
         plan.status = BuyPlanStatus.HALTED.value
         plan.halted_by_id = user.id
         plan.halted_at = now
-        logger.info("Plan %d HALTED by %s: %s", plan_id, user.email, rejection_note)
+        logger.info("Plan {} HALTED by {}: {}", plan_id, user.email, rejection_note)
     else:
         raise ValueError(f"Invalid SO verification action: {action}")
 
@@ -214,7 +214,7 @@ def confirm_po(
     line.estimated_ship_date = estimated_ship_date
     line.po_confirmed_at = datetime.now(timezone.utc)
     line.status = BuyPlanLineStatus.PENDING_VERIFY.value
-    logger.info("PO %s confirmed for line %d (plan %d)", po_number, line_id, plan_id)
+    logger.info("PO {} confirmed for line {} (plan {})", po_number, line_id, plan_id)
 
     db.flush()
     return line
@@ -253,7 +253,7 @@ def verify_po(
         line.status = BuyPlanLineStatus.VERIFIED.value
         line.po_verified_by_id = user.id
         line.po_verified_at = now
-        logger.info("PO verified for line %d (plan %d)", line_id, plan_id)
+        logger.info("PO verified for line {} (plan {})", line_id, plan_id)
         check_completion(plan_id, db)
     elif action == "reject":
         line.status = BuyPlanLineStatus.AWAITING_PO.value
@@ -261,7 +261,7 @@ def verify_po(
         line.po_number = None
         line.estimated_ship_date = None
         line.po_confirmed_at = None
-        logger.info("PO rejected for line %d: %s", line_id, rejection_note)
+        logger.info("PO rejected for line {}: {}", line_id, rejection_note)
     else:
         raise ValueError(f"Invalid PO verification action: {action}")
 
@@ -302,7 +302,7 @@ def flag_line_issue(
     line.status = BuyPlanLineStatus.ISSUE.value
     line.issue_type = issue_type
     line.issue_note = note
-    logger.info("Issue '%s' flagged on line %d (plan %d)", issue_type, line_id, plan_id)
+    logger.info("Issue '{}' flagged on line {} (plan {})", issue_type, line_id, plan_id)
 
     db.flush()
     return line
@@ -333,7 +333,7 @@ def check_completion(plan_id: int, db: Session) -> BuyPlan:
         plan.status = BuyPlanStatus.COMPLETED.value
         plan.completed_at = datetime.now(timezone.utc)
         plan.case_report = generate_case_report(plan, db)
-        logger.info("Buy plan %d auto-completed (all lines terminal)", plan_id)
+        logger.info("Buy plan {} auto-completed (all lines terminal)", plan_id)
         db.flush()
 
     return plan
@@ -367,7 +367,7 @@ def reset_buy_plan_to_draft(plan_id: int, user: User, db: Session) -> BuyPlan:
     plan.cancellation_reason = None
     plan.updated_at = datetime.now(timezone.utc)
 
-    logger.info("Buy plan %d reset to draft by user %d", plan_id, user.id)
+    logger.info("Buy plan {} reset to draft by user {}", plan_id, user.id)
     return plan
 
 
@@ -523,7 +523,7 @@ def _apply_line_overrides(plan: BuyPlan, overrides: list[dict], db: Session):
     for ovr in overrides:
         line = next((ln for ln in plan.lines if ln.id == ovr["line_id"]), None)
         if not line:
-            logger.warning("Override line_id %d not found in plan %d", ovr["line_id"], plan.id)
+            logger.warning("Override line_id {} not found in plan {}", ovr["line_id"], plan.id)
             continue
 
         if ovr.get("offer_id"):
@@ -905,7 +905,7 @@ async def verify_po_sent_v3(plan: "BuyPlan", db: "Session") -> dict:
                 "sent_at": None,
                 "reason": "no_buyer",
             }
-            logger.debug("PO %s skipped — no buyer assigned (line %d)", line.po_number, line.id)
+            logger.debug("PO {} skipped — no buyer assigned (line {})", line.po_number, line.id)
             continue
 
         # Look up buyer for their azure_id
@@ -917,7 +917,7 @@ async def verify_po_sent_v3(plan: "BuyPlan", db: "Session") -> dict:
                 "sent_at": None,
                 "reason": "buyer_not_found",
             }
-            logger.warning("PO %s skipped — buyer %d not found (line %d)", line.po_number, line.buyer_id, line.id)
+            logger.warning("PO {} skipped — buyer {} not found (line {})", line.po_number, line.buyer_id, line.id)
             continue
 
         try:
@@ -947,7 +947,7 @@ async def verify_po_sent_v3(plan: "BuyPlan", db: "Session") -> dict:
 
                 line.status = BuyPlanLineStatus.VERIFIED.value
                 line.po_verified_at = datetime.now(timezone.utc)
-                logger.info("PO %s verified via Graph — line %d (plan %d)", line.po_number, line.id, plan.id)
+                logger.info("PO {} verified via Graph — line {} (plan {})", line.po_number, line.id, plan.id)
 
                 results[line.po_number] = {
                     "verified": True,
@@ -964,7 +964,7 @@ async def verify_po_sent_v3(plan: "BuyPlan", db: "Session") -> dict:
                 }
 
         except Exception as e:
-            logger.error("Graph API error verifying PO %s (line %d): %s", line.po_number, line.id, e)
+            logger.error("Graph API error verifying PO {} (line {}): {}", line.po_number, line.id, e)
             results[line.po_number] = {
                 "verified": False,
                 "recipient": None,

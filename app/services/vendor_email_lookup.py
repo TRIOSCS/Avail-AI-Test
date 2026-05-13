@@ -59,7 +59,7 @@ async def find_vendors_for_parts(
         needs_enrichment = [v for v in all_vendors.values() if not v.get("emails")]
         if needs_enrichment:
             logger.info(
-                "Enriching %d vendors missing emails out of %d total",
+                "Enriching {} vendors missing emails out of {} total",
                 len(needs_enrichment),
                 len(all_vendors),
             )
@@ -158,7 +158,7 @@ def _query_db_for_part(mpn_upper: str, db: Session) -> list[dict]:
                 "sighting_count": h.times_seen or 1,
             }
     except Exception as e:
-        logger.debug("Material history query failed: %s", e)
+        logger.debug("Material history query failed: {}", e)
 
     # 3. Email intelligence — vendor emails that mentioned this part
     try:
@@ -186,7 +186,7 @@ def _query_db_for_part(mpn_upper: str, db: Session) -> list[dict]:
                 .all()
             )
         except Exception as e:
-            logger.debug("Email intelligence query failed: %s", e)
+            logger.debug("Email intelligence query failed: {}", e)
             ei_rows = []
 
     for ei in ei_rows:
@@ -372,9 +372,9 @@ async def _enrich_vendors_batch(
                 vendor["emails"] = emails
                 vendor["phones"] = phones
             except asyncio.TimeoutError:
-                logger.debug("Enrichment timed out for %s", name)
+                logger.debug("Enrichment timed out for {}", name)
             except Exception as e:
-                logger.debug("Enrichment failed for %s: %s", name, e)
+                logger.debug("Enrichment failed for {}: {}", name, e)
 
     try:
         await asyncio.wait_for(
@@ -386,7 +386,7 @@ async def _enrich_vendors_batch(
         )
         db.commit()
     except asyncio.TimeoutError:
-        logger.info("Batch vendor enrichment hit %ss cap", timeout)
+        logger.info("Batch vendor enrichment hit {}s cap", timeout)
         try:
             db.commit()
         except Exception:

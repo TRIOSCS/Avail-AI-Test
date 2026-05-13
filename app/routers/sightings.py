@@ -679,7 +679,7 @@ async def sightings_refresh(
     try:
         await search_requirement(requirement, db)
     except Exception:
-        logger.warning("Search refresh failed for requirement %s", requirement_id, exc_info=True)
+        logger.warning("Search refresh failed for requirement {}", requirement_id, exc_info=True)
         refresh_failed = True
 
     # search_requirement uses a separate write session — expire stale ORM state
@@ -760,7 +760,7 @@ async def sightings_batch_refresh(
         )
         for (rid, _), outcome in zip(to_search, results):
             if isinstance(outcome, Exception):
-                logger.warning("Batch refresh failed for requirement %s", rid, exc_info=outcome)
+                logger.warning("Batch refresh failed for requirement {}", rid, exc_info=outcome)
                 failed += 1
             else:
                 success += 1
@@ -1065,7 +1065,7 @@ async def sightings_log_activity(
     db.commit()
 
     logger.info(
-        "Sighting activity logged: %s on requirement %d by user %d",
+        "Sighting activity logged: {} on requirement {} by user {}",
         channel,
         requirement_id,
         user.id,

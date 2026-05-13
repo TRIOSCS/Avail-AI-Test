@@ -79,7 +79,7 @@ async def classify_email_ai(
         logger.info("Claude not configured — skipping email classification")
         return None
     except ClaudeError as e:
-        logger.warning("Claude AI failed for email classification: %s", e)
+        logger.warning("Claude AI failed for email classification: {}", e)
         return None
 
     if not result or not isinstance(result, dict):
@@ -250,7 +250,7 @@ async def process_email_intelligence(
             user_id=user_id,
         )
     except Exception as e:
-        logger.warning("Fact extraction failed (non-fatal): %s", e)
+        logger.warning("Fact extraction failed (non-fatal): {}", e)
 
     # Store result
     try:
@@ -274,7 +274,7 @@ async def process_email_intelligence(
             "needs_review": record.needs_review,
         }
     except Exception as e:
-        logger.warning("Failed to store email intelligence: %s", e)
+        logger.warning("Failed to store email intelligence: {}", e)
         db.rollback()
         return None
 
@@ -359,7 +359,7 @@ async def detect_specialties_ai(texts: list[str]) -> list[dict | None]:
             except ClaudeUnavailableError:
                 return None
             except ClaudeError as e:
-                logger.warning("Claude AI failed for specialty detection: %s", e)
+                logger.warning("Claude AI failed for specialty detection: {}", e)
                 return None
 
     results = list(await asyncio.gather(*[_limited(t) for t in texts]))
@@ -448,7 +448,7 @@ async def summarize_thread(token: str, conversation_id: str, db: Session, user_i
             max_items=50,
         )
     except Exception as e:
-        logger.warning("Thread fetch failed for %s: %s", conversation_id, e)
+        logger.warning("Thread fetch failed for {}: {}", conversation_id, e)
         return None
 
     if not messages:
@@ -478,7 +478,7 @@ async def summarize_thread(token: str, conversation_id: str, db: Session, user_i
         logger.info("Claude not configured — skipping thread summary")
         return None
     except _ClaudeError as e:
-        logger.warning("Claude AI failed for thread summary: %s", e)
+        logger.warning("Claude AI failed for thread summary: {}", e)
         return None
 
     if not result or not isinstance(result, dict):

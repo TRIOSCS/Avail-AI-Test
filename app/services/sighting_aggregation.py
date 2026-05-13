@@ -18,7 +18,6 @@ from sqlalchemy.orm import Session
 from app.models.sourcing import Sighting
 from app.models.vendor_sighting_summary import VendorSightingSummary
 from app.models.vendors import VendorCard
-from app.vendor_utils import normalize_vendor_name
 
 
 def _score_to_tier(score: float | None) -> str:
@@ -191,19 +190,20 @@ def rebuild_vendor_summaries_from_sightings(
     requirement_id: int,
     sightings: list,
 ) -> None:
-    """Extract normalized vendor names from sightings and rebuild summaries.
+    """Rebuild all vendor summaries for the requirement when new sightings land.
 
     Silently catches errors so callers don't need try/except boilerplate.
     """
     try:
-        vendor_names = list(
-            {
-                normalize_vendor_name(s.vendor_name)
-                for s in sightings
-                if s.vendor_name and normalize_vendor_name(s.vendor_name)
-            }
-        )
-        if vendor_names:
-            rebuild_vendor_summaries(db, requirement_id, vendor_names=vendor_names)
+        # Skip cheaply when no sighting carries a usable vendor_name; otherwise
+        # always rebuild ALL vendors for the requirement. The previous
+        # implementation passed normalize_vendor_name(...) names into
+        # rebuild_vendor_summaries(vendor_names=...), which filters
+        # Sighting.vendor_name (raw, mixed-case, with suffixes) via IN — so
+        # only vendors whose raw name happened to equal the normalized form
+        # (e.g. "element14") ever produced summary rows.
+        has_vendor = any(s.vendor_name and s.vendor_name.strip() for s in sightings)
+        if has_vendor:
+            rebuild_vendor_summaries(db, requirement_id)
     except Exception:
         logger.warning("Vendor summary rebuild failed for requirement {}", requirement_id, exc_info=True)

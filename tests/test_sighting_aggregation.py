@@ -746,3 +746,72 @@ class TestApproximateQtyLogging:
             results = rebuild_vendor_summaries(db_session, item.id)
 
         assert results[0].estimated_qty == 150
+
+
+# ── rebuild_vendor_summaries_from_sightings — bug regression ─────────
+
+
+class TestRebuildFromSightings:
+    """Regression coverage for the wrapper that re-aggregates after new sightings.
+
+    The original implementation passed normalize_vendor_name(...) names into
+    rebuild_vendor_summaries(vendor_names=...) — but Sighting.vendor_name is
+    stored raw (mixed case, with suffixes), so the IN filter only matched the
+    rare vendor whose raw name happened to equal its normalized form (e.g.
+    "element14"). Every other vendor silently dropped from the summary view.
+    """
+
+    def test_creates_summaries_for_mixed_case_and_suffixed_vendors(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        s1 = _make_sighting(db_session, item.id, vendor_name="DigiKey", unit_price=1.0)
+        s2 = _make_sighting(db_session, item.id, vendor_name="Mouser Electronics, Inc.", unit_price=2.0)
+        s3 = _make_sighting(db_session, item.id, vendor_name="Arrow Electronics", unit_price=3.0)
+        db_session.commit()
+
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai",
+            return_value={"qty": 100, "approximate": False},
+        ):
+            rebuild_vendor_summaries_from_sightings(db_session, item.id, [s1, s2, s3])
+        db_session.commit()
+
+        summaries = db_session.query(VendorSightingSummary).filter_by(requirement_id=item.id).all()
+        # Three distinct vendors → three summary rows (pre-fix: only 0 rows
+        # because no raw name equaled its normalized form).
+        assert len(summaries) == 3
+
+    def test_skips_when_no_sightings_carry_vendor_name(self, db_session: Session, test_user):
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        s = _make_sighting(db_session, item.id, vendor_name="", unit_price=1.0)
+        db_session.commit()
+
+        rebuild_vendor_summaries_from_sightings(db_session, item.id, [s])
+        db_session.commit()
+
+        count = db_session.query(VendorSightingSummary).filter_by(requirement_id=item.id).count()
+        assert count == 0
+
+    def test_rebuilds_all_req_vendors_even_when_only_subset_in_sightings_arg(self, db_session: Session, test_user):
+        """The 'sightings' arg is a trigger signal, not a filter.
+
+        When a new search lands sightings for one vendor on a requirement that already
+        has sightings from other vendors, ALL vendor summaries should be refreshed (so
+        price/qty rollups stay correct across the whole req).
+        """
+        _req, item = _make_requisition_and_requirement(db_session, test_user.id)
+        _make_sighting(db_session, item.id, vendor_name="Arrow Electronics", unit_price=1.0)
+        _make_sighting(db_session, item.id, vendor_name="Mouser", unit_price=2.0)
+        # Only the new "Newark" sighting is passed in
+        s_new = _make_sighting(db_session, item.id, vendor_name="Newark", unit_price=3.0)
+        db_session.commit()
+
+        with patch(
+            "app.services.sighting_aggregation._estimate_qty_with_ai",
+            return_value={"qty": 100, "approximate": False},
+        ):
+            rebuild_vendor_summaries_from_sightings(db_session, item.id, [s_new])
+        db_session.commit()
+
+        summaries = db_session.query(VendorSightingSummary).filter_by(requirement_id=item.id).all()
+        # All three vendors get summary rows, not just the one in the arg.
+        assert len(summaries) == 3

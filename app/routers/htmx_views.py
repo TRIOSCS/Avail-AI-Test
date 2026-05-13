@@ -742,7 +742,7 @@ async def requisition_import_save(
                         if req_obj:
                             asyncio.run(do_search(req_obj, bg_db))
                     except Exception:
-                        logger.warning("Auto-search failed for requirement %s", rid, exc_info=True)
+                        logger.warning("Auto-search failed for requirement {}", rid, exc_info=True)
             finally:
                 bg_db.close()
 
@@ -1068,7 +1068,7 @@ async def requisition_create(
                         if req_obj:
                             asyncio.run(do_search(req_obj, bg_db))
                     except Exception:
-                        logger.warning("Auto-search failed for requirement %s", rid, exc_info=True)
+                        logger.warning("Auto-search failed for requirement {}", rid, exc_info=True)
             finally:
                 bg_db.close()
 
@@ -1172,7 +1172,7 @@ async def add_requirement(
                 if req_obj:
                     asyncio.run(do_search(req_obj, bg_db))
             except Exception:
-                logger.warning("Auto-search failed for requirement %s", requirement_id, exc_info=True)
+                logger.warning("Auto-search failed for requirement {}", requirement_id, exc_info=True)
             finally:
                 bg_db.close()
 
@@ -1223,7 +1223,7 @@ async def requisition_search_all(
                         if req_obj:
                             asyncio.run(do_search(req_obj, bg_db))
                     except Exception:
-                        logger.warning("Manual search failed for requirement %s", rid, exc_info=True)
+                        logger.warning("Manual search failed for requirement {}", rid, exc_info=True)
             finally:
                 bg_db.close()
 
@@ -2506,7 +2506,7 @@ async def ai_cleanup_email(
         )
         cleaned = result.strip() if result else user_text
     except Exception as exc:
-        logger.error("AI cleanup error for req %d: %s", req_id, exc)
+        logger.error("AI cleanup error for req {}: {}", req_id, exc)
         cleaned = user_text
 
     # Return a script that replaces the textarea content with the cleaned text
@@ -2949,7 +2949,7 @@ async def update_requirement(
                 if req_obj:
                     asyncio.run(do_search(req_obj, bg_db))
             except Exception:
-                logger.warning("Auto-search failed for requirement %s", requirement_id, exc_info=True)
+                logger.warning("Auto-search failed for requirement {}", requirement_id, exc_info=True)
             finally:
                 bg_db.close()
 
@@ -8643,7 +8643,7 @@ async def enrich_material(
         await enrich_material_cards([material_id], db)
         db.refresh(mc)
     except Exception as e:
-        logger.warning("Enrichment failed for material %d: %s", material_id, e)
+        logger.warning("Enrichment failed for material {}: {}", material_id, e)
 
     return await material_detail_partial(request, material_id, user, db)
 

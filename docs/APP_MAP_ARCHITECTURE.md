@@ -84,7 +84,8 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
 ### HTMX Conventions
 
 HTMX is the primary client/server interaction layer; the canonical
-click-to-refresh data flow (single POST, `X-Rendered-Req-Id` correlation
+click-to-refresh data flow (parallel GET /detail for cached paint +
+POST /refresh for background search, `X-Rendered-Req-Id` correlation
 header, `?source=user|sse` query-param gate) is documented in
 `APP_MAP_INTERACTIONS.md`. The do/don't rules for imperative
 `htmx.ajax()` calls live in `docs/htmx-conventions.md` and are the

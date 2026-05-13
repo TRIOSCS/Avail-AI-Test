@@ -162,7 +162,7 @@ def heal_orphaned_records(db: Session, batch_size: int = 500) -> dict:
                     )
                 sp.commit()
             except Exception as e:
-                logger.warning("INTEGRITY_HEAL_FAIL: %s id=%s mpn=%s error=%s", entity_type, record.id, mpn, e)
+                logger.warning("INTEGRITY_HEAL_FAIL: {} id={} mpn={} error={}", entity_type, record.id, mpn, e)
                 sp.rollback()
         return count
 
@@ -184,7 +184,7 @@ def heal_orphaned_records(db: Session, batch_size: int = 500) -> dict:
     if any(v > 0 for v in healed.values()):
         db.commit()
         logger.info(
-            "INTEGRITY_HEALED: requirements=%d sightings=%d offers=%d",
+            "INTEGRITY_HEALED: requirements={} sightings={} offers={}",
             healed["requirements"],
             healed["sightings"],
             healed["offers"],
@@ -221,7 +221,7 @@ def clear_dangling_fks(db: Session) -> dict:
     if any(v > 0 for v in cleared.values()):
         db.commit()
         logger.warning(
-            "INTEGRITY_CLEARED_DANGLING: requirements=%d sightings=%d offers=%d",
+            "INTEGRITY_CLEARED_DANGLING: requirements={} sightings={} offers={}",
             cleared["requirements"],
             cleared["sightings"],
             cleared["offers"],
@@ -253,8 +253,8 @@ def run_integrity_check(db: Session) -> dict:
 
     # --- Log check results (structured metrics) ---
     logger.info(
-        "MC_METRIC: action=integrity_check orphaned_req=%d orphaned_sight=%d "
-        "orphaned_offer=%d dangling_total=%d dup_cards=%d vh_dupes=%d",
+        "MC_METRIC: action=integrity_check orphaned_req={} orphaned_sight={} "
+        "orphaned_offer={} dangling_total={} dup_cards={} vh_dupes={}",
         orphaned_req,
         orphaned_sight,
         orphaned_offer,
@@ -268,8 +268,8 @@ def run_integrity_check(db: Session) -> dict:
     else:
         level = "critical" if (total_orphaned > 50 or total_dangling > 0 or dup_cards > 0) else "warning"
         msg = (
-            "INTEGRITY_ALERT: orphaned_req=%d orphaned_sight=%d orphaned_offer=%d "
-            "dangling_req=%d dangling_sight=%d dangling_offer=%d dup_cards=%d vh_dupes=%d"
+            "INTEGRITY_ALERT: orphaned_req={} orphaned_sight={} orphaned_offer={} "
+            "dangling_req={} dangling_sight={} dangling_offer={} dup_cards={} vh_dupes={}"
         )
         args = (
             orphaned_req,
@@ -301,7 +301,7 @@ def run_integrity_check(db: Session) -> dict:
     linkage = _compute_linkage_coverage(db)
     for entity, cov in linkage.items():
         logger.info(
-            "MC_METRIC: action=linkage_pct entity=%s pct=%s total=%d linked=%d",
+            "MC_METRIC: action=linkage_pct entity={} pct={} total={} linked={}",
             entity,
             cov["pct"],
             cov["total"],

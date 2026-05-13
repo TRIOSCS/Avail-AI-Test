@@ -109,7 +109,7 @@ def _get_search_redis():
         )
         _search_redis.ping()
     except Exception as e:
-        logger.warning("Search Redis unavailable, caching disabled: %s", e)
+        logger.warning("Search Redis unavailable, caching disabled: {}", e)
         _search_redis = None
     return _search_redis
 
@@ -133,7 +133,7 @@ def _get_search_cache(key: str) -> tuple[list[dict], list[dict]] | None:
     except redis.RedisError as e:
         logger.error("Redis error reading search cache key {}: {}", key, e)
     except Exception as e:
-        logger.warning("Search cache read failed: %s", e)
+        logger.warning("Search cache read failed: {}", e)
     return None
 
 
@@ -147,7 +147,7 @@ def _set_search_cache(key: str, results: list[dict], source_stats: list[dict]) -
     except redis.RedisError as e:
         logger.error("Redis error writing search cache key {}: {}", key, e)
     except Exception as e:
-        logger.warning("Search cache write failed: %s", e)
+        logger.warning("Search cache write failed: {}", e)
 
 
 def get_all_pns(req: Requirement) -> list[str]:
@@ -213,7 +213,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     try:
         write_req = write_db.get(Requirement, req_id)
         if not write_req:
-            logger.error("Requirement %s not found in write session", req_id)
+            logger.error("Requirement {} not found in write session", req_id)
             return {"sightings": [], "source_stats": source_stats}
 
         succeeded_sources = {
@@ -235,7 +235,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
                     if pn == pns[0] and not primary_card_id:
                         primary_card_id = card.id
             except Exception as e:
-                logger.error("MATERIAL_CARD_UPSERT_FAIL: mpn=%s error=%s", pn, e)
+                logger.error("MATERIAL_CARD_UPSERT_FAIL: mpn={} error={}", pn, e)
                 write_db.rollback()
 
         # Link requirement to its primary material card
@@ -907,7 +907,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         # Merge cached stats with disabled/skipped entries
         cached_stats_map = {s["source"]: s for s in cached_stats}
         source_stats_map.update(cached_stats_map)
-        logger.info("Search cache HIT for %s (%d results)", pns[0] if pns else "?", len(cached_results))
+        logger.info("Search cache HIT for {} ({} results)", pns[0] if pns else "?", len(cached_results))
         return cached_results, list(source_stats_map.values())
 
     # Run ALL connectors × ALL part numbers in parallel.
@@ -932,8 +932,8 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
             return hits
         except Exception as e:
             elapsed_ms = int((time.time() - start) * 1000)
-            logger.error(
-                "Search %s via %s failed (%dms): %s", pn, conn.__class__.__name__, elapsed_ms, e, exc_info=True
+            logger.opt(exception=True).error(
+                "Search {} via {} failed ({}ms): {}", pn, conn.__class__.__name__, elapsed_ms, e
             )
             if source_name:
                 stats_updates.append((source_name, 0, elapsed_ms, str(e)[:500]))
@@ -1014,7 +1014,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
                 src.error_count_24h = (src.error_count_24h or 0) + 1
         db.commit()
     except Exception as e:
-        logger.warning("API source stats update failed: %s", e)
+        logger.warning("API source stats update failed: {}", e)
         db.rollback()
 
     # Flatten and dedupe
@@ -1414,7 +1414,7 @@ def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
     try:
         db.commit()
     except Exception as e:
-        logger.warning("Failed to propagate vendor emails: %s", e)
+        logger.warning("Failed to propagate vendor emails: {}", e)
         db.rollback()
 
 
@@ -1562,7 +1562,7 @@ def _audit_card_created(db: Session, card: MaterialCard) -> None:
             db, material_card_id=card.id, action="created", normalized_mpn=card.normalized_mpn, created_by="system"
         )
     except Exception:
-        logger.warning("Audit log failed for card %s", getattr(card, "normalized_mpn", "unknown"), exc_info=True)
+        logger.warning("Audit log failed for card {}", getattr(card, "normalized_mpn", "unknown"), exc_info=True)
 
 
 def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> MaterialCard | None:
@@ -1583,7 +1583,7 @@ def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> Mate
     if card:
         if manufacturer and not card.manufacturer:
             card.manufacturer = manufacturer
-        logger.debug("MC_METRIC: action=resolved mpn=%s card_id=%d", norm, card.id)
+        logger.debug("MC_METRIC: action=resolved mpn={} card_id={}", norm, card.id)
         return card
 
     display = normalize_mpn(mpn) or mpn.strip()
@@ -1610,16 +1610,16 @@ def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> Mate
         # Re-fetch (unfiltered — may be soft-deleted and needs restoring)
         card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
         if card is None:
-            logger.error("MATERIAL_CARD_RESOLVE_FAIL: card missing after ON CONFLICT for mpn=%s", norm)
+            logger.error("MATERIAL_CARD_RESOLVE_FAIL: card missing after ON CONFLICT for mpn={}", norm)
         elif card.deleted_at is not None:
             # Restore soft-deleted card
             card.deleted_at = None
-            logger.info("MC_METRIC: action=restored mpn=%s card_id=%d", norm, card.id)
+            logger.info("MC_METRIC: action=restored mpn={} card_id={}", norm, card.id)
             _audit_card_created(db, card)
         elif result.rowcount == 0:
-            logger.info("MC_METRIC: action=race_resolved mpn=%s card_id=%d", norm, card.id)
+            logger.info("MC_METRIC: action=race_resolved mpn={} card_id={}", norm, card.id)
         else:
-            logger.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
+            logger.info("MC_METRIC: action=created mpn={} card_id={}", norm, card.id)
             _audit_card_created(db, card)
         return card
     else:
@@ -1630,18 +1630,18 @@ def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> Mate
             card = MaterialCard(normalized_mpn=norm, display_mpn=display, search_count=0, manufacturer=manufacturer)
             db.add(card)
             db.flush()
-            logger.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
+            logger.info("MC_METRIC: action=created mpn={} card_id={}", norm, card.id)
             _audit_card_created(db, card)
             return card
         except IntegrityError:
             db.rollback()
-            logger.info("MC_METRIC: action=race_resolved mpn=%s", norm)
+            logger.info("MC_METRIC: action=race_resolved mpn={}", norm)
             card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
             # Restore if soft-deleted
             if card and card.deleted_at is not None:
                 card.deleted_at = None
                 db.flush()
-                logger.info("MC_METRIC: action=restored mpn=%s card_id=%d", norm, card.id)
+                logger.info("MC_METRIC: action=restored mpn={} card_id={}", norm, card.id)
             return card
 
 
@@ -1778,7 +1778,7 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
                 tag_material_card(card.id, tags_to_apply, db)
                 db.commit()
     except Exception:
-        logger.warning("Tag classification failed for card %s", card.id, exc_info=True)
+        logger.warning("Tag classification failed for card {}", card.id, exc_info=True)
 
     return card
 
@@ -1815,7 +1815,7 @@ async def _schedule_background_enrichment(card_ids: set[int], db: Session) -> No
                             _apply_enrichment_to_card(card, result, session)
                             session.commit()
                 except Exception:
-                    logger.warning("Background enrichment failed for %s", mpn, exc_info=True)
+                    logger.warning("Background enrichment failed for {}", mpn, exc_info=True)
                     session.rollback()
         finally:
             session.close()

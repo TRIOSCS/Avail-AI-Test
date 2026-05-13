@@ -46,7 +46,7 @@ async def _job_sync_teams_calls():
             try:
                 since = datetime.fromisoformat(wm_row.value)
             except ValueError:
-                logger.warning("Corrupted Teams call watermark: %r, falling back to 1-day lookback", wm_row.value)
+                logger.warning("Corrupted Teams call watermark: {!r}, falling back to 1-day lookback", wm_row.value)
 
         users = (
             db.query(User)
@@ -73,7 +73,7 @@ async def _job_sync_teams_calls():
                     max_items=100,
                 )
             except Exception as e:
-                logger.warning("Teams call records fetch failed for %s: %s", user.email, e)
+                logger.warning("Teams call records fetch failed for {}: {}", user.email, e)
                 continue
 
             for record in records:
@@ -113,10 +113,10 @@ async def _job_sync_teams_calls():
         db.commit()
 
         if total_logged:
-            logger.info("Teams call sync: logged %d records for %d users", total_logged, len(users))
+            logger.info("Teams call sync: logged {} records for {} users", total_logged, len(users))
 
     except Exception as e:
-        logger.exception("Teams call records sync failed: %s", e)
+        logger.exception("Teams call records sync failed: {}", e)
         db.rollback()
         raise
     finally:

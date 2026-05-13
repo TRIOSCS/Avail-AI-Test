@@ -919,7 +919,7 @@ def _record_offer_won_history(db: Session, offer: Offer) -> None:
             source_ref=f"offer:{offer.id}",
         )
     except Exception as e:
-        logger.warning("Offer won purchase history recording failed: %s", e)
+        logger.warning("Offer won purchase history recording failed: {}", e)
 
 
 # ── Review Queue — medium-confidence AI-parsed offers ─────────────────

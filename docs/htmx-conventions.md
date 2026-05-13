@@ -34,15 +34,32 @@ stuck-true and silently drops every subsequent SSE refresh.
 See: `app/static/htmx_app.js:200` (afterRequest listener clearing
 clickInFlight for the sightings-detail target regardless of outcome).
 
-### DO NOT: fire a parallel GET for stale data alongside a POST for fresh data
-The split-GET-then-POST pattern (load stale immediately, replace with fresh)
-creates two simultaneous race conditions: response ordering and target
-collisions. Use a single POST and show a skeleton while waiting.
+### DO: fire a fast GET for cached data alongside a POST for fresh data — guarded by X-Rendered-Req-Id
+The click-to-refresh pattern in `selectReq`
+(`app/templates/htmx/partials/sightings/list.html`) fires:
+1. `GET /v2/partials/sightings/{id}/detail` — paints the cached
+   `VendorSightingSummary` panel in ~100ms.
+2. `POST /v2/partials/sightings/{id}/refresh?source=user` — runs the full
+   search pipeline in the background; its rendered HTML swaps in and
+   replaces the cached version when it returns.
 
-See: this anti-pattern was deleted in commit `7b0cb7b0` ("fix(htmx):
-structural fix for click-to-refresh — single POST, stale-response guard,
-source-aware toast"). The current implementation issues a single POST in
-`selectReq` (`app/templates/htmx/partials/sightings/list.html:64`).
+Both responses target `#sightings-detail` and echo `X-Rendered-Req-Id`. The
+`htmx:beforeSwap` correlation guard in `app/static/htmx_app.js` drops any
+swap whose header doesn't match the currently-selected row, so clicking a
+different row mid-flight cannot clobber the new panel with a stale response.
+
+`selectReq` increments `$store.sightingSelection.clickPending` by **2** (one
+per in-flight request); the `htmx:afterRequest` listener decrements once per
+`#sightings-detail` response so SSE suppression stays active until both
+legs complete.
+
+Historical note: commit `7b0cb7b0` ("fix(htmx): structural fix for
+click-to-refresh — single POST, stale-response guard, source-aware toast")
+collapsed an earlier dual-fetch into a single POST because the prior
+implementation lacked the `X-Rendered-Req-Id` correlation guard and the
+`clickPending` counter. With both in place, restoring the parallel GET is
+safe and necessary — the single-POST shape forced every click to wait on
+the full ~6s pipeline before any panel paint.
 
 ### DO NOT: publish SSE events from a handler that was itself triggered by an SSE event
 If an SSE event fires a POST that publishes a new SSE event, and the client

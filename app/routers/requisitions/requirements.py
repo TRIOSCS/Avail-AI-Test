@@ -242,11 +242,11 @@ def _enqueue_ics_nc_batch(requirement_ids: list[int]):
             try:
                 enqueue_for_nc_search(rid, bg_db)
             except Exception:
-                logger.warning("NC enqueue failed for requirement %s", rid, exc_info=True)
+                logger.warning("NC enqueue failed for requirement {}", rid, exc_info=True)
             try:
                 enqueue_for_ics_search(rid, bg_db)
             except Exception:
-                logger.warning("ICS enqueue failed for requirement %s", rid, exc_info=True)
+                logger.warning("ICS enqueue failed for requirement {}", rid, exc_info=True)
     finally:
         bg_db.close()
 
@@ -405,7 +405,7 @@ async def add_requirements(
             nested.commit()
         except Exception:
             nested.rollback()
-            logger.warning("resolve_material_card failed for %s", parsed.primary_mpn, exc_info=True)
+            logger.warning("resolve_material_card failed for {}", parsed.primary_mpn, exc_info=True)
 
         r = Requirement(
             requisition_id=req_id,
@@ -460,7 +460,7 @@ async def add_requirements(
                 try:
                     enqueue_for_nc_search(rid, bg_db)
                 except Exception:
-                    logger.warning("NC enqueue failed for requirement %s", rid, exc_info=True)
+                    logger.warning("NC enqueue failed for requirement {}", rid, exc_info=True)
         finally:
             bg_db.close()
 
@@ -472,7 +472,7 @@ async def add_requirements(
                 try:
                     enqueue_for_ics_search(rid, bg_db)
                 except Exception:
-                    logger.warning("ICS enqueue failed for requirement %s", rid, exc_info=True)
+                    logger.warning("ICS enqueue failed for requirement {}", rid, exc_info=True)
         finally:
             bg_db.close()
 
@@ -492,7 +492,7 @@ async def add_requirements(
                     if req_obj:
                         asyncio.run(do_search(req_obj, bg_db))
                 except Exception:
-                    logger.warning("Auto-search failed for requirement %s", rid, exc_info=True)
+                    logger.warning("Auto-search failed for requirement {}", rid, exc_info=True)
         finally:
             bg_db.close()
 
@@ -672,7 +672,7 @@ async def upload_requirements(
                 try:  # pragma: no cover
                     enqueue_for_nc_search(r_item.id, bg_db)
                 except Exception:  # pragma: no cover
-                    logger.warning("NC enqueue failed for requirement %s", r_item.id, exc_info=True)
+                    logger.warning("NC enqueue failed for requirement {}", r_item.id, exc_info=True)
         finally:
             bg_db.close()
 
@@ -735,7 +735,7 @@ async def update_requirement(
         except Exception:
             nested.rollback()
             r.material_card_id = None
-            logger.warning("resolve_material_card failed for %s", data.primary_mpn, exc_info=True)
+            logger.warning("resolve_material_card failed for {}", data.primary_mpn, exc_info=True)
     if data.target_qty is not None:
         r.target_qty = data.target_qty
     if data.substitutes is not None:
@@ -1276,7 +1276,7 @@ async def import_stock_list(
         db.commit()
     except Exception:
         db.rollback()
-        logger.exception("Stock import failed for requisition %s", req_id)
+        logger.exception("Stock import failed for requisition {}", req_id)
         raise HTTPException(500, "Stock import failed — no data was saved")
     return {"imported_rows": imported, "matched_sightings": matched}
 

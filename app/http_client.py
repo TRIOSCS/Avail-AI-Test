@@ -42,8 +42,8 @@ async def close_clients():
     try:
         await http.aclose()
     except RuntimeError as e:
-        logger.debug("http client close RuntimeError (expected during shutdown): %s", e)
+        logger.debug("http client close RuntimeError (expected during shutdown): {}", e)
     try:
         await http_redirect.aclose()
     except RuntimeError as e:
-        logger.debug("http_redirect client close RuntimeError (expected during shutdown): %s", e)
+        logger.debug("http_redirect client close RuntimeError (expected during shutdown): {}", e)

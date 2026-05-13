@@ -55,9 +55,9 @@ def _get_redis():
             retry_on_timeout=True,
         )
         _redis_client.ping()
-        logger.info("Redis cache connected: %s", settings.redis_url)
+        logger.info("Redis cache connected: {}", settings.redis_url)
     except Exception as e:
-        logger.warning("Redis unavailable, falling back to PostgreSQL cache: %s", e)
+        logger.warning("Redis unavailable, falling back to PostgreSQL cache: {}", e)
         _redis_client = None
 
     return _redis_client
@@ -77,7 +77,7 @@ def get_cached(cache_key: str) -> dict | None:
                 return json.loads(data)
             return None
         except Exception as e:
-            logger.warning("Redis read error for %s: %s", cache_key, e)
+            logger.warning("Redis read error for {}: {}", cache_key, e)
 
     # Fall back to PostgreSQL
     try:
@@ -94,7 +94,7 @@ def get_cached(cache_key: str) -> dict | None:
             if row:
                 return row[0]  # JSONB column returns as dict
     except Exception as e:
-        logger.warning("Cache read error for %s: %s", cache_key, e)
+        logger.warning("Cache read error for {}: {}", cache_key, e)
     return None
 
 
@@ -109,7 +109,7 @@ def set_cached(cache_key: str, data: dict, ttl_days: float = 7) -> None:
             r.setex(f"{_REDIS_PREFIX}{cache_key}", ttl_seconds, json.dumps(data))
             return  # Success — skip PG write
         except Exception as e:
-            logger.warning("Redis write error for %s: %s", cache_key, e)
+            logger.warning("Redis write error for {}: {}", cache_key, e)
 
     # Fall back to PostgreSQL
     try:
@@ -134,7 +134,7 @@ def set_cached(cache_key: str, data: dict, ttl_days: float = 7) -> None:
             )
             db.commit()
     except Exception as e:
-        logger.warning("Cache write error for %s: %s", cache_key, e)
+        logger.warning("Cache write error for {}: {}", cache_key, e)
 
 
 def cleanup_expired() -> int:
@@ -165,9 +165,9 @@ def cleanup_expired() -> int:
                 if result.rowcount < BATCH_SIZE:
                     break
             if count:
-                logger.info("Cache cleanup: removed %d expired entries from PostgreSQL", count)
+                logger.info("Cache cleanup: removed {} expired entries from PostgreSQL", count)
     except Exception as e:
-        logger.warning("Cache cleanup error: %s", e)
+        logger.warning("Cache cleanup error: {}", e)
 
     # Redis handles expiration automatically via TTL — no cleanup needed
     return count

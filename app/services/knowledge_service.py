@@ -551,7 +551,7 @@ async def generate_insights(db: Session, requisition_id: int) -> list[KnowledgeE
         logger.info("Claude not configured — skipping insight generation")
         return []
     except ClaudeError as e:
-        logger.warning("Claude AI failed for insight generation: %s", e)
+        logger.warning("Claude AI failed for insight generation: {}", e)
         return []
 
     if not result or "insights" not in result:
@@ -987,7 +987,7 @@ async def generate_mpn_insights(db: Session, mpn: str) -> list[KnowledgeEntry]:
         logger.info("Claude not configured — skipping MPN insight generation")
         return []
     except ClaudeError as e:
-        logger.warning("Claude AI failed for MPN insight generation: %s", e)
+        logger.warning("Claude AI failed for MPN insight generation: {}", e)
         return []
 
     if not result or "insights" not in result:
@@ -1049,7 +1049,7 @@ async def generate_vendor_insights(db: Session, vendor_card_id: int) -> list[Kno
         logger.info("Claude not configured — skipping vendor insight generation")
         return []
     except ClaudeError as e:
-        logger.warning("Claude AI failed for vendor insight generation: %s", e)
+        logger.warning("Claude AI failed for vendor insight generation: {}", e)
         return []
 
     if not result or "insights" not in result:
@@ -1111,7 +1111,7 @@ async def generate_pipeline_insights(db: Session) -> list[KnowledgeEntry]:
         logger.info("Claude not configured — skipping pipeline insight generation")
         return []
     except ClaudeError as e:
-        logger.warning("Claude AI failed for pipeline insight generation: %s", e)
+        logger.warning("Claude AI failed for pipeline insight generation: {}", e)
         return []
 
     if not result or "insights" not in result:
@@ -1173,7 +1173,7 @@ async def generate_company_insights(db: Session, company_id: int) -> list[Knowle
         logger.info("Claude not configured — skipping company insight generation")
         return []
     except ClaudeError as e:
-        logger.warning("Claude AI failed for company insight generation: %s", e)
+        logger.warning("Claude AI failed for company insight generation: {}", e)
         return []
 
     if not result or "insights" not in result:

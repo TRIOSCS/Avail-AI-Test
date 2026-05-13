@@ -89,7 +89,7 @@ def process_inbound_email_contact(
         if sig_data and sig_data.get("confidence", 0) > 0:
             cache_signature_extract(db, email_lower, sig_data)
     except Exception as e:
-        logger.warning("Signature extraction failed for %s: %s", email_lower, e)
+        logger.warning("Signature extraction failed for {}: {}", email_lower, e)
 
     # 2. Find matching VendorCard by domain
     card = db.query(VendorCard).filter(VendorCard.domain == domain).first()
@@ -161,7 +161,7 @@ def process_inbound_email_contact(
         try:
             db.flush()
         except sqlalchemy.exc.IntegrityError as e:
-            logger.warning("VendorContact flush conflict for %s: %s", email_lower, e)
+            logger.warning("VendorContact flush conflict for {}: {}", email_lower, e)
             db.rollback()
             return None
 
@@ -186,7 +186,7 @@ def process_inbound_email_contact(
     try:
         db.flush()
     except sqlalchemy.exc.SQLAlchemyError as e:
-        logger.warning("ActivityLog flush error: %s", e)
+        logger.warning("ActivityLog flush error: {}", e)
         db.rollback()
 
     return vc
@@ -270,7 +270,7 @@ def log_pipeline_event(
     try:
         db.flush()
     except sqlalchemy.exc.SQLAlchemyError as e:
-        logger.warning("Pipeline event flush error: %s", e)
+        logger.warning("Pipeline event flush error: {}", e)
         db.rollback()
         return None
 
@@ -531,7 +531,7 @@ def compute_all_contact_scores(db: Session) -> dict:
                 db.flush()
                 batch = []
             except sqlalchemy.exc.SQLAlchemyError as e:
-                logger.warning("Batch score flush error: %s", e)
+                logger.warning("Batch score flush error: {}", e)
                 db.rollback()
                 skipped += len(batch)
                 batch = []
@@ -541,14 +541,14 @@ def compute_all_contact_scores(db: Session) -> dict:
         try:
             db.flush()
         except sqlalchemy.exc.SQLAlchemyError as e:
-            logger.warning("Final score flush error: %s", e)
+            logger.warning("Final score flush error: {}", e)
             db.rollback()
             skipped += len(batch)
 
     try:
         db.commit()
     except sqlalchemy.exc.SQLAlchemyError as e:
-        logger.error("Score commit error: %s", e)
+        logger.error("Score commit error: {}", e)
         db.rollback()
 
     return {"updated": updated, "skipped": skipped}
@@ -626,7 +626,7 @@ def generate_contact_nudges(db: Session, vendor_card_id: int) -> list[dict]:
         try:
             nudges = _enrich_nudges_with_ai(db, nudges, vendor_card_id)
         except Exception as e:
-            logger.warning("Claude nudge enrichment skipped: %s", e)
+            logger.warning("Claude nudge enrichment skipped: {}", e)
 
     return nudges
 
@@ -674,7 +674,7 @@ def _enrich_nudges_with_ai(db: Session, nudges: list[dict], vendor_card_id: int)
             if result and isinstance(result, dict) and result.get("message"):
                 nudge["message"] = result["message"]
         except Exception as e:
-            logger.warning("AI nudge generation failed, using template: %s", e)
+            logger.warning("AI nudge generation failed, using template: {}", e)
 
     return nudges
 
@@ -741,7 +741,7 @@ def generate_contact_summary(db: Session, vendor_card_id: int, contact_id: int) 
         if result:
             return result
     except Exception as e:
-        logger.warning("AI summary failed: %s", e)
+        logger.warning("AI summary failed: {}", e)
 
     # Fallback: template-based summary
     trend_desc = {

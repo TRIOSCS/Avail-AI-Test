@@ -99,6 +99,14 @@ search_service.py (orchestrator)
     |       +---> DB: UPSERT sourcing_leads + lead_evidence
     |
     +---> sighting_aggregation.py --> DB: UPSERT vendor_sighting_summary
+    |       +---> rebuild_vendor_summaries_from_sightings() is a TRIGGER, not
+    |             a filter — when new sightings land, it always rebuilds ALL
+    |             vendor summaries for the requirement (never a subset). The
+    |             `sightings` arg only signals "do anything if at least one
+    |             carries a vendor_name"; the function then aggregates from
+    |             the live Sighting rows for that requirement_id. Passing a
+    |             normalized vendor_names subset would mismatch the raw
+    |             Sighting.vendor_name column and silently produce zero rows.
     |
     NOTE: Sightings page MPN chips link to material card detail pages
           when a MaterialCard exists. The sightings router
@@ -635,18 +643,39 @@ USER clicks a sightings row
 Alpine selectReq() in partials/sightings/list.html
     |
     +---> $store.sightingSelection.selectedReqId = <id>
-    +---> $store.sightingSelection.clickPending++
+    +---> $store.sightingSelection.clickPending += 2
+    |     -- one in-flight slot per request below; SSE handler stays
+    |        suppressed until both legs decrement back to 0.
     |
-    +---> htmx.ajax('POST', '/v2/partials/sightings/refresh', {
+    +---> htmx.ajax('GET', '/v2/partials/sightings/<id>/detail', {
     |         target: '#sightings-detail',
     |         swap:   'innerHTML',
     |         indicator: '#sightings-detail-skeleton',
-    |         values: { requirement_id: <id> }
+    |         headers: { 'X-Click-Req-Id': '<id>' }
     |     })
-    |     -- single POST, no parallel GET. The skeleton shows during flight.
+    |     -- LEG A: cached panel from VendorSightingSummary in ~100ms.
+    |        No search runs. Paints immediately so the UI is never blocked.
+    |
+    +---> htmx.ajax('POST', '/v2/partials/sightings/<id>/refresh?source=user', {
+    |         target: '#sightings-detail',
+    |         swap:   'innerHTML',
+    |         indicator: '#sightings-detail-skeleton',
+    |         headers: { 'X-Click-Req-Id': '<id>' }
+    |     })
+    |     -- LEG B: fires concurrently with LEG A. Runs the full connector
+    |        fan-out and swaps the fresh result in when it returns,
+    |        replacing the cached panel. X-Rendered-Req-Id correlation
+    |        protects against mid-flight row changes.
     |
     v
-SERVER: sightings_refresh(source="user", ...) [app/routers/sightings.py]
+SERVER (LEG A): sightings_detail(...) [app/routers/sightings.py]
+    |
+    +---> Reads cached VendorSightingSummary rows; renders detail partial.
+    +---> resp.headers["X-Rendered-Req-Id"] = str(requirement_id).
+    +---> Does NOT call search_requirement (pinned by tests).
+    |
+    v
+SERVER (LEG B): sightings_refresh(source="user", ...) [app/routers/sightings.py]
     |
     +---> search_requirement() runs the full connector fan-out
     |       (subject to rate-guard cooldown — skipped if recent)

@@ -49,7 +49,7 @@ def auto_progress_status(
     # Validate the transition is allowed (no raise — returns bool)
     if not validate_transition("requirement", current, target_status, raise_on_invalid=False):
         logger.warning(
-            "Auto-progress blocked: %s → %s not a valid transition",
+            "Auto-progress blocked: {} → {} not a valid transition",
             current,
             target_status,
         )
@@ -71,7 +71,7 @@ def auto_progress_status(
     )
 
     logger.info(
-        "Auto-progressed requirement %d: %s → %s",
+        "Auto-progressed requirement {}: {} → {}",
         requirement.id,
         old_status,
         target_status,

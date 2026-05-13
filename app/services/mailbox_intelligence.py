@@ -31,11 +31,11 @@ async def fetch_and_store_mailbox_settings(token: str, user, db: Session) -> dic
             params={"$select": "timeZone,workingHours,automaticRepliesSetting"},
         )
     except Exception as e:
-        logger.warning("Failed to fetch mailbox settings for %s: %s", user.email, e)
+        logger.warning("Failed to fetch mailbox settings for {}: {}", user.email, e)
         return None
 
     if not data or "error" in data:
-        logger.debug("Mailbox settings empty or error for %s", user.email)
+        logger.debug("Mailbox settings empty or error for {}", user.email)
         return None
 
     # Extract timezone
@@ -67,7 +67,7 @@ async def fetch_and_store_mailbox_settings(token: str, user, db: Session) -> dic
     result["auto_reply_status"] = auto_reply_status
 
     logger.info(
-        "Mailbox settings for %s: tz=%s, hours=%s-%s, auto_reply=%s",
+        "Mailbox settings for {}: tz={}, hours={}-{}, auto_reply={}",
         user.email,
         user.timezone,
         user.working_hours_start,
