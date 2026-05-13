@@ -242,9 +242,11 @@ Replace with `db.query(User).filter(User.id.in_(buyer_ids)).all()`.
 
 ## 5. TEST STATUS
 
-Tests are currently running. Summary will be appended when complete.
+**Result: 384 passed, 0 failed, 0 errors in 12.60s**
 
-### Known test file inventory (11 files, ~7,400 lines):
+All 11 test files run cleanly. No missing files, no broken imports after cleanup.
+
+### Test file inventory (11 files, ~7,400 lines):
 
 | File | Lines | Coverage |
 |---|---|---|
