@@ -230,18 +230,16 @@ class TestSightingsClickPendingCounter:
         assert "Math.max(0, store.clickPending - 1)" in js, "clickPending decrement must clamp at 0 via Math.max"
 
     def test_click_pending_counter_present_in_sightings_list_template(self):
-        """sightings/list.html increments on click and gates SSE on counter > 0.
+        """SelectReq fires ONE request (GET /detail), so the counter increments by 1.
 
-        selectReq() fires both GET /detail (cached panel ~100ms) and POST /refresh
-        (background search), so clickPending must increment by 2 — once per in-flight
-        request targeting #sightings-detail. The htmx:afterRequest listener decrements
-        once per response, returning the counter to 0.
+        SSE handler still consults it to suppress background refreshes while a user
+        click is in flight.
         """
         from pathlib import Path
 
         html = Path("app/templates/htmx/partials/sightings/list.html").read_text()
-        assert "store.clickPending += 2" in html, (
-            "selectReq() must increment clickPending by 2 (one for /detail, one for /refresh)"
+        assert "store.clickPending += 1" in html, (
+            "selectReq() must increment clickPending by 1 (one GET /detail; row click is read-only)"
         )
         assert "store.clickPending > 0" in html, "SSE handler must gate on clickPending > 0"
 
@@ -293,12 +291,11 @@ class TestSightingsDetailDoesNotSearch:
 
 
 class TestSightingsListTemplateSelectReqShape:
-    """Static-grep guard: selectReq fires both GET /detail and POST /refresh.
+    """Row click on /v2/sightings is read-only: fires GET /detail only.
 
-    The earlier single-POST shape blocked the UI for ~6s because every click
-    waited on the full search pipeline. The current shape fires GET /detail
-    (cached, ~100ms) concurrently with POST /refresh?source=user. These
-    static-grep checks ensure neither leg is silently removed.
+    The only way to trigger a connector search is the per-row refresh icon (table.html)
+    or the detail panel's "Search" button (m.search_button in _macros.html). Both POST
+    /refresh which is gated by the 48h per-MPN cooldown enforced in search_requirement.
     """
 
     def test_selectreq_fires_detail_get(self):
@@ -310,14 +307,20 @@ class TestSightingsListTemplateSelectReqShape:
             "selectReq must fire GET /detail for fast cached paint"
         )
 
-    def test_selectreq_fires_refresh_post_with_user_source(self):
-        """SelectReq must call htmx.ajax POST /refresh?source=user."""
+    def test_selectreq_does_not_fire_refresh_post(self):
+        """SelectReq must NOT fire POST /refresh.
+
+        The detail panel's m.search_button and the per-row refresh icon are the only
+        places that POST /refresh — selectReq must not.
+        """
         from pathlib import Path
 
         html = Path("app/templates/htmx/partials/sightings/list.html").read_text()
-        assert "htmx.ajax('POST', '/v2/partials/sightings/' + id + '/refresh?source=user'" in html, (
-            "selectReq must fire POST /refresh?source=user for background search"
-        )
+        # Scope the check to the selectReq function body via a static slice.
+        select_req_start = html.index("selectReq(id) {")
+        select_req_end = html.index("closeMobileDetail()", select_req_start)
+        select_req_body = html[select_req_start:select_req_end]
+        assert "/refresh" not in select_req_body, "selectReq must not POST /refresh — row click is read-only"
 
 
 class TestCrossMpnSightingVisibility:

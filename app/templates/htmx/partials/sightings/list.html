@@ -55,23 +55,18 @@
            localStorage.setItem('sightings-split', this.splitRatio.toFixed(3));
          }
        },
-       // GET /detail renders cached panel <100ms; POST /refresh runs search in
-       // background and swaps in fresh results when done. clickPending+=2 keeps
-       // the SSE handler suppressed for both legs; X-Rendered-Req-Id correlation
-       // already protects against mid-flight row changes.
+       // Row click is read-only: GET /detail renders the cached panel. The
+       // only way to fire a connector search is the per-row refresh icon
+       // (table.html) or the "Search" button in the detail panel header
+       // (_macros.html::search_button). Both POST /v2/.../refresh which is
+       // gated by the 48h per-MPN cooldown enforced in search_requirement.
        selectReq(id) {
          const store = Alpine.store('sightingSelection');
          this.selectedReqId = id;
          store.selectedReqId = id;
-         store.clickPending += 2;
+         store.clickPending += 1;
          if (window.innerWidth < 1024) { this.mobileDetailOpen = true; }
          htmx.ajax('GET', '/v2/partials/sightings/' + id + '/detail', {
-           target: '#sightings-detail',
-           swap: 'innerHTML',
-           indicator: '#sightings-detail-skeleton',
-           headers: { 'X-Click-Req-Id': String(id) },
-         });
-         htmx.ajax('POST', '/v2/partials/sightings/' + id + '/refresh?source=user', {
            target: '#sightings-detail',
            swap: 'innerHTML',
            indicator: '#sightings-detail-skeleton',
