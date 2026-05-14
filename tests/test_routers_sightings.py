@@ -1,9 +1,11 @@
 """test_routers_sightings.py — Tests for sightings refresh structural fix.
 
 Covers the click-to-refresh structural fix:
-- source="sse" suppresses rate-guard toast and broker.publish
-- source="user" (default) emits toast and publishes broker event
+- source="sse" suppresses broker.publish to prevent self-trigger loops
+- source="user" (default) publishes broker event and emits per-MPN toast
 - X-Rendered-Req-Id header echoed on detail and refresh responses
+- Per-MPN cooldown (48h, MaterialCard-level) replaces the prior 5-min
+  per-requirement cooldown
 
 Called by: pytest
 Depends on: app/routers/sightings.py, conftest.py fixtures
@@ -50,47 +52,17 @@ def req_with_item(db_session: Session, test_user: User) -> tuple:
 
 
 class TestSightingsRefreshSourceParam:
-    """Source=sse vs source=user (default) behavior on rate-guard path."""
-
-    def test_sightings_refresh_sse_source_suppresses_toast(
-        self, client: TestClient, req_with_item: tuple, db_session: Session
-    ):
-        """Within cooldown, POST ?source=sse → 200, no HX-Trigger header."""
-        _, item = req_with_item
-        # Force rate-guard path: searched 10 seconds ago
-        item.last_searched_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=10)
-        db_session.commit()
-
-        resp = client.post(
-            f"/v2/partials/sightings/{item.id}/refresh?source=sse",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "HX-Trigger" not in resp.headers
-
-    def test_sightings_refresh_user_source_emits_toast(
-        self, client: TestClient, req_with_item: tuple, db_session: Session
-    ):
-        """Within cooldown, POST without source → 200, HX-Trigger contains showToast."""
-        _, item = req_with_item
-        item.last_searched_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=10)
-        db_session.commit()
-
-        resp = client.post(
-            f"/v2/partials/sightings/{item.id}/refresh",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "HX-Trigger" in resp.headers
-        assert "showToast" in resp.headers["HX-Trigger"]
+    """Source=sse vs source=user (default) behavior."""
 
     def test_sightings_refresh_sse_skips_broker_publish(self, client: TestClient, req_with_item: tuple):
-        """Outside cooldown, POST ?source=sse → broker.publish NOT called."""
+        """POST ?source=sse → broker.publish NOT called."""
         _, item = req_with_item
-        # No last_searched_at → outside cooldown
         with patch("app.routers.sightings.broker") as mock_broker:
             mock_broker.publish = AsyncMock()
-            with patch("app.search_service.search_requirement", new=AsyncMock()):
+            with patch(
+                "app.search_service.search_requirement",
+                new=AsyncMock(return_value={"sightings": [], "source_stats": [], "mpn_results": {}}),
+            ):
                 resp = client.post(
                     f"/v2/partials/sightings/{item.id}/refresh?source=sse",
                     headers={"HX-Request": "true"},
@@ -99,12 +71,14 @@ class TestSightingsRefreshSourceParam:
             mock_broker.publish.assert_not_called()
 
     def test_sightings_refresh_user_calls_broker_publish(self, client: TestClient, req_with_item: tuple):
-        """Outside cooldown, POST without source → broker.publish called once with
-        sighting-updated."""
+        """POST without source → broker.publish called once with sighting-updated."""
         _, item = req_with_item
         with patch("app.routers.sightings.broker") as mock_broker:
             mock_broker.publish = AsyncMock()
-            with patch("app.search_service.search_requirement", new=AsyncMock()):
+            with patch(
+                "app.search_service.search_requirement",
+                new=AsyncMock(return_value={"sightings": [], "source_stats": [], "mpn_results": {}}),
+            ):
                 resp = client.post(
                     f"/v2/partials/sightings/{item.id}/refresh",
                     headers={"HX-Request": "true"},
@@ -122,24 +96,13 @@ class TestSightingsRenderedReqIdHeader:
     def test_sightings_refresh_echoes_req_id_header(
         self, client: TestClient, req_with_item: tuple, db_session: Session
     ):
-        """Both rate-guard and normal paths echo X-Rendered-Req-Id matching
-        str(req_id)."""
+        """POST /refresh response carries X-Rendered-Req-Id matching str(req_id)."""
         _, item = req_with_item
 
-        # Rate-guard path
-        item.last_searched_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=10)
-        db_session.commit()
-        resp_guard = client.post(
-            f"/v2/partials/sightings/{item.id}/refresh",
-            headers={"HX-Request": "true"},
-        )
-        assert resp_guard.status_code == 200
-        assert resp_guard.headers.get("X-Rendered-Req-Id") == str(item.id)
-
-        # Normal path
-        item.last_searched_at = None
-        db_session.commit()
-        with patch("app.search_service.search_requirement", new=AsyncMock()):
+        with patch(
+            "app.search_service.search_requirement",
+            new=AsyncMock(return_value={"sightings": [], "source_stats": [], "mpn_results": {}}),
+        ):
             resp_normal = client.post(
                 f"/v2/partials/sightings/{item.id}/refresh",
                 headers={"HX-Request": "true"},
@@ -152,26 +115,6 @@ class TestSightingsRenderedReqIdHeader:
         _, item = req_with_item
         resp = client.get(
             f"/v2/partials/sightings/{item.id}/detail",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert resp.headers.get("X-Rendered-Req-Id") == str(item.id)
-
-    def test_sightings_refresh_within_cooldown_echoes_req_id_header(
-        self, client: TestClient, req_with_item: tuple, db_session: Session
-    ):
-        """Rate-limited (cooldown) path explicitly returns X-Rendered-Req-Id.
-
-        Pins the contract that the header is set even when the search is
-        skipped — the detail endpoint sets it once on every response and
-        sightings_refresh inherits via `await sightings_detail(...)`.
-        """
-        _, item = req_with_item
-        item.last_searched_at = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(seconds=10)
-        db_session.commit()
-
-        resp = client.post(
-            f"/v2/partials/sightings/{item.id}/refresh",
             headers={"HX-Request": "true"},
         )
         assert resp.status_code == 200
@@ -334,7 +277,10 @@ class TestSightingsDetailDoesNotSearch:
         pattern in selectReq().
         """
         _, item = req_with_item
-        with patch("app.search_service.search_requirement", new=AsyncMock()) as mock_search:
+        with patch(
+            "app.search_service.search_requirement",
+            new=AsyncMock(return_value={"sightings": [], "source_stats": [], "mpn_results": {}}),
+        ) as mock_search:
             with patch("app.routers.sightings.broker") as mock_broker:
                 mock_broker.publish = AsyncMock()
                 resp = client.post(
@@ -459,3 +405,95 @@ class TestCrossMpnSightingVisibility:
         resp = client.get(f"/v2/partials/sightings/{item2.id}/detail")
         assert resp.status_code == 200
         assert "digikey" in resp.text.lower()
+
+
+class TestRefreshPerMpnToast:
+    """Per-MPN toast on /refresh describes how many MPNs were searched vs cached.
+
+    Replaces the prior 5-minute per-requirement cooldown toast. The 48h
+    per-MPN cooldown lives in `search_requirement` via
+    MaterialCard.last_searched_at; this endpoint just surfaces the result.
+    """
+
+    def test_toast_describes_searched_and_cached_mpns(self, client: TestClient, db_session: Session, test_user: User):
+        from app.models import MaterialCard, Requirement, Requisition
+        from app.utils.normalization import normalize_mpn_key
+
+        now = datetime.now(timezone.utc)
+        r = Requisition(
+            name="R",
+            customer_name="C",
+            status="active",
+            created_by=test_user.id,
+            created_at=now,
+        )
+        db_session.add(r)
+        db_session.flush()
+        item = Requirement(
+            requisition_id=r.id,
+            primary_mpn="ALPHA",
+            substitutes=[{"mpn": "BETA"}],
+            created_at=now,
+        )
+        db_session.add(item)
+        # ALPHA cached (12h ago), BETA stale (no card → searched)
+        db_session.add(
+            MaterialCard(
+                display_mpn="ALPHA",
+                normalized_mpn=normalize_mpn_key("ALPHA"),
+                last_searched_at=now - timedelta(hours=12),
+            )
+        )
+        db_session.commit()
+
+        with (
+            patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))),
+            patch("app.services.ics_worker.queue_manager.enqueue_for_ics_search"),
+            patch("app.services.nc_worker.queue_manager.enqueue_for_nc_search"),
+        ):
+            resp = client.post(f"/v2/partials/sightings/{item.id}/refresh")
+
+        assert resp.status_code == 200
+        # HX-Trigger header carries a showToast with both counts
+        hx = resp.headers.get("HX-Trigger", "")
+        assert '"showToast"' in hx
+        assert "1 cached" in hx
+        assert ("1 search" in hx) or ("Searched 1" in hx)
+
+    def test_all_cached_returns_no_search_toast(self, client: TestClient, db_session: Session, test_user: User):
+        from app.models import MaterialCard, Requirement, Requisition
+        from app.utils.normalization import normalize_mpn_key
+
+        now = datetime.now(timezone.utc)
+        r = Requisition(
+            name="R",
+            customer_name="C",
+            status="active",
+            created_by=test_user.id,
+            created_at=now,
+        )
+        db_session.add(r)
+        db_session.flush()
+        item = Requirement(
+            requisition_id=r.id,
+            primary_mpn="ONLY",
+            created_at=now,
+        )
+        db_session.add(item)
+        db_session.add(
+            MaterialCard(
+                display_mpn="ONLY",
+                normalized_mpn=normalize_mpn_key("ONLY"),
+                last_searched_at=now - timedelta(hours=1),
+            )
+        )
+        db_session.commit()
+
+        with patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))) as fetch_mock:
+            resp = client.post(f"/v2/partials/sightings/{item.id}/refresh")
+
+        assert resp.status_code == 200
+        # _fetch_fresh NOT called because all MPNs cached
+        fetch_mock.assert_not_called()
+        hx = resp.headers.get("HX-Trigger", "")
+        assert ("All MPNs" in hx) or ("cached" in hx)

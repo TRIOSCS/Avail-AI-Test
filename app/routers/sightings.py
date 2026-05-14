@@ -77,25 +77,6 @@ _SORT_COLUMNS = {
 }
 
 
-REFRESH_RATE_LIMIT_SECONDS: Final[int] = 300  # Per-requirement cooldown between manual searches
-
-
-def _within_rate_limit(last_searched_at: datetime | None, now: datetime) -> bool:
-    """Return True if the requirement was searched too recently (within cooldown
-    window).
-
-    Handles timezone-naive datetimes from SQLite (test environment).
-    """
-    if last_searched_at is None:
-        return False
-    ts = last_searched_at
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-    return (now - ts).total_seconds() < REFRESH_RATE_LIMIT_SECONDS
-
-
 def _oob_toast(msg: str, level: str = "success") -> HTMLResponse:
     """Return an OOB swap div that triggers a toast notification via Alpine."""
     safe_msg = msg.replace("'", "\\'").replace('"', "&quot;")
@@ -647,52 +628,56 @@ async def sightings_refresh(
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
-    """Re-run search pipeline for a requirement.
+    """Re-run sourcing pipeline for a requirement, gated by 48h per-MPN cooldown.
 
-    source="user" (default) or "sse". When "sse", suppresses the rate-guard and refresh-
-    failure toasts and skips broker.publish to avoid a self-trigger loop. FastAPI
-    rejects any other value with HTTP 422.
-
-    Returns the rendered detail panel HTML on success; returns the cached detail panel +
-    info toast (HX-Trigger header) when called within the rate-limit cooldown. The
-    X-Rendered-Req-Id header is inherited from sightings_detail on every response.
+    Returns the rendered detail panel + HX-Trigger toast describing per-MPN result.
     """
     from ..search_service import search_requirement
-
-    is_sse = source == "sse"
 
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
 
-    now = datetime.now(timezone.utc)
-    cooldown_minutes = REFRESH_RATE_LIMIT_SECONDS // 60
-    if _within_rate_limit(requirement.last_searched_at, now):
-        response = await sightings_detail(request, requirement_id, db, user)
-        if not is_sse:
-            response.headers["HX-Trigger"] = (
-                f'{{"showToast": {{"message": "Already searched within the last {cooldown_minutes} minutes.", "type": "info"}}}}'
-            )
-        return response
-
+    is_sse = source == "sse"
     refresh_failed = False
+    mpn_results: dict[str, str] = {}
     try:
-        await search_requirement(requirement, db)
+        result = await search_requirement(requirement, db)
+        mpn_results = result.get("mpn_results", {})
     except Exception:
         logger.warning("Search refresh failed for requirement {}", requirement_id, exc_info=True)
         refresh_failed = True
 
-    # search_requirement uses a separate write session — expire stale ORM state
+    # Force a fresh read; search_requirement uses a separate write session.
     db.expire(requirement)
 
     await _publish_if_user_source(source, user.id, requirement_id)
 
     response = await sightings_detail(request, requirement_id, db, user)
-    if refresh_failed and not is_sse:
-        response.headers["HX-Trigger"] = (
-            '{"showToast": {"message": "Search refresh failed - showing cached results", "type": "warning"}}'
+
+    if not is_sse:
+        toast_msg = _build_mpn_toast(mpn_results, refresh_failed)
+        toast_type = (
+            "warning" if refresh_failed else ("info" if all(v == "cached" for v in mpn_results.values()) else "success")
         )
+        if toast_msg:
+            response.headers["HX-Trigger"] = f'{{"showToast": {{"message": "{toast_msg}", "type": "{toast_type}"}}}}'
     return response
+
+
+def _build_mpn_toast(mpn_results: dict[str, str], refresh_failed: bool) -> str:
+    """Build the per-MPN toast message from search_requirement's result map."""
+    if refresh_failed:
+        return "Search refresh failed - showing cached results"
+    if not mpn_results:
+        return ""
+    searched = sum(1 for v in mpn_results.values() if v == "searched")
+    cached = sum(1 for v in mpn_results.values() if v == "cached")
+    if searched and cached:
+        return f"Searched {searched} MPN{'s' if searched != 1 else ''}, {cached} cached"
+    if searched:
+        return f"Searched {searched} MPN{'s' if searched != 1 else ''}"
+    return "All MPNs searched within 48h - showing cached"
 
 
 @router.post("/v2/partials/sightings/batch-refresh", response_class=HTMLResponse)
@@ -704,8 +689,9 @@ async def sightings_batch_refresh(
 ):
     """Refresh sightings for multiple requirements.
 
-    Skips requirements searched within the cooldown window. source="sse" suppresses the
-    OOB toast and broker.publish to prevent self-trigger loops.
+    Per-MPN 48h cooldown is enforced inside search_requirement
+    (MaterialCard.last_searched_at). source="sse" suppresses the OOB toast and
+    broker.publish to prevent self-trigger loops.
     """
     from ..search_service import search_requirement
 
@@ -729,20 +715,15 @@ async def sightings_batch_refresh(
 
     success = 0
     failed = 0
-    skipped = 0
-    now = datetime.now(timezone.utc)
 
-    # Build the list of requirements that should actually be searched.
-    # Anything that is missing or within the rate-guard cooldown is
-    # accounted for up-front so we only spawn tasks for real work.
+    # Build the list of requirements that exist. The 48h per-MPN cooldown
+    # is enforced inside search_requirement (MaterialCard.last_searched_at)
+    # so we no longer pre-filter by requirement-level last_searched_at.
     to_search: list[tuple[int, Requirement]] = []
     for rid in requirement_ids:
         req_obj = reqs_by_id.get(int(rid))
         if not req_obj:
             failed += 1
-            continue
-        if _within_rate_limit(req_obj.last_searched_at, now):
-            skipped += 1
             continue
         to_search.append((int(rid), req_obj))
 
@@ -770,17 +751,13 @@ async def sightings_batch_refresh(
         await _publish_if_user_source(source, user.id, int(rid))
 
     parts = []
-    total = success + failed + skipped
+    total = success + failed
     parts.append(f"Searched {success}/{total} requirements.")
-    if skipped:
-        parts.append(f"{skipped} skipped (already fresh).")
     if failed:
         parts.append(f"{failed} failed.")
     msg = " ".join(parts)
     if failed:
         level = "warning"
-    elif skipped and not success:
-        level = "info"
     else:
         level = "success"
     if _toast_suppressed_for_sse(source):

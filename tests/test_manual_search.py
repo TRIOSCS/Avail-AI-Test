@@ -5,7 +5,7 @@ Depends on: conftest.py fixtures, app models
 """
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 from app.constants import RequisitionStatus, SourcingStatus
@@ -145,69 +145,6 @@ def _seed_requirement(db_session, mpn="RATE-001", last_searched_at=None):
     db_session.add(vs)
     db_session.commit()
     return req, r
-
-
-class TestSingleRefreshRateGuard:
-    def test_refresh_returns_toast_when_recently_searched(self, client, db_session):
-        """Refresh within 5 minutes should return info toast, not re-search."""
-        now = datetime.now(timezone.utc)
-        _, r = _seed_requirement(db_session, last_searched_at=now)
-        resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")
-        assert resp.status_code == 200
-        trigger = resp.headers.get("HX-Trigger", "")
-        assert "Already searched" in trigger
-
-    def test_refresh_proceeds_when_not_recently_searched(self, client, db_session):
-        """Refresh after 5 minutes should proceed normally."""
-        old = datetime.now(timezone.utc) - timedelta(minutes=10)
-        _, r = _seed_requirement(db_session, last_searched_at=old)
-        resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")
-        assert resp.status_code == 200
-        trigger = resp.headers.get("HX-Trigger", "")
-        assert "Already searched" not in trigger
-
-    def test_refresh_proceeds_when_never_searched(self, client, db_session):
-        """First-time search should always proceed."""
-        _, r = _seed_requirement(db_session, last_searched_at=None)
-        resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")
-        assert resp.status_code == 200
-        trigger = resp.headers.get("HX-Trigger", "")
-        assert "Already searched" not in trigger
-
-
-class TestBatchRefreshRateGuard:
-    def test_batch_skips_recently_searched(self, client, db_session):
-        """Batch refresh should skip recently-searched requirements."""
-        now = datetime.now(timezone.utc)
-        _, r1 = _seed_requirement(db_session, mpn="BATCH-001", last_searched_at=now)
-        old = datetime.now(timezone.utc) - timedelta(minutes=10)
-        _, r2 = _seed_requirement(db_session, mpn="BATCH-002", last_searched_at=old)
-        resp = client.post(
-            "/v2/partials/sightings/batch-refresh",
-            data={"requirement_ids": f"[{r1.id}, {r2.id}]"},
-        )
-        assert resp.status_code == 200
-        assert "skipped" in resp.text.lower()
-
-
-class TestRateGuardBoundary:
-    def test_exactly_at_boundary_allows_refresh(self, client, db_session):
-        """At exactly REFRESH_RATE_LIMIT_SECONDS, refresh should proceed."""
-        boundary = datetime.now(timezone.utc) - timedelta(seconds=300)
-        _, r = _seed_requirement(db_session, mpn="BOUNDARY-001", last_searched_at=boundary)
-        resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")
-        assert resp.status_code == 200
-        trigger = resp.headers.get("HX-Trigger", "")
-        assert "Already searched" not in trigger
-
-    def test_one_second_before_boundary_blocks(self, client, db_session):
-        """At 299 seconds, refresh should be blocked."""
-        recent = datetime.now(timezone.utc) - timedelta(seconds=299)
-        _, r = _seed_requirement(db_session, mpn="BOUNDARY-002", last_searched_at=recent)
-        resp = client.post(f"/v2/partials/sightings/{r.id}/refresh")
-        assert resp.status_code == 200
-        trigger = resp.headers.get("HX-Trigger", "")
-        assert "Already searched" in trigger
 
 
 class TestBatchEdgeCases:
