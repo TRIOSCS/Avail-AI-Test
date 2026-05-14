@@ -4787,7 +4787,7 @@ async def create_site(
         )
         if existing:
             owner_user = db.get(User, parsed_owner_id)
-            owner_name = owner_user.display_name if owner_user else f"User #{parsed_owner_id}"
+            owner_name = owner_user.name if owner_user else f"User #{parsed_owner_id}"
             return HTMLResponse(
                 f'<div class="p-2 text-xs text-rose-600">{owner_name} already owns site "{existing.site_name}". Each user can only own one site.</div>'
             )
