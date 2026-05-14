@@ -12,7 +12,8 @@ import hashlib
 import json
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Final
 
 import redis
 from loguru import logger
@@ -176,6 +177,65 @@ def get_all_pns(req: Requirement) -> list[str]:
             pns.append(display)
             seen_keys.add(key)
     return pns
+
+
+# How long a MaterialCard.last_searched_at "shields" its MPN from being
+# re-queried at supplier APIs. Per-MPN, not per-requirement, so two
+# requirements that share an MPN don't each burn quota.
+MPN_COOLDOWN_HOURS: Final[int] = 48
+
+
+def _mpn_cooldown_partition(
+    db: Session,
+    pns: list[str],
+    now: datetime | None = None,
+) -> tuple[list[str], list[int]]:
+    """Split a requirement's MPNs into (to_search, cached_card_ids).
+
+    A display MPN goes into ``to_search`` when its MaterialCard either does
+    not exist or has ``last_searched_at`` older than ``MPN_COOLDOWN_HOURS``.
+    Otherwise its card id goes into ``cached_card_ids`` so the caller can
+    surface existing sightings via material_card_id linkage.
+
+    Lookups use ``normalize_mpn_key`` so case + packaging-suffix variations
+    don't escape the cooldown.
+    """
+    if not pns:
+        return [], []
+
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=MPN_COOLDOWN_HOURS)
+
+    keys_in_order = []
+    key_to_display: dict[str, str] = {}
+    for pn in pns:
+        k = normalize_mpn_key(pn)
+        if not k or k in key_to_display:
+            continue
+        keys_in_order.append(k)
+        key_to_display[k] = pn
+
+    cards = db.query(MaterialCard).filter(MaterialCard.normalized_mpn.in_(keys_in_order)).all()
+    card_by_key = {c.normalized_mpn: c for c in cards}
+
+    to_search: list[str] = []
+    cached_ids: list[int] = []
+    for key in keys_in_order:
+        card = card_by_key.get(key)
+        if card is None or card.last_searched_at is None:
+            to_search.append(key_to_display[key])
+            continue
+        # MaterialCard.last_searched_at uses raw DateTime (not UTCDateTime),
+        # so SQLite roundtrips strip tzinfo. Coerce to UTC for comparison.
+        last = card.last_searched_at
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        # >= 48h old → search again (boundary is inclusive on the stale side)
+        if last <= cutoff:
+            to_search.append(key_to_display[key])
+        else:
+            cached_ids.append(card.id)
+    return to_search, cached_ids
 
 
 async def search_requirement(req: Requirement, db: Session) -> dict:
