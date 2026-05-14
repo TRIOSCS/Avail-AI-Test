@@ -1,16 +1,11 @@
 """test_requirements_router_coverage2.py — Additional coverage for requirements.py.
 
-Targets missing lines:
-- 259: list_requirements 404 path
-- 386-456: add_requirements 404 path, batch skipped items, tag propagation
-- 468, 480-508, 511-539, 545-547, 560: add_requirements background/duplicate logic
-- 603: upload_requirements parse edge case
-- 808, 837-838, 846-847: search_all 404 path, error stat merging, draft status transition
-- 914: get_saved_sightings 404 path
-- 1025, 1053: saved sightings _history_to_result path, list_requisition_leads 404
-- 1167: add_lead_feedback 404 after append_lead_feedback returns None
-- 1201, 1207, 1212-1281: import_stock_list 404, no file, no filename, full import path
-- 1342: list_requirement_sightings sub_rows history path
+Covers: list_requirements 404, add_requirements (batch skip, duplicate detection,
+tag propagation), upload_requirements, get_saved_sightings, list_requisition_leads,
+add_lead_feedback, import_stock_list, list_requirement_sightings sub-row history.
+
+Auto-search machinery (search_all, ICS/NC enqueue at requirement creation, daily
+refresh cron) has been removed — see tests/test_no_auto_search.py.
 
 Called by: pytest
 Depends on: conftest.py (client, db_session, test_user, test_requisition)
@@ -21,7 +16,7 @@ import os
 os.environ["TESTING"] = "1"
 
 from datetime import datetime, timezone
-from unittest.mock import MagicMock, patch
+from unittest.mock import patch
 
 from sqlalchemy.orm import Session
 
@@ -132,14 +127,6 @@ def _make_sourcing_lead(db: Session, req: Requisition, req_item: Requirement, **
     return lead
 
 
-def _mock_session():
-    """Return a MagicMock that mimics SessionLocal() for background tasks."""
-    m = MagicMock()
-    m.query.return_value.filter.return_value.order_by.return_value.limit.return_value.all.return_value = []
-    m.get.return_value = None
-    return m
-
-
 # ── list_requirements 404 (line 259) ─────────────────────────────────────
 
 
@@ -167,11 +154,10 @@ class TestAddRequirements:
             {"primary_mpn": "", "manufacturer": "", "target_qty": -1},
         ]
         with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None):
-            with patch("app.routers.requisitions.requirements.SessionLocal", return_value=_mock_session()):
-                resp = client.post(
-                    f"/api/requisitions/{test_requisition.id}/requirements",
-                    json=payload,
-                )
+            resp = client.post(
+                f"/api/requisitions/{test_requisition.id}/requirements",
+                json=payload,
+            )
         assert resp.status_code == 200
         data = resp.json()
         assert "created" in data
@@ -191,14 +177,10 @@ class TestAddRequirements:
         with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=card):
             with patch("app.services.tagging.propagate_tags_to_entity"):
                 with patch("app.services.task_service.on_requirement_added"):
-                    with patch(
-                        "app.routers.requisitions.requirements.SessionLocal",
-                        return_value=_mock_session(),
-                    ):
-                        resp = client.post(
-                            f"/api/requisitions/{test_requisition.id}/requirements",
-                            json={"primary_mpn": "TL431A", "manufacturer": "TI", "target_qty": 50},
-                        )
+                    resp = client.post(
+                        f"/api/requisitions/{test_requisition.id}/requirements",
+                        json={"primary_mpn": "TL431A", "manufacturer": "TI", "target_qty": 50},
+                    )
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["created"]) == 1
@@ -210,14 +192,10 @@ class TestAddRequirements:
                 "app.services.task_service.on_requirement_added",
                 side_effect=Exception("task error"),
             ):
-                with patch(
-                    "app.routers.requisitions.requirements.SessionLocal",
-                    return_value=_mock_session(),
-                ):
-                    resp = client.post(
-                        f"/api/requisitions/{test_requisition.id}/requirements",
-                        json=[{"primary_mpn": "NE555", "manufacturer": "TI", "target_qty": 200}],
-                    )
+                resp = client.post(
+                    f"/api/requisitions/{test_requisition.id}/requirements",
+                    json=[{"primary_mpn": "NE555", "manufacturer": "TI", "target_qty": 200}],
+                )
         assert resp.status_code == 200
 
     def test_add_requirements_with_skipped_returns_skipped_key(self, client, db_session, test_user, test_requisition):
@@ -226,14 +204,10 @@ class TestAddRequirements:
             {"primary_mpn": "NE555", "manufacturer": "TI", "target_qty": 100},
         ]
         with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None):
-            with patch(
-                "app.routers.requisitions.requirements.SessionLocal",
-                return_value=_mock_session(),
-            ):
-                resp = client.post(
-                    f"/api/requisitions/{test_requisition.id}/requirements",
-                    json=payload,
-                )
+            resp = client.post(
+                f"/api/requisitions/{test_requisition.id}/requirements",
+                json=payload,
+            )
         assert resp.status_code == 200
         data = resp.json()
         assert "created" in data
@@ -277,126 +251,13 @@ class TestAddRequirements:
         with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=card):
             with patch("app.services.tagging.propagate_tags_to_entity"):
                 with patch("app.services.task_service.on_requirement_added"):
-                    with patch(
-                        "app.routers.requisitions.requirements.SessionLocal",
-                        return_value=_mock_session(),
-                    ):
-                        resp = client.post(
-                            f"/api/requisitions/{req.id}/requirements",
-                            json={"primary_mpn": "BC547", "manufacturer": "ST", "target_qty": 100},
-                        )
+                    resp = client.post(
+                        f"/api/requisitions/{req.id}/requirements",
+                        json={"primary_mpn": "BC547", "manufacturer": "ST", "target_qty": 100},
+                    )
         assert resp.status_code == 200
         data = resp.json()
         assert "duplicates" in data
-
-
-# ── add_requirements ICS/NC enqueue paths (lines 468, 511-539, 545-547) ──
-
-
-class TestAddRequirementsBackgroundTasks:
-    def test_add_requirements_ics_enqueue_exception_silenced(self, client, db_session, test_user, test_requisition):
-        """ICS enqueue failures must be silenced (background task)."""
-        with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None):
-            with patch(
-                "app.routers.requisitions.requirements.enqueue_for_ics_search",
-                side_effect=Exception("ICS error"),
-            ):
-                with patch(
-                    "app.routers.requisitions.requirements.SessionLocal",
-                    return_value=_mock_session(),
-                ):
-                    resp = client.post(
-                        f"/api/requisitions/{test_requisition.id}/requirements",
-                        json=[{"primary_mpn": "BC548", "manufacturer": "ST", "target_qty": 50}],
-                    )
-        assert resp.status_code == 200
-
-
-# ── search_all error paths (lines 808, 837-838, 846-847) ─────────────────
-
-
-class TestSearchAll:
-    def test_search_all_req_not_found(self, client, db_session, test_user):
-        resp = client.post("/api/requisitions/999999/search", json={})
-        assert resp.status_code == 404
-
-    def test_search_all_with_search_exception(self, client, db_session, test_user, test_requisition):
-        """search_requirement raising exception should be caught (logged,
-        sightings=[])."""
-
-        async def _raise(*a, **kw):
-            raise Exception("search failed")
-
-        with patch("app.routers.requisitions.search_requirement", new=_raise):
-            with patch("app.routers.requisitions._enrich_with_vendor_cards"):
-                with patch("app.routers.requisitions.requirements._annotate_buyer_outcomes"):
-                    with patch("app.routers.requisitions.requirements._enqueue_ics_nc_batch"):
-                        resp = client.post(
-                            f"/api/requisitions/{test_requisition.id}/search",
-                            json={},
-                        )
-        assert resp.status_code in (200, 500)
-
-    def test_search_all_stat_merging_with_error(self, client, db_session, test_user, test_requisition):
-        """Two reqs with same source stat name — second adds error to merge path."""
-        stats = [
-            {"source": "brokerbin", "results": 3, "ms": 50, "error": "timeout", "status": "error"},
-        ]
-        mock_result = {"sightings": [], "source_stats": stats}
-
-        # Add second requirement so merge loop runs twice for same source
-        _make_requirement(db_session, test_requisition, primary_mpn="NE555", normalized_mpn="ne555")
-        db_session.refresh(test_requisition)
-
-        async def _mock_search(r, db):
-            return mock_result
-
-        with patch("app.routers.requisitions.search_requirement", new=_mock_search):
-            with patch("app.routers.requisitions._enrich_with_vendor_cards"):
-                with patch("app.routers.requisitions.requirements._annotate_buyer_outcomes"):
-                    with patch("app.routers.requisitions.requirements._enqueue_ics_nc_batch"):
-                        resp = client.post(
-                            f"/api/requisitions/{test_requisition.id}/search",
-                            json={},
-                        )
-        assert resp.status_code in (200, 500)
-
-    def test_search_all_draft_status_transitions_to_active(self, client, db_session, test_user):
-        """When req is in 'draft' status, transition to 'active' is attempted (line
-        846)."""
-        req = _make_requisition(db_session, test_user, status="draft")
-        _make_requirement(db_session, req)
-        db_session.refresh(req)
-
-        mock_result = {"sightings": [], "source_stats": []}
-
-        async def _mock_search(r, db):
-            return mock_result
-
-        with patch("app.routers.requisitions.search_requirement", new=_mock_search):
-            with patch("app.routers.requisitions._enrich_with_vendor_cards"):
-                with patch("app.routers.requisitions.requirements._annotate_buyer_outcomes"):
-                    with patch("app.routers.requisitions.requirements._enqueue_ics_nc_batch"):
-                        resp = client.post(f"/api/requisitions/{req.id}/search", json={})
-        assert resp.status_code in (200, 500)
-
-    def test_search_all_archived_status_transitions_to_active(self, client, db_session, test_user):
-        """When req is 'archived', transition to 'active' is attempted."""
-        req = _make_requisition(db_session, test_user, status="archived")
-        _make_requirement(db_session, req)
-        db_session.refresh(req)
-
-        mock_result = {"sightings": [], "source_stats": []}
-
-        async def _mock_search(r, db):
-            return mock_result
-
-        with patch("app.routers.requisitions.search_requirement", new=_mock_search):
-            with patch("app.routers.requisitions._enrich_with_vendor_cards"):
-                with patch("app.routers.requisitions.requirements._annotate_buyer_outcomes"):
-                    with patch("app.routers.requisitions.requirements._enqueue_ics_nc_batch"):
-                        resp = client.post(f"/api/requisitions/{req.id}/search", json={})
-        assert resp.status_code in (200, 500)
 
 
 # ── get_saved_sightings 404 (line 914) ────────────────────────────────────
@@ -586,18 +447,13 @@ class TestListRequirementSightings:
 
 class TestUploadRequirements:
     def test_upload_csv_with_substitute_columns(self, client, db_session, test_user, test_requisition):
-        """CSV with sub_1/sub_2 columns normalizes MPNs (exercises dedup loop at line
-        603)."""
+        """CSV with sub_1/sub_2 columns normalizes MPNs (exercises dedup loop)."""
         csv_content = b"primary_mpn,target_qty,sub_1,sub_2\nLM317T,100,TL431A,\n"
         with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None):
-            with patch(
-                "app.routers.requisitions.requirements.SessionLocal",
-                return_value=_mock_session(),
-            ):
-                resp = client.post(
-                    f"/api/requisitions/{test_requisition.id}/upload",
-                    files={"file": ("parts.csv", csv_content, "text/csv")},
-                )
+            resp = client.post(
+                f"/api/requisitions/{test_requisition.id}/upload",
+                files={"file": ("parts.csv", csv_content, "text/csv")},
+            )
         assert resp.status_code == 200
 
     def test_upload_req_not_found(self, client, db_session, test_user):

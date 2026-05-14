@@ -210,64 +210,6 @@ class TestPatchLeadStatusErrors:
         assert resp.status_code == 200
 
 
-# ── search_all stats merge + _attach_lead_data ────────────────────────
-
-
-class TestSearchAllStatsMerge:
-    def test_duplicate_source_in_stats_merges(self, client: TestClient, test_requisition, db_session: Session):
-        """Lines 837-838: same source appears twice in merged_source_stats.
-
-        We mock search_requirement to return a result with two entries
-        for the same source name, forcing the else branch.
-        """
-        mock_result = {
-            "sightings": [],
-            "source_stats": [
-                {"source": "brokerbin", "results": 3, "ms": 100, "error": None, "status": "ok"},
-            ],
-        }
-
-        async def _mock_search(req, db):
-            return mock_result
-
-        # Two requirements → two search calls for same source → merge triggers
-        item2 = Requirement(
-            requisition_id=test_requisition.id,
-            primary_mpn="NE555",
-            target_qty=50,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(item2)
-        db_session.commit()
-
-        with patch("app.routers.requisitions.search_requirement", new=_mock_search):
-            resp = client.post(f"/api/requisitions/{test_requisition.id}/search")
-        assert resp.status_code == 200
-        # Coverage: line 837 (else: existing = ...), 838 (existing["results"] +=)
-
-    def test_search_with_lead_covers_attach_lead_data(self, client: TestClient, req_with_lead):
-        """Line 194: _attach_lead_data iterates over leads when req in results.
-
-        search_all always puts requirements in results dict (unlike get_saved_sightings
-        which skips empty ones). So a lead + search call → line 194 covered.
-        """
-        req, item, lead = req_with_lead
-        mock_result = {
-            "sightings": [],
-            "source_stats": [
-                {"source": "brokerbin", "results": 0, "ms": 50, "error": None, "status": "ok"},
-            ],
-        }
-
-        async def _mock_search(r, db):
-            return mock_result
-
-        with patch("app.routers.requisitions.search_requirement", new=_mock_search):
-            resp = client.post(f"/api/requisitions/{req.id}/search")
-        assert resp.status_code == 200
-        # Coverage: line 194 (lead_cards.append in _attach_lead_data)
-
-
 # ── list_requirement_sightings — material_card_id + string substitutes ──
 
 

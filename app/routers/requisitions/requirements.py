@@ -1,17 +1,15 @@
-"""Requirements, search, sightings, and stock import endpoints.
+"""Requirements, sightings, and stock import endpoints.
 
 Business Rules:
 - Requirements are line-items within a requisition (parent/child)
-- Search triggers all active connectors in parallel via asyncio.gather
+- Search runs only on explicit user action (see v2 partial routes in htmx_views.py)
 - Stock import creates sightings matched to requirements by MPN
-- NC/ICS browser-based searches enqueued as background tasks
 - Duplicate detection warns when same MPN quoted for same customer within 30 days
 
 Called by: requisitions.__init__ (sub-router)
 Depends on: models, schemas, search_service, file_utils, normalization utils
 """
 
-import asyncio
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, BackgroundTasks, Depends, File, HTTPException, Request, UploadFile
@@ -20,7 +18,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ...constants import OfferStatus, RequisitionStatus, TaskStatus
-from ...database import SessionLocal, get_db
+from ...database import get_db
 from ...dependencies import get_req_for_user, require_buyer, require_user
 from ...models import (
     ChangeLog,
@@ -34,19 +32,15 @@ from ...models import (
     SourcingLead,
     User,
 )
-from ...rate_limit import limiter
 from ...schemas.requisitions import (
     RequirementCreate,
     RequirementNoteAdd,
     RequirementTaskCreate,
     RequirementUpdate,
-    SearchOptions,
     SightingUnavailableIn,
 )
 from ...schemas.sourcing_leads import LeadDetailOut, LeadFeedbackIn, LeadOut, LeadStatusUpdateIn
 from ...search_service import resolve_material_card
-from ...services.ics_worker.queue_manager import enqueue_for_ics_search
-from ...services.nc_worker.queue_manager import enqueue_for_nc_search
 from ...services.sourcing_leads import (
     append_lead_feedback,
     attach_lead_metadata_to_results,
@@ -154,7 +148,7 @@ def _attach_lead_data(requirements: list[Requirement], results: dict, db: Sessio
     Uses canonical SourcingLead records (written during search by sync_leads_for_sightings)
     as the single source of truth for lead confidence, safety, and buyer status.
 
-    Called by: search endpoints in this router.
+    Called by: saved-sightings endpoints in this router.
     Depends on: app.services.sourcing_leads.attach_lead_metadata_to_results
     """
     req_ids = [r.id for r in requirements if r.id]
@@ -232,23 +226,6 @@ def _attach_lead_data(requirements: list[Requirement], results: dict, db: Sessio
             "high_confidence": sum(1 for lc in lead_cards if (lc.get("lead_confidence_pct") or 0) >= 75),
             "high_safety": sum(1 for lc in lead_cards if (lc.get("vendor_safety_pct") or 0) >= 75),
         }
-
-
-def _enqueue_ics_nc_batch(requirement_ids: list[int]):
-    """Queue requirements for ICS and NC browser-based searches (background task)."""
-    bg_db = SessionLocal()
-    try:
-        for rid in requirement_ids:
-            try:
-                enqueue_for_nc_search(rid, bg_db)
-            except Exception:
-                logger.warning("NC enqueue failed for requirement {}", rid, exc_info=True)
-            try:
-                enqueue_for_ics_search(rid, bg_db)
-            except Exception:
-                logger.warning("ICS enqueue failed for requirement {}", rid, exc_info=True)
-    finally:
-        bg_db.close()
 
 
 @router.get("/api/requisitions/{req_id}/requirements")
@@ -452,65 +429,6 @@ async def add_requirements(
     except Exception:
         logger.warning("Task auto-gen for requirements failed", exc_info=True)
 
-    # NC enqueue
-    def _nc_enqueue_batch(requirement_ids: list[int]):
-        bg_db = SessionLocal()
-        try:
-            for rid in requirement_ids:
-                try:
-                    enqueue_for_nc_search(rid, bg_db)
-                except Exception:
-                    logger.warning("NC enqueue failed for requirement {}", rid, exc_info=True)
-        finally:
-            bg_db.close()
-
-    # ICS enqueue
-    def _ics_enqueue_batch(requirement_ids: list[int]):
-        bg_db = SessionLocal()
-        try:
-            for rid in requirement_ids:
-                try:
-                    enqueue_for_ics_search(rid, bg_db)
-                except Exception:
-                    logger.warning("ICS enqueue failed for requirement {}", rid, exc_info=True)
-        finally:
-            bg_db.close()
-
-    # Auto-search: run full connector search in background
-    import os
-
-    def _bg_full_search(requirement_ids: list[int]):
-        import asyncio
-
-        from ...search_service import search_requirement as do_search
-
-        bg_db = SessionLocal()
-        try:
-            for rid in requirement_ids:
-                try:
-                    req_obj = bg_db.get(Requirement, rid)
-                    if req_obj:
-                        asyncio.run(do_search(req_obj, bg_db))
-                except Exception:
-                    logger.warning("Auto-search failed for requirement {}", rid, exc_info=True)
-        finally:
-            bg_db.close()
-
-        # After search populates sighting raw_data, generate descriptions
-        # from that DB data (no additional API calls)
-        try:
-            from ...services.description_service import backfill_descriptions
-
-            backfill_descriptions(requirement_ids)
-        except Exception:
-            logger.warning("Description backfill failed", exc_info=True)
-
-    if created:
-        background_tasks.add_task(_nc_enqueue_batch, [r.id for r in created])
-        background_tasks.add_task(_ics_enqueue_batch, [r.id for r in created])
-        if not os.environ.get("TESTING"):
-            background_tasks.add_task(_bg_full_search, [r.id for r in created])
-
     # Duplicate detection
     duplicates = []
     if req.customer_site_id and created:
@@ -656,29 +574,6 @@ async def upload_requirements(
     except Exception:  # pragma: no cover
         logger.warning("Tag propagation failed for uploaded requirements", exc_info=True)
 
-    # NC enqueue for uploaded requirements
-    def _nc_enqueue_uploaded(requisition_id: int, count: int):
-        bg_db = SessionLocal()
-        try:
-            for r_item in (
-                bg_db.query(Requirement)
-                .filter(
-                    Requirement.requisition_id == requisition_id,
-                )
-                .order_by(Requirement.id.desc())
-                .limit(count)
-                .all()
-            ):
-                try:  # pragma: no cover
-                    enqueue_for_nc_search(r_item.id, bg_db)
-                except Exception:  # pragma: no cover
-                    logger.warning("NC enqueue failed for requirement {}", r_item.id, exc_info=True)
-        finally:
-            bg_db.close()
-
-    if created:
-        background_tasks.add_task(_nc_enqueue_uploaded, req_id, created)
-
     return {"created": created, "total_rows": len(rows)}
 
 
@@ -786,111 +681,6 @@ async def update_requirement(
             )
     db.commit()
     return {"ok": True}
-
-
-# ── Search ───────────────────────────────────────────────────────────────
-
-
-@router.post("/api/requisitions/{req_id}/search")
-@limiter.limit("20/minute")
-async def search_all(
-    req_id: int,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    body: SearchOptions | None = None,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    from . import _enrich_with_vendor_cards, search_requirement
-
-    req = get_req_for_user(db, user, req_id)
-    if not req:
-        raise HTTPException(404, "Requisition not found")
-
-    requirement_ids = body.requirement_ids if body else None
-    reqs_to_search = [r for r in req.requirements if not requirement_ids or r.id in requirement_ids]
-
-    search_tasks = [search_requirement(r, db) for r in reqs_to_search]
-    search_results = await asyncio.gather(*search_tasks, return_exceptions=True)
-
-    results = {}
-    merged_source_stats: dict[str, dict] = {}
-    for r, search_result in zip(reqs_to_search, search_results):
-        if isinstance(search_result, Exception):
-            logger.error(f"Search failed for requirement {r.id}: {search_result}")
-            sightings = []
-            req_stats = []
-        else:
-            sightings = search_result["sightings"]
-            req_stats = search_result["source_stats"]
-        label = r.primary_mpn or f"Req #{r.id}"
-        results[str(r.id)] = {"label": label, "sightings": sightings}
-        for stat in req_stats:
-            name = stat["source"]
-            if name not in merged_source_stats:
-                merged_source_stats[name] = dict(stat)
-            else:
-                existing = merged_source_stats[name]
-                existing["results"] += stat["results"]
-                existing["ms"] = max(existing["ms"], stat["ms"])
-                if stat["error"] and not existing["error"]:
-                    existing["error"] = stat["error"]
-                    existing["status"] = stat["status"]
-
-    req.last_searched_at = datetime.now(timezone.utc)
-    if req.status in ("draft", "archived"):
-        from ...services.requisition_state import transition
-
-        try:
-            transition(req, "active", user, db)
-        except ValueError:
-            pass  # status may already be active
-    db.commit()
-
-    req_ids = [r.id for r in reqs_to_search]
-    background_tasks.add_task(_enqueue_ics_nc_batch, req_ids)
-
-    _enrich_with_vendor_cards(results, db)
-    _annotate_buyer_outcomes(req, results, db)
-    _attach_lead_data(reqs_to_search, results, db)
-
-    results["source_stats"] = list(merged_source_stats.values())
-    return results
-
-
-@router.post("/api/requirements/{item_id}/search")
-@limiter.limit("20/minute")
-async def search_one(
-    item_id: int,
-    request: Request,
-    background_tasks: BackgroundTasks,
-    user: User = Depends(require_user),
-    db: Session = Depends(get_db),
-):
-    from . import _enrich_with_vendor_cards, search_requirement
-
-    r = db.get(Requirement, item_id)
-    if not r:
-        raise HTTPException(404, "Requirement not found")
-    req = get_req_for_user(db, user, r.requisition_id)
-    if not req:
-        raise HTTPException(403, "Access denied")
-    search_result = await search_requirement(r, db)
-    sightings = search_result["sightings"]
-    source_stats = search_result["source_stats"]
-    results = {str(r.id): {"label": r.primary_mpn or f"Req #{r.id}", "sightings": sightings}}
-    _enrich_with_vendor_cards(results, db)
-    _annotate_buyer_outcomes(req, results, db)
-    _attach_lead_data([r], results, db)
-
-    background_tasks.add_task(_enqueue_ics_nc_batch, [r.id])
-
-    return {
-        "sightings": results[str(r.id)]["sightings"],
-        "lead_cards": results[str(r.id)].get("lead_cards", []),
-        "lead_summary": results[str(r.id)].get("lead_summary", {}),
-        "source_stats": source_stats,
-    }
 
 
 # ── Saved sightings (no re-search) ──────────────────────────────────────
