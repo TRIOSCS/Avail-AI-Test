@@ -238,12 +238,42 @@ def _mpn_cooldown_partition(
     return to_search, cached_ids
 
 
+def _affinity_match_to_result(match: dict, mpn: str) -> dict:
+    """Convert a single vendor-affinity match dict into a sighting-shaped result.
+
+    Shared between the cached-only short-circuit path and the full search path
+    in ``search_requirement`` so both surface affinity suggestions identically.
+    """
+    conf_pct = round(match.get("confidence", 0) * 100)
+    return {
+        "vendor_name": match.get("vendor_name", ""),
+        "vendor_id": match.get("vendor_id"),
+        "mpn": mpn,
+        "mpn_matched": mpn,
+        "source_type": "vendor_affinity",
+        "source_badge": "Vendor Match",
+        "is_historical": False,
+        "is_material_history": False,
+        "is_affinity": True,
+        "confidence_pct": conf_pct,
+        "confidence_color": "green" if conf_pct >= 75 else ("amber" if conf_pct >= 50 else "red"),
+        "reasoning": match.get("reasoning", ""),
+        "qty_available": None,
+        "unit_price": None,
+        "score": max(5, match.get("confidence", 0) * 20),
+        "cross_references": [],
+    }
+
+
 async def search_requirement(req: Requirement, db: Session) -> dict:
     """Search APIs for stale MPNs only; surface cached sightings for fresh ones.
 
     The per-MPN 48h cooldown (``MaterialCard.last_searched_at``) gates which
     MPNs hit the connector layer. Cached MPNs are still surfaced via
     ``material_card_id`` linkage in the caller's detail panel.
+
+    Affinity matches are returned on both the cached short-circuit path and
+    the full search path; only the connector calls are gated by the cooldown.
 
     Returns ``{"sightings": [...], "source_stats": [...], "mpn_results": {mpn: "searched"|"cached"}}``.
     """
@@ -263,24 +293,30 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         key = normalize_mpn_key(pn)
         mpn_results[pn] = "searched" if key in searched_keys else "cached"
 
+    # Vendor affinity is a pure-DB lookup (no connector quota) keyed on the
+    # requirement's primary MPN, so we compute it on every path — including
+    # the cached-only short-circuit below.
+    primary_mpn = pns[0]
+    try:
+        affinity_matches = find_vendor_affinity(primary_mpn, db)
+    except Exception as e:
+        logger.warning("Vendor affinity lookup failed for {}: {}", primary_mpn, e)
+        affinity_matches = []
+
     # Short-circuit: every MPN is within cooldown — no connector calls.
     # The detail panel surfaces cached sightings via material_card_id linkage
-    # in its own query path; this function returns no fresh sightings.
+    # in its own query path; this function returns affinity suggestions only.
     if not to_search:
-        return {"sightings": [], "source_stats": [], "mpn_results": mpn_results}
+        affinity_results = [_affinity_match_to_result(m, primary_mpn) for m in affinity_matches]
+        return {
+            "sightings": affinity_results,
+            "source_stats": [],
+            "mpn_results": mpn_results,
+        }
 
-    # 1. Fetch + dedupe (parallel across stale-MPN connectors) + vendor affinity
-    async def _fetch_affinity():
-        """Run vendor affinity matching for the first stale MPN."""
-        try:
-            return find_vendor_affinity(to_search[0], db)
-        except Exception as e:
-            logger.warning("Vendor affinity lookup failed for {}: {}", to_search[0], e)
-            return []
-
-    fresh_task = _fetch_fresh(to_search, db)
-    affinity_task = _fetch_affinity()
-    (fresh, source_stats), affinity_matches = await asyncio.gather(fresh_task, affinity_task)
+    # 1. Fetch + dedupe (parallel across stale-MPN connectors). Affinity was
+    # already computed above so it's available to the merge step below.
+    fresh, source_stats = await _fetch_fresh(to_search, db)
 
     # 2. Score + save — only replace sightings from connectors that succeeded
     # Use a dedicated DB session for writes so concurrent search_requirement()
@@ -380,33 +416,13 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         if vendor_lower in live_vendors:
             continue
         live_vendors.add(vendor_lower)
-        conf_pct = round(match.get("confidence", 0) * 100)
-        results.append(
-            {
-                "vendor_name": match.get("vendor_name", ""),
-                "vendor_id": match.get("vendor_id"),
-                "mpn": to_search[0],
-                "mpn_matched": to_search[0],
-                "source_type": "vendor_affinity",
-                "source_badge": "Vendor Match",
-                "is_historical": False,
-                "is_material_history": False,
-                "is_affinity": True,
-                "confidence_pct": conf_pct,
-                "confidence_color": "green" if conf_pct >= 75 else ("amber" if conf_pct >= 50 else "red"),
-                "reasoning": match.get("reasoning", ""),
-                "qty_available": None,
-                "unit_price": None,
-                "score": max(5, match.get("confidence", 0) * 20),
-                "cross_references": [],
-            }
-        )
+        results.append(_affinity_match_to_result(match, primary_mpn))
     if affinity_matches:
         kept = sum(1 for r in results if r.get("is_affinity"))
         logger.info(
             "Req {} ({}): merged {} affinity suggestions ({} after dedup)",
             req.id,
-            to_search[0],
+            primary_mpn,
             len(affinity_matches),
             kept,
         )

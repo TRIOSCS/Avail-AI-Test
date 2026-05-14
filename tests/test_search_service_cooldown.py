@@ -146,3 +146,44 @@ class TestSearchRequirementCooldown:
         if last.tzinfo is None:
             last = last.replace(tzinfo=timezone.utc)
         assert (now - last).total_seconds() < 60
+
+    async def test_all_cached_path_returns_affinity_matches(self, db_session: Session, test_user):
+        """When every MPN is within cooldown, affinity matches still surface."""
+        now = datetime.now(timezone.utc)
+        req = Requisition(
+            name="REQ-CD-AFFINITY",
+            customer_name="Test Co",
+            status="active",
+            created_by=test_user.id,
+            created_at=now,
+        )
+        db_session.add(req)
+        db_session.flush()
+        item = Requirement(
+            requisition_id=req.id,
+            primary_mpn="CACHEDMPN",
+            created_at=now,
+        )
+        db_session.add(item)
+        _mk_card(db_session, "CACHEDMPN", now - timedelta(hours=1))
+        db_session.commit()
+
+        # Mock both _fetch_fresh (should NOT be called) and find_vendor_affinity
+        # (should be called even on the all-cached short-circuit path)
+        fake_match = {"vendor_name": "FakeVendor", "score": 80}
+        with (
+            patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))) as fetch_mock,
+            patch(
+                "app.search_service.find_vendor_affinity",
+                return_value=[fake_match],
+            ) as affinity_mock,
+        ):
+            result = await search_requirement(item, db_session)
+
+        fetch_mock.assert_not_called()
+        affinity_mock.assert_called_once()
+        # Affinity match surfaces in sightings list even though no connectors fired
+        vendor_names = {s.get("vendor_name") for s in result.get("sightings", [])}
+        assert "FakeVendor" in vendor_names
+        # mpn_results still reflects the cached state
+        assert result["mpn_results"] == {"CACHEDMPN": "cached"}
