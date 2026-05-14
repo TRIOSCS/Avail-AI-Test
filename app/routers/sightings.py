@@ -661,7 +661,7 @@ async def sightings_refresh(
             "warning" if refresh_failed else ("info" if all(v == "cached" for v in mpn_results.values()) else "success")
         )
         if toast_msg:
-            response.headers["HX-Trigger"] = f'{{"showToast": {{"message": "{toast_msg}", "type": "{toast_type}"}}}}'
+            response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": toast_msg, "type": toast_type}})
     return response
 
 
