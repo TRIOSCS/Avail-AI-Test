@@ -500,3 +500,37 @@ class TestRefreshPerMpnToast:
         fetch_mock.assert_not_called()
         hx = resp.headers.get("HX-Trigger", "")
         assert ("All MPNs" in hx) or ("cached" in hx)
+
+
+class TestPerRowSearchIconAlwaysVisible:
+    """The per-row refresh icon must render on every row regardless of last_searched_at
+    (no 'stale' conditional).
+
+    Its hx-post target is the same /refresh endpoint the detail-panel button uses.
+    """
+
+    def test_row_refresh_icon_has_no_stale_only_conditional(self):
+        from pathlib import Path
+
+        path = Path(__file__).parent.parent / "app" / "templates" / "htmx" / "partials" / "sightings" / "table.html"
+        text = path.read_text()
+        # The icon block must NOT be wrapped in a {% if ... is_stale %} or
+        # similar Jinja conditional. Locate the hx-post for /refresh and
+        # walk backwards to assert there's no stale conditional pattern
+        # within ~10 lines above.
+        idx = text.index('hx-post="/v2/partials/sightings/{{ r.id }}/refresh"')
+        prefix = text[:idx]
+        recent = "\n".join(prefix.splitlines()[-10:])
+        assert "is_stale" not in recent
+        assert "stale_warning" not in recent
+        # The "row is stale" gate looks like {% if r.is_stale %} or
+        # {% if not r.last_searched_at %} or similar. Detect direct gating
+        # on row staleness — but allow unrelated Jinja conditionals
+        # (e.g. {% if cards_map.get(...) %}) which are fine.
+        bad_gates = [
+            "{% if r.is_stale",
+            "{% if not r.last_searched_at",
+            "{% if r.last_searched_at < ",
+        ]
+        for gate in bad_gates:
+            assert gate not in recent, f"Found stale-only gate: {gate!r}"
