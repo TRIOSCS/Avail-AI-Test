@@ -2263,7 +2263,7 @@ class TestSearchRequirement:
         req = _make_requirement(db_session, reqn, mpn="")
 
         result = await search_requirement(req, db_session)
-        assert result == {"sightings": [], "source_stats": []}
+        assert result == {"sightings": [], "source_stats": [], "mpn_results": {}}
 
     @pytest.mark.asyncio
     async def test_full_orchestration(self, _mock_enrich, db_session):

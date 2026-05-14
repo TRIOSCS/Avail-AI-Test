@@ -239,26 +239,46 @@ def _mpn_cooldown_partition(
 
 
 async def search_requirement(req: Requirement, db: Session) -> dict:
-    """Search APIs, upsert material cards, merge history.
+    """Search APIs for stale MPNs only; surface cached sightings for fresh ones.
 
-    Returns {"sightings": [...], "source_stats": [...]}.
+    The per-MPN 48h cooldown (``MaterialCard.last_searched_at``) gates which
+    MPNs hit the connector layer. Cached MPNs are still surfaced via
+    ``material_card_id`` linkage in the caller's detail panel.
+
+    Returns ``{"sightings": [...], "source_stats": [...], "mpn_results": {mpn: "searched"|"cached"}}``.
     """
     pns = get_all_pns(req)
     if not pns:
-        return {"sightings": [], "source_stats": []}
+        return {"sightings": [], "source_stats": [], "mpn_results": {}}
 
     now = datetime.now(timezone.utc)
 
-    # 1. Fetch + dedupe (parallel across all connectors) + vendor affinity
+    # 48h per-normalized-MPN cooldown. Split into MPNs that need a connector
+    # call vs. ones whose MaterialCard.last_searched_at is recent enough.
+    to_search, cached_card_ids = _mpn_cooldown_partition(db, pns, now=now)
+
+    searched_keys = {normalize_mpn_key(m) for m in to_search if normalize_mpn_key(m)}
+    mpn_results: dict[str, str] = {}
+    for pn in pns:
+        key = normalize_mpn_key(pn)
+        mpn_results[pn] = "searched" if key in searched_keys else "cached"
+
+    # Short-circuit: every MPN is within cooldown — no connector calls.
+    # The detail panel surfaces cached sightings via material_card_id linkage
+    # in its own query path; this function returns no fresh sightings.
+    if not to_search:
+        return {"sightings": [], "source_stats": [], "mpn_results": mpn_results}
+
+    # 1. Fetch + dedupe (parallel across stale-MPN connectors) + vendor affinity
     async def _fetch_affinity():
-        """Run vendor affinity matching for the primary MPN."""
+        """Run vendor affinity matching for the first stale MPN."""
         try:
-            return find_vendor_affinity(pns[0], db)
+            return find_vendor_affinity(to_search[0], db)
         except Exception as e:
-            logger.warning("Vendor affinity lookup failed for {}: {}", pns[0], e)
+            logger.warning("Vendor affinity lookup failed for {}: {}", to_search[0], e)
             return []
 
-    fresh_task = _fetch_fresh(pns, db)
+    fresh_task = _fetch_fresh(to_search, db)
     affinity_task = _fetch_affinity()
     (fresh, source_stats), affinity_matches = await asyncio.gather(fresh_task, affinity_task)
 
@@ -274,7 +294,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         write_req = write_db.get(Requirement, req_id)
         if not write_req:
             logger.error("Requirement {} not found in write session", req_id)
-            return {"sightings": [], "source_stats": source_stats}
+            return {"sightings": [], "source_stats": source_stats, "mpn_results": mpn_results}
 
         succeeded_sources = {
             stat["source"]
@@ -282,17 +302,29 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
             if stat["status"] == SourceRunStatus.OK.value and not stat.get("error")
         }
         sightings = _save_sightings(fresh, write_req, write_db, succeeded_sources)
-        logger.info(f"Req {req_id} ({pns[0]}): {len(sightings)} fresh sightings")
+        logger.info(f"Req {req_id} ({to_search[0]}): {len(sightings)} fresh sightings")
 
-        # 3. Material card upsert (errors won't break search)
+        # 3. Material card upsert (errors won't break search). Only upsert
+        # cards for MPNs we actually searched; cached-side cards are already
+        # surfaced via material_card_id linkage in the caller.
+        # We also need to ensure the cooldown clock advances even when a
+        # search yielded zero sightings — otherwise the next click immediately
+        # re-burns the connector quota. `_upsert_material_card` returns None
+        # when there were no sightings for that MPN, so we fall back to
+        # `resolve_material_card` to guarantee a card exists, then stamp it.
         card_ids = set()
         primary_card_id = None
-        for pn in pns:
+        for pn in to_search:
             try:
                 card = _upsert_material_card(pn, sightings, write_db, now)
+                if card is None:
+                    card = resolve_material_card(pn, write_db)
                 if card:
                     card_ids.add(card.id)
-                    if pn == pns[0] and not primary_card_id:
+                    # Stamp the cooldown clock on every searched MPN's card.
+                    if card.normalized_mpn in searched_keys:
+                        card.last_searched_at = now
+                    if pn == to_search[0] and not primary_card_id:
                         primary_card_id = card.id
             except Exception as e:
                 logger.error("MATERIAL_CARD_UPSERT_FAIL: mpn={} error={}", pn, e)
@@ -353,8 +385,8 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
             {
                 "vendor_name": match.get("vendor_name", ""),
                 "vendor_id": match.get("vendor_id"),
-                "mpn": pns[0],
-                "mpn_matched": pns[0],
+                "mpn": to_search[0],
+                "mpn_matched": to_search[0],
                 "source_type": "vendor_affinity",
                 "source_badge": "Vendor Match",
                 "is_historical": False,
@@ -372,7 +404,11 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     if affinity_matches:
         kept = sum(1 for r in results if r.get("is_affinity"))
         logger.info(
-            "Req {} ({}): merged {} affinity suggestions ({} after dedup)", req.id, pns[0], len(affinity_matches), kept
+            "Req {} ({}): merged {} affinity suggestions ({} after dedup)",
+            req.id,
+            to_search[0],
+            len(affinity_matches),
+            kept,
         )
 
     # 6. Cross-references: group results by material_card_id to show alternate MPNs
@@ -422,7 +458,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         logger.info(f"Req {req.id}: filtered {filtered_count} weak leads ({before_count} -> {len(results)})")
 
     results.sort(key=lambda x: (x.get("confidence_pct", 0), x.get("score", 0)), reverse=True)
-    return {"sightings": results, "source_stats": source_stats}
+    return {"sightings": results, "source_stats": source_stats, "mpn_results": mpn_results}
 
 
 async def quick_search_mpn(mpn: str, db: Session) -> dict:

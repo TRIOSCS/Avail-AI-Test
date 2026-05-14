@@ -5,11 +5,12 @@ Depends on: app.search_service._mpn_cooldown_partition, MaterialCard
 """
 
 from datetime import datetime, timedelta, timezone
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.orm import Session
 
-from app.models import MaterialCard
-from app.search_service import _mpn_cooldown_partition
+from app.models import MaterialCard, Requirement, Requisition
+from app.search_service import _mpn_cooldown_partition, search_requirement
 from app.utils.normalization import normalize_mpn_key
 
 
@@ -65,3 +66,83 @@ class TestMpnCooldownPartition:
         to_search, cached_ids = _mpn_cooldown_partition(db_session, ["BOUNDARYMPN"], now=now)
 
         assert to_search == ["BOUNDARYMPN"]
+
+
+class TestSearchRequirementCooldown:
+    """Integration tests: search_requirement honors per-MPN cooldown and stamps MaterialCard."""
+
+    async def test_only_stale_mpns_hit_connectors(self, db_session: Session, test_user):
+        now = datetime.now(timezone.utc)
+        req = Requisition(
+            name="REQ-CD-1",
+            customer_name="Test Co",
+            status="active",
+            created_by=test_user.id,
+            created_at=now,
+        )
+        db_session.add(req)
+        db_session.flush()
+
+        item = Requirement(
+            requisition_id=req.id,
+            primary_mpn="STALEMPN",
+            substitutes=[{"mpn": "FRESHMPN"}],
+            created_at=now,
+        )
+        db_session.add(item)
+        db_session.flush()
+
+        # FRESHMPN already searched 12h ago → should be skipped
+        _mk_card(db_session, "FRESHMPN", now - timedelta(hours=12))
+        # STALEMPN has no card → should be searched
+        db_session.commit()
+
+        with patch(
+            "app.search_service._fetch_fresh",
+            new=AsyncMock(return_value=([], [])),
+        ) as fetch_mock:
+            result = await search_requirement(item, db_session)
+
+        # _fetch_fresh called with exactly ["STALEMPN"] (FRESHMPN excluded)
+        assert fetch_mock.call_count == 1
+        called_pns = fetch_mock.call_args[0][0]
+        assert called_pns == ["STALEMPN"]
+
+        # Returned per-MPN map reflects partition
+        assert result["mpn_results"] == {
+            "STALEMPN": "searched",
+            "FRESHMPN": "cached",
+        }
+
+    async def test_searched_mpn_card_last_searched_at_updates(self, db_session: Session, test_user):
+        now = datetime.now(timezone.utc)
+        req = Requisition(
+            name="REQ-CD-2",
+            customer_name="Test Co",
+            status="active",
+            created_by=test_user.id,
+            created_at=now,
+        )
+        db_session.add(req)
+        db_session.flush()
+        item = Requirement(
+            requisition_id=req.id,
+            primary_mpn="NEWMPN",
+            created_at=now,
+        )
+        db_session.add(item)
+        db_session.commit()
+
+        with patch(
+            "app.search_service._fetch_fresh",
+            new=AsyncMock(return_value=([], [])),
+        ):
+            await search_requirement(item, db_session)
+
+        card = db_session.query(MaterialCard).filter_by(normalized_mpn=normalize_mpn_key("NEWMPN")).first()
+        assert card is not None
+        assert card.last_searched_at is not None
+        last = card.last_searched_at
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        assert (now - last).total_seconds() < 60
