@@ -372,3 +372,90 @@ class TestSightingsListTemplateSelectReqShape:
         assert "htmx.ajax('POST', '/v2/partials/sightings/' + id + '/refresh?source=user'" in html, (
             "selectReq must fire POST /refresh?source=user for background search"
         )
+
+
+class TestCrossMpnSightingVisibility:
+    """Detail panel surfaces sightings linked via material_card_id from prior searches
+    on other requirements that share the same primary or substitute MPN.
+
+    Closes the cross-requirement gap: when req1 searches MPN X and a vendor
+    sighting is materialized against MaterialCard(X), opening req2's detail
+    panel (which also targets MPN X) must show that vendor — even though the
+    sighting was created with requirement_id=req1.item.id.
+    """
+
+    def test_detail_shows_sightings_from_other_req_via_material_card(
+        self, client: TestClient, db_session: Session, test_user: User
+    ):
+        from app.models import MaterialCard, Requirement, Requisition
+        from app.models.sourcing import Sighting
+        from app.services.sighting_aggregation import rebuild_vendor_summaries
+        from app.utils.normalization import normalize_mpn_key
+
+        # Two requisitions, two requirements, but both point at the same MPN
+        # via a shared MaterialCard.
+        req1 = Requisition(
+            name="R1",
+            customer_name="C",
+            status="active",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        req2 = Requisition(
+            name="R2",
+            customer_name="C",
+            status="active",
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add_all([req1, req2])
+        db_session.flush()
+
+        card = MaterialCard(
+            normalized_mpn=normalize_mpn_key("SHARED"),
+            display_mpn="SHARED",
+        )
+        db_session.add(card)
+        db_session.flush()
+
+        item1 = Requirement(
+            requisition_id=req1.id,
+            primary_mpn="SHARED",
+            material_card_id=card.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        item2 = Requirement(
+            requisition_id=req2.id,
+            primary_mpn="SHARED",
+            material_card_id=card.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add_all([item1, item2])
+        db_session.flush()
+
+        # Sighting created during req1's search — linked to material_card,
+        # NOT to req2's requirement_id directly.
+        s = Sighting(
+            requirement_id=item1.id,
+            material_card_id=card.id,
+            vendor_name="DigiKey",
+            normalized_mpn=normalize_mpn_key("SHARED"),
+            source_type="api",
+            unit_price=1.0,
+            qty_available=100,
+            score=50.0,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(s)
+        db_session.commit()
+
+        # Rebuild summaries so detail panel has rows to render
+        rebuild_vendor_summaries(db_session, item2.id)
+        db_session.commit()
+
+        # GET /detail for item2 — should include the DigiKey vendor row
+        # via shared MaterialCard linkage. vendor_name is lower-cased on
+        # write into VendorSightingSummary, so the rendered cell is "digikey".
+        resp = client.get(f"/v2/partials/sightings/{item2.id}/detail")
+        assert resp.status_code == 200
+        assert "digikey" in resp.text.lower()

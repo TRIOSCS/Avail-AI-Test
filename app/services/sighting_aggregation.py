@@ -79,14 +79,46 @@ def rebuild_vendor_summaries(
     requirement_id: int,
     vendor_names: list[str] | None = None,
 ) -> list[VendorSightingSummary]:
-    """Rebuild VendorSightingSummary rows for given requirement + vendors.
+    """Rebuild VendorSightingSummary rows for the requirement.
 
-    If vendor_names is None, rebuilds all vendors for that requirement.
+    Pulls sightings via material_card_id set so prior searches on other requirements
+    that share an MPN are visible. Falls back to requirement_id-direct sightings for
+    rows missing material_card_id.
     """
-    query = db.query(Sighting).filter(
-        Sighting.requirement_id == requirement_id,
-        Sighting.is_unavailable.isnot(True),
-    )
+    from app.models import MaterialCard, Requirement
+    from app.utils.normalization import normalize_mpn_key
+
+    req = db.get(Requirement, requirement_id)
+    if not req:
+        return []
+
+    pns: list[str] = []
+    if req.primary_mpn:
+        pns.append(req.primary_mpn)
+    for sub in req.substitutes or []:
+        if isinstance(sub, dict):
+            v = (sub.get("mpn") or "").strip()
+        else:
+            v = str(sub).strip() if sub else ""
+        if v:
+            pns.append(v)
+    norm_keys = [k for k in (normalize_mpn_key(p) for p in pns) if k]
+
+    card_ids: set[int] = set()
+    if norm_keys:
+        rows = db.query(MaterialCard.id).filter(MaterialCard.normalized_mpn.in_(norm_keys)).all()
+        card_ids = {r[0] for r in rows}
+
+    base_filter = [Sighting.is_unavailable.isnot(True)]
+    if card_ids:
+        base_filter.append(
+            (Sighting.material_card_id.in_(card_ids))
+            | ((Sighting.material_card_id.is_(None)) & (Sighting.requirement_id == requirement_id))
+        )
+    else:
+        base_filter.append(Sighting.requirement_id == requirement_id)
+
+    query = db.query(Sighting).filter(*base_filter)
     if vendor_names:
         query = query.filter(Sighting.vendor_name.in_(vendor_names))
 
