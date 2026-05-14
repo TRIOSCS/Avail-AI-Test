@@ -373,6 +373,25 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         # 3b. Fire background enrichment for cards without manufacturer
         await _schedule_background_enrichment(card_ids, write_db)
 
+        # Browser-automation workers: enqueue per searched MPN. They have
+        # internal dedup (`recent` lookup via normalized_mpn within the
+        # worker's dedup window), so duplicate enqueues for the same MPN on
+        # multiple requirements collapse to a single search and link existing
+        # sightings to each requirement's primary material card.
+        for pn in to_search:
+            try:
+                from app.services.ics_worker.queue_manager import enqueue_for_ics_search
+
+                enqueue_for_ics_search(req_id, write_db)
+            except Exception:
+                logger.warning("ICS enqueue failed for requirement {}", req_id, exc_info=True)
+            try:
+                from app.services.nc_worker.queue_manager import enqueue_for_nc_search
+
+                enqueue_for_nc_search(req_id, write_db)
+            except Exception:
+                logger.warning("NC enqueue failed for requirement {}", req_id, exc_info=True)
+
         # 4. Historical vendors from material cards
         fresh_vendors = {s.vendor_name.lower() for s in sightings}
         history = _get_material_history(list(card_ids), fresh_vendors, write_db)

@@ -187,3 +187,39 @@ class TestSearchRequirementCooldown:
         assert "FakeVendor" in vendor_names
         # mpn_results still reflects the cached state
         assert result["mpn_results"] == {"CACHEDMPN": "cached"}
+
+
+class TestIcsNcEnqueueOnRefresh:
+    async def test_enqueues_ics_and_nc_for_each_searched_mpn(self, db_session: Session, test_user):
+        now = datetime.now(timezone.utc)
+        req = Requisition(
+            name="REQ-CD-3",
+            customer_name="C",
+            status="active",
+            created_by=test_user.id,
+            created_at=now,
+        )
+        db_session.add(req)
+        db_session.flush()
+        item = Requirement(
+            requisition_id=req.id,
+            primary_mpn="EM1",
+            substitutes=[{"mpn": "EM2"}],
+            created_at=now,
+        )
+        db_session.add(item)
+        db_session.commit()
+
+        with (
+            patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))),
+            patch("app.services.ics_worker.queue_manager.enqueue_for_ics_search") as ics_mock,
+            patch("app.services.nc_worker.queue_manager.enqueue_for_nc_search") as nc_mock,
+        ):
+            await search_requirement(item, db_session)
+
+        assert ics_mock.call_count == 2
+        assert nc_mock.call_count == 2
+        # Called with (requirement_id, db_session)
+        for m in (ics_mock, nc_mock):
+            requirement_ids = [c.args[0] for c in m.call_args_list]
+            assert requirement_ids == [item.id, item.id]
