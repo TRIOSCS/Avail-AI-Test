@@ -83,11 +83,13 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
 
 ### HTMX Conventions
 
-HTMX is the primary client/server interaction layer; the canonical
-click-to-refresh data flow (parallel GET /detail for cached paint +
-POST /refresh for background search, `X-Rendered-Req-Id` correlation
-header, `?source=user|sse` query-param gate) is documented in
-`APP_MAP_INTERACTIONS.md`. The do/don't rules for imperative
+HTMX is the primary client/server interaction layer. Sourcing is strictly
+user-initiated: clicking the refresh icon on a sightings row or the
+detail-panel "Search" button POSTs `/refresh`, gated by a 48h per-MPN
+cooldown via `MaterialCard.last_searched_at`. The row click itself is
+read-only (`GET /detail`, no connector calls). The `X-Rendered-Req-Id`
+correlation header and `?source=user|sse` query-param gate are documented
+in `APP_MAP_INTERACTIONS.md`. The do/don't rules for imperative
 `htmx.ajax()` calls live in `docs/htmx-conventions.md` and are the
 authoritative reference. Static-analysis tests in
 `tests/test_static_analysis.py` enforce the conventions in CI:

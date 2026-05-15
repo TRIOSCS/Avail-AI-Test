@@ -34,32 +34,41 @@ stuck-true and silently drops every subsequent SSE refresh.
 See: `app/static/htmx_app.js:200` (afterRequest listener clearing
 clickInFlight for the sightings-detail target regardless of outcome).
 
-### DO: fire a fast GET for cached data alongside a POST for fresh data — guarded by X-Rendered-Req-Id
-The click-to-refresh pattern in `selectReq`
-(`app/templates/htmx/partials/sightings/list.html`) fires:
-1. `GET /v2/partials/sightings/{id}/detail` — paints the cached
-   `VendorSightingSummary` panel in ~100ms.
-2. `POST /v2/partials/sightings/{id}/refresh?source=user` — runs the full
-   search pipeline in the background; its rendered HTML swaps in and
-   replaces the cached version when it returns.
+### Sightings click pattern (read-only row click + explicit refresh)
 
-Both responses target `#sightings-detail` and echo `X-Rendered-Req-Id`. The
-`htmx:beforeSwap` correlation guard in `app/static/htmx_app.js` drops any
-swap whose header doesn't match the currently-selected row, so clicking a
-different row mid-flight cannot clobber the new panel with a stale response.
+Sourcing on `/v2/sightings` is strictly user-initiated. There are three
+distinct interactions:
 
-`selectReq` increments `$store.sightingSelection.clickPending` by **2** (one
-per in-flight request); the `htmx:afterRequest` listener decrements once per
-`#sightings-detail` response so SSE suppression stays active until both
-legs complete.
+- **Row click** → `GET /v2/partials/sightings/{id}/detail` only. Read-only.
+  No connector calls. Paints the cached `VendorSightingSummary` panel in
+  ~100ms. `selectReq` increments `$store.sightingSelection.clickPending`
+  by **1**; the `htmx:afterRequest` listener decrements once on the
+  `#sightings-detail` response so SSE suppression stays active until the
+  GET completes.
+- **Per-row search icon** (always visible) → `POST /v2/partials/sightings/{id}/refresh?source=user`.
+- **Detail-panel "Search" button** (`m.search_button` macro) → same POST.
 
-Historical note: commit `7b0cb7b0` ("fix(htmx): structural fix for
-click-to-refresh — single POST, stale-response guard, source-aware toast")
-collapsed an earlier dual-fetch into a single POST because the prior
-implementation lacked the `X-Rendered-Req-Id` correlation guard and the
-`clickPending` counter. With both in place, restoring the parallel GET is
-safe and necessary — the single-POST shape forced every click to wait on
-the full ~6s pipeline before any panel paint.
+Both POSTs run `search_requirement`, which gates each MPN by a 48h
+cooldown via `MaterialCard.last_searched_at`. MPNs inside the window
+are skipped; their prior sightings are surfaced via the `material_card_id`
+linkage on Sighting rows so cross-requirement visibility is preserved.
+The response carries an `HX-Trigger` per-MPN toast summarizing
+`{searched, cached}` counts (suppressed when `?source=sse`).
+
+SSE-driven background refreshes also POST `/refresh?source=sse`; the
+gate skips `broker.publish` and `HX-Trigger` toasts so the loop breaks
+and background work stays silent.
+
+All `/refresh` and `/detail` responses target `#sightings-detail` and
+echo `X-Rendered-Req-Id`. The `htmx:beforeSwap` correlation guard in
+`app/static/htmx_app.js` drops any swap whose header doesn't match the
+currently-selected row, so clicking a different row mid-flight cannot
+clobber the new panel with a stale response.
+
+Historical note: prior to 2026-05-14, the row click also fired a
+parallel POST `/refresh` (LEG B) so every click ran the full connector
+pipeline. Sourcing is now strictly explicit — see
+`docs/superpowers/specs/2026-05-14-search-button-only-sourcing-design.md`.
 
 ### DO NOT: publish SSE events from a handler that was itself triggered by an SSE event
 If an SSE event fires a POST that publishes a new SSE event, and the client

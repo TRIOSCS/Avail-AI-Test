@@ -49,13 +49,44 @@ htmx_views.py (router)
     +---> activity_service.py --> DB: INSERT activity_log
 ```
 
-## 2. Search (All Connectors in Parallel)
+## 2. Search (User-Initiated Only)
+
+Sourcing is strictly user-initiated. There is no background cron, no
+auto-enqueue on requirement creation, and no row-click POST. Two entry
+points trigger a search:
+
+- Per-row search icon on `/v2/sightings`
+- Detail-panel "Search" button (`m.search_button` macro)
+
+Both POST `/v2/partials/sightings/{requirement_id}/refresh?source=user`.
+
+A 48-hour per-MPN cooldown is enforced via `MaterialCard.last_searched_at`.
+Every MPN whose card was searched within 48h is skipped; prior sightings
+on those MPNs (across all requirements) are surfaced via the
+`material_card_id` linkage on Sighting rows.
 
 ```
-Browser POST /v2/partials/requisitions/{id}/search-all
+Browser POST /v2/partials/sightings/{requirement_id}/refresh?source=user
     |
     v
-requirements.py (router)
+sightings.py (router) → search_requirement(req, db)
+    |
+    +---> _mpn_cooldown_partition(pns) → (to_search, cached_card_ids)
+    |     Per-MPN 48h cooldown. Cards inside the window are partitioned
+    |     out; their material_card_id is returned for the detail-panel
+    |     query so prior sightings remain visible.
+    |
+    +---> _fetch_fresh(to_search) — every live HTTP connector in parallel
+    |       (asyncio.wait, search_total_timeout_s budget)
+    |
+    +---> enqueue_for_ics_search(requirement_id, db)   # browser worker queue
+    +---> enqueue_for_nc_search(requirement_id, db)    # browser worker queue
+    |
+    +---> _save_sightings + scoring + material card upsert
+    |
+    +---> Stamp MaterialCard.last_searched_at = now on every searched card
+    |
+    +---> Returns {sightings, source_stats, mpn_results: {mpn: "searched"|"cached"}}
     |
     v
 search_service.py (orchestrator)
@@ -188,6 +219,28 @@ eliminate; it has been removed.
 `tests/test_sourcengine_connector.py`, `tests/test_connector_errors.py`,
 `tests/test_constants.py`, `tests/test_search_streaming.py`, and
 `tests/test_health_monitor.py`.
+
+### Browser-worker carve-out
+
+`icsource` and `netcomponents` are queue-driven via `avail-ics-worker` /
+`avail-nc-worker` rather than request/response connectors. They have no
+entry in `_get_connector_for_source`, so the 15-min ping loop would flip
+them to DISABLED on every run. `app.constants.BROWSER_WORKER_SOURCES`
+holds this set, and `run_health_checks` excludes those names from the
+ping loop. Their `api_sources` row is seeded to `LIVE` + `is_active=True`
+once at startup by `seed_browser_worker_sources` (see `app/startup.py`)
+and the seed survives because the ping loop never touches them. Their
+actual health is tracked via `IcsWorkerStatus` / `NcWorkerStatus`
+heartbeats; both singletons are seeded at startup so
+`update_worker_status()` writes are not silently dropped.
+
+### Removed (2026-05-14)
+
+- Daily 3 AM `_job_refresh_stale_requisitions` cron — no background refresh
+- Requirement-creation auto-enqueue (ICS + NC + background full-connector search)
+- Legacy `POST /api/requirements/{id}/search` and
+  `POST /api/requisitions/{id}/search-all` routes
+- Row-click POST `/refresh` (row click is read-only `GET /detail` only)
 
 ## 3. RFQ Email Sending
 
@@ -643,9 +696,9 @@ USER clicks a sightings row
 Alpine selectReq() in partials/sightings/list.html
     |
     +---> $store.sightingSelection.selectedReqId = <id>
-    +---> $store.sightingSelection.clickPending += 2
-    |     -- one in-flight slot per request below; SSE handler stays
-    |        suppressed until both legs decrement back to 0.
+    +---> $store.sightingSelection.clickPending += 1
+    |     -- single in-flight slot for the GET below; SSE handler stays
+    |        suppressed until it decrements back to 0.
     |
     +---> htmx.ajax('GET', '/v2/partials/sightings/<id>/detail', {
     |         target: '#sightings-detail',
@@ -653,32 +706,28 @@ Alpine selectReq() in partials/sightings/list.html
     |         indicator: '#sightings-detail-skeleton',
     |         headers: { 'X-Click-Req-Id': '<id>' }
     |     })
-    |     -- LEG A: cached panel from VendorSightingSummary in ~100ms.
-    |        No search runs. Paints immediately so the UI is never blocked.
-    |
-    +---> htmx.ajax('POST', '/v2/partials/sightings/<id>/refresh?source=user', {
-    |         target: '#sightings-detail',
-    |         swap:   'innerHTML',
-    |         indicator: '#sightings-detail-skeleton',
-    |         headers: { 'X-Click-Req-Id': '<id>' }
-    |     })
-    |     -- LEG B: fires concurrently with LEG A. Runs the full connector
-    |        fan-out and swaps the fresh result in when it returns,
-    |        replacing the cached panel. X-Rendered-Req-Id correlation
-    |        protects against mid-flight row changes.
+    |     -- Row click is READ-ONLY. No connector calls. Paints the
+    |        cached panel from VendorSightingSummary in ~100ms.
+    |        Fresh searches happen only when the user explicitly clicks
+    |        the per-row refresh icon or the detail-panel "Search" button
+    |        (both POST /refresh, gated by 48h per-MPN cooldown).
     |
     v
-SERVER (LEG A): sightings_detail(...) [app/routers/sightings.py]
+SERVER: sightings_detail(...) [app/routers/sightings.py]
     |
     +---> Reads cached VendorSightingSummary rows; renders detail partial.
     +---> resp.headers["X-Rendered-Req-Id"] = str(requirement_id).
     +---> Does NOT call search_requirement (pinned by tests).
     |
     v
-SERVER (LEG B): sightings_refresh(source="user", ...) [app/routers/sightings.py]
+USER clicks per-row refresh icon OR detail-panel "Search" button
     |
-    +---> search_requirement() runs the full connector fan-out
-    |       (subject to rate-guard cooldown — skipped if recent)
+    v
+SERVER: sightings_refresh(source="user", ...) [app/routers/sightings.py]
+    |
+    +---> search_requirement() runs connector fan-out for MPNs that pass
+    |       the 48h per-MPN cooldown (skipped MPNs surface prior sightings
+    |       via material_card_id linkage instead)
     |
     +---> renders sightings_detail() partial (HTMX response body)
     |       +---> resp.headers["X-Rendered-Req-Id"] = str(requirement_id)
@@ -689,8 +738,8 @@ SERVER (LEG B): sightings_refresh(source="user", ...) [app/routers/sightings.py]
     |       +---> sse_broker.publish("sighting-updated", {requirement_id})
     |               on the user's channel
     |
-    +---> (source="user" only) HX-Trigger toast on rate-guard or
-    |     refresh-failure. SSE-source POSTs suppress these toasts.
+    +---> (source="user" only) HX-Trigger per-MPN toast summarizing
+    |     {searched, cached} counts. SSE-source POSTs suppress toasts.
     |
     v
 CLIENT: htmx:beforeSwap listener in app/static/htmx_app.js
