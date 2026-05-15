@@ -1006,3 +1006,58 @@ def seed_api_sources() -> None:
         db.rollback()
     finally:
         db.close()
+
+
+def seed_browser_worker_sources(db) -> None:
+    """Flip icsource + netcomponents api_sources rows to live + active.
+
+    The browser workers (avail-ics-worker, avail-nc-worker) are queue-driven
+    and need their api_sources rows surfaced as 'live' so search_service's
+    connector enumeration includes them. Idempotent.
+
+    Called by: main.py lifespan (after seed_api_sources)
+    Depends on: ApiSource model
+    """
+    from .models import ApiSource
+
+    for name in ("icsource", "netcomponents"):
+        row = db.query(ApiSource).filter_by(name=name).one_or_none()
+        if row is None:
+            continue
+        row.status = "live"
+        row.is_active = True
+
+
+def seed_ics_worker_status_singleton(db) -> None:
+    """Insert ics_worker_status id=1 row if absent.
+
+    The worker's update_worker_status() is a no-op when the row is missing,
+    so heartbeats and daily stats silently never persist. Seeding makes the
+    worker's writes effective from first startup. Idempotent.
+
+    Called by: main.py lifespan (after seed_browser_worker_sources)
+    Depends on: IcsWorkerStatus model
+    """
+    from .models import IcsWorkerStatus
+
+    existing = db.query(IcsWorkerStatus).filter_by(id=1).one_or_none()
+    if existing is not None:
+        return
+    db.add(IcsWorkerStatus(id=1, is_running=False))
+
+
+def seed_browser_workers() -> None:
+    """Run both browser-worker seeds in a single SessionLocal transaction.
+
+    Called by: main.py lifespan (after seed_api_sources)
+    """
+    db = SessionLocal()
+    try:
+        seed_browser_worker_sources(db)
+        seed_ics_worker_status_singleton(db)
+        db.commit()
+    except (SQLAlchemyError, DBAPIError) as e:
+        logger.warning("Browser worker seed error: {}", e)
+        db.rollback()
+    finally:
+        db.close()
