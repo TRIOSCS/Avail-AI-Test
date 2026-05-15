@@ -306,3 +306,14 @@ class SourceRunStatus(StrEnum):
     ERROR_SKIPPED = "error_skipped"
     SKIPPED = "skipped"
     DISABLED = "disabled"
+
+
+BROWSER_WORKER_SOURCES = frozenset({"icsource", "netcomponents"})
+"""api_sources rows backed by queue-driven browser workers, not request/response
+connectors.
+
+These have no entry in `_get_connector_for_source`, so `health_monitor.ping_source` would
+flip them to DISABLED on every 15-min run. Skip them in `run_health_checks` so the seed
+applied at startup (`seed_browser_worker_sources`) survives. Their actual health is
+tracked via `IcsWorkerStatus`/`NcWorkerStatus` heartbeats.
+"""

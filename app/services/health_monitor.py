@@ -28,7 +28,7 @@ from ..connectors.errors import (
     ConnectorQuotaError,
     ConnectorRateLimitError,
 )
-from ..constants import ApiSourceStatus
+from ..constants import BROWSER_WORKER_SOURCES, ApiSourceStatus
 from ..models.config import ApiSource, ApiUsageLog
 
 # Quota warning thresholds (percentage of monthly_quota)
@@ -450,6 +450,7 @@ async def run_health_checks(check_type: str = "ping") -> dict:
         sources = (
             db.query(ApiSource)
             .filter(ApiSource.is_active == True)  # noqa: E712
+            .filter(~ApiSource.name.in_(BROWSER_WORKER_SOURCES))
             .all()
         )
         results["total"] = len(sources)

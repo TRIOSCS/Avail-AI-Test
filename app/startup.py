@@ -1012,19 +1012,21 @@ def seed_browser_worker_sources(db) -> None:
     """Flip icsource + netcomponents api_sources rows to live + active.
 
     The browser workers (avail-ics-worker, avail-nc-worker) are queue-driven
-    and need their api_sources rows surfaced as 'live' so search_service's
-    connector enumeration includes them. Idempotent.
+    so the dashboard surfaces them as 'live' rather than 'pending'/'disabled'.
+    `health_monitor.run_health_checks` excludes BROWSER_WORKER_SOURCES so this
+    seed survives the 15-min ping loop. Idempotent.
 
-    Called by: main.py lifespan (after seed_api_sources)
-    Depends on: ApiSource model
+    Called by: seed_browser_workers (lifespan)
+    Depends on: ApiSource model, ApiSourceStatus, BROWSER_WORKER_SOURCES
     """
+    from .constants import BROWSER_WORKER_SOURCES, ApiSourceStatus
     from .models import ApiSource
 
-    for name in ("icsource", "netcomponents"):
+    for name in BROWSER_WORKER_SOURCES:
         row = db.query(ApiSource).filter_by(name=name).one_or_none()
         if row is None:
             continue
-        row.status = "live"
+        row.status = ApiSourceStatus.LIVE.value
         row.is_active = True
 
 
@@ -1035,7 +1037,7 @@ def seed_ics_worker_status_singleton(db) -> None:
     so heartbeats and daily stats silently never persist. Seeding makes the
     worker's writes effective from first startup. Idempotent.
 
-    Called by: main.py lifespan (after seed_browser_worker_sources)
+    Called by: seed_browser_workers (lifespan)
     Depends on: IcsWorkerStatus model
     """
     from .models import IcsWorkerStatus
@@ -1046,8 +1048,25 @@ def seed_ics_worker_status_singleton(db) -> None:
     db.add(IcsWorkerStatus(id=1, is_running=False))
 
 
+def seed_nc_worker_status_singleton(db) -> None:
+    """Insert nc_worker_status id=1 row if absent.
+
+    Same pattern as the ICS singleton — the NC worker's update_worker_status()
+    silently no-ops when the row is missing, dropping every heartbeat. Idempotent.
+
+    Called by: seed_browser_workers (lifespan)
+    Depends on: NcWorkerStatus model
+    """
+    from .models import NcWorkerStatus
+
+    existing = db.query(NcWorkerStatus).filter_by(id=1).one_or_none()
+    if existing is not None:
+        return
+    db.add(NcWorkerStatus(id=1, is_running=False))
+
+
 def seed_browser_workers() -> None:
-    """Run both browser-worker seeds in a single SessionLocal transaction.
+    """Run all browser-worker seeds in a single SessionLocal transaction.
 
     Called by: main.py lifespan (after seed_api_sources)
     """
@@ -1055,6 +1074,7 @@ def seed_browser_workers() -> None:
     try:
         seed_browser_worker_sources(db)
         seed_ics_worker_status_singleton(db)
+        seed_nc_worker_status_singleton(db)
         db.commit()
     except (SQLAlchemyError, DBAPIError) as e:
         logger.warning("Browser worker seed error: {}", e)

@@ -340,7 +340,7 @@ class TestRunHealthChecks:
         mock_connector.search = AsyncMock(return_value=[])
 
         mock_session = MagicMock(spec=Session)
-        mock_session.query.return_value.filter.return_value.all.return_value = [source]
+        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [source]
         mock_session.commit = MagicMock()
         mock_session.rollback = MagicMock()
         mock_session.close = MagicMock()
@@ -359,7 +359,7 @@ class TestRunHealthChecks:
         source = _make_source(db_session, name="source_b", is_active=True)
 
         mock_session = MagicMock(spec=Session)
-        mock_session.query.return_value.filter.return_value.all.return_value = [source]
+        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [source]
         mock_session.commit = MagicMock()
         mock_session.close = MagicMock()
 
@@ -373,7 +373,7 @@ class TestRunHealthChecks:
 
     def test_no_active_sources(self):
         mock_session = MagicMock(spec=Session)
-        mock_session.query.return_value.filter.return_value.all.return_value = []
+        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = []
         mock_session.commit = MagicMock()
         mock_session.close = MagicMock()
 
@@ -389,7 +389,7 @@ class TestRunHealthChecks:
         source.name = "broken_source"
 
         mock_session = MagicMock(spec=Session)
-        mock_session.query.return_value.filter.return_value.all.return_value = [source]
+        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [source]
         mock_session.commit = MagicMock()
         mock_session.close = MagicMock()
 
@@ -424,7 +424,7 @@ class TestRunHealthChecks:
             sources.append(s)
 
         mock_session = MagicMock(spec=Session)
-        mock_session.query.return_value.filter.return_value.all.return_value = sources
+        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = sources
         mock_session.close = MagicMock()
 
         commit_count = 0
@@ -460,7 +460,7 @@ class TestRunHealthChecks:
         s3.name = "source_3"
 
         mock_session = MagicMock(spec=Session)
-        mock_session.query.return_value.filter.return_value.all.return_value = [s1, s2, s3]
+        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [s1, s2, s3]
         mock_session.close = MagicMock()
 
         commit_count = 0
