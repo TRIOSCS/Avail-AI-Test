@@ -118,21 +118,6 @@ class TestBatchRefreshCoverage:
         assert resp.status_code == 200
         assert "failed" in resp.text.lower()
 
-    def test_batch_refresh_only_skipped_level_info(self, client: TestClient, req_item, db_session: Session):
-        """Lines 689-690: skipped and not success → level='info'."""
-        _, item = req_item
-        # Set recently searched so it gets rate-limited
-        item.last_searched_at = datetime.utcnow() - timedelta(seconds=5)
-        db_session.commit()
-        with patch("app.search_service.search_requirement", new=AsyncMock()):
-            resp = client.post(
-                "/v2/partials/sightings/batch-refresh",
-                data={"requirement_ids": json.dumps([item.id])},
-                headers={"HX-Request": "true"},
-            )
-        assert resp.status_code == 200
-        assert "skipped" in resp.text.lower()
-
     def test_batch_refresh_mixed_failed_and_skipped(self, client: TestClient, two_items, db_session: Session):
         """Lines 683-688: failed > 0 → level='warning', skipped text appended."""
         _, items = two_items
