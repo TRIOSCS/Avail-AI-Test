@@ -28,10 +28,13 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(), nullable=True),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("canonical_name"),
+        if_not_exists=True,
     )
-    op.create_index(op.f("ix_manufacturers_canonical_name"), "manufacturers", ["canonical_name"], unique=True)
+    op.create_index(
+        op.f("ix_manufacturers_canonical_name"), "manufacturers", ["canonical_name"], unique=True, if_not_exists=True
+    )
 
 
 def downgrade() -> None:
-    op.drop_index(op.f("ix_manufacturers_canonical_name"), table_name="manufacturers")
-    op.drop_table("manufacturers")
+    op.drop_index(op.f("ix_manufacturers_canonical_name"), table_name="manufacturers", if_exists=True)
+    op.drop_table("manufacturers", if_exists=True)

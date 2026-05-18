@@ -29,8 +29,9 @@ def upgrade() -> None:
         sa.Column("success", sa.Boolean(), nullable=False, default=False),
         sa.Column("error_msg", sa.Text(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now(), index=True),
+        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
-    op.drop_table("teams_notification_log")
+    op.drop_table("teams_notification_log", if_exists=True)

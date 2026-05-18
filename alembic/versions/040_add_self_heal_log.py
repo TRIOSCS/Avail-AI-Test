@@ -26,12 +26,13 @@ def upgrade() -> None:
         sa.Column("cost_usd", sa.Float()),
         sa.Column("user_verified", sa.Boolean()),
         sa.Column("created_at", sa.DateTime()),
+        if_not_exists=True,
     )
-    op.create_index("ix_self_heal_log_ticket_id", "self_heal_log", ["ticket_id"])
-    op.create_index("ix_self_heal_log_created_at", "self_heal_log", ["created_at"])
+    op.create_index("ix_self_heal_log_ticket_id", "self_heal_log", ["ticket_id"], if_not_exists=True)
+    op.create_index("ix_self_heal_log_created_at", "self_heal_log", ["created_at"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_self_heal_log_created_at")
-    op.drop_index("ix_self_heal_log_ticket_id")
-    op.drop_table("self_heal_log")
+    op.drop_index("ix_self_heal_log_created_at", if_exists=True)
+    op.drop_index("ix_self_heal_log_ticket_id", if_exists=True)
+    op.drop_table("self_heal_log", if_exists=True)

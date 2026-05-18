@@ -22,4 +22,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("contacts", "error_message")
+    op.execute("ALTER TABLE IF EXISTS contacts DROP COLUMN IF EXISTS error_message")

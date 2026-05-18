@@ -65,13 +65,13 @@ def upgrade() -> None:
     )
 
     # --- Add missing FK indexes ---
-    op.create_index("ix_nc_search_log_queue_id", "nc_search_log", ["queue_id"])
-    op.create_index("ix_req_attachments_req_id", "requisition_attachments", ["requisition_id"])
-    op.create_index("ix_reqmt_attachments_reqmt_id", "requirement_attachments", ["requirement_id"])
-    op.create_index("ix_notifications_ticket_id", "notifications", ["ticket_id"])
+    op.create_index("ix_nc_search_log_queue_id", "nc_search_log", ["queue_id"], if_not_exists=True)
+    op.create_index("ix_req_attachments_req_id", "requisition_attachments", ["requisition_id"], if_not_exists=True)
+    op.create_index("ix_reqmt_attachments_reqmt_id", "requirement_attachments", ["requirement_id"], if_not_exists=True)
+    op.create_index("ix_notifications_ticket_id", "notifications", ["ticket_id"], if_not_exists=True)
 
     # --- Remove duplicate index (keep unique constraint on column) ---
-    op.drop_index("ix_ese_email", table_name="email_signature_extracts")
+    op.drop_index("ix_ese_email", table_name="email_signature_extracts", if_exists=True)
 
     # --- Add ondelete clauses to user FK columns ---
     # Offers
@@ -115,13 +115,13 @@ def downgrade() -> None:
     _recreate_fk("offers", "entered_by_id", "users", "id", None)
 
     # --- Recreate duplicate index ---
-    op.create_index("ix_ese_email", "email_signature_extracts", ["sender_email"], unique=True)
+    op.create_index("ix_ese_email", "email_signature_extracts", ["sender_email"], unique=True, if_not_exists=True)
 
     # --- Drop added indexes ---
-    op.drop_index("ix_notifications_ticket_id", table_name="notifications")
-    op.drop_index("ix_reqmt_attachments_reqmt_id", table_name="requirement_attachments")
-    op.drop_index("ix_req_attachments_req_id", table_name="requisition_attachments")
-    op.drop_index("ix_nc_search_log_queue_id", table_name="nc_search_log")
+    op.drop_index("ix_notifications_ticket_id", table_name="notifications", if_exists=True)
+    op.drop_index("ix_reqmt_attachments_reqmt_id", table_name="requirement_attachments", if_exists=True)
+    op.drop_index("ix_req_attachments_req_id", table_name="requisition_attachments", if_exists=True)
+    op.drop_index("ix_nc_search_log_queue_id", table_name="nc_search_log", if_exists=True)
 
     # --- Revert Numeric → Float ---
     op.alter_column(

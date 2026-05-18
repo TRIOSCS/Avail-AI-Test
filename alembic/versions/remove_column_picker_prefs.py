@@ -32,11 +32,11 @@ def _column_exists(table: str, column: str) -> bool:
 
 def upgrade() -> None:
     if _column_exists("users", "parts_column_prefs"):
-        op.drop_column("users", "parts_column_prefs")
+        op.execute("ALTER TABLE IF EXISTS users DROP COLUMN IF EXISTS parts_column_prefs")
     if _column_exists("users", "requirements_column_prefs"):
-        op.drop_column("users", "requirements_column_prefs")
+        op.execute("ALTER TABLE IF EXISTS users DROP COLUMN IF EXISTS requirements_column_prefs")
     if _column_exists("users", "offers_column_prefs"):
-        op.drop_column("users", "offers_column_prefs")
+        op.execute("ALTER TABLE IF EXISTS users DROP COLUMN IF EXISTS offers_column_prefs")
 
 
 def downgrade() -> None:

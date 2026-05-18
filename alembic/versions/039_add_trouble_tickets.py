@@ -42,16 +42,17 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime()),
         sa.Column("diagnosed_at", sa.DateTime()),
         sa.Column("resolved_at", sa.DateTime()),
+        if_not_exists=True,
     )
-    op.create_index("ix_trouble_tickets_status", "trouble_tickets", ["status"])
-    op.create_index("ix_trouble_tickets_risk_tier", "trouble_tickets", ["risk_tier"])
-    op.create_index("ix_trouble_tickets_submitted_by", "trouble_tickets", ["submitted_by"])
-    op.create_index("ix_trouble_tickets_created_at", "trouble_tickets", ["created_at"])
+    op.create_index("ix_trouble_tickets_status", "trouble_tickets", ["status"], if_not_exists=True)
+    op.create_index("ix_trouble_tickets_risk_tier", "trouble_tickets", ["risk_tier"], if_not_exists=True)
+    op.create_index("ix_trouble_tickets_submitted_by", "trouble_tickets", ["submitted_by"], if_not_exists=True)
+    op.create_index("ix_trouble_tickets_created_at", "trouble_tickets", ["created_at"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_trouble_tickets_created_at")
-    op.drop_index("ix_trouble_tickets_submitted_by")
-    op.drop_index("ix_trouble_tickets_risk_tier")
-    op.drop_index("ix_trouble_tickets_status")
-    op.drop_table("trouble_tickets")
+    op.drop_index("ix_trouble_tickets_created_at", if_exists=True)
+    op.drop_index("ix_trouble_tickets_submitted_by", if_exists=True)
+    op.drop_index("ix_trouble_tickets_risk_tier", if_exists=True)
+    op.drop_index("ix_trouble_tickets_status", if_exists=True)
+    op.drop_table("trouble_tickets", if_exists=True)

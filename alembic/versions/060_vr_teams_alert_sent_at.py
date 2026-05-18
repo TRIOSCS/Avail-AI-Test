@@ -20,4 +20,4 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_column("vendor_responses", "teams_alert_sent_at")
+    op.execute("ALTER TABLE IF EXISTS vendor_responses DROP COLUMN IF EXISTS teams_alert_sent_at")

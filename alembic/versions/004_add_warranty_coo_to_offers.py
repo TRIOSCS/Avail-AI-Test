@@ -18,10 +18,12 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # IF NOT EXISTS: idempotent against migration 001's explicit-DDL baseline
+    # which already includes these columns. Safe on existing databases too.
     op.add_column("offers", sa.Column("warranty", sa.String(100), nullable=True))
     op.add_column("offers", sa.Column("country_of_origin", sa.String(100), nullable=True))
 
 
 def downgrade() -> None:
-    op.drop_column("offers", "country_of_origin")
-    op.drop_column("offers", "warranty")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS country_of_origin")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS warranty")

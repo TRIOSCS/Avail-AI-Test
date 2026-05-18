@@ -3,8 +3,8 @@ name: Security Scanning
 on:
   push:
     branches: [main]
+  # Run security scans for PRs targeting any branch (stacked-PR support).
   pull_request:
-    branches: [main]
   schedule:
     - cron: "0 8 * * 1"  # Weekly Monday 8am UTC
 
@@ -30,6 +30,8 @@ jobs:
 
       - name: Install dependencies
         run: |
+          # Upgrade pip itself first — pip 26.0.1 has CVE-2026-3219 / CVE-2026-6357.
+          python -m pip install --upgrade "pip>=26.1"
           pip install -r requirements.txt
           pip install bandit pip-audit
           npm ci
@@ -42,7 +44,12 @@ jobs:
         run: bandit -r app/ -c pyproject.toml -ll
 
       - name: pip-audit vulnerability scan
-        run: pip-audit --desc
+        # --requirement scopes the audit to declared deps (app + dev) and their
+        # transitive resolution, excluding the CI runner's pre-installed packages
+        # (e.g. the runner-bundled pip itself), whose CVEs are not actionable
+        # for this app. Both files are audited so dev tooling (pytest, ruff,
+        # mypy, bandit, playwright-python, etc.) is covered.
+        run: pip-audit --desc --requirement requirements.txt --requirement requirements-dev.txt
 
       - name: npm audit vulnerability scan
         run: npm audit --audit-level=high

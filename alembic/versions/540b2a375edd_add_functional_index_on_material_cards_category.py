@@ -29,8 +29,9 @@ def upgrade() -> None:
         "material_cards",
         [sa.text("lower(trim(category))")],
         postgresql_where=sa.text("deleted_at IS NULL"),
+        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_mc_category_lower", table_name="material_cards")
+    op.drop_index("ix_mc_category_lower", table_name="material_cards", if_exists=True)

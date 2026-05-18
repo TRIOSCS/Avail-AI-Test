@@ -22,4 +22,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("error_reports", "ai_prompt")
+    op.execute("ALTER TABLE IF EXISTS error_reports DROP COLUMN IF EXISTS ai_prompt")

@@ -89,8 +89,9 @@ def upgrade() -> None:
         sa.Column("parent_id", sa.Integer(), sa.ForeignKey("tags.id", ondelete="SET NULL"), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.UniqueConstraint("name", "tag_type", name="uq_tags_name_type"),
+        if_not_exists=True,
     )
-    op.create_index("ix_tags_tag_type", "tags", ["tag_type"])
+    op.create_index("ix_tags_tag_type", "tags", ["tag_type"], if_not_exists=True)
 
     # ── material_tags ─────────────────────────────────────────────────
     op.create_table(
@@ -104,9 +105,10 @@ def upgrade() -> None:
         sa.Column("source", sa.String(30), nullable=False),
         sa.Column("classified_at", sa.DateTime(timezone=True), nullable=True),
         sa.UniqueConstraint("material_card_id", "tag_id", name="uq_material_tags_card_tag"),
+        if_not_exists=True,
     )
-    op.create_index("ix_material_tags_tag_id", "material_tags", ["tag_id"])
-    op.create_index("ix_material_tags_source", "material_tags", ["source"])
+    op.create_index("ix_material_tags_tag_id", "material_tags", ["tag_id"], if_not_exists=True)
+    op.create_index("ix_material_tags_source", "material_tags", ["source"], if_not_exists=True)
 
     # ── entity_tags ───────────────────────────────────────────────────
     op.create_table(
@@ -121,9 +123,12 @@ def upgrade() -> None:
         sa.Column("first_seen_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("last_seen_at", sa.DateTime(timezone=True), nullable=True),
         sa.UniqueConstraint("entity_type", "entity_id", "tag_id", name="uq_entity_tags_type_id_tag"),
+        if_not_exists=True,
     )
-    op.create_index("ix_entity_tags_type_tag_visible", "entity_tags", ["entity_type", "tag_id", "is_visible"])
-    op.create_index("ix_entity_tags_type_id", "entity_tags", ["entity_type", "entity_id"])
+    op.create_index(
+        "ix_entity_tags_type_tag_visible", "entity_tags", ["entity_type", "tag_id", "is_visible"], if_not_exists=True
+    )
+    op.create_index("ix_entity_tags_type_id", "entity_tags", ["entity_type", "entity_id"], if_not_exists=True)
 
     # ── tag_threshold_config ──────────────────────────────────────────
     op.create_table(
@@ -134,6 +139,7 @@ def upgrade() -> None:
         sa.Column("min_count", sa.Integer(), nullable=False),
         sa.Column("min_percentage", sa.Float(), nullable=False),
         sa.UniqueConstraint("entity_type", "tag_type", name="uq_threshold_entity_tag"),
+        if_not_exists=True,
     )
 
     # ── Seed commodity taxonomy ───────────────────────────────────────
@@ -166,12 +172,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("tag_threshold_config")
-    op.drop_index("ix_entity_tags_type_id")
-    op.drop_index("ix_entity_tags_type_tag_visible")
-    op.drop_table("entity_tags")
-    op.drop_index("ix_material_tags_source")
-    op.drop_index("ix_material_tags_tag_id")
-    op.drop_table("material_tags")
-    op.drop_index("ix_tags_tag_type")
-    op.drop_table("tags")
+    op.drop_table("tag_threshold_config", if_exists=True)
+    op.drop_index("ix_entity_tags_type_id", if_exists=True)
+    op.drop_index("ix_entity_tags_type_tag_visible", if_exists=True)
+    op.drop_table("entity_tags", if_exists=True)
+    op.drop_index("ix_material_tags_source", if_exists=True)
+    op.drop_index("ix_material_tags_tag_id", if_exists=True)
+    op.drop_table("material_tags", if_exists=True)
+    op.drop_index("ix_tags_tag_type", if_exists=True)
+    op.drop_table("tags", if_exists=True)

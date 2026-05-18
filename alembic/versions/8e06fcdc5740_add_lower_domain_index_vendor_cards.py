@@ -27,4 +27,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_vendor_cards_domain_lower", table_name="vendor_cards")
+    op.drop_index("ix_vendor_cards_domain_lower", table_name="vendor_cards", if_exists=True)

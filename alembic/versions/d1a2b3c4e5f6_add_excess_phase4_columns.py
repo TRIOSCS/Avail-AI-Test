@@ -87,12 +87,13 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_offers_excess_line_item", table_name="offers")
+    op.drop_index("ix_offers_excess_line_item", table_name="offers", if_exists=True)
     op.drop_constraint("fk_offers_excess_line_item_id", "offers", type_="foreignkey")
-    op.drop_column("offers", "excess_line_item_id")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS excess_line_item_id")
 
     op.drop_index(
         "ix_excess_line_items_normalized_part_number",
         table_name="excess_line_items",
+        if_exists=True,
     )
-    op.drop_column("excess_line_items", "normalized_part_number")
+    op.execute("ALTER TABLE IF EXISTS excess_line_items DROP COLUMN IF EXISTS normalized_part_number")
