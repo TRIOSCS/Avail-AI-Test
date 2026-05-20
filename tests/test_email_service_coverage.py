@@ -1,4 +1,5 @@
-"""tests/test_email_service_coverage.py — Coverage tests for uncovered lines in app/email_service.py.
+"""tests/test_email_service_coverage.py — Coverage tests for uncovered lines in
+app/email_service.py.
 
 Covers:
 - _handle_excess_bid_reply: empty body (921-922), None parse result (958-959),
@@ -107,7 +108,8 @@ def _make_vendor_response(db: Session, user: User, requisition: Requisition, con
 class TestHandleExcessBidReplyEmptyBody:
     @pytest.mark.asyncio
     async def test_empty_body_skipped(self, db_session: Session, test_user: User):
-        """Whitespace-only body returns early without changing status (lines 921-922)."""
+        """Whitespace-only body returns early without changing status (lines
+        921-922)."""
         sol = _make_excess_solicitation(db_session, test_user)
         msg = {"body": {"content": "   "}, "bodyPreview": "   "}
 
@@ -120,7 +122,7 @@ class TestHandleExcessBidReplyEmptyBody:
 
     @pytest.mark.asyncio
     async def test_empty_body_preview_skipped(self, db_session: Session, test_user: User):
-        """msg with no 'body' key but empty bodyPreview also returns early."""
+        """Msg with no 'body' key but empty bodyPreview also returns early."""
         sol = _make_excess_solicitation(db_session, test_user)
         msg = {"bodyPreview": ""}
 
@@ -138,7 +140,8 @@ class TestHandleExcessBidReplyEmptyBody:
 class TestHandleExcessBidReplyNoneResult:
     @pytest.mark.asyncio
     async def test_none_result_leaves_solicitation_unchanged(self, db_session: Session, test_user: User):
-        """claude_structured returning None leaves solicitation status unchanged (lines 958-959)."""
+        """claude_structured returning None leaves solicitation status unchanged (lines
+        958-959)."""
         sol = _make_excess_solicitation(db_session, test_user)
         msg = {"body": {"content": "I have some parts, please advise."}}
 
@@ -170,7 +173,8 @@ class TestHandleExcessBidReplyNoneResult:
 class TestHandleExcessBidReplyIncomplete:
     @pytest.mark.asyncio
     async def test_missing_unit_price_skips_bid_creation(self, db_session: Session, test_user: User):
-        """Parse result with unit_price=None returns early without creating bid (lines 971-972)."""
+        """Parse result with unit_price=None returns early without creating bid (lines
+        971-972)."""
         sol = _make_excess_solicitation(db_session, test_user)
         msg = {"body": {"content": "We can supply 200 units."}}
 
@@ -204,7 +208,8 @@ class TestAutoCreateOffersCardIdPath:
     def test_requirement_with_material_card_id_linked_to_offer(
         self, db_session: Session, test_user: User, test_requisition: Requisition
     ):
-        """Requirement.material_card_id populates mpn_to_card_id; offer inherits it (line 1043)."""
+        """Requirement.material_card_id populates mpn_to_card_id; offer inherits it
+        (line 1043)."""
         from app.models import MaterialCard
 
         mc = MaterialCard(
@@ -244,7 +249,8 @@ class TestAutoCreateOffersDedup:
     def test_existing_offer_for_same_vr_and_mpn_skipped(
         self, db_session: Session, test_user: User, test_requisition: Requisition
     ):
-        """Existing offer with same vendor_response_id + mpn causes continue (line 1059)."""
+        """Existing offer with same vendor_response_id + mpn causes continue (line
+        1059)."""
         vr = _make_vendor_response(db_session, test_user, test_requisition, confidence=0.9)
 
         # Pre-create the duplicate offer
@@ -352,7 +358,8 @@ class TestAutoCreateOffersExceptionHandlers:
         assert offer is not None
 
     def test_offer_loop_exception_swallowed(self, db_session: Session, test_user: User, test_requisition: Requisition):
-        """Exception inside the per-offer loop is caught (lines 1166-1167); no propagation."""
+        """Exception inside the per-offer loop is caught (lines 1166-1167); no
+        propagation."""
         vr = _make_vendor_response(db_session, test_user, test_requisition, confidence=0.9)
         draft = {"mpn": "LM404T", "vendor_name": "BadVendor"}
         parsed = {"confidence": 0.9}
@@ -371,7 +378,8 @@ class TestAutoCreateOffersStrategicVendorClock:
     def test_strategic_vendor_clock_exception_swallowed(
         self, db_session: Session, test_user: User, test_requisition: Requisition
     ):
-        """Exception in sv_record is swallowed (lines 1135-1136) when vendor_card_id is set."""
+        """Exception in sv_record is swallowed (lines 1135-1136) when vendor_card_id is
+        set."""
         from app.models import VendorCard
 
         vc = VendorCard(
@@ -448,7 +456,8 @@ class TestAutoCreateOffersExistingNotification:
     def test_existing_unread_notification_updated_not_duplicated(
         self, db_session: Session, test_user: User, test_requisition: Requisition
     ):
-        """Unread offer_pending_review log is updated in place, not duplicated (lines 1151-1154)."""
+        """Unread offer_pending_review log is updated in place, not duplicated (lines
+        1151-1154)."""
         vr = _make_vendor_response(db_session, test_user, test_requisition, confidence=0.6)
 
         existing_notif = ActivityLog(
@@ -501,7 +510,8 @@ class TestAutoCreateOffersExistingNotification:
 
 class TestAutoCreateOffersSSEException:
     def test_sse_broker_exception_swallowed(self, db_session: Session, test_user: User, test_requisition: Requisition):
-        """Exception from broker.publish is swallowed (lines 1186-1187); no propagation."""
+        """Exception from broker.publish is swallowed (lines 1186-1187); no
+        propagation."""
         vr = _make_vendor_response(db_session, test_user, test_requisition, confidence=0.9)
         draft = {"mpn": "LM317T", "vendor_name": "TestVendor Inc"}
         parsed = {"confidence": 0.9}

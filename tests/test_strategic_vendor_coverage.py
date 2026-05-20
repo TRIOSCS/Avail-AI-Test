@@ -1,4 +1,5 @@
-"""test_strategic_vendor_coverage.py — Coverage gap tests for strategic_vendor_service.py.
+"""test_strategic_vendor_coverage.py — Coverage gap tests for
+strategic_vendor_service.py.
 
 Targets missing lines: 96, 117-119, 170-171, 175-176, 179-181
 - Line 96: claim_vendor returns "already claimed by another buyer"
