@@ -33,18 +33,18 @@ def upgrade() -> None:
     op.add_column("offers", sa.Column("promoted_at", sa.DateTime(), nullable=True))
 
     # Index for filtering by evidence tier
-    op.create_index("ix_sightings_evidence_tier", "sightings", ["evidence_tier"])
-    op.create_index("ix_offers_evidence_tier", "offers", ["evidence_tier"])
+    op.create_index("ix_sightings_evidence_tier", "sightings", ["evidence_tier"], if_not_exists=True)
+    op.create_index("ix_offers_evidence_tier", "offers", ["evidence_tier"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_offers_evidence_tier", table_name="offers")
-    op.drop_index("ix_sightings_evidence_tier", table_name="sightings")
+    op.drop_index("ix_offers_evidence_tier", table_name="offers", if_exists=True)
+    op.drop_index("ix_sightings_evidence_tier", table_name="sightings", if_exists=True)
 
-    op.drop_column("offers", "promoted_at")
-    op.drop_column("offers", "promoted_by_id")
-    op.drop_column("offers", "parse_confidence")
-    op.drop_column("offers", "evidence_tier")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS promoted_at")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS promoted_by_id")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS parse_confidence")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS evidence_tier")
 
-    op.drop_column("sightings", "score_components")
-    op.drop_column("sightings", "evidence_tier")
+    op.execute("ALTER TABLE IF EXISTS sightings DROP COLUMN IF EXISTS score_components")
+    op.execute("ALTER TABLE IF EXISTS sightings DROP COLUMN IF EXISTS evidence_tier")

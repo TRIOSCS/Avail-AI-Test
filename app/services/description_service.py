@@ -92,7 +92,7 @@ def _collect_db_descriptions(mpn: str, manufacturer: str) -> list[dict[str, Any]
                     break
 
     except Exception:
-        logger.warning("DB description collection failed for %s", mpn, exc_info=True)
+        logger.warning("DB description collection failed for {}", mpn, exc_info=True)
     finally:
         db.close()
 
@@ -227,7 +227,7 @@ def backfill_descriptions(requirement_ids: list[int]) -> None:
                 if result["description"] and result["confidence"] >= 0.75:
                     req.description = result["description"]
                     logger.info(
-                        "Auto-generated description for requirement %s: %s (confidence=%.2f, sources=%d)",
+                        "Auto-generated description for requirement {}: {} (confidence={:.2f}, sources={})",
                         rid,
                         result["description"],
                         result["confidence"],
@@ -243,14 +243,14 @@ def backfill_descriptions(requirement_ids: list[int]) -> None:
                     db.commit()
                 else:
                     logger.debug(
-                        "Skipped description for requirement %s: confidence=%.2f, sources=%d",
+                        "Skipped description for requirement {}: confidence={:.2f}, sources={}",
                         rid,
                         result.get("confidence", 0),
                         result.get("sources_used", 0),
                     )
             except Exception:
                 logger.warning(
-                    "Description generation failed for requirement %s",
+                    "Description generation failed for requirement {}",
                     rid,
                     exc_info=True,
                 )

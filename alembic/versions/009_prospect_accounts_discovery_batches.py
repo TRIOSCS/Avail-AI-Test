@@ -37,6 +37,7 @@ def upgrade() -> None:
         sa.Column("started_at", sa.DateTime, nullable=False),
         sa.Column("completed_at", sa.DateTime),
         sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
+        if_not_exists=True,
     )
 
     # -- prospect_accounts --
@@ -81,18 +82,24 @@ def upgrade() -> None:
         sa.Column("last_enriched_at", sa.DateTime),
         sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime, server_default=sa.func.now()),
+        if_not_exists=True,
     )
 
     # Indexes for prospect_accounts
-    op.create_index("ix_prospect_accounts_status", "prospect_accounts", ["status"])
-    op.create_index("ix_prospect_accounts_fit_score", "prospect_accounts", ["fit_score"])
-    op.create_index("ix_prospect_accounts_readiness_score", "prospect_accounts", ["readiness_score"])
-    op.create_index("ix_prospect_accounts_region", "prospect_accounts", ["region"])
-    op.create_index("ix_prospect_accounts_discovery_source", "prospect_accounts", ["discovery_source"])
+    op.create_index("ix_prospect_accounts_status", "prospect_accounts", ["status"], if_not_exists=True)
+    op.create_index("ix_prospect_accounts_fit_score", "prospect_accounts", ["fit_score"], if_not_exists=True)
+    op.create_index(
+        "ix_prospect_accounts_readiness_score", "prospect_accounts", ["readiness_score"], if_not_exists=True
+    )
+    op.create_index("ix_prospect_accounts_region", "prospect_accounts", ["region"], if_not_exists=True)
+    op.create_index(
+        "ix_prospect_accounts_discovery_source", "prospect_accounts", ["discovery_source"], if_not_exists=True
+    )
     op.create_index(
         "ix_prospect_accounts_status_fit",
         "prospect_accounts",
         ["status", "fit_score"],
+        if_not_exists=True,
     )
 
     # -- Add source column to companies --
@@ -103,6 +110,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("companies", "source")
-    op.drop_table("prospect_accounts")
-    op.drop_table("discovery_batches")
+    op.execute("ALTER TABLE IF EXISTS companies DROP COLUMN IF EXISTS source")
+    op.drop_table("prospect_accounts", if_exists=True)
+    op.drop_table("discovery_batches", if_exists=True)

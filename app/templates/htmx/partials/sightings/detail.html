@@ -1,4 +1,4 @@
-{# Sightings detail panel — requirement info + vendor breakdown + activity.
+{# Sightings detail panel — requirement info + tabbed vendors/activity panes.
    Called by: GET /v2/partials/sightings/{id}/detail (sightings router)
    Depends on: _macros.html, activity_timeline.html, source_badge.html
    Context: requirement, requisition, summaries, vendor_statuses,
@@ -9,7 +9,7 @@
 {% import "htmx/partials/shared/_macros.html" as m %}
 {% from "htmx/partials/shared/_mpn_chips.html" import mpn_chips %}
 
-{# ── Part Header ─────────────────────────────────────────────── #}
+{# ── Part Header (always visible above tabs) ─────────────────── #}
 <div class="border-b border-gray-100 pb-3 mb-3 sightings-slide-down">
   <div class="flex items-start justify-between">
     <div>
@@ -70,8 +70,25 @@
   </div>
 </div>
 
-{# ── Vendor Breakdown Table ──────────────────────────────────── #}
-<div class="mb-4 border-t border-gray-100 pt-3">
+{# ── Tabbed body: Vendors (default) / Activity ──────────────── #}
+{# Inline rendering: `activities` already loaded by sightings_detail; lazy hx-get would add a round trip with no benefit. #}
+<div x-data="{ activeTab: 'vendors' }">
+  <div class="border-b border-gray-200 mb-3">
+    <nav class="flex gap-6 -mb-px">
+      {% for tab_id, tab_label in [('vendors', 'Vendors'), ('activity', 'Activity')] %}
+      <button @click="activeTab = '{{ tab_id }}'"
+              type="button"
+              :class="activeTab === '{{ tab_id }}' ? 'border-brand-500 text-brand-500' : 'border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-200'"
+              class="py-2 px-1 text-xs font-medium border-b-2 transition-colors whitespace-nowrap">
+        {{ tab_label }}
+      </button>
+      {% endfor %}
+    </nav>
+  </div>
+
+  {# ── Vendors panel (default) ──────────────────────────────── #}
+  <div x-show="activeTab === 'vendors'" x-cloak>
+<div class="mb-4">
   <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">
     Vendors ({{ summaries|length }})
   </h4>
@@ -159,8 +176,12 @@
   </div>
   {% endif %}
 </div>
+  </div>{# /vendors panel #}
 
-{# ── Activity Timeline ──────────────────────────────────────── #}
-<div id="sightings-activity-section">
-  {% include "htmx/partials/sightings/activity_section.html" %}
-</div>
+  {# ── Activity panel ───────────────────────────────────────── #}
+  <div x-show="activeTab === 'activity'" x-cloak>
+    <div id="sightings-activity-section">
+      {% include "htmx/partials/sightings/activity_section.html" %}
+    </div>
+  </div>
+</div>{# /tabs root #}

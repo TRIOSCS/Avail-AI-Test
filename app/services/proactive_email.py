@@ -93,7 +93,7 @@ async def draft_proactive_email(
         logger.info("Claude not configured — using fallback email draft")
         return _fallback_draft(company_name, contact_name, parts, salesperson_name, notes)
     except ClaudeError as e:
-        logger.warning("Claude AI failed for proactive email: %s", e)
+        logger.warning("Claude AI failed for proactive email: {}", e)
         return _fallback_draft(company_name, contact_name, parts, salesperson_name, notes)
 
     if not result or not isinstance(result, dict):

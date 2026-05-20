@@ -361,7 +361,7 @@ async def _job_email_reverification():
         result = await run_email_reverification(db, max_contacts=200)
         db.commit()
         logger.info(
-            "Email re-verification: %d processed, %d invalidated",
+            "Email re-verification: {} processed, {} invalidated",
             result.get("processed", 0),
             result.get("invalidated", 0),
         )
@@ -420,11 +420,11 @@ async def _scan_user_inbox(user, db):
         try:
             await fn()
         except Exception as e:
-            logger.exception("Sub-op %s failed for %s: %s", name, user.email, e)
+            logger.exception("Sub-op {} failed for {}: {}", name, user.email, e)
             sub_op_failures.append(name)
 
     if sub_op_failures:
-        logger.warning("Inbox scan partial failure for %s — failed sub-ops: %s", user.email, sub_op_failures)
+        logger.warning("Inbox scan partial failure for {} — failed sub-ops: {}", user.email, sub_op_failures)
 
     if poll_succeeded:
         user.last_inbox_scan = datetime.now(timezone.utc)

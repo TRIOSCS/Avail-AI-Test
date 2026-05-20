@@ -19,9 +19,9 @@ def upgrade() -> None:
         "material_cards",
         sa.Column("is_internal_part", sa.Boolean(), server_default="false", nullable=True),
     )
-    op.create_index("ix_mc_internal_part", "material_cards", ["is_internal_part"])
+    op.create_index("ix_mc_internal_part", "material_cards", ["is_internal_part"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_mc_internal_part", table_name="material_cards")
-    op.drop_column("material_cards", "is_internal_part")
+    op.drop_index("ix_mc_internal_part", table_name="material_cards", if_exists=True)
+    op.execute("ALTER TABLE IF EXISTS material_cards DROP COLUMN IF EXISTS is_internal_part")

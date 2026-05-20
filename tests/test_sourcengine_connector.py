@@ -14,6 +14,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+from app.connectors.errors import ConnectorAuthError, ConnectorRateLimitError
+
 
 class TestSourcengineDoSearch:
     """Tests for SourcengineConnector._do_search."""
@@ -28,34 +30,40 @@ class TestSourcengineDoSearch:
         assert result == []
 
     @pytest.mark.asyncio
-    async def test_status_429_returns_empty(self):
-        """HTTP 429 → log warning and return []."""
+    async def test_status_429_raises_for_health_monitor(self):
+        """Sourcengine 429 raises RuntimeError so health_monitor flips
+        api_sources.status to 'error'; search_service excludes the source from user
+        searches; auto-recovers on next successful ping.
+
+        Replaces the prior silent-empty contract per connector convention. See
+        docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
+        """
         from app.connectors.sourcengine import SourcengineConnector
 
         connector = SourcengineConnector(api_key="test-key")
 
         mock_response = MagicMock()
         mock_response.status_code = 429
+        mock_response.text = "Too Many Requests"
 
         with patch("app.connectors.sourcengine.http.get", new_callable=AsyncMock, return_value=mock_response):
-            result = await connector._do_search("LM317T")
-
-        assert result == []
+            with pytest.raises(ConnectorRateLimitError, match="Sourcengine rate limited"):
+                await connector._do_search("LM317T")
 
     @pytest.mark.asyncio
-    async def test_status_401_returns_empty(self):
-        """HTTP 401 → log error and return []."""
+    async def test_status_401_raises_for_health_monitor(self):
+        """Sourcengine 401 (auth) raises RuntimeError — same contract as 429."""
         from app.connectors.sourcengine import SourcengineConnector
 
         connector = SourcengineConnector(api_key="bad-key")
 
         mock_response = MagicMock()
         mock_response.status_code = 401
+        mock_response.text = "Unauthorized"
 
         with patch("app.connectors.sourcengine.http.get", new_callable=AsyncMock, return_value=mock_response):
-            result = await connector._do_search("LM317T")
-
-        assert result == []
+            with pytest.raises(ConnectorAuthError, match="Sourcengine auth error"):
+                await connector._do_search("LM317T")
 
     @pytest.mark.asyncio
     async def test_successful_search_returns_results(self):

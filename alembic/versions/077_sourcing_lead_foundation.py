@@ -71,17 +71,24 @@ def upgrade() -> None:
             "part_number_matched",
             name="uq_sourcing_lead_requirement_vendor_part",
         ),
+        if_not_exists=True,
     )
-    op.create_index("ix_sourcing_leads_lead_id", "sourcing_leads", ["lead_id"], unique=True)
-    op.create_index("ix_sourcing_leads_requirement_id", "sourcing_leads", ["requirement_id"])
-    op.create_index("ix_sourcing_leads_requisition_id", "sourcing_leads", ["requisition_id"])
-    op.create_index("ix_sourcing_leads_vendor_name_normalized", "sourcing_leads", ["vendor_name_normalized"])
-    op.create_index("ix_sourcing_leads_vendor_card_id", "sourcing_leads", ["vendor_card_id"])
-    op.create_index("ix_sourcing_leads_buyer_owner_user_id", "sourcing_leads", ["buyer_owner_user_id"])
-    op.create_index("ix_sourcing_leads_status", "sourcing_leads", ["buyer_status"])
-    op.create_index("ix_sourcing_leads_confidence", "sourcing_leads", ["confidence_score"])
-    op.create_index("ix_sourcing_leads_safety", "sourcing_leads", ["vendor_safety_score"])
-    op.create_index("ix_sourcing_leads_req_status", "sourcing_leads", ["requisition_id", "buyer_status"])
+    op.create_index("ix_sourcing_leads_lead_id", "sourcing_leads", ["lead_id"], unique=True, if_not_exists=True)
+    op.create_index("ix_sourcing_leads_requirement_id", "sourcing_leads", ["requirement_id"], if_not_exists=True)
+    op.create_index("ix_sourcing_leads_requisition_id", "sourcing_leads", ["requisition_id"], if_not_exists=True)
+    op.create_index(
+        "ix_sourcing_leads_vendor_name_normalized", "sourcing_leads", ["vendor_name_normalized"], if_not_exists=True
+    )
+    op.create_index("ix_sourcing_leads_vendor_card_id", "sourcing_leads", ["vendor_card_id"], if_not_exists=True)
+    op.create_index(
+        "ix_sourcing_leads_buyer_owner_user_id", "sourcing_leads", ["buyer_owner_user_id"], if_not_exists=True
+    )
+    op.create_index("ix_sourcing_leads_status", "sourcing_leads", ["buyer_status"], if_not_exists=True)
+    op.create_index("ix_sourcing_leads_confidence", "sourcing_leads", ["confidence_score"], if_not_exists=True)
+    op.create_index("ix_sourcing_leads_safety", "sourcing_leads", ["vendor_safety_score"], if_not_exists=True)
+    op.create_index(
+        "ix_sourcing_leads_req_status", "sourcing_leads", ["requisition_id", "buyer_status"], if_not_exists=True
+    )
 
     op.create_table(
         "lead_evidence",
@@ -103,11 +110,12 @@ def upgrade() -> None:
         sa.Column("source_reliability_band", sa.String(length=16), nullable=True),
         sa.Column("verification_state", sa.String(length=32), nullable=True, server_default="raw"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        if_not_exists=True,
     )
-    op.create_index("ix_lead_evidence_evidence_id", "lead_evidence", ["evidence_id"], unique=True)
-    op.create_index("ix_lead_evidence_lead_id", "lead_evidence", ["lead_id"])
-    op.create_index("ix_lead_evidence_source_type", "lead_evidence", ["source_type"])
-    op.create_index("ix_lead_evidence_verification", "lead_evidence", ["verification_state"])
+    op.create_index("ix_lead_evidence_evidence_id", "lead_evidence", ["evidence_id"], unique=True, if_not_exists=True)
+    op.create_index("ix_lead_evidence_lead_id", "lead_evidence", ["lead_id"], if_not_exists=True)
+    op.create_index("ix_lead_evidence_source_type", "lead_evidence", ["source_type"], if_not_exists=True)
+    op.create_index("ix_lead_evidence_verification", "lead_evidence", ["verification_state"], if_not_exists=True)
 
     op.create_table(
         "lead_feedback_events",
@@ -120,34 +128,39 @@ def upgrade() -> None:
         sa.Column("contact_attempt_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("created_by_user_id", sa.Integer(), sa.ForeignKey("users.id", ondelete="SET NULL"), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
+        if_not_exists=True,
     )
-    op.create_index("ix_lead_feedback_events_lead_id", "lead_feedback_events", ["lead_id"])
-    op.create_index("ix_lead_feedback_events_created_by_user_id", "lead_feedback_events", ["created_by_user_id"])
-    op.create_index("ix_lead_feedback_lead_created", "lead_feedback_events", ["lead_id", "created_at"])
-    op.create_index("ix_lead_feedback_status", "lead_feedback_events", ["status"])
+    op.create_index("ix_lead_feedback_events_lead_id", "lead_feedback_events", ["lead_id"], if_not_exists=True)
+    op.create_index(
+        "ix_lead_feedback_events_created_by_user_id", "lead_feedback_events", ["created_by_user_id"], if_not_exists=True
+    )
+    op.create_index(
+        "ix_lead_feedback_lead_created", "lead_feedback_events", ["lead_id", "created_at"], if_not_exists=True
+    )
+    op.create_index("ix_lead_feedback_status", "lead_feedback_events", ["status"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_lead_feedback_status", table_name="lead_feedback_events")
-    op.drop_index("ix_lead_feedback_lead_created", table_name="lead_feedback_events")
-    op.drop_index("ix_lead_feedback_events_created_by_user_id", table_name="lead_feedback_events")
-    op.drop_index("ix_lead_feedback_events_lead_id", table_name="lead_feedback_events")
-    op.drop_table("lead_feedback_events")
+    op.drop_index("ix_lead_feedback_status", table_name="lead_feedback_events", if_exists=True)
+    op.drop_index("ix_lead_feedback_lead_created", table_name="lead_feedback_events", if_exists=True)
+    op.drop_index("ix_lead_feedback_events_created_by_user_id", table_name="lead_feedback_events", if_exists=True)
+    op.drop_index("ix_lead_feedback_events_lead_id", table_name="lead_feedback_events", if_exists=True)
+    op.drop_table("lead_feedback_events", if_exists=True)
 
-    op.drop_index("ix_lead_evidence_verification", table_name="lead_evidence")
-    op.drop_index("ix_lead_evidence_source_type", table_name="lead_evidence")
-    op.drop_index("ix_lead_evidence_lead_id", table_name="lead_evidence")
-    op.drop_index("ix_lead_evidence_evidence_id", table_name="lead_evidence")
-    op.drop_table("lead_evidence")
+    op.drop_index("ix_lead_evidence_verification", table_name="lead_evidence", if_exists=True)
+    op.drop_index("ix_lead_evidence_source_type", table_name="lead_evidence", if_exists=True)
+    op.drop_index("ix_lead_evidence_lead_id", table_name="lead_evidence", if_exists=True)
+    op.drop_index("ix_lead_evidence_evidence_id", table_name="lead_evidence", if_exists=True)
+    op.drop_table("lead_evidence", if_exists=True)
 
-    op.drop_index("ix_sourcing_leads_req_status", table_name="sourcing_leads")
-    op.drop_index("ix_sourcing_leads_safety", table_name="sourcing_leads")
-    op.drop_index("ix_sourcing_leads_confidence", table_name="sourcing_leads")
-    op.drop_index("ix_sourcing_leads_status", table_name="sourcing_leads")
-    op.drop_index("ix_sourcing_leads_buyer_owner_user_id", table_name="sourcing_leads")
-    op.drop_index("ix_sourcing_leads_vendor_card_id", table_name="sourcing_leads")
-    op.drop_index("ix_sourcing_leads_vendor_name_normalized", table_name="sourcing_leads")
-    op.drop_index("ix_sourcing_leads_requisition_id", table_name="sourcing_leads")
-    op.drop_index("ix_sourcing_leads_requirement_id", table_name="sourcing_leads")
-    op.drop_index("ix_sourcing_leads_lead_id", table_name="sourcing_leads")
-    op.drop_table("sourcing_leads")
+    op.drop_index("ix_sourcing_leads_req_status", table_name="sourcing_leads", if_exists=True)
+    op.drop_index("ix_sourcing_leads_safety", table_name="sourcing_leads", if_exists=True)
+    op.drop_index("ix_sourcing_leads_confidence", table_name="sourcing_leads", if_exists=True)
+    op.drop_index("ix_sourcing_leads_status", table_name="sourcing_leads", if_exists=True)
+    op.drop_index("ix_sourcing_leads_buyer_owner_user_id", table_name="sourcing_leads", if_exists=True)
+    op.drop_index("ix_sourcing_leads_vendor_card_id", table_name="sourcing_leads", if_exists=True)
+    op.drop_index("ix_sourcing_leads_vendor_name_normalized", table_name="sourcing_leads", if_exists=True)
+    op.drop_index("ix_sourcing_leads_requisition_id", table_name="sourcing_leads", if_exists=True)
+    op.drop_index("ix_sourcing_leads_requirement_id", table_name="sourcing_leads", if_exists=True)
+    op.drop_index("ix_sourcing_leads_lead_id", table_name="sourcing_leads", if_exists=True)
+    op.drop_table("sourcing_leads", if_exists=True)

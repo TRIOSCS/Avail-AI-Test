@@ -38,26 +38,30 @@ def upgrade() -> None:
         sa.Column("needs_review", sa.Boolean, default=False),
         sa.Column("thread_summary", sa.JSON),
         sa.Column("created_at", sa.DateTime, default=sa.func.now()),
+        if_not_exists=True,
     )
     op.create_index(
         "ix_email_intel_user_received",
         "email_intelligence",
         ["user_id", "received_at"],
+        if_not_exists=True,
     )
     op.create_index(
         "ix_email_intel_classification",
         "email_intelligence",
         ["classification"],
+        if_not_exists=True,
     )
     op.create_index(
         "ix_email_intel_needs_review",
         "email_intelligence",
         ["needs_review"],
+        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_email_intel_needs_review")
-    op.drop_index("ix_email_intel_classification")
-    op.drop_index("ix_email_intel_user_received")
-    op.drop_table("email_intelligence")
+    op.drop_index("ix_email_intel_needs_review", if_exists=True)
+    op.drop_index("ix_email_intel_classification", if_exists=True)
+    op.drop_index("ix_email_intel_user_received", if_exists=True)
+    op.drop_table("email_intelligence", if_exists=True)

@@ -138,7 +138,7 @@ async def _enrich_batch(cards: list[MaterialCard], db: Session, stats: dict) -> 
             timeout=60,
         )
     except Exception as e:
-        logger.error("Material enrichment AI call failed: %s", e)
+        logger.error("Material enrichment AI call failed: {}", e)
         stats["errors"] += len(cards)
         return
 
@@ -150,7 +150,7 @@ async def _enrich_batch(cards: list[MaterialCard], db: Session, stats: dict) -> 
     ai_parts = result["parts"]
 
     if len(ai_parts) != len(cards):
-        logger.warning("Enrichment returned %d parts for %d cards — skipping batch", len(ai_parts), len(cards))
+        logger.warning("Enrichment returned {} parts for {} cards — skipping batch", len(ai_parts), len(cards))
         stats["errors"] += len(cards)
         return
 
@@ -159,13 +159,13 @@ async def _enrich_batch(cards: list[MaterialCard], db: Session, stats: dict) -> 
             _apply_enrichment_result(card, ai)
             stats["enriched"] += 1
         except Exception as e:
-            logger.warning("Failed to apply enrichment for card %d: %s", card.id, e)
+            logger.warning("Failed to apply enrichment for card {}: {}", card.id, e)
             stats["errors"] += 1
 
     try:
         db.commit()
     except Exception as e:
-        logger.error("Material enrichment commit failed: %s", e)
+        logger.error("Material enrichment commit failed: {}", e)
         db.rollback()
         stats["errors"] += len(cards)
         stats["enriched"] -= len(cards)
@@ -300,7 +300,7 @@ async def batch_enrich_materials(db: Session) -> str | None:
         logger.info("Claude not configured — skipping batch material enrichment")
         return None
     except ClaudeError as e:
-        logger.warning("batch_enrich_materials: claude_batch_submit failed: %s", e)
+        logger.warning("batch_enrich_materials: claude_batch_submit failed: {}", e)
         return None
     if not batch_id:
         logger.warning("batch_enrich_materials: claude_batch_submit returned None")
@@ -309,7 +309,7 @@ async def batch_enrich_materials(db: Session) -> str | None:
     if r:
         r.set(_REDIS_KEY, batch_id)
 
-    logger.info("batch_enrich_materials: submitted %d cards, batch_id=%s", len(cards), batch_id)
+    logger.info("batch_enrich_materials: submitted {} cards, batch_id={}", len(cards), batch_id)
     return batch_id
 
 
@@ -336,17 +336,17 @@ async def process_material_batch_results(db: Session) -> dict | None:
     try:
         results = await claude_batch_results(batch_id)
     except ClaudeError as e:
-        logger.warning("process_material_batch_results: batch %s check failed: %s", batch_id, e)
+        logger.warning("process_material_batch_results: batch {} check failed: {}", batch_id, e)
         return None
     if results is None:
-        logger.debug("process_material_batch_results: batch %s still processing", batch_id)
+        logger.debug("process_material_batch_results: batch {} still processing", batch_id)
         return None
 
     stats = {"applied": 0, "errors": 0}
 
     for custom_id, parsed in results.items():
         if parsed is None:
-            logger.warning("Batch result error for %s — skipping", custom_id)
+            logger.warning("Batch result error for {} — skipping", custom_id)
             stats["errors"] += 1
             continue
 
@@ -377,19 +377,19 @@ async def process_material_batch_results(db: Session) -> dict | None:
             card.enrichment_source = "batch_api"  # Override source for batch
             stats["applied"] += 1
         except Exception as e:
-            logger.warning("Failed to apply batch enrichment for card %d: %s", card_id, e)
+            logger.warning("Failed to apply batch enrichment for card {}: {}", card_id, e)
             stats["errors"] += 1
 
     try:
         db.commit()
     except Exception as e:
-        logger.error("process_material_batch_results commit failed: %s", e)
+        logger.error("process_material_batch_results commit failed: {}", e)
         db.rollback()
         return stats
 
     r.delete(_REDIS_KEY)
     logger.info(
-        "process_material_batch_results: %d applied, %d errors from batch %s",
+        "process_material_batch_results: {} applied, {} errors from batch {}",
         stats["applied"],
         stats["errors"],
         batch_id,

@@ -107,14 +107,14 @@ async def _analyze_vendor_materials(card_id: int, db_session=None):
         db.commit()
 
         logger.info(
-            "Material tags updated for vendor %s (card %d): %d brands, %d commodities",
+            "Material tags updated for vendor {} (card {}): {} brands, {} commodities",
             card.display_name,
             card_id,
             len(card.brand_tags),
             len(card.commodity_tags),
         )
     except Exception:
-        logger.exception("Material analysis failed for vendor card %d", card_id)
+        logger.exception("Material analysis failed for vendor card {}", card_id)
         if own_session:
             db.rollback()
     finally:

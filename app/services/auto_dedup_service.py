@@ -108,7 +108,7 @@ def _dedup_vendors(db: Session) -> int:
             if score >= 98:
                 should_merge = True
                 logger.info(
-                    "Auto-merging vendors (score=%d): '%s' into '%s'",
+                    "Auto-merging vendors (score={}): '{}' into '{}'",
                     score,
                     b.display_name if remove_id == b.id else a.display_name,
                     a.display_name if keep_id == a.id else b.display_name,
@@ -123,7 +123,7 @@ def _dedup_vendors(db: Session) -> int:
                     merged += 1
                     merged_ids.add(remove_id)
                 except Exception:
-                    logger.exception("Failed to merge vendors %d -> %d", remove_id, keep_id)
+                    logger.exception("Failed to merge vendors {} -> {}", remove_id, keep_id)
                     db.rollback()
 
             if merged >= 50:  # Cap merges per run
@@ -165,7 +165,7 @@ def _dedup_companies(db: Session) -> int:
         if score >= 98:
             should_merge = True
             logger.info(
-                "Auto-merging companies (score=%d): '%s' into '%s'",
+                "Auto-merging companies (score={}): '{}' into '{}'",
                 score,
                 remove.name,
                 keep.name,
@@ -179,7 +179,7 @@ def _dedup_companies(db: Session) -> int:
                 db.commit()
                 merged += 1
             except Exception:
-                logger.exception("Failed to merge companies %d -> %d", remove_id, keep_id)
+                logger.exception("Failed to merge companies {} -> {}", remove_id, keep_id)
                 db.rollback()
 
         if merged >= 10:  # Cap merges per run
@@ -242,7 +242,7 @@ async def _ask_claude_merge(prompt: str) -> bool:
         logger.info("Claude not configured — skipping dedup check")
         return False
     except ClaudeError as e:
-        logger.warning("Claude AI failed for dedup check: %s", e)
+        logger.warning("Claude AI failed for dedup check: {}", e)
         return False
 
     if not result:

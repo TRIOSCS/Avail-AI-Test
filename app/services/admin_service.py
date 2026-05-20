@@ -222,7 +222,7 @@ def get_system_health(db: Session) -> dict:
                 }
             )
     except Exception as e:
-        logger.warning("Admin health: connector stats query failed: %s", e)
+        logger.warning("Admin health: connector stats query failed: {}", e)
 
     return {
         "version": APP_VERSION,

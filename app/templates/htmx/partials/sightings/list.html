@@ -55,10 +55,23 @@
            localStorage.setItem('sightings-split', this.splitRatio.toFixed(3));
          }
        },
+       // Row click is read-only: GET /detail renders the cached panel. The
+       // only way to fire a connector search is the per-row refresh icon
+       // (table.html) or the "Search" button in the detail panel header
+       // (_macros.html::search_button). Both POST /v2/.../refresh which is
+       // gated by the 48h per-MPN cooldown enforced in search_requirement.
        selectReq(id) {
+         const store = Alpine.store('sightingSelection');
          this.selectedReqId = id;
-         Alpine.store('sightingSelection').selectedReqId = id;
+         store.selectedReqId = id;
+         store.clickPending += 1;
          if (window.innerWidth < 1024) { this.mobileDetailOpen = true; }
+         htmx.ajax('GET', '/v2/partials/sightings/' + id + '/detail', {
+           target: '#sightings-detail',
+           swap: 'innerHTML',
+           indicator: '#sightings-detail-skeleton',
+           headers: { 'X-Click-Req-Id': String(id) },
+         });
        },
        closeMobileDetail() {
          this.mobileDetailOpen = false;
@@ -77,15 +90,23 @@
          init() {
            this._sse = new EventSource('/api/events/stream');
            this._sse.addEventListener('sighting-updated', (e) => {
+             let data;
              try {
-               const data = JSON.parse(e.data || '{}');
-               const reqId = data.requirement_id;
-               const sel = Alpine.store('sightingSelection')?.selectedReqId;
-               if (reqId && sel && String(reqId) === String(sel)) {
-                 htmx.ajax('GET', '/v2/partials/sightings/' + reqId + '/detail',
-                            {target: '#sightings-detail', swap: 'innerHTML'});
-               }
-             } catch(err) { /* ignore parse errors */ }
+               data = JSON.parse(e.data || '{}');
+             } catch (err) {
+               console.debug('[sightings] sse handler parse error', err);
+               return;
+             }
+             const reqId = data.requirement_id;
+             const store = Alpine.store('sightingSelection');
+             const sel = store.selectedReqId;
+             if (!reqId || !sel || String(reqId) !== String(sel)) return;
+             if (store.clickPending > 0) return;
+             htmx.ajax('POST', '/v2/partials/sightings/' + reqId + '/refresh?source=sse', {
+               target: '#sightings-detail',
+               swap: 'innerHTML',
+               indicator: '#sightings-detail-skeleton',
+             });
            });
            this._sse.onerror = () => {
              window.dispatchEvent(new CustomEvent('sse-error'));
@@ -179,7 +200,5 @@
     {# Detail content — loaded via HTMX when row selected #}
     <div x-show="selectedReqId" x-cloak id="sightings-detail" class="sightings-fade p-3"
          hx-indicator="#sightings-detail-skeleton"></div>
-    {# Hidden sink for background refresh — triggers search pipeline without blocking detail load #}
-    <div id="sightings-refresh-sink" class="hidden"></div>
   </div>
 </div>

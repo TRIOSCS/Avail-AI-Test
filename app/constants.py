@@ -271,3 +271,49 @@ class PendingBatchStatus(StrEnum):
     PROCESSING = "processing"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class ApiSourceStatus(StrEnum):
+    """ApiSource.status — managed by health_monitor.ping_source.
+
+    Single source of truth for the api_sources.status string column.
+    health_monitor.ping_source is the only writer of LIVE / ERROR. DISABLED is set when
+    no connector is available for the source. DEGRADED is reserved for future
+    ConnectorRateLimitError handling where the source should be auto-retry-after-window
+    without exclusion from user searches.
+    """
+
+    PENDING = "pending"
+    LIVE = "live"
+    ERROR = "error"
+    DEGRADED = "degraded"
+    DISABLED = "disabled"
+
+
+class SourceRunStatus(StrEnum):
+    """Per-search-run status for source_stats[i] entries.
+
+    Returned to the streaming search response so the per-source chip strip in the UI can
+    render the right state (green / red / dim / pulsing).
+
+    error_skipped means the source was excluded from this run because health_monitor
+    previously flipped its ApiSource.status to ERROR; the operator sees a distinct chip
+    with an actionable message.
+    """
+
+    OK = "ok"
+    ERROR = "error"
+    ERROR_SKIPPED = "error_skipped"
+    SKIPPED = "skipped"
+    DISABLED = "disabled"
+
+
+BROWSER_WORKER_SOURCES = frozenset({"icsource", "netcomponents"})
+"""api_sources rows backed by queue-driven browser workers, not request/response
+connectors.
+
+These have no entry in `_get_connector_for_source`, so `health_monitor.ping_source` would
+flip them to DISABLED on every 15-min run. Skip them in `run_health_checks` so the seed
+applied at startup (`seed_browser_worker_sources`) survives. Their actual health is
+tracked via `IcsWorkerStatus`/`NcWorkerStatus` heartbeats.
+"""

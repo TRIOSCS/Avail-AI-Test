@@ -100,46 +100,6 @@ def test_search_requirements_req_not_found(client):
     assert resp.status_code == 404
 
 
-def test_search_requirements_with_exception(client, test_requisition, db_session):
-    r = Requirement(
-        requisition_id=test_requisition.id,
-        primary_mpn="LM317T",
-        manufacturer="TI",
-        target_qty=10,
-    )
-    db_session.add(r)
-    db_session.commit()
-
-    async def _fail(*args, **kwargs):
-        raise Exception("Search failed")
-
-    with patch("app.routers.requisitions.requirements.get_req_for_user", return_value=test_requisition):
-        with patch("app.search_service.search_requirement", side_effect=_fail):
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/search",
-                json={},
-            )
-    assert resp.status_code == 200
-
-
-def test_search_requirements_draft_to_active_transition(client, test_requisition, db_session):
-    """Tests the draft → active transition during search (lines 841-847)."""
-    from app.constants import RequisitionStatus
-
-    test_requisition.status = RequisitionStatus.DRAFT
-
-    async def _search(*args, **kwargs):
-        return {"sightings": [], "source_stats": []}
-
-    with patch("app.routers.requisitions.requirements.get_req_for_user", return_value=test_requisition):
-        with patch("app.routers.requisitions.__init__.search_requirement", side_effect=_search):
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/search",
-                json={},
-            )
-    assert resp.status_code == 200
-
-
 # ── get_cached_sightings ──────────────────────────────────────────────
 
 

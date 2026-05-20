@@ -12,7 +12,8 @@ import hashlib
 import json
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Final
 
 import redis
 from loguru import logger
@@ -26,6 +27,7 @@ from .connectors.mouser import MouserConnector
 from .connectors.oemsecrets import OEMSecretsConnector
 from .connectors.sourcengine import SourcengineConnector
 from .connectors.sources import BrokerBinConnector, NexarConnector
+from .constants import ApiSourceStatus, SourceRunStatus
 from .database import SessionLocal
 from .models import (
     ApiSource,
@@ -109,7 +111,7 @@ def _get_search_redis():
         )
         _search_redis.ping()
     except Exception as e:
-        logger.warning("Search Redis unavailable, caching disabled: %s", e)
+        logger.warning("Search Redis unavailable, caching disabled: {}", e)
         _search_redis = None
     return _search_redis
 
@@ -133,7 +135,7 @@ def _get_search_cache(key: str) -> tuple[list[dict], list[dict]] | None:
     except redis.RedisError as e:
         logger.error("Redis error reading search cache key {}: {}", key, e)
     except Exception as e:
-        logger.warning("Search cache read failed: %s", e)
+        logger.warning("Search cache read failed: {}", e)
     return None
 
 
@@ -147,7 +149,7 @@ def _set_search_cache(key: str, results: list[dict], source_stats: list[dict]) -
     except redis.RedisError as e:
         logger.error("Redis error writing search cache key {}: {}", key, e)
     except Exception as e:
-        logger.warning("Search cache write failed: %s", e)
+        logger.warning("Search cache write failed: {}", e)
 
 
 def get_all_pns(req: Requirement) -> list[str]:
@@ -178,29 +180,144 @@ def get_all_pns(req: Requirement) -> list[str]:
     return pns
 
 
-async def search_requirement(req: Requirement, db: Session) -> dict:
-    """Search APIs, upsert material cards, merge history.
+# How long a MaterialCard.last_searched_at "shields" its MPN from being
+# re-queried at supplier APIs. Per-MPN, not per-requirement, so two
+# requirements that share an MPN don't each burn quota.
+MPN_COOLDOWN_HOURS: Final[int] = 48
 
-    Returns {"sightings": [...], "source_stats": [...]}.
+
+def _mpn_cooldown_partition(
+    db: Session,
+    pns: list[str],
+    now: datetime | None = None,
+) -> tuple[list[str], list[int]]:
+    """Split a requirement's MPNs into (to_search, cached_card_ids).
+
+    A display MPN goes into ``to_search`` when its MaterialCard either does
+    not exist or has ``last_searched_at`` older than ``MPN_COOLDOWN_HOURS``.
+    Otherwise its card id goes into ``cached_card_ids`` so the caller can
+    surface existing sightings via material_card_id linkage.
+
+    Lookups use ``normalize_mpn_key`` so case + packaging-suffix variations
+    don't escape the cooldown.
+    """
+    if not pns:
+        return [], []
+
+    now = now or datetime.now(timezone.utc)
+    cutoff = now - timedelta(hours=MPN_COOLDOWN_HOURS)
+
+    keys_in_order = []
+    key_to_display: dict[str, str] = {}
+    for pn in pns:
+        k = normalize_mpn_key(pn)
+        if not k or k in key_to_display:
+            continue
+        keys_in_order.append(k)
+        key_to_display[k] = pn
+
+    cards = db.query(MaterialCard).filter(MaterialCard.normalized_mpn.in_(keys_in_order)).all()
+    card_by_key = {c.normalized_mpn: c for c in cards}
+
+    to_search: list[str] = []
+    cached_ids: list[int] = []
+    for key in keys_in_order:
+        card = card_by_key.get(key)
+        if card is None or card.last_searched_at is None:
+            to_search.append(key_to_display[key])
+            continue
+        # MaterialCard.last_searched_at uses raw DateTime (not UTCDateTime),
+        # so SQLite roundtrips strip tzinfo. Coerce to UTC for comparison.
+        last = card.last_searched_at
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+        # >= 48h old → search again (boundary is inclusive on the stale side)
+        if last <= cutoff:
+            to_search.append(key_to_display[key])
+        else:
+            cached_ids.append(card.id)
+    return to_search, cached_ids
+
+
+def _affinity_match_to_result(match: dict, mpn: str) -> dict:
+    """Convert a single vendor-affinity match dict into a sighting-shaped result.
+
+    Shared between the cached-only short-circuit path and the full search path
+    in ``search_requirement`` so both surface affinity suggestions identically.
+    """
+    conf_pct = round(match.get("confidence", 0) * 100)
+    return {
+        "vendor_name": match.get("vendor_name", ""),
+        "vendor_id": match.get("vendor_id"),
+        "mpn": mpn,
+        "mpn_matched": mpn,
+        "source_type": "vendor_affinity",
+        "source_badge": "Vendor Match",
+        "is_historical": False,
+        "is_material_history": False,
+        "is_affinity": True,
+        "confidence_pct": conf_pct,
+        "confidence_color": "green" if conf_pct >= 75 else ("amber" if conf_pct >= 50 else "red"),
+        "reasoning": match.get("reasoning", ""),
+        "qty_available": None,
+        "unit_price": None,
+        "score": max(5, match.get("confidence", 0) * 20),
+        "cross_references": [],
+    }
+
+
+async def search_requirement(req: Requirement, db: Session) -> dict:
+    """Search APIs for stale MPNs only; surface cached sightings for fresh ones.
+
+    The per-MPN 48h cooldown (``MaterialCard.last_searched_at``) gates which
+    MPNs hit the connector layer. Cached MPNs are still surfaced via
+    ``material_card_id`` linkage in the caller's detail panel.
+
+    Affinity matches are returned on both the cached short-circuit path and
+    the full search path; only the connector calls are gated by the cooldown.
+
+    Returns ``{"sightings": [...], "source_stats": [...], "mpn_results": {mpn: "searched"|"cached"}}``.
     """
     pns = get_all_pns(req)
     if not pns:
-        return {"sightings": [], "source_stats": []}
+        return {"sightings": [], "source_stats": [], "mpn_results": {}}
 
     now = datetime.now(timezone.utc)
 
-    # 1. Fetch + dedupe (parallel across all connectors) + vendor affinity
-    async def _fetch_affinity():
-        """Run vendor affinity matching for the primary MPN."""
-        try:
-            return find_vendor_affinity(pns[0], db)
-        except Exception as e:
-            logger.warning("Vendor affinity lookup failed for {}: {}", pns[0], e)
-            return []
+    # 48h per-normalized-MPN cooldown. Split into MPNs that need a connector
+    # call vs. ones whose MaterialCard.last_searched_at is recent enough.
+    to_search, cached_card_ids = _mpn_cooldown_partition(db, pns, now=now)
 
-    fresh_task = _fetch_fresh(pns, db)
-    affinity_task = _fetch_affinity()
-    (fresh, source_stats), affinity_matches = await asyncio.gather(fresh_task, affinity_task)
+    searched_keys = {normalize_mpn_key(m) for m in to_search if normalize_mpn_key(m)}
+    mpn_results: dict[str, str] = {}
+    for pn in pns:
+        key = normalize_mpn_key(pn)
+        mpn_results[pn] = "searched" if key in searched_keys else "cached"
+
+    # Vendor affinity is a pure-DB lookup (no connector quota) keyed on the
+    # requirement's primary MPN, so we compute it on every path — including
+    # the cached-only short-circuit below.
+    primary_mpn = pns[0]
+    try:
+        affinity_matches = find_vendor_affinity(primary_mpn, db)
+    except Exception as e:
+        logger.warning("Vendor affinity lookup failed for {}: {}", primary_mpn, e)
+        affinity_matches = []
+
+    # Short-circuit: every MPN is within cooldown — no connector calls.
+    # The detail panel surfaces cached sightings via material_card_id linkage
+    # in its own query path; this function returns affinity suggestions only.
+    if not to_search:
+        affinity_results = [_affinity_match_to_result(m, primary_mpn) for m in affinity_matches]
+        return {
+            "sightings": affinity_results,
+            "source_stats": [],
+            "mpn_results": mpn_results,
+        }
+
+    # 1. Fetch + dedupe (parallel across stale-MPN connectors). Affinity was
+    # already computed above so it's available to the merge step below.
+    fresh, source_stats = await _fetch_fresh(to_search, db)
 
     # 2. Score + save — only replace sightings from connectors that succeeded
     # Use a dedicated DB session for writes so concurrent search_requirement()
@@ -213,27 +330,41 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
     try:
         write_req = write_db.get(Requirement, req_id)
         if not write_req:
-            logger.error("Requirement %s not found in write session", req_id)
-            return {"sightings": [], "source_stats": source_stats}
+            logger.error("Requirement {} not found in write session", req_id)
+            return {"sightings": [], "source_stats": source_stats, "mpn_results": mpn_results}
 
         succeeded_sources = {
-            stat["source"] for stat in source_stats if stat["status"] == "ok" and not stat.get("error")
+            stat["source"]
+            for stat in source_stats
+            if stat["status"] == SourceRunStatus.OK.value and not stat.get("error")
         }
         sightings = _save_sightings(fresh, write_req, write_db, succeeded_sources)
-        logger.info(f"Req {req_id} ({pns[0]}): {len(sightings)} fresh sightings")
+        logger.info(f"Req {req_id} ({to_search[0]}): {len(sightings)} fresh sightings")
 
-        # 3. Material card upsert (errors won't break search)
+        # 3. Material card upsert (errors won't break search). Only upsert
+        # cards for MPNs we actually searched; cached-side cards are already
+        # surfaced via material_card_id linkage in the caller.
+        # We also need to ensure the cooldown clock advances even when a
+        # search yielded zero sightings — otherwise the next click immediately
+        # re-burns the connector quota. `_upsert_material_card` returns None
+        # when there were no sightings for that MPN, so we fall back to
+        # `resolve_material_card` to guarantee a card exists, then stamp it.
         card_ids = set()
         primary_card_id = None
-        for pn in pns:
+        for pn in to_search:
             try:
                 card = _upsert_material_card(pn, sightings, write_db, now)
+                if card is None:
+                    card = resolve_material_card(pn, write_db)
                 if card:
                     card_ids.add(card.id)
-                    if pn == pns[0] and not primary_card_id:
+                    # Stamp the cooldown clock on every searched MPN's card.
+                    if card.normalized_mpn in searched_keys:
+                        card.last_searched_at = now
+                    if pn == to_search[0] and not primary_card_id:
                         primary_card_id = card.id
             except Exception as e:
-                logger.error("MATERIAL_CARD_UPSERT_FAIL: mpn=%s error=%s", pn, e)
+                logger.error("MATERIAL_CARD_UPSERT_FAIL: mpn={} error={}", pn, e)
                 write_db.rollback()
 
         # Link requirement to its primary material card
@@ -258,6 +389,24 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         if succeeded_sources:
             write_req.last_searched_at = now
         write_db.commit()
+
+        # Browser-automation workers: best-effort enqueue once per call. Both
+        # workers key by requirement_id and internally normalize req.primary_mpn,
+        # so per-substitute iteration would just round-trip dedup checks. Called
+        # after write_db.commit() so the worker reads the same durable state we
+        # just wrote.
+        try:
+            from app.services.ics_worker.queue_manager import enqueue_for_ics_search
+
+            enqueue_for_ics_search(req_id, write_db)
+        except Exception:
+            logger.warning("ICS enqueue failed for requirement {}", req_id, exc_info=True)
+        try:
+            from app.services.nc_worker.queue_manager import enqueue_for_nc_search
+
+            enqueue_for_nc_search(req_id, write_db)
+        except Exception:
+            logger.warning("NC enqueue failed for requirement {}", req_id, exc_info=True)
 
         # Expunge sightings so they remain usable after session close
         for s in sightings:
@@ -286,31 +435,15 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         if vendor_lower in live_vendors:
             continue
         live_vendors.add(vendor_lower)
-        conf_pct = round(match.get("confidence", 0) * 100)
-        results.append(
-            {
-                "vendor_name": match.get("vendor_name", ""),
-                "vendor_id": match.get("vendor_id"),
-                "mpn": pns[0],
-                "mpn_matched": pns[0],
-                "source_type": "vendor_affinity",
-                "source_badge": "Vendor Match",
-                "is_historical": False,
-                "is_material_history": False,
-                "is_affinity": True,
-                "confidence_pct": conf_pct,
-                "confidence_color": "green" if conf_pct >= 75 else ("amber" if conf_pct >= 50 else "red"),
-                "reasoning": match.get("reasoning", ""),
-                "qty_available": None,
-                "unit_price": None,
-                "score": max(5, match.get("confidence", 0) * 20),
-                "cross_references": [],
-            }
-        )
+        results.append(_affinity_match_to_result(match, primary_mpn))
     if affinity_matches:
         kept = sum(1 for r in results if r.get("is_affinity"))
         logger.info(
-            "Req {} ({}): merged {} affinity suggestions ({} after dedup)", req.id, pns[0], len(affinity_matches), kept
+            "Req {} ({}): merged {} affinity suggestions ({} after dedup)",
+            req.id,
+            primary_mpn,
+            len(affinity_matches),
+            kept,
         )
 
     # 6. Cross-references: group results by material_card_id to show alternate MPNs
@@ -360,7 +493,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         logger.info(f"Req {req.id}: filtered {filtered_count} weak leads ({before_count} -> {len(results)})")
 
     results.sort(key=lambda x: (x.get("confidence_pct", 0), x.get("score", 0)), reverse=True)
-    return {"sightings": results, "source_stats": source_stats}
+    return {"sightings": results, "source_stats": source_stats, "mpn_results": mpn_results}
 
 
 async def quick_search_mpn(mpn: str, db: Session) -> dict:
@@ -772,21 +905,26 @@ def should_trigger_ai_search(
 # ── Private helpers ──────────────────────────────────────────────────────
 
 
-def _make_stat(source_name: str, status: str, error: str | None = None) -> dict:
-    """Build a source stat entry."""
-    return {"source": source_name, "results": 0, "ms": 0, "error": error, "status": status}
+def _make_stat(source_name: str, status: SourceRunStatus | str, error: str | None = None) -> dict:
+    """Build a source stat entry.
+
+    Accepts a SourceRunStatus enum or its string value; normalizes to string for
+    downstream JSON serialization.
+    """
+    status_str = status.value if isinstance(status, SourceRunStatus) else status
+    return {"source": source_name, "results": 0, "ms": 0, "error": error, "status": status_str}
 
 
 def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
     """Build enabled connectors with credentials, returning (connectors,
     source_stats_map, disabled_sources).
 
-    Checks disabled sources in DB, loads credentials per-connector.
-
-    Called by: _fetch_fresh
-    Depends on: services/credential_service, connectors/*, models.ApiSource
+    Sources with status='disabled' or status='error' (set by health_monitor) are
+    excluded; their entries are seeded into source_stats_map with 'disabled' or
+    'error_skipped' chips so the UI renders them.
     """
-    disabled_sources = {src.name for src in db.query(ApiSource).filter_by(status="disabled").all()}
+    disabled_sources = {src.name for src in db.query(ApiSource).filter_by(status=ApiSourceStatus.DISABLED.value).all()}
+    errored_sources = {src.name for src in db.query(ApiSource).filter_by(status=ApiSourceStatus.ERROR.value).all()}
 
     # Batch-load all credentials in a single DB query
     creds = get_credentials_batch(
@@ -816,9 +954,17 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
 
     def _add_or_skip(source_name, has_creds, connector_factory):
         if source_name in disabled_sources:
-            source_stats_map[source_name] = _make_stat(source_name, "disabled")
+            source_stats_map[source_name] = _make_stat(source_name, SourceRunStatus.DISABLED)
+        elif source_name in errored_sources:
+            # health_monitor flipped status to 'error' on a prior raise — exclude
+            # from this run so we don't keep DOSing a known-broken upstream.
+            source_stats_map[source_name] = _make_stat(
+                source_name,
+                SourceRunStatus.ERROR_SKIPPED,
+                "Skipped due to prior error — auto-recovers when next ping returns 200; rotate credentials if persistent",
+            )
         elif not has_creds:
-            source_stats_map[source_name] = _make_stat(source_name, "skipped", "No API key configured")
+            source_stats_map[source_name] = _make_stat(source_name, SourceRunStatus.SKIPPED, "No API key configured")
         else:
             connectors.append(connector_factory())
 
@@ -831,6 +977,9 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
 
     bb_key = _c("brokerbin", "BROKERBIN_API_KEY")
     bb_sec = _c("brokerbin", "BROKERBIN_API_SECRET")
+    # BrokerBin v2.x uses Bearer auth — only the API key is required. The
+    # bb_sec slot is retained for legacy Basic-auth keys but is ignored at
+    # request time.
     _add_or_skip("brokerbin", bb_key, lambda: BrokerBinConnector(bb_key, bb_sec))
 
     ebay_id = _c("ebay", "EBAY_CLIENT_ID")
@@ -857,10 +1006,12 @@ def _build_connectors(db: Session) -> tuple[list, dict[str, dict], set[str]]:
 
 
 async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[dict]]:
-    """Returns (results, source_stats) where source_stats is a list of {"source": name,
-    "results": count, "ms": elapsed, "error": str|None, "status":
+    """Run all enabled connectors against pns and return (results, source_stats).
 
-    "ok"|"error"|"skipped"|"disabled"}.
+    source_stats[i] follows SourceRunStatus: 'ok' (ran successfully), 'error' (this run
+    failed), 'error_skipped' (excluded because health_monitor previously flipped
+    api_sources.status to 'error' — auto-recovers on next ping success), 'skipped' (no
+    creds), or 'disabled' (operator turned the source off).
     """
     connectors, source_stats_map, disabled_sources = _build_connectors(db)
 
@@ -869,9 +1020,9 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
     has_ai_live = bool(ai_key) and not bool(os.environ.get("TESTING"))
     ai_connector = None
     if "ai_live_web" in disabled_sources:
-        source_stats_map["ai_live_web"] = _make_stat("ai_live_web", "disabled")
+        source_stats_map["ai_live_web"] = _make_stat("ai_live_web", SourceRunStatus.DISABLED)
     elif not has_ai_live:
-        source_stats_map["ai_live_web"] = _make_stat("ai_live_web", "skipped", "No API key configured")
+        source_stats_map["ai_live_web"] = _make_stat("ai_live_web", SourceRunStatus.SKIPPED, "No API key configured")
     else:
         ai_connector = AIWebSearchConnector(ai_key)
 
@@ -887,7 +1038,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
         # Merge cached stats with disabled/skipped entries
         cached_stats_map = {s["source"]: s for s in cached_stats}
         source_stats_map.update(cached_stats_map)
-        logger.info("Search cache HIT for %s (%d results)", pns[0] if pns else "?", len(cached_results))
+        logger.info("Search cache HIT for {} ({} results)", pns[0] if pns else "?", len(cached_results))
         return cached_results, list(source_stats_map.values())
 
     # Run ALL connectors × ALL part numbers in parallel.
@@ -912,8 +1063,8 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
             return hits
         except Exception as e:
             elapsed_ms = int((time.time() - start) * 1000)
-            logger.error(
-                "Search %s via %s failed (%dms): %s", pn, conn.__class__.__name__, elapsed_ms, e, exc_info=True
+            logger.opt(exception=True).error(
+                "Search {} via {} failed ({}ms): {}", pn, conn.__class__.__name__, elapsed_ms, e
             )
             if source_name:
                 stats_updates.append((source_name, 0, elapsed_ms, str(e)[:500]))
@@ -986,7 +1137,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
                 src.last_success = datetime.now(timezone.utc)
                 prev = src.avg_response_ms or elapsed_ms
                 src.avg_response_ms = (prev * 3 + elapsed_ms) // 4
-                src.status = "live"
+                src.status = ApiSourceStatus.LIVE.value
                 src.last_error = None
             else:
                 src.last_error = error
@@ -994,7 +1145,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
                 src.error_count_24h = (src.error_count_24h or 0) + 1
         db.commit()
     except Exception as e:
-        logger.warning("API source stats update failed: %s", e)
+        logger.warning("API source stats update failed: {}", e)
         db.rollback()
 
     # Flatten and dedupe
@@ -1033,9 +1184,22 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
                 is_obsolete = True
                 break
 
-        # Months since last sighting for primary PN
+        # Months since last sighting for primary PN.
+        # NOTE: Sighting has no `mpn` column — the stored fields are
+        # `mpn_matched` (raw MPN as returned by the connector) and
+        # `normalized_mpn` (canonical dedup key from normalize_mpn_key).
+        # Use the normalized key + the indexed column so the lookup is both
+        # correct and uses the Sighting.normalized_mpn index.
         months_since_last_sighting = None
-        latest_sighting = db.query(Sighting).filter(Sighting.mpn.in_(pns)).order_by(Sighting.created_at.desc()).first()
+        normalized_pns = [k for k in (normalize_mpn_key(pn) for pn in pns) if k]
+        latest_sighting = (
+            db.query(Sighting)
+            .filter(Sighting.normalized_mpn.in_(normalized_pns))
+            .order_by(Sighting.created_at.desc())
+            .first()
+            if normalized_pns
+            else None
+        )
         if latest_sighting and latest_sighting.created_at:
             delta = (
                 datetime.now(timezone.utc) - latest_sighting.created_at.replace(tzinfo=timezone.utc)
@@ -1088,13 +1252,7 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
                 is_obsolete,
                 months_since_last_sighting,
             )
-            source_stats_map["ai_live_web"] = {
-                "source": "ai_live_web",
-                "results": 0,
-                "ms": 0,
-                "error": None,
-                "status": "skipped",
-            }
+            source_stats_map["ai_live_web"] = _make_stat("ai_live_web", SourceRunStatus.SKIPPED)
 
     # Build source_stats from stats_updates (connectors that actually ran)
     # Aggregate per source (a connector may run for multiple PNs)
@@ -1105,14 +1263,14 @@ async def _fetch_fresh(pns: list[str], db: Session) -> tuple[list[dict], list[di
             agg[source_name]["ms"] = max(agg[source_name]["ms"], elapsed_ms)
             if error and not agg[source_name]["error"]:
                 agg[source_name]["error"] = error
-                agg[source_name]["status"] = "error"
+                agg[source_name]["status"] = SourceRunStatus.ERROR.value
         else:
             agg[source_name] = {
                 "source": source_name,
                 "results": hit_count,
                 "ms": elapsed_ms,
                 "error": error,
-                "status": "error" if error else "ok",
+                "status": SourceRunStatus.ERROR.value if error else SourceRunStatus.OK.value,
             }
     # Merge with skipped/disabled entries
     for name, entry in agg.items():
@@ -1387,7 +1545,7 @@ def _propagate_vendor_emails(sightings: list[Sighting], db: Session):
     try:
         db.commit()
     except Exception as e:
-        logger.warning("Failed to propagate vendor emails: %s", e)
+        logger.warning("Failed to propagate vendor emails: {}", e)
         db.rollback()
 
 
@@ -1535,7 +1693,7 @@ def _audit_card_created(db: Session, card: MaterialCard) -> None:
             db, material_card_id=card.id, action="created", normalized_mpn=card.normalized_mpn, created_by="system"
         )
     except Exception:
-        logger.warning("Audit log failed for card %s", getattr(card, "normalized_mpn", "unknown"), exc_info=True)
+        logger.warning("Audit log failed for card {}", getattr(card, "normalized_mpn", "unknown"), exc_info=True)
 
 
 def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> MaterialCard | None:
@@ -1556,7 +1714,7 @@ def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> Mate
     if card:
         if manufacturer and not card.manufacturer:
             card.manufacturer = manufacturer
-        logger.debug("MC_METRIC: action=resolved mpn=%s card_id=%d", norm, card.id)
+        logger.debug("MC_METRIC: action=resolved mpn={} card_id={}", norm, card.id)
         return card
 
     display = normalize_mpn(mpn) or mpn.strip()
@@ -1583,16 +1741,16 @@ def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> Mate
         # Re-fetch (unfiltered — may be soft-deleted and needs restoring)
         card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
         if card is None:
-            logger.error("MATERIAL_CARD_RESOLVE_FAIL: card missing after ON CONFLICT for mpn=%s", norm)
+            logger.error("MATERIAL_CARD_RESOLVE_FAIL: card missing after ON CONFLICT for mpn={}", norm)
         elif card.deleted_at is not None:
             # Restore soft-deleted card
             card.deleted_at = None
-            logger.info("MC_METRIC: action=restored mpn=%s card_id=%d", norm, card.id)
+            logger.info("MC_METRIC: action=restored mpn={} card_id={}", norm, card.id)
             _audit_card_created(db, card)
         elif result.rowcount == 0:
-            logger.info("MC_METRIC: action=race_resolved mpn=%s card_id=%d", norm, card.id)
+            logger.info("MC_METRIC: action=race_resolved mpn={} card_id={}", norm, card.id)
         else:
-            logger.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
+            logger.info("MC_METRIC: action=created mpn={} card_id={}", norm, card.id)
             _audit_card_created(db, card)
         return card
     else:
@@ -1603,18 +1761,18 @@ def resolve_material_card(mpn: str, db: Session, manufacturer: str = "") -> Mate
             card = MaterialCard(normalized_mpn=norm, display_mpn=display, search_count=0, manufacturer=manufacturer)
             db.add(card)
             db.flush()
-            logger.info("MC_METRIC: action=created mpn=%s card_id=%d", norm, card.id)
+            logger.info("MC_METRIC: action=created mpn={} card_id={}", norm, card.id)
             _audit_card_created(db, card)
             return card
         except IntegrityError:
             db.rollback()
-            logger.info("MC_METRIC: action=race_resolved mpn=%s", norm)
+            logger.info("MC_METRIC: action=race_resolved mpn={}", norm)
             card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
             # Restore if soft-deleted
             if card and card.deleted_at is not None:
                 card.deleted_at = None
                 db.flush()
-                logger.info("MC_METRIC: action=restored mpn=%s card_id=%d", norm, card.id)
+                logger.info("MC_METRIC: action=restored mpn={} card_id={}", norm, card.id)
             return card
 
 
@@ -1751,7 +1909,7 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
                 tag_material_card(card.id, tags_to_apply, db)
                 db.commit()
     except Exception:
-        logger.warning("Tag classification failed for card %s", card.id, exc_info=True)
+        logger.warning("Tag classification failed for card {}", card.id, exc_info=True)
 
     return card
 
@@ -1788,7 +1946,7 @@ async def _schedule_background_enrichment(card_ids: set[int], db: Session) -> No
                             _apply_enrichment_to_card(card, result, session)
                             session.commit()
                 except Exception:
-                    logger.warning("Background enrichment failed for %s", mpn, exc_info=True)
+                    logger.warning("Background enrichment failed for {}", mpn, exc_info=True)
                     session.rollback()
         finally:
             session.close()
@@ -1996,6 +2154,28 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
         try:
             connectors, source_stats_map, _disabled = _build_connectors(db)
 
+            # Publish source-status SSE events for every non-ok source so the
+            # chip strip renders the right state immediately. Without this the
+            # operator never sees error_skipped / disabled / skipped chips —
+            # only connectors that actually run later emit per-source events.
+            for _src_name, _stat in source_stats_map.items():
+                _status = _stat.get("status")
+                if _status and _status != SourceRunStatus.OK.value:
+                    await active_broker.publish(
+                        channel,
+                        "source-status",
+                        json.dumps(
+                            {
+                                "source": _stat.get("source", _src_name),
+                                "status": _status,
+                                "error": _stat.get("error"),
+                                "results": _stat.get("results", 0),
+                                "ms": _stat.get("ms", 0),
+                            },
+                            default=str,
+                        ),
+                    )
+
             if not connectors:
                 await active_broker.publish(
                     channel,
@@ -2055,7 +2235,7 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                             json.dumps(
                                 {
                                     "source": source_name,
-                                    "status": "ok",
+                                    "status": SourceRunStatus.OK.value,
                                     "results": hit_count,
                                     "ms": elapsed_ms,
                                 },
@@ -2102,7 +2282,7 @@ async def stream_search_mpn(search_id: str, mpn: str) -> None:
                             json.dumps(
                                 {
                                     "source": source_name,
-                                    "status": "error",
+                                    "status": SourceRunStatus.ERROR.value,
                                     "error": str(e)[:500],
                                     "results": 0,
                                     "ms": 0,

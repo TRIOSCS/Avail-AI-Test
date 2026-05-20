@@ -13,9 +13,9 @@ import asyncio
 import json
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Final
+from typing import Any, Final, Literal
 
-from fastapi import APIRouter, Depends, Form, HTTPException, Request
+from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
 from fastapi.responses import HTMLResponse
 from loguru import logger
 from sqlalchemy import func as sqlfunc
@@ -77,25 +77,6 @@ _SORT_COLUMNS = {
 }
 
 
-REFRESH_RATE_LIMIT_SECONDS: Final[int] = 300  # Per-requirement cooldown between manual searches
-
-
-def _within_rate_limit(last_searched_at: datetime | None, now: datetime) -> bool:
-    """Return True if the requirement was searched too recently (within cooldown
-    window).
-
-    Handles timezone-naive datetimes from SQLite (test environment).
-    """
-    if last_searched_at is None:
-        return False
-    ts = last_searched_at
-    if ts.tzinfo is None:
-        ts = ts.replace(tzinfo=timezone.utc)
-    if now.tzinfo is None:
-        now = now.replace(tzinfo=timezone.utc)
-    return (now - ts).total_seconds() < REFRESH_RATE_LIMIT_SECONDS
-
-
 def _oob_toast(msg: str, level: str = "success") -> HTMLResponse:
     """Return an OOB swap div that triggers a toast notification via Alpine."""
     safe_msg = msg.replace("'", "\\'").replace('"', "&quot;")
@@ -105,6 +86,24 @@ def _oob_toast(msg: str, level: str = "success") -> HTMLResponse:
         f"$store.toast.type='{level}';"
         f'$store.toast.show=true"></div>'
     )
+
+
+async def _publish_if_user_source(source: str, user_id: int, requirement_id: int) -> None:
+    """Publish sighting-updated SSE only when the caller is a human user.
+
+    Skips publish when source == 'sse' to prevent self-trigger loops.
+    """
+    if source != "sse":
+        await broker.publish(
+            f"user:{user_id}",
+            "sighting-updated",
+            json.dumps({"requirement_id": requirement_id}),
+        )
+
+
+def _toast_suppressed_for_sse(source: str) -> bool:
+    """Return True when the caller is an SSE-triggered request."""
+    return source == "sse"
 
 
 @router.get("/v2/partials/sightings/workspace", response_class=HTMLResponse)
@@ -616,20 +615,22 @@ async def sightings_detail(
         "activities": activities,
         "user": user,
     }
-    return templates.TemplateResponse("htmx/partials/sightings/detail.html", ctx)
+    resp = templates.TemplateResponse("htmx/partials/sightings/detail.html", ctx)
+    resp.headers["X-Rendered-Req-Id"] = str(requirement_id)
+    return resp
 
 
 @router.post("/v2/partials/sightings/{requirement_id}/refresh", response_class=HTMLResponse)
 async def sightings_refresh(
     request: Request,
     requirement_id: int,
+    source: Literal["user", "sse"] = Query(default="user"),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
-    """Re-run search pipeline for a requirement.
+    """Re-run sourcing pipeline for a requirement, gated by 48h per-MPN cooldown.
 
-    Returns info toast without re-searching if called within the cooldown window.
-    Otherwise returns updated detail panel.
+    Returns the rendered detail panel + HX-Trigger toast describing per-MPN result.
     """
     from ..search_service import search_requirement
 
@@ -637,50 +638,60 @@ async def sightings_refresh(
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
 
-    # Rate guard: return cached detail with info toast if searched recently
-    now = datetime.now(timezone.utc)
-    cooldown_minutes = REFRESH_RATE_LIMIT_SECONDS // 60
-    if _within_rate_limit(requirement.last_searched_at, now):
-        response = await sightings_detail(request, requirement_id, db, user)
-        response.headers["HX-Trigger"] = (
-            f'{{"showToast": {{"message": "Already searched within the last {cooldown_minutes} minutes.", "type": "info"}}}}'
-        )
-        return response
-
+    is_sse = source == "sse"
     refresh_failed = False
+    mpn_results: dict[str, str] = {}
     try:
-        await search_requirement(requirement, db)
+        result = await search_requirement(requirement, db)
+        mpn_results = result.get("mpn_results", {})
     except Exception:
-        logger.warning("Search refresh failed for requirement %s", requirement_id, exc_info=True)
+        logger.warning("Search refresh failed for requirement {}", requirement_id, exc_info=True)
         refresh_failed = True
 
-    # Expire stale cached object so sightings_detail picks up fresh data
-    # (search_requirement commits via its own write session)
+    # Force a fresh read; search_requirement uses a separate write session.
     db.expire(requirement)
 
-    await broker.publish(
-        f"user:{user.id}",
-        "sighting-updated",
-        json.dumps({"requirement_id": requirement_id}),
-    )
+    await _publish_if_user_source(source, user.id, requirement_id)
 
     response = await sightings_detail(request, requirement_id, db, user)
-    if refresh_failed:
-        response.headers["HX-Trigger"] = (
-            '{"showToast": {"message": "Search refresh failed - showing cached results", "type": "warning"}}'
+
+    if not is_sse:
+        toast_msg = _build_mpn_toast(mpn_results, refresh_failed)
+        toast_type = (
+            "warning" if refresh_failed else ("info" if all(v == "cached" for v in mpn_results.values()) else "success")
         )
+        if toast_msg:
+            response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": toast_msg, "type": toast_type}})
     return response
+
+
+def _build_mpn_toast(mpn_results: dict[str, str], refresh_failed: bool) -> str:
+    """Build the per-MPN toast message from search_requirement's result map."""
+    if refresh_failed:
+        return "Search refresh failed - showing cached results"
+    if not mpn_results:
+        return ""
+    searched = sum(1 for v in mpn_results.values() if v == "searched")
+    cached = sum(1 for v in mpn_results.values() if v == "cached")
+    if searched and cached:
+        return f"Searched {searched} MPN{'s' if searched != 1 else ''}, {cached} cached"
+    if searched:
+        return f"Searched {searched} MPN{'s' if searched != 1 else ''}"
+    return "All MPNs searched within 48h - showing cached"
 
 
 @router.post("/v2/partials/sightings/batch-refresh", response_class=HTMLResponse)
 async def sightings_batch_refresh(
     request: Request,
+    source: Literal["user", "sse"] = Query(default="user"),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
     """Refresh sightings for multiple requirements.
 
-    Skips requirements searched within the cooldown window.
+    Per-MPN 48h cooldown is enforced inside search_requirement
+    (MaterialCard.last_searched_at). source="sse" suppresses the OOB toast and
+    broker.publish to prevent self-trigger loops.
     """
     from ..search_service import search_requirement
 
@@ -704,20 +715,15 @@ async def sightings_batch_refresh(
 
     success = 0
     failed = 0
-    skipped = 0
-    now = datetime.now(timezone.utc)
 
-    # Build the list of requirements that should actually be searched.
-    # Anything that is missing or within the rate-guard cooldown is
-    # accounted for up-front so we only spawn tasks for real work.
+    # Build the list of requirements that exist. The 48h per-MPN cooldown
+    # is enforced inside search_requirement (MaterialCard.last_searched_at)
+    # so we no longer pre-filter by requirement-level last_searched_at.
     to_search: list[tuple[int, Requirement]] = []
     for rid in requirement_ids:
         req_obj = reqs_by_id.get(int(rid))
         if not req_obj:
             failed += 1
-            continue
-        if _within_rate_limit(req_obj.last_searched_at, now):
-            skipped += 1
             continue
         to_search.append((int(rid), req_obj))
 
@@ -735,33 +741,27 @@ async def sightings_batch_refresh(
         )
         for (rid, _), outcome in zip(to_search, results):
             if isinstance(outcome, Exception):
-                logger.warning("Batch refresh failed for requirement %s", rid, exc_info=outcome)
+                logger.warning("Batch refresh failed for requirement {}", rid, exc_info=outcome)
                 failed += 1
             else:
                 success += 1
 
     # Notify all connected clients that these requirements changed
     for rid in requirement_ids:
-        await broker.publish(
-            f"user:{user.id}",
-            "sighting-updated",
-            json.dumps({"requirement_id": int(rid)}),
-        )
+        await _publish_if_user_source(source, user.id, int(rid))
 
     parts = []
-    total = success + failed + skipped
+    total = success + failed
     parts.append(f"Searched {success}/{total} requirements.")
-    if skipped:
-        parts.append(f"{skipped} skipped (already fresh).")
     if failed:
         parts.append(f"{failed} failed.")
     msg = " ".join(parts)
     if failed:
         level = "warning"
-    elif skipped and not success:
-        level = "info"
     else:
         level = "success"
+    if _toast_suppressed_for_sse(source):
+        return HTMLResponse("")
     return _oob_toast(msg, level)
 
 
@@ -907,6 +907,7 @@ async def sightings_batch_notes(
 async def sightings_mark_unavailable(
     request: Request,
     requirement_id: int,
+    source: Literal["user", "sse"] = Query(default="user"),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -929,11 +930,7 @@ async def sightings_mark_unavailable(
         s.is_unavailable = True
     db.commit()
 
-    await broker.publish(
-        f"user:{user.id}",
-        "sighting-updated",
-        json.dumps({"requirement_id": requirement_id}),
-    )
+    await _publish_if_user_source(source, user.id, requirement_id)
 
     return await sightings_detail(request, requirement_id, db, user)
 
@@ -942,6 +939,7 @@ async def sightings_mark_unavailable(
 async def sightings_assign_buyer(
     request: Request,
     requirement_id: int,
+    source: Literal["user", "sse"] = Query(default="user"),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -957,11 +955,7 @@ async def sightings_assign_buyer(
     requirement.assigned_buyer_id = buyer_id
     db.commit()
 
-    await broker.publish(
-        f"user:{user.id}",
-        "sighting-updated",
-        json.dumps({"requirement_id": requirement_id}),
-    )
+    await _publish_if_user_source(source, user.id, requirement_id)
 
     return await sightings_detail(request, requirement_id, db, user)
 
@@ -970,6 +964,7 @@ async def sightings_assign_buyer(
 async def sightings_advance_status(
     request: Request,
     requirement_id: int,
+    source: Literal["user", "sse"] = Query(default="user"),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -1002,11 +997,7 @@ async def sightings_advance_status(
     )
     db.commit()
 
-    await broker.publish(
-        f"user:{user.id}",
-        "sighting-updated",
-        json.dumps({"requirement_id": requirement_id}),
-    )
+    await _publish_if_user_source(source, user.id, requirement_id)
 
     return await sightings_detail(request, requirement_id, db, user)
 
@@ -1018,6 +1009,7 @@ async def sightings_log_activity(
     notes: str = Form(...),
     channel: str = Form("note"),
     vendor_name: str = Form(""),
+    source: Literal["user", "sse"] = Query(default="user"),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
 ):
@@ -1050,17 +1042,13 @@ async def sightings_log_activity(
     db.commit()
 
     logger.info(
-        "Sighting activity logged: %s on requirement %d by user %d",
+        "Sighting activity logged: {} on requirement {} by user {}",
         channel,
         requirement_id,
         user.id,
     )
 
-    await broker.publish(
-        f"user:{user.id}",
-        "sighting-updated",
-        json.dumps({"requirement_id": requirement_id}),
-    )
+    await _publish_if_user_source(source, user.id, requirement_id)
 
     # Re-fetch activities for the timeline
     activities = (
@@ -1076,7 +1064,9 @@ async def sightings_log_activity(
         "activities": activities,
         "requirement": requirement,
     }
-    return templates.TemplateResponse("htmx/partials/sightings/activity_section.html", ctx)
+    resp = templates.TemplateResponse("htmx/partials/sightings/activity_section.html", ctx)
+    resp.headers["X-Rendered-Req-Id"] = str(requirement_id)
+    return resp
 
 
 @router.get("/v2/partials/sightings/vendor-modal", response_class=HTMLResponse)
@@ -1203,6 +1193,7 @@ async def sightings_preview_inquiry(
 @router.post("/v2/partials/sightings/send-inquiry", response_class=HTMLResponse)
 async def sightings_send_inquiry(
     request: Request,
+    source: Literal["user", "sse"] = Query(default="user"),
     db: Session = Depends(get_db),
     user: User = Depends(require_user),
     token: str = Depends(require_fresh_token),
@@ -1295,11 +1286,7 @@ async def sightings_send_inquiry(
 
     # Notify SSE listeners for each affected requirement
     for r in requirements:
-        await broker.publish(
-            f"user:{user.id}",
-            "sighting-updated",
-            json.dumps({"requirement_id": r.id}),
-        )
+        await _publish_if_user_source(source, user.id, r.id)
 
     total = len(vendor_names)
     if failed_vendors:

@@ -41,9 +41,9 @@ async def get_presence(email: str, gc) -> str | None:
     except Exception as e:
         err_msg = str(e)
         if "401" in err_msg or "403" in err_msg:
-            logger.error("Presence API auth failure for %s — check Presence.Read.All permission: %s", email, e)
+            logger.error("Presence API auth failure for {} — check Presence.Read.All permission: {}", email, e)
         else:
-            logger.warning("Presence lookup failed for %s: %s", email, e)
+            logger.warning("Presence lookup failed for {}: {}", email, e)
         return None
 
 

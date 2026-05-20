@@ -128,7 +128,7 @@ async def parse_email(
         logger.info("Claude not configured — skipping email parse")
         return None
     except ClaudeError as e:
-        logger.warning("Claude AI failed for email parse: %s", e)
+        logger.warning("Claude AI failed for email parse: {}", e)
         return None
 
     if not result or not isinstance(result, dict):

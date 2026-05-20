@@ -53,7 +53,7 @@ def _set_ai_cache(query: str, result: dict) -> None:
 
         set_cached(_ai_cache_key(query), result, ttl_days=AI_CACHE_TTL_SECONDS / 86400)
     except Exception as e:
-        logger.warning("AI search cache write failed: %s", e)
+        logger.warning("AI search cache write failed: {}", e)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -441,7 +441,7 @@ async def ai_search(query: str, db: Session) -> dict:
         logger.info("Claude not configured — falling back to fast_search")
         return fast_search(query, db)
     except ClaudeError as e:
-        logger.warning("Claude AI failed for search intent: %s", e)
+        logger.warning("Claude AI failed for search intent: {}", e)
         return fast_search(query, db)
 
     if not intent or "searches" not in intent:

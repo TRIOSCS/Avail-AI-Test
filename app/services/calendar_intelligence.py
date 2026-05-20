@@ -65,7 +65,7 @@ async def scan_calendar_events(token: str, user_id: int, db: Session, lookback_d
             max_items=500,
         )
     except Exception as e:
-        logger.warning("Calendar scan failed for user %d: %s", user_id, e)
+        logger.warning("Calendar scan failed for user {}: {}", user_id, e)
         return {
             "events_scanned": 0,
             "vendor_meetings": 0,
@@ -115,7 +115,7 @@ async def scan_calendar_events(token: str, user_id: int, db: Session, lookback_d
         try:
             db.commit()
         except Exception as e:
-            logger.warning("Calendar activities commit failed: %s", e)
+            logger.warning("Calendar activities commit failed: {}", e)
             db.rollback()
 
     return {

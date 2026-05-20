@@ -38,28 +38,30 @@ def upgrade() -> None:
         sa.Column("requirement_id", sa.Integer(), sa.ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.text("now()")),
+        if_not_exists=True,
     )
 
-    op.create_index("ix_ke_requisition", "knowledge_entries", ["requisition_id", "created_at"])
-    op.create_index("ix_ke_mpn", "knowledge_entries", ["mpn"])
-    op.create_index("ix_ke_company", "knowledge_entries", ["company_id", "created_at"])
-    op.create_index("ix_ke_vendor", "knowledge_entries", ["vendor_card_id"])
-    op.create_index("ix_ke_parent", "knowledge_entries", ["parent_id"])
+    op.create_index("ix_ke_requisition", "knowledge_entries", ["requisition_id", "created_at"], if_not_exists=True)
+    op.create_index("ix_ke_mpn", "knowledge_entries", ["mpn"], if_not_exists=True)
+    op.create_index("ix_ke_company", "knowledge_entries", ["company_id", "created_at"], if_not_exists=True)
+    op.create_index("ix_ke_vendor", "knowledge_entries", ["vendor_card_id"], if_not_exists=True)
+    op.create_index("ix_ke_parent", "knowledge_entries", ["parent_id"], if_not_exists=True)
     op.create_index(
         "ix_ke_expires",
         "knowledge_entries",
         ["expires_at"],
         postgresql_where=sa.text("expires_at IS NOT NULL"),
+        if_not_exists=True,
     )
-    op.create_index("ix_knowledge_entries_id", "knowledge_entries", ["id"])
+    op.create_index("ix_knowledge_entries_id", "knowledge_entries", ["id"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_knowledge_entries_id", table_name="knowledge_entries")
-    op.drop_index("ix_ke_expires", table_name="knowledge_entries")
-    op.drop_index("ix_ke_parent", table_name="knowledge_entries")
-    op.drop_index("ix_ke_vendor", table_name="knowledge_entries")
-    op.drop_index("ix_ke_company", table_name="knowledge_entries")
-    op.drop_index("ix_ke_mpn", table_name="knowledge_entries")
-    op.drop_index("ix_ke_requisition", table_name="knowledge_entries")
-    op.drop_table("knowledge_entries")
+    op.drop_index("ix_knowledge_entries_id", table_name="knowledge_entries", if_exists=True)
+    op.drop_index("ix_ke_expires", table_name="knowledge_entries", if_exists=True)
+    op.drop_index("ix_ke_parent", table_name="knowledge_entries", if_exists=True)
+    op.drop_index("ix_ke_vendor", table_name="knowledge_entries", if_exists=True)
+    op.drop_index("ix_ke_company", table_name="knowledge_entries", if_exists=True)
+    op.drop_index("ix_ke_mpn", table_name="knowledge_entries", if_exists=True)
+    op.drop_index("ix_ke_requisition", table_name="knowledge_entries", if_exists=True)
+    op.drop_table("knowledge_entries", if_exists=True)

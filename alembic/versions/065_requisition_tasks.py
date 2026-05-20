@@ -38,14 +38,15 @@ def upgrade() -> None:
         sa.Column("completed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        if_not_exists=True,
     )
-    op.create_index("ix_rt_req_status", "requisition_tasks", ["requisition_id", "status"])
-    op.create_index("ix_rt_assignee_status", "requisition_tasks", ["assigned_to_id", "status"])
-    op.create_index("ix_rt_status_due", "requisition_tasks", ["status", "due_at"])
+    op.create_index("ix_rt_req_status", "requisition_tasks", ["requisition_id", "status"], if_not_exists=True)
+    op.create_index("ix_rt_assignee_status", "requisition_tasks", ["assigned_to_id", "status"], if_not_exists=True)
+    op.create_index("ix_rt_status_due", "requisition_tasks", ["status", "due_at"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_rt_status_due", table_name="requisition_tasks")
-    op.drop_index("ix_rt_assignee_status", table_name="requisition_tasks")
-    op.drop_index("ix_rt_req_status", table_name="requisition_tasks")
-    op.drop_table("requisition_tasks")
+    op.drop_index("ix_rt_status_due", table_name="requisition_tasks", if_exists=True)
+    op.drop_index("ix_rt_assignee_status", table_name="requisition_tasks", if_exists=True)
+    op.drop_index("ix_rt_req_status", table_name="requisition_tasks", if_exists=True)
+    op.drop_table("requisition_tasks", if_exists=True)

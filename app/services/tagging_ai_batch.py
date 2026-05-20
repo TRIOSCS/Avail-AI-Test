@@ -179,7 +179,7 @@ async def check_and_apply_batch_results(db: Session, meta_path: str | None = Non
         try:
             results = await claude_batch_results(batch_id)
         except _ClaudeErr as e:
-            logger.warning("Batch results check failed for %s: %s", batch_id, e)
+            logger.warning("Batch results check failed for {}: {}", batch_id, e)
             results = None
         if results is None:
             all_complete = False

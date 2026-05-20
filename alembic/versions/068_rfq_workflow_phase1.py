@@ -34,22 +34,22 @@ def upgrade() -> None:
         ["id"],
         ondelete="SET NULL",
     )
-    op.create_index("ix_requisitions_claimed_by", "requisitions", ["claimed_by_id"])
-    op.create_index("ix_requisitions_urgency", "requisitions", ["urgency"])
+    op.create_index("ix_requisitions_claimed_by", "requisitions", ["claimed_by_id"], if_not_exists=True)
+    op.create_index("ix_requisitions_urgency", "requisitions", ["urgency"], if_not_exists=True)
 
     # -- Requirement: per-part sourcing status --
     op.add_column("requirements", sa.Column("sourcing_status", sa.String(20), server_default="open", nullable=True))
-    op.create_index("ix_requirements_sourcing_status", "requirements", ["sourcing_status"])
+    op.create_index("ix_requirements_sourcing_status", "requirements", ["sourcing_status"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_requirements_sourcing_status", table_name="requirements")
-    op.drop_column("requirements", "sourcing_status")
+    op.drop_index("ix_requirements_sourcing_status", table_name="requirements", if_exists=True)
+    op.execute("ALTER TABLE IF EXISTS requirements DROP COLUMN IF EXISTS sourcing_status")
 
-    op.drop_index("ix_requisitions_urgency", table_name="requisitions")
-    op.drop_index("ix_requisitions_claimed_by", table_name="requisitions")
+    op.drop_index("ix_requisitions_urgency", table_name="requisitions", if_exists=True)
+    op.drop_index("ix_requisitions_claimed_by", table_name="requisitions", if_exists=True)
     op.drop_constraint("fk_requisitions_claimed_by", "requisitions", type_="foreignkey")
-    op.drop_column("requisitions", "opportunity_value")
-    op.drop_column("requisitions", "urgency")
-    op.drop_column("requisitions", "claimed_at")
-    op.drop_column("requisitions", "claimed_by_id")
+    op.execute("ALTER TABLE IF EXISTS requisitions DROP COLUMN IF EXISTS opportunity_value")
+    op.execute("ALTER TABLE IF EXISTS requisitions DROP COLUMN IF EXISTS urgency")
+    op.execute("ALTER TABLE IF EXISTS requisitions DROP COLUMN IF EXISTS claimed_at")
+    op.execute("ALTER TABLE IF EXISTS requisitions DROP COLUMN IF EXISTS claimed_by_id")

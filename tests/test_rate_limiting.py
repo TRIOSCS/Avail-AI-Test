@@ -1,13 +1,13 @@
 """tests/test_rate_limiting.py — Tests for rate limiting behavior.
 
-Covers: slowapi rate limiter configuration, per-IP limiting on
-search endpoints, rate limit headers, and fallback behavior.
+Covers: slowapi rate limiter configuration, key function, storage
+backend resolution, and TESTING-mode fallback behavior.
 
 Called by: pytest
-Depends on: app.rate_limit, routers/requisitions.py (search endpoints)
+Depends on: app.rate_limit
 """
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
 
 def test_limiter_is_configured():
@@ -25,21 +25,6 @@ def test_limiter_uses_remote_address():
     from app.rate_limit import limiter
 
     assert limiter._key_func is get_remote_address
-
-
-def test_search_endpoint_rate_limited(client, test_requisition):
-    """Search endpoint returns 429 after exceeding rate limit."""
-    with patch(
-        "app.routers.requisitions.search_requirement",
-        new_callable=AsyncMock,
-        return_value={"sightings": [], "source_stats": []},
-    ):
-        # The search endpoint is limited to 20/minute.
-        # We can't easily hit 20 in a test, but we can verify the endpoint
-        # responds correctly for a handful of requests.
-        for _ in range(3):
-            resp = client.post(f"/api/requisitions/{test_requisition.id}/search")
-            assert resp.status_code == 200
 
 
 def test_rate_limit_disabled_in_test_mode():

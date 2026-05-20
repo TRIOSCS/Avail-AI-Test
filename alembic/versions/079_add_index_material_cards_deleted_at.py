@@ -24,4 +24,4 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_index("ix_material_cards_deleted_at", table_name="material_cards")
+    op.drop_index("ix_material_cards_deleted_at", table_name="material_cards", if_exists=True)

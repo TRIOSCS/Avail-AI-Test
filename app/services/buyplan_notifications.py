@@ -45,7 +45,7 @@ async def run_v3_notify_bg(coro_factory, plan_id: int, **kwargs):
             if bg_plan:
                 await coro_factory(bg_plan, bg_db, **kwargs)
         except Exception:
-            logger.exception("Background %s failed for buy plan %s", coro_factory.__name__, plan_id)
+            logger.exception("Background {} failed for buy plan {}", coro_factory.__name__, plan_id)
         finally:
             bg_db.close()
 
@@ -138,9 +138,9 @@ async def _send_email(user: User, subject: str, html_body: str, db: Session):
                 "saveToSentItems": "false",
             },
         )
-        logger.info("buy plan email sent to %s", user.email)
+        logger.info("buy plan email sent to {}", user.email)
     except Exception as e:
-        logger.error("Failed to send buy plan email to %s: %s", user.email, e)
+        logger.error("Failed to send buy plan email to {}: {}", user.email, e)
 
 
 # ── Reuse Teams helpers ──────────────────────────────────────────────
@@ -523,9 +523,9 @@ async def notify_stock_sale_approved(plan: BuyPlan, db: Session):
                             "saveToSentItems": "false",
                         },
                     )
-                    logger.info("stock sale email sent to %s", email_addr)
+                    logger.info("stock sale email sent to {}", email_addr)
                 except Exception as e:
-                    logger.error("Failed to send stock sale email to %s: %s", email_addr, e)
+                    logger.error("Failed to send stock sale email to {}: {}", email_addr, e)
 
             await asyncio.gather(*[_send_stock_email(e) for e in settings.stock_sale_notify_emails])
 
