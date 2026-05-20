@@ -10,14 +10,46 @@ if [ "${1:-}" = "--no-commit" ]; then
     shift
 fi
 
-# Step 1: Commit & push (unless --no-commit)
+# Step 1: Commit & push (unless --no-commit). Hardened against the silent-
+# failure mode where a stale local main (behind origin/main) caused every
+# `git push origin main` to be rejected as non-fast-forward — the rebuild
+# steps still ran from whatever branch was checked out, so deploys appeared
+# to succeed while origin/main drifted days out of sync.
 if [ "$NO_COMMIT" = false ]; then
+    CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+    if [ "$CURRENT_BRANCH" != "main" ]; then
+        echo "ERROR: ./deploy.sh (without --no-commit) must run from main." >&2
+        echo "Current branch: $CURRENT_BRANCH" >&2
+        echo "Either: git checkout main && git pull --ff-only origin main" >&2
+        echo "Or deploy the current branch without pushing: ./deploy.sh --no-commit" >&2
+        exit 1
+    fi
+
+    echo "==> Syncing local main with origin/main..."
+    git fetch origin
+    if ! git merge --ff-only origin/main; then
+        echo "ERROR: local main diverged from origin/main — cannot fast-forward." >&2
+        echo "Resolve with 'git pull --rebase origin main' or investigate before re-running." >&2
+        exit 2
+    fi
+
     if git diff --quiet && git diff --cached --quiet; then
-        echo "No changes to commit — skipping git steps"
+        echo "No changes to commit — skipping commit step"
     else
         git add -A
         git commit -m "${1:-deploy}"
-        git push origin main
+    fi
+
+    AHEAD=$(git rev-list --count origin/main..HEAD)
+    if [ "$AHEAD" -gt 0 ]; then
+        echo "==> Pushing $AHEAD commit(s) to origin/main..."
+        if ! git push origin main; then
+            echo "ERROR: git push origin main failed." >&2
+            echo "Likely causes: non-fast-forward rejection, auth failure, or branch protection." >&2
+            exit 3
+        fi
+    else
+        echo "Local main already matches origin/main — nothing to push."
     fi
 fi
 
