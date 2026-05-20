@@ -354,7 +354,7 @@ def run_proactive_scan(db: Session) -> dict:
     try:
         db.commit()
     except Exception as e:
-        logger.error("Failed to commit proactive matches: %s", e)
+        logger.error("Failed to commit proactive matches: {}", e)
         db.rollback()
         return {
             "scanned_offers": len(new_offers),
@@ -362,7 +362,7 @@ def run_proactive_scan(db: Session) -> dict:
         }
 
     logger.info(
-        "Proactive scan: %d offers → %d matches",
+        "Proactive scan: {} offers → {} matches",
         len(new_offers),
         total_matches,
     )

@@ -51,7 +51,7 @@ def run_auto_attribution(db: Session) -> dict:
         logger.debug("No unmatched activities to process")
         return stats
 
-    logger.info("Processing %d unmatched activities", len(activities))
+    logger.info("Processing {} unmatched activities", len(activities))
     now = datetime.now(timezone.utc)
     cutoff_30d = now - timedelta(days=30)
     still_unmatched = []
@@ -94,7 +94,7 @@ def run_auto_attribution(db: Session) -> dict:
         db.commit()
 
     logger.info(
-        "Auto-attribution complete: %d rule-matched, %d AI-matched, %d dismissed, %d skipped",
+        "Auto-attribution complete: {} rule-matched, {} AI-matched, {} dismissed, {} skipped",
         stats["rule_matched"],
         stats["ai_matched"],
         stats["auto_dismissed"],
@@ -215,7 +215,7 @@ async def _call_claude_for_matching(
         logger.info("Claude not configured — skipping auto attribution")
         return {}
     except ClaudeError as e:
-        logger.warning("Claude AI failed for auto attribution: %s", e)
+        logger.warning("Claude AI failed for auto attribution: {}", e)
         return {}
 
     if not result:

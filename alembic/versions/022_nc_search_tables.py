@@ -59,6 +59,7 @@ def upgrade():
             sa.DateTime(timezone=True),
             server_default=sa.func.now(),
         ),
+        if_not_exists=True,
     )
     # Partial index for polling queued items
     op.create_index(
@@ -66,6 +67,7 @@ def upgrade():
         "nc_search_queue",
         ["status", "priority", "created_at"],
         postgresql_where=sa.text("status = 'queued'"),
+        if_not_exists=True,
     )
     # Partial index for dedup lookups on completed searches
     op.create_index(
@@ -73,6 +75,7 @@ def upgrade():
         "nc_search_queue",
         ["normalized_mpn", sa.text("last_searched_at DESC")],
         postgresql_where=sa.text("status = 'completed'"),
+        if_not_exists=True,
     )
 
     # ── nc_search_log ────────────────────────────────────────────────
@@ -95,6 +98,7 @@ def upgrade():
         sa.Column("sightings_created", sa.Integer()),
         sa.Column("page_html_hash", sa.String(64)),
         sa.Column("error", sa.Text()),
+        if_not_exists=True,
     )
 
     # ── sightings: add source_searched_at ────────────────────────────
@@ -105,8 +109,8 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_column("sightings", "source_searched_at")
-    op.drop_table("nc_search_log")
-    op.drop_index("ix_nc_queue_dedup", table_name="nc_search_queue")
-    op.drop_index("ix_nc_queue_poll", table_name="nc_search_queue")
-    op.drop_table("nc_search_queue")
+    op.execute("ALTER TABLE IF EXISTS sightings DROP COLUMN IF EXISTS source_searched_at")
+    op.drop_table("nc_search_log", if_exists=True)
+    op.drop_index("ix_nc_queue_dedup", table_name="nc_search_queue", if_exists=True)
+    op.drop_index("ix_nc_queue_poll", table_name="nc_search_queue", if_exists=True)
+    op.drop_table("nc_search_queue", if_exists=True)

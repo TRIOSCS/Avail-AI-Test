@@ -55,5 +55,5 @@ class BatchQueue:
             )
 
         self._pending.clear()
-        logger.info("Built batch of %d items for prefix '%s'", len(requests), self.prefix)
+        logger.info("Built batch of {} items for prefix '{}'", len(requests), self.prefix)
         return requests

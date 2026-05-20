@@ -21,5 +21,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("excess_line_items", "description")
-    op.drop_column("quote_lines", "description")
+    op.execute("ALTER TABLE IF EXISTS excess_line_items DROP COLUMN IF EXISTS description")
+    op.execute("ALTER TABLE IF EXISTS quote_lines DROP COLUMN IF EXISTS description")

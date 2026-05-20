@@ -51,6 +51,31 @@ def test_build_connectors_instantiates_with_creds(db_session):
     assert stats["nexar"]["status"] == "skipped"
 
 
+def test_build_connectors_brokerbin_gates_on_bearer_token(db_session):
+    """BrokerBin v2.x uses Bearer auth — only the API key (token) is required.
+
+    The legacy ``BROKERBIN_API_SECRET`` slot is no longer load-bearing for v2.x
+    keys; it remains in the schema for backward compatibility but is ignored at
+    request time.
+    """
+    from app.connectors.sources import BrokerBinConnector
+    from app.search_service import _build_connectors
+
+    # Token only → connector built (Bearer doesn't need a username)
+    only_key = {("brokerbin", "BROKERBIN_API_KEY"): "key-only"}
+    with patch("app.search_service.get_credentials_batch", return_value=only_key):
+        connectors, stats, _ = _build_connectors(db_session)
+    assert any(isinstance(c, BrokerBinConnector) for c in connectors)
+    assert "brokerbin" not in stats
+
+    # No token → skipped (Bearer auth requires the token)
+    only_secret = {("brokerbin", "BROKERBIN_API_SECRET"): "user-only"}
+    with patch("app.search_service.get_credentials_batch", return_value=only_secret):
+        connectors, stats, _ = _build_connectors(db_session)
+    assert not any(isinstance(c, BrokerBinConnector) for c in connectors)
+    assert stats["brokerbin"]["status"] == "skipped"
+
+
 # ── Aggressive dedup tests ──────────────────────────────────────────────
 
 
@@ -193,10 +218,13 @@ async def test_stream_search_publishes_events(db_session):
     async def mock_publish(channel, event, data=""):
         published_events.append({"channel": channel, "event": event, "data": data})
 
-    # Mock broker and connectors
+    # Mock broker and connectors. The worker now opens its own SessionLocal(),
+    # so we patch it to return the test's db_session (which is bound to the
+    # in-memory test engine with tables created by conftest).
     with (
         patch("app.search_service.broker", create=True) as mock_broker,
         patch("app.search_service._build_connectors") as mock_build,
+        patch("app.search_service.SessionLocal", lambda: db_session),
     ):
         mock_broker.publish = mock_publish
 
@@ -217,7 +245,7 @@ async def test_stream_search_publishes_events(db_session):
         )
         mock_build.return_value = ([fake_connector], {}, set())
 
-        await stream_search_mpn("test-search-id", "LM317T", db_session)
+        await stream_search_mpn("test-search-id", "LM317T")
 
     # Should have published source-status + results + done events
     event_types = [e["event"] for e in published_events]
@@ -739,3 +767,202 @@ def test_full_search_flow_smoke(client, db_session):
         )
     assert resp.status_code == 200
     assert "Arrow" in resp.text
+
+
+# ── Errored / non-ok source surfacing ──────────────────────────────────
+
+
+class TestBuildConnectorsErroredBranch:
+    """_build_connectors must exclude sources where ApiSource.status='error' (set by
+    health_monitor) and surface them as 'error_skipped' in source_stats_map.
+
+    Operator sees a distinct chip with actionable message.
+    """
+
+    def test_errored_source_excluded_with_error_skipped_status(self, db_session):
+        """A source with status='error' is not instantiated; source_stats_map gets
+        'error_skipped' with the operator-actionable message."""
+        from app.models.config import ApiSource
+        from app.search_service import _build_connectors
+
+        # Insert an OEMSecrets source flipped to 'error' by health_monitor
+        # (simulating the prior-error state). Pre-populate its credentials
+        # so the only reason for exclusion is the error status.
+        src = ApiSource(
+            name="oemsecrets",
+            display_name="OEMSecrets",
+            category="api",
+            source_type="search",
+            status="error",
+            is_active=True,
+            credentials={"OEMSECRETS_API_KEY": "test-key"},
+        )
+        db_session.add(src)
+        db_session.commit()
+
+        # Stub credentials_batch to return a key for oemsecrets so the
+        # exclusion is unambiguously due to the 'error' branch (not "no
+        # creds").
+        with patch(
+            "app.search_service.get_credentials_batch",
+            return_value={("oemsecrets", "OEMSECRETS_API_KEY"): "test-key"},
+        ):
+            connectors, source_stats_map, _ = _build_connectors(db_session)
+
+        # OEMSecrets connector excluded
+        from app.connectors.oemsecrets import OEMSecretsConnector
+
+        assert not any(isinstance(c, OEMSecretsConnector) for c in connectors)
+        # source_stats_map carries the error_skipped chip with operator
+        # message
+        stat = source_stats_map.get("oemsecrets", {})
+        assert stat.get("status") == "error_skipped"
+        msg = (stat.get("error") or "").lower()
+        assert "rotate" in msg or "credentials" in msg or "auto-recover" in msg
+
+
+class TestStreamSearchMpnNonOkChips:
+    """stream_search_mpn must publish source-status SSE events for every non-ok entry in
+    source_stats_map at search start.
+
+    Without this, the operator never sees chips for excluded sources (error_skipped,
+    disabled, skipped) — only sources that actually run emit events.
+    """
+
+    @pytest.mark.asyncio
+    async def test_error_skipped_publishes_source_status_event(self, db_session):
+        """An error_skipped source emits a source-status event so the chip renders.
+
+        Verifies the contract's UI hop end-to-end.
+        """
+        from app.search_service import stream_search_mpn
+
+        # source_stats_map populated by _build_connectors with an
+        # error_skipped entry for oemsecrets — simulating health_monitor's
+        # prior-error state.
+        seeded_stats = {
+            "oemsecrets": {
+                "source": "oemsecrets",
+                "status": "error_skipped",
+                "error": "Skipped due to prior error — auto-recovers when next ping returns 200; rotate credentials if persistent",
+                "results": 0,
+                "ms": 0,
+            },
+        }
+
+        published_events = []
+
+        async def mock_publish(channel, event, data=""):
+            published_events.append({"channel": channel, "event": event, "data": data})
+
+        # Need at least one connector to keep the function from short-circuiting
+        # — otherwise it emits 'done' and returns before reaching the
+        # full event flow. But the non-ok publish loop runs BEFORE the
+        # short-circuit, so this also tests the no-connector case.
+        from unittest.mock import AsyncMock, MagicMock
+
+        fake_connector = MagicMock()
+        fake_connector.source_name = "nexar"
+        fake_connector.search = AsyncMock(return_value=[])
+
+        with (
+            patch("app.search_service.broker", create=True) as mock_broker,
+            patch(
+                "app.search_service._build_connectors",
+                return_value=([fake_connector], seeded_stats, set()),
+            ),
+            patch("app.search_service.SessionLocal", lambda: db_session),
+        ):
+            mock_broker.publish = mock_publish
+            await stream_search_mpn("test-search-id", "LM317T")
+
+        # Find the source-status event for oemsecrets (the non-ok one)
+        oem_status_events = [e for e in published_events if e["event"] == "source-status" and "oemsecrets" in e["data"]]
+        assert len(oem_status_events) >= 1, (
+            f"Expected oemsecrets source-status event, got: {[e['event'] for e in published_events]}"
+        )
+        oem_payload = json.loads(oem_status_events[0]["data"])
+        assert oem_payload["status"] == "error_skipped"
+        assert oem_payload["source"] == "oemsecrets"
+        # Operator-actionable error message must be carried through to
+        # the chip
+        assert oem_payload.get("error")
+
+    @pytest.mark.asyncio
+    async def test_no_connectors_still_publishes_non_ok_chips(self, db_session):
+        """Even when no connectors run (all skipped/disabled/errored), the non-ok chips
+        must still publish before the 'done' event."""
+        from app.search_service import stream_search_mpn
+
+        seeded_stats = {
+            "nexar": {
+                "source": "nexar",
+                "status": "skipped",
+                "error": "No API key configured",
+                "results": 0,
+                "ms": 0,
+            },
+            "oemsecrets": {
+                "source": "oemsecrets",
+                "status": "error_skipped",
+                "error": "Skipped due to prior error",
+                "results": 0,
+                "ms": 0,
+            },
+        }
+
+        published_events = []
+
+        async def mock_publish(channel, event, data=""):
+            published_events.append({"channel": channel, "event": event, "data": data})
+
+        with (
+            patch("app.search_service.broker", create=True) as mock_broker,
+            patch(
+                "app.search_service._build_connectors",
+                return_value=([], seeded_stats, set()),
+            ),
+            patch("app.search_service.SessionLocal", lambda: db_session),
+        ):
+            mock_broker.publish = mock_publish
+            await stream_search_mpn("test-search-id", "LM317T")
+
+        status_events = [e for e in published_events if e["event"] == "source-status"]
+        assert len(status_events) == 2
+        sources_published = {json.loads(e["data"])["source"] for e in status_events}
+        assert sources_published == {"nexar", "oemsecrets"}
+        # 'done' should still fire after the non-ok chips
+        assert any(e["event"] == "done" for e in published_events)
+
+    @pytest.mark.asyncio
+    async def test_ok_status_in_seeded_map_does_not_double_publish(self, db_session):
+        """If source_stats_map already has an 'ok' entry (shouldn't happen in practice
+        but defensive), the non-ok publish loop must skip it — that source's event will
+        come from the actual run later."""
+        from app.search_service import stream_search_mpn
+
+        seeded_stats = {
+            "nexar": {"source": "nexar", "status": "ok", "results": 0, "ms": 0, "error": None},
+        }
+
+        published_events = []
+
+        async def mock_publish(channel, event, data=""):
+            published_events.append({"channel": channel, "event": event, "data": data})
+
+        with (
+            patch("app.search_service.broker", create=True) as mock_broker,
+            patch(
+                "app.search_service._build_connectors",
+                return_value=([], seeded_stats, set()),
+            ),
+            patch("app.search_service.SessionLocal", lambda: db_session),
+        ):
+            mock_broker.publish = mock_publish
+            await stream_search_mpn("test-search-id", "LM317T")
+
+        # No source-status events expected because the only seeded entry
+        # is 'ok' (skipped by the non-ok publish loop) and there are no
+        # connectors to run.
+        status_events = [e for e in published_events if e["event"] == "source-status"]
+        assert len(status_events) == 0

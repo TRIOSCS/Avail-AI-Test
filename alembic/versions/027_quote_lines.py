@@ -31,11 +31,12 @@ def upgrade():
         sa.Column("sell_price", sa.Numeric(12, 4)),
         sa.Column("margin_pct", sa.Numeric(5, 2)),
         sa.Column("currency", sa.String(10), server_default="USD"),
+        if_not_exists=True,
     )
-    op.create_index("ix_quote_lines_quote", "quote_lines", ["quote_id"])
-    op.create_index("ix_quote_lines_card", "quote_lines", ["material_card_id"])
-    op.create_index("ix_quote_lines_mpn", "quote_lines", ["mpn"])
+    op.create_index("ix_quote_lines_quote", "quote_lines", ["quote_id"], if_not_exists=True)
+    op.create_index("ix_quote_lines_card", "quote_lines", ["material_card_id"], if_not_exists=True)
+    op.create_index("ix_quote_lines_mpn", "quote_lines", ["mpn"], if_not_exists=True)
 
 
 def downgrade():
-    op.drop_table("quote_lines")
+    op.drop_table("quote_lines", if_exists=True)

@@ -65,10 +65,10 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
                 try:
                     db.commit()
                 except Exception:
-                    logger.exception("Failed to commit domain-matched vendor alt name for '%s'", vendor_name)
+                    logger.exception("Failed to commit domain-matched vendor alt name for '{}'", vendor_name)
                     db.rollback()
             logger.info(
-                "Domain-matched vendor '%s' to '%s' (domain=%s)",
+                "Domain-matched vendor '{}' to '{}' (domain={})",
                 vendor_name,
                 card.display_name,
                 domain_lower,
@@ -96,10 +96,10 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
                         try:
                             db.commit()
                         except Exception:
-                            logger.exception("Failed to commit pg_trgm matched vendor alt name for '%s'", vendor_name)
+                            logger.exception("Failed to commit pg_trgm matched vendor alt name for '{}'", vendor_name)
                             db.rollback()
                     logger.info(
-                        "pg_trgm matched vendor '%s' to '%s' (sim=%.2f)",
+                        "pg_trgm matched vendor '{}' to '{}' (sim={:.2f})",
                         vendor_name,
                         card.display_name,
                         trgm_rows[0].sim,
@@ -131,10 +131,10 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
                     try:
                         db.commit()
                     except Exception:
-                        logger.exception("Failed to commit fuzzy-matched vendor alt name for '%s'", vendor_name)
+                        logger.exception("Failed to commit fuzzy-matched vendor alt name for '{}'", vendor_name)
                         db.rollback()
                 logger.info(
-                    "Fuzzy-matched vendor '%s' to '%s' (score=%d)",
+                    "Fuzzy-matched vendor '{}' to '{}' (score={})",
                     vendor_name,
                     card.display_name,
                     best_score,
@@ -148,7 +148,7 @@ def get_or_create_card(vendor_name: str, db: Session, domain: str | None = None)
     try:
         db.commit()
     except Exception:
-        logger.exception("Failed to commit new VendorCard for '%s'", vendor_name)
+        logger.exception("Failed to commit new VendorCard for '{}'", vendor_name)
         db.rollback()
         raise
     return card
@@ -174,11 +174,11 @@ async def _background_enrich_vendor(card_id: int, domain: str, vendor_name: str)
                 try:
                     db.commit()
                 except Exception:
-                    logger.exception("Background enrichment commit failed for vendor card %d", card_id)
+                    logger.exception("Background enrichment commit failed for vendor card {}", card_id)
                     db.rollback()
                     return
                 logger.info(
-                    "Background enrichment completed for vendor %s (card %d): %s",
+                    "Background enrichment completed for vendor {} (card {}): {}",
                     vendor_name,
                     card_id,
                     enrichment.get("source", "unknown"),
@@ -186,14 +186,14 @@ async def _background_enrich_vendor(card_id: int, domain: str, vendor_name: str)
         finally:
             db.close()
     except Exception:
-        logger.exception("Background enrichment failed for vendor card %d", card_id)
+        logger.exception("Background enrichment failed for vendor card {}", card_id)
 
     # Also run AI material analysis if vendor has sighting data
     if get_credential_cached("anthropic_ai", "ANTHROPIC_API_KEY"):
         try:
             await _analyze_vendor_materials(card_id)
         except Exception:
-            logger.exception("Background material analysis failed for vendor card %d", card_id)
+            logger.exception("Background material analysis failed for vendor card {}", card_id)
 
 
 def _load_entity_tags(entity_type: str, entity_id: int, db: Session) -> list[dict]:

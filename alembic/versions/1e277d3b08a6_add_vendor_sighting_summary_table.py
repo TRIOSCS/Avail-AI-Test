@@ -45,14 +45,15 @@ def upgrade() -> None:
         ),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("requirement_id", "vendor_name", name="uq_vss_req_vendor"),
+        if_not_exists=True,
     )
-    op.create_index("ix_vss_requirement", "vendor_sighting_summary", ["requirement_id"])
-    op.create_index("ix_vss_vendor", "vendor_sighting_summary", ["vendor_name"])
-    op.create_index("ix_vss_score", "vendor_sighting_summary", ["score"])
+    op.create_index("ix_vss_requirement", "vendor_sighting_summary", ["requirement_id"], if_not_exists=True)
+    op.create_index("ix_vss_vendor", "vendor_sighting_summary", ["vendor_name"], if_not_exists=True)
+    op.create_index("ix_vss_score", "vendor_sighting_summary", ["score"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_vss_score", table_name="vendor_sighting_summary")
-    op.drop_index("ix_vss_vendor", table_name="vendor_sighting_summary")
-    op.drop_index("ix_vss_requirement", table_name="vendor_sighting_summary")
-    op.drop_table("vendor_sighting_summary")
+    op.drop_index("ix_vss_score", table_name="vendor_sighting_summary", if_exists=True)
+    op.drop_index("ix_vss_vendor", table_name="vendor_sighting_summary", if_exists=True)
+    op.drop_index("ix_vss_requirement", table_name="vendor_sighting_summary", if_exists=True)
+    op.drop_table("vendor_sighting_summary", if_exists=True)

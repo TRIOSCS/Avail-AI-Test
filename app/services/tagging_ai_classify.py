@@ -61,7 +61,7 @@ async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:  # prag
         logger.info("Claude not configured — skipping AI classification")
         return [{"mpn": mpn, "manufacturer": "Unknown", "category": "Miscellaneous"} for mpn in part_numbers]
     except ClaudeError as e:
-        logger.warning("Claude AI failed for classification: %s", e)
+        logger.warning("Claude AI failed for classification: {}", e)
         return [{"mpn": mpn, "manufacturer": "Unknown", "category": "Miscellaneous"} for mpn in part_numbers]
 
     if not result or not isinstance(result, list):

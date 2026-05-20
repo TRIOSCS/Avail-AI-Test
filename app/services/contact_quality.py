@@ -133,7 +133,7 @@ def flag_stale_contacts(db: Session, stale_days: int = 180) -> int:
 
     if count:
         db.flush()
-        logger.info("Flagged %d stale contacts (older than %d days)", count, stale_days)
+        logger.info("Flagged {} stale contacts (older than {} days)", count, stale_days)
     return count
 
 

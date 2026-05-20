@@ -28,8 +28,8 @@ def upgrade() -> None:
     op.add_column("knowledge_entries", sa.Column("answered_via", sa.String(10), nullable=True))
 
     # Add digest hour to teams_alert_config
-    op.add_column(
-        "teams_alert_config", sa.Column("knowledge_digest_hour", sa.Integer(), nullable=False, server_default="14")
+    op.execute(
+        "ALTER TABLE teams_alert_config ADD COLUMN IF NOT EXISTS knowledge_digest_hour INTEGER NOT NULL DEFAULT '14'"
     )
 
     # Create knowledge_config table
@@ -38,6 +38,7 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("key", sa.String(50), unique=True, nullable=False),
         sa.Column("value", sa.String(255), nullable=False),
+        if_not_exists=True,
     )
 
     # Seed default question cap
@@ -45,8 +46,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_table("knowledge_config")
-    op.drop_column("teams_alert_config", "knowledge_digest_hour")
-    op.drop_column("knowledge_entries", "answered_via")
-    op.drop_column("knowledge_entries", "delivered_at")
-    op.drop_column("knowledge_entries", "nudged_at")
+    op.drop_table("knowledge_config", if_exists=True)
+    op.execute("ALTER TABLE IF EXISTS teams_alert_config DROP COLUMN IF EXISTS knowledge_digest_hour")
+    op.execute("ALTER TABLE IF EXISTS knowledge_entries DROP COLUMN IF EXISTS answered_via")
+    op.execute("ALTER TABLE IF EXISTS knowledge_entries DROP COLUMN IF EXISTS delivered_at")
+    op.execute("ALTER TABLE IF EXISTS knowledge_entries DROP COLUMN IF EXISTS nudged_at")

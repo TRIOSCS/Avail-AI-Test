@@ -49,11 +49,12 @@ def upgrade() -> None:
         ["requirement_id", "created_at"],
         unique=False,
         postgresql_where=sa.text("requirement_id IS NOT NULL"),
+        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
-    op.drop_index("ix_activity_requirement", table_name="activity_log")
-    op.drop_column("activity_log", "requirement_id")
-    op.drop_column("requirements", "assigned_buyer_id")
-    op.drop_column("requirements", "priority_score")
+    op.drop_index("ix_activity_requirement", table_name="activity_log", if_exists=True)
+    op.execute("ALTER TABLE IF EXISTS activity_log DROP COLUMN IF EXISTS requirement_id")
+    op.execute("ALTER TABLE IF EXISTS requirements DROP COLUMN IF EXISTS assigned_buyer_id")
+    op.execute("ALTER TABLE IF EXISTS requirements DROP COLUMN IF EXISTS priority_score")

@@ -18,9 +18,9 @@ down_revision = "072"
 
 def upgrade():
     op.add_column("requisition_tasks", sa.Column("completion_note", sa.Text(), nullable=True))
-    op.create_index("ix_rt_creator_status", "requisition_tasks", ["created_by", "status"])
+    op.create_index("ix_rt_creator_status", "requisition_tasks", ["created_by", "status"], if_not_exists=True)
 
 
 def downgrade():
-    op.drop_index("ix_rt_creator_status", table_name="requisition_tasks")
-    op.drop_column("requisition_tasks", "completion_note")
+    op.drop_index("ix_rt_creator_status", table_name="requisition_tasks", if_exists=True)
+    op.execute("ALTER TABLE IF EXISTS requisition_tasks DROP COLUMN IF EXISTS completion_note")

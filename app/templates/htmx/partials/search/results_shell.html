@@ -47,6 +47,60 @@
   (function() {
     var wrapper = document.getElementById('search-results-wrapper');
     if (!wrapper) return;
+
+    // Map SourceRunStatus → chip CSS class. 'ok' uses the per-source
+    // brand color via source-chip--{name} (set below); everything else
+    // gets a status-specific monochrome treatment.
+    var STATUS_CLASS = {
+      'ok': 'source-chip--done',
+      'error': 'source-chip--error',
+      'error_skipped': 'source-chip--error',
+      'disabled': 'source-chip--disabled',
+      'skipped': 'source-chip--skipped',
+    };
+
+    wrapper.addEventListener('htmx:sseMessage', function(evt) {
+      if (!evt.detail || evt.detail.type !== 'source-status') return;
+      var payload;
+      try { payload = JSON.parse(evt.detail.data); } catch (e) { return; }
+      if (!payload || !payload.source) return;
+
+      var chip = document.getElementById('source-chip-' + payload.source);
+      if (!chip) return;
+
+      // Drop all transient/state classes and apply the new state.
+      chip.classList.remove(
+        'source-chip--searching',
+        'source-chip--done',
+        'source-chip--error',
+        'source-chip--disabled',
+        'source-chip--skipped',
+        'source-chip--empty'
+      );
+      var stateClass = STATUS_CLASS[payload.status];
+      if (stateClass) chip.classList.add(stateClass);
+      if (payload.status === 'ok') {
+        // Brand color for healthy sources; remove pulsing dot.
+        chip.classList.add('source-chip--' + payload.source);
+        var dot = chip.querySelector('.animate-pulse');
+        if (dot) dot.remove();
+        // Empty result → distinct dim treatment.
+        if ((payload.results || 0) === 0) {
+          chip.classList.remove('source-chip--done', 'source-chip--' + payload.source);
+          chip.classList.add('source-chip--empty');
+        }
+      } else {
+        // Non-ok states: drop the pulsing dot.
+        var dot2 = chip.querySelector('.animate-pulse');
+        if (dot2) dot2.remove();
+      }
+
+      // Operator-actionable message → hover tooltip on the chip.
+      if (payload.error) {
+        chip.setAttribute('title', payload.error);
+      }
+    });
+
     wrapper.addEventListener('htmx:sseClose', function() {
       var cards = document.getElementById('search-results-cards');
       var empty = document.getElementById('search-empty-state');

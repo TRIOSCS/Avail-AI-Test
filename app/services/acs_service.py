@@ -46,7 +46,7 @@ async def initiate_call(to_phone: str, from_phone: str, callback_url: str, conne
         logger.error("azure-communication-callautomation package not installed")
         return None
     except Exception as e:
-        logger.error("ACS call initiation failed: %s", e)
+        logger.error("ACS call initiation failed: {}", e)
         return None
 
 

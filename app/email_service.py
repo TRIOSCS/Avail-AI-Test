@@ -883,7 +883,7 @@ def _apply_parsed_result(vr: VendorResponse, parsed: dict, db: Session = None) -
         try:
             _auto_create_offers_from_parse(vr, parsed, db)
         except Exception as e:
-            logger.error("Auto-create offers failed for VR %s: %s", getattr(vr, "id", "?"), e, exc_info=True)
+            logger.error("Auto-create offers failed for VR {}: {}", getattr(vr, "id", "?"), e, exc_info=True)
 
 
 async def _handle_excess_bid_reply(msg: dict, solicitation_id: int, db: Session) -> None:
@@ -1019,7 +1019,7 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
 
         draft_offers = extract_draft_offers(parsed, vr.vendor_name or "Unknown")
     except Exception as e:
-        logger.warning("Failed to extract draft offers: %s", e)
+        logger.warning("Failed to extract draft offers: {}", e)
         return
 
     req = db.get(Requisition, vr.requisition_id)
@@ -1124,7 +1124,7 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
                     if vc:  # pragma: no cover
                         propagate_tags_to_entity("vendor_card", vc.id, offer.material_card_id, 1.0, db)
             except Exception:
-                logger.warning("Tag propagation failed for offer %s", offer.id, exc_info=True)
+                logger.warning("Tag propagation failed for offer {}", offer.id, exc_info=True)
 
             # Reset strategic vendor 39-day clock
             if offer.vendor_card_id:
@@ -1133,7 +1133,7 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
 
                     sv_record(db, offer.vendor_card_id)
                 except Exception:
-                    logger.warning("Strategic vendor clock reset failed for offer %s", offer.id, exc_info=True)
+                    logger.warning("Strategic vendor clock reset failed for offer {}", offer.id, exc_info=True)
 
             # Deduplicated notification -- update existing if unread, else create new
             if owner_id:
@@ -1164,7 +1164,7 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
                         )
                     )
         except Exception as e:
-            logger.error("Failed to create offer for %s: %s", draft.get("mpn", "?"), e, exc_info=True)
+            logger.error("Failed to create offer for {}: {}", draft.get("mpn", "?"), e, exc_info=True)
 
     # Publish SSE event so sightings page refreshes for affected requirements
     if owner_id:

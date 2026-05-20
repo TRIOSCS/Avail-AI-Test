@@ -44,12 +44,13 @@ def upgrade():
             "activity_log",
             ["quality_assessed_at"],
             postgresql_where=sa.text("quality_assessed_at IS NULL"),
+            if_not_exists=True,
         )
 
 
 def downgrade():
-    op.drop_index("ix_activity_unscored", table_name="activity_log")
-    op.drop_column("activity_log", "is_meaningful")
-    op.drop_column("activity_log", "quality_assessed_at")
-    op.drop_column("activity_log", "quality_classification")
-    op.drop_column("activity_log", "quality_score")
+    op.drop_index("ix_activity_unscored", table_name="activity_log", if_exists=True)
+    op.execute("ALTER TABLE IF EXISTS activity_log DROP COLUMN IF EXISTS is_meaningful")
+    op.execute("ALTER TABLE IF EXISTS activity_log DROP COLUMN IF EXISTS quality_assessed_at")
+    op.execute("ALTER TABLE IF EXISTS activity_log DROP COLUMN IF EXISTS quality_classification")
+    op.execute("ALTER TABLE IF EXISTS activity_log DROP COLUMN IF EXISTS quality_score")

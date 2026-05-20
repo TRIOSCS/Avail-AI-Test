@@ -318,14 +318,14 @@ def batch_update_email_health(db: Session, lookback_days: int = 90, limit: int =
             update_vendor_email_health(db, vid, lookback_days)
             updated += 1
         except Exception as e:
-            logger.warning("Email health update failed for vendor %d: %s", vid, e)
+            logger.warning("Email health update failed for vendor {}: {}", vid, e)
             errors += 1
 
     if updated:
         try:
             db.commit()
         except Exception as e:
-            logger.warning("Batch email health commit failed: %s", e)
+            logger.warning("Batch email health commit failed: {}", e)
             db.rollback()
 
     return {"updated": updated, "errors": errors}

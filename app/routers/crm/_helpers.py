@@ -96,7 +96,7 @@ def quote_to_dict(q: Quote, db=None) -> dict:
         except Exception:
             from loguru import logger
 
-            logger.warning("MaterialCard enrichment failed for quote %s, returning raw items", q.id)
+            logger.warning("MaterialCard enrichment failed for quote {}, returning raw items", q.id)
             enriched_items = q.line_items or []
     # Compute expiration fields
     is_expired = False

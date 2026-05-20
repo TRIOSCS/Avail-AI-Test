@@ -124,7 +124,7 @@ class AIWebSearchConnector(BaseConnector):
             logger.warning("Claude not configured — skipping AI live web search")
             return []
         except ClaudeError as e:
-            logger.warning("Claude AI failed for live web search: %s", e)
+            logger.warning("Claude AI failed for live web search: {}", e)
             return []
 
         offers = data.get("offers", []) if isinstance(data, dict) else []

@@ -210,7 +210,7 @@ def api_get_credentials(
                     "source": "db",
                 }
             except (ValueError, TypeError):
-                logger.warning("Credential decryption failed for %s", var_name, exc_info=True)
+                logger.warning("Credential decryption failed for {}", var_name, exc_info=True)
                 result[var_name] = {"status": "error", "masked": "", "source": "db"}
         elif os.getenv(var_name):
             result[var_name] = {

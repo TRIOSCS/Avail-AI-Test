@@ -13,17 +13,20 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import httpx
 import pytest
 
+from app.connectors.errors import ConnectorAuthError, ConnectorRateLimitError
+
 # ═══════════════════════════════════════════════════════════════════════
 #  Helpers
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def _mock_response(status_code=200, json_data=None, text=""):
+def _mock_response(status_code=200, json_data=None, text="", headers=None):
     """Build a fake httpx.Response."""
     resp = MagicMock(spec=httpx.Response)
     resp.status_code = status_code
     resp.json.return_value = json_data or {}
     resp.text = text or str(json_data)
+    resp.headers = headers or {}
     resp.raise_for_status = MagicMock()
     if status_code >= 400:
         resp.raise_for_status.side_effect = httpx.HTTPStatusError("error", request=MagicMock(), response=resp)
@@ -115,7 +118,15 @@ class TestBaseConnector:
         _breakers.pop("GoodConnector", None)
 
     @pytest.mark.asyncio
-    async def test_search_skips_when_breaker_open(self):
+    async def test_search_raises_when_breaker_open(self):
+        """Open breaker raises ConnectorError so health_monitor flips api_sources.status
+        to 'error'.
+
+        Was: return [] which silently
+        masked the contract — see docs/APP_MAP_INTERACTIONS.md
+        § Connector Failure Contract.
+        """
+        from app.connectors.errors import ConnectorError
         from app.connectors.sources import BaseConnector, _breakers
 
         class SkipConnector(BaseConnector):
@@ -127,8 +138,8 @@ class TestBaseConnector:
         for _ in range(10):
             c._breaker.record_failure()
         assert c._breaker.current_state == "open"
-        result = await c.search("LM317")
-        assert result == []
+        with pytest.raises(ConnectorError, match="circuit breaker open"):
+            await c.search("LM317")
         _breakers.pop("SkipConnector", None)
 
     @pytest.mark.slow
@@ -354,6 +365,27 @@ class TestDigiKeyConnector:
         }
         results = c._parse(data, "X")
         assert results[0]["unit_price"] == 2.50
+
+    @pytest.mark.asyncio
+    async def test_do_search_persistent_429_raises_for_health_monitor(self):
+        """DigiKey: a 429 that persists across the in-method retry must
+        raise RuntimeError so health_monitor.ping_source flips status to
+        'error'; search_service excludes the source from user searches;
+        auto-recovers on next successful ping."""
+        c = self._make_connector()
+        c._token = "cached-token"
+        c._token_expires_at = time.monotonic() + 600  # avoid token refresh
+        resp_429 = _mock_response(429, text="Too Many Requests")
+        resp_429.raise_for_status = MagicMock()
+        # Mock asyncio.sleep so the test doesn't actually wait for Retry-After
+        with (
+            patch("app.connectors.digikey.http") as mock_http,
+            patch("app.connectors.digikey.asyncio.sleep", AsyncMock()),
+        ):
+            mock_http.post = AsyncMock(side_effect=[resp_429, resp_429])
+            with pytest.raises(ConnectorRateLimitError, match="DigiKey rate limited"):
+                await c._do_search("LM317T")
+            assert mock_http.post.call_count == 2  # initial + one retry
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -616,22 +648,26 @@ class TestMouserConnector:
         assert results == []
 
     @pytest.mark.asyncio
-    async def test_do_search_403_returns_empty(self):
-        """Mouser 403 (quota/rate limit) returns empty, does not raise."""
+    async def test_do_search_403_raises_auth_error(self):
+        """Mouser 403 raises ConnectorAuthError.
+
+        The prior silent-empty carve-out hid revoked-key cases — auto-recovery handles
+        transient overload via the next ping flipping status back to 'live'.
+        """
         c = self._make_connector()
         resp = _mock_response(403, text="Forbidden")
         resp.raise_for_status = MagicMock()  # Should not be called
         with patch("app.connectors.mouser.http") as mock_http:
             mock_http.post = AsyncMock(return_value=resp)
-            result = await c._do_search("LM317T")
-            assert result == []
+            with pytest.raises(ConnectorAuthError, match="Mouser auth error"):
+                await c._do_search("LM317T")
 
     @pytest.mark.asyncio
-    async def test_do_search_auth_error_in_body_returns_empty(self):
-        """Mouser 'Invalid unique identifier' (bad/revoked API key) must return [] in
-        <100ms instead of raising and triggering the retry loop.
+    async def test_do_search_auth_error_in_body_raises(self):
+        """Mouser 'Invalid unique identifier' (bad/revoked API key) must raise
+        ConnectorAuthError so health_monitor.ping_source flips status to 'error'.
 
-        This matches the fast-fail behavior of 403 responses.
+        See docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
         """
         c = self._make_connector()
         resp = _mock_response(
@@ -650,8 +686,8 @@ class TestMouserConnector:
         )
         with patch("app.connectors.mouser.http") as mock_http:
             mock_http.post = AsyncMock(return_value=resp)
-            result = await c._do_search("LM317T")
-        assert result == []
+            with pytest.raises(ConnectorAuthError, match="Mouser auth error"):
+                await c._do_search("LM317T")
 
     @pytest.mark.asyncio
     async def test_do_search_invalid_part_number_still_raises(self):
@@ -673,25 +709,29 @@ class TestMouserConnector:
                 await c._do_search("LM317T")
 
     @pytest.mark.asyncio
-    async def test_do_search_429_returns_empty(self):
-        """Mouser 429 (rate limit) returns empty, does not raise."""
+    async def test_do_search_429_raises_rate_limit(self):
+        """Mouser 429 raises ConnectorRateLimitError.
+
+        Auto-recovers on next ping success.
+        """
         c = self._make_connector()
         resp = _mock_response(429, text="Too Many Requests")
         resp.raise_for_status = MagicMock()
         with patch("app.connectors.mouser.http") as mock_http:
             mock_http.post = AsyncMock(return_value=resp)
-            result = await c._do_search("LM317T")
-            assert result == []
+            with pytest.raises(ConnectorRateLimitError, match="Mouser rate limited"):
+                await c._do_search("LM317T")
 
     @pytest.mark.asyncio
-    async def test_do_search_quota_error_in_body_returns_empty(self):
-        """Mouser returns 200 with quota/rate error in Errors array — return empty."""
+    async def test_do_search_quota_error_in_body_raises_rate_limit(self):
+        """Mouser HTTP 200 with quota/rate error in Errors array raises
+        ConnectorRateLimitError (was return [])."""
         c = self._make_connector()
         resp = _mock_response(200, {"Errors": [{"Message": "Too many requests per day"}]})
         with patch("app.connectors.mouser.http") as mock_http:
             mock_http.post = AsyncMock(return_value=resp)
-            result = await c._do_search("LM317T")
-            assert result == []
+            with pytest.raises(ConnectorRateLimitError, match="Mouser rate"):
+                await c._do_search("LM317T")
 
     def test_parse_picks_lowest_qty_price_break(self):
         """Price should come from the lowest quantity price break."""
@@ -990,26 +1030,28 @@ class TestOEMSecretsConnector:
         assert results[0]["moq"] == 5
 
     @pytest.mark.asyncio
-    async def test_do_search_401_returns_empty(self):
-        """OEMSecrets 401 (quota exhausted) returns empty, does not raise."""
+    async def test_do_search_401_raises_for_health_monitor(self):
+        """OEMSecrets 401 (bad key OR quota exhausted) must raise RuntimeError so
+        health_monitor.ping_source flips api_sources.status to 'error', stopping the
+        15-min ping loop from continuing to consume quota."""
         c = self._make_connector()
         resp = _mock_response(401, text="User is not accepted")
         resp.raise_for_status = MagicMock()
         with patch("app.connectors.oemsecrets.http") as mock_http:
             mock_http.get = AsyncMock(return_value=resp)
-            result = await c._do_search("LM317T")
-            assert result == []
+            with pytest.raises(ConnectorAuthError, match="OEMSecrets auth/quota error"):
+                await c._do_search("LM317T")
 
     @pytest.mark.asyncio
-    async def test_do_search_429_returns_empty(self):
-        """OEMSecrets 429 (rate limit) returns empty, does not raise."""
+    async def test_do_search_429_raises_for_health_monitor(self):
+        """OEMSecrets 429 (rate limit) must raise — same contract as 401."""
         c = self._make_connector()
         resp = _mock_response(429, text="Rate limited")
         resp.raise_for_status = MagicMock()
         with patch("app.connectors.oemsecrets.http") as mock_http:
             mock_http.get = AsyncMock(return_value=resp)
-            result = await c._do_search("LM317T")
-            assert result == []
+            with pytest.raises(ConnectorRateLimitError, match="OEMSecrets rate limited"):
+                await c._do_search("LM317T")
 
     def test_parse_empty_prices_dict(self):
         """Empty prices dict should result in None price."""
@@ -1222,6 +1264,41 @@ class TestSourcengineConnector:
         results = c._parse(data, "X")
         assert len(results) == 1
 
+    @pytest.mark.asyncio
+    async def test_search_401_raises_for_health_monitor(self):
+        """Sourcengine 401/403 (auth) must raise RuntimeError so
+        health_monitor.ping_source flips status to 'error' and stops the 15-min ping
+        loop from burning quota against bad creds."""
+        c = self._make_connector()
+        resp = _mock_response(401, text="Unauthorized")
+        resp.raise_for_status = MagicMock()
+        with patch("app.connectors.sourcengine.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=resp)
+            with pytest.raises(ConnectorAuthError, match="Sourcengine auth error"):
+                await c._do_search("LM317T")
+
+    @pytest.mark.asyncio
+    async def test_search_403_raises_for_health_monitor(self):
+        """Sourcengine 403 (forbidden) must raise — same contract as 401."""
+        c = self._make_connector()
+        resp = _mock_response(403, text="Forbidden")
+        resp.raise_for_status = MagicMock()
+        with patch("app.connectors.sourcengine.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=resp)
+            with pytest.raises(ConnectorAuthError, match="Sourcengine auth error"):
+                await c._do_search("LM317T")
+
+    @pytest.mark.asyncio
+    async def test_search_429_raises_for_health_monitor(self):
+        """Sourcengine 429 (rate limit) must raise — same contract as 401/403."""
+        c = self._make_connector()
+        resp = _mock_response(429, text="Too Many Requests")
+        resp.raise_for_status = MagicMock()
+        with patch("app.connectors.sourcengine.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=resp)
+            with pytest.raises(ConnectorRateLimitError, match="Sourcengine rate limited"):
+                await c._do_search("LM317T")
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  Element14 Connector tests
@@ -1380,6 +1457,49 @@ class TestElement14Connector:
         assert len(results) == 1
         mock_http.get.assert_awaited_once()  # Only one call — no fallback
 
+    @pytest.mark.asyncio
+    async def test_search_401_raises_for_health_monitor(self):
+        """Element14 401 (auth) must raise RuntimeError so health_monitor.ping_source
+        flips status to 'error' — and the first raise short-circuits the keyword-
+        fallback in _do_search so we don't burn a second quota call against the same
+        broken creds."""
+        c = self._make_connector()
+        resp = _mock_response(401, text="Unauthorized")
+        resp.raise_for_status = MagicMock()
+        with patch("app.connectors.element14.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=resp)
+            with pytest.raises(ConnectorAuthError, match="element14 auth error"):
+                await c._do_search("LM317T")
+            # Only the exact-MPN call ran — fallback was short-circuited
+            assert mock_http.get.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_search_403_raises_for_health_monitor(self):
+        """Element14 403 (key rejected for region/store) raises ConnectorAuthError.
+
+        Same operator action as 401: rotate the key.
+        """
+        c = self._make_connector()
+        resp = _mock_response(403, text="Forbidden")
+        resp.raise_for_status = MagicMock()
+        with patch("app.connectors.element14.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=resp)
+            with pytest.raises(ConnectorAuthError, match="element14 auth error"):
+                await c._do_search("LM317T")
+            assert mock_http.get.call_count == 1
+
+    @pytest.mark.asyncio
+    async def test_search_429_raises_for_health_monitor(self):
+        """Element14 429 (rate limit) must raise — same contract as 401."""
+        c = self._make_connector()
+        resp = _mock_response(429, text="Too Many Requests")
+        resp.raise_for_status = MagicMock()
+        with patch("app.connectors.element14.http") as mock_http:
+            mock_http.get = AsyncMock(return_value=resp)
+            with pytest.raises(ConnectorRateLimitError, match="element14 rate limited"):
+                await c._do_search("LM317T")
+            assert mock_http.get.call_count == 1
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  BrokerBin Connector tests
@@ -1393,12 +1513,16 @@ class TestBrokerBinConnector:
         return BrokerBinConnector(api_key="bb-token", api_secret="triomhk")
 
     @pytest.mark.asyncio
-    async def test_empty_token(self):
+    async def test_search_returns_empty_when_token_missing(self):
+        """Without the bearer token, no request can be made."""
         from app.connectors.sources import BrokerBinConnector
 
-        c = BrokerBinConnector(api_key="", api_secret="")
-        results = await c._do_search("LM317T")
-        assert results == []
+        c = BrokerBinConnector(api_key="", api_secret="triomhk")
+        with patch("app.http_client.http_redirect") as mock_client:
+            mock_client.get = AsyncMock()
+            results = await c._do_search("LM317T")
+            assert results == []
+            mock_client.get.assert_not_called()
 
     @pytest.mark.asyncio
     async def test_search_200_with_results(self):
@@ -1459,6 +1583,42 @@ class TestBrokerBinConnector:
             assert results == []
 
     @pytest.mark.asyncio
+    async def test_search_429_raises_for_health_monitor(self):
+        """Rate-limit responses must raise so health_monitor flips status.
+
+        Regression: BrokerBin used to silently swallow 429s as `return []`,
+        leaving the source's status as 'live' with no operator signal —
+        the silent-failure mode the contract is designed to eliminate.
+        See docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
+        """
+        import pytest as _pytest
+
+        c = self._make_connector()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 429
+        mock_resp.text = '{"error":"Too many requests! Request limit reached..."}'
+
+        with patch("app.http_client.http_redirect") as mock_client:
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            with _pytest.raises(RuntimeError, match="rate limited"):
+                await c._do_search("LM317T")
+
+    @pytest.mark.asyncio
+    async def test_search_401_raises_for_health_monitor(self):
+        """401/403 (auth) responses must raise — same pattern as 429."""
+        import pytest as _pytest
+
+        c = self._make_connector()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 401
+        mock_resp.text = '{"message":"Unauthenticated. Must use secure protocol."}'
+
+        with patch("app.http_client.http_redirect") as mock_client:
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            with _pytest.raises(RuntimeError, match="auth error"):
+                await c._do_search("LM317T")
+
+    @pytest.mark.asyncio
     async def test_search_non_json(self):
         c = self._make_connector()
         mock_resp = MagicMock()
@@ -1507,10 +1667,11 @@ class TestBrokerBinConnector:
             assert results == []
 
     @pytest.mark.asyncio
-    async def test_search_no_login_header(self):
+    async def test_search_proceeds_without_login(self):
+        """Bearer auth doesn't need a username — login field is legacy/ignored."""
         from app.connectors.sources import BrokerBinConnector
 
-        c = BrokerBinConnector(api_key="token", api_secret="")
+        c = BrokerBinConnector(api_key="bb-token", api_secret="")
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"data": [], "meta": {"total": 0}}
@@ -1519,6 +1680,25 @@ class TestBrokerBinConnector:
             mock_client.get = AsyncMock(return_value=mock_resp)
             results = await c._do_search("LM317T")
             assert results == []
+            mock_client.get.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_search_uses_bearer_auth(self):
+        """v2.x docs: ``Authorization: Bearer <token>``.
+
+        No HTTP Basic auth tuple.
+        """
+        c = self._make_connector()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"data": [], "meta": {"total": 0}}
+
+        with patch("app.http_client.http_redirect") as mock_client:
+            mock_client.get = AsyncMock(return_value=mock_resp)
+            await c._do_search("LM317T")
+            kwargs = mock_client.get.call_args.kwargs
+            assert kwargs.get("headers", {}).get("Authorization") == "Bearer bb-token"
+            assert "auth" not in kwargs, "Must not send HTTP Basic alongside Bearer"
 
 
 # ═══════════════════════════════════════════════════════════════════════

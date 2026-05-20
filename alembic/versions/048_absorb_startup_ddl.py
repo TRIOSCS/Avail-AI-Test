@@ -52,7 +52,7 @@ def _add_col(table: str, col: sa.Column) -> None:
 
 def _add_idx(name: str, table: str, columns: list, **kw) -> None:
     if not _idx_exists(table, name):
-        op.create_index(name, table, columns, **kw)
+        op.create_index(name, table, columns, **kw, if_not_exists=True)
 
 
 # ---------------------------------------------------------------------------

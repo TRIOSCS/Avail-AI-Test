@@ -12,6 +12,7 @@ from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
+from .errors import ConnectorAuthError, ConnectorRateLimitError
 from .sources import BaseConnector
 
 
@@ -39,19 +40,20 @@ class OEMSecretsConnector(BaseConnector):
 
         r = await http.get(self.SEARCH_URL, params=params, timeout=httpx.Timeout(self.timeout, connect=5.0))
 
-        # 401 — OEMSecrets returns this when API key is rejected OR quota
-        # is exhausted ("User is not accepted or has run out of api calls").
-        # Return empty instead of raising to avoid tripping the circuit breaker
-        # on a temporary quota issue.
+        # Hard errors raise typed ConnectorError subclasses so
+        # health_monitor.ping_source flips api_sources.status to 'error'.
+        # OEMSecrets returns 401 for both bad API key AND quota
+        # exhaustion; either way the operator must rotate the key (or
+        # top up quota) and the source auto-recovers when the next ping
+        # returns 200. See docs/APP_MAP_INTERACTIONS.md § Connector
+        # Failure Contract.
         if r.status_code == 401:
-            body_preview = r.text[:200]
-            logger.warning(f"OEMSecrets: 401 for {part_number} — quota exhausted or key invalid: {body_preview}")
-            return []
-
-        # 429 — explicit rate limit
+            # OEMSecrets returns 401 for both bad/expired key AND quota
+            # exhaustion. Operator action is the same in both cases (rotate
+            # key or top up quota), so we treat both as auth.
+            raise ConnectorAuthError(f"OEMSecrets auth/quota error: HTTP 401 {r.text[:200]}")
         if r.status_code == 429:
-            logger.warning(f"OEMSecrets: 429 rate limited for {part_number}, returning empty results")
-            return []
+            raise ConnectorRateLimitError(f"OEMSecrets rate limited: {r.text[:200]}")
 
         if r.status_code != 200:
             logger.warning(f"OEMSecrets: HTTP {r.status_code} for {part_number}: {r.text[:200]}")

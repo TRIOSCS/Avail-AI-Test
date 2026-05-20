@@ -61,7 +61,7 @@ async def run_customer_enrichment_batch(
     for gap in gaps:
         # Stop early if all credit budgets are exhausted
         if not any(can_use_credits(db, p) for p in ["explorium"]):
-            logger.info("All credit budgets exhausted — stopping batch early at %d/%d", processed, len(gaps))
+            logger.info("All credit budgets exhausted — stopping batch early at {}/{}", processed, len(gaps))
             break
 
         try:
@@ -73,7 +73,7 @@ async def run_customer_enrichment_batch(
         except Exception as e:
             processed += 1
             errors.append(f"Company {gap['company_id']}: {str(e)[:100]}")
-            logger.warning("Batch enrichment error for company %d: %s", gap["company_id"], e)
+            logger.warning("Batch enrichment error for company {}: {}", gap["company_id"], e)
 
         # Small delay between accounts to avoid rate limiting
         await asyncio.sleep(0.5)
@@ -87,7 +87,7 @@ async def run_customer_enrichment_batch(
     db.flush()
 
     logger.info(
-        "Customer enrichment batch complete: %d processed, %d enriched, %d errors",
+        "Customer enrichment batch complete: {} processed, {} enriched, {} errors",
         processed,
         enriched,
         len(errors),

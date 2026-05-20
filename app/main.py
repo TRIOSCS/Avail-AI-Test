@@ -46,7 +46,7 @@ async def lifespan(app):
         if not settings.azure_tenant_id:
             missing.append("AZURE_TENANT_ID")
         if missing:
-            logger.warning("Missing env vars (some features disabled): %s", ", ".join(missing))
+            logger.warning("Missing env vars (some features disabled): {}", ", ".join(missing))
 
     # Sentry error tracking (conditional on DSN being set)
     if settings.sentry_dsn:
@@ -113,9 +113,10 @@ async def lifespan(app):
     _is_testing = os.environ.get("TESTING") == "1"
 
     if not _is_testing:
-        from .startup import seed_api_sources
+        from .startup import seed_api_sources, seed_browser_workers
 
         seed_api_sources()
+        seed_browser_workers()
         from .connector_status import log_connector_status
 
         _connector_status = log_connector_status()

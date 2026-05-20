@@ -1,10 +1,10 @@
-"""Mouser Search API connector.
+"""Mouser API connector.
 
-Handles 403 Forbidden as rate limiting (Mouser returns 403 when daily
-API quota is approached). Returns empty results instead of raising.
+Hard errors (HTTP 401/403/429, body-level auth/rate errors) raise typed ConnectorError
+subclasses; health_monitor flips api_sources.status to 'error' and search_service
+excludes the source from user searches. Auto-recovers when the next ping returns 200.
 
-Called by: search_service via BaseConnector.search()
-Depends on: http_client, utils, sources.BaseConnector
+See docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
 """
 
 import re
@@ -13,6 +13,7 @@ from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float
+from .errors import ConnectorAuthError, ConnectorRateLimitError
 from .sources import BaseConnector
 
 
@@ -52,18 +53,16 @@ class MouserConnector(BaseConnector):
             timeout=self.timeout,
         )
 
-        # 403 — Mouser uses this for rate limiting / quota exceeded
+        # 403 — bad/revoked key, quota-rejected, or region-locked. Raise
+        # so health_monitor flips status='error' and the source is excluded
+        # from user searches; auto-recovers on next ping success if it was
+        # transient.
         if r.status_code == 403:
-            logger.warning(
-                f"Mouser: 403 Forbidden for {part_number} — rate limited or quota near limit, returning empty results"
-            )
-            return []
+            raise ConnectorAuthError(f"Mouser auth error: HTTP 403 {r.text[:200]}")
 
-        # 429 — explicit rate limit (handled by BaseConnector too, but
-        # return empty here to avoid raising)
+        # 429 — explicit rate limit. Auto-recovers on next ping success.
         if r.status_code == 429:
-            logger.warning(f"Mouser: 429 rate limited for {part_number}, returning empty results")
-            return []
+            raise ConnectorRateLimitError(f"Mouser rate limited: HTTP 429 {r.text[:200]}")
 
         r.raise_for_status()
         data = r.json()
@@ -73,25 +72,22 @@ class MouserConnector(BaseConnector):
         if errors:
             msg = errors[0].get("Message", "Unknown Mouser API error")
             msg_lower = msg.lower()
-            # Quota/rate errors in body — return empty instead of raising
+            # Quota/rate errors in body — raise rate-limit so status flips
+            # to 'error' and the operator sees the chip.
             if "too many" in msg_lower or "rate" in msg_lower or "quota" in msg_lower:
-                logger.warning(f"Mouser: rate/quota error for {part_number}: {msg}")
-                return []
-            # Auth errors (bad / revoked / missing API key) — return empty
-            # instead of raising so BaseConnector._search_with_retry does
-            # not burn ~8s per search on exponential backoff retries.
-            # Require "invalid" to co-occur with an auth noun so catalog
-            # errors like "Invalid part number" still raise and reach the
-            # circuit breaker instead of being silently swallowed.
+                raise ConnectorRateLimitError(f"Mouser rate/quota error: {msg}")
+            # Auth errors (bad / revoked / missing API key)
             is_auth_error = (
                 "api key" in msg_lower
                 or "unauthorized" in msg_lower
                 or ("invalid" in msg_lower and ("identifier" in msg_lower or "key" in msg_lower))
             )
             if is_auth_error:
-                logger.warning(f"Mouser: auth error for {part_number}: {msg}")
-                return []
+                raise ConnectorAuthError(f"Mouser auth error: {msg}")
             logger.warning(f"Mouser API errors for {part_number}: {errors}")
+            # Catalog errors ("Invalid part number") aren't hard contract
+            # failures — keep them as plain RuntimeError so the caller
+            # treats them as transient.
             raise RuntimeError(f"Mouser API: {msg}")
 
         return self._parse(data, part_number)
