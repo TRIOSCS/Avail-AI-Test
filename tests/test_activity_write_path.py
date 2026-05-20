@@ -12,6 +12,7 @@ from app.constants import ActivityType
 from app.jobs.email_jobs import _AVAIL_TAG_RE
 from app.models import ActivityLog
 from app.services.activity_service import (
+    get_requisition_activities,
     log_activity,
     log_call_activity,
     log_email_activity,
@@ -99,3 +100,34 @@ def test_avail_tag_re_matches_ref_format():
 
 def test_avail_tag_re_matches_legacy_format():
     assert _AVAIL_TAG_RE.search("Quote request [AVAIL-99]").group(1) == "99"
+
+
+def test_get_requisition_activities_returns_scoped_rows(db_session, test_requisition, test_user):
+    log_activity(
+        db_session,
+        activity_type=ActivityType.STATUS_CHANGED,
+        requisition_id=test_requisition.id,
+        user_id=test_user.id,
+        description="first",
+    )
+    log_activity(
+        db_session,
+        activity_type=ActivityType.RFQ_SENT,
+        requisition_id=test_requisition.id,
+        user_id=test_user.id,
+        description="second",
+    )
+    rows = get_requisition_activities(test_requisition.id, db_session)
+    assert len(rows) == 2
+    assert all(r.requisition_id == test_requisition.id for r in rows)
+
+
+def test_get_requisition_activities_excludes_other_reqs(db_session, test_requisition, test_user):
+    log_activity(
+        db_session,
+        activity_type=ActivityType.STATUS_CHANGED,
+        requisition_id=test_requisition.id,
+        user_id=test_user.id,
+        description="mine",
+    )
+    assert get_requisition_activities(999999, db_session) == []

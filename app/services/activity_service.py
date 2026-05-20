@@ -295,6 +295,20 @@ def get_user_activities(user_id: int, db: Session, limit: int = 50) -> list[Acti
     )
 
 
+def get_requisition_activities(requisition_id: int, db: Session, limit: int = 200) -> list[ActivityLog]:
+    """Get the full activity timeline for a requisition, newest first.
+
+    Backs the requisition Activity tab. Uses the ix_activity_requisition index.
+    """
+    return (
+        db.query(ActivityLog)
+        .filter(ActivityLog.requisition_id == requisition_id)
+        .order_by(ActivityLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
 def get_account_timeline(
     db: Session,
     company_id: int,
