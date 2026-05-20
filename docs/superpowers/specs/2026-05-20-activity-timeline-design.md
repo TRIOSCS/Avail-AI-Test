@@ -19,9 +19,11 @@ found this is a **write-side problem**, not a read or render bug:
 - 8x8 call logging is fully built (`app/services/eight_by_eight_service.py`,
   `app/jobs/eight_by_eight_jobs.py`) but gated off by `eight_by_eight_enabled=False`
   (`app/config.py:202`).
-- **To confirm during build:** possible subject-tag mismatch — RFQ send appears to tag
-  `[ref:{req_id}]` while `app/jobs/email_jobs.py:scan_sent_folder()` looks for
-  `[AVAIL-{id}]`. Open both files and verify before relying on outbound-email linkage.
+- **CONFIRMED BUG:** RFQ send tags subjects `[ref:{requisition_id}]`
+  (`app/email_service.py:95`), but the sent-folder scan regex `_AVAIL_TAG_RE`
+  (`app/jobs/email_jobs.py:774`) matches only `[AVAIL-(\d+)]`. Every outbound RFQ
+  therefore logs with `requisition_id=NULL` and never reaches the req timeline.
+  `poll_inbox` already handles both formats (`app/email_service.py:450`).
 
 The DB is intentionally empty right now — no historical backfill needed; the fix is
 forward-only.
@@ -31,12 +33,16 @@ forward-only.
 The existing `activity_log` table (`app/models/intelligence.py:257-375`) already holds every
 field a unified timeline needs. We make it canonical rather than introducing a new table.
 
-### Canonical schema (additive migration only — non-destructive)
+### Canonical schema — reuses existing columns, NO migration needed
+
+The `activity_log` table already carries every needed column. Reading the live model
+(`app/models/intelligence.py:257-375`) corrected two assumptions from the draft:
 
 | Concept | Column | Notes |
 |---|---|---|
-| Event type | `event_type` | Canonical enum (below) |
-| Source | `source` | `graph` \| `8x8` \| `system` \| `manual` (reuse `channel`) |
+| Event type | `activity_type` | Canonical enum (below); all values fit existing `String(20)` |
+| Source / channel | `channel` | `email`/`phone`/`manual`/`system` — existing field, serves as the source axis; no separate `source` column |
+| Coarse category | `event_type` | Existing `email`/`call`/`note`/`meeting`; left unchanged |
 | Actor | `user_id` | Nullable — null for automated/system events |
 | Vendor/contact | `vendor_card_id`, `vendor_contact_id`, `company_id`, `site_contact_id` | Existing |
 | Scope | `requisition_id`, `requirement_id` | **Set on every write** |
@@ -45,27 +51,31 @@ field a unified timeline needs. We make it canonical rather than introducing a n
 | Payload | `details` (JSON) | Type-specific extras |
 | Curation | `quality_score`, `quality_classification`, `is_meaningful` | Existing (migration 081) |
 
-**Canonical `event_type` enum:** `rfq_sent`, `email_received`, `call_logged`,
+**Canonical `activity_type` enum:** `rfq_sent`, `email_received`, `call_logged`,
 `status_changed`, `offer_created`, `offer_status_changed`, `sighting_added`, `sales_note`,
-`task_completed`, `assignment_changed`, `req_archived`.
+`task_completed`, `assignment_changed`, `req_archived` (longest = 20 chars, fits).
 
-If any column needs a non-additive change, flag it before running the migration.
+**Plan 1 requires no schema migration.** Should a later build step need a new column,
+it will be additive only — flag any non-additive change before running it.
 
 ### Single write path
 
-One mandatory helper in `app/services/activity_service.py`:
+`app/services/activity_service.py` already has `log_rfq_activity()` (line 657) — a
+requisition-aware writer. Rather than duplicate it, generalize it into the canonical
+helper `log_activity()` and keep `log_rfq_activity()` as a thin delegating alias so
+existing callers (`sightings.py:990`) keep working:
 
 ```python
-def log_activity(db, *, event_type, source, requisition_id, requirement_id=None,
-                 actor_id=None, vendor_card_id=None, vendor_contact_id=None,
-                 company_id=None, occurred_at=None, summary=None, details=None):
+def log_activity(db, *, activity_type, channel, requisition_id, requirement_id=None,
+                 user_id=None, company_id=None, vendor_card_id=None, vendor_contact_id=None,
+                 description=None, summary=None, occurred_at=None, details=None):
     ...
 ```
 
 Every writer — system events, webhooks, jobs — goes through this. Existing
-`log_email_activity` / `log_call_activity` are refactored to delegate to it and to accept
-`requisition_id`. New read helper `get_requisition_activities(db, req_id, ...)` replaces the
-inlined query in `htmx_views.py`.
+`log_email_activity` / `log_call_activity` gain optional `requisition_id` / `requirement_id`
+parameters. New read helper `get_requisition_activities(db, req_id, ...)` replaces the
+inlined query in `htmx_views.py:1269-1273`.
 
 ## Hybrid AI curation
 
