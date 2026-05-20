@@ -13,10 +13,20 @@ os.environ["TESTING"] = "1"
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 from sqlalchemy.orm import Session
 
 from app.search_service import stream_search_mpn
 from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is used
+
+
+@pytest.fixture(autouse=True)
+def _own_session(db_session):
+    """stream_search_mpn opens its own SessionLocal(); point it at the test session so
+    the worker does not touch the real database."""
+    with patch("app.search_service.SessionLocal", lambda: db_session):
+        yield
+
 
 # ── Test 1: No connectors → early "done" event ───────────────────────────────
 
@@ -32,7 +42,7 @@ class TestStreamSearchMpnNoConnectors:
             patch("app.search_service._build_connectors", return_value=([], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
         ):
-            await stream_search_mpn("test-search-001", "LM317T", db_session)
+            await stream_search_mpn("test-search-001", "LM317T")
 
         assert mock_broker.publish.call_count == 1
         call_args = mock_broker.publish.call_args
@@ -50,7 +60,7 @@ class TestStreamSearchMpnNoConnectors:
             patch("app.search_service._build_connectors", return_value=([], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
         ):
-            await stream_search_mpn("test-search-002", "LM317T", db_session)
+            await stream_search_mpn("test-search-002", "LM317T")
 
         payload = json.loads(mock_broker.publish.call_args[0][2])
         assert payload["total_results"] == 0
@@ -79,7 +89,7 @@ class TestStreamSearchMpnWithResults:
             patch("app.search_service._incremental_dedup", return_value=([], [])),
             patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
         ):
-            await stream_search_mpn("test-search-003", "LM317T", db_session)
+            await stream_search_mpn("test-search-003", "LM317T")
 
         event_types = [call[0][1] for call in mock_broker.publish.call_args_list]
         assert "source-status" in event_types
@@ -104,7 +114,7 @@ class TestStreamSearchMpnWithResults:
             patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
         ):
             # Should not raise
-            await stream_search_mpn("test-search-004", "LM317T", db_session)
+            await stream_search_mpn("test-search-004", "LM317T")
 
         assert mock_broker.publish.called
 
@@ -128,7 +138,7 @@ class TestStreamSearchMpnWithResults:
             patch("app.search_service._incremental_dedup", return_value=([fake_card], [])),
             patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
         ):
-            await stream_search_mpn("test-search-005", "LM317T", db_session)
+            await stream_search_mpn("test-search-005", "LM317T")
 
         event_types = [call[0][1] for call in mock_broker.publish.call_args_list]
         assert "results" in event_types
@@ -154,7 +164,7 @@ class TestStreamSearchMpnWithResults:
             patch("app.search_service._incremental_dedup", return_value=([], [fake_updated])),
             patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
         ):
-            await stream_search_mpn("test-search-006", "LM317T", db_session)
+            await stream_search_mpn("test-search-006", "LM317T")
 
         event_types = [call[0][1] for call in mock_broker.publish.call_args_list]
         assert "card-update" in event_types
@@ -179,7 +189,7 @@ class TestStreamSearchMpnConnectorException:
             patch("app.services.sse_broker.broker", mock_broker),
         ):
             # Must not raise
-            await stream_search_mpn("test-search-007", "LM317T", db_session)
+            await stream_search_mpn("test-search-007", "LM317T")
 
         import json
 
@@ -202,7 +212,7 @@ class TestStreamSearchMpnConnectorException:
             patch("app.search_service._build_connectors", return_value=([mock_conn], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
         ):
-            await stream_search_mpn("test-search-008", "LM317T", db_session)
+            await stream_search_mpn("test-search-008", "LM317T")
 
         event_types = [call[0][1] for call in mock_broker.publish.call_args_list]
         assert "done" in event_types
@@ -231,7 +241,7 @@ class TestStreamSearchMpnConnectorException:
             patch("app.search_service._incremental_dedup", return_value=([], [])),
             patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
         ):
-            await stream_search_mpn("test-search-009", "LM317T", db_session)
+            await stream_search_mpn("test-search-009", "LM317T")
 
         import json
 
@@ -257,7 +267,7 @@ class TestStreamSearchMpnRedisCacheFailure:
             patch("app.services.sse_broker.broker", mock_broker),
             patch("app.search_service._get_search_redis", side_effect=Exception("no redis")),
         ):
-            await stream_search_mpn("test-search-010", "LM317T", db_session)
+            await stream_search_mpn("test-search-010", "LM317T")
 
         # Still publishes done
         assert mock_broker.publish.called
@@ -282,7 +292,7 @@ class TestStreamSearchMpnRedisCacheFailure:
             patch("app.search_service._incremental_dedup", return_value=([], [])),
             patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
         ):
-            await stream_search_mpn("test-search-011", "LM317T", db_session)
+            await stream_search_mpn("test-search-011", "LM317T")
 
         event_types = [call[0][1] for call in mock_broker.publish.call_args_list]
         assert "done" in event_types
@@ -297,7 +307,7 @@ class TestStreamSearchMpnRedisCacheFailure:
             patch("app.services.sse_broker.broker", mock_broker),
             patch("app.search_service._get_search_redis", return_value=None),
         ):
-            await stream_search_mpn("test-search-012", "LM317T", db_session)
+            await stream_search_mpn("test-search-012", "LM317T")
 
         assert mock_broker.publish.called
 
@@ -325,7 +335,7 @@ class TestStreamSearchMpnDonePayload:
             patch("app.search_service._score_raw_hit", side_effect=lambda r, vm: r),
             patch("app.search_service._get_search_redis", return_value=None),
         ):
-            await stream_search_mpn("test-search-013", "LM317T", db_session)
+            await stream_search_mpn("test-search-013", "LM317T")
 
         done_calls = [call for call in mock_broker.publish.call_args_list if call[0][1] == "done"]
         assert len(done_calls) == 1
@@ -344,7 +354,7 @@ class TestStreamSearchMpnDonePayload:
             patch("app.search_service._build_connectors", return_value=([], {}, set())),
             patch("app.services.sse_broker.broker", mock_broker),
         ):
-            await stream_search_mpn("my-unique-id-999", "LM317T", db_session)
+            await stream_search_mpn("my-unique-id-999", "LM317T")
 
         channel_used = mock_broker.publish.call_args[0][0]
         assert channel_used == "search:my-unique-id-999"
