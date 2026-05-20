@@ -692,21 +692,30 @@ def log_activity(
     occurred_at: datetime | None = None,
     details: dict | None = None,
 ) -> ActivityLog:
-    """Canonical activity-log writer — every event source routes through this.
+    """Canonical writer for system/RFQ-style activity events.
 
     Resolves company_id from the requisition (requisition -> customer_site ->
     company) when not supplied, so the row links to both the req and its company.
     Always sets requisition_id/requirement_id so the row appears on the req
     Activity tab.
 
-    Called by: log_rfq_activity (alias), system-event hooks, webhook handlers.
+    Email and call events are written by log_email_activity()/log_call_activity(),
+    which run their own contact-matching and do not route through this function.
+
+    Called by: log_rfq_activity() (backward-compat alias). New system event
+    sources (status changes, offer events, etc.) should call this directly.
     """
     if company_id is None and requisition_id:
         from ..models.crm import CustomerSite
         from ..models.sourcing import Requisition
 
         req = db.get(Requisition, requisition_id)
-        if req and req.customer_site_id:
+        if req is None:
+            logger.warning(
+                f"log_activity: requisition_id={requisition_id} not found; "
+                f"activity row written without company linkage (type={activity_type})"
+            )
+        elif req.customer_site_id:
             site = db.get(CustomerSite, req.customer_site_id)
             if site:
                 company_id = site.company_id

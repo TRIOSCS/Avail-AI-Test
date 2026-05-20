@@ -771,8 +771,9 @@ async def _sync_user_contacts(user, db):
 # ── Sent Folder Scanning ─────────────────────────────────────────────────
 
 # Regex to extract requisition ID from RFQ subject tags.
-# Matches both [ref:123] (current, written by email_service.send_batch_rfq)
-# and [AVAIL-123] (legacy). Mirrors the pattern in email_service.py:450.
+# Matches both [ref:123] (current, written by the RFQ send path,
+# e.g. email_service.send_batch_rfq) and [AVAIL-123] (legacy).
+# Mirrors avail_token_re in app/email_service.py.
 _AVAIL_TAG_RE = re.compile(r"\[(?:ref:|AVAIL-)(\d+)\]")
 
 # Regex to extract solicitation ID from [EXCESS-BID-123] tags in bid reply subjects

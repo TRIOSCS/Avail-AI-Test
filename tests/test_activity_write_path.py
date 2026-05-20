@@ -68,7 +68,7 @@ def test_log_email_activity_accepts_requisition_id(db_session, test_requisition,
         user_id=test_user.id,
         direction="sent",
         email_addr="vendor@example.com",
-        subject="RFQ [ref:%d]" % test_requisition.id,
+        subject=f"RFQ [ref:{test_requisition.id}]",
         external_id="msg-req-001",
         contact_name="Vendor Rep",
         db=db_session,
@@ -147,3 +147,67 @@ def test_activity_tab_renders_logged_event(client, db_session, test_requisition,
     assert resp.status_code == 200
     assert "Status changed from active to sourcing" in resp.text
     assert "No activity recorded yet" not in resp.text
+
+
+def test_log_activity_resolves_company_from_requisition(db_session, test_user, test_company, test_customer_site):
+    """log_activity() backfills company_id by walking requisition -> site -> company."""
+    from app.models.sourcing import Requisition
+
+    req = Requisition(
+        name="REQ-COMPANY-RESOLVE",
+        customer_name="Acme Electronics",
+        status="active",
+        created_by=test_user.id,
+        customer_site_id=test_customer_site.id,
+    )
+    db_session.add(req)
+    db_session.flush()
+
+    record = log_activity(
+        db_session,
+        activity_type=ActivityType.STATUS_CHANGED,
+        requisition_id=req.id,
+        user_id=test_user.id,
+        description="resolves company",
+    )
+    assert record.company_id == test_company.id
+
+
+def test_log_activity_explicit_company_id_skips_resolution(db_session, test_user, test_company, test_customer_site):
+    """An explicitly passed company_id is used as-is, not overwritten by resolution."""
+    from app.models.sourcing import Requisition
+
+    req = Requisition(
+        name="REQ-EXPLICIT-COMPANY",
+        customer_name="Acme Electronics",
+        status="active",
+        created_by=test_user.id,
+        customer_site_id=test_customer_site.id,
+    )
+    db_session.add(req)
+    db_session.flush()
+
+    record = log_activity(
+        db_session,
+        activity_type=ActivityType.STATUS_CHANGED,
+        requisition_id=req.id,
+        company_id=test_company.id,
+        user_id=test_user.id,
+        description="explicit company",
+    )
+    assert record.company_id == test_company.id
+
+
+def test_log_rfq_activity_maps_metadata_to_details(db_session, test_requisition, test_user):
+    """The alias maps its `metadata` arg onto the `details` column and forces
+    channel=system."""
+    record = log_rfq_activity(
+        db=db_session,
+        rfq_id=test_requisition.id,
+        activity_type="status_change",
+        description="with metadata",
+        metadata={"old": "active", "new": "sourcing"},
+        user_id=test_user.id,
+    )
+    assert record.details == {"old": "active", "new": "sourcing"}
+    assert record.channel == "system"
