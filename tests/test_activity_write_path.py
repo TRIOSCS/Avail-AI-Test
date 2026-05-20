@@ -9,6 +9,8 @@ Depends on: app/constants.py, app/services/activity_service.py, conftest.py
 """
 
 from app.constants import ActivityType
+from app.models import ActivityLog
+from app.services.activity_service import log_activity, log_rfq_activity
 
 
 def test_activity_type_values_fit_column():
@@ -22,3 +24,33 @@ def test_activity_type_has_expected_members():
     assert ActivityType.RFQ_SENT == "rfq_sent"
     assert ActivityType.STATUS_CHANGED == "status_changed"
     assert ActivityType.OFFER_STATUS_CHANGED == "offer_status_changed"
+
+
+def test_log_activity_sets_requisition_id(db_session, test_requisition, test_user):
+    record = log_activity(
+        db_session,
+        activity_type=ActivityType.STATUS_CHANGED,
+        channel="system",
+        requisition_id=test_requisition.id,
+        user_id=test_user.id,
+        description="Status changed from active to sourcing",
+    )
+    assert record.id is not None
+    assert record.requisition_id == test_requisition.id
+    assert record.activity_type == "status_changed"
+    assert record.channel == "system"
+    assert record.notes == "Status changed from active to sourcing"
+
+
+def test_log_rfq_activity_delegates_to_log_activity(db_session, test_requisition, test_user):
+    record = log_rfq_activity(
+        db=db_session,
+        rfq_id=test_requisition.id,
+        activity_type="status_change",
+        description="legacy call path",
+        user_id=test_user.id,
+    )
+    assert record.requisition_id == test_requisition.id
+    assert record.notes == "legacy call path"
+    rows = db_session.query(ActivityLog).filter_by(requisition_id=test_requisition.id).all()
+    assert len(rows) == 1
