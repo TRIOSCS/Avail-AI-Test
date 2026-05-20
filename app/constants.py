@@ -317,3 +317,22 @@ flip them to DISABLED on every 15-min run. Skip them in `run_health_checks` so t
 applied at startup (`seed_browser_worker_sources`) survives. Their actual health is
 tracked via `IcsWorkerStatus`/`NcWorkerStatus` heartbeats.
 """
+
+
+class ActivityType(StrEnum):
+    """Canonical activity_log.activity_type values.
+
+    All <= 20 chars (column width).
+    """
+
+    RFQ_SENT = "rfq_sent"
+    EMAIL_RECEIVED = "email_received"
+    CALL_LOGGED = "call_logged"
+    STATUS_CHANGED = "status_changed"
+    OFFER_CREATED = "offer_created"
+    OFFER_STATUS_CHANGED = "offer_status_changed"
+    SIGHTING_ADDED = "sighting_added"
+    SALES_NOTE = "sales_note"
+    TASK_COMPLETED = "task_completed"
+    ASSIGNMENT_CHANGED = "assignment_changed"
+    REQ_ARCHIVED = "req_archived"
