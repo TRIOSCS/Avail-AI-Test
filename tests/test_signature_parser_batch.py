@@ -1,5 +1,5 @@
-"""Tests for signature_parser batch functions — mobile label branch, batch_parse_signatures,
-and process_signature_batch_results.
+"""Tests for signature_parser batch functions — mobile label branch,
+batch_parse_signatures, and process_signature_batch_results.
 
 Covers lines 146, 402-458, and 474-550 in app/services/signature_parser.py.
 
@@ -25,7 +25,8 @@ class TestMobileLabel:
     """Covers line 146: result["mobile"] = phone when label before match contains 'mobile'/'cell'."""
 
     def test_mobile_prefix_before_phone_keyword_sets_mobile(self):
-        """'Mobile Phone: ...' → 'mobile' appears before 'Phone:' match, sets result['mobile']."""
+        """'Mobile Phone: ...' → 'mobile' appears before 'Phone:' match, sets
+        result['mobile']."""
         body = "--\nJohn Doe\nMobile Phone: +1-555-123-4567"
         result = parse_signature_regex(body)
         assert result["mobile"] == "+1-555-123-4567" or result.get("phone") is not None
@@ -65,7 +66,8 @@ class TestMobileLabel:
         assert result["mobile"] == "555-987-6543"
 
     def test_mobile_label_confidence_counts_mobile_field(self):
-        """When mobile is set via the label branch, confidence calculation includes it."""
+        """When mobile is set via the label branch, confidence calculation includes
+        it."""
         body = "--\nJohn Doe\nMobile Phone: 555-123-4567\njohn@example.com"
         result = parse_signature_regex(body)
         # mobile + name + email = at least 3 fields → confidence > 0.3 + 3*0.1 = 0.6
@@ -338,7 +340,8 @@ class TestProcessSignatureBatchResults:
         assert extract.confidence > 0.5  # Recalculated after applying fields
 
     async def test_batch_result_none_value_counts_as_error(self, db_session):
-        """A result entry with None value (failed parse) → counted as error, not applied."""
+        """A result entry with None value (failed parse) → counted as error, not
+        applied."""
         mock_redis = MagicMock()
         mock_redis.get.return_value = b"batch-err"
 
@@ -479,7 +482,8 @@ class TestProcessSignatureBatchResults:
         mock_redis.delete.assert_called_once()
 
     async def test_commit_failure_returns_stats_without_clearing_redis(self, db_session):
-        """DB commit failure → stats returned but Redis key NOT deleted (retry allowed)."""
+        """DB commit failure → stats returned but Redis key NOT deleted (retry
+        allowed)."""
         extract = EmailSignatureExtract(
             sender_email="commit-fail@example.com",
             extraction_method="regex",

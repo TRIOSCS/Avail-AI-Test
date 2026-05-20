@@ -1,4 +1,5 @@
-"""test_search_service_stream.py — Coverage tests for stream_search_mpn in app/search_service.py.
+"""test_search_service_stream.py — Coverage tests for stream_search_mpn in
+app/search_service.py.
 
 Covers lines 1959-2110: streaming search via SSE.
 
@@ -22,7 +23,8 @@ from tests.conftest import engine  # noqa: F401 — ensures SQLite engine is use
 
 class TestStreamSearchMpnNoConnectors:
     async def test_no_connectors_publishes_done(self, db_session: Session):
-        """When _build_connectors returns empty list, broker.publish is called once with 'done'."""
+        """When _build_connectors returns empty list, broker.publish is called once with
+        'done'."""
         mock_broker = MagicMock()
         mock_broker.publish = AsyncMock()
 
@@ -132,7 +134,8 @@ class TestStreamSearchMpnWithResults:
         assert "results" in event_types
 
     async def test_updated_cards_triggers_card_update_event(self, db_session: Session):
-        """When _incremental_dedup returns updated_cards, a 'card-update' event is published."""
+        """When _incremental_dedup returns updated_cards, a 'card-update' event is
+        published."""
         mock_broker = MagicMock()
         mock_broker.publish = AsyncMock()
 
@@ -162,7 +165,8 @@ class TestStreamSearchMpnWithResults:
 
 class TestStreamSearchMpnConnectorException:
     async def test_connector_exception_publishes_error_source_status(self, db_session: Session):
-        """When connector.search raises, source-status error is published and no exception propagates."""
+        """When connector.search raises, source-status error is published and no
+        exception propagates."""
         mock_broker = MagicMock()
         mock_broker.publish = AsyncMock()
 
@@ -204,7 +208,8 @@ class TestStreamSearchMpnConnectorException:
         assert "done" in event_types
 
     async def test_multiple_connectors_one_fails_other_succeeds(self, db_session: Session):
-        """With two connectors, one failing and one succeeding, both source-status events are published."""
+        """With two connectors, one failing and one succeeding, both source-status
+        events are published."""
         mock_broker = MagicMock()
         mock_broker.publish = AsyncMock()
 

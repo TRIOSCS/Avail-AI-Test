@@ -1,4 +1,5 @@
-"""test_nightly_coverage_gaps.py — Covers remaining uncovered lines across multiple modules.
+"""test_nightly_coverage_gaps.py — Covers remaining uncovered lines across multiple
+modules.
 
 Targets:
 - app/utils/graph_client.py: patch_json, search_sent_messages, PATCH retry, _parse_retry_after bad value
