@@ -316,7 +316,7 @@ async def test_run_health_checks_ping(db_session):
     db_session.commit()
 
     mock_session = MagicMock()
-    mock_session.query.return_value.filter.return_value.all.return_value = [src1, src2]
+    mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [src1, src2]
     mock_session_cls = MagicMock(return_value=mock_session)
     ping_mock = AsyncMock(return_value={"success": True, "elapsed_ms": 42, "error": None})
 
@@ -351,7 +351,7 @@ async def test_run_health_checks_deep(db_session):
     db_session.commit()
 
     mock_session = MagicMock()
-    mock_session.query.return_value.filter.return_value.all.return_value = [src]
+    mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [src]
     mock_session_cls = MagicMock(return_value=mock_session)
     deep_mock = AsyncMock(
         return_value={
@@ -390,7 +390,7 @@ async def test_run_health_checks_mixed_results(db_session):
     db_session.commit()
 
     mock_session = MagicMock()
-    mock_session.query.return_value.filter.return_value.all.return_value = [src_ok, src_bad]
+    mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [src_ok, src_bad]
     mock_session_cls = MagicMock(return_value=mock_session)
     ping_mock = AsyncMock(
         side_effect=[
@@ -424,7 +424,7 @@ async def test_run_health_checks_source_crash(db_session):
     db_session.commit()
 
     mock_session = MagicMock()
-    mock_session.query.return_value.filter.return_value.all.return_value = [src]
+    mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [src]
     mock_session_cls = MagicMock(return_value=mock_session)
     ping_mock = AsyncMock(side_effect=RuntimeError("unexpected crash"))
 
@@ -468,7 +468,7 @@ async def test_run_health_checks_db_error_rollback():
 async def test_run_health_checks_no_active_sources():
     """run_health_checks with no active sources returns zeroes."""
     mock_session = MagicMock()
-    mock_session.query.return_value.filter.return_value.all.return_value = []
+    mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = []
     mock_session_cls = MagicMock(return_value=mock_session)
 
     with patch("app.database.SessionLocal", mock_session_cls):
