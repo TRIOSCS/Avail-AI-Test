@@ -2914,7 +2914,7 @@ async def search_run(
 
     from ..search_service import stream_search_mpn
 
-    await _safe_bg(stream_search_mpn(search_id, search_mpn, db), task_name="stream_search_mpn")
+    await _safe_bg(stream_search_mpn(search_id, search_mpn), task_name="stream_search_mpn")
 
     ctx = _base_ctx(request, user, "search")
     ctx.update(
