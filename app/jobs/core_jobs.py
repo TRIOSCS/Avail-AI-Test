@@ -128,7 +128,7 @@ async def _job_token_refresh():
                 if r:
                     acquired = r.set(lock_key, "1", nx=True, ex=60)
                     if not acquired:
-                        logger.debug("Token refresh skipped for %s — lock held", user.email)
+                        logger.debug("Token refresh skipped for {} — lock held", user.email)
                         return
                 await refresh_user_token(user, task_db)
             except Exception as e:
@@ -146,7 +146,7 @@ async def _job_token_refresh():
                     try:
                         r.delete(lock_key)
                     except Exception as e:
-                        logger.warning("Failed to release token refresh lock: %s", e)
+                        logger.warning("Failed to release token refresh lock: {}", e)
                 task_db.close()
 
     if users_to_refresh:

@@ -201,13 +201,7 @@ class TestUploadRequirements:
         with (
             patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None),
             patch("app.services.tagging.propagate_tags_to_entity", return_value=None),
-            patch("app.routers.requisitions.requirements.enqueue_for_nc_search"),
-            patch("app.routers.requisitions.requirements.enqueue_for_ics_search"),
-            patch("app.routers.requisitions.requirements.SessionLocal") as mock_sl,
         ):
-            mock_sl.return_value.__enter__ = lambda s, *a: db_session
-            mock_sl.return_value.__exit__ = lambda s, *a: None
-            mock_sl.return_value = db_session
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/upload",
                 files={"file": ("parts.csv", csv_content, "text/csv")},
@@ -247,9 +241,6 @@ class TestUploadRequirements:
         with (
             patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None),
             patch("app.services.tagging.propagate_tags_to_entity", return_value=None),
-            patch("app.routers.requisitions.requirements.enqueue_for_nc_search"),
-            patch("app.routers.requisitions.requirements.enqueue_for_ics_search"),
-            patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session),
         ):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/upload",
@@ -311,86 +302,6 @@ class TestUpdateRequirementEdgeCases:
         with patch("app.routers.requisitions.requirements.get_req_for_user", return_value=None):
             resp = client.put(f"/api/requirements/{req_item.id}", json={"target_qty": 500})
             assert resp.status_code == 403
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# search_all with requirement_ids filter
-# ══════════════════════════════════════════════════════════════════════════
-
-
-class TestSearchAllEdgeCases:
-    @patch("app.routers.requisitions.requirements.enqueue_for_nc_search")
-    @patch("app.routers.requisitions.requirements.enqueue_for_ics_search")
-    def test_search_all_with_requirement_ids(self, mock_ics, mock_nc, client, db_session, test_user, test_requisition):
-        req_item = test_requisition.requirements[0]
-        with patch("app.routers.requisitions._enrich_with_vendor_cards"):
-            resp = client.post(
-                f"/api/requisitions/{test_requisition.id}/search",
-                json={"requirement_ids": [req_item.id]},
-            )
-        assert resp.status_code == 200
-
-    @patch("app.routers.requisitions.requirements.enqueue_for_nc_search")
-    @patch("app.routers.requisitions.requirements.enqueue_for_ics_search")
-    def test_search_all_not_found(self, mock_ics, mock_nc, client):
-        resp = client.post("/api/requisitions/99999/search")
-        assert resp.status_code == 404
-
-    @patch("app.routers.requisitions.requirements.enqueue_for_nc_search")
-    @patch("app.routers.requisitions.requirements.enqueue_for_ics_search")
-    def test_search_all_draft_status(self, mock_ics, mock_nc, client, db_session, test_user):
-        from app.constants import RequisitionStatus
-
-        req = Requisition(
-            name="DRAFT-REQ",
-            status=RequisitionStatus.DRAFT,
-            created_by=test_user.id,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(req)
-        db_session.flush()
-        item = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
-            target_qty=100,
-            created_at=datetime.now(timezone.utc),
-        )
-        db_session.add(item)
-        db_session.commit()
-        with patch("app.routers.requisitions._enrich_with_vendor_cards"):
-            with patch("app.services.requisition_state.transition"):
-                resp = client.post(f"/api/requisitions/{req.id}/search")
-        assert resp.status_code == 200
-
-
-# ══════════════════════════════════════════════════════════════════════════
-# search_one (single requirement search)
-# ══════════════════════════════════════════════════════════════════════════
-
-
-class TestSearchOne:
-    @patch("app.routers.requisitions.requirements.enqueue_for_nc_search")
-    @patch("app.routers.requisitions.requirements.enqueue_for_ics_search")
-    def test_search_one_basic(self, mock_ics, mock_nc, client, db_session, test_user, test_requisition):
-        req_item = test_requisition.requirements[0]
-        with patch("app.routers.requisitions._enrich_with_vendor_cards"):
-            resp = client.post(f"/api/requirements/{req_item.id}/search")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert "sightings" in data
-        assert "source_stats" in data
-
-    def test_search_one_not_found(self, client):
-        resp = client.post("/api/requirements/99999/search")
-        assert resp.status_code == 404
-
-    @patch("app.routers.requisitions.requirements.enqueue_for_nc_search")
-    @patch("app.routers.requisitions.requirements.enqueue_for_ics_search")
-    def test_search_one_not_authorized(self, mock_ics, mock_nc, client, db_session, test_user, test_requisition):
-        req_item = test_requisition.requirements[0]
-        with patch("app.routers.requisitions.requirements.get_req_for_user", return_value=None):
-            resp = client.post(f"/api/requirements/{req_item.id}/search")
-        assert resp.status_code == 403
 
 
 # ══════════════════════════════════════════════════════════════════════════
@@ -733,10 +644,7 @@ class TestRequirementHistoryOfferChanges:
 class TestBatchAddRequirements:
     def test_batch_add_valid(self, client, db_session, test_user, test_requisition):
         """Batch POST with a list of requirements."""
-        with (
-            patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None),
-            patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session),
-        ):
+        with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/requirements",
                 json=[
@@ -750,10 +658,7 @@ class TestBatchAddRequirements:
 
     def test_batch_add_partial_invalid(self, client, db_session, test_user, test_requisition):
         """Batch POST where one item is invalid — should be skipped."""
-        with (
-            patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None),
-            patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session),
-        ):
+        with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=None):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/requirements",
                 json=[
@@ -905,10 +810,7 @@ class TestAddRequirementsDuplicateDetection:
         db_session.commit()
 
         mc = _make_material_card(db_session, "NE555P")
-        with (
-            patch("app.routers.requisitions.requirements.resolve_material_card", return_value=mc),
-            patch("app.routers.requisitions.requirements.SessionLocal", return_value=db_session),
-        ):
+        with patch("app.routers.requisitions.requirements.resolve_material_card", return_value=mc):
             resp = client.post(
                 f"/api/requisitions/{test_requisition.id}/requirements",
                 json={"primary_mpn": "NE555P", "manufacturer": "TI", "target_qty": 100},
@@ -916,24 +818,3 @@ class TestAddRequirementsDuplicateDetection:
         assert resp.status_code == 200
         data = resp.json()
         assert "duplicates" in data
-
-
-class TestSearchAllErrorBranch:
-    @patch("app.routers.requisitions.requirements.enqueue_for_nc_search")
-    @patch("app.routers.requisitions.requirements.enqueue_for_ics_search")
-    @patch("app.routers.requisitions._enrich_with_vendor_cards")
-    def test_search_all_with_exception_in_result(
-        self, mock_enrich, mock_nc, mock_ics, client, db_session, test_user, test_requisition
-    ):
-        """Tests the branch where search_requirement returns an Exception."""
-
-        async def _failing_search(req, db):
-            raise RuntimeError("connector failed")
-
-        with patch(
-            "app.routers.requisitions.search_requirement",
-            new=_failing_search,
-        ):
-            resp = client.post(f"/api/requisitions/{test_requisition.id}/search")
-        # Should return 200 even when individual searches fail
-        assert resp.status_code == 200

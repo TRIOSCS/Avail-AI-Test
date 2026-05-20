@@ -110,14 +110,14 @@ async def analyze_customer_materials(company_id: int, db_session=None):
         db.commit()
 
         logger.info(
-            "Material tags updated for customer %s (id %d): %d brands, %d commodities",
+            "Material tags updated for customer {} (id {}): {} brands, {} commodities",
             company.name,
             company_id,
             len(company.brand_tags),
             len(company.commodity_tags),
         )
     except Exception:
-        logger.exception("Material analysis failed for company %d", company_id)
+        logger.exception("Material analysis failed for company {}", company_id)
         if own_session:
             db.rollback()
     finally:

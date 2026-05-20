@@ -97,7 +97,7 @@ def _create_default_user_if_env_set() -> None:
     try:
         existing = db.query(User).filter_by(email=email).first()
         if existing:
-            logger.info("Default user %s already exists, skipping creation", email)
+            logger.info("Default user {} already exists, skipping creation", email)
             return
 
         # PBKDF2-HMAC-SHA256 with random salt
@@ -108,7 +108,7 @@ def _create_default_user_if_env_set() -> None:
         user = User(email=email.lower(), name=email.split("@")[0], role=role, password_hash=store)
         db.add(user)
         db.commit()
-        logger.info("Created default user %s with role %s", email, role)
+        logger.info("Created default user {} with role {}", email, role)
     except Exception:
         logger.exception("Failed creating default user")
         db.rollback()
@@ -136,14 +136,14 @@ def _seed_admin_user_if_env_set(db=None) -> None:
     try:
         existing = db.query(User).filter_by(email=email).first()
         if existing:
-            logger.info("Admin user %s already exists, skipping", email)
+            logger.info("Admin user {} already exists, skipping", email)
             return
         user = User(email=email, name=name, role="admin")
         db.add(user)
         db.commit()
-        logger.info("Created admin user %s", email)
+        logger.info("Created admin user {}", email)
     except Exception:
-        logger.exception("Failed creating admin user %s", email)
+        logger.exception("Failed creating admin user {}", email)
         db.rollback()
         raise
     finally:
@@ -184,7 +184,7 @@ def _exec(conn, stmt: str, params: dict | None = None) -> None:  # noqa: S603
         conn.execute(sqltext(stmt), params or {})
         conn.commit()
     except (SQLAlchemyError, DBAPIError) as e:
-        logger.warning("DDL failed: %s", e)
+        logger.warning("DDL failed: {}", e)
         conn.rollback()
 
 
@@ -391,7 +391,7 @@ def _seed_site_contacts(conn) -> None:
         conn.commit()
         logger.info("Seeded site_contacts from existing customer_sites data")
     except (SQLAlchemyError, DBAPIError) as e:
-        logger.warning("Seed site_contacts failed: %s", e)
+        logger.warning("Seed site_contacts failed: {}", e)
         conn.rollback()
 
 
@@ -431,9 +431,9 @@ def _backfill_normalized_mpn() -> None:
                 if len(rows) < _BACKFILL_BATCH_SIZE:
                     break
             if total_reqs:
-                logger.info("Backfilled normalized_mpn on %d requirements", total_reqs)
+                logger.info("Backfilled normalized_mpn on {} requirements", total_reqs)
         except (SQLAlchemyError, DBAPIError) as e:
-            logger.warning("Backfill requirements.normalized_mpn failed: %s", e)
+            logger.warning("Backfill requirements.normalized_mpn failed: {}", e)
             conn.rollback()
 
         # 2. Backfill material_cards.normalized_mpn where NULL only (skip full re-scan)
@@ -485,9 +485,9 @@ def _backfill_normalized_mpn() -> None:
                 conn.commit()
                 total_updated += len(batch)
             if total_updated:
-                logger.info("Backfilled normalized_mpn on %d material_cards", total_updated)
+                logger.info("Backfilled normalized_mpn on {} material_cards", total_updated)
         except (SQLAlchemyError, DBAPIError) as e:
-            logger.warning("Backfill material_cards.normalized_mpn failed: %s", e)
+            logger.warning("Backfill material_cards.normalized_mpn failed: {}", e)
             conn.rollback()
 
 
@@ -521,9 +521,9 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
                 if len(rows) < _BACKFILL_BATCH_SIZE:
                     break
             if total_sightings:
-                logger.info("Backfilled normalized_mpn on %d sightings", total_sightings)
+                logger.info("Backfilled normalized_mpn on {} sightings", total_sightings)
         except (SQLAlchemyError, DBAPIError) as e:
-            logger.warning("Backfill sightings.normalized_mpn failed: %s", e)
+            logger.warning("Backfill sightings.normalized_mpn failed: {}", e)
             conn.rollback()
 
         # Offers: compute from mpn — chunked batch writes
@@ -553,9 +553,9 @@ def _backfill_sighting_offer_normalized_mpn() -> None:
                 if len(rows) < _BACKFILL_BATCH_SIZE:
                     break
             if total_offers:
-                logger.info("Backfilled normalized_mpn on %d offers", total_offers)
+                logger.info("Backfilled normalized_mpn on {} offers", total_offers)
         except (SQLAlchemyError, DBAPIError) as e:
-            logger.warning("Backfill offers.normalized_mpn failed: %s", e)
+            logger.warning("Backfill offers.normalized_mpn failed: {}", e)
             conn.rollback()
 
 
@@ -597,11 +597,11 @@ def _backfill_sighting_vendor_normalized() -> None:
                     conn.commit()
                 total += len(batch)
             except Exception as e:
-                logger.warning("Backfill sightings.vendor_name_normalized failed: %s", e)
+                logger.warning("Backfill sightings.vendor_name_normalized failed: {}", e)
                 conn.rollback()
                 break
         if total:
-            logger.info("Backfilled vendor_name_normalized on %d sightings", total)
+            logger.info("Backfilled vendor_name_normalized on {} sightings", total)
 
 
 # ── Denormalized company count triggers ──────────────────────────────
@@ -822,9 +822,9 @@ def _backfill_proactive_offer_qty() -> None:
 
             if fixed:
                 conn.commit()
-                logger.info("Fixed proactive offer quantities on %d offers", fixed)
+                logger.info("Fixed proactive offer quantities on {} offers", fixed)
         except Exception as e:
-            logger.warning("Backfill proactive offer qty failed: %s", e)
+            logger.warning("Backfill proactive offer qty failed: {}", e)
             conn.rollback()
 
 
@@ -880,7 +880,7 @@ def _backfill_material_cards() -> None:
                     resolve_material_card(sub_mpn, db)
         db.commit()
         if linked:
-            logger.info("Backfilled %d requirement→material_card links", linked)
+            logger.info("Backfilled {} requirement→material_card links", linked)
     except Exception:
         logger.exception("Failed backfilling material cards")
         db.rollback()
@@ -914,7 +914,7 @@ def _backfill_ticket_defaults() -> None:
                 t.risk_tier = "low"
                 t.category = "other"
             db.commit()
-            logger.info("Backfilled %d tickets with default risk_tier/category", len(null_tickets))
+            logger.info("Backfilled {} tickets with default risk_tier/category", len(null_tickets))
     except Exception:
         logger.exception("Failed backfilling null ticket fields")
         db.rollback()
@@ -952,11 +952,11 @@ def seed_api_sources() -> None:
 
         # Quick check: if all sources exist and count matches, skip update
         if len(existing_map) == len(SOURCES) and all(s["name"] in existing_map for s in SOURCES):
-            logger.debug("API sources up to date (%d sources, hash=%s)", len(SOURCES), source_hash)
+            logger.debug("API sources up to date ({} sources, hash={})", len(SOURCES), source_hash)
             return
 
         # Batch fetch all existing sources (1 query instead of 25+)
-        logger.info("Seeding API sources (%d sources, hash=%s)", len(SOURCES), source_hash)
+        logger.info("Seeding API sources ({} sources, hash={})", len(SOURCES), source_hash)
         for src in SOURCES:
             existing = existing_map.get(src["name"])
             if existing:
@@ -1002,7 +1002,82 @@ def seed_api_sources() -> None:
 
         db.commit()
     except (SQLAlchemyError, DBAPIError) as e:
-        logger.warning("API source seed error: %s", e)
+        logger.warning("API source seed error: {}", e)
+        db.rollback()
+    finally:
+        db.close()
+
+
+def seed_browser_worker_sources(db) -> None:
+    """Flip icsource + netcomponents api_sources rows to live + active.
+
+    The browser workers (avail-ics-worker, avail-nc-worker) are queue-driven
+    so the dashboard surfaces them as 'live' rather than 'pending'/'disabled'.
+    `health_monitor.run_health_checks` excludes BROWSER_WORKER_SOURCES so this
+    seed survives the 15-min ping loop. Idempotent.
+
+    Called by: seed_browser_workers (lifespan)
+    Depends on: ApiSource model, ApiSourceStatus, BROWSER_WORKER_SOURCES
+    """
+    from .constants import BROWSER_WORKER_SOURCES, ApiSourceStatus
+    from .models import ApiSource
+
+    for name in BROWSER_WORKER_SOURCES:
+        row = db.query(ApiSource).filter_by(name=name).one_or_none()
+        if row is None:
+            continue
+        row.status = ApiSourceStatus.LIVE.value
+        row.is_active = True
+
+
+def seed_ics_worker_status_singleton(db) -> None:
+    """Insert ics_worker_status id=1 row if absent.
+
+    The worker's update_worker_status() is a no-op when the row is missing,
+    so heartbeats and daily stats silently never persist. Seeding makes the
+    worker's writes effective from first startup. Idempotent.
+
+    Called by: seed_browser_workers (lifespan)
+    Depends on: IcsWorkerStatus model
+    """
+    from .models import IcsWorkerStatus
+
+    existing = db.query(IcsWorkerStatus).filter_by(id=1).one_or_none()
+    if existing is not None:
+        return
+    db.add(IcsWorkerStatus(id=1, is_running=False))
+
+
+def seed_nc_worker_status_singleton(db) -> None:
+    """Insert nc_worker_status id=1 row if absent.
+
+    Same pattern as the ICS singleton — the NC worker's update_worker_status()
+    silently no-ops when the row is missing, dropping every heartbeat. Idempotent.
+
+    Called by: seed_browser_workers (lifespan)
+    Depends on: NcWorkerStatus model
+    """
+    from .models import NcWorkerStatus
+
+    existing = db.query(NcWorkerStatus).filter_by(id=1).one_or_none()
+    if existing is not None:
+        return
+    db.add(NcWorkerStatus(id=1, is_running=False))
+
+
+def seed_browser_workers() -> None:
+    """Run all browser-worker seeds in a single SessionLocal transaction.
+
+    Called by: main.py lifespan (after seed_api_sources)
+    """
+    db = SessionLocal()
+    try:
+        seed_browser_worker_sources(db)
+        seed_ics_worker_status_singleton(db)
+        seed_nc_worker_status_singleton(db)
+        db.commit()
+    except (SQLAlchemyError, DBAPIError) as e:
+        logger.warning("Browser worker seed error: {}", e)
         db.rollback()
     finally:
         db.close()

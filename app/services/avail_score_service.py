@@ -783,7 +783,7 @@ def compute_all_avail_scores(db: Session, month: date | None = None) -> dict:
             result["user_name"] = user.name
             buyer_results.append(result)
         except Exception as e:
-            logger.error("Avail score error for buyer %s: %s", user.id, e)
+            logger.error("Avail score error for buyer {}: {}", user.id, e)
 
     sales_results = []
     for user in sales + multi_role:
@@ -793,7 +793,7 @@ def compute_all_avail_scores(db: Session, month: date | None = None) -> dict:
             result["user_name"] = user.name
             sales_results.append(result)
         except Exception as e:
-            logger.error("Avail score error for sales %s: %s", user.id, e)
+            logger.error("Avail score error for sales {}: {}", user.id, e)
 
     # Rank and assign bonuses
     _rank_and_bonus(buyer_results)
@@ -806,7 +806,7 @@ def compute_all_avail_scores(db: Session, month: date | None = None) -> dict:
             saved += _upsert_snapshot(db, r, month)
 
     db.commit()
-    logger.info("Avail scores computed: %d buyers, %d sales, %d saved", len(buyer_results), len(sales_results), saved)
+    logger.info("Avail scores computed: {} buyers, {} sales, {} saved", len(buyer_results), len(sales_results), saved)
     return {"buyers": len(buyer_results), "sales": len(sales_results), "saved": saved}
 
 

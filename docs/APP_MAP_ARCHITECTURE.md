@@ -81,6 +81,21 @@ base.html (app shell: topbar, mobile nav, modal, toast, SSE)
 - **Build:** Vite bundles `htmx_app.js` + `styles.css` -> content-hashed dist/
 - **Tailwind safelist:** Broadened to cover all color families (slate, red, amber, emerald, etc.) + Python content scanning so dynamic classes survive tree-shaking
 
+### HTMX Conventions
+
+HTMX is the primary client/server interaction layer. Sourcing is strictly
+user-initiated: clicking the refresh icon on a sightings row or the
+detail-panel "Search" button POSTs `/refresh`, gated by a 48h per-MPN
+cooldown via `MaterialCard.last_searched_at`. The row click itself is
+read-only (`GET /detail`, no connector calls). The `X-Rendered-Req-Id`
+correlation header and `?source=user|sse` query-param gate are documented
+in `APP_MAP_INTERACTIONS.md`. The do/don't rules for imperative
+`htmx.ajax()` calls live in `docs/htmx-conventions.md` and are the
+authoritative reference. Static-analysis tests in
+`tests/test_static_analysis.py` enforce the conventions in CI:
+`broker.publish` source-gating, `htmx.ajax()` indicator coverage, and
+`X-Rendered-Req-Id` header coverage on context-sensitive responses.
+
 ### Templates by Feature
 
 | Feature | Count | Directory |

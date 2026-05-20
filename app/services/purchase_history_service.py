@@ -63,7 +63,7 @@ def upsert_purchase(
         if source_ref:
             existing.source_ref = source_ref
         logger.info(
-            "CPH_UPSERT: updated company=%d card=%d source=%s count=%d",
+            "CPH_UPSERT: updated company={} card={} source={} count={}",
             company_id,
             material_card_id,
             source,
@@ -86,7 +86,7 @@ def upsert_purchase(
     )
     db.add(record)
     logger.info(
-        "CPH_UPSERT: created company=%d card=%d source=%s",
+        "CPH_UPSERT: created company={} card={} source={}",
         company_id,
         material_card_id,
         source,

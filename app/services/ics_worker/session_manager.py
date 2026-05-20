@@ -99,71 +99,38 @@ class IcsSessionManager:
     async def login(self) -> bool:
         """Log in to ICsource.
 
-        ICsource login flow:
-        1. Navigate to /home/LogIn.aspx
-        2. Set username via JS (Telerik RadTextBox doesn't respond to keyboard.type)
-        3. Click password placeholder to reveal real password input
-        4. Set password via JS
-        5. Click the styled green Log In div button
+        ICsource login flow (post-2026 redesign):
+        1. Navigate to /home/index.aspx (login form is now on the home hero)
+        2. Fill username + password directly (plain inputs, no Telerik trickery)
+        3. Click the ASP.NET Log In submit button
         """
         if not self.config.ICS_USERNAME or not self.config.ICS_PASSWORD:
             logger.error("ICS login: ICS_USERNAME or ICS_PASSWORD not configured")
             return False
 
         try:
-            await self._page.goto("https://www.icsource.com/home/LogIn.aspx")
+            await self._page.goto("https://www.icsource.com/home/index.aspx")
             await asyncio.sleep(2)
 
-            # Wait for login form
-            username_sel = "#ctl00_ctl00_body_bodycontent_logincontrol_txtUserName"
-            await self._page.locator(username_sel).wait_for(timeout=10000)
+            # New login form lives on the home page hero. ASP.NET IDs are
+            # post-redesign: ctl00_cphBody_txt(Username|Password) +
+            # ctl00_cphBody_btnLogin. The earlier
+            # ctl00_ctl00_body_bodycontent_logincontrol_* IDs are gone.
+            username_sel = "#ctl00_cphBody_txtUsername"
+            password_sel = "#ctl00_cphBody_txtPassword"
+            login_btn_sel = "#ctl00_cphBody_btnLogin"
 
-            # Set username via JS evaluate (Telerik inputs ignore keyboard events)
-            await self._page.evaluate(
-                """(u) => {
-                    const el = document.getElementById(
-                        'ctl00_ctl00_body_bodycontent_logincontrol_txtUserName'
-                    );
-                    el.value = u;
-                    el.dispatchEvent(new Event('input', {bubbles: true}));
-                    el.dispatchEvent(new Event('change', {bubbles: true}));
-                }""",
-                self.config.ICS_USERNAME,
-            )
+            await self._page.locator(username_sel).wait_for(timeout=10000)
+            await self._page.locator(username_sel).fill(self.config.ICS_USERNAME)
 
             await HumanBehavior.random_delay(0.3, 0.8)
 
-            # Click password placeholder to reveal real input
-            pwd_placeholder = self._page.locator(".passwordhidden")
-            try:
-                await pwd_placeholder.wait_for(timeout=3000)
-                await pwd_placeholder.click()
-                await asyncio.sleep(0.5)
-            except Exception:
-                pass  # Placeholder may not exist on all login page versions
-
-            # Set password via JS evaluate
-            await self._page.evaluate(
-                """(p) => {
-                    const el = document.getElementById(
-                        'ctl00_ctl00_body_bodycontent_logincontrol_txtPassword'
-                    );
-                    el.style.display = 'inline-block';
-                    el.value = p;
-                    el.dispatchEvent(new Event('input', {bubbles: true}));
-                    el.dispatchEvent(new Event('change', {bubbles: true}));
-                }""",
-                self.config.ICS_PASSWORD,
-            )
+            await self._page.locator(password_sel).fill(self.config.ICS_PASSWORD)
 
             await HumanBehavior.random_delay(0.5, 1.0)
 
-            # Click the styled green Log In button (not the hidden ASP.NET input)
-            login_btn = self._page.locator("div.button.green:has-text('Log In')")
-            try:
-                await login_btn.wait_for(state="visible", timeout=5000)
-            except Exception:
-                login_btn = self._page.locator("#ctl00_ctl00_body_bodycontent_logincontrol_btnLogIn")
+            login_btn = self._page.locator(login_btn_sel)
+            await login_btn.wait_for(state="visible", timeout=5000)
             await HumanBehavior.human_click(self._page, login_btn)
             await asyncio.sleep(5)
 

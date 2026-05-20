@@ -91,7 +91,7 @@ def get_credential(db: Session, source_name: str, env_var_name: str) -> str | No
                 return decrypt_value(encrypted)
             except Exception:
                 logger.error(
-                    "Credential decrypt FAILED for %s/%s — falling back to env var. DB credentials may be corrupted.",
+                    "Credential decrypt FAILED for {}/{} — falling back to env var. DB credentials may be corrupted.",
                     source_name,
                     env_var_name,
                     exc_info=True,
@@ -99,7 +99,7 @@ def get_credential(db: Session, source_name: str, env_var_name: str) -> str | No
                 decrypt_failed = True
     fallback = os.getenv(env_var_name) or None
     if decrypt_failed and fallback:
-        logger.warning("Using env var fallback for %s/%s", source_name, env_var_name)
+        logger.warning("Using env var fallback for {}/{}", source_name, env_var_name)
     return fallback
 
 
@@ -121,7 +121,7 @@ def get_all_credentials_for_source(db: Session, source_name: str) -> dict[str, s
                 try:
                     val = decrypt_value(encrypted)
                 except Exception:
-                    logger.error("Credential decrypt fallback for %s", var_name, exc_info=True)
+                    logger.error("Credential decrypt fallback for {}", var_name, exc_info=True)
         if not val:
             val = os.getenv(var_name) or ""
         if val:
@@ -158,7 +158,7 @@ def get_credentials_batch(db: Session, requests: list[tuple[str, str]]) -> dict[
                 try:
                     val = decrypt_value(encrypted)
                 except Exception:
-                    logger.error("Credential decrypt fallback for %s", env_var_name, exc_info=True)
+                    logger.error("Credential decrypt fallback for {}", env_var_name, exc_info=True)
         if not val:
             val = os.getenv(env_var_name) or None
         result[(source_name, env_var_name)] = val

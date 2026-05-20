@@ -72,7 +72,7 @@ def _save_screenshot(ticket_id: int, b64_data: str) -> str | None:
             f.write(png_bytes)
         return path
     except Exception:
-        logger.warning("Failed to save screenshot for ticket %d", ticket_id)
+        logger.warning("Failed to save screenshot for ticket {}", ticket_id)
         return None
 
 
@@ -110,7 +110,7 @@ def _create_ticket(
     db.flush()
     ticket.ticket_number = f"TT-{ticket.id:04d}"
     db.commit()
-    logger.info("Trouble ticket %s created by user %d", ticket.ticket_number, user_id)
+    logger.info("Trouble ticket {} created by user {}", ticket.ticket_number, user_id)
     return ticket
 
 
@@ -146,9 +146,9 @@ async def _generate_ai_summary(ticket_id: int):
             ticket.ai_summary = summary.strip()[:500]
             ticket.updated_at = datetime.now(timezone.utc)
             db.commit()
-            logger.debug("AI summary generated for ticket %s", ticket.ticket_number)
+            logger.debug("AI summary generated for ticket {}", ticket.ticket_number)
     except Exception:
-        logger.warning("AI summary failed for ticket %d", ticket_id)
+        logger.warning("AI summary failed for ticket {}", ticket_id)
         db.rollback()
     finally:
         db.close()
@@ -244,7 +244,7 @@ async def submit_trouble_ticket(
                 db.commit()
     except Exception:
         db.rollback()
-        logger.exception("Failed to create trouble ticket for user %d", user.id)
+        logger.exception("Failed to create trouble ticket for user {}", user.id)
         return HTMLResponse(
             '<div class="p-4 text-rose-600 text-sm">Something went wrong saving your report. Please try again.</div>',
             status_code=500,
@@ -426,7 +426,7 @@ async def analyze_tickets(
             model_tier="fast",
         )
     except (ClaudeUnavailableError, ClaudeError) as e:
-        logger.warning("AI root cause analysis failed: %s", e)
+        logger.warning("AI root cause analysis failed: {}", e)
         result = None
 
     if not result or "groups" not in result:
@@ -453,7 +453,7 @@ async def analyze_tickets(
                 ticket_map[tid].root_cause_group_id = group.id
 
     db.commit()
-    logger.info("AI analysis grouped %d tickets into %d groups", len(tickets), len(result["groups"]))
+    logger.info("AI analysis grouped {} tickets into {} groups", len(tickets), len(result["groups"]))
 
     resp = HTMLResponse("")
     resp.headers["HX-Trigger"] = "ticketsUpdated"
@@ -484,5 +484,5 @@ async def update_ticket(
     ticket.updated_at = datetime.now(timezone.utc)
     db.commit()
 
-    logger.info("Ticket %s updated to %s by user %d", ticket.ticket_number, ticket.status, user.id)
+    logger.info("Ticket {} updated to {} by user {}", ticket.ticket_number, ticket.status, user.id)
     return {"id": ticket.id, "status": ticket.status}

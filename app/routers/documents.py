@@ -36,7 +36,7 @@ async def download_rfq_pdf(
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
-        logger.error("PDF generation failed for requisition %d: %s", requisition_id, e)
+        logger.error("PDF generation failed for requisition {}: {}", requisition_id, e)
         raise HTTPException(500, "PDF generation failed")
 
     return Response(
@@ -67,7 +67,7 @@ async def download_quote_pdf(
     except ValueError as e:
         raise HTTPException(404, str(e))
     except Exception as e:
-        logger.error("PDF generation failed for quote %d: %s", quote_id, e)
+        logger.error("PDF generation failed for quote {}: {}", quote_id, e)
         raise HTTPException(500, "PDF generation failed")
 
     return Response(

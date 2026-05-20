@@ -56,7 +56,7 @@ async def enrich_company(
 
             waterfall_result = await enrich_customer_account(company_id, db)
         except Exception as e:
-            logger.warning("Customer waterfall enrichment error: %s", e)
+            logger.warning("Customer waterfall enrichment error: {}", e)
 
     db.commit()
     result = {"ok": True, "updated_fields": updated, "enrichment": enrichment}

@@ -290,7 +290,7 @@ async def main():
                         if item:
                             mark_status(db, item, "failed", error=str(e)[:500])
                     except Exception as mark_err:
-                        logger.debug("ICS worker: failed to mark item as failed: %s", mark_err)
+                        logger.debug("ICS worker: failed to mark item as failed: {}", mark_err)
                 finally:
                     db.close()
 

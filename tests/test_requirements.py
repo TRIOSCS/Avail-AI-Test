@@ -768,33 +768,6 @@ class TestAttachLeadData:
         assert results[str(req_item.id)]["lead_summary"]["total_leads"] == 0
 
 
-class TestEnqueueIcsNcBatch:
-    @patch("app.routers.requisitions.requirements.SessionLocal")
-    @patch("app.routers.requisitions.requirements.enqueue_for_nc_search")
-    @patch("app.routers.requisitions.requirements.enqueue_for_ics_search")
-    def test_enqueue_basic(self, mock_ics, mock_nc, mock_session_cls):
-        from app.routers.requisitions.requirements import _enqueue_ics_nc_batch
-
-        mock_db = MagicMock()
-        mock_session_cls.return_value = mock_db
-        _enqueue_ics_nc_batch([1, 2])
-        assert mock_nc.call_count == 2
-        assert mock_ics.call_count == 2
-        mock_db.close.assert_called_once()
-
-    @patch("app.routers.requisitions.requirements.SessionLocal")
-    @patch("app.routers.requisitions.requirements.enqueue_for_nc_search", side_effect=Exception("NC fail"))
-    @patch("app.routers.requisitions.requirements.enqueue_for_ics_search", side_effect=Exception("ICS fail"))
-    def test_enqueue_handles_errors(self, mock_ics, mock_nc, mock_session_cls):
-        from app.routers.requisitions.requirements import _enqueue_ics_nc_batch
-
-        mock_db = MagicMock()
-        mock_session_cls.return_value = mock_db
-        # Should not raise even when enqueue functions fail
-        _enqueue_ics_nc_batch([1])
-        mock_db.close.assert_called_once()
-
-
 # ── GET /api/requirements/{requirement_id}/sightings ──────────────
 
 

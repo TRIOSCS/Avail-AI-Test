@@ -123,7 +123,10 @@ class TestH10RefreshWarning:
         db_session.commit()
 
         with (
-            patch("app.search_service.search_requirement", new_callable=AsyncMock),
+            patch(
+                "app.search_service.search_requirement",
+                new=AsyncMock(return_value={"sightings": [], "source_stats": [], "mpn_results": {}}),
+            ),
             patch("app.routers.sightings.broker") as mock_broker,
         ):
             mock_broker.publish = AsyncMock()

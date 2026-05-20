@@ -138,6 +138,7 @@ Alpine.store('shortlist', {
 Alpine.store('sightingSelection', {
     _map: {},
     selectedReqId: null,
+    clickPending: 0,    // count of click-initiated POSTs currently in-flight
     toggle(id) {
         if (this._map[id]) { delete this._map[id]; }
         else { this._map[id] = true; }
@@ -169,6 +170,41 @@ htmx.on('htmx:responseError', (evt) => {
     Alpine.store('toast').message = 'Request failed. Please try again.';
     Alpine.store('toast').type = 'error';
     Alpine.store('toast').show = true;
+});
+
+// Stale-response guard: HTMX swaps can arrive out of order when the user
+// clicks a new row before the previous /refresh resolves. Correlate via
+// X-Rendered-Req-Id and drop swaps for the wrong row.
+document.body.addEventListener('htmx:beforeSwap', (evt) => {
+    if (evt.detail.target.id === 'sightings-detail') {
+        const store = Alpine.store('sightingSelection');
+        const reqId = evt.detail.xhr?.getResponseHeader('X-Rendered-Req-Id');
+        if (reqId) {
+            if (store.selectedReqId && String(store.selectedReqId) !== String(reqId)) {
+                // Stale response — drop the swap. The htmx:afterRequest
+                // handler owns the clickPending counter and will decrement
+                // it for this completed (rejected) request.
+                evt.detail.shouldSwap = false;
+                return;
+            }
+        } else {
+            console.debug('[sightings] response to #sightings-detail missing X-Rendered-Req-Id');
+        }
+    }
+});
+
+// Decrement the clickPending counter when a #sightings-detail request
+// finishes — success, error, timeout, abort, or stale-reject all funnel
+// through here. Counter (vs. bool) handles the multi-click race where a
+// user clicks row A then row B before A returns: each completion
+// decrements once, and SSE suppression stays active until both clear.
+// Math.max(0, …) clamps in case of an unexpected double-decrement.
+htmx.on('htmx:afterRequest', function(evt) {
+    var target = evt.detail.target || evt.detail.elt;
+    if (target && target.id === 'sightings-detail') {
+        var store = Alpine.store('sightingSelection');
+        store.clickPending = Math.max(0, store.clickPending - 1);
+    }
 });
 
 // ── Clear stuck loading/swapping states after errors or timeouts ──
@@ -568,6 +604,7 @@ Alpine.data('materialsFilter', () => ({
         }
       }
     } catch (e) {
+      console.warn('[materialsFilter] Broken URL — resetting filters', e);
       // Broken URL — reset to defaults
       this.commodity = '';
       this.q = '';

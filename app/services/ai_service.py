@@ -103,7 +103,7 @@ async def enrich_contacts_websearch(
         logger.info("Claude not configured — skipping contact enrichment")
         return []
     except ClaudeError as e:
-        logger.warning("Claude AI failed for contact enrichment: %s", e)
+        logger.warning("Claude AI failed for contact enrichment: {}", e)
         return []
 
     contacts = []
@@ -115,7 +115,7 @@ async def enrich_contacts_websearch(
             validated = ContactSearchResult.model_validate(result)
             raw_contacts = [c.model_dump() for c in validated.contacts]
         except ValidationError as e:
-            logger.warning("ContactSearchResult validation failed: %s", e)
+            logger.warning("ContactSearchResult validation failed: {}", e)
             raw_contacts = result.get("contacts", [])
     elif isinstance(result, list):
         # Validate individual contacts
@@ -231,7 +231,7 @@ async def company_intel(company_name: str, domain: str | None = None) -> dict | 
         logger.info("Claude not configured — skipping company intel")
         return None
     except ClaudeError as e:
-        logger.warning("Claude AI failed for company intel: %s", e)
+        logger.warning("Claude AI failed for company intel: {}", e)
         return None
 
     if intel and isinstance(intel, dict):
@@ -240,7 +240,7 @@ async def company_intel(company_name: str, domain: str | None = None) -> dict | 
             validated = CompanyIntelligence.model_validate(intel)
             intel = validated.model_dump()
         except ValidationError as e:
-            logger.warning("CompanyIntelligence validation failed: %s", e)
+            logger.warning("CompanyIntelligence validation failed: {}", e)
             # Fall through with raw dict if validation fails
 
         set_cached(cache_key, intel, ttl_days=7)

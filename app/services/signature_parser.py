@@ -268,7 +268,7 @@ async def parse_signature_ai(body: str, sender_name: str = "", sender_email: str
         result["confidence"] = min(0.5 + (fields_found * 0.08), 0.95)
         return result
     except Exception as e:
-        logger.warning("AI signature parsing failed: %s", e)
+        logger.warning("AI signature parsing failed: {}", e)
         return {"confidence": 0.0}
 
 
@@ -286,7 +286,7 @@ async def extract_signature(body: str, sender_name: str = "", sender_email: str 
             ai_result["extraction_method"] = "claude_ai"
             return ai_result
     except Exception as e:
-        logger.warning("Claude signature parse failed: %s", e)
+        logger.warning("Claude signature parse failed: {}", e)
 
     regex_result["extraction_method"] = "regex"
     return regex_result
@@ -340,7 +340,7 @@ def cache_signature_extract(db, sender_email: str, extract: dict) -> None:
     try:
         db.flush()
     except Exception as e:
-        logger.warning("Signature cache flush error: %s", e)
+        logger.warning("Signature cache flush error: {}", e)
         db.rollback()
 
 
@@ -445,7 +445,7 @@ async def batch_parse_signatures(db) -> str | None:
         logger.info("Claude not configured — skipping batch signature parse")
         return None
     except ClaudeError as e:
-        logger.warning("batch_parse_signatures: claude_batch_submit failed: %s", e)
+        logger.warning("batch_parse_signatures: claude_batch_submit failed: {}", e)
         return None
     if not batch_id:
         logger.warning("batch_parse_signatures: claude_batch_submit returned None")
@@ -454,7 +454,7 @@ async def batch_parse_signatures(db) -> str | None:
     if r:
         r.set(_REDIS_KEY, batch_id)
 
-    logger.info("batch_parse_signatures: submitted %d records, batch_id=%s", len(records), batch_id)
+    logger.info("batch_parse_signatures: submitted {} records, batch_id={}", len(records), batch_id)
     return batch_id
 
 
@@ -486,10 +486,10 @@ async def process_signature_batch_results(db) -> dict | None:
     try:
         results = await claude_batch_results(batch_id)
     except ClaudeError as e:
-        logger.warning("process_signature_batch_results: batch %s check failed: %s", batch_id, e)
+        logger.warning("process_signature_batch_results: batch {} check failed: {}", batch_id, e)
         return None
     if results is None:
-        logger.debug("process_signature_batch_results: batch %s still processing", batch_id)
+        logger.debug("process_signature_batch_results: batch {} still processing", batch_id)
         return None
 
     stats = {"applied": 0, "errors": 0}
@@ -497,7 +497,7 @@ async def process_signature_batch_results(db) -> dict | None:
 
     for custom_id, parsed in results.items():
         if parsed is None:
-            logger.warning("Batch signature result error for %s — skipping", custom_id)
+            logger.warning("Batch signature result error for {} — skipping", custom_id)
             stats["errors"] += 1
             continue
 
@@ -530,19 +530,19 @@ async def process_signature_batch_results(db) -> dict | None:
             record.updated_at = datetime.now(timezone.utc)
             stats["applied"] += 1
         except Exception as e:
-            logger.warning("Failed to apply batch signature for record %d: %s", record_id, e)
+            logger.warning("Failed to apply batch signature for record {}: {}", record_id, e)
             stats["errors"] += 1
 
     try:
         db.commit()
     except Exception as e:
-        logger.error("process_signature_batch_results commit failed: %s", e)
+        logger.error("process_signature_batch_results commit failed: {}", e)
         db.rollback()
         return stats
 
     r.delete(_REDIS_KEY)
     logger.info(
-        "process_signature_batch_results: %d applied, %d errors from batch %s",
+        "process_signature_batch_results: {} applied, {} errors from batch {}",
         stats["applied"],
         stats["errors"],
         batch_id,

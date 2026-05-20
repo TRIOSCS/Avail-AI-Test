@@ -71,7 +71,7 @@ def transition_requirement(
         )
         db.add(log_entry)
     except Exception as e:
-        logger.warning("Failed to log part status transition: %s", e)
+        logger.warning("Failed to log part status transition: {}", e)
 
     return True
 
@@ -89,7 +89,7 @@ def on_rfq_sent(requirement_ids: list[int], db: Session, actor: User | None = No
                 if transition_requirement(req, "sourcing", db, actor):
                     changed += 1
             except ValueError as e:
-                logger.debug("Skipping requirement %s transition to sourcing: %s", req.id, e)
+                logger.debug("Skipping requirement {} transition to sourcing: {}", req.id, e)
     return changed
 
 
@@ -103,7 +103,7 @@ def on_offer_created(requirement: Requirement, db: Session, actor: User | None =
         try:
             return transition_requirement(requirement, "offered", db, actor)
         except ValueError as e:
-            logger.debug("Skipping requirement %s transition to offered: %s", requirement.id, e)
+            logger.debug("Skipping requirement {} transition to offered: {}", requirement.id, e)
             return False
     return False
 
@@ -122,7 +122,7 @@ def on_quote_built(requirement_ids: list[int], db: Session, actor: User | None =
                 if transition_requirement(req, "quoted", db, actor):
                     changed += 1
             except ValueError as e:
-                logger.debug("Skipping requirement %s transition to quoted: %s", req.id, e)
+                logger.debug("Skipping requirement {} transition to quoted: {}", req.id, e)
     return changed
 
 
@@ -156,7 +156,7 @@ def claim_requisition(requisition: Requisition, buyer: User, db: Session) -> boo
         )
         db.add(log_entry)
     except Exception as e:
-        logger.warning("Failed to log requisition claim: %s", e)
+        logger.warning("Failed to log requisition claim: {}", e)
 
     return True
 
@@ -181,6 +181,6 @@ def unclaim_requisition(requisition: Requisition, db: Session, actor: User | Non
         )
         db.add(log_entry)
     except Exception as e:
-        logger.warning("Failed to log requisition unclaim: %s", e)
+        logger.warning("Failed to log requisition unclaim: {}", e)
 
     return True

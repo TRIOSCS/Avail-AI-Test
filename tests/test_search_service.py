@@ -2169,6 +2169,86 @@ class TestFetchFresh:
         # No ApiSource to update, but results should still be returned
         assert len(results) >= 1
 
+    @pytest.mark.asyncio
+    async def test_ai_trigger_block_uses_correct_sighting_column(self, db_session):
+        """Regression: the smart-AI-trigger block looks up the latest Sighting by
+        normalized_mpn (not Sighting.mpn — that column doesn't exist).
+
+        Bug: between 2026-03-15 (b8a086b78) and the fix in this commit, the
+        AI-trigger lookup used `Sighting.mpn.in_(pns)`. SQLAlchemy raised
+        AttributeError at query-build time, which propagated up through
+        `_fetch_fresh` → `search_requirement` → the requisition-page
+        `search_one()` route, surfacing as "0 hits" in the UI even when
+        every connector returned data.
+
+        This test exercises the AI-trigger branch (TESTING gate cleared,
+        Anthropic key present) with a pre-existing Sighting in the DB on
+        the queried MPN, and asserts the call returns successfully and the
+        sighting is found via the normalized_mpn index.
+        """
+        from datetime import datetime, timezone
+
+        # Pre-seed a sighting whose normalized_mpn matches what
+        # normalize_mpn_key("LM317T") produces ("lm317t").
+        u = _make_user(db_session)
+        rq = _make_requisition(db_session, u)
+        req = Requirement(
+            requisition_id=rq.id,
+            primary_mpn="LM317T",
+            target_qty=1,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+        existing = Sighting(
+            requirement_id=req.id,
+            vendor_name="OldVendor",
+            mpn_matched="LM317T",
+            normalized_mpn="lm317t",
+            qty_available=10,
+            unit_price=1.5,
+            source_type="historical",
+            confidence=0.5,
+            score=50.0,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(existing)
+        db_session.commit()
+
+        # Clear TESTING so the AI-trigger branch is reached, but mock the
+        # AI connector so no real network call happens. Mock should_trigger
+        # to False so we don't actually fire the AI search.
+        env_no_testing = {k: v for k, v in os.environ.items() if k != "TESTING"}
+        with (
+            patch.dict("os.environ", env_no_testing, clear=True),
+            patch("app.search_service.get_credentials_batch", side_effect=_fake_creds_batch("fake-key")),
+            patch("app.search_service.get_credential", return_value="fake-key"),
+            patch("app.search_service.AIWebSearchConnector") as MockAI,
+            patch("app.search_service.should_trigger_ai_search", return_value=False),
+            patch("app.search_service.NexarConnector") as MockNexar,
+            patch("app.search_service.BrokerBinConnector") as MockBB,
+            patch("app.search_service.EbayConnector") as MockEbay,
+            patch("app.search_service.DigiKeyConnector") as MockDK,
+            patch("app.search_service.MouserConnector") as MockMouser,
+            patch("app.search_service.OEMSecretsConnector") as MockOEM,
+            patch("app.search_service.SourcengineConnector") as MockSrc,
+            patch("app.search_service.Element14Connector") as MockE14,
+        ):
+            mocks = [MockNexar, MockBB, MockEbay, MockDK, MockMouser, MockOEM, MockSrc, MockE14]
+            _setup_mock_connectors(mocks)
+            MockAI.return_value.__class__.__name__ = "AIWebSearchConnector"
+            MockAI.return_value.search = AsyncMock(return_value=[])
+
+            # The bug raised AttributeError before this returned. With the
+            # fix, the call completes and stats include the AI source.
+            results, stats = await _fetch_fresh(["LM317T"], db_session)
+
+        # Sighting still in DB (the lookup worked, didn't crash on Sighting.mpn)
+        assert db_session.query(Sighting).filter_by(normalized_mpn="lm317t").count() == 1
+        ai_stat = next((s for s in stats if s["source"] == "ai_live_web"), None)
+        assert ai_stat is not None
+        assert ai_stat["status"] == "skipped"
+
 
 # ── search_requirement ───────────────────────────────────────────────────
 
@@ -2183,7 +2263,7 @@ class TestSearchRequirement:
         req = _make_requirement(db_session, reqn, mpn="")
 
         result = await search_requirement(req, db_session)
-        assert result == {"sightings": [], "source_stats": []}
+        assert result == {"sightings": [], "source_stats": [], "mpn_results": {}}
 
     @pytest.mark.asyncio
     async def test_full_orchestration(self, _mock_enrich, db_session):

@@ -2,8 +2,7 @@
 app/routers/sightings.py.
 
 Targets uncovered branches:
-- _within_rate_limit: timezone-naive branch
-- sightings_refresh: rate limit hit, refresh failed paths
+- sightings_refresh: refresh failed path
 - sightings_list: filter branches (status, sales_person, assigned, q, group_by)
 - sightings_detail: not found, various suggestion paths
 - sightings_mark_unavailable: success path
@@ -11,7 +10,7 @@ Targets uncovered branches:
 - sightings_log_activity: all channels, invalid channel, empty notes
 - sightings_preview_inquiry: success, missing params
 - sightings_send_inquiry: success, missing params, failed send
-- batch-refresh: skipped (rate-limited) path, failed path
+- batch-refresh: failed path
 
 Called by: pytest
 Depends on: conftest.py fixtures
@@ -22,7 +21,7 @@ import os
 os.environ["TESTING"] = "1"
 
 import json
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -30,44 +29,6 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from app.models import Requirement, Requisition, User
-from app.routers.sightings import _within_rate_limit
-
-# ── Unit tests for helpers ─────────────────────────────────────────────────
-
-
-class TestWithinRateLimit:
-    def test_none_last_searched(self):
-        now = datetime.now(timezone.utc)
-        assert _within_rate_limit(None, now) is False
-
-    def test_naive_datetime_within_limit(self):
-        # Timezone-naive datetime (SQLite) within cooldown
-        ts = datetime.utcnow() - timedelta(seconds=10)
-        now = datetime.now(timezone.utc)
-        assert _within_rate_limit(ts, now) is True
-
-    def test_naive_datetime_outside_limit(self):
-        # Timezone-naive datetime older than cooldown
-        ts = datetime.utcnow() - timedelta(seconds=400)
-        now = datetime.now(timezone.utc)
-        assert _within_rate_limit(ts, now) is False
-
-    def test_naive_now_within_limit(self):
-        # naive `now` should also be handled
-        ts = datetime.utcnow() - timedelta(seconds=10)
-        now = datetime.utcnow()
-        assert _within_rate_limit(ts, now) is True
-
-    def test_tz_aware_within_limit(self):
-        now = datetime.now(timezone.utc)
-        ts = now - timedelta(seconds=10)
-        assert _within_rate_limit(ts, now) is True
-
-    def test_tz_aware_outside_limit(self):
-        now = datetime.now(timezone.utc)
-        ts = now - timedelta(seconds=400)
-        assert _within_rate_limit(ts, now) is False
-
 
 # ── Fixtures ──────────────────────────────────────────────────────────────
 
@@ -108,22 +69,12 @@ class TestSightingsRefresh:
         )
         assert resp.status_code == 404
 
-    def test_refresh_rate_limited(self, client: TestClient, req_with_item: tuple, db_session: Session):
-        _, item = req_with_item
-        # Set last_searched_at to 10 seconds ago — within cooldown
-        item.last_searched_at = datetime.utcnow() - timedelta(seconds=10)
-        db_session.commit()
-        resp = client.post(
-            f"/v2/partials/sightings/{item.id}/refresh",
-            headers={"HX-Request": "true"},
-        )
-        assert resp.status_code == 200
-        assert "HX-Trigger" in resp.headers
-        assert "Already searched" in resp.headers["HX-Trigger"]
-
     def test_refresh_success(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
-        with patch("app.search_service.search_requirement", new=AsyncMock()):
+        with patch(
+            "app.search_service.search_requirement",
+            new=AsyncMock(return_value={"sightings": [], "source_stats": [], "mpn_results": {}}),
+        ):
             resp = client.post(
                 f"/v2/partials/sightings/{item.id}/refresh",
                 headers={"HX-Request": "true"},
@@ -483,19 +434,6 @@ class TestSendInquiry:
 
 
 class TestBatchRefreshAdditional:
-    def test_batch_refresh_rate_limited_skips(self, client: TestClient, req_with_item: tuple, db_session: Session):
-        _, item = req_with_item
-        item.last_searched_at = datetime.utcnow() - timedelta(seconds=10)
-        db_session.commit()
-        with patch("app.search_service.search_requirement", new=AsyncMock()):
-            resp = client.post(
-                "/v2/partials/sightings/batch-refresh",
-                data={"requirement_ids": json.dumps([item.id])},
-                headers={"HX-Request": "true"},
-            )
-        assert resp.status_code == 200
-        assert "skipped" in resp.text.lower() or "already fresh" in resp.text.lower()
-
     def test_batch_refresh_failed_path(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
         with patch(

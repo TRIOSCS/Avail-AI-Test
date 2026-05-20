@@ -157,7 +157,7 @@ async def parse_vendor_response(
         logger.info("Claude not configured — skipping response parse")
         return None
     except ClaudeError as e:
-        logger.warning("Claude AI failed for response parse: %s", e)
+        logger.warning("Claude AI failed for response parse: {}", e)
         return None
 
     if not result:
@@ -168,7 +168,7 @@ async def parse_vendor_response(
         validated = VendorResponseParsed.model_validate(result)
         result = validated.model_dump()
     except ValidationError as e:
-        logger.warning("VendorResponseParsed validation failed: %s", e)
+        logger.warning("VendorResponseParsed validation failed: {}", e)
         # Fall through with raw dict if validation fails — don't block parsing
 
     # Extended thinking retry: if confidence is in the ambiguous review band,

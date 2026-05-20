@@ -466,7 +466,7 @@ async def _download_and_import_stock_list(
             if created_sightings:
                 db.commit()
                 logger.info(
-                    "Auto-created %d stock sightings from %s (%s)",
+                    "Auto-created {} stock sightings from {} ({})",
                     created_sightings,
                     filename,
                     vendor_name,
