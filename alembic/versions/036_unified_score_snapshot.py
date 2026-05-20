@@ -44,12 +44,15 @@ def upgrade() -> None:
         # Timestamps
         sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(), server_default=sa.func.now()),
+        if_not_exists=True,
     )
-    op.create_index("ix_uss_user_month", "unified_score_snapshot", ["user_id", "month"], unique=True)
-    op.create_index("ix_uss_month_rank", "unified_score_snapshot", ["month", "rank"])
+    op.create_index(
+        "ix_uss_user_month", "unified_score_snapshot", ["user_id", "month"], unique=True, if_not_exists=True
+    )
+    op.create_index("ix_uss_month_rank", "unified_score_snapshot", ["month", "rank"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_uss_month_rank", table_name="unified_score_snapshot")
-    op.drop_index("ix_uss_user_month", table_name="unified_score_snapshot")
-    op.drop_table("unified_score_snapshot")
+    op.drop_index("ix_uss_month_rank", table_name="unified_score_snapshot", if_exists=True)
+    op.drop_index("ix_uss_user_month", table_name="unified_score_snapshot", if_exists=True)
+    op.drop_table("unified_score_snapshot", if_exists=True)

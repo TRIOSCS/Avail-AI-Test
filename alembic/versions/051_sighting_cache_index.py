@@ -25,4 +25,4 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_index("ix_sighting_cache_lookup", table_name="sightings")
+    op.drop_index("ix_sighting_cache_lookup", table_name="sightings", if_exists=True)

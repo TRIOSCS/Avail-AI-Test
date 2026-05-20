@@ -184,17 +184,17 @@ def upgrade() -> None:
     ]
 
     for ix_name, table, columns in NEW_INDEXES:
-        op.create_index(ix_name, table, columns)
+        op.create_index(ix_name, table, columns, if_not_exists=True)
 
 
 def downgrade() -> None:
     # -----------------------------------------------------------------------
     # 6. Drop indexes
     # -----------------------------------------------------------------------
-    op.drop_index("ix_graph_subscriptions_user_id", table_name="graph_subscriptions")
-    op.drop_index("ix_prospect_contacts_saved_by", table_name="prospect_contacts")
-    op.drop_index("ix_eq_reviewed_by", table_name="enrichment_queue")
-    op.drop_index("ix_ej_started_by", table_name="enrichment_jobs")
+    op.drop_index("ix_graph_subscriptions_user_id", table_name="graph_subscriptions", if_exists=True)
+    op.drop_index("ix_prospect_contacts_saved_by", table_name="prospect_contacts", if_exists=True)
+    op.drop_index("ix_eq_reviewed_by", table_name="enrichment_queue", if_exists=True)
+    op.drop_index("ix_ej_started_by", table_name="enrichment_jobs", if_exists=True)
 
     # -----------------------------------------------------------------------
     # 5. Remove server_default on timestamp columns

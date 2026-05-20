@@ -24,10 +24,11 @@ def upgrade():
         sa.Column("alerts_enabled", sa.Boolean(), nullable=False, server_default="true"),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
+        if_not_exists=True,
     )
-    op.create_index("ix_teams_alert_config_user", "teams_alert_config", ["user_id"])
+    op.create_index("ix_teams_alert_config_user", "teams_alert_config", ["user_id"], if_not_exists=True)
 
 
 def downgrade():
-    op.drop_index("ix_teams_alert_config_user")
-    op.drop_table("teams_alert_config")
+    op.drop_index("ix_teams_alert_config_user", if_exists=True)
+    op.drop_table("teams_alert_config", if_exists=True)

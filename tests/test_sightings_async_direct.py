@@ -35,10 +35,8 @@ def _make_form_request(fields: dict) -> MagicMock:
     async def _form():
         form_mock = MagicMock()
         form_mock.get = lambda key, default=None: fields.get(key, default)
-        form_mock.getlist = (
-            lambda key: fields.get(key, [])
-            if isinstance(fields.get(key), list)
-            else ([fields[key]] if key in fields else [])
+        form_mock.getlist = lambda key: (
+            fields.get(key, []) if isinstance(fields.get(key), list) else ([fields[key]] if key in fields else [])
         )
         return form_mock
 
@@ -714,9 +712,7 @@ async def test_preview_inquiry_success(
             if key == "vendor_names"
             else []
         )
-        form_mock.get = lambda key, default=None: (
-            "Please quote the following parts" if key == "email_body" else default
-        )
+        form_mock.get = lambda key, default=None: "Please quote the following parts" if key == "email_body" else default
         return form_mock
 
     mock_req.form = _form
@@ -783,7 +779,7 @@ async def test_send_inquiry_success(
             if key == "vendor_names"
             else []
         )
-        form_mock.get = lambda key, default=None: ("Please quote: LM317T x100" if key == "email_body" else default)
+        form_mock.get = lambda key, default=None: "Please quote: LM317T x100" if key == "email_body" else default
         return form_mock
 
     mock_req.form = _form
@@ -849,7 +845,7 @@ async def test_send_inquiry_rfq_exception(
         form_mock.getlist = lambda key: (
             [str(req_item.id)] if key == "requirement_ids" else ["Arrow Electronics"] if key == "vendor_names" else []
         )
-        form_mock.get = lambda key, default=None: ("RFQ body text here" if key == "email_body" else default)
+        form_mock.get = lambda key, default=None: "RFQ body text here" if key == "email_body" else default
         return form_mock
 
     mock_req.form = _form

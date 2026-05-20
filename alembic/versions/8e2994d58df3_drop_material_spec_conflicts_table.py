@@ -20,7 +20,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.drop_table("material_spec_conflicts")
+    op.drop_table("material_spec_conflicts", if_exists=True)
 
 
 def downgrade() -> None:
@@ -45,4 +45,5 @@ def downgrade() -> None:
             ondelete="CASCADE",
         ),
         sa.PrimaryKeyConstraint("id", name=op.f("material_spec_conflicts_pkey")),
+        if_not_exists=True,
     )

@@ -32,7 +32,7 @@ def _drop_index_if_exists(index_name: str, table_name: str) -> None:
         {"name": index_name},
     )
     if result.fetchone():
-        op.drop_index(index_name, table_name=table_name)
+        op.drop_index(index_name, table_name=table_name, if_exists=True)
 
 
 def upgrade() -> None:
@@ -57,106 +57,109 @@ def upgrade() -> None:
 
     # ── Phase 2: Add missing FK indexes ─────────────────────────────────
     # vendor_responses (high seq scan table — 199K scans, 206M tuples)
-    op.create_index("ix_vr_scanned_by", "vendor_responses", ["scanned_by_user_id"])
-    op.create_index("ix_vr_contact", "vendor_responses", ["contact_id"])
+    op.create_index("ix_vr_scanned_by", "vendor_responses", ["scanned_by_user_id"], if_not_exists=True)
+    op.create_index("ix_vr_contact", "vendor_responses", ["contact_id"], if_not_exists=True)
 
     # requisitions (19M seq tuple reads)
-    op.create_index("ix_req_site", "requisitions", ["customer_site_id"])
-    op.create_index("ix_req_cloned_from", "requisitions", ["cloned_from_id"])
-    op.create_index("ix_req_created_by", "requisitions", ["created_by"])
+    op.create_index("ix_req_site", "requisitions", ["customer_site_id"], if_not_exists=True)
+    op.create_index("ix_req_cloned_from", "requisitions", ["cloned_from_id"], if_not_exists=True)
+    op.create_index("ix_req_created_by", "requisitions", ["created_by"], if_not_exists=True)
 
     # companies
-    op.create_index("ix_companies_owner", "companies", ["account_owner_id"])
+    op.create_index("ix_companies_owner", "companies", ["account_owner_id"], if_not_exists=True)
 
     # enrichment_queue
-    op.create_index("ix_eq_reviewed_by", "enrichment_queue", ["reviewed_by_id"])
-    op.create_index("ix_eq_vendor_contact", "enrichment_queue", ["vendor_contact_id"])
+    op.create_index("ix_eq_reviewed_by", "enrichment_queue", ["reviewed_by_id"], if_not_exists=True)
+    op.create_index("ix_eq_vendor_contact", "enrichment_queue", ["vendor_contact_id"], if_not_exists=True)
 
     # buy_plans
-    op.create_index("ix_bp_completed_by", "buy_plans", ["completed_by_id"])
-    op.create_index("ix_bp_approved_by", "buy_plans", ["approved_by_id"])
-    op.create_index("ix_bp_cancelled_by", "buy_plans", ["cancelled_by_id"])
+    op.create_index("ix_bp_completed_by", "buy_plans", ["completed_by_id"], if_not_exists=True)
+    op.create_index("ix_bp_approved_by", "buy_plans", ["approved_by_id"], if_not_exists=True)
+    op.create_index("ix_bp_cancelled_by", "buy_plans", ["cancelled_by_id"], if_not_exists=True)
 
     # quotes
-    op.create_index("ix_quotes_created_by", "quotes", ["created_by_id"])
+    op.create_index("ix_quotes_created_by", "quotes", ["created_by_id"], if_not_exists=True)
 
     # offers
-    op.create_index("ix_offers_vr", "offers", ["vendor_response_id"])
-    op.create_index("ix_offers_entered_by", "offers", ["entered_by_id"])
+    op.create_index("ix_offers_vr", "offers", ["vendor_response_id"], if_not_exists=True)
+    op.create_index("ix_offers_entered_by", "offers", ["entered_by_id"], if_not_exists=True)
 
     # prospect_contacts
-    op.create_index("ix_pc_saved_by", "prospect_contacts", ["saved_by_id"])
+    op.create_index("ix_pc_saved_by", "prospect_contacts", ["saved_by_id"], if_not_exists=True)
 
     # enrichment_jobs
-    op.create_index("ix_ej_started_by", "enrichment_jobs", ["started_by_id"])
+    op.create_index("ix_ej_started_by", "enrichment_jobs", ["started_by_id"], if_not_exists=True)
 
     # proactive_matches
-    op.create_index("ix_pm_requirement", "proactive_matches", ["requirement_id"])
+    op.create_index("ix_pm_requirement", "proactive_matches", ["requirement_id"], if_not_exists=True)
 
     # offer_attachments
-    op.create_index("ix_oa_uploaded_by", "offer_attachments", ["uploaded_by_id"])
+    op.create_index("ix_oa_uploaded_by", "offer_attachments", ["uploaded_by_id"], if_not_exists=True)
 
     # vendor_reviews
-    op.create_index("ix_vrev_user", "vendor_reviews", ["user_id"])
+    op.create_index("ix_vrev_user", "vendor_reviews", ["user_id"], if_not_exists=True)
 
     # proactive_offers
-    op.create_index("ix_poff_conv_req", "proactive_offers", ["converted_requisition_id"])
-    op.create_index("ix_poff_conv_quote", "proactive_offers", ["converted_quote_id"])
+    op.create_index("ix_poff_conv_req", "proactive_offers", ["converted_requisition_id"], if_not_exists=True)
+    op.create_index("ix_poff_conv_quote", "proactive_offers", ["converted_quote_id"], if_not_exists=True)
 
     # error_reports
-    op.create_index("ix_er_resolved_by", "error_reports", ["resolved_by_id"])
+    op.create_index("ix_er_resolved_by", "error_reports", ["resolved_by_id"], if_not_exists=True)
 
     # proactive_throttle
-    op.create_index("ix_pt_offer", "proactive_throttle", ["proactive_offer_id"])
+    op.create_index("ix_pt_offer", "proactive_throttle", ["proactive_offer_id"], if_not_exists=True)
 
 
 def downgrade() -> None:
     # ── Remove FK indexes ───────────────────────────────────────────────
-    op.drop_index("ix_pt_offer", table_name="proactive_throttle")
-    op.drop_index("ix_er_resolved_by", table_name="error_reports")
-    op.drop_index("ix_poff_conv_quote", table_name="proactive_offers")
-    op.drop_index("ix_poff_conv_req", table_name="proactive_offers")
-    op.drop_index("ix_vrev_user", table_name="vendor_reviews")
-    op.drop_index("ix_oa_uploaded_by", table_name="offer_attachments")
-    op.drop_index("ix_pm_requirement", table_name="proactive_matches")
-    op.drop_index("ix_ej_started_by", table_name="enrichment_jobs")
-    op.drop_index("ix_pc_saved_by", table_name="prospect_contacts")
-    op.drop_index("ix_offers_entered_by", table_name="offers")
-    op.drop_index("ix_offers_vr", table_name="offers")
-    op.drop_index("ix_quotes_created_by", table_name="quotes")
-    op.drop_index("ix_bp_cancelled_by", table_name="buy_plans")
-    op.drop_index("ix_bp_approved_by", table_name="buy_plans")
-    op.drop_index("ix_bp_completed_by", table_name="buy_plans")
-    op.drop_index("ix_eq_vendor_contact", table_name="enrichment_queue")
-    op.drop_index("ix_eq_reviewed_by", table_name="enrichment_queue")
-    op.drop_index("ix_companies_owner", table_name="companies")
-    op.drop_index("ix_req_created_by", table_name="requisitions")
-    op.drop_index("ix_req_cloned_from", table_name="requisitions")
-    op.drop_index("ix_req_site", table_name="requisitions")
-    op.drop_index("ix_vr_contact", table_name="vendor_responses")
-    op.drop_index("ix_vr_scanned_by", table_name="vendor_responses")
+    op.drop_index("ix_pt_offer", table_name="proactive_throttle", if_exists=True)
+    op.drop_index("ix_er_resolved_by", table_name="error_reports", if_exists=True)
+    op.drop_index("ix_poff_conv_quote", table_name="proactive_offers", if_exists=True)
+    op.drop_index("ix_poff_conv_req", table_name="proactive_offers", if_exists=True)
+    op.drop_index("ix_vrev_user", table_name="vendor_reviews", if_exists=True)
+    op.drop_index("ix_oa_uploaded_by", table_name="offer_attachments", if_exists=True)
+    op.drop_index("ix_pm_requirement", table_name="proactive_matches", if_exists=True)
+    op.drop_index("ix_ej_started_by", table_name="enrichment_jobs", if_exists=True)
+    op.drop_index("ix_pc_saved_by", table_name="prospect_contacts", if_exists=True)
+    op.drop_index("ix_offers_entered_by", table_name="offers", if_exists=True)
+    op.drop_index("ix_offers_vr", table_name="offers", if_exists=True)
+    op.drop_index("ix_quotes_created_by", table_name="quotes", if_exists=True)
+    op.drop_index("ix_bp_cancelled_by", table_name="buy_plans", if_exists=True)
+    op.drop_index("ix_bp_approved_by", table_name="buy_plans", if_exists=True)
+    op.drop_index("ix_bp_completed_by", table_name="buy_plans", if_exists=True)
+    op.drop_index("ix_eq_vendor_contact", table_name="enrichment_queue", if_exists=True)
+    op.drop_index("ix_eq_reviewed_by", table_name="enrichment_queue", if_exists=True)
+    op.drop_index("ix_companies_owner", table_name="companies", if_exists=True)
+    op.drop_index("ix_req_created_by", table_name="requisitions", if_exists=True)
+    op.drop_index("ix_req_cloned_from", table_name="requisitions", if_exists=True)
+    op.drop_index("ix_req_site", table_name="requisitions", if_exists=True)
+    op.drop_index("ix_vr_contact", table_name="vendor_responses", if_exists=True)
+    op.drop_index("ix_vr_scanned_by", table_name="vendor_responses", if_exists=True)
 
     # ── Restore duplicate indexes ───────────────────────────────────────
-    op.create_index("ix_vr_message_id", "vendor_responses", ["message_id"], unique=True)
+    op.create_index("ix_vr_message_id", "vendor_responses", ["message_id"], unique=True, if_not_exists=True)
     op.create_index(
         "ix_vendor_responses_vendor_name",
         "vendor_responses",
         ["vendor_name"],
         postgresql_where="vendor_name IS NOT NULL",
+        if_not_exists=True,
     )
-    op.create_index("ix_vc_domain", "vendor_cards", ["domain"])
-    op.create_index("ix_sysconfig_key", "system_config", ["key"], unique=True)
+    op.create_index("ix_vc_domain", "vendor_cards", ["domain"], if_not_exists=True)
+    op.create_index("ix_sysconfig_key", "system_config", ["key"], unique=True, if_not_exists=True)
     op.create_index(
         "ix_offers_vendor_card",
         "offers",
         ["vendor_card_id"],
         postgresql_where="vendor_card_id IS NOT NULL",
+        if_not_exists=True,
     )
-    op.create_index("ix_ese_email", "email_signature_extracts", ["sender_email"], unique=True)
+    op.create_index("ix_ese_email", "email_signature_extracts", ["sender_email"], unique=True, if_not_exists=True)
     op.create_index(
         "ix_contacts_vendor_name",
         "contacts",
         ["vendor_name"],
         postgresql_where="vendor_name IS NOT NULL",
+        if_not_exists=True,
     )
-    op.create_index("ix_buyplans_token", "buy_plans", ["approval_token"])
+    op.create_index("ix_buyplans_token", "buy_plans", ["approval_token"], if_not_exists=True)

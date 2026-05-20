@@ -56,13 +56,14 @@ def upgrade() -> None:
         sa.Column("is_stock_sale", sa.Boolean, server_default="false"),
         sa.Column("created_at", sa.DateTime, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime, server_default=sa.text("now()")),
+        if_not_exists=True,
     )
-    op.create_index("ix_bpv3_status", "buy_plans_v3", ["status"])
-    op.create_index("ix_bpv3_so_status", "buy_plans_v3", ["so_status"])
-    op.create_index("ix_bpv3_quote", "buy_plans_v3", ["quote_id"])
-    op.create_index("ix_bpv3_requisition", "buy_plans_v3", ["requisition_id"])
-    op.create_index("ix_bpv3_submitted_by", "buy_plans_v3", ["submitted_by_id"])
-    op.create_index("ix_bpv3_status_created", "buy_plans_v3", ["status", "created_at"])
+    op.create_index("ix_bpv3_status", "buy_plans_v3", ["status"], if_not_exists=True)
+    op.create_index("ix_bpv3_so_status", "buy_plans_v3", ["so_status"], if_not_exists=True)
+    op.create_index("ix_bpv3_quote", "buy_plans_v3", ["quote_id"], if_not_exists=True)
+    op.create_index("ix_bpv3_requisition", "buy_plans_v3", ["requisition_id"], if_not_exists=True)
+    op.create_index("ix_bpv3_submitted_by", "buy_plans_v3", ["submitted_by_id"], if_not_exists=True)
+    op.create_index("ix_bpv3_status_created", "buy_plans_v3", ["status", "created_at"], if_not_exists=True)
 
     # ── buy_plan_lines ───────────────────────────────────────────────
     op.create_table(
@@ -91,13 +92,14 @@ def upgrade() -> None:
         sa.Column("manager_note", sa.Text),
         sa.Column("created_at", sa.DateTime, server_default=sa.text("now()")),
         sa.Column("updated_at", sa.DateTime, server_default=sa.text("now()")),
+        if_not_exists=True,
     )
-    op.create_index("ix_bpl_buy_plan", "buy_plan_lines", ["buy_plan_id"])
-    op.create_index("ix_bpl_requirement", "buy_plan_lines", ["requirement_id"])
-    op.create_index("ix_bpl_status", "buy_plan_lines", ["status"])
-    op.create_index("ix_bpl_buyer", "buy_plan_lines", ["buyer_id"])
-    op.create_index("ix_bpl_offer", "buy_plan_lines", ["offer_id"])
-    op.create_index("ix_bpl_plan_requirement", "buy_plan_lines", ["buy_plan_id", "requirement_id"])
+    op.create_index("ix_bpl_buy_plan", "buy_plan_lines", ["buy_plan_id"], if_not_exists=True)
+    op.create_index("ix_bpl_requirement", "buy_plan_lines", ["requirement_id"], if_not_exists=True)
+    op.create_index("ix_bpl_status", "buy_plan_lines", ["status"], if_not_exists=True)
+    op.create_index("ix_bpl_buyer", "buy_plan_lines", ["buyer_id"], if_not_exists=True)
+    op.create_index("ix_bpl_offer", "buy_plan_lines", ["offer_id"], if_not_exists=True)
+    op.create_index("ix_bpl_plan_requirement", "buy_plan_lines", ["buy_plan_id", "requirement_id"], if_not_exists=True)
 
     # ── verification_group_members ───────────────────────────────────
     op.create_table(
@@ -106,11 +108,12 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Integer, sa.ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True),
         sa.Column("is_active", sa.Boolean, nullable=False, server_default="true"),
         sa.Column("added_at", sa.DateTime, server_default=sa.text("now()")),
+        if_not_exists=True,
     )
-    op.create_index("ix_vgm_active", "verification_group_members", ["is_active"])
+    op.create_index("ix_vgm_active", "verification_group_members", ["is_active"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_table("buy_plan_lines")
-    op.drop_table("buy_plans_v3")
-    op.drop_table("verification_group_members")
+    op.drop_table("buy_plan_lines", if_exists=True)
+    op.drop_table("buy_plans_v3", if_exists=True)
+    op.drop_table("verification_group_members", if_exists=True)

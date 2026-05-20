@@ -897,7 +897,7 @@ async def test_import_stock_list_no_filename_raises_400(
 
     async def _form():
         form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (mock_file if key == "file" else default)
+        form_mock.get = lambda key, default=None: mock_file if key == "file" else default
         return form_mock
 
     mock_req.form = _form
@@ -997,7 +997,7 @@ async def test_import_stock_list_commit_exception_raises_500(
 
     async def _form():
         form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (mock_file if key == "file" else default)
+        form_mock.get = lambda key, default=None: mock_file if key == "file" else default
         return form_mock
 
     mock_req.form = _form
@@ -1169,7 +1169,7 @@ async def test_import_stock_list_normalize_stock_row_returns_none(
 
     async def _form():
         form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (mock_file if key == "file" else default)
+        form_mock.get = lambda key, default=None: mock_file if key == "file" else default
         return form_mock
 
     mock_req.form = _form
@@ -1218,7 +1218,7 @@ async def test_import_stock_list_mpn_not_in_req_mpns(
 
     async def _form():
         form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (mock_file if key == "file" else default)
+        form_mock.get = lambda key, default=None: mock_file if key == "file" else default
         return form_mock
 
     mock_req.form = _form

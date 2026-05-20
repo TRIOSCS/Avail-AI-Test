@@ -29,9 +29,10 @@ def upgrade() -> None:
         sa.Column("old_value", sa.Text()),
         sa.Column("new_value", sa.Text()),
         sa.Column("created_at", sa.DateTime()),
+        if_not_exists=True,
     )
-    op.create_index("ix_changelog_entity", "change_log", ["entity_type", "entity_id"])
-    op.create_index("ix_changelog_user", "change_log", ["user_id"])
+    op.create_index("ix_changelog_entity", "change_log", ["entity_type", "entity_id"], if_not_exists=True)
+    op.create_index("ix_changelog_user", "change_log", ["user_id"], if_not_exists=True)
 
     # Add audit fields to offers
     op.add_column("offers", sa.Column("updated_at", sa.DateTime(), nullable=True))
@@ -45,12 +46,12 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("requisitions", "updated_by_id")
-    op.drop_column("requisitions", "updated_at")
-    op.drop_column("offers", "approved_at")
-    op.drop_column("offers", "approved_by_id")
-    op.drop_column("offers", "updated_by_id")
-    op.drop_column("offers", "updated_at")
-    op.drop_index("ix_changelog_user", "change_log")
-    op.drop_index("ix_changelog_entity", "change_log")
-    op.drop_table("change_log")
+    op.execute("ALTER TABLE IF EXISTS requisitions DROP COLUMN IF EXISTS updated_by_id")
+    op.execute("ALTER TABLE IF EXISTS requisitions DROP COLUMN IF EXISTS updated_at")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS approved_at")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS approved_by_id")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS updated_by_id")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS updated_at")
+    op.drop_index("ix_changelog_user", "change_log", if_exists=True)
+    op.drop_index("ix_changelog_entity", "change_log", if_exists=True)
+    op.drop_table("change_log", if_exists=True)
