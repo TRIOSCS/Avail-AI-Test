@@ -148,6 +148,8 @@ def log_email_activity(
     external_id: str | None,
     contact_name: str | None,
     db: Session,
+    requisition_id: int | None = None,
+    requirement_id: int | None = None,
 ) -> ActivityLog | None:
     """Log an email activity, matching the contact to a company or vendor.
 
@@ -178,6 +180,8 @@ def log_email_activity(
         direction="outbound" if direction == "sent" else "inbound",
         event_type="email",
         summary=f"Email {'to' if direction == 'sent' else 'from'} {contact_name or email_addr}",
+        requisition_id=requisition_id,
+        requirement_id=requirement_id,
     )
     db.add(record)
     db.flush()
@@ -202,6 +206,8 @@ def log_call_activity(
     contact_name: str | None,
     db: Session,
     subject: str | None = None,
+    requisition_id: int | None = None,
+    requirement_id: int | None = None,
 ) -> ActivityLog | None:
     """Log a phone call activity."""
     if external_id:
@@ -235,6 +241,8 @@ def log_call_activity(
         direction=direction,
         event_type="call",
         summary=subject,
+        requisition_id=requisition_id,
+        requirement_id=requirement_id,
     )
     db.add(record)
     db.flush()

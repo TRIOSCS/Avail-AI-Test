@@ -10,7 +10,12 @@ Depends on: app/constants.py, app/services/activity_service.py, conftest.py
 
 from app.constants import ActivityType
 from app.models import ActivityLog
-from app.services.activity_service import log_activity, log_rfq_activity
+from app.services.activity_service import (
+    log_activity,
+    log_call_activity,
+    log_email_activity,
+    log_rfq_activity,
+)
 
 
 def test_activity_type_values_fit_column():
@@ -54,3 +59,33 @@ def test_log_rfq_activity_delegates_to_log_activity(db_session, test_requisition
     assert record.notes == "legacy call path"
     rows = db_session.query(ActivityLog).filter_by(requisition_id=test_requisition.id).all()
     assert len(rows) == 1
+
+
+def test_log_email_activity_accepts_requisition_id(db_session, test_requisition, test_user):
+    record = log_email_activity(
+        user_id=test_user.id,
+        direction="sent",
+        email_addr="vendor@example.com",
+        subject="RFQ [ref:%d]" % test_requisition.id,
+        external_id="msg-req-001",
+        contact_name="Vendor Rep",
+        db=db_session,
+        requisition_id=test_requisition.id,
+    )
+    assert record is not None
+    assert record.requisition_id == test_requisition.id
+
+
+def test_log_call_activity_accepts_requisition_id(db_session, test_requisition, test_user):
+    record = log_call_activity(
+        user_id=test_user.id,
+        direction="outbound",
+        phone="+15551234567",
+        duration_seconds=120,
+        external_id="call-req-001",
+        contact_name="Vendor Rep",
+        db=db_session,
+        requisition_id=test_requisition.id,
+    )
+    assert record is not None
+    assert record.requisition_id == test_requisition.id
