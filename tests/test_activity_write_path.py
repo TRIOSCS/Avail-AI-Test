@@ -131,3 +131,19 @@ def test_get_requisition_activities_excludes_other_reqs(db_session, test_requisi
         description="mine",
     )
     assert get_requisition_activities(999999, db_session) == []
+
+
+def test_activity_tab_renders_logged_event(client, db_session, test_requisition, test_user):
+    """An event written via log_activity() appears on the requisition Activity tab."""
+    log_activity(
+        db_session,
+        activity_type=ActivityType.STATUS_CHANGED,
+        requisition_id=test_requisition.id,
+        user_id=test_user.id,
+        description="Status changed from active to sourcing",
+    )
+    db_session.commit()
+    resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/tab/activity")
+    assert resp.status_code == 200
+    assert "Status changed from active to sourcing" in resp.text
+    assert "No activity recorded yet" not in resp.text

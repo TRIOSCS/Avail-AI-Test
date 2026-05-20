@@ -49,6 +49,11 @@ htmx_views.py (router)
     +---> activity_service.py --> DB: INSERT activity_log
 ```
 
+All activity writers route through `activity_service.log_activity()`, the
+canonical writer (`log_rfq_activity()` is kept as a thin delegating alias).
+The requisition Activity tab reads its timeline back via
+`activity_service.get_requisition_activities()` rather than an inlined query.
+
 ## 2. Search (User-Initiated Only)
 
 Sourcing is strictly user-initiated. There is no background cron, no

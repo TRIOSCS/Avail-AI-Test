@@ -1257,8 +1257,8 @@ async def requisition_tab(
         return templates.TemplateResponse("htmx/partials/requisitions/tabs/responses.html", ctx)
 
     else:  # activity
-        from ..models.intelligence import ActivityLog
         from ..models.offers import Contact as RfqContact
+        from ..services.activity_service import get_requisition_activities
 
         contacts = (
             db.query(RfqContact)
@@ -1266,14 +1266,8 @@ async def requisition_tab(
             .order_by(RfqContact.created_at.desc())
             .all()
         )
-        activities = (
-            db.query(ActivityLog)
-            .filter(ActivityLog.requisition_id == req_id)
-            .order_by(ActivityLog.created_at.desc())
-            .all()
-        )
         ctx["contacts"] = contacts
-        ctx["activities"] = activities
+        ctx["activities"] = get_requisition_activities(req_id, db)
         ctx["req"] = req
         return templates.TemplateResponse("htmx/partials/requisitions/tabs/activity.html", ctx)
 
