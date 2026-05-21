@@ -175,7 +175,7 @@ async def create_quote(
             except Exception:
                 nested.rollback()
                 logger.warning(
-                    "Failed to resolve material card for MPN=%s during quote creation for req=%d",
+                    "Failed to resolve material card for MPN={} during quote creation for req={}",
                     li.get("mpn"),
                     req_id,
                 )
@@ -656,7 +656,7 @@ def _record_quote_won_history(db: Session, req: Requisition | None, quote: Quote
             )
     except Exception as e:
         logger.error(
-            "Quote won purchase history recording failed for quote_id=%d quote_number=%s: %s",
+            "Quote won purchase history recording failed for quote_id={} quote_number={}: {}",
             quote.id,
             quote.quote_number,
             e,

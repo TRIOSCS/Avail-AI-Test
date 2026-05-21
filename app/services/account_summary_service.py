@@ -195,7 +195,7 @@ async def generate_account_summary(company_id: int, db: Session) -> dict:
             max_tokens=600,
         )
     except Exception:
-        logger.exception("Account summary generation failed for company %d", company_id)
+        logger.exception("Account summary generation failed for company {}", company_id)
         return {}
 
     if not result or not isinstance(result, dict):

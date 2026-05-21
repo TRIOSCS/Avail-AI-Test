@@ -49,13 +49,44 @@ htmx_views.py (router)
     +---> activity_service.py --> DB: INSERT activity_log
 ```
 
-## 2. Search (All Connectors in Parallel)
+## 2. Search (User-Initiated Only)
+
+Sourcing is strictly user-initiated. There is no background cron, no
+auto-enqueue on requirement creation, and no row-click POST. Two entry
+points trigger a search:
+
+- Per-row search icon on `/v2/sightings`
+- Detail-panel "Search" button (`m.search_button` macro)
+
+Both POST `/v2/partials/sightings/{requirement_id}/refresh?source=user`.
+
+A 48-hour per-MPN cooldown is enforced via `MaterialCard.last_searched_at`.
+Every MPN whose card was searched within 48h is skipped; prior sightings
+on those MPNs (across all requirements) are surfaced via the
+`material_card_id` linkage on Sighting rows.
 
 ```
-Browser POST /v2/partials/requisitions/{id}/search-all
+Browser POST /v2/partials/sightings/{requirement_id}/refresh?source=user
     |
     v
-requirements.py (router)
+sightings.py (router) → search_requirement(req, db)
+    |
+    +---> _mpn_cooldown_partition(pns) → (to_search, cached_card_ids)
+    |     Per-MPN 48h cooldown. Cards inside the window are partitioned
+    |     out; their material_card_id is returned for the detail-panel
+    |     query so prior sightings remain visible.
+    |
+    +---> _fetch_fresh(to_search) — every live HTTP connector in parallel
+    |       (asyncio.wait, search_total_timeout_s budget)
+    |
+    +---> enqueue_for_ics_search(requirement_id, db)   # browser worker queue
+    +---> enqueue_for_nc_search(requirement_id, db)    # browser worker queue
+    |
+    +---> _save_sightings + scoring + material card upsert
+    |
+    +---> Stamp MaterialCard.last_searched_at = now on every searched card
+    |
+    +---> Returns {sightings, source_stats, mpn_results: {mpn: "searched"|"cached"}}
     |
     v
 search_service.py (orchestrator)
@@ -99,6 +130,14 @@ search_service.py (orchestrator)
     |       +---> DB: UPSERT sourcing_leads + lead_evidence
     |
     +---> sighting_aggregation.py --> DB: UPSERT vendor_sighting_summary
+    |       +---> rebuild_vendor_summaries_from_sightings() is a TRIGGER, not
+    |             a filter — when new sightings land, it always rebuilds ALL
+    |             vendor summaries for the requirement (never a subset). The
+    |             `sightings` arg only signals "do anything if at least one
+    |             carries a vendor_name"; the function then aggregates from
+    |             the live Sighting rows for that requirement_id. Passing a
+    |             normalized vendor_names subset would mismatch the raw
+    |             Sighting.vendor_name column and silently produce zero rows.
     |
     NOTE: Sightings page MPN chips link to material card detail pages
           when a MaterialCard exists. The sightings router
@@ -118,6 +157,132 @@ search_service.py (orchestrator)
     |
     +---> connector_status.py --> DB: UPDATE api_sources
 ```
+
+### 2b. Streaming Part-Search (`/v2/partials/search/run`)
+
+```
+Browser POST /v2/partials/search/run  (manual MPN entry)
+    |
+    v
+htmx_views.py: search_run()
+    |
+    +---> Returns HTML shell + spinner immediately (200 OK)
+    |
+    +---> _safe_bg(stream_search_mpn(search_id, mpn))   # fire-and-forget asyncio.Task
+              |
+              v
+    search_service.stream_search_mpn(search_id, mpn)
+        |
+        +---> db = SessionLocal()      # OWNS its own session — must NOT
+        |                                receive a request-scoped session: web
+        |                                framework finalizers close those as soon
+        |                                as the response is sent, so a request
+        |                                session would be dead before the worker's
+        |                                first db.query(...). The fire-and-forget
+        |                                wrapper swallows exceptions, so the
+        |                                failure would surface only as a hung SSE
+        |                                stream. Same pattern as _enrich_cards.
+        |
+        +---> connectors = _build_connectors(db)         # one-shot setup query
+        |     vendor_score_map = db.query(VendorCard...) # one-shot setup query
+        |
+        +---> for each connector: asyncio.create_task(connector.search(mpn))
+        |     loop with asyncio.wait(FIRST_COMPLETED):
+        |       publish "source-status" / "results" / "card-update" per connector
+        |     publish terminal "done" once all settle
+        |
+        +---> Always publishes a terminal "done" — including on uncaught
+              exceptions (pool exhaustion, broker outage, render errors). The
+              SSE client only knows the stream is complete via the done event,
+              so worker death without done means a hung browser spinner.
+```
+
+Browser opens `GET /v2/partials/search/stream?search_id=...` (SSE long-poll) in
+parallel to the POST so it receives events as the worker publishes them.
+
+### Connector Failure Contract
+
+External-API connectors (`app/connectors/*.py`) follow a single contract
+for upstream failures: **auth, quota, and rate-limit conditions raise
+typed `ConnectorError` subclasses; do not silently return `[]`**. The
+exception propagates through `BaseConnector.search()` to the caller
+(search orchestrator or `health_monitor.ping_source`).
+
+```
+connector._do_search(part_number)
+    |
+    +-- 200 OK         ----> parse + return list[dict]
+    +-- 400 (bad input) --> log + return []   (input-domain error, not contract)
+    +-- 401/403 (auth)  --> raise ConnectorAuthError
+    +-- 429 (rate)      --> raise ConnectorRateLimitError
+    +-- explicit quota  --> raise ConnectorQuotaError
+    +-- 5xx             --> raise (httpx.HTTPStatusError via raise_for_status)
+```
+
+The `BaseConnector.search` wrapper:
+- Re-raises `ConnectorError` immediately without retry (hard failures
+  are not transient; retrying just burns more upstream calls).
+- Raises `ConnectorError` on open circuit breaker (was: silently `[]`,
+  which masked the contract — health_monitor saw success and flipped
+  status back to live).
+- Raises `ConnectorRateLimitError` on httpx 429 retries exhausted.
+
+`health_monitor.ping_source` catches each subtype and writes a
+type-specific `last_error` message:
+
+| Exception | last_error prefix | Operator action |
+|---|---|---|
+| `ConnectorAuthError` | "Auth error — rotate credentials: ..." | Rotate API key in Admin > API Sources |
+| `ConnectorRateLimitError` | "Rate limited — auto-recovers when window expires: ..." | Usually none |
+| `ConnectorQuotaError` | "Quota exhausted — upgrade plan or wait for cycle: ..." | Upgrade plan or wait |
+
+In all cases `api_sources.status` flips to `'error'`, and
+`search_service._build_connectors` excludes the source from the next
+user search with a `source_stats[i].status = 'error_skipped'` chip.
+`stream_search_mpn` publishes a `source-status` SSE event for every
+non-ok source at search start so the chip strip renders the right
+state immediately.
+
+**Auto-recovery.** The 15-min ping loop continues to ping all
+`is_active=True` sources, including those at `status='error'`. On the
+first ping that returns 200, status flips back to `'live'` and the
+source rejoins user searches automatically. Persistent failures
+(revoked key, exhausted quota) keep flipping back to `'error'` on each
+ping, keeping the source excluded until the operator intervenes.
+
+**No carve-outs.** All seven connectors (Mouser, BrokerBin, Nexar,
+DigiKey, Element14, OEMSecrets, Sourcengine) follow this contract
+uniformly. The Mouser HTTP-403/429 silent-empty path that existed prior
+to round-2 was the silent-failure mode the contract is designed to
+eliminate; it has been removed.
+
+**Test enforcement** lives in `tests/test_connectors.py`,
+`tests/test_connector_rate_limits.py`,
+`tests/test_sourcengine_connector.py`, `tests/test_connector_errors.py`,
+`tests/test_constants.py`, `tests/test_search_streaming.py`, and
+`tests/test_health_monitor.py`.
+
+### Browser-worker carve-out
+
+`icsource` and `netcomponents` are queue-driven via `avail-ics-worker` /
+`avail-nc-worker` rather than request/response connectors. They have no
+entry in `_get_connector_for_source`, so the 15-min ping loop would flip
+them to DISABLED on every run. `app.constants.BROWSER_WORKER_SOURCES`
+holds this set, and `run_health_checks` excludes those names from the
+ping loop. Their `api_sources` row is seeded to `LIVE` + `is_active=True`
+once at startup by `seed_browser_worker_sources` (see `app/startup.py`)
+and the seed survives because the ping loop never touches them. Their
+actual health is tracked via `IcsWorkerStatus` / `NcWorkerStatus`
+heartbeats; both singletons are seeded at startup so
+`update_worker_status()` writes are not silently dropped.
+
+### Removed (2026-05-14)
+
+- Daily 3 AM `_job_refresh_stale_requisitions` cron — no background refresh
+- Requirement-creation auto-enqueue (ICS + NC + background full-connector search)
+- Legacy `POST /api/requirements/{id}/search` and
+  `POST /api/requisitions/{id}/search-all` routes
+- Row-click POST `/refresh` (row click is read-only `GET /detail` only)
 
 ## 3. RFQ Email Sending
 
@@ -550,6 +715,184 @@ BROWSER (HTMX + Alpine.js)
       status_badge macro (_macros.html): unified badge rendering
           used across all pages (requisitions, sightings, parts, etc.)
 ```
+
+---
+
+## HTMX Click-to-Refresh Pattern (Sightings)
+
+The sightings page uses a structural HTMX pattern that avoids the
+GET-then-POST race conditions and SSE re-trigger loops the codebase used
+to suffer from. It's the canonical pattern for any panel where a
+user-initiated swap and a background SSE-driven refresh can both target
+the same DOM region.
+
+**Authoritative do/don't rules live in `docs/htmx-conventions.md`** — this
+section documents the data flow only, not the rules.
+
+### Click-to-Refresh Data Flow (end to end)
+
+```
+USER clicks a sightings row
+    |
+    v
+Alpine selectReq() in partials/sightings/list.html
+    |
+    +---> $store.sightingSelection.selectedReqId = <id>
+    +---> $store.sightingSelection.clickPending += 1
+    |     -- single in-flight slot for the GET below; SSE handler stays
+    |        suppressed until it decrements back to 0.
+    |
+    +---> htmx.ajax('GET', '/v2/partials/sightings/<id>/detail', {
+    |         target: '#sightings-detail',
+    |         swap:   'innerHTML',
+    |         indicator: '#sightings-detail-skeleton',
+    |         headers: { 'X-Click-Req-Id': '<id>' }
+    |     })
+    |     -- Row click is READ-ONLY. No connector calls. Paints the
+    |        cached panel from VendorSightingSummary in ~100ms.
+    |        Fresh searches happen only when the user explicitly clicks
+    |        the per-row refresh icon or the detail-panel "Search" button
+    |        (both POST /refresh, gated by 48h per-MPN cooldown).
+    |
+    v
+SERVER: sightings_detail(...) [app/routers/sightings.py]
+    |
+    +---> Reads cached VendorSightingSummary rows; renders detail partial.
+    +---> resp.headers["X-Rendered-Req-Id"] = str(requirement_id).
+    +---> Does NOT call search_requirement (pinned by tests).
+    |
+    v
+USER clicks per-row refresh icon OR detail-panel "Search" button
+    |
+    v
+SERVER: sightings_refresh(source="user", ...) [app/routers/sightings.py]
+    |
+    +---> search_requirement() runs connector fan-out for MPNs that pass
+    |       the 48h per-MPN cooldown (skipped MPNs surface prior sightings
+    |       via material_card_id linkage instead)
+    |
+    +---> renders sightings_detail() partial (HTMX response body)
+    |       +---> resp.headers["X-Rendered-Req-Id"] = str(requirement_id)
+    |               (set unconditionally in sightings_detail; sightings_refresh
+    |                inherits via `await sightings_detail(...)`)
+    |
+    +---> (source="user" only) await _publish_if_user_source(...)
+    |       +---> sse_broker.publish("sighting-updated", {requirement_id})
+    |               on the user's channel
+    |
+    +---> (source="user" only) HX-Trigger per-MPN toast summarizing
+    |     {searched, cached} counts. SSE-source POSTs suppress toasts.
+    |
+    v
+CLIENT: htmx:beforeSwap listener in app/static/htmx_app.js
+    |
+    +---> Reads X-Rendered-Req-Id from response.
+    +---> Compares to $store.sightingSelection.selectedReqId.
+    +---> If they differ, evt.preventDefault() — drop the stale swap.
+    |     (User clicked a different row mid-flight.)
+    |
+    v
+CLIENT: htmx:afterRequest listener in app/static/htmx_app.js
+    |
+    +---> store.clickPending = Math.max(0, store.clickPending - 1)
+    |     -- decrements on EVERY outcome (swap, error, abort, stale-reject)
+    |     so the counter never gets stuck.
+    |
+    v
+SSE channel for the user fires "sighting-updated" event
+    |
+    v
+SSE listener in partials/sightings/list.html
+    |
+    +---> if ($store.sightingSelection.clickPending > 0) return;
+    |     -- user has an in-flight click; skip background refresh to avoid
+    |        target collisions.
+    |
+    +---> if (eventReqId !== $store.sightingSelection.selectedReqId) return;
+    |     -- only refresh the currently-displayed requirement.
+    |
+    +---> htmx.ajax('POST', '/v2/partials/sightings/refresh?source=sse', {
+    |         target: '#sightings-detail',
+    |         swap:   'innerHTML',
+    |         indicator: '#sightings-detail-skeleton',
+    |         values: { requirement_id: <id> }
+    |     })
+    |
+    v
+SERVER: sightings_refresh(source="sse", ...)
+    |
+    +---> Runs the connector fan-out and re-renders detail.
+    +---> Skips broker.publish (loop break — see do-not rule in
+    |     docs/htmx-conventions.md).
+    +---> Skips HX-Trigger toasts (background-triggered toasts are not
+    |     surfaced to the user).
+    +---> Still sets X-Rendered-Req-Id; client guard still runs.
+```
+
+### X-Rendered-Req-Id Correlation Header
+
+**Why it exists.** Out-of-order swap protection. If the user clicks rows
+A then B in quick succession, both POSTs are in flight simultaneously and
+either response can arrive first. Without correlation, the A response can
+clobber the B response that already swapped — leaving the wrong detail
+panel for row B.
+
+**Server side.** Set on every response from any endpoint that renders
+into `#sightings-detail`. Endpoints today:
+- `sightings_detail()` — the canonical setter; inherited by
+  `sightings_refresh()` via `await sightings_detail(...)`.
+- `sightings_log_activity()` — sets the header on its rendered detail
+  response too.
+
+**Client side.** `htmx:beforeSwap` listener in `app/static/htmx_app.js`
+reads the header off the XHR, compares to
+`Alpine.store('sightingSelection').selectedReqId`, and calls
+`evt.preventDefault()` if they differ.
+
+### `?source=user|sse` Query-Param Convention
+
+**Why it exists.** Break the SSE → broker.publish → SSE → endpoint loop
+that occurs when a refresh handler both consumes and re-emits the same
+event. Also: gate user-facing toasts so background-triggered refreshes
+stay silent.
+
+**Type contract.** `source: Literal["user", "sse"] = Query(default="user")`.
+The `Literal` type is load-bearing — a plain `str` would silently fall
+back to the user-path branch on typos like `?source=SSE` and re-introduce
+the loop. `Literal` makes FastAPI return HTTP 422 on unknown values.
+
+**Endpoints that use the gate.** All mutation endpoints under
+`app/routers/sightings.py` whose response can land in `#sightings-detail`
+or whose state change should propagate via SSE:
+- `sightings_refresh`
+- `sightings_batch_refresh`
+- `sightings_mark_unavailable`
+- `sightings_assign_buyer`
+- `sightings_advance_status`
+- `sightings_log_activity`
+
+**Shared helpers** (`app/routers/sightings.py`):
+- `_publish_if_user_source(source, user_id, requirement_id)` — calls
+  `broker.publish` only when `source != "sse"`. Used at the point where a
+  handler would otherwise emit the looped SSE event.
+- `_toast_suppressed_for_sse(source) -> bool` — guards `HX-Trigger`
+  emission. Rate-guard toasts ("Already searched within X minutes") and
+  refresh-failure toasts only fire when `source == "user"`.
+
+### Static-Analysis Enforcement
+
+The conventions are not just guidance — `tests/test_static_analysis.py`
+walks the source tree and fails CI on regressions:
+- `broker.publish` calls inside source-gated handlers must be guarded by
+  `_publish_if_user_source` or an equivalent `if source != "sse"` check.
+- `htmx.ajax()` call sites whose target is a content-sensitive panel
+  must pass an `indicator:` option (HTMX does not read `hx-indicator`
+  from the target element on imperative calls).
+- Endpoints that render into `#sightings-detail` must set
+  `X-Rendered-Req-Id`.
+
+See `docs/htmx-conventions.md` for the do/don't rules and pointers into
+the current implementation.
 
 ---
 

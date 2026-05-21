@@ -24,10 +24,14 @@ def upgrade():
         sa.Column("is_broadcast", sa.Boolean(), server_default=sa.text("false"), nullable=True),
     )
     op.create_index(
-        "ix_vendor_cards_broadcast", "vendor_cards", ["is_broadcast"], postgresql_where=sa.text("is_broadcast = true")
+        "ix_vendor_cards_broadcast",
+        "vendor_cards",
+        ["is_broadcast"],
+        postgresql_where=sa.text("is_broadcast = true"),
+        if_not_exists=True,
     )
 
 
 def downgrade():
-    op.drop_index("ix_vendor_cards_broadcast", table_name="vendor_cards")
-    op.drop_column("vendor_cards", "is_broadcast")
+    op.drop_index("ix_vendor_cards_broadcast", table_name="vendor_cards", if_exists=True)
+    op.execute("ALTER TABLE IF EXISTS vendor_cards DROP COLUMN IF EXISTS is_broadcast")

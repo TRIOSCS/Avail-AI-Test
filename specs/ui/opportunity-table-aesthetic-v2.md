@@ -73,7 +73,7 @@ Do not start coding until I approve the plan.
 
 ### Typography
 
-- MPN: mono, 13px, weight 500, primary color
+- MPN: mono, 14px, weight 600, primary color
 - Description: sans, 11px, weight 400, tertiary color
 - Status label: sans, 12px, weight 400, secondary color
 - Qty, Unit Price: tabular-nums, sans, 12px, secondary color

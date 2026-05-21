@@ -298,7 +298,7 @@ def main():
                         if item:
                             mark_status(db, item, "failed", error=str(e)[:500])
                     except Exception as mark_err:
-                        logger.error("NC worker: double fault marking item failed: %s", mark_err)
+                        logger.error("NC worker: double fault marking item failed: {}", mark_err)
                 finally:
                     db.close()
 

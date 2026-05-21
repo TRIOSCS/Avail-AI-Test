@@ -340,7 +340,7 @@ class TestRunHealthChecks:
         mock_connector.search = AsyncMock(return_value=[])
 
         mock_session = MagicMock(spec=Session)
-        mock_session.query.return_value.filter.return_value.all.return_value = [source]
+        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [source]
         mock_session.commit = MagicMock()
         mock_session.rollback = MagicMock()
         mock_session.close = MagicMock()
@@ -359,7 +359,7 @@ class TestRunHealthChecks:
         source = _make_source(db_session, name="source_b", is_active=True)
 
         mock_session = MagicMock(spec=Session)
-        mock_session.query.return_value.filter.return_value.all.return_value = [source]
+        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [source]
         mock_session.commit = MagicMock()
         mock_session.close = MagicMock()
 
@@ -373,7 +373,7 @@ class TestRunHealthChecks:
 
     def test_no_active_sources(self):
         mock_session = MagicMock(spec=Session)
-        mock_session.query.return_value.filter.return_value.all.return_value = []
+        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = []
         mock_session.commit = MagicMock()
         mock_session.close = MagicMock()
 
@@ -389,7 +389,7 @@ class TestRunHealthChecks:
         source.name = "broken_source"
 
         mock_session = MagicMock(spec=Session)
-        mock_session.query.return_value.filter.return_value.all.return_value = [source]
+        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [source]
         mock_session.commit = MagicMock()
         mock_session.close = MagicMock()
 
@@ -424,7 +424,7 @@ class TestRunHealthChecks:
             sources.append(s)
 
         mock_session = MagicMock(spec=Session)
-        mock_session.query.return_value.filter.return_value.all.return_value = sources
+        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = sources
         mock_session.close = MagicMock()
 
         commit_count = 0
@@ -460,7 +460,7 @@ class TestRunHealthChecks:
         s3.name = "source_3"
 
         mock_session = MagicMock(spec=Session)
-        mock_session.query.return_value.filter.return_value.all.return_value = [s1, s2, s3]
+        mock_session.query.return_value.filter.return_value.filter.return_value.all.return_value = [s1, s2, s3]
         mock_session.close = MagicMock()
 
         commit_count = 0
@@ -536,3 +536,66 @@ class TestNotifyAdmins:
         from app.services.health_monitor import _notify_admins
 
         _notify_admins(db_session, "test_event", "Test title")
+
+
+# ── ping_source typed-error branches ─────────────────────────────────
+
+
+class TestPingSourceTypedErrors:
+    """ping_source produces distinct last_error messages for each ConnectorError
+    subtype, giving operators type-specific guidance:
+
+    auth → rotate creds, rate-limit → auto-recovers, quota → upgrade plan.
+    """
+
+    def test_auth_error_message(self, db_session):
+        """ConnectorAuthError → last_error mentions 'rotate credentials'."""
+        from app.connectors.errors import ConnectorAuthError
+
+        source = _make_source(db_session, status="live", error_count_24h=0)
+        mock_connector = MagicMock()
+        mock_connector.search = AsyncMock(side_effect=ConnectorAuthError("bad creds"))
+
+        with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
+            with patch("app.services.health_monitor._check_status_transition"):
+                result = asyncio.get_event_loop().run_until_complete(ping_source(source, db_session))
+
+        assert result["success"] is False
+        assert source.status == "error"
+        assert "rotate credentials" in (source.last_error or "").lower()
+        assert "bad creds" in (source.last_error or "")
+
+    def test_rate_limit_error_message(self, db_session):
+        """ConnectorRateLimitError → last_error mentions 'rate limited' or 'auto-
+        recover'."""
+        from app.connectors.errors import ConnectorRateLimitError
+
+        source = _make_source(db_session, status="live", error_count_24h=0)
+        mock_connector = MagicMock()
+        mock_connector.search = AsyncMock(side_effect=ConnectorRateLimitError("hit window"))
+
+        with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
+            with patch("app.services.health_monitor._check_status_transition"):
+                result = asyncio.get_event_loop().run_until_complete(ping_source(source, db_session))
+
+        assert result["success"] is False
+        assert source.status == "error"
+        msg = (source.last_error or "").lower()
+        assert "rate limited" in msg or "auto-recover" in msg or "auto recovers" in msg
+
+    def test_quota_error_message(self, db_session):
+        """ConnectorQuotaError → last_error mentions 'quota' or 'upgrade plan'."""
+        from app.connectors.errors import ConnectorQuotaError
+
+        source = _make_source(db_session, status="live", error_count_24h=0)
+        mock_connector = MagicMock()
+        mock_connector.search = AsyncMock(side_effect=ConnectorQuotaError("plan limit"))
+
+        with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
+            with patch("app.services.health_monitor._check_status_transition"):
+                result = asyncio.get_event_loop().run_until_complete(ping_source(source, db_session))
+
+        assert result["success"] is False
+        assert source.status == "error"
+        msg = (source.last_error or "").lower()
+        assert "quota" in msg or "upgrade" in msg

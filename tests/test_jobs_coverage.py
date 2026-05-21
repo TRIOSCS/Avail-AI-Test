@@ -3,7 +3,6 @@
 Covers missing tests for:
   - health_jobs: register_health_jobs
   - prospecting_jobs: register_prospecting_jobs (enabled + disabled)
-  - sourcing_refresh_jobs: register_sourcing_refresh_jobs
   - task_jobs: register_task_jobs, _job_bid_due_alerts (all branches)
   - knowledge_jobs: register_knowledge_jobs, _job_refresh_insights, _job_expire_stale
   - tagging_jobs: register_tagging_jobs, _job_internal_boost, _job_prefix_backfill,
@@ -102,24 +101,6 @@ class TestRegisterProspectingJobs:
         register_prospecting_jobs(mock_scheduler, mock_settings)
 
         mock_scheduler.add_job.assert_not_called()
-
-
-# ═══════════════════════════════════════════════════════════════════════
-# sourcing_refresh_jobs — register_sourcing_refresh_jobs
-# ═══════════════════════════════════════════════════════════════════════
-
-
-class TestRegisterSourcingRefreshJobs:
-    def test_registers_one_job(self):
-        """register_sourcing_refresh_jobs adds 1 job."""
-        from app.jobs.sourcing_refresh_jobs import register_sourcing_refresh_jobs
-
-        mock_scheduler = MagicMock()
-        mock_settings = MagicMock()
-        register_sourcing_refresh_jobs(mock_scheduler, mock_settings)
-
-        assert mock_scheduler.add_job.call_count == 1
-        assert mock_scheduler.add_job.call_args_list[0].kwargs["id"] == "refresh_stale_requisitions"
 
 
 # ═══════════════════════════════════════════════════════════════════════

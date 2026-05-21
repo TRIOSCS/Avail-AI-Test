@@ -49,8 +49,8 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("users", "offers_column_prefs")
-    op.drop_column("users", "requirements_column_prefs")
-    op.drop_column("offers", "spq")
-    op.drop_column("requirements", "need_by_date")
-    op.drop_column("requirements", "customer_pn")
+    op.execute("ALTER TABLE IF EXISTS users DROP COLUMN IF EXISTS offers_column_prefs")
+    op.execute("ALTER TABLE IF EXISTS users DROP COLUMN IF EXISTS requirements_column_prefs")
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS spq")
+    op.execute("ALTER TABLE IF EXISTS requirements DROP COLUMN IF EXISTS need_by_date")
+    op.execute("ALTER TABLE IF EXISTS requirements DROP COLUMN IF EXISTS customer_pn")

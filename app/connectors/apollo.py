@@ -59,11 +59,11 @@ async def search_company(domain: str, api_key: str) -> dict | None:
                 params={"domain": domain},
             )
             if resp.status_code != 200:
-                logger.warning("Apollo company lookup failed: %s", resp.status_code)
+                logger.warning("Apollo company lookup failed: {}", resp.status_code)
                 return None
             return _parse_company_response(resp.json())
     except (httpx.HTTPError, KeyError, ValueError) as e:
-        logger.error("Apollo company lookup error: %s", e)
+        logger.error("Apollo company lookup error: {}", e)
         return None
 
 
@@ -81,9 +81,9 @@ async def search_contacts(domain: str, api_key: str, limit: int = 10) -> list[di
                 },
             )
             if resp.status_code != 200:
-                logger.warning("Apollo contacts search failed: %s", resp.status_code)
+                logger.warning("Apollo contacts search failed: {}", resp.status_code)
                 return []
             return _parse_contacts_response(resp.json())
     except (httpx.HTTPError, KeyError, ValueError) as e:
-        logger.error("Apollo contacts search error: %s", e)
+        logger.error("Apollo contacts search error: {}", e)
         return []

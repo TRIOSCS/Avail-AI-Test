@@ -41,7 +41,7 @@ def _make_mock_request(content_type: str, body: bytes) -> MagicMock:
 
         parsed = parse_qs(body.decode("utf-8"))
         form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (parsed.get(key, [default])[0])
+        form_mock.get = lambda key, default=None: parsed.get(key, [default])[0]
         return form_mock
 
     mock_req.json = _json

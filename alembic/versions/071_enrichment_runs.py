@@ -33,8 +33,9 @@ def upgrade() -> None:
         sa.Column("started_at", sa.DateTime),
         sa.Column("completed_at", sa.DateTime),
         sa.Column("created_at", sa.DateTime, server_default=sa.func.now()),
+        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
-    op.drop_table("enrichment_runs")
+    op.drop_table("enrichment_runs", if_exists=True)

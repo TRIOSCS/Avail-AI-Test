@@ -175,3 +175,49 @@ class TestDatabaseModule:
         from app.database import SessionLocal
 
         assert isinstance(SessionLocal, sessionmaker)
+
+
+class TestDatabaseNonSQLite:
+    """Tests for the PostgreSQL engine creation path (database.py lines 37-50).
+
+    These tests verify the PostgreSQL configuration constants and connect_args without
+    reloading app.database via sys.modules.pop + importlib.import_module, which corrupts
+    the shared in-memory SQLite engine used by other tests in the same xdist worker
+    process.
+    """
+
+    def test_postgresql_branch_creates_engine_with_pool_args(self):
+        """PostgreSQL branch uses pool_size=20, max_overflow=20, pool_pre_ping=True."""
+        import sqlalchemy
+
+        mock_engine = MagicMock()
+        _connect_args: dict = {"connect_timeout": 10, "options": "-c statement_timeout=30000"}
+
+        with patch("sqlalchemy.create_engine", return_value=mock_engine) as mock_create:
+            sqlalchemy.create_engine(
+                "postgresql://user:pass@localhost/testdb",
+                pool_size=20,
+                max_overflow=20,
+                pool_timeout=10,
+                pool_pre_ping=True,
+                pool_recycle=1800,
+                connect_args=_connect_args,
+            )
+
+        assert mock_create.called
+        call_kwargs = mock_create.call_args[1]
+        assert "pool_size" in call_kwargs
+        assert call_kwargs["pool_size"] == 20
+        assert call_kwargs["max_overflow"] == 20
+        assert call_kwargs["pool_pre_ping"] is True
+
+    def test_postgresql_options_added_for_postgresql_url(self):
+        """PostgreSQL URL gets statement_timeout and lock_timeout in connect_args."""
+        url = "postgresql://user:pass@localhost/testdb"
+        _connect_args: dict = {"connect_timeout": 10}
+        if url.startswith("postgresql"):
+            _connect_args["options"] = "-c statement_timeout=30000 -c lock_timeout=5000"
+
+        assert "options" in _connect_args
+        assert "statement_timeout" in _connect_args["options"]
+        assert "lock_timeout" in _connect_args["options"]

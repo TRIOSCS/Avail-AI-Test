@@ -119,7 +119,7 @@ async def enrich_customer_account(
 
     # No enrichment providers currently configured (Apollo/Hunter/Lusha removed)
     logger.info(
-        "Customer enrichment for %s: no providers configured, skipping",
+        "Customer enrichment for {}: no providers configured, skipping",
         company.name,
     )
     return {

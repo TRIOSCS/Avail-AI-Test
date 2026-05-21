@@ -28,10 +28,10 @@ async def main(limit: int = 500, batch_size: int = 30):
             .all()
         )
         card_ids = [c[0] for c in cards]
-        logger.info("Re-enriching %d cards (limit=%d, batch_size=%d)", len(card_ids), limit, batch_size)
+        logger.info("Re-enriching {} cards (limit={}, batch_size={})", len(card_ids), limit, batch_size)
 
         stats = await enrich_material_cards(card_ids, db, batch_size=batch_size)
-        logger.info("Re-enrichment complete: %s", stats)
+        logger.info("Re-enrichment complete: {}", stats)
 
         # Backfill MaterialSpecFacet rows from updated specs_structured
         from app.services.spec_write_service import record_spec
@@ -54,7 +54,7 @@ async def main(limit: int = 500, batch_size: int = 30):
                     )
                     facet_count += 1
         db.commit()
-        logger.info("Backfilled %d facet rows", facet_count)
+        logger.info("Backfilled {} facet rows", facet_count)
     finally:
         db.close()
 

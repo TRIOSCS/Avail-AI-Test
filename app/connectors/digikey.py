@@ -14,6 +14,7 @@ from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
+from .errors import ConnectorRateLimitError
 from .sources import BaseConnector, _parse_retry_after
 
 
@@ -110,8 +111,7 @@ class DigiKeyConnector(BaseConnector):
                 timeout=self.timeout,
             )
             if r.status_code == 429:
-                logger.warning(f"DigiKey: still rate limited for {part_number}, returning empty")
-                return []
+                raise ConnectorRateLimitError(f"DigiKey rate limited (persistent 429): {r.text[:200]}")
 
         r.raise_for_status()
         data = r.json()

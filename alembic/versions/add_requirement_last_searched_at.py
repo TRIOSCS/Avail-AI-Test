@@ -35,4 +35,4 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_column("requirements", "last_searched_at")
+    op.execute("ALTER TABLE IF EXISTS requirements DROP COLUMN IF EXISTS last_searched_at")

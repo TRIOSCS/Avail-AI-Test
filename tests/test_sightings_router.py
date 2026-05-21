@@ -5,6 +5,7 @@ Depends on: conftest.py fixtures, app models, sighting_status service
 """
 
 import json
+import re
 from datetime import datetime, timedelta, timezone
 
 from app.models.intelligence import ActivityLog, MaterialCard
@@ -83,6 +84,25 @@ class TestSightingsDetailPartial:
     def test_404_for_missing(self, client, db_session):
         resp = client.get("/v2/partials/sightings/99999/detail")
         assert resp.status_code == 404
+
+    def test_renders_tab_structure(self, client, db_session):
+        """Right pane renders an Alpine tab shell with Vendors (default) + Activity
+        tabs."""
+        _, r, _ = _seed_data(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        body = resp.text
+        # Alpine tab state initialised, defaulting to vendors
+        assert "x-data=\"{ activeTab: 'vendors' }\"" in body
+        # Both tab labels render as buttons
+        assert "activeTab = 'vendors'" in body
+        assert "activeTab = 'activity'" in body
+        # Tab labels render inside the nav buttons (whitespace-tolerant; class string is unique to tab buttons).
+        assert re.search(r'border-b-2 transition-colors whitespace-nowrap">\s*Vendors\s*</button>', body)
+        assert re.search(r'border-b-2 transition-colors whitespace-nowrap">\s*Activity\s*</button>', body)
+        # Vendors panel still shows vendor data; activity panel still hosts the log section
+        assert "Good Vendor" in body
+        assert 'id="sightings-activity-section"' in body
 
 
 class TestSightingsWorkspace:

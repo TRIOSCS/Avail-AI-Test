@@ -80,7 +80,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_mss_month_role_points", table_name="multiplier_score_snapshot")
-    op.drop_index("ix_mss_month_role_rank", table_name="multiplier_score_snapshot")
-    op.drop_index("ix_mss_user_month", table_name="multiplier_score_snapshot")
-    op.drop_table("multiplier_score_snapshot")
+    op.drop_index("ix_mss_month_role_points", table_name="multiplier_score_snapshot", if_exists=True)
+    op.drop_index("ix_mss_month_role_rank", table_name="multiplier_score_snapshot", if_exists=True)
+    op.drop_index("ix_mss_user_month", table_name="multiplier_score_snapshot", if_exists=True)
+    op.drop_table("multiplier_score_snapshot", if_exists=True)

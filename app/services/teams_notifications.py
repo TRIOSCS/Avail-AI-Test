@@ -44,9 +44,9 @@ async def post_teams_channel(message: str) -> None:
             timeout=15,
         )
         if resp.status_code not in (200, 202):
-            logger.warning("Teams webhook returned %d: %s", resp.status_code, resp.text[:200])
+            logger.warning("Teams webhook returned {}: {}", resp.status_code, resp.text[:200])
     except Exception as e:
-        logger.error("Teams channel post failed: %s", e)
+        logger.error("Teams channel post failed: {}", e)
 
 
 async def send_teams_dm(user, message: str, db=None) -> None:
@@ -62,7 +62,7 @@ async def send_teams_dm(user, message: str, db=None) -> None:
         db: optional DB session for token refresh
     """
     if not user.access_token and not db:
-        logger.debug("No token for %s, skipping Teams DM", user.email)
+        logger.debug("No token for {}, skipping Teams DM", user.email)
         return
     try:
         from app.utils.graph_client import GraphClient
@@ -74,7 +74,7 @@ async def send_teams_dm(user, message: str, db=None) -> None:
         else:
             token = user.access_token
         if not token:
-            logger.debug("No valid token for %s, skipping Teams DM", user.email)
+            logger.debug("No valid token for {}, skipping Teams DM", user.email)
             return
         gc = GraphClient(token)
         # Create or get 1:1 chat with the user (self-chat acts as notification)
@@ -94,6 +94,6 @@ async def send_teams_dm(user, message: str, db=None) -> None:
         chat_id = chat.get("id")
         if chat_id:
             await gc.post_json(f"/chats/{chat_id}/messages", {"body": {"content": message}})
-            logger.info("Teams DM sent to %s", user.email)
+            logger.info("Teams DM sent to {}", user.email)
     except Exception as e:
-        logger.warning("Teams DM to %s failed (may not have Chat permissions): %s", user.email, e)
+        logger.warning("Teams DM to {} failed (may not have Chat permissions): {}", user.email, e)

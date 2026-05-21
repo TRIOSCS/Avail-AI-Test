@@ -188,7 +188,7 @@ async def normalize_company_input(name: str, domain: str = "") -> tuple[str, str
             if fixed and fixed.strip().strip('"'):
                 clean_name = fixed.strip().strip('"')
         except Exception as e:
-            logger.warning("Typo fix skipped: %s", e)
+            logger.warning("Typo fix skipped: {}", e)
 
     return clean_name, clean_domain
 
@@ -283,7 +283,7 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
             timeout=15,
         )
         if resp.status_code != 200:
-            logger.warning("Explorium company lookup failed: %s", resp.status_code)
+            logger.warning("Explorium company lookup failed: {}", resp.status_code)
             return None
         data = resp.json()
         firmo = {k.replace("firmo_", ""): v for k, v in data.items() if k.startswith("firmo_")}
@@ -303,7 +303,7 @@ async def _explorium_find_company(domain: str, name: str = "") -> Optional[dict]
             "revenue_range": firmo.get("yearly_revenue_range"),
         }
     except (httpx.HTTPError, KeyError, ValueError) as e:
-        logger.error("Explorium company lookup error: %s", e)
+        logger.error("Explorium company lookup error: {}", e)
         return None
 
 
@@ -325,7 +325,7 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
             timeout=20,
         )
         if resp.status_code != 200:
-            logger.warning("Explorium contacts returned HTTP %d for %s", resp.status_code, domain)
+            logger.warning("Explorium contacts returned HTTP {} for {}", resp.status_code, domain)
             return []
         prospects = resp.json().get("prospects") or []
         return [
@@ -343,7 +343,7 @@ async def _explorium_find_contacts(domain: str, title_filter: str = "") -> list[
             if p.get("full_name")
         ]
     except (httpx.HTTPError, KeyError, ValueError) as e:
-        logger.error("Explorium contacts lookup error: %s", e)
+        logger.error("Explorium contacts lookup error: {}", e)
         return []
 
 
@@ -389,7 +389,7 @@ async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
             timeout=60,
         )
         if not data or not isinstance(data, dict):
-            logger.warning("AI company lookup returned no data for %s", domain)
+            logger.warning("AI company lookup returned no data for {}", domain)
             return None
         return {
             "source": "ai",
@@ -404,7 +404,7 @@ async def _ai_find_company(domain: str, name: str = "") -> Optional[dict]:
             "website": data.get("website"),
         }
     except (httpx.HTTPError, KeyError, ValueError, TypeError) as e:
-        logger.error("AI company lookup error: %s", e)
+        logger.error("AI company lookup error: {}", e)
         return None
 
 
@@ -439,7 +439,7 @@ async def _ai_find_contacts(domain: str, name: str = "", title_filter: str = "")
             if c.get("full_name")
         ]
     except (httpx.HTTPError, KeyError, ValueError, TypeError) as e:
-        logger.error("AI contacts lookup error: %s", e)
+        logger.error("AI contacts lookup error: {}", e)
         return []
 
 
@@ -544,7 +544,7 @@ async def find_suggested_contacts(domain: str, name: str = "", title_filter: str
     all_contacts = []
     for r in results:
         if isinstance(r, Exception):
-            logger.warning("Contact provider failed: %s", r)
+            logger.warning("Contact provider failed: {}", r)
             continue
         all_contacts.extend(r)
 

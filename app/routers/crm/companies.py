@@ -511,12 +511,12 @@ async def create_company(
                             if waterfall.get("contacts_added", 0) > 0:
                                 s.commit()
                                 logger.info(
-                                    "Auto-enriched company %d: %d contacts via waterfall",
+                                    "Auto-enriched company {}: {} contacts via waterfall",
                                     cid,
                                     waterfall["contacts_added"],
                                 )
                         except Exception as we:
-                            logger.warning("Waterfall auto-enrich error for company %d: %s", cid, we)
+                            logger.warning("Waterfall auto-enrich error for company {}: {}", cid, we)
                             s.rollback()
                 finally:
                     s.close()
@@ -528,7 +528,7 @@ async def create_company(
                     '{"entity_type": "company", "company_id": ' + str(cid) + "}",
                 )
             except Exception:
-                logger.exception("Background enrichment failed for company %d", cid)
+                logger.exception("Background enrichment failed for company {}", cid)
 
         await safe_background_task(
             _enrich_company_bg(result["id"], result["default_site_id"], domain, result["name"], user.id),

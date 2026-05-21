@@ -164,3 +164,25 @@ class TestDeriveVendorStatus:
         db_session.commit()
         statuses = compute_vendor_statuses(r.id, req.id, db_session)
         assert statuses["Acme Corp"] == "offer-in"
+
+    def test_empty_vendor_names_returns_empty_dict(self, db_session):
+        """Line 43: compute_vendor_statuses with no vendors returns empty dict."""
+        from app.services.sighting_status import compute_vendor_statuses
+
+        req = _make_requisition(db_session)
+        r = _make_requirement(db_session, req)
+        db_session.commit()
+        # Pass empty vendor_names explicitly
+        statuses = compute_vendor_statuses(r.id, req.id, db_session, vendor_names=[])
+        assert statuses == {}
+
+    def test_explicit_vendor_names_bypasses_db_query(self, db_session):
+        """When vendor_names is passed explicitly, no DB query for summaries."""
+        from app.services.sighting_status import compute_vendor_statuses
+
+        req = _make_requisition(db_session)
+        r = _make_requirement(db_session, req)
+        db_session.commit()
+        # Pass vendor_names directly (no summaries in DB)
+        statuses = compute_vendor_statuses(r.id, req.id, db_session, vendor_names=["My Vendor"])
+        assert statuses["My Vendor"] == "sighting"

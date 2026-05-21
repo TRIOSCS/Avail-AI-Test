@@ -209,7 +209,7 @@ def compute_buyer_multiplier(
     total_points = offer_points + bonus_points
 
     logger.debug(
-        "Buyer multiplier user=%d: %d offers, %.1f offer_pts, %.1f bonus_pts",
+        "Buyer multiplier user={}: {} offers, {:.1f} offer_pts, {:.1f} bonus_pts",
         user_id,
         len(all_offers),
         offer_points,
@@ -323,7 +323,7 @@ def compute_sales_multiplier(db: Session, user_id: int, month: date) -> dict:
     bonus_points = pts_accounts
     total_points = offer_points + bonus_points
 
-    logger.debug("Sales multiplier user=%d: %.1f offer_pts, %.1f bonus_pts", user_id, offer_points, bonus_points)
+    logger.debug("Sales multiplier user={}: {:.1f} offer_pts, {:.1f} bonus_pts", user_id, offer_points, bonus_points)
 
     return {
         "user_id": user_id,
@@ -378,7 +378,7 @@ def compute_all_multiplier_scores(db: Session, month: date | None = None) -> dic
             result["user_name"] = user.name
             buyer_results.append(result)
         except Exception as e:
-            logger.error("Multiplier error for buyer %s: %s", user.id, e)
+            logger.error("Multiplier error for buyer {}: {}", user.id, e)
 
     sales_results = []
     for user in sales + multi_role:
@@ -387,7 +387,7 @@ def compute_all_multiplier_scores(db: Session, month: date | None = None) -> dic
             result["user_name"] = user.name
             sales_results.append(result)
         except Exception as e:
-            logger.error("Multiplier error for sales %s: %s", user.id, e)
+            logger.error("Multiplier error for sales {}: {}", user.id, e)
 
     # Attach Avail Scores and determine bonuses
     _attach_avail_scores_and_rank(db, buyer_results, month, "buyer")
@@ -400,7 +400,7 @@ def compute_all_multiplier_scores(db: Session, month: date | None = None) -> dic
             saved += _upsert_multiplier(db, r, month)
 
     db.commit()
-    logger.info("Multiplier scores: %d buyers, %d sales, %d saved", len(buyer_results), len(sales_results), saved)
+    logger.info("Multiplier scores: {} buyers, {} sales, {} saved", len(buyer_results), len(sales_results), saved)
     return {"buyers": len(buyer_results), "sales": len(sales_results), "saved": saved}
 
 

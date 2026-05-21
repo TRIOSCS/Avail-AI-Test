@@ -309,7 +309,10 @@ class TestClassifyMpn:
         mock_client = MagicMock()
         mock_client.messages.create.return_value = MagicMock(content=[MagicMock(text="Voltage Regulator")])
 
-        with patch("anthropic.Anthropic", return_value=mock_client):
+        mock_anthropic_mod = MagicMock()
+        mock_anthropic_mod.Anthropic.return_value = mock_client
+
+        with patch.dict("sys.modules", {"anthropic": mock_anthropic_mod}):
             result = _classify_mpn("LM317T", "Texas Instruments", "sk-fake")
 
         assert result == "Voltage Regulator"
@@ -317,7 +320,10 @@ class TestClassifyMpn:
     def test_returns_none_on_exception(self):
         from app.services.vendor_affinity_service import _classify_mpn
 
-        with patch("anthropic.Anthropic", side_effect=Exception("API error")):
+        mock_anthropic_mod = MagicMock()
+        mock_anthropic_mod.Anthropic.side_effect = Exception("API error")
+
+        with patch.dict("sys.modules", {"anthropic": mock_anthropic_mod}):
             result = _classify_mpn("LM317T", None, "sk-fake")
 
         assert result is None
@@ -328,7 +334,10 @@ class TestClassifyMpn:
         mock_client = MagicMock()
         mock_client.messages.create.return_value = MagicMock(content=[MagicMock(text="Resistor")])
 
-        with patch("anthropic.Anthropic", return_value=mock_client):
+        mock_anthropic_mod = MagicMock()
+        mock_anthropic_mod.Anthropic.return_value = mock_client
+
+        with patch.dict("sys.modules", {"anthropic": mock_anthropic_mod}):
             result = _classify_mpn("RC0402", None, "sk-fake")
 
         assert result == "Resistor"

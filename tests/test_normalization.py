@@ -12,6 +12,7 @@ from app.utils.normalization import (
     normalize_packaging,
     normalize_price,
     normalize_quantity,
+    parse_substitute_mpns,
 )
 
 # ── normalize_quantity ────────────────────────────────────────────────
@@ -491,3 +492,141 @@ class TestNormalizeMpn:
 
     def test_empty(self):
         assert normalize_mpn("") is None
+
+
+# ── Additional edge cases for uncovered branches ─────────────────────
+
+
+class TestNormalizePriceEdgeCases:
+    """Cover lines 85-86: price range where first part is not a float."""
+
+    def test_range_with_non_numeric_first_part(self):
+        # "abc-0.42" → "-" found but "abc" can't be float → falls through
+        # to other parsing which also fails → None
+        result = normalize_price("abc-0.42")
+        # After stripping currency symbols and the range check fails,
+        # "abc-0.42" is parsed normally which fails → None
+        assert result is None
+
+    def test_range_starting_with_dash_is_treated_as_negative(self):
+        # "-0.38-0.42" starts with "-" so range is not applied
+        result = normalize_price("-0.38")
+        assert result is None  # negative price returns None
+
+
+class TestNormalizeQuantityEdgeCases:
+    """Cover lines 163-164: K/M multiplier with non-numeric prefix."""
+
+    def test_k_suffix_with_non_numeric_prefix(self):
+        # "XK" ends with "K" but "X" can't be float → falls through to plain parse
+        result = normalize_quantity("XK")
+        assert result is None
+
+    def test_m_suffix_with_non_numeric_prefix(self):
+        result = normalize_quantity("abcM")
+        assert result is None
+
+
+class TestNormalizeLeadTimeEdgeCases:
+    """Cover line 212: ambiguous number > 52 treated as days."""
+
+    def test_large_ambiguous_number_treated_as_days(self):
+        # Number > 52 with no unit → assume days (multiplier=1)
+        result = normalize_lead_time("90")
+        assert result == 90  # 90 * 1 = 90 days
+
+    def test_ambiguous_number_at_boundary(self):
+        # Exactly 52 → assume weeks (52 * 7 = 364)
+        result = normalize_lead_time("52")
+        assert result == 364  # 52 weeks
+
+
+class TestNormalizeDateCodeEdgeCases:
+    """Cover line 278: date code with fewer than 2 digits → None."""
+
+    def test_single_digit_returns_none(self):
+        result = normalize_date_code("A1")
+        # "A1" has 1 digit — not enough → None
+        assert result is None
+
+    def test_no_digits_returns_none(self):
+        result = normalize_date_code("XYZ")
+        assert result is None
+
+
+class TestFuzzyMpnMatchRevision:
+    """Cover line 400: short suffix means likely revision (True)."""
+
+    def test_two_char_suffix_revision(self):
+        # "LM317TN" vs "LM317T" — 1-char suffix "N" → likely revision
+        result = fuzzy_mpn_match("LM317TN", "LM317T")
+        assert result is True
+
+    def test_two_char_suffix_exactly(self):
+        # Up to 2 chars difference is a revision
+        result = fuzzy_mpn_match("NE555P", "NE555")
+        assert result is True
+
+
+class TestParseSubstituteMpns:
+    """Cover lines 417-435: parse_substitute_mpns function."""
+
+    def test_empty_list_returns_empty(self):
+        result = parse_substitute_mpns([], "LM317T")
+        assert result == []
+
+    def test_none_list_returns_empty(self):
+        # None is treated as falsy
+        result = parse_substitute_mpns(None, "LM317T")
+        assert result == []
+
+    def test_basic_substitute_list(self):
+        subs = [{"mpn": "LM317AT", "manufacturer": "TI"}]
+        result = parse_substitute_mpns(subs, "LM317T")
+        assert len(result) == 1
+        assert result[0]["mpn"] == "LM317AT"
+        assert result[0]["manufacturer"] == "TI"
+
+    def test_deduplication(self):
+        # Same MPN twice should deduplicate
+        subs = [
+            {"mpn": "LM317AT", "manufacturer": "TI"},
+            {"mpn": "LM317AT", "manufacturer": "Texas Instruments"},
+        ]
+        result = parse_substitute_mpns(subs, "LM317T")
+        assert len(result) == 1
+
+    def test_primary_mpn_excluded(self):
+        # Primary MPN should not be in substitute list
+        subs = [
+            {"mpn": "LM317T", "manufacturer": "TI"},
+            {"mpn": "LM317AT", "manufacturer": "TI"},
+        ]
+        result = parse_substitute_mpns(subs, "LM317T")
+        assert len(result) == 1
+        assert result[0]["mpn"] == "LM317AT"
+
+    def test_blank_mpn_skipped(self):
+        subs = [
+            {"mpn": "", "manufacturer": "TI"},
+            {"mpn": "LM317AT", "manufacturer": "TI"},
+        ]
+        result = parse_substitute_mpns(subs, "LM317T")
+        assert len(result) == 1
+
+    def test_limit_enforced(self):
+        subs = [{"mpn": f"MPN{i:03d}", "manufacturer": "TI"} for i in range(25)]
+        result = parse_substitute_mpns(subs, "BASELINE")
+        assert len(result) <= 20
+
+    def test_manufacturer_field_optional(self):
+        subs = [{"mpn": "NE555P"}]
+        result = parse_substitute_mpns(subs, "LM317T")
+        assert len(result) == 1
+        assert result[0]["manufacturer"] == ""
+
+    def test_mpn_normalized_to_uppercase(self):
+        subs = [{"mpn": "lm317at", "manufacturer": "TI"}]
+        result = parse_substitute_mpns(subs, "LM317T")
+        assert len(result) == 1
+        assert result[0]["mpn"] == "LM317AT"

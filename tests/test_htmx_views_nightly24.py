@@ -25,7 +25,6 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from fastapi import BackgroundTasks
 from sqlalchemy.orm import Session
 from starlette.requests import Request
 from starlette.responses import HTMLResponse
@@ -280,7 +279,6 @@ class TestUpdateRequirementDirect:
                 request=mock_req,
                 req_id=req.id,
                 item_id=item.id,
-                background_tasks=BackgroundTasks(),
                 primary_mpn="BC547",
                 manufacturer="Fairchild",
                 target_qty=200,
@@ -316,7 +314,6 @@ class TestUpdateRequirementDirect:
                 request=mock_req,
                 req_id=req.id,
                 item_id=item.id,
-                background_tasks=BackgroundTasks(),
                 primary_mpn="BC547",
                 manufacturer="  ",  # empty after strip
                 target_qty=100,
@@ -349,7 +346,6 @@ class TestUpdateRequirementDirect:
                 request=mock_req,
                 req_id=req.id,
                 item_id=99999,
-                background_tasks=BackgroundTasks(),
                 primary_mpn="BC547",
                 manufacturer="TI",
                 target_qty=100,
@@ -382,7 +378,6 @@ class TestUpdateRequirementDirect:
                 request=mock_req,
                 req_id=req.id,
                 item_id=item.id,
-                background_tasks=BackgroundTasks(),
                 primary_mpn="BC547",
                 manufacturer="TI",
                 target_qty=100,

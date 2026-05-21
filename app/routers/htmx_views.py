@@ -616,7 +616,6 @@ async def requisition_import_parse(
 @router.post("/v2/partials/requisitions/import-save", response_class=HTMLResponse)
 async def requisition_import_save(
     request: Request,
-    background_tasks: BackgroundTasks,
     name: str = Form(...),
     customer_name: str = Form(""),
     customer_site_id: str = Form(""),
@@ -721,32 +720,6 @@ async def requisition_import_save(
             resolve_material_card(sub_mpn, db, manufacturer=sub_mfr)
 
     db.commit()
-
-    # Auto-search all created requirements in background
-    import os
-
-    if not os.environ.get("TESTING"):
-        requirement_ids = [r.id for r in created_reqs]
-
-        def _bg_full_search(req_ids: list[int]):
-            import asyncio
-
-            from app.database import SessionLocal
-            from app.search_service import search_requirement as do_search
-
-            bg_db = SessionLocal()
-            try:
-                for rid in req_ids:
-                    try:
-                        req_obj = bg_db.get(Requirement, rid)
-                        if req_obj:
-                            asyncio.run(do_search(req_obj, bg_db))
-                    except Exception:
-                        logger.warning("Auto-search failed for requirement %s", rid, exc_info=True)
-            finally:
-                bg_db.close()
-
-        background_tasks.add_task(_bg_full_search, requirement_ids)
 
     # Return success — close modal + refresh parts list + toast
     safe_added = int(added)  # safe: server-computed int
@@ -861,7 +834,7 @@ async def customer_lookup(
               if(meta)document.dispatchEvent(new CustomEvent('customer-created',{{
                 detail:{{siteId:meta.dataset.siteId,displayName:meta.dataset.display}}
               }}));
-            }}catch(e){{btn.textContent='Failed — retry';btn.disabled=false;}}
+            }}catch(e){{console.error('quick-create failed:',e);btn.textContent='Failed — retry';btn.disabled=false;}}
           }})(this)"
                 class="px-3 py-1 text-xs font-semibold bg-emerald-600 text-white rounded hover:bg-emerald-700">
           Use This Customer
@@ -991,7 +964,6 @@ async def requisition_detail_partial(
 @router.post("/v2/partials/requisitions/create", response_class=HTMLResponse)
 async def requisition_create(
     request: Request,
-    background_tasks: BackgroundTasks,
     name: str = Form(...),
     customer_name: str = Form(""),
     deadline: str = Form(""),
@@ -1048,32 +1020,6 @@ async def requisition_create(
     db.refresh(req)
     logger.info("Created requisition {} with {} parts from text", req.id, part_count)
 
-    # Auto-search: fire background search for all new requirements
-    import os
-
-    if part_count and not os.environ.get("TESTING"):
-        requirement_ids = [r.id for r in db.query(Requirement).filter(Requirement.requisition_id == req.id).all()]
-
-        def _bg_search_all(req_ids: list[int]):
-            import asyncio
-
-            from app.database import SessionLocal
-            from app.search_service import search_requirement as do_search
-
-            bg_db = SessionLocal()
-            try:
-                for rid in req_ids:
-                    try:
-                        req_obj = bg_db.get(Requirement, rid)
-                        if req_obj:
-                            asyncio.run(do_search(req_obj, bg_db))
-                    except Exception:
-                        logger.warning("Auto-search failed for requirement %s", rid, exc_info=True)
-            finally:
-                bg_db.close()
-
-        background_tasks.add_task(_bg_search_all, requirement_ids)
-
     # Attach counts for the row partial
     req.req_count = part_count
     req.offer_count = 0
@@ -1089,7 +1035,6 @@ async def requisition_create(
 async def add_requirement(
     request: Request,
     req_id: int,
-    background_tasks: BackgroundTasks,
     primary_mpn: str = Form(...),
     manufacturer: str = Form(""),
     target_qty: int = Form(1),
@@ -1153,31 +1098,6 @@ async def add_requirement(
     db.commit()
     db.refresh(r)
 
-    # Auto-search: fire background search for the new requirement
-    import os
-
-    if not os.environ.get("TESTING"):
-
-        def _bg_search(requirement_id: int):
-            import asyncio
-
-            from ..database import SessionLocal
-            from ..search_service import search_requirement as do_search
-
-            bg_db = SessionLocal()
-            try:
-                from ..models.sourcing import Requirement
-
-                req_obj = bg_db.get(Requirement, requirement_id)
-                if req_obj:
-                    asyncio.run(do_search(req_obj, bg_db))
-            except Exception:
-                logger.warning("Auto-search failed for requirement %s", requirement_id, exc_info=True)
-            finally:
-                bg_db.close()
-
-        background_tasks.add_task(_bg_search, r.id)
-
     # Return the new row via template for HTMX append
     r.sighting_count = 0
     ctx = _base_ctx(request, user, "requisitions")
@@ -1223,7 +1143,7 @@ async def requisition_search_all(
                         if req_obj:
                             asyncio.run(do_search(req_obj, bg_db))
                     except Exception:
-                        logger.warning("Manual search failed for requirement %s", rid, exc_info=True)
+                        logger.warning("Manual search failed for requirement {}", rid, exc_info=True)
             finally:
                 bg_db.close()
 
@@ -2506,7 +2426,7 @@ async def ai_cleanup_email(
         )
         cleaned = result.strip() if result else user_text
     except Exception as exc:
-        logger.error("AI cleanup error for req %d: %s", req_id, exc)
+        logger.error("AI cleanup error for req {}: {}", req_id, exc)
         cleaned = user_text
 
     # Return a script that replaces the textarea content with the cleaned text
@@ -2859,7 +2779,6 @@ async def update_requirement(
     request: Request,
     req_id: int,
     item_id: int,
-    background_tasks: BackgroundTasks,
     primary_mpn: str = Form(...),
     manufacturer: str = Form(""),
     target_qty: int = Form(1),
@@ -2930,31 +2849,6 @@ async def update_requirement(
     db.commit()
     db.refresh(item)
 
-    # Auto-search: re-search after edit
-    import os
-
-    if not os.environ.get("TESTING"):
-
-        def _bg_search(requirement_id: int):
-            import asyncio
-
-            from ..database import SessionLocal
-            from ..search_service import search_requirement as do_search
-
-            bg_db = SessionLocal()
-            try:
-                from ..models.sourcing import Requirement
-
-                req_obj = bg_db.get(Requirement, requirement_id)
-                if req_obj:
-                    asyncio.run(do_search(req_obj, bg_db))
-            except Exception:
-                logger.warning("Auto-search failed for requirement %s", requirement_id, exc_info=True)
-            finally:
-                bg_db.close()
-
-        background_tasks.add_task(_bg_search, item.id)
-
     # Attach sighting_count for the template
     sighting_count = db.query(Sighting).filter(Sighting.requirement_id == item.id).count()
     item.sighting_count = sighting_count
@@ -3020,7 +2914,7 @@ async def search_run(
 
     from ..search_service import stream_search_mpn
 
-    await _safe_bg(stream_search_mpn(search_id, search_mpn, db), task_name="stream_search_mpn")
+    await _safe_bg(stream_search_mpn(search_id, search_mpn), task_name="stream_search_mpn")
 
     ctx = _base_ctx(request, user, "search")
     ctx.update(
@@ -8643,7 +8537,7 @@ async def enrich_material(
         await enrich_material_cards([material_id], db)
         db.refresh(mc)
     except Exception as e:
-        logger.warning("Enrichment failed for material %d: %s", material_id, e)
+        logger.warning("Enrichment failed for material {}: {}", material_id, e)
 
     return await material_detail_partial(request, material_id, user, db)
 

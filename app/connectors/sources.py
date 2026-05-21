@@ -11,6 +11,7 @@ import httpx
 from loguru import logger
 
 from ..utils import safe_float, safe_int
+from .errors import ConnectorAuthError, ConnectorError, ConnectorQuotaError, ConnectorRateLimitError
 
 # ── Async-compatible circuit breaker ─────────────────────────────────
 # Opens after `fail_max` consecutive failures, resets after `reset_timeout` seconds.
@@ -88,10 +89,13 @@ class BaseConnector(ABC):
         self._semaphore = _get_connector_semaphore(self.__class__.__name__)
 
     async def search(self, part_number: str) -> list[dict]:
-        # Short-circuit if the breaker is open (service is known-down)
+        # Short-circuit if the breaker is open (service is known-down).
+        # Raise (don't return []) so health_monitor catches and stays at
+        # status='error', and search-time _run_one renders the per-source
+        # error chip. Returning [] here masks the contract — see
+        # docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
         if self._breaker.current_state == "open":
-            logger.warning(f"{self.__class__.__name__} circuit breaker OPEN — skipping {part_number}")
-            return []
+            raise ConnectorError(f"{self.__class__.__name__} circuit breaker open")
 
         # Per-connector concurrency limit — avoids hammering one API
         async with self._semaphore:
@@ -104,6 +108,12 @@ class BaseConnector(ABC):
                 result = await self._do_search(part_number)
                 self._breaker.record_success()
                 return result
+            except ConnectorError:
+                # Hard error from the connector — auth, quota, persistent
+                # rate-limit. Do NOT retry; fast-fail so health_monitor
+                # flips status='error' and the upstream stops getting hit.
+                self._breaker.record_failure()
+                raise
             except (httpx.ConnectTimeout, httpx.ConnectError) as e:
                 # Server unreachable — no point retrying
                 self._breaker.record_failure()
@@ -123,9 +133,12 @@ class BaseConnector(ABC):
                         await asyncio.sleep(retry_after)
                         last_err = e
                         continue
-                    # Final attempt exhausted — return empty instead of crashing
+                    # Final attempt exhausted — raise so health_monitor flips
+                    # status='error'. Was: return [] (silent failure).
                     self._breaker.record_failure()
-                    return []
+                    raise ConnectorRateLimitError(
+                        f"{self.__class__.__name__} rate limited (persistent 429): {e.response.text[:200]}"
+                    )
 
                 # Auth/permission errors — fail fast (connector-specific
                 # _do_search can override to handle gracefully)
@@ -408,6 +421,14 @@ class NexarConnector(BaseConnector):
                 data = await self._run_query(self.AGGREGATE_QUERY, part_number)
                 results_data = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
                 return self._parse_aggregate(results_data, part_number) if results_data else []
+            # Quota / billing failures are hard errors — raise so the health
+            # monitor flips api_sources.status to 'error'. search_service
+            # then excludes this source from user searches; auto-recovers
+            # when the next ping returns 200. Persistent quota exhaustion
+            # keeps flipping back to 'error' until operator upgrades plan.
+            msg_lower = msg.lower()
+            if "exceed" in msg_lower and ("limit" in msg_lower or "quota" in msg_lower or "plan" in msg_lower):
+                raise ConnectorQuotaError(f"Nexar quota exceeded: {msg[:200]}")
             return []
 
         results_data = (data.get("data") or {}).get("supSearchMpn", {}).get("results", [])
@@ -564,7 +585,9 @@ class NexarConnector(BaseConnector):
 class BrokerBinConnector(BaseConnector):
     """BrokerBin REST API v2.
 
-    Auth: Bearer token in Authorization header + login header for user.
+    Auth: ``Authorization: Bearer <token>`` per the v2 docs. Older keys that
+    only worked with HTTP Basic have been retired — the bearer token format
+    is the v2.x standard.
     Endpoint: GET https://search.brokerbin.com/api/v2/part/search?query={mpn}&size=100
     Response: { meta: {...}, data: [{ company, country, part, mfg, cond, description, price, qty, age_in_days }] }
     """
@@ -575,20 +598,15 @@ class BrokerBinConnector(BaseConnector):
 
     def __init__(self, api_key: str, api_secret: str = ""):
         super().__init__()
-        self.token = api_key  # Bearer token
-        self.login = api_secret  # BrokerBin username (e.g. "triomhk")
+        self.token = api_key  # Bearer token (the v2.x API key)
+        # Legacy field — Basic-auth keys used a username+key pair. Bearer doesn't
+        # need a username; we keep the param so _build_connectors signatures don't
+        # have to change, but we never read this for v2.x auth.
+        self.login = api_secret
 
     async def _do_search(self, part_number: str) -> list[dict]:
         if not self.token:
             return []
-
-        headers = {
-            "Authorization": f"Bearer {self.token}",
-            "Accept": "application/json",
-            "Content-Type": "application/json",
-        }
-        if self.login:
-            headers["login"] = self.login
 
         params = {
             "query": part_number,
@@ -597,8 +615,25 @@ class BrokerBinConnector(BaseConnector):
 
         from ..http_client import http_redirect
 
-        r = await http_redirect.get(self.API_URL, params=params, headers=headers, timeout=self.timeout)
+        r = await http_redirect.get(
+            self.API_URL,
+            params=params,
+            headers={
+                "Accept": "application/json",
+                "Authorization": f"Bearer {self.token}",
+            },
+            timeout=self.timeout,
+        )
 
+        # Hard errors raise typed ConnectorError subclasses so
+        # health_monitor.ping_source flips api_sources.status to 'error' and
+        # search_service excludes the source from the next user search with
+        # an 'error_skipped' chip. Auto-recovers when the next ping returns
+        # 200. See docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
+        if r.status_code in (401, 403):
+            raise ConnectorAuthError(f"BrokerBin auth error: HTTP {r.status_code} {r.text[:200]}")
+        if r.status_code == 429:
+            raise ConnectorRateLimitError(f"BrokerBin rate limited: {r.text[:200]}")
         if r.status_code != 200:
             logger.warning(f"BrokerBin: HTTP {r.status_code} for {part_number}: {r.text[:200]}")
             return []

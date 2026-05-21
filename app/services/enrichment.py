@@ -110,16 +110,16 @@ async def _try_connector_config(config: dict, mpn: str) -> dict | None:
                 }
         return None
     except asyncio.TimeoutError:
-        logger.warning("Connector %s timed out for %s", config["name"], mpn)
+        logger.warning("Connector {} timed out for {}", config["name"], mpn)
         return None
     except Exception as exc:
         err_str = str(exc).lower()
         if "401" in err_str or "403" in err_str or "unauthorized" in err_str:
-            logger.error("Connector %s auth failure for %s — check API credentials", config["name"], mpn)
+            logger.error("Connector {} auth failure for {} — check API credentials", config["name"], mpn)
         elif "429" in err_str or "rate" in err_str:
-            logger.warning("Connector %s rate limited for %s", config["name"], mpn)
+            logger.warning("Connector {} rate limited for {}", config["name"], mpn)
         else:
-            logger.warning("Connector %s failed for %s", config["name"], mpn, exc_info=True)
+            logger.warning("Connector {} failed for {}", config["name"], mpn, exc_info=True)
         return None
 
 
@@ -481,7 +481,7 @@ async def nexar_bulk_validate(db: Session, limit: int = 5000) -> dict:
                         )
                         changed += 1
             except Exception:
-                logger.warning("Nexar validate failed for %s", row.normalized_mpn, exc_info=True)
+                logger.warning("Nexar validate failed for {}", row.normalized_mpn, exc_info=True)
                 no_result += 1
 
         db.commit()
@@ -564,7 +564,7 @@ async def nexar_backfill_untagged(db: Session, limit: int = 5000) -> dict:
                 tagged += 1
 
         except Exception:
-            logger.warning("Nexar backfill failed for %s", row.normalized_mpn, exc_info=True)
+            logger.warning("Nexar backfill failed for {}", row.normalized_mpn, exc_info=True)
             no_result += 1
 
         if (i + 1) % 200 == 0:

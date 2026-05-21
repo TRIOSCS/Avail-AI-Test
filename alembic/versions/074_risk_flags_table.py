@@ -33,18 +33,19 @@ def upgrade() -> None:
         sa.Column("message", sa.Text(), nullable=False),
         sa.Column("source", sa.String(50), server_default="ai"),
         sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
+        if_not_exists=True,
     )
-    op.create_index("ix_risk_flags_line", "risk_flags", ["buy_plan_line_id"])
-    op.create_index("ix_risk_flags_offer", "risk_flags", ["source_offer_id"])
-    op.create_index("ix_risk_flags_req", "risk_flags", ["requisition_id"])
-    op.create_index("ix_risk_flags_severity", "risk_flags", ["severity"])
-    op.create_index("ix_risk_flags_type", "risk_flags", ["type"])
+    op.create_index("ix_risk_flags_line", "risk_flags", ["buy_plan_line_id"], if_not_exists=True)
+    op.create_index("ix_risk_flags_offer", "risk_flags", ["source_offer_id"], if_not_exists=True)
+    op.create_index("ix_risk_flags_req", "risk_flags", ["requisition_id"], if_not_exists=True)
+    op.create_index("ix_risk_flags_severity", "risk_flags", ["severity"], if_not_exists=True)
+    op.create_index("ix_risk_flags_type", "risk_flags", ["type"], if_not_exists=True)
 
 
 def downgrade() -> None:
-    op.drop_index("ix_risk_flags_type", table_name="risk_flags")
-    op.drop_index("ix_risk_flags_severity", table_name="risk_flags")
-    op.drop_index("ix_risk_flags_req", table_name="risk_flags")
-    op.drop_index("ix_risk_flags_offer", table_name="risk_flags")
-    op.drop_index("ix_risk_flags_line", table_name="risk_flags")
-    op.drop_table("risk_flags")
+    op.drop_index("ix_risk_flags_type", table_name="risk_flags", if_exists=True)
+    op.drop_index("ix_risk_flags_severity", table_name="risk_flags", if_exists=True)
+    op.drop_index("ix_risk_flags_req", table_name="risk_flags", if_exists=True)
+    op.drop_index("ix_risk_flags_offer", table_name="risk_flags", if_exists=True)
+    op.drop_index("ix_risk_flags_line", table_name="risk_flags", if_exists=True)
+    op.drop_table("risk_flags", if_exists=True)

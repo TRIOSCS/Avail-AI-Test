@@ -215,7 +215,7 @@ async def _job_material_enrichment():
 
         result = await enrich_pending_cards(db, limit=settings.material_enrichment_batch_size)
         logger.info(
-            "Material enrichment: enriched=%d errors=%d pending=%d",
+            "Material enrichment: enriched={} errors={} pending={}",
             result["enriched"],
             result["errors"],
             result.get("pending", 0),

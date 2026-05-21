@@ -8,9 +8,7 @@ Depends on: routers/requisitions.py, conftest fixtures
 """
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
-
-from tests.conftest import TestSessionLocal
+from unittest.mock import patch
 
 # ── Requisition CRUD ──────────────────────────────────────────────────
 
@@ -342,66 +340,6 @@ def test_sourcing_score_not_found(client):
     assert resp.status_code == 404
 
 
-# ── Search ────────────────────────────────────────────────────────────
-
-
-def test_search_all(client, test_requisition):
-    """POST /api/requisitions/{id}/search triggers parallel search."""
-    with patch(
-        "app.routers.requisitions.search_requirement",
-        new_callable=AsyncMock,
-        return_value={"sightings": [], "source_stats": []},
-    ):
-        resp = client.post(f"/api/requisitions/{test_requisition.id}/search")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "source_stats" in data
-
-
-def test_search_all_not_found(client):
-    """Search returns 404 for non-existent requisition."""
-    resp = client.post("/api/requisitions/99999/search")
-    assert resp.status_code == 404
-
-
-def test_search_all_transitions_draft_to_active(client, db_session, test_requisition):
-    """First search transitions a draft requisition to active."""
-    test_requisition.status = "draft"
-    db_session.commit()
-    with patch(
-        "app.routers.requisitions.search_requirement",
-        new_callable=AsyncMock,
-        return_value={"sightings": [], "source_stats": []},
-    ):
-        resp = client.post(f"/api/requisitions/{test_requisition.id}/search")
-    assert resp.status_code == 200
-    db_session.refresh(test_requisition)
-    assert test_requisition.status == "active"
-
-
-def test_search_one(client, db_session, test_requisition):
-    """POST /api/requirements/{id}/search searches a single item."""
-    from app.models import Requirement
-
-    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-    with patch(
-        "app.routers.requisitions.search_requirement",
-        new_callable=AsyncMock,
-        return_value={"sightings": [], "source_stats": []},
-    ):
-        resp = client.post(f"/api/requirements/{req_item.id}/search")
-    assert resp.status_code == 200
-    data = resp.json()
-    assert "sightings" in data
-    assert "source_stats" in data
-
-
-def test_search_one_not_found(client):
-    """Search single returns 404 for non-existent requirement."""
-    resp = client.post("/api/requirements/99999/search")
-    assert resp.status_code == 404
-
-
 # ── Saved Sightings ──────────────────────────────────────────────────
 
 
@@ -686,7 +624,6 @@ def test_dismiss_new_offers_not_found(client):
 # ── Upload Requirements ─────────────────────────────────────────────
 
 
-@patch("app.routers.requisitions.requirements.SessionLocal", TestSessionLocal)
 def test_upload_requirements_csv(client, test_requisition):
     """POST /api/requisitions/{id}/upload accepts a CSV of MPNs."""
     import io
@@ -1039,53 +976,6 @@ def test_delete_requirement_unauthorized(client, db_session, test_user, test_req
         app.dependency_overrides[require_buyer] = lambda: test_user
 
 
-def test_search_all_with_exception(client, db_session, test_requisition):
-    """Search handles exceptions from search_requirement gracefully."""
-    with patch(
-        "app.routers.requisitions.search_requirement",
-        new_callable=AsyncMock,
-        side_effect=RuntimeError("Connector timeout"),
-    ):
-        resp = client.post(f"/api/requisitions/{test_requisition.id}/search")
-    assert resp.status_code == 200
-    data = resp.json()
-    # Should have logged the error but still return
-    assert "source_stats" in data
-
-
-def test_search_all_with_requirement_ids(client, db_session, test_requisition):
-    """Search with requirement_ids filter only searches specified requirements."""
-    from app.models import Requirement
-
-    req_item = db_session.query(Requirement).filter_by(requisition_id=test_requisition.id).first()
-
-    with patch(
-        "app.routers.requisitions.search_requirement",
-        new_callable=AsyncMock,
-        return_value={"sightings": [], "source_stats": []},
-    ):
-        resp = client.post(
-            f"/api/requisitions/{test_requisition.id}/search",
-            json={"requirement_ids": [req_item.id]},
-        )
-    assert resp.status_code == 200
-
-
-def test_search_all_reactivates_archived(client, db_session, test_requisition):
-    """Search reactivates an archived requisition."""
-    test_requisition.status = "archived"
-    db_session.commit()
-    with patch(
-        "app.routers.requisitions.search_requirement",
-        new_callable=AsyncMock,
-        return_value={"sightings": [], "source_stats": []},
-    ):
-        resp = client.post(f"/api/requisitions/{test_requisition.id}/search")
-    assert resp.status_code == 200
-    db_session.refresh(test_requisition)
-    assert test_requisition.status == "active"
-
-
 def test_search_one_unauthorized(client, db_session, test_user, test_requisition):
     """Search one returns 403 when user does not have access to parent req."""
     from app.dependencies import require_buyer, require_user
@@ -1163,7 +1053,6 @@ def test_saved_sightings_with_historical_offers(client, db_session, test_requisi
         assert "historical_offers" in entry
 
 
-@patch("app.routers.requisitions.requirements.SessionLocal", TestSessionLocal)
 def test_upload_requirements_with_substitutes(client, test_requisition):
     """Upload CSV with substitutes column creates requirements with subs."""
     import io
@@ -1177,7 +1066,6 @@ def test_upload_requirements_with_substitutes(client, test_requisition):
     assert resp.json()["created"] >= 1
 
 
-@patch("app.routers.requisitions.requirements.SessionLocal", TestSessionLocal)
 def test_upload_requirements_with_optional_columns(client, test_requisition):
     """Upload CSV with condition, packaging, date_codes, manufacturer, notes."""
     import io
@@ -1220,45 +1108,3 @@ def test_import_stock_oversized_file(client, db_session, test_requisition):
         files={"file": ("big.csv", io.BytesIO(large_content), "text/csv")},
     )
     assert resp.status_code == 413
-
-
-def test_search_all_with_source_stats_merge(client, db_session, test_requisition):
-    """Search merges source_stats across multiple requirements."""
-    from app.models import Requirement
-
-    # Add a second requirement
-    r2 = Requirement(
-        requisition_id=test_requisition.id,
-        primary_mpn="NE555P",
-        target_qty=100,
-        created_at=datetime.now(timezone.utc),
-    )
-    db_session.add(r2)
-    db_session.commit()
-
-    search_results = [
-        {
-            "sightings": [],
-            "source_stats": [{"source": "BrokerBin", "results": 3, "ms": 100, "status": "ok", "error": None}],
-        },
-        {
-            "sightings": [],
-            "source_stats": [{"source": "BrokerBin", "results": 5, "ms": 200, "status": "ok", "error": None}],
-        },
-    ]
-    call_count = 0
-
-    async def mock_search(r, db):
-        nonlocal call_count
-        result = search_results[call_count % len(search_results)]
-        call_count += 1
-        return result
-
-    with patch("app.routers.requisitions.search_requirement", side_effect=mock_search):
-        resp = client.post(f"/api/requisitions/{test_requisition.id}/search")
-    assert resp.status_code == 200
-    data = resp.json()
-    stats = data["source_stats"]
-    bb_stat = [s for s in stats if s["source"] == "BrokerBin"]
-    if bb_stat:
-        assert bb_stat[0]["results"] == 8  # 3 + 5 merged

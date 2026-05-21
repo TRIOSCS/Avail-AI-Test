@@ -130,13 +130,13 @@ def upgrade() -> None:
 
     # --- Task 2.2: New indexes ---
     for ix_name, table, columns in NEW_INDEXES:
-        op.create_index(ix_name, table, columns)
+        op.create_index(ix_name, table, columns, if_not_exists=True)
 
 
 def downgrade() -> None:
     # --- Remove indexes ---
     for ix_name, table, _columns in reversed(NEW_INDEXES):
-        op.drop_index(ix_name, table_name=table)
+        op.drop_index(ix_name, table_name=table, if_exists=True)
 
     # --- Restore SET NULL FKs to NO ACTION ---
     for table, constraint, col, ref_table, ref_col in SET_NULL_FKS:

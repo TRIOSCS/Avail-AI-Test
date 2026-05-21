@@ -25,10 +25,11 @@ def upgrade():
         sa.Column("reason", sa.Text()),
         sa.Column("dismissed_at", sa.DateTime()),
         sa.Column("created_at", sa.DateTime(), server_default=sa.func.now()),
+        if_not_exists=True,
     )
-    op.create_index("ix_reactivation_company", "reactivation_signals", ["company_id"])
-    op.create_index("ix_reactivation_type", "reactivation_signals", ["signal_type"])
+    op.create_index("ix_reactivation_company", "reactivation_signals", ["company_id"], if_not_exists=True)
+    op.create_index("ix_reactivation_type", "reactivation_signals", ["signal_type"], if_not_exists=True)
 
 
 def downgrade():
-    op.drop_table("reactivation_signals")
+    op.drop_table("reactivation_signals", if_exists=True)

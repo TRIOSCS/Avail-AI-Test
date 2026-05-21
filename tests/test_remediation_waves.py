@@ -7,7 +7,9 @@ Called by: pytest
 Depends on: conftest.py (client, db_session, test_user fixtures)
 """
 
-from app.services.status_machine import validate_transition
+import pytest
+
+from app.services.status_machine import require_valid_transition, validate_transition
 
 # ── Status Machine ──────────────────────────────────────────────────────
 
@@ -73,3 +75,25 @@ class TestStatusMachine:
     def test_raise_on_invalid_false(self):
         result = validate_transition("offer", "sold", "active", raise_on_invalid=False)
         assert result is False
+
+
+class TestRequireValidTransition:
+    """Tests for require_valid_transition — covers lines 117-120."""
+
+    def test_valid_transition_does_not_raise(self):
+        # Should not raise
+        require_valid_transition("offer", "pending_review", "active")
+
+    def test_invalid_transition_raises_http_409(self):
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            require_valid_transition("offer", "sold", "active")
+        assert exc_info.value.status_code == 409
+
+    def test_terminal_state_raises_http_409(self):
+        from fastapi import HTTPException
+
+        with pytest.raises(HTTPException) as exc_info:
+            require_valid_transition("buy_plan", "completed", "active")
+        assert exc_info.value.status_code == 409

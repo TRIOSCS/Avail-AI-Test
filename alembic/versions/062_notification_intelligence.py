@@ -30,14 +30,17 @@ def upgrade():
         sa.Column("ai_confidence", sa.Float, nullable=True),
         sa.Column("suppression_reason", sa.Text, nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        if_not_exists=True,
     )
-    op.create_index("ix_notif_engage_user_event", "notification_engagement", ["user_id", "event_type"])
-    op.create_index("ix_notif_engage_created", "notification_engagement", ["created_at"])
-    op.create_index("ix_notif_engage_user_action", "notification_engagement", ["user_id", "action"])
+    op.create_index(
+        "ix_notif_engage_user_event", "notification_engagement", ["user_id", "event_type"], if_not_exists=True
+    )
+    op.create_index("ix_notif_engage_created", "notification_engagement", ["created_at"], if_not_exists=True)
+    op.create_index("ix_notif_engage_user_action", "notification_engagement", ["user_id", "action"], if_not_exists=True)
 
     # Extend teams_alert_config
-    op.add_column(
-        "teams_alert_config", sa.Column("priority_threshold", sa.String(20), nullable=False, server_default="medium")
+    op.execute(
+        "ALTER TABLE teams_alert_config ADD COLUMN IF NOT EXISTS priority_threshold VARCHAR(20) NOT NULL DEFAULT 'medium'"
     )
     op.add_column(
         "teams_alert_config", sa.Column("batch_digest_enabled", sa.Boolean, nullable=False, server_default="true")
@@ -53,17 +56,17 @@ def upgrade():
 
 
 def downgrade():
-    op.drop_column("teams_notification_log", "batch_id")
-    op.drop_column("teams_notification_log", "ai_decision")
-    op.drop_column("teams_notification_log", "ai_priority")
-    op.drop_column("teams_notification_log", "user_id")
+    op.execute("ALTER TABLE IF EXISTS teams_notification_log DROP COLUMN IF EXISTS batch_id")
+    op.execute("ALTER TABLE IF EXISTS teams_notification_log DROP COLUMN IF EXISTS ai_decision")
+    op.execute("ALTER TABLE IF EXISTS teams_notification_log DROP COLUMN IF EXISTS ai_priority")
+    op.execute("ALTER TABLE IF EXISTS teams_notification_log DROP COLUMN IF EXISTS user_id")
 
-    op.drop_column("teams_alert_config", "quiet_hours_end")
-    op.drop_column("teams_alert_config", "quiet_hours_start")
-    op.drop_column("teams_alert_config", "batch_digest_enabled")
-    op.drop_column("teams_alert_config", "priority_threshold")
+    op.execute("ALTER TABLE IF EXISTS teams_alert_config DROP COLUMN IF EXISTS quiet_hours_end")
+    op.execute("ALTER TABLE IF EXISTS teams_alert_config DROP COLUMN IF EXISTS quiet_hours_start")
+    op.execute("ALTER TABLE IF EXISTS teams_alert_config DROP COLUMN IF EXISTS batch_digest_enabled")
+    op.execute("ALTER TABLE IF EXISTS teams_alert_config DROP COLUMN IF EXISTS priority_threshold")
 
-    op.drop_index("ix_notif_engage_user_action", "notification_engagement")
-    op.drop_index("ix_notif_engage_created", "notification_engagement")
-    op.drop_index("ix_notif_engage_user_event", "notification_engagement")
-    op.drop_table("notification_engagement")
+    op.drop_index("ix_notif_engage_user_action", "notification_engagement", if_exists=True)
+    op.drop_index("ix_notif_engage_created", "notification_engagement", if_exists=True)
+    op.drop_index("ix_notif_engage_user_event", "notification_engagement", if_exists=True)
+    op.drop_table("notification_engagement", if_exists=True)

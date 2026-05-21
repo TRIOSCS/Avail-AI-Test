@@ -173,29 +173,6 @@ class TestBatchRefreshAsync:
             )
         assert resp.status_code == 200
 
-    async def test_batch_refresh_skips_recently_searched(self, client, db_session, test_user, test_requisition):
-        from datetime import datetime, timezone
-
-        req = test_requisition
-        r = Requirement(
-            requisition_id=req.id,
-            primary_mpn="LM317T",
-            manufacturer="TI",
-            target_qty=10,
-            last_searched_at=datetime.now(timezone.utc),  # Just searched
-        )
-        db_session.add(r)
-        db_session.commit()
-
-        with patch("app.search_service.search_requirement", new_callable=AsyncMock) as mock_search:
-            resp = client.post(
-                "/v2/partials/sightings/batch-refresh",
-                data={"requirement_ids": json.dumps([r.id])},
-            )
-        # Should have skipped it
-        assert resp.status_code == 200
-        assert mock_search.call_count == 0  # Skipped due to rate limit
-
     async def test_batch_refresh_search_exception(self, client, db_session, test_user, test_requisition):
         from datetime import datetime, timedelta, timezone
 

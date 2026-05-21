@@ -121,8 +121,15 @@ def test_connector_opens_breaker_after_failures():
     assert conn._breaker.current_state == "open"
 
 
-def test_open_breaker_skips_calls():
-    """When breaker is open, search returns [] without calling _do_search."""
+def test_open_breaker_raises_without_calling():
+    """When breaker is open, search raises ConnectorError without calling _do_search.
+
+    Was: returned [] (silent failure that masked the contract —
+    health_monitor saw success and flipped status back to 'live'). See
+    docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
+    """
+    from app.connectors.errors import ConnectorError
+
     conn = _FakeConnector(fail=True)
     # Trip the breaker (fail_max=5, max_retries=0 → 5 search calls)
     for _ in range(5):
@@ -136,6 +143,6 @@ def test_open_breaker_skips_calls():
     conn.call_count = 0
     conn._fail = False
 
-    result = asyncio.run(conn.search("LM317T"))
-    assert result == []
+    with pytest.raises(ConnectorError, match="circuit breaker open"):
+        asyncio.run(conn.search("LM317T"))
     assert conn.call_count == 0  # _do_search was never called

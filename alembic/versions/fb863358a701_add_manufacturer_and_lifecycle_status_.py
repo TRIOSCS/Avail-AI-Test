@@ -17,10 +17,18 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.create_index(op.f("ix_material_cards_manufacturer"), "material_cards", ["manufacturer"], unique=False)
-    op.create_index(op.f("ix_material_cards_lifecycle_status"), "material_cards", ["lifecycle_status"], unique=False)
+    op.create_index(
+        op.f("ix_material_cards_manufacturer"), "material_cards", ["manufacturer"], unique=False, if_not_exists=True
+    )
+    op.create_index(
+        op.f("ix_material_cards_lifecycle_status"),
+        "material_cards",
+        ["lifecycle_status"],
+        unique=False,
+        if_not_exists=True,
+    )
 
 
 def downgrade() -> None:
-    op.drop_index(op.f("ix_material_cards_lifecycle_status"), table_name="material_cards")
-    op.drop_index(op.f("ix_material_cards_manufacturer"), table_name="material_cards")
+    op.drop_index(op.f("ix_material_cards_lifecycle_status"), table_name="material_cards", if_exists=True)
+    op.drop_index(op.f("ix_material_cards_manufacturer"), table_name="material_cards", if_exists=True)

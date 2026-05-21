@@ -48,18 +48,18 @@ def upgrade() -> None:
     )
 
     # Indexes for FK lookups
-    op.create_index("ix_requirements_material_card", "requirements", ["material_card_id"])
-    op.create_index("ix_sightings_material_card", "sightings", ["material_card_id"])
-    op.create_index("ix_offers_material_card", "offers", ["material_card_id"])
+    op.create_index("ix_requirements_material_card", "requirements", ["material_card_id"], if_not_exists=True)
+    op.create_index("ix_sightings_material_card", "sightings", ["material_card_id"], if_not_exists=True)
+    op.create_index("ix_offers_material_card", "offers", ["material_card_id"], if_not_exists=True)
 
 
 def downgrade() -> None:
     op.drop_constraint("fk_offers_material_card", "offers", type_="foreignkey")
     op.drop_constraint("fk_sightings_material_card", "sightings", type_="foreignkey")
     op.drop_constraint("fk_requirements_material_card", "requirements", type_="foreignkey")
-    op.drop_index("ix_offers_material_card", "offers")
-    op.drop_index("ix_sightings_material_card", "sightings")
-    op.drop_index("ix_requirements_material_card", "requirements")
-    op.drop_column("offers", "material_card_id")
-    op.drop_column("sightings", "material_card_id")
-    op.drop_column("requirements", "material_card_id")
+    op.drop_index("ix_offers_material_card", "offers", if_exists=True)
+    op.drop_index("ix_sightings_material_card", "sightings", if_exists=True)
+    op.drop_index("ix_requirements_material_card", "requirements", if_exists=True)
+    op.execute("ALTER TABLE IF EXISTS offers DROP COLUMN IF EXISTS material_card_id")
+    op.execute("ALTER TABLE IF EXISTS sightings DROP COLUMN IF EXISTS material_card_id")
+    op.execute("ALTER TABLE IF EXISTS requirements DROP COLUMN IF EXISTS material_card_id")

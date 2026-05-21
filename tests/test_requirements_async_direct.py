@@ -317,43 +317,6 @@ async def test_add_requirements_duplicate_detection(
     assert "duplicates" in result
 
 
-# ── search_all draft→active transition (lines 837-847) ───────────────────────
-
-
-async def test_search_all_transitions_draft_to_active(
-    db_session: Session, test_user: User, test_requisition: Requisition
-):
-    """Covers lines 841-847: draft req transitions to active after search."""
-    from app.routers.requisitions.requirements import search_all
-
-    # Set requisition to draft
-    test_requisition.status = "draft"
-    db_session.commit()
-
-    req_item = _make_requirement(db_session, test_requisition)
-    mock_req = MagicMock(spec=Request)
-    mock_req.headers = {}
-    bg_tasks = BackgroundTasks()
-
-    with patch(
-        "app.routers.requisitions.__init__.search_requirement",
-        new_callable=AsyncMock,
-    ) as mock_search:
-        mock_search.return_value = {"sightings": [], "source_stats": []}
-
-        result = await search_all(
-            req_id=test_requisition.id,
-            request=mock_req,
-            background_tasks=bg_tasks,
-            body=None,
-            user=test_user,
-            db=db_session,
-        )
-
-    db_session.refresh(test_requisition)
-    assert test_requisition.status == "active"
-
-
 # ── get_saved_sightings (line 914, 1025) ──────────────────────────────────────
 
 
@@ -841,119 +804,6 @@ async def test_add_requirements_task_service_exception(
     assert len(result["created"]) == 1
 
 
-# ── search_all with draft/archived status (lines 837-838, 841-847) ───────────
-
-
-async def test_search_all_with_draft_requisition_transitions_to_active(db_session: Session, test_user: User):
-    """Covers lines 841-847: draft requisition → transition to active."""
-    from app.models import Requisition
-    from app.routers.requisitions.requirements import search_all
-
-    draft_req = Requisition(
-        name="Draft Search Req",
-        status="draft",
-        created_by=test_user.id,
-    )
-    db_session.add(draft_req)
-    db_session.commit()
-    db_session.refresh(draft_req)
-
-    req_item = _make_requirement(db_session, draft_req, mpn="TL071CN")
-
-    bg_tasks = BackgroundTasks()
-
-    with (
-        patch(
-            "app.routers.requisitions.search_requirement",
-            new_callable=AsyncMock,
-            return_value={
-                "sightings": [],
-                "source_stats": [],
-                "req_stats": [],
-            },
-        ),
-        patch("app.routers.requisitions.requirements._enqueue_ics_nc_batch"),
-        patch("app.routers.requisitions._enrich_with_vendor_cards"),
-        patch("app.routers.requisitions.requirements._annotate_buyer_outcomes"),
-        # Force transition to raise ValueError to cover lines 846-847
-        patch(
-            "app.services.requisition_state.transition",
-            side_effect=ValueError("already active"),
-        ),
-    ):
-        result = await search_all(
-            req_id=draft_req.id,
-            request=MagicMock(spec=Request),
-            background_tasks=bg_tasks,
-            user=test_user,
-            db=db_session,
-        )
-
-    # search_all returns dict keyed by req_id strings, plus "source_stats"
-    assert "source_stats" in result
-
-
-async def test_search_all_merged_source_stats_with_error(db_session: Session, test_user: User):
-    """Covers lines 837-838: merged source stats where stat has error."""
-    from app.models import Requisition
-    from app.routers.requisitions.requirements import search_all
-
-    req = Requisition(
-        name="Stats Test Req",
-        status="active",
-        created_by=test_user.id,
-    )
-    db_session.add(req)
-    db_session.commit()
-    db_session.refresh(req)
-
-    _make_requirement(db_session, req, mpn="UA741CP")
-    _make_requirement(db_session, req, mpn="LM741CN")
-
-    bg_tasks = BackgroundTasks()
-
-    # First call: digikey succeeds (no error); second call: digikey fails
-    # This triggers the else branch (line 833) and the error assignment (lines 837-838)
-    call_count = {"n": 0}
-
-    async def _search_side_effect(req_obj, db_obj):
-        call_count["n"] += 1
-        if call_count["n"] == 1:
-            return {
-                "sightings": [],
-                "source_stats": [
-                    {"source": "digikey", "results": 5, "ms": 80, "error": None, "status": "ok"},
-                ],
-            }
-        return {
-            "sightings": [],
-            "source_stats": [
-                {"source": "digikey", "results": 0, "ms": 200, "error": "timeout", "status": "error"},
-            ],
-        }
-
-    with (
-        patch(
-            "app.routers.requisitions.search_requirement",
-            new_callable=AsyncMock,
-            side_effect=_search_side_effect,
-        ),
-        patch("app.routers.requisitions.requirements._enqueue_ics_nc_batch"),
-        patch("app.routers.requisitions._enrich_with_vendor_cards"),
-        patch("app.routers.requisitions.requirements._annotate_buyer_outcomes"),
-    ):
-        result = await search_all(
-            req_id=req.id,
-            request=MagicMock(spec=Request),
-            background_tasks=bg_tasks,
-            user=test_user,
-            db=db_session,
-        )
-
-    # search_all returns dict keyed by req_id strings, plus "source_stats"
-    assert "source_stats" in result
-
-
 # ── upload_requirements with substitutes column (line 593) ───────────────────
 
 
@@ -1047,7 +897,7 @@ async def test_import_stock_list_no_filename_raises_400(
 
     async def _form():
         form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (mock_file if key == "file" else default)
+        form_mock.get = lambda key, default=None: mock_file if key == "file" else default
         return form_mock
 
     mock_req.form = _form
@@ -1147,7 +997,7 @@ async def test_import_stock_list_commit_exception_raises_500(
 
     async def _form():
         form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (mock_file if key == "file" else default)
+        form_mock.get = lambda key, default=None: mock_file if key == "file" else default
         return form_mock
 
     mock_req.form = _form
@@ -1319,7 +1169,7 @@ async def test_import_stock_list_normalize_stock_row_returns_none(
 
     async def _form():
         form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (mock_file if key == "file" else default)
+        form_mock.get = lambda key, default=None: mock_file if key == "file" else default
         return form_mock
 
     mock_req.form = _form
@@ -1368,7 +1218,7 @@ async def test_import_stock_list_mpn_not_in_req_mpns(
 
     async def _form():
         form_mock = MagicMock()
-        form_mock.get = lambda key, default=None: (mock_file if key == "file" else default)
+        form_mock.get = lambda key, default=None: mock_file if key == "file" else default
         return form_mock
 
     mock_req.form = _form

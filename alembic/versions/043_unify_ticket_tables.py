@@ -36,7 +36,7 @@ def upgrade() -> None:
     op.add_column("trouble_tickets", sa.Column("current_view", sa.String(100), nullable=True))
 
     # 2. Index on source for filtered queries
-    op.create_index("ix_trouble_tickets_source", "trouble_tickets", ["source"])
+    op.create_index("ix_trouble_tickets_source", "trouble_tickets", ["source"], if_not_exists=True)
 
     # 3. Migrate data from error_reports into trouble_tickets
     #    Map statuses: open → submitted, in_progress → diagnosed, resolved → resolved, closed → rejected
@@ -97,15 +97,15 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_trouble_tickets_source", table_name="trouble_tickets")
-    op.drop_column("trouble_tickets", "current_view")
-    op.drop_column("trouble_tickets", "console_errors")
-    op.drop_column("trouble_tickets", "legacy_error_report_id")
-    op.drop_column("trouble_tickets", "source")
-    op.drop_column("trouble_tickets", "resolved_by_id")
-    op.drop_column("trouble_tickets", "admin_notes")
-    op.drop_column("trouble_tickets", "ai_prompt")
-    op.drop_column("trouble_tickets", "page_state")
-    op.drop_column("trouble_tickets", "screen_size")
-    op.drop_column("trouble_tickets", "browser_info")
-    op.drop_column("trouble_tickets", "screenshot_b64")
+    op.drop_index("ix_trouble_tickets_source", table_name="trouble_tickets", if_exists=True)
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS current_view")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS console_errors")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS legacy_error_report_id")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS source")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS resolved_by_id")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS admin_notes")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS ai_prompt")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS page_state")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS screen_size")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS browser_info")
+    op.execute("ALTER TABLE IF EXISTS trouble_tickets DROP COLUMN IF EXISTS screenshot_b64")

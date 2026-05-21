@@ -32,5 +32,5 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_sightings_vendor_norm", table_name="sightings")
-    op.drop_column("sightings", "vendor_name_normalized")
+    op.drop_index("ix_sightings_vendor_norm", table_name="sightings", if_exists=True)
+    op.execute("ALTER TABLE IF EXISTS sightings DROP COLUMN IF EXISTS vendor_name_normalized")

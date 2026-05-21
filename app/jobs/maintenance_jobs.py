@@ -70,7 +70,7 @@ async def _job_auto_attribute_activities():
         total = stats["rule_matched"] + stats["ai_matched"]
         if total:
             logger.info(
-                "Auto-attribution: %d rule-matched, %d AI-matched, %d dismissed",
+                "Auto-attribution: {} rule-matched, {} AI-matched, {} dismissed",
                 stats["rule_matched"],
                 stats["ai_matched"],
                 stats["auto_dismissed"],
@@ -95,7 +95,7 @@ async def _job_auto_dedup():
         total = stats["vendors_merged"] + stats["companies_merged"]
         if total:
             logger.info(
-                "Auto-dedup: %d vendors merged, %d companies merged",
+                "Auto-dedup: {} vendors merged, {} companies merged",
                 stats["vendors_merged"],
                 stats["companies_merged"],
             )
@@ -200,7 +200,7 @@ async def _job_integrity_check():
 
         report = run_integrity_check(db)
         logger.info(
-            "Integrity check complete: status=%s cards=%d healed=(%d/%d/%d)",
+            "Integrity check complete: status={} cards={} healed=({}/{}/{})",
             report["status"],
             report["material_cards_total"],
             report["healed"]["requirements"],

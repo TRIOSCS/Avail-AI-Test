@@ -23,29 +23,31 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Drop unused index (no query uses spec_key + value_text + material_card_id)
-    op.drop_index("ix_msf_key_text_card", table_name="material_spec_facets")
+    op.drop_index("ix_msf_key_text_card", table_name="material_spec_facets", if_exists=True)
 
     # Drop redundant index (covered by FK index and uq_msf_card_spec)
-    op.drop_index("ix_msf_card", table_name="material_spec_facets")
+    op.drop_index("ix_msf_card", table_name="material_spec_facets", if_exists=True)
 
     # Recreate numeric index with category as leading column to match query patterns
-    op.drop_index("ix_msf_key_numeric", table_name="material_spec_facets")
+    op.drop_index("ix_msf_key_numeric", table_name="material_spec_facets", if_exists=True)
     op.create_index(
         "ix_msf_key_numeric",
         "material_spec_facets",
         ["category", "spec_key", "value_numeric"],
         postgresql_where="value_numeric IS NOT NULL",
+        if_not_exists=True,
     )
 
 
 def downgrade() -> None:
     # Restore original numeric index (without category)
-    op.drop_index("ix_msf_key_numeric", table_name="material_spec_facets")
+    op.drop_index("ix_msf_key_numeric", table_name="material_spec_facets", if_exists=True)
     op.create_index(
         "ix_msf_key_numeric",
         "material_spec_facets",
         ["spec_key", "value_numeric"],
         postgresql_where="value_numeric IS NOT NULL",
+        if_not_exists=True,
     )
 
     # Restore redundant card index
@@ -53,6 +55,7 @@ def downgrade() -> None:
         "ix_msf_card",
         "material_spec_facets",
         ["material_card_id"],
+        if_not_exists=True,
     )
 
     # Restore key_text_card index
@@ -60,4 +63,5 @@ def downgrade() -> None:
         "ix_msf_key_text_card",
         "material_spec_facets",
         ["spec_key", "value_text", "material_card_id"],
+        if_not_exists=True,
     )
