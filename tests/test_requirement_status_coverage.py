@@ -21,6 +21,7 @@ from unittest.mock import patch
 
 import pytest
 
+from app.constants import ActivityType
 from app.models import ActivityLog, Requisition
 from app.services.requirement_status import (
     claim_requisition,
@@ -179,7 +180,7 @@ class TestUnclaimRequisitionNoActor:
             db_session.query(ActivityLog)
             .filter_by(
                 requisition_id=test_requisition.id,
-                activity_type="requisition_unclaimed",
+                activity_type=ActivityType.ASSIGNMENT_CHANGED,
             )
             .first()
         )

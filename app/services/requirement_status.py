@@ -15,8 +15,10 @@ from datetime import datetime, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from ..constants import ActivityType
 from ..constants import SourcingStatus as RequirementSourcingStatus
 from ..models import ActivityLog, Requirement, Requisition, User
+from .activity_service import log_activity
 
 # Valid per-part status transitions
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
@@ -147,14 +149,14 @@ def claim_requisition(requisition: Requisition, buyer: User, db: Session) -> boo
     locked.claimed_at = datetime.now(timezone.utc)
 
     try:
-        log_entry = ActivityLog(
-            user_id=buyer.id,
-            activity_type="requisition_claimed",
-            channel="system",
+        log_activity(
+            db,
+            activity_type=ActivityType.ASSIGNMENT_CHANGED,
             requisition_id=locked.id,
-            subject=f"Claimed by {buyer.name or buyer.email}",
+            user_id=buyer.id,
+            description=f"Requisition claimed by {buyer.name or buyer.email}",
+            details={"action": "claimed", "claimed_by_id": buyer.id},
         )
-        db.add(log_entry)
     except Exception as e:
         logger.warning("Failed to log requisition claim: {}", e)
 
@@ -171,15 +173,14 @@ def unclaim_requisition(requisition: Requisition, db: Session, actor: User | Non
     requisition.claimed_at = None
 
     try:
-        actor_id = actor.id if actor else None
-        log_entry = ActivityLog(
-            user_id=actor_id,
-            activity_type="requisition_unclaimed",
-            channel="system",
+        log_activity(
+            db,
+            activity_type=ActivityType.ASSIGNMENT_CHANGED,
             requisition_id=requisition.id,
-            subject=f"Released from user {old_claimer}",
+            user_id=actor.id if actor else None,
+            description="Requisition unclaimed",
+            details={"action": "unclaimed", "previous_claimed_by_id": old_claimer},
         )
-        db.add(log_entry)
     except Exception as e:
         logger.warning("Failed to log requisition unclaim: {}", e)
 

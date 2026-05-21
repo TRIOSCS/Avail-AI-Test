@@ -46,3 +46,17 @@ def test_complete_task_logs_task_completed(db_session, test_requisition, test_us
 
     rows = _activity_rows(db_session, test_requisition.id, ActivityType.TASK_COMPLETED)
     assert len(rows) == 1
+
+
+def test_claim_requisition_logs_assignment_changed(db_session, test_requisition, test_user):
+    """Claiming a requisition writes an assignment_changed activity row (not a raw-
+    string type)."""
+    from app.services.requirement_status import claim_requisition
+
+    claim_requisition(test_requisition, test_user, db_session)
+    db_session.commit()
+
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.ASSIGNMENT_CHANGED)
+    assert len(rows) == 1
+    legacy = db_session.query(ActivityLog).filter(ActivityLog.activity_type == "requisition_claimed").all()
+    assert legacy == []
