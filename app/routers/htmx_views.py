@@ -64,6 +64,7 @@ from ..models.prospect_account import ProspectAccount
 from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorContact
 from ..scoring import classify_lead, explain_lead, score_unified
+from ..services.activity_service import log_activity as _log_activity
 from ..services.commodity_registry import COMMODITY_TREE, get_display_name
 from ..services.faceted_search_service import (
     get_commodity_counts,
@@ -1923,8 +1924,6 @@ async def review_offer(
         require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
         offer.status = OfferStatus.REJECTED
 
-    from ..services.activity_service import log_activity as _log_activity
-
     _log_activity(
         db,
         activity_type=ActivityType.OFFER_STATUS_CHANGED,
@@ -2014,10 +2013,8 @@ async def add_offer(
         created_at=datetime.now(timezone.utc),
     )
     db.add(offer)
-    db.commit()
+    db.flush()  # offer.id populated; activity row + offer committed together below
     logger.info("Manual offer created: {} on req {} by {}", mpn, req_id, user.email)
-
-    from ..services.activity_service import log_activity as _log_activity
 
     _log_activity(
         db,
@@ -2217,8 +2214,6 @@ async def mark_offer_sold_htmx(
         )
     )
 
-    from ..services.activity_service import log_activity as _log_activity
-
     _log_activity(
         db,
         activity_type=ActivityType.OFFER_STATUS_CHANGED,
@@ -2281,8 +2276,6 @@ async def promote_offer_htmx(
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
 
-    from ..services.activity_service import log_activity as _log_activity
-
     _log_activity(
         db,
         activity_type=ActivityType.OFFER_STATUS_CHANGED,
@@ -2322,8 +2315,6 @@ async def reject_offer_htmx(
     offer.status = OfferStatus.REJECTED
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
-
-    from ..services.activity_service import log_activity as _log_activity
 
     _log_activity(
         db,

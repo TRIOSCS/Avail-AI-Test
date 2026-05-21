@@ -395,7 +395,7 @@ async def create_offer(
         except Exception as e:
             logger.warning("Requirement status update failed: {}", e)
 
-    db.commit()
+    db.flush()  # offer.id populated; activity row + offer committed together below
 
     log_activity(
         db,

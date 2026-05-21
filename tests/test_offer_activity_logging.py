@@ -140,6 +140,118 @@ def test_approve_offer_logs_status_changed(client, db_session, test_requisition,
     rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
     assert len(rows) == 1
     assert "status:" in (rows[0].notes or "")
+    assert rows[0].details["old_status"] == "pending_review"
+    assert rows[0].details["new_status"] == "active"
+    assert rows[0].details["offer_id"] == test_offer.id
+
+
+def test_add_offer_htmx_logs_offer_created(client, db_session, test_requisition):
+    """The add-offer HTMX route writes exactly one offer_created activity row."""
+    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_CREATED))
+    resp = client.post(
+        f"/v2/partials/requisitions/{test_requisition.id}/add-offer",
+        data={"vendor_name": "Arrow Electronics", "mpn": "LM317T"},
+    )
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_CREATED)
+    assert len(rows) == before + 1
+
+
+def test_reject_offer_logs_status_changed(client, db_session, test_requisition, test_offer):
+    """PUT /api/offers/{id}/reject writes one offer_status_changed activity row."""
+    test_offer.status = "pending_review"
+    db_session.commit()
+    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
+    resp = client.put(f"/api/offers/{test_offer.id}/reject")
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
+    assert len(rows) == before + 1
+
+
+def test_mark_offer_sold_logs_status_changed(client, db_session, test_requisition, test_offer):
+    """PATCH /api/offers/{id}/mark-sold writes one offer_status_changed activity row."""
+    test_offer.status = "active"
+    db_session.commit()
+    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
+    resp = client.patch(f"/api/offers/{test_offer.id}/mark-sold")
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
+    assert len(rows) == before + 1
+
+
+def test_promote_offer_logs_status_changed(client, db_session, test_requisition, test_offer):
+    """POST /api/offers/{id}/promote writes one offer_status_changed row with a real
+    status change."""
+    test_offer.status = "pending_review"
+    test_offer.evidence_tier = "T4"
+    db_session.commit()
+    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
+    resp = client.post(f"/api/offers/{test_offer.id}/promote")
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
+    assert len(rows) == before + 1
+    assert rows[0].details["old_status"] != rows[0].details["new_status"]
+
+
+def test_reject_offer_t4_review_logs_status_changed(client, db_session, test_requisition, test_offer):
+    """POST /api/offers/{id}/reject (T4 review) writes one offer_status_changed activity
+    row."""
+    test_offer.status = "pending_review"
+    db_session.commit()
+    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
+    resp = client.post(f"/api/offers/{test_offer.id}/reject")
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
+    assert len(rows) == before + 1
+
+
+def test_review_offer_htmx_reject_logs_status_changed(client, db_session, test_requisition, test_offer):
+    """The HTMX review handler with action=reject logs one offer_status_changed row."""
+    test_offer.status = "pending_review"
+    db_session.commit()
+    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
+    resp = client.post(
+        f"/v2/partials/requisitions/{test_requisition.id}/offers/{test_offer.id}/review",
+        data={"action": "reject"},
+    )
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
+    assert len(rows) == before + 1
+
+
+def test_mark_offer_sold_htmx_logs_status_changed(client, db_session, test_requisition, test_offer):
+    """The mark-sold HTMX handler logs one offer_status_changed row."""
+    test_offer.status = "active"
+    db_session.commit()
+    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
+    resp = client.post(
+        f"/v2/partials/requisitions/{test_requisition.id}/offers/{test_offer.id}/mark-sold",
+    )
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
+    assert len(rows) == before + 1
+
+
+def test_promote_offer_htmx_logs_status_changed(client, db_session, test_requisition, test_offer):
+    """The promote-offer HTMX handler logs one offer_status_changed row."""
+    test_offer.status = "pending_review"
+    db_session.commit()
+    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
+    resp = client.post(f"/v2/partials/offers/{test_offer.id}/promote")
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
+    assert len(rows) == before + 1
+
+
+def test_reject_offer_htmx_logs_status_changed(client, db_session, test_requisition, test_offer):
+    """The reject-offer HTMX handler logs one offer_status_changed row."""
+    test_offer.status = "pending_review"
+    db_session.commit()
+    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED))
+    resp = client.post(f"/v2/partials/offers/{test_offer.id}/reject")
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
+    assert len(rows) == before + 1
 
 
 def test_review_offer_htmx_logs_status_changed(client, db_session, test_requisition, test_offer):
