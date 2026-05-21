@@ -139,3 +139,19 @@ def test_sightings_template_responses_set_rendered_req_id():
 # changes that are not part of this hunt PR. Adding the connector enforcement
 # here without those source changes would break CI on main. Ship the test in
 # the same commit as the source changes it locks in.
+
+
+def test_standalone_pages_register_csrf_listener():
+    """Standalone page templates that issue mutating HTMX requests but do not
+    unconditionally load htmx_app.js must register their own htmx:configRequest CSRF
+    listener — otherwise starlette_csrf rejects every hx-post/patch/delete (CRIT-FE-1).
+
+    requisitions2/page.html loads requisitions2.js for exactly this reason.
+    """
+    js = Path("app/static/js/requisitions2.js").read_text()
+    assert "htmx:configRequest" in js, (
+        "requisitions2.js must register an htmx:configRequest listener that "
+        "attaches the x-csrftoken header — page.html does not always load "
+        "htmx_app.js, which carries the shared listener."
+    )
+    assert "x-csrftoken" in js, "requisitions2.js CSRF listener must set the x-csrftoken header"

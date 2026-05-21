@@ -164,8 +164,19 @@ def _seed_agent_user() -> None:
     try:
         existing = db.query(User).filter_by(email="agent@availai.local").first()
         if existing:
+            # Correct a legacy agent row seeded with an over-privileged role.
+            # The agent is a non-interactive service account and must hold
+            # only UserRole.AGENT — never admin or buyer (see dependencies.py).
+            if existing.role != UserRole.AGENT:
+                logger.warning(
+                    "Demoting agent service account from role '{}' to '{}'",
+                    existing.role,
+                    UserRole.AGENT.value,
+                )
+                existing.role = UserRole.AGENT
+                db.commit()
             return
-        user = User(email="agent@availai.local", name="Agent", role=UserRole.ADMIN, is_active=True)
+        user = User(email="agent@availai.local", name="Agent", role=UserRole.AGENT, is_active=True)
         db.add(user)
         db.commit()
         logger.info("Seeded agent service account")
