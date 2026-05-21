@@ -64,4 +64,7 @@ RUN useradd -r -u 1000 -m appuser \
     && mkdir -p /app/fix_queue && chown appuser:appuser /app/fix_queue
 
 ENTRYPOINT ["tini", "--", "./docker-entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# No --forwarded-allow-ips here: uvicorn safe-defaults to 127.0.0.1 when the
+# image is run standalone. docker-compose.yml overrides `command:` to trust
+# the compose network where Caddy fronts the app.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

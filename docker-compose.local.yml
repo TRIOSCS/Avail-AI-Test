@@ -12,7 +12,7 @@ services:
       - ./app:/app/app
       - /app/app/static/dist    # preserve Vite-built assets from image
       - ./scripts:/app/scripts
-    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*", "--reload", "--reload-dir", "/app/app"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "172.28.0.0/24", "--reload", "--reload-dir", "/app/app"]
 
   redis:
     ports:

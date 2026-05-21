@@ -37,6 +37,21 @@ if [ "$NO_COMMIT" = false ]; then
         echo "No changes to commit — skipping commit step"
     else
         git add -A
+        # Last line of defence before `git add -A` lands something in history.
+        # .gitignore should already exclude these, but the moment it misses a
+        # new untracked file (a secret, an SSH key, a DB dump) `git add -A`
+        # stages it. Abort the deploy rather than commit it.
+        DANGER=$(git diff --cached --name-only | grep -iE \
+            '(^|/)\.env($|\.)|\.(pem|key|p12|pfx|sql|sqlite3?|dump)$|(^|/)(credentials|service-account|id_rsa|id_ed25519)[^/]*$' \
+            || true)
+        if [ -n "$DANGER" ]; then
+            echo "ERROR: deploy aborted — refusing to commit sensitive/data files:" >&2
+            echo "$DANGER" | sed 's/^/  /' >&2
+            echo "Add them to .gitignore or commit deliberately outside ./deploy.sh." >&2
+            echo "The working tree is unchanged; nothing was committed." >&2
+            git reset -q
+            exit 4
+        fi
         git commit -m "${1:-deploy}"
     fi
 

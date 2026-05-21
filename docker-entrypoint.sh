@@ -26,12 +26,19 @@ if [ -d /srv/static ]; then
     cp -r app/static/dist/* /srv/static/
 fi
 
-# Run database migrations before starting the app (DB is healthy via depends_on)
+# Run database migrations before starting the app (DB is healthy via depends_on).
+# A failed migration is fatal: starting the app against an un-migrated schema
+# risks data corruption and masks the real problem. `alembic upgrade head` is
+# idempotent — it is a no-op when the schema is already current, so a non-zero
+# exit always means a genuine failure.
 echo "Running alembic upgrade head..."
 if ! runuser -u appuser -- alembic upgrade head 2>&1; then
-    echo "WARNING: alembic upgrade head failed — skipping (schema may already be current)."
+    echo "ERROR: alembic upgrade head failed — refusing to start the app." >&2
+    echo "The database schema is not at head. Investigate the migration failure" >&2
+    echo "before restarting; do not start the app against a stale schema." >&2
+    exit 1
 fi
-echo "Alembic: migrations check done."
+echo "Alembic: migrations complete."
 
 # Drop to non-root user and start the app
 exec runuser -u appuser -- "$@"
