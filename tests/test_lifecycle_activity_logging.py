@@ -60,3 +60,17 @@ def test_claim_requisition_logs_assignment_changed(db_session, test_requisition,
     assert len(rows) == 1
     legacy = db_session.query(ActivityLog).filter(ActivityLog.activity_type == "requisition_claimed").all()
     assert legacy == []
+
+
+def test_toggle_archive_logs_req_archived(client, db_session, test_requisition):
+    """Archiving a requisition writes a req_archived activity row; toggling back writes
+    a req_unarchived row."""
+    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.REQ_ARCHIVED)
+    assert len(rows) == 1
+
+    resp = client.put(f"/api/requisitions/{test_requisition.id}/archive")
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.REQ_UNARCHIVED)
+    assert len(rows) == 1

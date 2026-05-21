@@ -558,8 +558,22 @@ async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Se
         raise HTTPException(404, "Requisition not found")
     if req.status in ("archived", "won", "lost"):
         req.status = RequisitionStatus.ACTIVE
+        log_activity(
+            db,
+            activity_type=ActivityType.REQ_UNARCHIVED,
+            requisition_id=req.id,
+            user_id=user.id,
+            description="Requisition unarchived",
+        )
     else:
         req.status = RequisitionStatus.ARCHIVED
+        log_activity(
+            db,
+            activity_type=ActivityType.REQ_ARCHIVED,
+            requisition_id=req.id,
+            user_id=user.id,
+            description="Requisition archived",
+        )
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "status": req.status}

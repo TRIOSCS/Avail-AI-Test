@@ -336,3 +336,4 @@ class ActivityType(StrEnum):
     TASK_COMPLETED = "task_completed"
     ASSIGNMENT_CHANGED = "assignment_changed"
     REQ_ARCHIVED = "req_archived"
+    REQ_UNARCHIVED = "req_unarchived"

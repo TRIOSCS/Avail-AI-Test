@@ -9808,6 +9808,13 @@ async def archive_requisition(
     requisition.status = RequisitionStatus.ARCHIVED
     for child in requisition.requirements:
         child.sourcing_status = SourcingStatus.ARCHIVED
+    _log_activity(
+        db,
+        activity_type=ActivityType.REQ_ARCHIVED,
+        requisition_id=requisition.id,
+        user_id=user.id,
+        description="Requisition archived",
+    )
     db.commit()
     logger.info("Requisition {} ({} parts) archived by {}", req_id, len(requisition.requirements), user.email)
 
@@ -9830,6 +9837,13 @@ async def unarchive_requisition(
     for child in requisition.requirements:
         if child.sourcing_status == SourcingStatus.ARCHIVED:
             child.sourcing_status = SourcingStatus.OPEN
+    _log_activity(
+        db,
+        activity_type=ActivityType.REQ_UNARCHIVED,
+        requisition_id=requisition.id,
+        user_id=user.id,
+        description="Requisition unarchived",
+    )
     db.commit()
     logger.info("Requisition {} unarchived by {}", req_id, user.email)
 
@@ -9861,6 +9875,13 @@ async def bulk_archive(
         reqs = db.query(Requisition).filter(Requisition.id.in_(requisition_ids)).all()
         for requisition in reqs:
             requisition.status = RequisitionStatus.ARCHIVED
+            _log_activity(
+                db,
+                activity_type=ActivityType.REQ_ARCHIVED,
+                requisition_id=requisition.id,
+                user_id=user.id,
+                description="Requisition archived",
+            )
         # Cascade: archive all children of these requisitions
         db.query(Requirement).filter(
             Requirement.requisition_id.in_(requisition_ids),
