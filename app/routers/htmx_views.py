@@ -1911,6 +1911,8 @@ async def review_offer(
     if not offer:
         raise HTTPException(404, "Offer not found")
 
+    old_status = offer.status
+
     if action == "approve":
         require_valid_transition("offer", offer.status, OfferStatus.APPROVED)
         offer.status = OfferStatus.APPROVED
@@ -1920,6 +1922,22 @@ async def review_offer(
     else:
         require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
         offer.status = OfferStatus.REJECTED
+
+    from ..services.activity_service import log_activity as _log_activity
+
+    _log_activity(
+        db,
+        activity_type=ActivityType.OFFER_STATUS_CHANGED,
+        requisition_id=offer.requisition_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
+        details={
+            "offer_id": offer.id,
+            "old_status": str(old_status),
+            "new_status": str(offer.status),
+        },
+    )
 
     db.commit()
     logger.info("Offer {} {} by {}", offer_id, action, user.email)
@@ -2198,6 +2216,23 @@ async def mark_offer_sold_htmx(
             new_value="sold",
         )
     )
+
+    from ..services.activity_service import log_activity as _log_activity
+
+    _log_activity(
+        db,
+        activity_type=ActivityType.OFFER_STATUS_CHANGED,
+        requisition_id=offer.requisition_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
+        details={
+            "offer_id": offer.id,
+            "old_status": str(old_status),
+            "new_status": str(offer.status),
+        },
+    )
+
     db.commit()
     logger.info("Offer {} marked sold by {}", offer_id, user.email)
 
@@ -2238,12 +2273,30 @@ async def promote_offer_htmx(
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be promoted")
 
+    old_status = offer.status
     require_valid_transition("offer", offer.status, OfferStatus.ACTIVE)
     offer.status = OfferStatus.ACTIVE
     offer.approved_by_id = user.id
     offer.approved_at = datetime.now(timezone.utc)
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
+
+    from ..services.activity_service import log_activity as _log_activity
+
+    _log_activity(
+        db,
+        activity_type=ActivityType.OFFER_STATUS_CHANGED,
+        requisition_id=offer.requisition_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
+        details={
+            "offer_id": offer.id,
+            "old_status": str(old_status),
+            "new_status": str(offer.status),
+        },
+    )
+
     db.commit()
     logger.info("Offer {} promoted by {}", offer_id, user.email)
 
@@ -2264,10 +2317,28 @@ async def reject_offer_htmx(
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be rejected")
 
+    old_status = offer.status
     require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
     offer.status = OfferStatus.REJECTED
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
+
+    from ..services.activity_service import log_activity as _log_activity
+
+    _log_activity(
+        db,
+        activity_type=ActivityType.OFFER_STATUS_CHANGED,
+        requisition_id=offer.requisition_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
+        details={
+            "offer_id": offer.id,
+            "old_status": str(old_status),
+            "new_status": str(offer.status),
+        },
+    )
+
     db.commit()
     logger.info("Offer {} rejected by {}", offer_id, user.email)
 

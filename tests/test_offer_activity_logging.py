@@ -140,3 +140,16 @@ def test_approve_offer_logs_status_changed(client, db_session, test_requisition,
     rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
     assert len(rows) == 1
     assert "status:" in (rows[0].notes or "")
+
+
+def test_review_offer_htmx_logs_status_changed(client, db_session, test_requisition, test_offer):
+    """Approving an offer through the HTMX review handler logs offer_status_changed."""
+    test_offer.status = "pending_review"
+    db_session.commit()
+    resp = client.post(
+        f"/v2/partials/requisitions/{test_requisition.id}/offers/{test_offer.id}/review",
+        data={"action": "approve"},
+    )
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
+    assert len(rows) >= 1
