@@ -23,6 +23,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..constants import (
+    ActivityType,
     AttributionStatus,
     BuyPlanStatus,
     ContactStatus,
@@ -1997,6 +1998,20 @@ async def add_offer(
     db.add(offer)
     db.commit()
     logger.info("Manual offer created: {} on req {} by {}", mpn, req_id, user.email)
+
+    from ..services.activity_service import log_activity as _log_activity
+
+    _log_activity(
+        db,
+        activity_type=ActivityType.OFFER_CREATED,
+        requisition_id=offer.requisition_id,
+        requirement_id=offer.requirement_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
+        details={"offer_id": offer.id, "source": offer.source},
+    )
+    db.commit()
 
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 

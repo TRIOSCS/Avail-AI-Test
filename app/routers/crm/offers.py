@@ -6,7 +6,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
-from ...constants import OfferStatus, RequisitionStatus, UserRole
+from ...constants import ActivityType, OfferStatus, RequisitionStatus, UserRole
 from ...database import get_db
 from ...dependencies import is_admin as _is_admin
 from ...dependencies import require_buyer, require_user
@@ -25,6 +25,7 @@ from ...models import (
 )
 from ...schemas.crm import OfferCreate, OfferUpdate, OneDriveAttach
 from ...schemas.responses import OfferListResponse
+from ...services.activity_service import log_activity
 from ...services.credential_service import get_credential_cached
 from ...services.status_machine import require_valid_transition
 from ...utils.async_helpers import safe_background_task
@@ -394,6 +395,18 @@ async def create_offer(
         except Exception as e:
             logger.warning("Requirement status update failed: {}", e)
 
+    db.commit()
+
+    log_activity(
+        db,
+        activity_type=ActivityType.OFFER_CREATED,
+        requisition_id=offer.requisition_id,
+        requirement_id=offer.requirement_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
+        details={"offer_id": offer.id, "source": offer.source},
+    )
     db.commit()
 
     # Auto-generate review task for new offer
