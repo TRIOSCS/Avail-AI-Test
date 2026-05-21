@@ -447,15 +447,16 @@ class TestBackfillProactiveOfferQty:
 class TestCreateDefaultUserDefaultRole:
     """Additional _create_default_user_if_env_set coverage."""
 
-    def test_default_role_is_admin(self):
-        """Without DEFAULT_USER_ROLE, role defaults to 'admin'."""
+    def test_default_role_is_buyer(self):
+        """Without DEFAULT_USER_ROLE, role defaults to least-privilege 'buyer', never
+        'admin' (CRIT-SEC-2)."""
         from app.startup import _create_default_user_if_env_set
 
         mock_session = MagicMock()
         mock_session.query.return_value.filter_by.return_value.first.return_value = None
 
         env = {
-            "DEFAULT_USER_EMAIL": "admin@example.com",
+            "DEFAULT_USER_EMAIL": "default@example.com",
             "DEFAULT_USER_PASSWORD": "secret",
         }
         with (
@@ -466,7 +467,7 @@ class TestCreateDefaultUserDefaultRole:
             _create_default_user_if_env_set()
 
         created_user = mock_session.add.call_args[0][0]
-        assert created_user.role == "admin"
+        assert created_user.role == "buyer"
 
 
 class TestExecAdditional:
