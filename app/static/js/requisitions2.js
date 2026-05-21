@@ -12,6 +12,18 @@
  * bundle. Keep behavior in sync with htmx_app.js:splitPanel.
  */
 
+// ── CSRF token for all HTMX requests ───────────────────────
+// Mirrors the listener in htmx_app.js. page.html is a standalone template
+// that only conditionally loads the Vite bundle (htmx_app.js), so without
+// this every hx-post/patch/delete from this page would be rejected by the
+// starlette_csrf middleware for lacking the x-csrftoken header.
+document.body.addEventListener('htmx:configRequest', (evt) => {
+  const csrfCookie = document.cookie.match(/csrftoken=([^;]+)/)?.[1];
+  if (csrfCookie) {
+    evt.detail.headers['x-csrftoken'] = csrfCookie;
+  }
+});
+
 document.addEventListener('alpine:init', () => {
   Alpine.data('splitPanel', (panelId, defaultPct) => ({
     leftWidth: parseInt(localStorage.getItem('avail_split_' + panelId) || defaultPct),

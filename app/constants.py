@@ -153,6 +153,9 @@ class UserRole(StrEnum):
     TRADER = "trader"
     MANAGER = "manager"
     ADMIN = "admin"
+    # Non-interactive service account (x-agent-key auth). Least privilege:
+    # deliberately excluded from require_buyer's allowed set and never admin.
+    AGENT = "agent"
 
 
 class ProactiveOfferStatus(StrEnum):
