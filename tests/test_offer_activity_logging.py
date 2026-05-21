@@ -116,3 +116,16 @@ def test_save_freeform_offers_logs_offer_created(db_session, test_requisition, t
     db_session.commit()
     rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_CREATED)
     assert len(rows) >= 1
+
+
+def test_clone_requisition_logs_offer_created(db_session, test_requisition, test_user, test_offer):
+    """Cloning a requisition that has offers logs offer_created per cloned offer."""
+    from app.services.requisition_service import clone_requisition
+
+    before = db_session.query(ActivityLog).filter(ActivityLog.activity_type == ActivityType.OFFER_CREATED).count()
+    new_req = clone_requisition(db=db_session, source_req=test_requisition, user_id=test_user.id)
+    db_session.commit()
+    after = db_session.query(ActivityLog).filter(ActivityLog.activity_type == ActivityType.OFFER_CREATED).count()
+    assert after > before
+    rows = _activity_rows(db_session, new_req.id, ActivityType.OFFER_CREATED)
+    assert len(rows) >= 1
