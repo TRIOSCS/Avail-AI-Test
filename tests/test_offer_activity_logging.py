@@ -129,3 +129,14 @@ def test_clone_requisition_logs_offer_created(db_session, test_requisition, test
     assert after > before
     rows = _activity_rows(db_session, new_req.id, ActivityType.OFFER_CREATED)
     assert len(rows) >= 1
+
+
+def test_approve_offer_logs_status_changed(client, db_session, test_requisition, test_offer):
+    """Approving an offer via the API writes an offer_status_changed activity row."""
+    test_offer.status = "pending_review"
+    db_session.commit()
+    resp = client.put(f"/api/offers/{test_offer.id}/approve")
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_STATUS_CHANGED)
+    assert len(rows) == 1
+    assert "status:" in (rows[0].notes or "")

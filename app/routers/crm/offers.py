@@ -639,6 +639,19 @@ async def approve_offer(
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
     record_changes(db, "offer", offer_id, user.id, {"status": old_status}, {"status": "active"}, ["status"])
+    log_activity(
+        db,
+        activity_type=ActivityType.OFFER_STATUS_CHANGED,
+        requisition_id=offer.requisition_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
+        details={
+            "offer_id": offer.id,
+            "old_status": str(old_status),
+            "new_status": str(offer.status),
+        },
+    )
     db.commit()
     return {"ok": True, "status": "active"}
 
@@ -664,6 +677,19 @@ async def reject_offer(
     if reason:
         offer.notes = f"{offer.notes or ''}\n[Rejected: {reason}]".strip()
     record_changes(db, "offer", offer_id, user.id, {"status": old_status}, {"status": "rejected"}, ["status"])
+    log_activity(
+        db,
+        activity_type=ActivityType.OFFER_STATUS_CHANGED,
+        requisition_id=offer.requisition_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
+        details={
+            "offer_id": offer.id,
+            "old_status": str(old_status),
+            "new_status": str(offer.status),
+        },
+    )
     db.commit()
     return {"ok": True, "status": "rejected"}
 
@@ -691,6 +717,19 @@ async def mark_offer_sold(
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
     record_changes(db, "offer", offer_id, user.id, {"status": old_status}, {"status": "sold"}, ["status"])
+    log_activity(
+        db,
+        activity_type=ActivityType.OFFER_STATUS_CHANGED,
+        requisition_id=offer.requisition_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
+        details={
+            "offer_id": offer.id,
+            "old_status": str(old_status),
+            "new_status": str(offer.status),
+        },
+    )
     db.commit()
     return {"ok": True, "status": "sold"}
 
@@ -994,9 +1033,23 @@ async def promote_offer(
 
     offer.evidence_tier = "T5"
     require_valid_transition("offer", offer.status, OfferStatus.ACTIVE)
+    old_status = offer.status
     offer.status = OfferStatus.ACTIVE
     offer.promoted_by_id = user.id
     offer.promoted_at = datetime.now(timezone.utc)
+    log_activity(
+        db,
+        activity_type=ActivityType.OFFER_STATUS_CHANGED,
+        requisition_id=offer.requisition_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
+        details={
+            "offer_id": offer.id,
+            "old_status": str(old_status),
+            "new_status": str(offer.status),
+        },
+    )
     db.commit()
 
     logger.info(f"Offer {offer_id} promoted T4→T5 by user {user.id}")
@@ -1021,9 +1074,23 @@ async def reject_offer_t4_review(
         raise HTTPException(400, "Only pending_review offers can be rejected")
 
     require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
+    old_status = offer.status
     offer.status = OfferStatus.REJECTED
     offer.updated_by_id = user.id
     offer.updated_at = datetime.now(timezone.utc)
+    log_activity(
+        db,
+        activity_type=ActivityType.OFFER_STATUS_CHANGED,
+        requisition_id=offer.requisition_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
+        details={
+            "offer_id": offer.id,
+            "old_status": str(old_status),
+            "new_status": str(offer.status),
+        },
+    )
     db.commit()
 
     logger.info(f"Offer {offer_id} rejected by user {user.id}")
