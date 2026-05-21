@@ -86,7 +86,9 @@ def _create_default_user_if_env_set() -> None:
 
     email = os.environ.get("DEFAULT_USER_EMAIL")
     password = os.environ.get("DEFAULT_USER_PASSWORD")
-    role = os.environ.get("DEFAULT_USER_ROLE", "admin")
+    # Least privilege: an unspecified role yields a buyer, never an admin.
+    # Set DEFAULT_USER_ROLE explicitly to grant a higher tier (CRIT-SEC-2).
+    role = os.environ.get("DEFAULT_USER_ROLE", "buyer")
     if not email or not password:
         return
 

@@ -25,70 +25,76 @@ document.body.addEventListener('htmx:configRequest', (evt) => {
 });
 
 document.addEventListener('alpine:init', () => {
-  Alpine.data('splitPanel', (panelId, defaultPct) => ({
-    leftWidth: parseInt(localStorage.getItem('avail_split_' + panelId) || defaultPct),
-    _resizing: false,
-    _startX: 0,
-    _startWidth: 0,
+  // splitPanel is also registered by htmx_app.js (the Vite bundle). When the
+  // bundle is loaded it sets window.__availSplitPanelRegistered and wins;
+  // this standalone copy registers only as the no-bundle fallback so the
+  // component is never registered twice (CRIT-FE-2).
+  if (!window.__availSplitPanelRegistered) {
+    Alpine.data('splitPanel', (panelId, defaultPct) => ({
+      leftWidth: parseInt(localStorage.getItem('avail_split_' + panelId) || defaultPct),
+      _resizing: false,
+      _startX: 0,
+      _startWidth: 0,
 
-    startResize(e) {
-      this._resizing = true;
-      this._startX = e.clientX;
-      this._startWidth = this.leftWidth;
-      document.body.style.cursor = 'col-resize';
-      document.body.style.userSelect = 'none';
+      startResize(e) {
+        this._resizing = true;
+        this._startX = e.clientX;
+        this._startWidth = this.leftWidth;
+        document.body.style.cursor = 'col-resize';
+        document.body.style.userSelect = 'none';
 
-      const onMove = (ev) => {
-        if (!this._resizing) return;
-        const container = document.getElementById('split-' + panelId);
-        if (!container) return;
-        const dx = ev.clientX - this._startX;
-        const containerW = container.offsetWidth;
-        const newPct = this._startWidth + (dx / containerW) * 100;
-        this.leftWidth = Math.max(20, Math.min(70, Math.round(newPct)));
-      };
+        const onMove = (ev) => {
+          if (!this._resizing) return;
+          const container = document.getElementById('split-' + panelId);
+          if (!container) return;
+          const dx = ev.clientX - this._startX;
+          const containerW = container.offsetWidth;
+          const newPct = this._startWidth + (dx / containerW) * 100;
+          this.leftWidth = Math.max(20, Math.min(70, Math.round(newPct)));
+        };
 
-      const onUp = () => {
-        this._resizing = false;
-        document.body.style.cursor = '';
-        document.body.style.userSelect = '';
-        localStorage.setItem('avail_split_' + panelId, this.leftWidth);
-        document.removeEventListener('mousemove', onMove);
-        document.removeEventListener('mouseup', onUp);
-      };
+        const onUp = () => {
+          this._resizing = false;
+          document.body.style.cursor = '';
+          document.body.style.userSelect = '';
+          localStorage.setItem('avail_split_' + panelId, this.leftWidth);
+          document.removeEventListener('mousemove', onMove);
+          document.removeEventListener('mouseup', onUp);
+        };
 
-      document.addEventListener('mousemove', onMove);
-      document.addEventListener('mouseup', onUp);
-    },
+        document.addEventListener('mousemove', onMove);
+        document.addEventListener('mouseup', onUp);
+      },
 
-    startTouchResize(e) {
-      const touch = e.touches[0];
-      this._resizing = true;
-      this._startX = touch.clientX;
-      this._startWidth = this.leftWidth;
+      startTouchResize(e) {
+        const touch = e.touches[0];
+        this._resizing = true;
+        this._startX = touch.clientX;
+        this._startWidth = this.leftWidth;
 
-      const onTouchMove = (ev) => {
-        if (!this._resizing) return;
-        const t = ev.touches[0];
-        const container = document.getElementById('split-' + panelId);
-        if (!container) return;
-        const dx = t.clientX - this._startX;
-        const containerW = container.offsetWidth;
-        const newPct = this._startWidth + (dx / containerW) * 100;
-        this.leftWidth = Math.max(20, Math.min(70, Math.round(newPct)));
-      };
+        const onTouchMove = (ev) => {
+          if (!this._resizing) return;
+          const t = ev.touches[0];
+          const container = document.getElementById('split-' + panelId);
+          if (!container) return;
+          const dx = t.clientX - this._startX;
+          const containerW = container.offsetWidth;
+          const newPct = this._startWidth + (dx / containerW) * 100;
+          this.leftWidth = Math.max(20, Math.min(70, Math.round(newPct)));
+        };
 
-      const onTouchEnd = () => {
-        this._resizing = false;
-        localStorage.setItem('avail_split_' + panelId, this.leftWidth);
-        document.removeEventListener('touchmove', onTouchMove);
-        document.removeEventListener('touchend', onTouchEnd);
-      };
+        const onTouchEnd = () => {
+          this._resizing = false;
+          localStorage.setItem('avail_split_' + panelId, this.leftWidth);
+          document.removeEventListener('touchmove', onTouchMove);
+          document.removeEventListener('touchend', onTouchEnd);
+        };
 
-      document.addEventListener('touchmove', onTouchMove);
-      document.addEventListener('touchend', onTouchEnd);
-    },
-  }));
+        document.addEventListener('touchmove', onTouchMove);
+        document.addEventListener('touchend', onTouchEnd);
+      },
+    }));
+  }
 
   Alpine.data('rq2Page', () => ({
     selectedIds: new Set(),

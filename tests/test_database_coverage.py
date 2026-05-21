@@ -177,47 +177,69 @@ class TestDatabaseModule:
         assert isinstance(SessionLocal, sessionmaker)
 
 
-class TestDatabaseNonSQLite:
-    """Tests for the PostgreSQL engine creation path (database.py lines 37-50).
+class TestMakeEngine:
+    """Exercises the real engine-construction branches in app/database.py via the
+    extracted _make_engine() factory.
 
-    These tests verify the PostgreSQL configuration constants and connect_args without
-    reloading app.database via sys.modules.pop + importlib.import_module, which corrupts
-    the shared in-memory SQLite engine used by other tests in the same xdist worker
-    process.
+    Earlier tests here reconstructed the kwargs inline and never touched app.database,
+    so the production branch was effectively untested (CRIT-TEST-2). These call
+    _make_engine() directly — with create_engine patched so the branch logic is asserted
+    without a real connection and without rebuilding the shared engine.
     """
 
-    def test_postgresql_branch_creates_engine_with_pool_args(self):
-        """PostgreSQL branch uses pool_size=20, max_overflow=20, pool_pre_ping=True."""
-        import sqlalchemy
+    def test_postgresql_branch_passes_pool_and_timeout_args(self):
+        """A postgresql:// URL gets the production pool settings and the
+        statement_timeout / lock_timeout connect option."""
+        import app.database as database
 
-        mock_engine = MagicMock()
-        _connect_args: dict = {"connect_timeout": 10, "options": "-c statement_timeout=30000"}
+        with patch.object(database, "create_engine") as mock_create:
+            database._make_engine("postgresql://user:pass@localhost/testdb")
 
-        with patch("sqlalchemy.create_engine", return_value=mock_engine) as mock_create:
-            sqlalchemy.create_engine(
-                "postgresql://user:pass@localhost/testdb",
-                pool_size=20,
-                max_overflow=20,
-                pool_timeout=10,
-                pool_pre_ping=True,
-                pool_recycle=1800,
-                connect_args=_connect_args,
-            )
+        assert mock_create.call_count == 1
+        args, kwargs = mock_create.call_args
+        assert args[0] == "postgresql://user:pass@localhost/testdb"
+        assert kwargs["pool_size"] == 20
+        assert kwargs["max_overflow"] == 20
+        assert kwargs["pool_timeout"] == 10
+        assert kwargs["pool_pre_ping"] is True
+        assert kwargs["pool_recycle"] == 1800
+        assert "statement_timeout" in kwargs["connect_args"]["options"]
+        assert "lock_timeout" in kwargs["connect_args"]["options"]
 
-        assert mock_create.called
-        call_kwargs = mock_create.call_args[1]
-        assert "pool_size" in call_kwargs
-        assert call_kwargs["pool_size"] == 20
-        assert call_kwargs["max_overflow"] == 20
-        assert call_kwargs["pool_pre_ping"] is True
+    def test_sqlite_branch_uses_static_pool(self):
+        """A sqlite:// URL builds a StaticPool engine with check_same_thread off."""
+        import app.database as database
 
-    def test_postgresql_options_added_for_postgresql_url(self):
-        """PostgreSQL URL gets statement_timeout and lock_timeout in connect_args."""
-        url = "postgresql://user:pass@localhost/testdb"
-        _connect_args: dict = {"connect_timeout": 10}
-        if url.startswith("postgresql"):
-            _connect_args["options"] = "-c statement_timeout=30000 -c lock_timeout=5000"
+        with patch.object(database, "create_engine") as mock_create:
+            database._make_engine("sqlite:///tmp/test.db")
 
-        assert "options" in _connect_args
-        assert "statement_timeout" in _connect_args["options"]
-        assert "lock_timeout" in _connect_args["options"]
+        assert mock_create.call_count == 1
+        _, kwargs = mock_create.call_args
+        assert kwargs["poolclass"].__name__ == "StaticPool"
+        assert kwargs["connect_args"] == {"check_same_thread": False}
+
+    def test_non_postgresql_url_omits_timeout_options(self):
+        """A non-sqlite, non-postgresql URL keeps the pool args but gets no
+        statement_timeout options in connect_args."""
+        import app.database as database
+
+        with patch.object(database, "create_engine") as mock_create:
+            database._make_engine("mysql://user:pass@localhost/db")
+
+        assert mock_create.call_count == 1
+        _, kwargs = mock_create.call_args
+        assert kwargs["pool_size"] == 20
+        assert "options" not in kwargs["connect_args"]
+
+    def test_make_engine_postgresql_builds_real_queue_pool(self):
+        """Sanity check with create_engine un-patched: a postgresql:// URL
+        yields a real QueuePool engine (no connection is opened)."""
+        from app.database import _make_engine
+
+        eng = _make_engine("postgresql://user:pass@localhost:5432/testdb")
+        try:
+            assert eng.pool.__class__.__name__ == "QueuePool"
+            assert eng.pool.size() == 20
+            assert eng.dialect.name == "postgresql"
+        finally:
+            eng.dispose()
