@@ -74,6 +74,7 @@ from ..services.freeform_parser_service import parse_freeform_rfq
 from ..services.status_machine import require_valid_transition
 from ..template_env import templates
 from ..utils.search_builder import SearchBuilder
+from ..utils.sql_helpers import escape_like
 from ._lookup_helpers import get_requisition_or_404, get_vendor_card_or_404
 from .auth import _password_login_enabled
 
@@ -367,9 +368,9 @@ async def requisitions_list_partial(
             select(Requirement.id).where(
                 Requirement.requisition_id == Requisition.id,
                 or_(
-                    Requirement.primary_mpn.ilike(safe),
-                    Requirement.customer_pn.ilike(safe),
-                    Requirement.substitutes_text.ilike(safe),
+                    Requirement.primary_mpn.ilike(safe, escape="\\"),
+                    Requirement.customer_pn.ilike(safe, escape="\\"),
+                    Requirement.substitutes_text.ilike(safe, escape="\\"),
                 ),
             )
         )
@@ -1129,9 +1130,7 @@ async def requisition_search_all(
     if not os.environ.get("TESTING"):
         requirement_ids = [r.id for r in requirements]
 
-        def _bg_search(req_ids: list[int]):
-            import asyncio
-
+        async def _bg_search(req_ids: list[int]):
             from app.database import SessionLocal
             from app.search_service import search_requirement as do_search
 
@@ -1141,7 +1140,7 @@ async def requisition_search_all(
                     try:
                         req_obj = bg_db.get(Requirement, rid)
                         if req_obj:
-                            asyncio.run(do_search(req_obj, bg_db))
+                            await do_search(req_obj, bg_db)
                     except Exception:
                         logger.warning("Manual search failed for requirement {}", rid, exc_info=True)
             finally:
@@ -3327,12 +3326,12 @@ async def vendors_list_partial(
         from sqlalchemy import Text, cast
 
         sb = SearchBuilder(q.strip())
-        term = f"%{q.strip()}%"
+        term = f"%{escape_like(q.strip())}%"
         query = query.filter(
             or_(
                 sb.ilike_filter(VendorCard.display_name, VendorCard.domain),
-                cast(VendorCard.brand_tags, Text).ilike(term),
-                cast(VendorCard.commodity_tags, Text).ilike(term),
+                cast(VendorCard.brand_tags, Text).ilike(term, escape="\\"),
+                cast(VendorCard.commodity_tags, Text).ilike(term, escape="\\"),
             )
         )
 
@@ -6921,8 +6920,8 @@ async def manufacturer_search(
 
     results = []
     if q.strip():
-        pattern = f"%{q.strip()}%"
-        by_name = db.query(Manufacturer).filter(Manufacturer.canonical_name.ilike(pattern)).limit(10).all()
+        pattern = f"%{escape_like(q.strip())}%"
+        by_name = db.query(Manufacturer).filter(Manufacturer.canonical_name.ilike(pattern, escape="\\")).limit(10).all()
         results = list(by_name)
         if len(results) < 10:
             seen_ids = {r.id for r in results}
@@ -6930,7 +6929,7 @@ async def manufacturer_search(
                 db.query(Manufacturer)
                 .filter(
                     Manufacturer.id.notin_(seen_ids),
-                    cast(Manufacturer.aliases, Text).ilike(pattern),
+                    cast(Manufacturer.aliases, Text).ilike(pattern, escape="\\"),
                 )
                 .limit(10 - len(results))
                 .all()
