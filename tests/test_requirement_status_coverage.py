@@ -186,13 +186,3 @@ class TestUnclaimRequisitionNoActor:
         )
         assert log is not None
         assert log.user_id is None
-
-    def test_unclaim_activity_log_exception_is_swallowed(self, db_session, test_requisition, test_user):
-        """ActivityLog creation failure during unclaim is swallowed (lines 183-184)."""
-        test_requisition.claimed_by_id = test_user.id
-        db_session.commit()
-
-        with patch("app.services.requirement_status.ActivityLog", side_effect=Exception("log err")):
-            changed = unclaim_requisition(test_requisition, db_session, actor=test_user)
-        assert changed is True
-        assert test_requisition.claimed_by_id is None

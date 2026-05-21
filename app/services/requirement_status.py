@@ -148,17 +148,14 @@ def claim_requisition(requisition: Requisition, buyer: User, db: Session) -> boo
     locked.claimed_by_id = buyer.id
     locked.claimed_at = datetime.now(timezone.utc)
 
-    try:
-        log_activity(
-            db,
-            activity_type=ActivityType.ASSIGNMENT_CHANGED,
-            requisition_id=locked.id,
-            user_id=buyer.id,
-            description=f"Requisition claimed by {buyer.name or buyer.email}",
-            details={"action": "claimed", "claimed_by_id": buyer.id},
-        )
-    except Exception as e:
-        logger.warning("Failed to log requisition claim: {}", e)
+    log_activity(
+        db,
+        activity_type=ActivityType.ASSIGNMENT_CHANGED,
+        requisition_id=locked.id,
+        user_id=buyer.id,
+        description=f"Requisition claimed by {buyer.name or buyer.email}",
+        details={"action": "claimed", "claimed_by_id": buyer.id},
+    )
 
     return True
 
@@ -172,16 +169,13 @@ def unclaim_requisition(requisition: Requisition, db: Session, actor: User | Non
     requisition.claimed_by_id = None
     requisition.claimed_at = None
 
-    try:
-        log_activity(
-            db,
-            activity_type=ActivityType.ASSIGNMENT_CHANGED,
-            requisition_id=requisition.id,
-            user_id=actor.id if actor else None,
-            description="Requisition unclaimed",
-            details={"action": "unclaimed", "previous_claimed_by_id": old_claimer},
-        )
-    except Exception as e:
-        logger.warning("Failed to log requisition unclaim: {}", e)
+    log_activity(
+        db,
+        activity_type=ActivityType.ASSIGNMENT_CHANGED,
+        requisition_id=requisition.id,
+        user_id=actor.id if actor else None,
+        description="Requisition unclaimed",
+        details={"action": "unclaimed", "previous_claimed_by_id": old_claimer},
+    )
 
     return True
