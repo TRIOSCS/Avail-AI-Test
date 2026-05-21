@@ -14,8 +14,9 @@ from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.constants import TaskStatus
+from app.constants import ActivityType, TaskStatus
 from app.models.task import RequisitionTask
+from app.services.activity_service import log_activity
 
 # ---------------------------------------------------------------------------
 # CRUD
@@ -194,6 +195,15 @@ def complete_task(
     task.status = TaskStatus.DONE
     task.completed_at = datetime.now(timezone.utc)
     task.completion_note = completion_note
+    log_activity(
+        db,
+        activity_type=ActivityType.TASK_COMPLETED,
+        requisition_id=task.requisition_id,
+        requirement_id=task.requirement_id,
+        user_id=user_id,
+        description=f"Task completed: {task.title}",
+        details={"task_id": task.id},
+    )
     db.commit()
     db.refresh(task)
     logger.info("Task {} completed by user {}", task_id, user_id)

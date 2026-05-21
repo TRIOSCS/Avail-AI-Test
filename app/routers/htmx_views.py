@@ -9704,6 +9704,15 @@ async def mark_task_done(
 
     task.status = TaskStatus.DONE
     task.completed_at = datetime.now(timezone.utc)
+    _log_activity(
+        db,
+        activity_type=ActivityType.TASK_COMPLETED,
+        requisition_id=task.requisition_id,
+        requirement_id=task.requirement_id,
+        user_id=user.id,
+        description=f"Task completed: {task.title}",
+        details={"task_id": task.id},
+    )
     db.commit()
     logger.info("Task {} marked done by {}", task_id, user.email)
 
