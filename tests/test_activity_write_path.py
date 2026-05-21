@@ -9,7 +9,6 @@ Depends on: app/constants.py, app/services/activity_service.py, conftest.py
 """
 
 from app.constants import ActivityType
-from app.jobs.email_jobs import _AVAIL_TAG_RE
 from app.models import ActivityLog
 from app.services.activity_service import (
     get_requisition_activities,
@@ -18,6 +17,7 @@ from app.services.activity_service import (
     log_email_activity,
     log_rfq_activity,
 )
+from app.shared_constants import RFQ_SUBJECT_TAG_RE
 
 
 def test_activity_type_values_fit_column():
@@ -95,11 +95,11 @@ def test_log_call_activity_accepts_requisition_id(db_session, test_requisition, 
 
 def test_avail_tag_re_matches_ref_format():
     """The sent-folder scan must recognise the [ref:N] tag that RFQ send writes."""
-    assert _AVAIL_TAG_RE.search("Quote request RE part [ref:4321]").group(1) == "4321"
+    assert RFQ_SUBJECT_TAG_RE.search("Quote request RE part [ref:4321]").group(1) == "4321"
 
 
 def test_avail_tag_re_matches_legacy_format():
-    assert _AVAIL_TAG_RE.search("Quote request [AVAIL-99]").group(1) == "99"
+    assert RFQ_SUBJECT_TAG_RE.search("Quote request [AVAIL-99]").group(1) == "99"
 
 
 def test_get_requisition_activities_returns_scoped_rows(db_session, test_requisition, test_user):

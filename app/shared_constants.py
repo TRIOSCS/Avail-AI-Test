@@ -4,9 +4,11 @@ Consolidated here to avoid duplication of noise/junk domain lists,
 email prefixes, and other constants that were previously defined
 independently in email_service.py and utils/vendor_helpers.py.
 
-Called by: email_service.py, utils/vendor_helpers.py
+Called by: email_service.py, utils/vendor_helpers.py, jobs/email_jobs.py
 Depends on: nothing
 """
+
+import re
 
 # ── Noise / Junk domains ────────────────────────────────────────────────
 # Domains that should not be treated as vendor contacts.
@@ -112,3 +114,11 @@ JUNK_VENDORS: set[str] = {
     "no vendor",
     "no seller",
 }
+
+# ── RFQ subject tags ────────────────────────────────────────────────────
+# Extracts the requisition ID from an RFQ email subject tag. Matches both
+# [ref:123] (current, written by email_service.send_batch_rfq) and
+# [AVAIL-123] (legacy). Single source of truth — used by the RFQ send-path
+# reader (email_service.monitor_sent_folders) and the sent-folder scan job
+# (jobs/email_jobs).
+RFQ_SUBJECT_TAG_RE = re.compile(r"\[(?:ref:|AVAIL-)(\d+)\]")
