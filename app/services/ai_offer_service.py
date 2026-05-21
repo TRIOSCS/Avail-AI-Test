@@ -13,7 +13,7 @@ Depends on: models (Offer, Requirement, Requisition, VendorCard, VendorContact,
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from ..constants import OfferStatus
+from ..constants import ActivityType, OfferStatus
 from ..models import (
     CustomerSite,
     Offer,
@@ -26,6 +26,7 @@ from ..models import (
 )
 from ..utils.normalization import fuzzy_mpn_match, normalize_mpn_key
 from ..vendor_utils import normalize_vendor_name
+from .activity_service import log_activity
 
 # -- Prospect Contact Promotion -----------------------------------------------
 
@@ -184,6 +185,16 @@ def save_parsed_offers(db: Session, requisition_id: int, response_id: int | None
         )
         db.add(offer)
         db.flush()
+        log_activity(
+            db,
+            activity_type=ActivityType.OFFER_CREATED,
+            requisition_id=offer.requisition_id,
+            requirement_id=offer.requirement_id,
+            user_id=user_id,
+            vendor_card_id=offer.vendor_card_id,
+            description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
+            details={"offer_id": offer.id, "source": offer.source},
+        )
         created.append(offer.id)
 
     logger.info(
@@ -321,6 +332,16 @@ def save_freeform_offers(
         )
         db.add(offer)
         db.flush()
+        log_activity(
+            db,
+            activity_type=ActivityType.OFFER_CREATED,
+            requisition_id=offer.requisition_id,
+            requirement_id=offer.requirement_id,
+            user_id=user_id,
+            vendor_card_id=offer.vendor_card_id,
+            description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
+            details={"offer_id": offer.id, "source": offer.source},
+        )
         created.append(offer.id)
 
     logger.info(

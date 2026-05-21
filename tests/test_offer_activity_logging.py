@@ -70,3 +70,49 @@ def test_email_parsed_offer_logs_offer_created(db_session, test_requisition):
 
     rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_CREATED)
     assert len(rows) >= 1
+
+
+def _one_parsed_offer():
+    """Return an offers list with one valid DraftOfferItem for the AI offer services."""
+    from app.schemas.ai import DraftOfferItem
+
+    return [
+        DraftOfferItem(
+            vendor_name="Arrow Electronics",
+            mpn="LM317T",
+            manufacturer="Texas Instruments",
+            qty_available=500,
+            unit_price=0.42,
+        )
+    ]
+
+
+def test_save_parsed_offers_logs_offer_created(db_session, test_requisition):
+    """save_parsed_offers writes one offer_created row per saved offer."""
+    from app.services.ai_offer_service import save_parsed_offers
+
+    save_parsed_offers(
+        db=db_session,
+        requisition_id=test_requisition.id,
+        response_id=None,
+        offers=_one_parsed_offer(),
+        user_id=None,
+    )
+    db_session.commit()
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_CREATED)
+    assert len(rows) >= 1
+
+
+def test_save_freeform_offers_logs_offer_created(db_session, test_requisition, test_user):
+    """save_freeform_offers writes one offer_created row per saved offer."""
+    from app.services.ai_offer_service import save_freeform_offers
+
+    save_freeform_offers(
+        db=db_session,
+        requisition_id=test_requisition.id,
+        offers=_one_parsed_offer(),
+        user_id=test_user.id,
+    )
+    db_session.commit()
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.OFFER_CREATED)
+    assert len(rows) >= 1
