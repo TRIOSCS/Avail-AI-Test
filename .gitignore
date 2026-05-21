@@ -22,6 +22,7 @@ node_modules/
 .claude/worktrees/
 
 # Dev/test artifacts
+.playwright-mcp/
 .coverage
 coverage.xml
 coverage.json
