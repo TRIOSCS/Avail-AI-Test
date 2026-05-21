@@ -98,6 +98,28 @@ class TestCreateDefaultUser:
         assert "$" in u.password_hash
 
     @patch("app.startup.SessionLocal")
+    def test_default_role_is_buyer_when_role_unset(self, mock_sl, db_session):
+        """With DEFAULT_USER_ROLE unset, the created user is a buyer — never an admin
+        (CRIT-SEC-2: least privilege)."""
+        from app.startup import _create_default_user_if_env_set
+
+        mock_sl.return_value = db_session
+
+        env = {
+            "DEFAULT_USER_EMAIL": "defaultrole@test.com",
+            "DEFAULT_USER_PASSWORD": "secret123",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            os.environ.pop("DEFAULT_USER_ROLE", None)
+            _create_default_user_if_env_set()
+
+        from app.models.auth import User
+
+        u = db_session.query(User).filter_by(email="defaultrole@test.com").first()
+        assert u is not None
+        assert u.role == "buyer"
+
+    @patch("app.startup.SessionLocal")
     def test_skips_if_user_already_exists(self, mock_sl, db_session, admin_user):
         """Does not create duplicate user."""
         from app.startup import _create_default_user_if_env_set
