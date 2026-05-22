@@ -236,7 +236,7 @@ def log_call_activity(
 
     match = match_phone_to_entity(phone, db)
 
-    activity_type = f"call_{direction}"
+    activity_type = ActivityType.CALL_LOGGED
 
     # Auto-generate subject if not explicitly provided
     if not subject:
@@ -391,14 +391,14 @@ def get_contact_timeline(
 def get_last_outbound_activity(db: Session, company_id: int) -> ActivityLog | None:
     """Get the most recent outbound activity for a company.
 
-    Checks both new direction column and legacy activity_type values.
+    Outbound is identified by the canonical ``direction`` column, which every
+    call and email writer populates.
     """
-    legacy_outbound = ["email_sent", "call_outbound", "phone_call"]
     return (
         db.query(ActivityLog)
         .filter(
             ActivityLog.company_id == company_id,
-            (ActivityLog.direction == "outbound") | (ActivityLog.activity_type.in_(legacy_outbound)),
+            ActivityLog.direction == "outbound",
         )
         .order_by(ActivityLog.created_at.desc())
         .first()
@@ -460,7 +460,7 @@ def log_company_call(
     db: Session,
 ) -> ActivityLog:
     """Log a manual call against a company."""
-    activity_type = f"call_{direction}"
+    activity_type = ActivityType.CALL_LOGGED
     record = ActivityLog(
         user_id=user_id,
         activity_type=activity_type,
@@ -469,6 +469,7 @@ def log_company_call(
         contact_phone=phone,
         contact_name=contact_name,
         duration_seconds=duration_seconds,
+        direction=direction,
         notes=notes,
     )
     db.add(record)
@@ -574,7 +575,7 @@ def log_vendor_call(
     requisition_id: int | None = None,
 ) -> ActivityLog:
     """Log a manual call against a known vendor (from vendor popup)."""
-    activity_type = f"call_{direction}"
+    activity_type = ActivityType.CALL_LOGGED
     record = ActivityLog(
         user_id=user_id,
         activity_type=activity_type,
@@ -584,6 +585,7 @@ def log_vendor_call(
         contact_phone=phone,
         contact_name=contact_name,
         duration_seconds=duration_seconds,
+        direction=direction,
         notes=notes,
         requisition_id=requisition_id,
     )

@@ -47,8 +47,8 @@ def company_activities(db_session: Session, test_user: User, test_company: Compa
         [
             ("email_sent", "email", "outbound", "email"),
             ("email_received", "email", "inbound", "email"),
-            ("call_outbound", "phone", "outbound", "call"),
-            ("call_inbound", "phone", "inbound", "call"),
+            ("call_logged", "phone", "outbound", "call"),
+            ("call_logged", "phone", "inbound", "call"),
             ("note", "manual", None, "note"),
         ]
     ):
@@ -85,7 +85,7 @@ def contact_activities(
     for i, (atype, chan) in enumerate(
         [
             ("email_sent", "email"),
-            ("call_outbound", "phone"),
+            ("call_logged", "phone"),
         ]
     ):
         a = ActivityLog(
@@ -187,7 +187,7 @@ class TestGetLastOutboundActivity:
     def test_returns_most_recent_outbound(self, db_session, test_company, company_activities):
         result = get_last_outbound_activity(db_session, test_company.id)
         assert result is not None
-        assert result.direction == "outbound" or result.activity_type in ("email_sent", "call_outbound", "phone_call")
+        assert result.direction == "outbound"
 
     def test_returns_none_when_no_outbound(self, db_session, test_user, test_company):
         # Only inbound activity
@@ -206,14 +206,15 @@ class TestGetLastOutboundActivity:
         result = get_last_outbound_activity(db_session, test_company.id)
         assert result is None
 
-    def test_backward_compat_legacy_activity_type(self, db_session, test_user, test_company):
-        """Legacy records without direction column still match via activity_type."""
+    def test_canonical_call_logged_matches_via_direction(self, db_session, test_user, test_company):
+        """A canonical call_logged row is matched as outbound purely by the direction
+        column."""
         a = ActivityLog(
             user_id=test_user.id,
-            activity_type="phone_call",
+            activity_type="call_logged",
             channel="phone",
             company_id=test_company.id,
-            direction=None,  # legacy — no direction set
+            direction="outbound",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(a)
@@ -221,7 +222,24 @@ class TestGetLastOutboundActivity:
 
         result = get_last_outbound_activity(db_session, test_company.id)
         assert result is not None
-        assert result.activity_type == "phone_call"
+        assert result.activity_type == "call_logged"
+        assert result.direction == "outbound"
+
+    def test_call_logged_inbound_is_not_outbound(self, db_session, test_user, test_company):
+        """An inbound call_logged row must not be returned as outbound activity."""
+        a = ActivityLog(
+            user_id=test_user.id,
+            activity_type="call_logged",
+            channel="phone",
+            company_id=test_company.id,
+            direction="inbound",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(a)
+        db_session.commit()
+
+        result = get_last_outbound_activity(db_session, test_company.id)
+        assert result is None
 
 
 # ═══════════════════════════════════════════════════════════════════════

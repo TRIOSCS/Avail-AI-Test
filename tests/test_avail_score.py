@@ -375,8 +375,9 @@ class TestSalesAvailScore:
             db_session.add(
                 ActivityLog(
                     user_id=sales.id,
-                    activity_type="call_outbound",
+                    activity_type="call_logged",
                     channel="phone",
+                    direction="outbound",
                     created_at=datetime(2026, 2, i + 1, 10, 0, 0, tzinfo=timezone.utc),
                 )
             )

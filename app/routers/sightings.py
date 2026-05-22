@@ -22,7 +22,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
-from ..constants import OfferStatus, RequisitionStatus, SourcingStatus
+from ..constants import ActivityType, OfferStatus, RequisitionStatus, SourcingStatus
 from ..database import get_db
 from ..dependencies import require_fresh_token, require_user
 from ..models import User
@@ -1027,12 +1027,18 @@ async def sightings_log_activity(
     if not requirement:
         raise HTTPException(status_code=404, detail="Requirement not found")
 
-    activity_type_map = {"note": "note", "call": "call_outbound", "email": "email_sent"}
+    activity_type_map = {
+        "note": "note",
+        "call": ActivityType.CALL_LOGGED,
+        "email": "email_sent",
+    }
 
     record = ActivityLog(
         user_id=user.id,
         activity_type=activity_type_map[channel],
         channel=channel if channel != "note" else "manual",
+        # Manual call/email logs from the sighting timeline are outbound.
+        direction="outbound" if channel in ("call", "email") else None,
         requirement_id=requirement_id,
         requisition_id=requirement.requisition_id,
         notes=notes.strip(),

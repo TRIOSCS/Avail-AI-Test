@@ -436,7 +436,8 @@ def test_log_activity_creates_record(client, db_session, test_user):
     log = db_session.query(ActivityLog).filter_by(requirement_id=requirement.id).first()
     assert log is not None
     assert log.notes == "Spoke to vendor"
-    assert log.activity_type == "call_outbound"
+    assert log.activity_type == "call_logged"
+    assert log.direction == "outbound"
 
 
 # ── vendor-modal ──────────────────────────────────────────────────
