@@ -277,3 +277,29 @@ async def test_poll_inbox_logs_email_received_activity(db_session, test_requisit
         .all()
     )
     assert len(rows) == 1
+
+
+def test_log_activity_marks_meaningful_types(db_session, test_requisition, test_user):
+    """Inherently-meaningful activity types are flagged is_meaningful=True at write
+    time."""
+    rec = log_activity(
+        db_session,
+        activity_type=ActivityType.STATUS_CHANGED,
+        requisition_id=test_requisition.id,
+        user_id=test_user.id,
+        description="status changed",
+    )
+    assert rec.is_meaningful is True
+
+
+def test_log_activity_leaves_ai_scored_types_unflagged(db_session, test_requisition, test_user):
+    """AI-scored types (sighting_added) are left is_meaningful=None for the quality
+    pass."""
+    rec = log_activity(
+        db_session,
+        activity_type=ActivityType.SIGHTING_ADDED,
+        requisition_id=test_requisition.id,
+        user_id=test_user.id,
+        description="12 sightings added",
+    )
+    assert rec.is_meaningful is None

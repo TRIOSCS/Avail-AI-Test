@@ -13,8 +13,27 @@ from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.constants import ActivityType
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
+
+# Activity types that are inherently meaningful — flagged is_meaningful=True at
+# write time (cheap, deterministic). The high-volume / free-text types
+# (sighting_added, email_received) are deliberately excluded: they are left
+# is_meaningful=None for the AI quality-scoring pass to classify. Call events
+# are flagged in log_call_activity (they are not written via log_activity).
+_RULE_MEANINGFUL_TYPES: frozenset[str] = frozenset(
+    {
+        ActivityType.RFQ_SENT,
+        ActivityType.STATUS_CHANGED,
+        ActivityType.OFFER_CREATED,
+        ActivityType.OFFER_STATUS_CHANGED,
+        ActivityType.ASSIGNMENT_CHANGED,
+        ActivityType.TASK_COMPLETED,
+        ActivityType.REQ_ARCHIVED,
+        ActivityType.REQ_UNARCHIVED,
+    }
+)
 
 # ═══════════════════════════════════════════════════════════════════════
 #  CONTACT MATCHING — email or phone → company or vendor
@@ -243,6 +262,7 @@ def log_call_activity(
         summary=subject,
         requisition_id=requisition_id,
         requirement_id=requirement_id,
+        is_meaningful=True,
     )
     db.add(record)
     db.flush()
@@ -733,6 +753,7 @@ def log_activity(
         summary=summary,
         occurred_at=occurred_at or datetime.now(timezone.utc),
         details=details,
+        is_meaningful=True if activity_type in _RULE_MEANINGFUL_TYPES else None,
     )
     db.add(record)
     db.flush()
