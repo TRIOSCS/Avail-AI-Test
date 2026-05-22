@@ -74,3 +74,24 @@ def test_toggle_archive_logs_req_archived(client, db_session, test_requisition):
     assert resp.status_code == 200, resp.text
     rows = _activity_rows(db_session, test_requisition.id, ActivityType.REQ_UNARCHIVED)
     assert len(rows) == 1
+
+
+def test_batch_archive_logs_req_archived(client, db_session, test_requisition):
+    """Bulk-archiving requisitions writes a req_archived row for each."""
+    before = len(_activity_rows(db_session, test_requisition.id, ActivityType.REQ_ARCHIVED))
+    resp = client.put("/api/requisitions/batch-archive", json={"ids": [test_requisition.id]})
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.REQ_ARCHIVED)
+    assert len(rows) == before + 1
+
+
+def test_save_part_notes_logs_sales_note(client, db_session, test_requisition):
+    """Editing a requirement's sale notes writes a sales_note activity row."""
+    requirement = test_requisition.requirements[0]
+    resp = client.patch(
+        f"/v2/partials/parts/{requirement.id}/notes",
+        data={"sale_notes": "Customer wants expedited quote"},
+    )
+    assert resp.status_code == 200, resp.text
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.SALES_NOTE)
+    assert len(rows) == 1

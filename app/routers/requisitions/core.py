@@ -595,7 +595,16 @@ async def bulk_archive(user: User = Depends(require_admin), db: Session = Depend
             ]
         ),
     )
+    target_ids = [row.id for row in q.with_entities(Requisition.id).all()]
     count = q.update({"status": "archived"}, synchronize_session="fetch")
+    for rid in target_ids:
+        log_activity(
+            db,
+            activity_type=ActivityType.REQ_ARCHIVED,
+            requisition_id=rid,
+            user_id=user.id,
+            description="Requisition archived (bulk)",
+        )
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "archived_count": count}
@@ -624,7 +633,16 @@ async def batch_archive_by_ids(
     # Sales users can only archive their own requisitions
     if user.role == UserRole.SALES:
         q = q.filter(Requisition.created_by == user.id)
+    target_ids = [row.id for row in q.with_entities(Requisition.id).all()]
     count = q.update({"status": "archived"}, synchronize_session="fetch")
+    for rid in target_ids:
+        log_activity(
+            db,
+            activity_type=ActivityType.REQ_ARCHIVED,
+            requisition_id=rid,
+            user_id=user.id,
+            description="Requisition archived (bulk)",
+        )
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "archived_count": count}

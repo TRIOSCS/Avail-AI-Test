@@ -9646,7 +9646,18 @@ async def save_part_notes(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    old_sale_notes = req.sale_notes
     req.sale_notes = sale_notes.strip() or None
+    if req.sale_notes != old_sale_notes:
+        _log_activity(
+            db,
+            activity_type=ActivityType.SALES_NOTE,
+            requisition_id=req.requisition_id,
+            requirement_id=req.id,
+            user_id=user.id,
+            description="Sales note updated",
+            details={"requirement_id": req.id},
+        )
     db.commit()
     ctx = _base_ctx(request, user, "requisitions")
     ctx["requirement"] = req
