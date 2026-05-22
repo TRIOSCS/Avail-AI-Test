@@ -36,4 +36,4 @@ bandit>=1.8.0
 pip-audit>=2.7.0
 
 # Debugging
-ipdb>=0.13.0
+ipdb>=0.13.13
