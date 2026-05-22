@@ -9,7 +9,7 @@ COPY app/templates/ app/templates/
 RUN npm run build
 
 # Stage 2: Python application
-FROM python:3.12-slim@sha256:9d3abd9fc11d06998ccdbdd93b4dd49b5ad7d67fcbbc11c016eb0eb2c2194891
+FROM python:3.14-slim@sha256:a7185a8e40af01bf891414a4df16ef10fc6000cee460a404a13da9029fe41604
 
 WORKDIR /app
 
