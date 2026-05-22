@@ -134,7 +134,7 @@ async def list_companies(
                 .join(Quote, Quote.requisition_id == Requisition.id)
                 .filter(
                     CustomerSite.company_id.in_(company_ids),
-                    Requisition.status == "won",
+                    Requisition.status == RequisitionStatus.WON,
                     Quote.created_at >= rev_cutoff,
                 )
                 .group_by(CustomerSite.company_id)
