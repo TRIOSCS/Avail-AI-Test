@@ -62,6 +62,16 @@ archive/unarchive, and sales-note edits likewise route through
 `activity_service.log_activity()` (`ActivityType.TASK_COMPLETED`,
 `ASSIGNMENT_CHANGED`, `REQ_ARCHIVED`/`REQ_UNARCHIVED`, `SALES_NOTE`).
 
+**AI curation:** each search batch logs one aggregated `sighting_added` row
+("N sightings added from <sources>", with `details={count, sources}`).
+`log_activity()` flags inherently-meaningful event types `is_meaningful=True`
+at write time (cheap, deterministic); the high-volume / free-text types
+(`sighting_added`, `email_received`) are left unscored and classified by the
+`activity_quality_service` AI pass (`score_unscored_activities`, allow-list
+keyed on `activity_type`). The requisition Activity tab defaults to meaningful
+events — `get_requisition_activities(meaningful_only=True)` keeps `is_meaningful`
+True-or-unscored and hides AI-rejected rows — with a `show_all` toggle.
+
 ## 2. Search (User-Initiated Only)
 
 Sourcing is strictly user-initiated. There is no background cron, no
