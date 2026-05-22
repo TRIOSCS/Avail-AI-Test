@@ -98,6 +98,23 @@ def test_avail_tag_re_matches_ref_format():
     assert RFQ_SUBJECT_TAG_RE.search("Quote request RE part [ref:4321]").group(1) == "4321"
 
 
+def test_log_email_activity_accepts_none_user(db_session, test_requisition):
+    """log_email_activity tolerates user_id=None (userless inbox scan)."""
+    record = log_email_activity(
+        user_id=None,
+        direction="received",
+        email_addr="vendor@example.com",
+        subject="RE: RFQ",
+        external_id="msg-none-user-001",
+        contact_name="Vendor Rep",
+        db=db_session,
+        requisition_id=test_requisition.id,
+    )
+    assert record is not None
+    assert record.user_id is None
+    assert record.requisition_id == test_requisition.id
+
+
 def test_avail_tag_re_matches_legacy_format():
     assert RFQ_SUBJECT_TAG_RE.search("Quote request [AVAIL-99]").group(1) == "99"
 
