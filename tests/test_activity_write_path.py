@@ -228,3 +228,52 @@ def test_log_rfq_activity_maps_metadata_to_details(db_session, test_requisition,
     )
     assert record.details == {"old": "active", "new": "sourcing"}
     assert record.channel == "system"
+
+
+def _make_inbox_message(req_id):
+    """Build a single fake Graph inbox message tagged for the given requisition."""
+    return {
+        "id": "poll-inbox-msg-001",
+        "subject": f"RE: Quote request [AVAIL-{req_id}]",
+        "from": {
+            "emailAddress": {
+                "address": "vendor@parts.com",
+                "name": "Vendor Rep",
+            }
+        },
+        "bodyPreview": "Quote attached",
+        "body": {"content": "<p>Quote attached</p>"},
+        "conversationId": "poll-inbox-conv-001",
+        "receivedDateTime": None,
+    }
+
+
+async def test_poll_inbox_logs_email_received_activity(db_session, test_requisition, test_user):
+    """Driving the real poll_inbox with one inbound vendor reply writes exactly one
+    email_received ActivityLog row for the matched requisition."""
+    from unittest.mock import AsyncMock, patch
+
+    from app.email_service import poll_inbox
+
+    mock_gc = AsyncMock()
+    mock_gc.get_json.return_value = {"value": [_make_inbox_message(test_requisition.id)]}
+
+    with (
+        patch("app.utils.graph_client.GraphClient", return_value=mock_gc),
+        patch("app.email_service.get_credential_cached", return_value=None),
+    ):
+        await poll_inbox(
+            token="fake-token",
+            db=db_session,
+            requisition_id=test_requisition.id,
+        )
+
+    rows = (
+        db_session.query(ActivityLog)
+        .filter(
+            ActivityLog.requisition_id == test_requisition.id,
+            ActivityLog.activity_type == "email_received",
+        )
+        .all()
+    )
+    assert len(rows) == 1
