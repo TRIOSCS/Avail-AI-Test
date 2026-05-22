@@ -9648,7 +9648,7 @@ async def save_part_notes(
         raise HTTPException(404, "Part not found")
     old_sale_notes = req.sale_notes
     req.sale_notes = sale_notes.strip() or None
-    if req.sale_notes != old_sale_notes:
+    if (req.sale_notes or "") != (old_sale_notes or ""):
         _log_activity(
             db,
             activity_type=ActivityType.SALES_NOTE,
@@ -9816,16 +9816,18 @@ async def archive_requisition(
     if not requisition:
         raise HTTPException(404, "Requisition not found")
 
+    prior_status = requisition.status
     requisition.status = RequisitionStatus.ARCHIVED
     for child in requisition.requirements:
         child.sourcing_status = SourcingStatus.ARCHIVED
-    _log_activity(
-        db,
-        activity_type=ActivityType.REQ_ARCHIVED,
-        requisition_id=requisition.id,
-        user_id=user.id,
-        description="Requisition archived",
-    )
+    if prior_status != RequisitionStatus.ARCHIVED:
+        _log_activity(
+            db,
+            activity_type=ActivityType.REQ_ARCHIVED,
+            requisition_id=requisition.id,
+            user_id=user.id,
+            description="Requisition archived",
+        )
     db.commit()
     logger.info("Requisition {} ({} parts) archived by {}", req_id, len(requisition.requirements), user.email)
 
@@ -9844,17 +9846,19 @@ async def unarchive_requisition(
     if not requisition:
         raise HTTPException(404, "Requisition not found")
 
+    prior_status = requisition.status
     requisition.status = RequisitionStatus.ACTIVE
     for child in requisition.requirements:
         if child.sourcing_status == SourcingStatus.ARCHIVED:
             child.sourcing_status = SourcingStatus.OPEN
-    _log_activity(
-        db,
-        activity_type=ActivityType.REQ_UNARCHIVED,
-        requisition_id=requisition.id,
-        user_id=user.id,
-        description="Requisition unarchived",
-    )
+    if prior_status != RequisitionStatus.ACTIVE:
+        _log_activity(
+            db,
+            activity_type=ActivityType.REQ_UNARCHIVED,
+            requisition_id=requisition.id,
+            user_id=user.id,
+            description="Requisition unarchived",
+        )
     db.commit()
     logger.info("Requisition {} unarchived by {}", req_id, user.email)
 
