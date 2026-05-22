@@ -27,6 +27,7 @@ import pytest
 from sqlalchemy.orm import Session
 
 from app.models import (
+    ActivityLog,
     ApiSource,
     MaterialCard,
     MaterialVendorHistory,
@@ -2298,6 +2299,78 @@ class TestSearchRequirement:
         assert "source_stats" in result
         assert len(result["sightings"]) >= 1
         assert result["source_stats"] == mock_stats
+
+    @pytest.mark.asyncio
+    async def test_logs_one_aggregated_sighting_added_activity(self, _mock_enrich, db_session):
+        """A search batch writes exactly one aggregated sighting_added activity row."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        mock_fresh = [
+            {
+                "vendor_name": "Arrow",
+                "mpn_matched": "LM317T",
+                "vendor_sku": "ARR-1",
+                "source_type": "nexar",
+                "is_authorized": True,
+                "confidence": 5,
+                "manufacturer": "TI",
+                "qty_available": 1000,
+                "unit_price": 0.50,
+                "currency": "USD",
+            },
+            {
+                "vendor_name": "Mouser",
+                "mpn_matched": "LM317T",
+                "vendor_sku": "MOU-2",
+                "source_type": "mouser",
+                "is_authorized": True,
+                "confidence": 5,
+                "manufacturer": "TI",
+                "qty_available": 500,
+                "unit_price": 0.55,
+                "currency": "USD",
+            },
+        ]
+        mock_stats = [
+            {"source": "nexar", "results": 1, "ms": 100, "error": None, "status": "ok"},
+            {"source": "mouser", "results": 1, "ms": 120, "error": None, "status": "ok"},
+        ]
+
+        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = (mock_fresh, mock_stats)
+            await search_requirement(req, db_session)
+
+        sighting_count = db_session.query(Sighting).filter(Sighting.requirement_id == req.id).count()
+        assert sighting_count >= 1
+
+        logs = db_session.query(ActivityLog).filter(ActivityLog.activity_type == "sighting_added").all()
+        assert len(logs) == 1
+        log = logs[0]
+        assert log.requisition_id == req.requisition_id
+        assert log.requirement_id == req.id
+        assert log.channel == "system"
+        assert log.user_id is None
+        assert log.details["count"] == sighting_count
+
+    @pytest.mark.asyncio
+    async def test_no_sighting_added_activity_when_zero_sightings(self, _mock_enrich, db_session):
+        """A zero-result search writes no sighting_added activity row."""
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        mock_stats = [
+            {"source": "nexar", "results": 0, "ms": 100, "error": None, "status": "ok"},
+        ]
+
+        with patch("app.search_service._fetch_fresh", new_callable=AsyncMock) as mock_fetch:
+            mock_fetch.return_value = ([], mock_stats)
+            await search_requirement(req, db_session)
+
+        logs = db_session.query(ActivityLog).filter(ActivityLog.activity_type == "sighting_added").all()
+        assert logs == []
 
     @pytest.mark.asyncio
     async def test_material_card_upsert_error_handled(self, _mock_enrich, db_session):

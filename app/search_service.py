@@ -27,7 +27,7 @@ from .connectors.mouser import MouserConnector
 from .connectors.oemsecrets import OEMSecretsConnector
 from .connectors.sourcengine import SourcengineConnector
 from .connectors.sources import BrokerBinConnector, NexarConnector
-from .constants import ApiSourceStatus, SourceRunStatus
+from .constants import ActivityType, ApiSourceStatus, SourceRunStatus
 from .models import (
     ApiSource,
     MaterialCard,
@@ -36,6 +36,7 @@ from .models import (
     Sighting,
 )
 from .scoring import classify_lead, explain_lead, is_weak_lead, score_sighting, score_sighting_v2, score_unified
+from .services.activity_service import log_activity
 from .services.credential_service import get_credential, get_credentials_batch
 from .services.price_snapshot_service import record_price_snapshot
 from .services.sourcing_leads import sync_leads_for_sightings
@@ -388,6 +389,26 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         if succeeded_sources:
             write_req.last_searched_at = now
         write_db.commit()
+
+        # Aggregated activity-timeline entry: one row per search batch,
+        # never one per sighting. Skipped for zero-result searches so the
+        # timeline stays free of noise.
+        if sightings:
+            _sighting_sources = sorted(succeeded_sources)
+            log_activity(
+                write_db,
+                activity_type=ActivityType.SIGHTING_ADDED,
+                requisition_id=write_req.requisition_id,
+                requirement_id=write_req.id,
+                user_id=None,
+                channel="system",
+                description=(
+                    f"{len(sightings)} sighting(s) added"
+                    + (f" from {', '.join(_sighting_sources)}" if _sighting_sources else "")
+                ),
+                details={"count": len(sightings), "sources": _sighting_sources},
+            )
+            write_db.commit()
 
         # Browser-automation workers: best-effort enqueue once per call. Both
         # workers key by requirement_id and internally normalize req.primary_mpn,
