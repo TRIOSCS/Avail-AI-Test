@@ -144,7 +144,15 @@
 
     {# Activity Log entries #}
     {% if activities %}
-    <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider mt-4 mb-2">Activity Log</h4>
+    <div class="flex items-center justify-between mt-4 mb-2">
+      <h4 class="text-xs font-semibold text-gray-500 uppercase tracking-wider">Activity Log</h4>
+      <a hx-get="/v2/partials/requisitions/{{ req.id }}/tab/activity{% if not show_all %}?show_all=1{% endif %}"
+         hx-target="#tab-content"
+         hx-swap="innerHTML"
+         class="text-xs font-medium text-brand-600 hover:text-brand-700 cursor-pointer">
+        {{ "Show meaningful only" if show_all else "Show all events" }}
+      </a>
+    </div>
     <div class="space-y-2">
     {% for a in activities %}
     <div class="flex gap-3 p-3 bg-white rounded-lg border border-gray-200 hover:border-brand-200 transition-colors">

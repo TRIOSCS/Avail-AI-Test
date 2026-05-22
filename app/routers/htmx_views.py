@@ -1268,8 +1268,10 @@ async def requisition_tab(
             .order_by(RfqContact.created_at.desc())
             .all()
         )
+        show_all = request.query_params.get("show_all") == "1"
         ctx["contacts"] = contacts
-        ctx["activities"] = get_requisition_activities(req_id, db)
+        ctx["activities"] = get_requisition_activities(req_id, db, meaningful_only=not show_all)
+        ctx["show_all"] = show_all
         ctx["req"] = req
         return templates.TemplateResponse("htmx/partials/requisitions/tabs/activity.html", ctx)
 

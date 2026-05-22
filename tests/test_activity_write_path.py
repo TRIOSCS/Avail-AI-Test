@@ -303,3 +303,37 @@ def test_log_activity_leaves_ai_scored_types_unflagged(db_session, test_requisit
         description="12 sightings added",
     )
     assert rec.is_meaningful is None
+
+
+def test_get_requisition_activities_meaningful_only_filter(db_session, test_requisition, test_user):
+    """meaningful_only hides is_meaningful=False rows but keeps True and None
+    (unscored)."""
+    log_activity(
+        db_session,
+        activity_type=ActivityType.STATUS_CHANGED,
+        requisition_id=test_requisition.id,
+        user_id=test_user.id,
+        description="meaningful",
+    )
+    unscored = log_activity(
+        db_session,
+        activity_type=ActivityType.SIGHTING_ADDED,
+        requisition_id=test_requisition.id,
+        user_id=test_user.id,
+        description="unscored",
+    )
+    noise = log_activity(
+        db_session,
+        activity_type=ActivityType.SIGHTING_ADDED,
+        requisition_id=test_requisition.id,
+        user_id=test_user.id,
+        description="noise",
+    )
+    noise.is_meaningful = False
+    db_session.flush()
+
+    curated = get_requisition_activities(test_requisition.id, db_session, meaningful_only=True)
+    assert noise.id not in {r.id for r in curated}
+    assert unscored.id in {r.id for r in curated}
+    all_rows = get_requisition_activities(test_requisition.id, db_session, meaningful_only=False)
+    assert noise.id in {r.id for r in all_rows}

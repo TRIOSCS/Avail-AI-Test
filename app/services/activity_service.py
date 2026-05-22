@@ -315,18 +315,21 @@ def get_user_activities(user_id: int, db: Session, limit: int = 50) -> list[Acti
     )
 
 
-def get_requisition_activities(requisition_id: int, db: Session, limit: int = 200) -> list[ActivityLog]:
-    """Get the full activity timeline for a requisition, newest first.
+def get_requisition_activities(
+    requisition_id: int, db: Session, limit: int = 200, meaningful_only: bool = True
+) -> list[ActivityLog]:
+    """Get the activity timeline for a requisition, newest first.
 
     Backs the requisition Activity tab. Uses the ix_activity_requisition index.
+
+    meaningful_only (default True) hides events the AI quality pass classified as not
+    meaningful (is_meaningful=False); rows that are meaningful (True) or not yet scored
+    (None) are kept, so freshly-logged events appear immediately.
     """
-    return (
-        db.query(ActivityLog)
-        .filter(ActivityLog.requisition_id == requisition_id)
-        .order_by(ActivityLog.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+    q = db.query(ActivityLog).filter(ActivityLog.requisition_id == requisition_id)
+    if meaningful_only:
+        q = q.filter((ActivityLog.is_meaningful.is_(True)) | (ActivityLog.is_meaningful.is_(None)))
+    return q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
 
 
 def get_account_timeline(
