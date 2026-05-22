@@ -137,7 +137,6 @@ def _sanitize_html_filter(value: str) -> str:
             "hr",
         },
         attributes={
-            "*": {"class"},
             "a": {"href", "title", "target"},
             "td": {"colspan", "rowspan", "width", "height"},
             "th": {"colspan", "rowspan", "width", "height"},
