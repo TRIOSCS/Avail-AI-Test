@@ -72,6 +72,14 @@ keyed on `activity_type`). The requisition Activity tab defaults to meaningful
 events — `get_requisition_activities(meaningful_only=True)` keeps `is_meaningful`
 True-or-unscored and hides AI-rejected rows — with a `show_all` toggle.
 
+The requisition Activity tab (`requisitions/tabs/activity.html`) renders these
+rows as one date-grouped chronological timeline (newest-first, "Today" /
+"Yesterday" / dated headers keyed on `occurred_at or created_at`). RFQ sends
+appear inline as `rfq_sent` events — there is no separate "RFQ History"
+section. Each row's leading glyph comes from the `activity_icon` macro
+(`shared/_macros.html`), which maps the 12 canonical `ActivityType` values to a
+heroicon + accent color.
+
 **Phone calls** (manual logs and the 8x8 CDR poll) log the canonical
 `ActivityType.CALL_LOGGED` type; inbound/outbound is carried on the `direction`
 column (not encoded in `activity_type`). Readers that distinguish direction
