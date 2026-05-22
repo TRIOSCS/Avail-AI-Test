@@ -1259,17 +1259,9 @@ async def requisition_tab(
         return templates.TemplateResponse("htmx/partials/requisitions/tabs/responses.html", ctx)
 
     else:  # activity
-        from ..models.offers import Contact as RfqContact
         from ..services.activity_service import get_requisition_activities
 
-        contacts = (
-            db.query(RfqContact)
-            .filter(RfqContact.requisition_id == req_id)
-            .order_by(RfqContact.created_at.desc())
-            .all()
-        )
         show_all = request.query_params.get("show_all") == "1"
-        ctx["contacts"] = contacts
         ctx["activities"] = get_requisition_activities(req_id, db, meaningful_only=not show_all)
         ctx["show_all"] = show_all
         ctx["req"] = req

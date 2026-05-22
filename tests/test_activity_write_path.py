@@ -354,3 +354,22 @@ def test_log_call_activity_writes_canonical_call_logged(db_session, test_user):
     assert rec is not None
     assert rec.activity_type == ActivityType.CALL_LOGGED
     assert rec.direction == "outbound"
+
+
+def test_activity_tab_renders_rfq_sent_event(client, db_session, test_requisition, test_user):
+    """An RFQ-sent event written via log_activity() appears on the Activity tab.
+
+    Regression guard: the activity tab must render from the `activities` list
+    alone, with no dependency on the removed `contacts` query.
+    """
+    log_activity(
+        db_session,
+        activity_type=ActivityType.RFQ_SENT,
+        requisition_id=test_requisition.id,
+        user_id=test_user.id,
+        description="RFQ sent to Acme",
+    )
+    db_session.commit()
+    resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/tab/activity")
+    assert resp.status_code == 200
+    assert "RFQ sent to Acme" in resp.text
