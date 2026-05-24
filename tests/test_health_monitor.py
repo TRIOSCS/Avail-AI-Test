@@ -616,8 +616,8 @@ class TestRedactApiKeysEdgeCases:
     def test_very_long_bare_token_in_url_not_masked(self):
         """Bare token > 100 chars in URL query string is left intact (line 72 branch).
 
-        Uses a parameter name not in the named-pattern list so the named-key
-        regex doesn't consume it first, letting _mask_bare see it.
+        Uses a parameter name not in the named-pattern list so the named-key regex
+        doesn't consume it first, letting _mask_bare see it.
         """
         long_token = "A" * 101
         # "foo" is not a named key pattern so _API_KEY_RE won't touch it;
@@ -629,8 +629,8 @@ class TestRedactApiKeysEdgeCases:
     def test_normal_bare_token_in_url_is_masked(self):
         """Bare token 20–100 chars in URL query string is masked (line 73 branch).
 
-        Uses a parameter name not in the named-pattern list so _API_KEY_RE won't
-        consume it; _BARE_KEY_RE then masks the 20-char value.
+        Uses a parameter name not in the named-pattern list so _API_KEY_RE won't consume
+        it; _BARE_KEY_RE then masks the 20-char value.
         """
         bare_token = "ABCDEFGHIJKLMNOPQRST"  # exactly 20 chars
         text = f"https://api.example.com/data?foo={bare_token}"
