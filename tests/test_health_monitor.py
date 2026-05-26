@@ -599,3 +599,102 @@ class TestPingSourceTypedErrors:
         assert source.status == "error"
         msg = (source.last_error or "").lower()
         assert "quota" in msg or "upgrade" in msg
+
+
+# ── deep_test_source typed-error branches ────────────────────────────
+
+
+class TestDeepTestSourceTypedErrors:
+    """deep_test_source handles each ConnectorError subtype with a distinct message."""
+
+    def test_auth_error_message(self, db_session):
+        from app.connectors.errors import ConnectorAuthError
+
+        source = _make_source(db_session, status="live", error_count_24h=0)
+        mock_connector = MagicMock()
+        mock_connector.search = AsyncMock(side_effect=ConnectorAuthError("bad token"))
+
+        with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
+            with patch("app.services.health_monitor._check_status_transition"):
+                result = asyncio.get_event_loop().run_until_complete(deep_test_source(source, db_session))
+
+        assert result["success"] is False
+        assert result["results_count"] == 0
+        assert source.status == "error"
+        assert "rotate credentials" in (source.last_error or "").lower()
+        assert "bad token" in (source.last_error or "")
+
+        logs = db_session.query(ApiUsageLog).filter_by(source_id=source.id).all()
+        assert len(logs) == 1
+        assert logs[0].check_type == "deep"
+        assert logs[0].success is False
+
+    def test_rate_limit_error_message(self, db_session):
+        from app.connectors.errors import ConnectorRateLimitError
+
+        source = _make_source(db_session, status="live", error_count_24h=0)
+        mock_connector = MagicMock()
+        mock_connector.search = AsyncMock(side_effect=ConnectorRateLimitError("too many"))
+
+        with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
+            with patch("app.services.health_monitor._check_status_transition"):
+                result = asyncio.get_event_loop().run_until_complete(deep_test_source(source, db_session))
+
+        assert result["success"] is False
+        assert result["results_count"] == 0
+        assert source.status == "error"
+        msg = (source.last_error or "").lower()
+        assert "rate limited" in msg or "auto-recover" in msg or "auto recovers" in msg
+
+        logs = db_session.query(ApiUsageLog).filter_by(source_id=source.id).all()
+        assert len(logs) == 1
+        assert logs[0].check_type == "deep"
+        assert logs[0].success is False
+
+    def test_quota_error_message(self, db_session):
+        from app.connectors.errors import ConnectorQuotaError
+
+        source = _make_source(db_session, status="live", error_count_24h=0)
+        mock_connector = MagicMock()
+        mock_connector.search = AsyncMock(side_effect=ConnectorQuotaError("exhausted"))
+
+        with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
+            with patch("app.services.health_monitor._check_status_transition"):
+                result = asyncio.get_event_loop().run_until_complete(deep_test_source(source, db_session))
+
+        assert result["success"] is False
+        assert result["results_count"] == 0
+        assert source.status == "error"
+        msg = (source.last_error or "").lower()
+        assert "quota" in msg or "upgrade" in msg
+
+        logs = db_session.query(ApiUsageLog).filter_by(source_id=source.id).all()
+        assert len(logs) == 1
+        assert logs[0].check_type == "deep"
+        assert logs[0].success is False
+
+    def test_typed_error_increments_error_count(self, db_session):
+        from app.connectors.errors import ConnectorAuthError
+
+        source = _make_source(db_session, status="error", error_count_24h=5)
+        mock_connector = MagicMock()
+        mock_connector.search = AsyncMock(side_effect=ConnectorAuthError("again"))
+
+        with patch("app.services.health_monitor._get_connector", return_value=mock_connector):
+            with patch("app.services.health_monitor._check_status_transition"):
+                asyncio.get_event_loop().run_until_complete(deep_test_source(source, db_session))
+
+        assert source.error_count_24h == 6
+
+
+# ── _redact_api_keys bare-key masking ────────────────────────────────
+
+
+class TestRedactBareKeyMasking:
+    def test_bare_key_in_query_without_named_prefix(self):
+        """Bare token in URL query string (no named prefix) gets masked by _mask_bare."""
+        bare_token = "A" * 25  # 25 chars, well within 20-100 range
+        text = f"https://api.example.com/endpoint?data={bare_token}&q=test"
+        result = _redact_api_keys(text)
+        assert bare_token not in result
+        assert "***" in result
