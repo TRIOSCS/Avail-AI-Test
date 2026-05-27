@@ -14,7 +14,7 @@ Depends on: app/services/eight_by_eight_service.py, app/jobs/eight_by_eight_jobs
 import os
 from datetime import datetime, timezone
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 import pytest
@@ -38,6 +38,38 @@ FAKE_SETTINGS = SimpleNamespace(
     eight_by_eight_pbx_id="pbx-123",
     eight_by_eight_timezone="America/Los_Angeles",
 )
+
+
+def _mock_async_client(*, get=None, post=None):
+    """Build a patch target replacing httpx.AsyncClient.
+
+    `get`/`post` may be a single response, an iterable of responses
+    (side_effect), or an exception. Returns a MagicMock suitable as the
+    `new` of a patch on `app.services.eight_by_eight_service.httpx.AsyncClient`.
+    """
+    client = MagicMock()
+
+    def _async_method(spec):
+        m = AsyncMock()
+        if spec is None:
+            return m
+        if isinstance(spec, BaseException) or (isinstance(spec, type) and issubclass(spec, BaseException)):
+            m.side_effect = spec
+        elif isinstance(spec, (list, tuple)):
+            m.side_effect = list(spec)
+        else:
+            m.return_value = spec
+        return m
+
+    client.get = _async_method(get)
+    client.post = _async_method(post)
+
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=client)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    factory = MagicMock(return_value=cm)
+    factory._client = client
+    return factory
 
 
 # ── normalize_phone ────────────────────────────────────────────────────
@@ -72,43 +104,42 @@ class TestNormalizePhone:
 
 
 class TestGetAccessToken:
-    @patch("app.services.eight_by_eight_service.httpx.post")
-    def test_uses_token_key_fallback(self, mock_post):
+    async def test_uses_token_key_fallback(self):
         """Response uses 'token' key instead of 'access_token'."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"token": "tok-fallback"}
-        mock_post.return_value = mock_resp
+        factory = _mock_async_client(post=mock_resp)
 
-        result = get_access_token(FAKE_SETTINGS)
+        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+            result = await get_access_token(FAKE_SETTINGS)
         assert result == "tok-fallback"
 
-    @patch("app.services.eight_by_eight_service.httpx.post")
-    def test_raises_when_no_token_in_response(self, mock_post):
+    async def test_raises_when_no_token_in_response(self):
         """Response 200 but no access_token or token key."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {"message": "ok"}
-        mock_post.return_value = mock_resp
+        factory = _mock_async_client(post=mock_resp)
 
-        with pytest.raises(ValueError, match="missing access_token"):
-            get_access_token(FAKE_SETTINGS)
+        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+            with pytest.raises(ValueError, match="missing access_token"):
+                await get_access_token(FAKE_SETTINGS)
 
-    @patch("app.services.eight_by_eight_service.httpx.post")
-    def test_raises_on_http_error(self, mock_post):
+    async def test_raises_on_http_error(self):
         """HTTPError during auth raises ValueError."""
-        mock_post.side_effect = httpx.HTTPError("connection refused")
+        factory = _mock_async_client(post=httpx.HTTPError("connection refused"))
 
-        with pytest.raises(ValueError, match="auth request failed"):
-            get_access_token(FAKE_SETTINGS)
+        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+            with pytest.raises(ValueError, match="auth request failed"):
+                await get_access_token(FAKE_SETTINGS)
 
 
 # ── get_extension_map ──────────────────────────────────────────────────
 
 
 class TestGetExtensionMap:
-    @patch("app.services.eight_by_eight_service.httpx.get")
-    def test_returns_ext_map(self, mock_get):
+    async def test_returns_ext_map(self):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -117,28 +148,28 @@ class TestGetExtensionMap:
                 {"extensionNumber": "1002", "userId": "marcus@trio.com"},
             ]
         }
-        mock_get.return_value = mock_resp
+        factory = _mock_async_client(get=mock_resp)
 
-        result = get_extension_map("tok-123", FAKE_SETTINGS)
+        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+            result = await get_extension_map("tok-123", FAKE_SETTINGS)
         assert result["1001"] == "mike@trio.com"
         assert result["1002"] == "marcus@trio.com"
 
-    @patch("app.services.eight_by_eight_service.httpx.get")
-    def test_returns_empty_on_http_error(self, mock_get):
-        mock_get.side_effect = httpx.HTTPError("timeout")
-        result = get_extension_map("tok-123", FAKE_SETTINGS)
+    async def test_returns_empty_on_http_error(self):
+        factory = _mock_async_client(get=httpx.HTTPError("timeout"))
+        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+            result = await get_extension_map("tok-123", FAKE_SETTINGS)
         assert result == {}
 
-    @patch("app.services.eight_by_eight_service.httpx.get")
-    def test_returns_empty_on_non_200(self, mock_get):
+    async def test_returns_empty_on_non_200(self):
         mock_resp = MagicMock()
         mock_resp.status_code = 403
-        mock_get.return_value = mock_resp
-        result = get_extension_map("tok-123", FAKE_SETTINGS)
+        factory = _mock_async_client(get=mock_resp)
+        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+            result = await get_extension_map("tok-123", FAKE_SETTINGS)
         assert result == {}
 
-    @patch("app.services.eight_by_eight_service.httpx.get")
-    def test_skips_users_without_ext_or_email(self, mock_get):
+    async def test_skips_users_without_ext_or_email(self):
         mock_resp = MagicMock()
         mock_resp.status_code = 200
         mock_resp.json.return_value = {
@@ -148,8 +179,9 @@ class TestGetExtensionMap:
                 {"extensionNumber": "1004", "email": "valid@test.com"},
             ]
         }
-        mock_get.return_value = mock_resp
-        result = get_extension_map("tok", FAKE_SETTINGS)
+        factory = _mock_async_client(get=mock_resp)
+        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+            result = await get_extension_map("tok", FAKE_SETTINGS)
         assert "1004" in result
         assert len(result) == 1
 
@@ -158,16 +190,15 @@ class TestGetExtensionMap:
 
 
 class TestGetCdrs:
-    @patch("app.services.eight_by_eight_service.httpx.get")
-    def test_returns_empty_on_http_error(self, mock_get):
-        mock_get.side_effect = httpx.HTTPError("connection refused")
+    async def test_returns_empty_on_http_error(self):
+        factory = _mock_async_client(get=httpx.HTTPError("connection refused"))
         since = datetime(2026, 3, 1, tzinfo=timezone.utc)
         until = datetime(2026, 3, 2, tzinfo=timezone.utc)
-        result = get_cdrs("token", FAKE_SETTINGS, since, until)
+        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+            result = await get_cdrs("token", FAKE_SETTINGS, since, until)
         assert result == []
 
-    @patch("app.services.eight_by_eight_service.httpx.get")
-    def test_stops_when_all_records_fetched(self, mock_get):
+    async def test_stops_when_all_records_fetched(self):
         """Stops paginating when all records are already in all_records."""
         mock_resp = MagicMock()
         mock_resp.status_code = 200
@@ -175,13 +206,14 @@ class TestGetCdrs:
             "meta": {"totalRecordCount": 2, "scrollId": "scroll-abc"},
             "data": [{"callId": "1"}, {"callId": "2"}],
         }
-        mock_get.return_value = mock_resp
+        factory = _mock_async_client(get=mock_resp)
         since = datetime(2026, 3, 1, tzinfo=timezone.utc)
         until = datetime(2026, 3, 2, tzinfo=timezone.utc)
-        result = get_cdrs("token", FAKE_SETTINGS, since, until)
+        with patch("app.services.eight_by_eight_service.httpx.AsyncClient", factory):
+            result = await get_cdrs("token", FAKE_SETTINGS, since, until)
         # Should stop after first page since all records fetched
         assert len(result) == 2
-        assert mock_get.call_count == 1
+        assert factory._client.get.await_count == 1
 
 
 # ── normalize_cdr edge cases ──────────────────────────────────────────
@@ -292,29 +324,29 @@ class TestProcessCdrsEdgeCases:
         db.query.side_effect = query_router
         return db
 
-    @patch("app.services.eight_by_eight_service.get_access_token")
-    def test_auth_failure_returns_zeros(self, mock_auth):
+    @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
+    async def test_auth_failure_returns_zeros(self, mock_auth):
         from app.jobs.eight_by_eight_jobs import _process_cdrs
 
         mock_auth.side_effect = ValueError("auth failed")
         db = self._make_mock_db()
-        result = _process_cdrs(db, FAKE_SETTINGS)
+        result = await _process_cdrs(db, FAKE_SETTINGS)
         assert result == {"processed": 0, "matched": 0, "skipped": 0}
 
-    @patch("app.services.eight_by_eight_service.get_cdrs")
-    @patch("app.services.eight_by_eight_service.get_access_token")
-    def test_empty_cdrs_updates_watermark(self, mock_auth, mock_fetch):
+    @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
+    @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
+    async def test_empty_cdrs_updates_watermark(self, mock_auth, mock_fetch):
         from app.jobs.eight_by_eight_jobs import _process_cdrs
 
         mock_auth.return_value = "token"
         mock_fetch.return_value = []
         db = self._make_mock_db()
-        result = _process_cdrs(db, FAKE_SETTINGS)
+        result = await _process_cdrs(db, FAKE_SETTINGS)
         assert result["processed"] == 0
 
-    @patch("app.services.eight_by_eight_service.get_cdrs")
-    @patch("app.services.eight_by_eight_service.get_access_token")
-    def test_with_existing_watermark(self, mock_auth, mock_fetch):
+    @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
+    @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
+    async def test_with_existing_watermark(self, mock_auth, mock_fetch):
         from app.jobs.eight_by_eight_jobs import _process_cdrs
 
         mock_auth.return_value = "token"
@@ -323,12 +355,12 @@ class TestProcessCdrsEdgeCases:
         wm_row = MagicMock()
         wm_row.value = "2026-03-01T00:00:00+00:00"
         db = self._make_mock_db(watermark=wm_row)
-        result = _process_cdrs(db, FAKE_SETTINGS)
+        result = await _process_cdrs(db, FAKE_SETTINGS)
         assert result["processed"] == 0
 
-    @patch("app.services.eight_by_eight_service.get_cdrs")
-    @patch("app.services.eight_by_eight_service.get_access_token")
-    def test_with_invalid_watermark_falls_back(self, mock_auth, mock_fetch):
+    @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
+    @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
+    async def test_with_invalid_watermark_falls_back(self, mock_auth, mock_fetch):
         from app.jobs.eight_by_eight_jobs import _process_cdrs
 
         mock_auth.return_value = "token"
@@ -337,14 +369,14 @@ class TestProcessCdrsEdgeCases:
         wm_row = MagicMock()
         wm_row.value = "not-a-date"
         db = self._make_mock_db(watermark=wm_row)
-        result = _process_cdrs(db, FAKE_SETTINGS)
+        result = await _process_cdrs(db, FAKE_SETTINGS)
         assert result["processed"] == 0
 
     @patch("app.services.eight_by_eight_service.reverse_lookup_phone")
     @patch("app.services.activity_service.log_call_activity")
-    @patch("app.services.eight_by_eight_service.get_cdrs")
-    @patch("app.services.eight_by_eight_service.get_access_token")
-    def test_incoming_call_processed(self, mock_auth, mock_fetch, mock_log, mock_reverse):
+    @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
+    @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
+    async def test_incoming_call_processed(self, mock_auth, mock_fetch, mock_log, mock_reverse):
         from app.jobs.eight_by_eight_jobs import _process_cdrs
 
         mock_auth.return_value = "token"
@@ -393,14 +425,14 @@ class TestProcessCdrsEdgeCases:
             return MagicMock()
 
         db.query.side_effect = query_router
-        result = _process_cdrs(db, FAKE_SETTINGS)
+        result = await _process_cdrs(db, FAKE_SETTINGS)
         assert result["processed"] == 1
 
     @patch("app.services.eight_by_eight_service.reverse_lookup_phone")
     @patch("app.services.activity_service.log_call_activity")
-    @patch("app.services.eight_by_eight_service.get_cdrs")
-    @patch("app.services.eight_by_eight_service.get_access_token")
-    def test_cdr_skipped_when_log_returns_none(self, mock_auth, mock_fetch, mock_log, mock_reverse):
+    @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
+    @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
+    async def test_cdr_skipped_when_log_returns_none(self, mock_auth, mock_fetch, mock_log, mock_reverse):
         from app.jobs.eight_by_eight_jobs import _process_cdrs
 
         mock_auth.return_value = "token"
@@ -442,14 +474,14 @@ class TestProcessCdrsEdgeCases:
             return MagicMock()
 
         db.query.side_effect = query_router
-        result = _process_cdrs(db, FAKE_SETTINGS)
+        result = await _process_cdrs(db, FAKE_SETTINGS)
         assert result["skipped"] == 1
 
     @patch("app.services.eight_by_eight_service.reverse_lookup_phone")
     @patch("app.services.activity_service.log_call_activity")
-    @patch("app.services.eight_by_eight_service.get_cdrs")
-    @patch("app.services.eight_by_eight_service.get_access_token")
-    def test_vendor_match_sets_vendor_card_id(self, mock_auth, mock_fetch, mock_log, mock_reverse):
+    @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
+    @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
+    async def test_vendor_match_sets_vendor_card_id(self, mock_auth, mock_fetch, mock_log, mock_reverse):
         from app.jobs.eight_by_eight_jobs import _process_cdrs
 
         mock_auth.return_value = "token"
@@ -500,7 +532,7 @@ class TestProcessCdrsEdgeCases:
             return MagicMock()
 
         db.query.side_effect = query_router
-        result = _process_cdrs(db, FAKE_SETTINGS)
+        result = await _process_cdrs(db, FAKE_SETTINGS)
         assert result["matched"] == 1
         assert record.vendor_card_id == 99
 
@@ -546,7 +578,7 @@ async def test_job_poll_8x8_cdrs_success():
             "SessionLocal",
             mock_db_factory,
         ),
-        patch("app.jobs.eight_by_eight_jobs._process_cdrs") as mock_process,
+        patch("app.jobs.eight_by_eight_jobs._process_cdrs", new_callable=AsyncMock) as mock_process,
     ):
         mock_process.return_value = {"processed": 5, "matched": 3, "skipped": 2}
         # Patch at import site
@@ -569,7 +601,7 @@ async def test_job_poll_8x8_cdrs_handles_exception():
 
     mock_db = MagicMock()
     mock_db_factory = MagicMock(return_value=mock_db)
-    with patch("app.jobs.eight_by_eight_jobs._process_cdrs") as mock_process:
+    with patch("app.jobs.eight_by_eight_jobs._process_cdrs", new_callable=AsyncMock) as mock_process:
         mock_process.side_effect = Exception("Unexpected error")
         import app.database as _db_mod
 

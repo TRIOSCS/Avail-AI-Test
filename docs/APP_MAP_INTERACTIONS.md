@@ -181,6 +181,48 @@ search_service.py (orchestrator)
     +---> connector_status.py --> DB: UPDATE api_sources
 ```
 
+### 2b. Streaming Part-Search (`/v2/partials/search/run`)
+
+```
+Browser POST /v2/partials/search/run  (manual MPN entry)
+    |
+    v
+htmx_views.py: search_run()
+    |
+    +---> Returns HTML shell + spinner immediately (200 OK)
+    |
+    +---> _safe_bg(stream_search_mpn(search_id, mpn))   # fire-and-forget asyncio.Task
+              |
+              v
+    search_service.stream_search_mpn(search_id, mpn)
+        |
+        +---> db = SessionLocal()      # OWNS its own session — must NOT
+        |                                receive a request-scoped session: web
+        |                                framework finalizers close those as soon
+        |                                as the response is sent, so a request
+        |                                session would be dead before the worker's
+        |                                first db.query(...). The fire-and-forget
+        |                                wrapper swallows exceptions, so the
+        |                                failure would surface only as a hung SSE
+        |                                stream. Same pattern as _enrich_cards.
+        |
+        +---> connectors = _build_connectors(db)         # one-shot setup query
+        |     vendor_score_map = db.query(VendorCard...) # one-shot setup query
+        |
+        +---> for each connector: asyncio.create_task(connector.search(mpn))
+        |     loop with asyncio.wait(FIRST_COMPLETED):
+        |       publish "source-status" / "results" / "card-update" per connector
+        |     publish terminal "done" once all settle
+        |
+        +---> Always publishes a terminal "done" — including on uncaught
+              exceptions (pool exhaustion, broker outage, render errors). The
+              SSE client only knows the stream is complete via the done event,
+              so worker death without done means a hung browser spinner.
+```
+
+Browser opens `GET /v2/partials/search/stream?search_id=...` (SSE long-poll) in
+parallel to the POST so it receives events as the worker publishes them.
+
 ### Connector Failure Contract
 
 External-API connectors (`app/connectors/*.py`) follow a single contract
@@ -977,3 +1019,51 @@ Component bound to `/requisitions2` `<tr>`. CSS handles hover reveal via
 `tr:hover .opp-action-rail`; this component exposes `show` state so
 `@focusin`/`@focusout`/`@keydown.enter` toggle visibility for keyboard
 users. `Escape` dismisses.
+
+---
+
+## 8x8 Integration — Operator Enablement
+
+The 8x8 CDR (call-detail record) integration is **code-complete but
+disabled by default**. The polling job runs only when
+`eight_by_eight_enabled` is true in settings (driven by env vars).
+
+**Required env vars** (set in deployment `.env`, then restart the api
+container):
+
+| Var | Purpose |
+|---|---|
+| `EIGHT_BY_EIGHT_ENABLED` | `true` to register the polling job |
+| `EIGHT_BY_EIGHT_API_KEY` | 8x8 API token |
+| `EIGHT_BY_EIGHT_USERNAME` | Service account username |
+| `EIGHT_BY_EIGHT_PASSWORD` | Service account password |
+| `EIGHT_BY_EIGHT_PBX_ID` | Tenant PBX identifier |
+
+**Optional env vars** (defaults applied if unset):
+
+| Var | Default | Purpose |
+|---|---|---|
+| `EIGHT_BY_EIGHT_TIMEZONE` | `America/Los_Angeles` | Tenant timezone for CDR timestamp parsing |
+| `EIGHT_BY_EIGHT_POLL_INTERVAL_MINUTES` | `30` | How often the job pulls new CDRs |
+
+**Per-user setup:** Each user that should have their calls ingested
+needs their 8x8 extension stored on the `users` table (fields added
+in alembic migration `052_add_8x8_user_fields.py`). Without this,
+their calls land in `activity_log` but are not attributed to a user.
+
+**Verifying enablement landed:** On api container start, `docker
+compose logs api` will show exactly one of three lines from
+`register_eight_by_eight_jobs`:
+
+| Log line | Means |
+|---|---|
+| `8x8 CDR polling NOT registered (EIGHT_BY_EIGHT_ENABLED is false)` | Flag is off — set `EIGHT_BY_EIGHT_ENABLED=true`. |
+| `8x8 CDR polling NOT registered — enabled flag is true but credentials missing: ...` | Flag is on but one or more secrets are unset. The line lists which ones. |
+| `8x8 CDR polling registered (every 30min)` | Job is live; CDRs will pull on the next interval tick. |
+
+If none of these appear in the logs, the api container did not finish
+starting — check `docker compose ps` and earlier log lines.
+
+**Data flow:** Job → `eight_by_eight_service` → CDR pull → matched to
+users by extension → rows inserted into `activity_log` with
+`source='8x8_call'`. Visible in the per-record activity timeline.

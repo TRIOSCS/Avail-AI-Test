@@ -5,7 +5,44 @@ on:
     types: [published]
 
 jobs:
+  # Gate: never deploy a release commit whose CI is not green.
+  verify-ci:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Require green CI on the release commit
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SHA: ${{ github.sha }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+          # Echo a check's status (if running) or conclusion (if completed),
+          # or empty if it has not reported for this commit yet.
+          check_state() {
+            gh api "repos/$REPO/commits/$SHA/check-runs" --paginate \
+              --jq ".check_runs[] | select(.name==\"$1\") | (if .status!=\"completed\" then .status else .conclusion end)" \
+              2>/dev/null | head -1
+          }
+          for attempt in $(seq 1 40); do
+            T=$(check_state "CI — Tests")
+            S=$(check_state "Security Scanning")
+            echo "attempt $attempt — CI — Tests=${T:-missing}  Security Scanning=${S:-missing}"
+            case "$T" in failure|cancelled|timed_out|action_required|stale)
+              echo "ERROR: 'CI — Tests' for $SHA = $T — refusing to deploy." >&2; exit 1;; esac
+            case "$S" in failure|cancelled|timed_out|action_required|stale)
+              echo "ERROR: 'Security Scanning' for $SHA = $S — refusing to deploy." >&2; exit 1;; esac
+            if [ "$T" = success ] && [ "$S" = success ]; then
+              echo "All required checks green for $SHA — deploy may proceed."
+              exit 0
+            fi
+            sleep 30
+          done
+          echo "ERROR: required CI checks did not all complete green within the wait window." >&2
+          exit 1
+
   deploy:
+    needs: verify-ci
     runs-on: ubuntu-latest
     timeout-minutes: 15
 

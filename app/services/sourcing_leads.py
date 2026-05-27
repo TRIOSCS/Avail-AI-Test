@@ -31,6 +31,7 @@ from app.models.sourcing import Requirement, Sighting
 from app.models.sourcing_lead import LeadEvidence, LeadFeedbackEvent, SourcingLead
 from app.models.vendors import VendorCard
 from app.scoring import explain_lead
+from app.utils.normalization import normalize_mpn_key
 from app.vendor_utils import normalize_vendor_name
 
 BUYER_STATUSES = {
@@ -54,12 +55,6 @@ def _as_utc(dt: datetime | None) -> datetime | None:
     if dt.tzinfo is None:
         return dt.replace(tzinfo=timezone.utc)
     return dt.astimezone(timezone.utc)
-
-
-def normalize_mpn(mpn: str | None) -> str:
-    if not mpn:
-        return ""
-    return mpn.upper().replace("-", "").replace("_", "").replace(" ", "").replace("/", "").replace(".", "")
 
 
 def _normalize_phone(phone: str | None) -> str:
@@ -356,8 +351,8 @@ def _match_type_for_parts(requested: str, matched: str, substitutes: list | None
     """
     if not requested or not matched:
         return "exact"
-    req_norm = normalize_mpn(requested)
-    match_norm = normalize_mpn(matched)
+    req_norm = normalize_mpn_key(requested)
+    match_norm = normalize_mpn_key(matched)
     if req_norm == match_norm:
         return "exact"
     if req_norm and match_norm and (req_norm in match_norm or match_norm in req_norm):
@@ -367,9 +362,9 @@ def _match_type_for_parts(requested: str, matched: str, substitutes: list | None
         sub_norms = set()
         for sub in substitutes:
             if isinstance(sub, str):
-                sub_norms.add(normalize_mpn(sub))
+                sub_norms.add(normalize_mpn_key(sub))
             elif isinstance(sub, dict):
-                sub_norms.add(normalize_mpn(sub.get("mpn") or sub.get("part_number") or ""))
+                sub_norms.add(normalize_mpn_key(sub.get("mpn") or sub.get("part_number") or ""))
         sub_norms.discard("")
         if match_norm in sub_norms:
             return "cross_ref"
@@ -420,7 +415,7 @@ def upsert_lead_from_sighting(db: Session, requirement: Requirement, sighting: S
     if not matched_part:
         matched_part = requested_part
 
-    matched_part_norm = normalize_mpn(matched_part) or matched_part.upper()
+    matched_part_norm = normalize_mpn_key(matched_part) or matched_part.lower()
     vendor_card = _find_vendor_card(db, vendor_normalized)
     source_reliability = _source_reliability(sighting.source_type, sighting.evidence_tier)
     freshness = _freshness_score(sighting.created_at)
@@ -768,7 +763,7 @@ def attach_lead_metadata_to_results(db: Session, results_by_requirement: dict[in
     for requirement_id, rows in results_by_requirement.items():
         for row in rows:
             vendor_norm = normalize_vendor_name((row.get("vendor_name") or "").strip()) or ""
-            part_norm = normalize_mpn((row.get("mpn_matched") or row.get("mpn") or "").strip()) or ""
+            part_norm = normalize_mpn_key((row.get("mpn_matched") or row.get("mpn") or "").strip()) or ""
             key = _lead_key(requirement_id, vendor_norm, part_norm)
             lead = by_key.get(key)
             if not lead:

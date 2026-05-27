@@ -24,30 +24,38 @@ class UTCDateTime(TypeDecorator):
         return value
 
 
-_is_sqlite = settings.database_url.startswith("sqlite")
+def _make_engine(database_url: str):
+    """Build the SQLAlchemy engine for ``database_url``.
 
-if _is_sqlite:
-    from sqlalchemy.pool import StaticPool
+    Split out from module scope so the PostgreSQL configuration branch is unit-testable
+    directly — re-importing this module to exercise it would rebuild the shared engine
+    and corrupt parallel (xdist) tests.
+    """
+    if database_url.startswith("sqlite"):
+        from sqlalchemy.pool import StaticPool
 
-    engine = create_engine(
-        settings.database_url,
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
-else:
-    _connect_args: dict[str, object] = {"connect_timeout": 10}
-    if settings.database_url.startswith("postgresql"):
-        _connect_args["options"] = "-c statement_timeout=30000 -c lock_timeout=5000"
+        return create_engine(
+            database_url,
+            connect_args={"check_same_thread": False},
+            poolclass=StaticPool,
+        )
 
-    engine = create_engine(
-        settings.database_url,
+    connect_args: dict[str, object] = {"connect_timeout": 10}
+    if database_url.startswith("postgresql"):
+        connect_args["options"] = "-c statement_timeout=30000 -c lock_timeout=5000"
+
+    return create_engine(
+        database_url,
         pool_size=20,
         max_overflow=20,
         pool_timeout=10,
         pool_pre_ping=True,
         pool_recycle=1800,
-        connect_args=_connect_args,
+        connect_args=connect_args,
     )
+
+
+engine = _make_engine(settings.database_url)
 
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 

@@ -1,7 +1,8 @@
-# Never commit these
+# Never commit these — exact .env and any `.env.*` variant (backups, workers,
+# timestamped edit snapshots). `!.env.example` re-allows the committed template.
 .env
-.env.backup.*
-Caddyfile
+.env.*
+!.env.example
 __pycache__/
 *.pyc
 *.pyo
@@ -20,6 +21,7 @@ node_modules/
 .claude/worktrees/
 
 # Dev/test artifacts
+.playwright-mcp/
 .coverage
 coverage.xml
 coverage.json
@@ -43,8 +45,6 @@ scripts/deep_test.py
 # server-local backups (do not commit)
 availai_backup.sql
 app/static/public/*_backup.png
-.env.ics-worker
-.env.nc-worker
 .worktrees/
 fix_queue/
 scripts/ux-repair-reports/
