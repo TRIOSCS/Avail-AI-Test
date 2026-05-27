@@ -16,7 +16,9 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
 
 from ..database import UTCDateTime
@@ -115,6 +117,7 @@ class Requirement(Base):
     package_type = Column(String(100))  # Physical package (QFP, BGA, SOIC, DIP, etc.)
     revision = Column(String(100))  # Part revision / version level
     customer_pn = Column(String(255))  # Customer's internal part number
+    oem_hint = Column(String(64), nullable=True)  # which OEM's spec-code vocabulary applies; null → "IBM"
     need_by_date = Column(Date)  # When customer needs the parts
     sale_notes = Column(Text)
     sourcing_status = Column(String(20), default="open")  # open | sourcing | offered | quoted | won | lost
@@ -215,6 +218,11 @@ class Sighting(Base):
     # Multi-factor score breakdown (JSON: {trust, price, qty, freshness, completeness})
     score_components = Column(JSON)
 
+    # Spec-code resolver lineage — populated when this sighting was sourced
+    # against an AVL MPN resolved from an OEM spec code (see SpecCodeResolver).
+    resolved_via_spec_code = Column(String(64), nullable=True)
+    source_mpn = Column(String(255), nullable=True)
+
     created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
 
     requirement = relationship("Requirement", back_populates="sightings")
@@ -303,3 +311,77 @@ class RequirementAttachment(Base):
 
     requirement = relationship("Requirement", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
+
+
+class OemSpecCode(Base):
+    """Authoritative OEM spec code → approved MPN list.
+
+    Only human-approved mappings live here. LLM proposals start in
+    OemSpecCodePending and get promoted on approval.
+
+    Called by: app/services/spec_code_resolver.py
+    Depends on: User (foreign key)
+    """
+
+    __tablename__ = "oem_spec_codes"
+
+    id = Column(Integer, primary_key=True)
+    oem = Column(String(64), nullable=False, index=True)
+    spec_code = Column(String(64), nullable=False, index=True)
+    avl = Column(JSONB, nullable=False)
+    source = Column(String(32), nullable=False)
+    approved_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at = Column(UTCDateTime, nullable=False)
+    created_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+
+    __table_args__ = (UniqueConstraint("oem", "spec_code", name="uq_oem_spec_code"),)
+
+
+class OemSpecCodePending(Base):
+    """LLM-discovered mappings awaiting human approval.
+
+    Speculatively used for sourcing while pending; promoted to OemSpecCode on
+    approve; deleted on reject (with rejected MPNs copied into
+    OemSpecCodeBlacklist).
+
+    Called by: app/services/spec_code_resolver.py,
+               app/routers/admin/spec_codes.py
+    Depends on: Requirement (foreign key)
+    """
+
+    __tablename__ = "oem_spec_codes_pending"
+
+    id = Column(Integer, primary_key=True)
+    oem = Column(String(64), nullable=False, index=True)
+    spec_code = Column(String(64), nullable=False, index=True)
+    proposed_avl = Column(JSONB, nullable=False)
+    llm_confidence = Column(Float, nullable=False)
+    citations = Column(JSONB, nullable=False, default=list)
+    discovered_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    first_requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True)
+    used_in_requirement_ids = Column(JSONB, nullable=False, default=list)
+
+    __table_args__ = (UniqueConstraint("oem", "spec_code", name="uq_pending_oem_spec_code"),)
+
+
+class OemSpecCodeBlacklist(Base):
+    """Rejected mappings — the resolver passes these to the LLM as an exclusion list so
+    the same wrong MPNs aren't proposed again.
+
+    Multiple rows per (oem, spec_code) are allowed; each row represents one
+    rejection event with its own reason.
+
+    Called by: app/services/spec_code_resolver.py,
+               app/routers/admin/spec_codes.py
+    Depends on: User (foreign key)
+    """
+
+    __tablename__ = "oem_spec_codes_blacklist"
+
+    id = Column(Integer, primary_key=True)
+    oem = Column(String(64), nullable=False, index=True)
+    spec_code = Column(String(64), nullable=False)
+    rejected_mpns = Column(JSONB, nullable=False)
+    rejected_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    rejected_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    reason = Column(Text, nullable=True)
