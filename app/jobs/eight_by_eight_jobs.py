@@ -27,6 +27,24 @@ from ..scheduler import _traced_job
 def register_eight_by_eight_jobs(scheduler, settings):
     """Register 8x8 CDR polling job with the scheduler."""
     if not settings.eight_by_eight_enabled:
+        logger.info("8x8 CDR polling NOT registered (EIGHT_BY_EIGHT_ENABLED is false)")
+        return
+
+    missing = [
+        name
+        for name, val in [
+            ("EIGHT_BY_EIGHT_API_KEY", settings.eight_by_eight_api_key),
+            ("EIGHT_BY_EIGHT_USERNAME", settings.eight_by_eight_username),
+            ("EIGHT_BY_EIGHT_PASSWORD", settings.eight_by_eight_password),
+            ("EIGHT_BY_EIGHT_PBX_ID", settings.eight_by_eight_pbx_id),
+        ]
+        if not val
+    ]
+    if missing:
+        logger.warning(
+            "8x8 CDR polling NOT registered — enabled flag is true but credentials missing: {}",
+            ", ".join(missing),
+        )
         return
 
     scheduler.add_job(
