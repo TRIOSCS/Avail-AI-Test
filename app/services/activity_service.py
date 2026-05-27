@@ -148,6 +148,8 @@ def log_email_activity(
     external_id: str | None,
     contact_name: str | None,
     db: Session,
+    requisition_id: int | None = None,
+    requirement_id: int | None = None,
 ) -> ActivityLog | None:
     """Log an email activity, matching the contact to a company or vendor.
 
@@ -178,6 +180,8 @@ def log_email_activity(
         direction="outbound" if direction == "sent" else "inbound",
         event_type="email",
         summary=f"Email {'to' if direction == 'sent' else 'from'} {contact_name or email_addr}",
+        requisition_id=requisition_id,
+        requirement_id=requirement_id,
     )
     db.add(record)
     db.flush()
@@ -202,6 +206,8 @@ def log_call_activity(
     contact_name: str | None,
     db: Session,
     subject: str | None = None,
+    requisition_id: int | None = None,
+    requirement_id: int | None = None,
 ) -> ActivityLog | None:
     """Log a phone call activity."""
     if external_id:
@@ -235,6 +241,8 @@ def log_call_activity(
         direction=direction,
         event_type="call",
         summary=subject,
+        requisition_id=requisition_id,
+        requirement_id=requirement_id,
     )
     db.add(record)
     db.flush()
@@ -281,6 +289,20 @@ def get_user_activities(user_id: int, db: Session, limit: int = 50) -> list[Acti
     return (
         db.query(ActivityLog)
         .filter(ActivityLog.user_id == user_id)
+        .order_by(ActivityLog.created_at.desc())
+        .limit(limit)
+        .all()
+    )
+
+
+def get_requisition_activities(requisition_id: int, db: Session, limit: int = 200) -> list[ActivityLog]:
+    """Get the full activity timeline for a requisition, newest first.
+
+    Backs the requisition Activity tab. Uses the ix_activity_requisition index.
+    """
+    return (
+        db.query(ActivityLog)
+        .filter(ActivityLog.requisition_id == requisition_id)
         .order_by(ActivityLog.created_at.desc())
         .limit(limit)
         .all()
@@ -654,6 +676,76 @@ def _increment_vendor_contact(vendor_contact_id: int, db: Session):
 # ═══════════════════════════════════════════════════════════════════════
 
 
+def log_activity(
+    db: Session,
+    *,
+    activity_type: str,
+    channel: str = "system",
+    requisition_id: int | None = None,
+    requirement_id: int | None = None,
+    user_id: int | None = None,
+    company_id: int | None = None,
+    vendor_card_id: int | None = None,
+    vendor_contact_id: int | None = None,
+    description: str | None = None,
+    summary: str | None = None,
+    occurred_at: datetime | None = None,
+    details: dict | None = None,
+) -> ActivityLog:
+    """Canonical writer for system/RFQ-style activity events.
+
+    Resolves company_id from the requisition (requisition -> customer_site ->
+    company) when not supplied, so the row links to both the req and its company.
+    Always sets requisition_id/requirement_id so the row appears on the req
+    Activity tab.
+
+    Email and call events are written by log_email_activity()/log_call_activity(),
+    which run their own contact-matching and do not route through this function.
+
+    Called by: log_rfq_activity() (backward-compat alias). New system event
+    sources (status changes, offer events, etc.) should call this directly.
+    """
+    if company_id is None and requisition_id:
+        from ..models.crm import CustomerSite
+        from ..models.sourcing import Requisition
+
+        req = db.get(Requisition, requisition_id)
+        if req is None:
+            logger.warning(
+                f"log_activity: requisition_id={requisition_id} not found; "
+                f"activity row written without company linkage (type={activity_type})"
+            )
+        elif req.customer_site_id:
+            site = db.get(CustomerSite, req.customer_site_id)
+            if site:
+                company_id = site.company_id
+
+    record = ActivityLog(
+        user_id=user_id,
+        activity_type=activity_type,
+        channel=channel,
+        requisition_id=requisition_id,
+        requirement_id=requirement_id,
+        company_id=company_id,
+        vendor_card_id=vendor_card_id,
+        vendor_contact_id=vendor_contact_id,
+        notes=description,
+        summary=summary,
+        occurred_at=occurred_at or datetime.now(timezone.utc),
+        details=details,
+    )
+    db.add(record)
+    db.flush()
+
+    if company_id:
+        _update_last_activity({"type": "company", "id": company_id}, db)
+    if vendor_card_id:
+        _update_last_activity({"type": "vendor", "id": vendor_card_id}, db)
+
+    logger.info(f"Activity logged: {activity_type} -> req {requisition_id} (channel={channel})")
+    return record
+
+
 def log_rfq_activity(
     db: Session,
     rfq_id: int,
@@ -663,37 +755,20 @@ def log_rfq_activity(
     user_id: int | None = None,
     requirement_id: int | None = None,
 ) -> ActivityLog:
-    """Log an activity entry on the RFQ activity timeline."""
-    # Resolve company_id via requisition → customer_site → company
-    company_id = None
-    if rfq_id:
-        from ..models.crm import CustomerSite
-        from ..models.sourcing import Requisition
+    """Backward-compatible alias for log_activity() — see that function.
 
-        req = db.get(Requisition, rfq_id)
-        if req and req.customer_site_id:
-            site = db.get(CustomerSite, req.customer_site_id)
-            if site:
-                company_id = site.company_id
-
-    record = ActivityLog(
-        user_id=user_id,
+    Kept so existing callers (e.g. routers/sightings.py) need no change.
+    """
+    return log_activity(
+        db,
         activity_type=activity_type,
         channel="system",
         requisition_id=rfq_id,
         requirement_id=requirement_id,
-        company_id=company_id,
-        notes=description,
+        user_id=user_id,
+        description=description,
         details=metadata,
     )
-    db.add(record)
-    db.flush()
-
-    if company_id:
-        _update_last_activity({"type": "company", "id": company_id}, db)
-
-    logger.info(f"RFQ activity logged: {activity_type} -> rfq {rfq_id}")
-    return record
 
 
 # ═══════════════════════════════════════════════════════════════════════

@@ -1211,13 +1211,13 @@ class TestDetectAttachments:
 
 class TestRegexPatterns:
     def test_avail_tag_re(self):
-        from app.jobs.email_jobs import _AVAIL_TAG_RE
+        from app.shared_constants import RFQ_SUBJECT_TAG_RE
 
-        m = _AVAIL_TAG_RE.search("Re: [AVAIL-42] RFQ for parts")
+        m = RFQ_SUBJECT_TAG_RE.search("Re: [AVAIL-42] RFQ for parts")
         assert m is not None
         assert m.group(1) == "42"
 
-        assert _AVAIL_TAG_RE.search("No tag here") is None
+        assert RFQ_SUBJECT_TAG_RE.search("No tag here") is None
 
     def test_excess_bid_re(self):
         from app.jobs.email_jobs import _EXCESS_BID_RE

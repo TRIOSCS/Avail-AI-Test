@@ -23,6 +23,7 @@ from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
 from ..scheduler import _traced_job
+from ..shared_constants import RFQ_SUBJECT_TAG_RE
 from ..utils.token_manager import _utc
 
 
@@ -770,9 +771,6 @@ async def _sync_user_contacts(user, db):
 
 # ── Sent Folder Scanning ─────────────────────────────────────────────────
 
-# Regex to extract requisition ID from [AVAIL-123] tags in email subjects
-_AVAIL_TAG_RE = re.compile(r"\[AVAIL-(\d+)\]")
-
 # Regex to extract solicitation ID from [EXCESS-BID-123] tags in bid reply subjects
 _EXCESS_BID_RE = re.compile(r"\[EXCESS-BID-(\d+)\]")
 
@@ -914,7 +912,7 @@ async def scan_sent_folder(user, db):
 
         # Check for [AVAIL-{id}] tag to link to requisition
         requisition_id = None
-        tag_match = _AVAIL_TAG_RE.search(subject)
+        tag_match = RFQ_SUBJECT_TAG_RE.search(subject)
         if tag_match:
             requisition_id = int(tag_match.group(1))
 
