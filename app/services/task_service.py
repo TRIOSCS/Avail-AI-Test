@@ -227,6 +227,15 @@ def reopen_task(
         raise PermissionError("Only the assignee can reopen this task")
     task.status = TaskStatus.TODO
     task.completed_at = None
+    log_activity(
+        db,
+        activity_type=ActivityType.TASK_REOPENED,
+        requisition_id=task.requisition_id,
+        requirement_id=task.requirement_id,
+        user_id=user_id,
+        description=f"Task reopened: {task.title}",
+        details={"task_id": task.id},
+    )
     db.commit()
     db.refresh(task)
     logger.info("Task {} reopened by user {}", task_id, user_id)
