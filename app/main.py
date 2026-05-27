@@ -309,6 +309,11 @@ async def _metrics_auth(x_metrics_token: str = Header(default="")) -> None:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
+# PrometheusMiddleware must remain registered last. Starlette wraps middleware
+# in reverse add_middleware() order, so being added last places it outermost in
+# the request chain — giving it wall-clock time across all inner middleware and
+# a stable position for the metrics contract. Do not move it inside Session,
+# GZip, or CSRF without updating that assumption.
 app.add_middleware(PrometheusMiddleware)
 
 
