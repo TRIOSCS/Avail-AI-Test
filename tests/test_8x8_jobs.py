@@ -13,6 +13,10 @@ DISABLED_SETTINGS = SimpleNamespace(
 ENABLED_SETTINGS = SimpleNamespace(
     eight_by_eight_enabled=True,
     eight_by_eight_poll_interval_minutes=30,
+    eight_by_eight_api_key="test-api-key",
+    eight_by_eight_username="test-user",
+    eight_by_eight_password="test-pass",
+    eight_by_eight_pbx_id="test-pbx",
 )
 
 SAMPLE_CDR_OUTGOING = {
