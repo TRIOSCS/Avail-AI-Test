@@ -54,7 +54,13 @@ the canonical writer (`log_rfq_activity()` is kept as a thin delegating alias).
 Email and call events are written by `log_email_activity()`/`log_call_activity()`,
 which run their own contact-matching. The requisition Activity tab reads its
 timeline back via `activity_service.get_requisition_activities()` rather than an
-inlined query.
+inlined query. Offer creation and offer status changes now also route through
+`activity_service.log_activity()` (`ActivityType.OFFER_CREATED` /
+`ActivityType.OFFER_STATUS_CHANGED`) so offer events appear on the requisition
+Activity tab. Task completion, requisition assignment (claim/unclaim/batch),
+archive/unarchive, and sales-note edits likewise route through
+`activity_service.log_activity()` (`ActivityType.TASK_COMPLETED`,
+`ASSIGNMENT_CHANGED`, `REQ_ARCHIVED`/`REQ_UNARCHIVED`, `SALES_NOTE`).
 
 ## 2. Search (User-Initiated Only)
 
@@ -999,3 +1005,51 @@ Component bound to `/requisitions2` `<tr>`. CSS handles hover reveal via
 `tr:hover .opp-action-rail`; this component exposes `show` state so
 `@focusin`/`@focusout`/`@keydown.enter` toggle visibility for keyboard
 users. `Escape` dismisses.
+
+---
+
+## 8x8 Integration — Operator Enablement
+
+The 8x8 CDR (call-detail record) integration is **code-complete but
+disabled by default**. The polling job runs only when
+`eight_by_eight_enabled` is true in settings (driven by env vars).
+
+**Required env vars** (set in deployment `.env`, then restart the api
+container):
+
+| Var | Purpose |
+|---|---|
+| `EIGHT_BY_EIGHT_ENABLED` | `true` to register the polling job |
+| `EIGHT_BY_EIGHT_API_KEY` | 8x8 API token |
+| `EIGHT_BY_EIGHT_USERNAME` | Service account username |
+| `EIGHT_BY_EIGHT_PASSWORD` | Service account password |
+| `EIGHT_BY_EIGHT_PBX_ID` | Tenant PBX identifier |
+
+**Optional env vars** (defaults applied if unset):
+
+| Var | Default | Purpose |
+|---|---|---|
+| `EIGHT_BY_EIGHT_TIMEZONE` | `America/Los_Angeles` | Tenant timezone for CDR timestamp parsing |
+| `EIGHT_BY_EIGHT_POLL_INTERVAL_MINUTES` | `30` | How often the job pulls new CDRs |
+
+**Per-user setup:** Each user that should have their calls ingested
+needs their 8x8 extension stored on the `users` table (fields added
+in alembic migration `052_add_8x8_user_fields.py`). Without this,
+their calls land in `activity_log` but are not attributed to a user.
+
+**Verifying enablement landed:** On api container start, `docker
+compose logs api` will show exactly one of three lines from
+`register_eight_by_eight_jobs`:
+
+| Log line | Means |
+|---|---|
+| `8x8 CDR polling NOT registered (EIGHT_BY_EIGHT_ENABLED is false)` | Flag is off — set `EIGHT_BY_EIGHT_ENABLED=true`. |
+| `8x8 CDR polling NOT registered — enabled flag is true but credentials missing: ...` | Flag is on but one or more secrets are unset. The line lists which ones. |
+| `8x8 CDR polling registered (every 30min)` | Job is live; CDRs will pull on the next interval tick. |
+
+If none of these appear in the logs, the api container did not finish
+starting — check `docker compose ps` and earlier log lines.
+
+**Data flow:** Job → `eight_by_eight_service` → CDR pull → matched to
+users by extension → rows inserted into `activity_log` with
+`source='8x8_call'`. Visible in the per-record activity timeline.

@@ -1,7 +1,7 @@
 """Tests for 8x8 CDR polling job."""
 
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from app.jobs.eight_by_eight_jobs import register_eight_by_eight_jobs
 from app.services.eight_by_eight_service import normalize_cdr
@@ -13,6 +13,10 @@ DISABLED_SETTINGS = SimpleNamespace(
 ENABLED_SETTINGS = SimpleNamespace(
     eight_by_eight_enabled=True,
     eight_by_eight_poll_interval_minutes=30,
+    eight_by_eight_api_key="test-api-key",
+    eight_by_eight_username="test-user",
+    eight_by_eight_password="test-pass",
+    eight_by_eight_pbx_id="test-pbx",
 )
 
 SAMPLE_CDR_OUTGOING = {
@@ -127,10 +131,10 @@ class TestCdrProcessingLogic:
 class TestProcessCdrsIntegration:
     """Test _process_cdrs with all dependencies mocked."""
 
-    @patch("app.services.eight_by_eight_service.get_cdrs")
-    @patch("app.services.eight_by_eight_service.get_access_token")
+    @patch("app.services.eight_by_eight_service.get_cdrs", new_callable=AsyncMock)
+    @patch("app.services.eight_by_eight_service.get_access_token", new_callable=AsyncMock)
     @patch("app.services.activity_service.log_call_activity")
-    def test_full_flow(self, mock_log_call, mock_auth, mock_fetch):
+    async def test_full_flow(self, mock_log_call, mock_auth, mock_fetch):
         from app.jobs.eight_by_eight_jobs import _process_cdrs
 
         mock_auth.return_value = "token"
@@ -166,7 +170,7 @@ class TestProcessCdrsIntegration:
 
         db.query.side_effect = query_router
 
-        result = _process_cdrs(db, ENABLED_SETTINGS)
+        result = await _process_cdrs(db, ENABLED_SETTINGS)
 
         # Outgoing call processed, Internal skipped
         assert result["processed"] == 1

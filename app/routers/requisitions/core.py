@@ -17,7 +17,7 @@ from sqlalchemy import and_, case, exists, literal, or_, select, update
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import RequisitionStatus, UserRole
+from ...constants import ActivityType, RequisitionStatus, UserRole
 from ...database import get_db
 from ...dependencies import get_req_for_user, require_admin, require_user
 from ...models import (
@@ -42,6 +42,7 @@ from ...schemas.requisitions import (
     RequisitionUpdate,
 )
 from ...schemas.responses import RequisitionListResponse
+from ...services.activity_service import log_activity
 from ...services.sourcing_score import compute_sourcing_score_safe
 from ...utils.sql_helpers import escape_like
 
@@ -556,9 +557,30 @@ async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Se
     if not req:
         raise HTTPException(404, "Requisition not found")
     if req.status in ("archived", "won", "lost"):
+        prior_status = req.status
         req.status = RequisitionStatus.ACTIVE
+        if prior_status == "archived":
+            unarchive_type = ActivityType.REQ_UNARCHIVED
+            unarchive_desc = "Requisition unarchived"
+        else:
+            unarchive_type = ActivityType.STATUS_CHANGED
+            unarchive_desc = f"Requisition reopened from {prior_status} to active"
+        log_activity(
+            db,
+            activity_type=unarchive_type,
+            requisition_id=req.id,
+            user_id=user.id,
+            description=unarchive_desc,
+        )
     else:
         req.status = RequisitionStatus.ARCHIVED
+        log_activity(
+            db,
+            activity_type=ActivityType.REQ_ARCHIVED,
+            requisition_id=req.id,
+            user_id=user.id,
+            description="Requisition archived",
+        )
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "status": req.status}
@@ -587,6 +609,14 @@ async def bulk_archive(user: User = Depends(require_admin), db: Session = Depend
         .execution_options(synchronize_session="fetch")
     )
     archived_ids = [row[0] for row in db.execute(stmt).all()]
+    for rid in archived_ids:
+        log_activity(
+            db,
+            activity_type=ActivityType.REQ_ARCHIVED,
+            requisition_id=rid,
+            user_id=user.id,
+            description="Requisition archived (bulk)",
+        )
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "archived_count": len(archived_ids), "archived_ids": archived_ids}
@@ -624,6 +654,14 @@ async def batch_archive_by_ids(
         .execution_options(synchronize_session="fetch")
     )
     archived_ids = [row[0] for row in db.execute(stmt).all()]
+    for rid in archived_ids:
+        log_activity(
+            db,
+            activity_type=ActivityType.REQ_ARCHIVED,
+            requisition_id=rid,
+            user_id=user.id,
+            description="Requisition archived (bulk)",
+        )
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "archived_count": len(archived_ids), "archived_ids": archived_ids}
@@ -653,6 +691,15 @@ async def batch_assign(
         .execution_options(synchronize_session="fetch")
     )
     assigned_ids = [row[0] for row in db.execute(stmt).all()]
+    for rid in assigned_ids:
+        log_activity(
+            db,
+            activity_type=ActivityType.ASSIGNMENT_CHANGED,
+            requisition_id=rid,
+            user_id=user.id,
+            description=f"Requisition assignment changed (batch) — owner {payload.owner_id}",
+            details={"action": "batch_assigned", "claimed_by_id": payload.owner_id},
+        )
     db.commit()
     invalidate_prefix("req_list")
     return {

@@ -17,13 +17,14 @@ from sqlalchemy import func
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..constants import BidSolicitationStatus, BidStatus, ExcessLineItemStatus
+from ..constants import ActivityType, BidSolicitationStatus, BidStatus, ExcessLineItemStatus
 from ..models import Company, CustomerSite
 from ..models.excess import Bid, BidSolicitation, ExcessLineItem, ExcessList
 from ..models.intelligence import ProactiveMatch
 from ..models.offers import Offer
 from ..models.sourcing import Requirement, Requisition
 from ..utils.normalization import normalize_mpn_key
+from .activity_service import log_activity
 
 _ACTIVE_REQ_STATUSES = {"active", "open", "sourcing"}
 
@@ -419,6 +420,17 @@ def match_excess_demand(db: Session, list_id: int, *, user_id: int) -> dict:
                 notes=f"Auto-matched from excess list: {excess_list.title}",
             )
             db.add(offer)
+            db.flush()
+            log_activity(
+                db,
+                activity_type=ActivityType.OFFER_CREATED,
+                requisition_id=offer.requisition_id,
+                requirement_id=offer.requirement_id,
+                user_id=user_id,
+                vendor_card_id=offer.vendor_card_id,
+                description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
+                details={"offer_id": offer.id, "source": offer.source},
+            )
             item_matches += 1
             matches_created += 1
 
@@ -662,6 +674,16 @@ def create_proactive_matches_for_excess(
             )
             db.add(offer)
             db.flush()
+            log_activity(
+                db,
+                activity_type=ActivityType.OFFER_CREATED,
+                requisition_id=offer.requisition_id,
+                requirement_id=offer.requirement_id,
+                user_id=user_id,
+                vendor_card_id=offer.vendor_card_id,
+                description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
+                details={"offer_id": offer.id, "source": offer.source},
+            )
 
         if not offer:
             continue

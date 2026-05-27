@@ -8,7 +8,7 @@ from datetime import datetime, timedelta, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from .constants import PendingBatchStatus, VendorResponseStatus
+from .constants import ActivityType, PendingBatchStatus, VendorResponseStatus
 from .models import (
     ActivityLog,
     Contact,
@@ -20,6 +20,7 @@ from .models import (
     VendorCard,
     VendorResponse,
 )
+from .services.activity_service import log_activity
 from .services.credential_service import get_credential_cached
 from .shared_constants import JUNK_DOMAINS as NOISE_DOMAINS
 from .shared_constants import JUNK_EMAIL_PREFIXES as NOISE_PREFIXES
@@ -1088,6 +1089,17 @@ def _auto_create_offers_from_parse(vr: VendorResponse, parsed: dict, db: Session
             )
             db.add(offer)
             db.flush()
+
+            log_activity(
+                db,
+                activity_type=ActivityType.OFFER_CREATED,
+                requisition_id=offer.requisition_id,
+                requirement_id=offer.requirement_id,
+                user_id=None,
+                vendor_card_id=offer.vendor_card_id,
+                description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
+                details={"offer_id": offer.id, "source": offer.source},
+            )
 
             # Auto-generate task for email-parsed offer
             try:

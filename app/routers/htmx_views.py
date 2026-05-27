@@ -23,6 +23,7 @@ from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload, selectinload
 
 from ..constants import (
+    ActivityType,
     AttributionStatus,
     BuyPlanStatus,
     ContactStatus,
@@ -63,6 +64,7 @@ from ..models.prospect_account import ProspectAccount
 from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorContact
 from ..scoring import classify_lead, explain_lead, score_unified
+from ..services.activity_service import log_activity as _log_activity
 from ..services.commodity_registry import COMMODITY_TREE, get_display_name
 from ..services.faceted_search_service import (
     get_commodity_counts,
@@ -1909,6 +1911,8 @@ async def review_offer(
     if not offer:
         raise HTTPException(404, "Offer not found")
 
+    old_status = offer.status
+
     if action == "approve":
         require_valid_transition("offer", offer.status, OfferStatus.APPROVED)
         offer.status = OfferStatus.APPROVED
@@ -1918,6 +1922,20 @@ async def review_offer(
     else:
         require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
         offer.status = OfferStatus.REJECTED
+
+    _log_activity(
+        db,
+        activity_type=ActivityType.OFFER_STATUS_CHANGED,
+        requisition_id=offer.requisition_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
+        details={
+            "offer_id": offer.id,
+            "old_status": str(old_status),
+            "new_status": str(offer.status),
+        },
+    )
 
     db.commit()
     logger.info("Offer {} {} by {}", offer_id, action, user.email)
@@ -1994,8 +2012,20 @@ async def add_offer(
         created_at=datetime.now(timezone.utc),
     )
     db.add(offer)
-    db.commit()
+    db.flush()  # offer.id populated; activity row + offer committed together below
     logger.info("Manual offer created: {} on req {} by {}", mpn, req_id, user.email)
+
+    _log_activity(
+        db,
+        activity_type=ActivityType.OFFER_CREATED,
+        requisition_id=offer.requisition_id,
+        requirement_id=offer.requirement_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer added: {offer.vendor_name} — {offer.mpn}",
+        details={"offer_id": offer.id, "source": offer.source},
+    )
+    db.commit()
 
     return await requisition_tab(request=request, req_id=req_id, tab="offers", user=user, db=db)
 
@@ -2182,6 +2212,21 @@ async def mark_offer_sold_htmx(
             new_value="sold",
         )
     )
+
+    _log_activity(
+        db,
+        activity_type=ActivityType.OFFER_STATUS_CHANGED,
+        requisition_id=offer.requisition_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
+        details={
+            "offer_id": offer.id,
+            "old_status": str(old_status),
+            "new_status": str(offer.status),
+        },
+    )
+
     db.commit()
     logger.info("Offer {} marked sold by {}", offer_id, user.email)
 
@@ -2222,12 +2267,28 @@ async def promote_offer_htmx(
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be promoted")
 
+    old_status = offer.status
     require_valid_transition("offer", offer.status, OfferStatus.ACTIVE)
     offer.status = OfferStatus.ACTIVE
     offer.approved_by_id = user.id
     offer.approved_at = datetime.now(timezone.utc)
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
+
+    _log_activity(
+        db,
+        activity_type=ActivityType.OFFER_STATUS_CHANGED,
+        requisition_id=offer.requisition_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
+        details={
+            "offer_id": offer.id,
+            "old_status": str(old_status),
+            "new_status": str(offer.status),
+        },
+    )
+
     db.commit()
     logger.info("Offer {} promoted by {}", offer_id, user.email)
 
@@ -2248,10 +2309,26 @@ async def reject_offer_htmx(
     if offer.status != "pending_review":
         raise HTTPException(400, "Only pending_review offers can be rejected")
 
+    old_status = offer.status
     require_valid_transition("offer", offer.status, OfferStatus.REJECTED)
     offer.status = OfferStatus.REJECTED
     offer.updated_at = datetime.now(timezone.utc)
     offer.updated_by_id = user.id
+
+    _log_activity(
+        db,
+        activity_type=ActivityType.OFFER_STATUS_CHANGED,
+        requisition_id=offer.requisition_id,
+        user_id=user.id,
+        vendor_card_id=offer.vendor_card_id,
+        description=f"Offer {offer.vendor_name} status: {old_status} → {offer.status}",
+        details={
+            "offer_id": offer.id,
+            "old_status": str(old_status),
+            "new_status": str(offer.status),
+        },
+    )
+
     db.commit()
     logger.info("Offer {} rejected by {}", offer_id, user.email)
 
@@ -9568,7 +9645,18 @@ async def save_part_notes(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    old_sale_notes = req.sale_notes
     req.sale_notes = sale_notes.strip() or None
+    if (req.sale_notes or "") != (old_sale_notes or ""):
+        _log_activity(
+            db,
+            activity_type=ActivityType.SALES_NOTE,
+            requisition_id=req.requisition_id,
+            requirement_id=req.id,
+            user_id=user.id,
+            description="Sales note updated",
+            details={"requirement_id": req.id},
+        )
     db.commit()
     ctx = _base_ctx(request, user, "requisitions")
     ctx["requirement"] = req
@@ -9626,6 +9714,15 @@ async def mark_task_done(
 
     task.status = TaskStatus.DONE
     task.completed_at = datetime.now(timezone.utc)
+    _log_activity(
+        db,
+        activity_type=ActivityType.TASK_COMPLETED,
+        requisition_id=task.requisition_id,
+        requirement_id=task.requirement_id,
+        user_id=user.id,
+        description=f"Task completed: {task.title}",
+        details={"task_id": task.id},
+    )
     db.commit()
     logger.info("Task {} marked done by {}", task_id, user.email)
 
@@ -9718,9 +9815,18 @@ async def archive_requisition(
     if not requisition:
         raise HTTPException(404, "Requisition not found")
 
+    prior_status = requisition.status
     requisition.status = RequisitionStatus.ARCHIVED
     for child in requisition.requirements:
         child.sourcing_status = SourcingStatus.ARCHIVED
+    if prior_status != RequisitionStatus.ARCHIVED:
+        _log_activity(
+            db,
+            activity_type=ActivityType.REQ_ARCHIVED,
+            requisition_id=requisition.id,
+            user_id=user.id,
+            description="Requisition archived",
+        )
     db.commit()
     logger.info("Requisition {} ({} parts) archived by {}", req_id, len(requisition.requirements), user.email)
 
@@ -9739,10 +9845,19 @@ async def unarchive_requisition(
     if not requisition:
         raise HTTPException(404, "Requisition not found")
 
+    prior_status = requisition.status
     requisition.status = RequisitionStatus.ACTIVE
     for child in requisition.requirements:
         if child.sourcing_status == SourcingStatus.ARCHIVED:
             child.sourcing_status = SourcingStatus.OPEN
+    if prior_status != RequisitionStatus.ACTIVE:
+        _log_activity(
+            db,
+            activity_type=ActivityType.REQ_UNARCHIVED,
+            requisition_id=requisition.id,
+            user_id=user.id,
+            description="Requisition unarchived",
+        )
     db.commit()
     logger.info("Requisition {} unarchived by {}", req_id, user.email)
 
@@ -9774,6 +9889,13 @@ async def bulk_archive(
         reqs = db.query(Requisition).filter(Requisition.id.in_(requisition_ids)).all()
         for requisition in reqs:
             requisition.status = RequisitionStatus.ARCHIVED
+            _log_activity(
+                db,
+                activity_type=ActivityType.REQ_ARCHIVED,
+                requisition_id=requisition.id,
+                user_id=user.id,
+                description="Requisition archived",
+            )
         # Cascade: archive all children of these requisitions
         db.query(Requirement).filter(
             Requirement.requisition_id.in_(requisition_ids),

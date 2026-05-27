@@ -17,6 +17,7 @@ from sqlalchemy import case, func
 from sqlalchemy.orm import Session, joinedload
 
 from ..constants import (
+    ActivityType,
     OfferStatus,
     ProactiveMatchStatus,
     ProactiveOfferStatus,
@@ -38,6 +39,7 @@ from ..models import (
     User,
 )
 from ..vendor_utils import normalize_vendor_name
+from .activity_service import log_activity
 
 # ── Match Retrieval ──────────────────────────────────────────────────────
 
@@ -474,6 +476,17 @@ def convert_proactive_to_win(db: Session, proactive_offer_id: int, user: User) -
         db.add(new_offer)
         db.flush()
         offer_ids.append(new_offer.id)
+
+        log_activity(
+            db,
+            activity_type=ActivityType.OFFER_CREATED,
+            requisition_id=new_offer.requisition_id,
+            requirement_id=new_offer.requirement_id,
+            user_id=user.id,
+            vendor_card_id=new_offer.vendor_card_id,
+            description=f"Offer added: {new_offer.vendor_name} — {new_offer.mpn}",
+            details={"offer_id": new_offer.id, "source": new_offer.source},
+        )
 
         cost = float(item.get("unit_price") or 0)
         sell = float(item.get("sell_price") or cost)

@@ -18,6 +18,7 @@ from datetime import datetime, timezone
 
 import pytest
 
+from app.constants import ActivityType
 from app.constants import SourcingStatus as RequirementSourcingStatus
 from app.models import ActivityLog, User
 from app.services.requirement_status import (
@@ -218,7 +219,7 @@ class TestClaimRequisition:
             db_session.query(ActivityLog)
             .filter_by(
                 requisition_id=test_requisition.id,
-                activity_type="requisition_claimed",
+                activity_type=ActivityType.ASSIGNMENT_CHANGED,
             )
             .all()
         )
