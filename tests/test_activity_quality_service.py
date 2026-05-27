@@ -235,15 +235,15 @@ class TestScoreUnscoredActivities:
         assert count == 0
 
     async def test_scores_unscored_activities(self, db_session: Session, test_user):
-        """Scores available unscored non-email activities."""
+        """Scores available unscored AI-eligible activities."""
         from app.services.activity_quality_service import score_unscored_activities
 
         log = ActivityLog(
             user_id=test_user.id,
-            activity_type="phone_call",
-            channel="phone",
-            event_type="call",
+            activity_type="email_received",
+            channel="email",
             subject="Pricing call",
+            notes="Vendor sent pricing.",
             created_at=datetime.now(timezone.utc),
         )
         db_session.add(log)
@@ -272,9 +272,8 @@ class TestScoreUnscoredActivities:
 
         log = ActivityLog(
             user_id=test_user.id,
-            activity_type="phone_call",
-            channel="phone",
-            event_type="call",
+            activity_type="email_received",
+            channel="email",
             subject="Some call",
             created_at=datetime.now(timezone.utc),
         )
@@ -300,9 +299,8 @@ class TestScoreUnscoredActivities:
 
         log = ActivityLog(
             user_id=test_user.id,
-            activity_type="phone_call",
-            channel="phone",
-            event_type="call",
+            activity_type="email_received",
+            channel="email",
             subject="Rate limited call",
             created_at=datetime.now(timezone.utc),
         )
@@ -328,17 +326,15 @@ class TestScoreUnscoredActivities:
         # Add two activities — first will fail, second will succeed
         log1 = ActivityLog(
             user_id=test_user.id,
-            activity_type="phone_call",
-            channel="phone",
-            event_type="call",
+            activity_type="email_received",
+            channel="email",
             subject="First call",
             created_at=datetime.now(timezone.utc),
         )
         log2 = ActivityLog(
             user_id=test_user.id,
-            activity_type="note",
-            channel="manual",
-            event_type="note",
+            activity_type="email_received",
+            channel="email",
             subject="Second note",
             created_at=datetime.now(timezone.utc),
         )
@@ -384,9 +380,8 @@ class TestScoreUnscoredActivities:
 
         log = ActivityLog(
             user_id=test_user.id,
-            activity_type="phone_call",
-            channel="phone",
-            event_type="call",
+            activity_type="email_received",
+            channel="email",
             subject="Unavailable error call",
             created_at=datetime.now(timezone.utc),
         )
@@ -404,3 +399,81 @@ class TestScoreUnscoredActivities:
             count = await score_unscored_activities(db_session, batch_size=10)
 
         assert count == 0
+
+
+class TestScoreUnscoredActivitiesNewTypes:
+    """Test AI scoring is extended to sighting_added and email_received activity
+    types."""
+
+    async def test_scores_sighting_added_activity(self, db_session: Session, test_user):
+        """A sighting_added activity is selected and scored from its details payload."""
+        from app.services.activity_quality_service import score_unscored_activities
+
+        log = ActivityLog(
+            user_id=test_user.id,
+            activity_type="sighting_added",
+            channel="system",
+            details={"count": 12, "sources": ["nexar", "digikey"]},
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(log)
+        db_session.commit()
+
+        mock_result = {
+            "is_meaningful": True,
+            "quality_score": 70,
+            "classification": "sighting_batch",
+            "sentiment": "neutral",
+            "clean_summary": "12 vendor sightings added from nexar and digikey.",
+        }
+
+        with patch(
+            "app.utils.claude_client.claude_structured",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ) as mock_claude:
+            count = await score_unscored_activities(db_session, batch_size=10)
+
+        assert count >= 1
+        db_session.refresh(log)
+        assert log.quality_assessed_at is not None
+        assert log.is_meaningful is True
+        # Prompt must be built from the details payload, not a degenerate stub.
+        prompt = mock_claude.call_args.kwargs["prompt"]
+        assert "12" in prompt
+        assert "nexar" in prompt and "digikey" in prompt
+
+    async def test_scores_email_received_activity(self, db_session: Session, test_user):
+        """An email_received activity is selected and scored from subject/notes."""
+        from app.services.activity_quality_service import score_unscored_activities
+
+        log = ActivityLog(
+            user_id=test_user.id,
+            activity_type="email_received",
+            channel="email",
+            subject="RE: LM317T quote request",
+            notes="Vendor confirmed 10K units in stock at $0.42 each.",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(log)
+        db_session.commit()
+
+        mock_result = {
+            "is_meaningful": True,
+            "quality_score": 80,
+            "classification": "quote",
+            "sentiment": "positive",
+            "clean_summary": "Vendor confirmed stock and pricing for LM317T.",
+        }
+
+        with patch(
+            "app.utils.claude_client.claude_structured",
+            new_callable=AsyncMock,
+            return_value=mock_result,
+        ):
+            count = await score_unscored_activities(db_session, batch_size=10)
+
+        assert count >= 1
+        db_session.refresh(log)
+        assert log.quality_assessed_at is not None
+        assert log.is_meaningful is True
