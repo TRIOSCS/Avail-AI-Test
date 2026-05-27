@@ -212,8 +212,8 @@ class TestIcsNcEnqueueOnRefresh:
 
         with (
             patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))),
-            patch("app.services.ics_worker.queue_manager.enqueue_for_ics_search") as ics_mock,
-            patch("app.services.nc_worker.queue_manager.enqueue_for_nc_search") as nc_mock,
+            patch("app.search_service.enqueue_for_ics_search") as ics_mock,
+            patch("app.search_service.enqueue_for_nc_search") as nc_mock,
         ):
             await search_requirement(item, db_session)
 
@@ -246,8 +246,8 @@ class TestIcsNcEnqueueOnRefresh:
 
         with (
             patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))),
-            patch("app.services.ics_worker.queue_manager.enqueue_for_ics_search") as ics_mock,
-            patch("app.services.nc_worker.queue_manager.enqueue_for_nc_search") as nc_mock,
+            patch("app.search_service.enqueue_for_ics_search") as ics_mock,
+            patch("app.search_service.enqueue_for_nc_search") as nc_mock,
         ):
             await search_requirement(item, db_session)
 

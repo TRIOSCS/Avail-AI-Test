@@ -38,6 +38,8 @@ from .models import (
 )
 from .scoring import classify_lead, explain_lead, is_weak_lead, score_sighting, score_sighting_v2, score_unified
 from .services.credential_service import get_credential, get_credentials_batch
+from .services.ics_worker.queue_manager import enqueue_for_ics_search
+from .services.nc_worker.queue_manager import enqueue_for_nc_search
 from .services.price_snapshot_service import record_price_snapshot
 from .services.sourcing_leads import sync_leads_for_sightings
 from .services.vendor_affinity_service import find_vendor_affinity
@@ -390,20 +392,131 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
             write_req.last_searched_at = now
         write_db.commit()
 
+        # --- Spec-code resolver fallback (spec §6) ---
+        # Trigger only on a hard zero from the synchronous fanout AND the
+        # feature flag. The async ICS/NC workers run independently below
+        # for the primary MPN regardless of resolver outcome.
+        from .config import settings as _settings
+
+        if _settings.spec_resolver_enabled and len(sightings) == 0 and write_req.primary_mpn:
+            try:
+                from app.services.spec_code_resolver import SpecCodeResolver
+
+                resolver = SpecCodeResolver(write_db)
+                resolution = await resolver.resolve(
+                    write_req.primary_mpn,
+                    oem=write_req.oem_hint or "IBM",
+                )
+            except Exception:
+                logger.warning(
+                    "spec_resolver: resolve() failed for req {} mpn {}",
+                    req_id,
+                    write_req.primary_mpn,
+                    exc_info=True,
+                )
+                resolution = None
+
+            if resolution is not None and resolution.status != "unresolved" and resolution.avl:
+                avl_mpns = [entry["mpn"] for entry in resolution.avl if entry.get("mpn")]
+                if avl_mpns:
+                    try:
+                        resolved_fresh, resolved_stats = await _fetch_fresh(avl_mpns, db)
+                    except Exception:
+                        logger.warning(
+                            "spec_resolver: AVL re-fanout failed for req {} mpns {}",
+                            req_id,
+                            avl_mpns,
+                            exc_info=True,
+                        )
+                        resolved_fresh, resolved_stats = [], []
+
+                    spec_code_tag = write_req.primary_mpn
+                    for row in resolved_fresh:
+                        row["resolved_via_spec_code"] = spec_code_tag
+                        row["source_mpn"] = row.get("mpn") or row.get("mpn_matched")
+
+                    resolved_succeeded = {
+                        stat["source"]
+                        for stat in resolved_stats
+                        if stat.get("status") == SourceRunStatus.OK.value and not stat.get("error")
+                    }
+                    if resolved_fresh:
+                        resolved_sightings = _save_sightings(resolved_fresh, write_req, write_db, resolved_succeeded)
+                        sightings.extend(resolved_sightings)
+                    else:
+                        resolved_sightings = []
+                    source_stats.extend(resolved_stats)
+                    logger.info(
+                        "spec_resolver: re-fanout produced {} sightings for req {} (spec_code={})",
+                        len(resolved_sightings),
+                        req_id,
+                        spec_code_tag,
+                    )
+
+                    # Enqueue each AVL MPN to ICS and NC workers in addition
+                    # to the primary-MPN enqueue below.
+                    for mpn in avl_mpns:
+                        try:
+                            enqueue_for_ics_search(
+                                req_id,
+                                write_db,
+                                override_mpn=mpn,
+                                resolved_via_spec_code=spec_code_tag,
+                            )
+                        except Exception:
+                            logger.warning(
+                                "spec_resolver: ICS AVL enqueue failed for req {} mpn {}",
+                                req_id,
+                                mpn,
+                                exc_info=True,
+                            )
+                        try:
+                            enqueue_for_nc_search(
+                                req_id,
+                                write_db,
+                                override_mpn=mpn,
+                                resolved_via_spec_code=spec_code_tag,
+                            )
+                        except Exception:
+                            logger.warning(
+                                "spec_resolver: NC AVL enqueue failed for req {} mpn {}",
+                                req_id,
+                                mpn,
+                                exc_info=True,
+                            )
+
+                    # Record this requirement on the pending row so the admin
+                    # UI can show which requirements consumed each speculative
+                    # mapping (spec §4.2 ``used_in_requirement_ids``).
+                    if resolution.status == "pending":
+                        from app.models.sourcing import OemSpecCodePending
+
+                        pending_row = (
+                            write_db.query(OemSpecCodePending)
+                            .filter_by(
+                                oem=(write_req.oem_hint or "IBM").strip().upper(),
+                                spec_code=spec_code_tag.strip().upper(),
+                            )
+                            .one_or_none()
+                        )
+                        if pending_row is not None:
+                            used = list(pending_row.used_in_requirement_ids or [])
+                            if req_id not in used:
+                                used.append(req_id)
+                                pending_row.used_in_requirement_ids = used
+                                write_db.commit()
+        # --- end resolver block ---
+
         # Browser-automation workers: best-effort enqueue once per call. Both
         # workers key by requirement_id and internally normalize req.primary_mpn,
         # so per-substitute iteration would just round-trip dedup checks. Called
         # after write_db.commit() so the worker reads the same durable state we
         # just wrote.
         try:
-            from app.services.ics_worker.queue_manager import enqueue_for_ics_search
-
             enqueue_for_ics_search(req_id, write_db)
         except Exception:
             logger.warning("ICS enqueue failed for requirement {}", req_id, exc_info=True)
         try:
-            from app.services.nc_worker.queue_manager import enqueue_for_nc_search
-
             enqueue_for_nc_search(req_id, write_db)
         except Exception:
             logger.warning("NC enqueue failed for requirement {}", req_id, exc_info=True)
@@ -1378,6 +1491,12 @@ def _save_sightings(
             lead_time=r.get("lead_time"),
             raw_data=r,
             evidence_tier=tier_for_sighting(r.get("source_type"), is_auth),
+            # Spec-code resolver lineage (spec §6). Both null on the normal
+            # path; populated by the search_requirement re-fanout block when
+            # the sighting was discovered via an AVL MPN resolved from an
+            # OEM spec code.
+            resolved_via_spec_code=r.get("resolved_via_spec_code"),
+            source_mpn=r.get("source_mpn"),
             created_at=datetime.now(timezone.utc),
         )
         norm_name = normalize_vendor_name(clean_vendor)

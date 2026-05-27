@@ -451,8 +451,8 @@ class TestRefreshPerMpnToast:
 
         with (
             patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))),
-            patch("app.services.ics_worker.queue_manager.enqueue_for_ics_search"),
-            patch("app.services.nc_worker.queue_manager.enqueue_for_nc_search"),
+            patch("app.search_service.enqueue_for_ics_search"),
+            patch("app.search_service.enqueue_for_nc_search"),
         ):
             resp = client.post(f"/v2/partials/sightings/{item.id}/refresh")
 
