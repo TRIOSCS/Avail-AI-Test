@@ -64,6 +64,7 @@ from ..models.prospect_account import ProspectAccount
 from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorContact
 from ..scoring import classify_lead, explain_lead, score_unified
+from ..services import task_service
 from ..services.activity_service import log_activity as _log_activity
 from ..services.commodity_registry import COMMODITY_TREE, get_display_name
 from ..services.faceted_search_service import (
@@ -9708,24 +9709,18 @@ async def mark_task_done(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Mark a task as done."""
+    """Mark a task as done.
 
-    task = db.get(RequisitionTask, task_id)
-    if not task:
+    Only the assignee may complete the task.
+    """
+    try:
+        task = task_service.complete_task(db, task_id, user.id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    if task is None:
         raise HTTPException(404, "Task not found")
 
-    task.status = TaskStatus.DONE
-    task.completed_at = datetime.now(timezone.utc)
-    _log_activity(
-        db,
-        activity_type=ActivityType.TASK_COMPLETED,
-        requisition_id=task.requisition_id,
-        requirement_id=task.requirement_id,
-        user_id=user.id,
-        description=f"Task completed: {task.title}",
-        details={"task_id": task.id},
-    )
-    db.commit()
     logger.info("Task {} marked done by {}", task_id, user.email)
 
     # Return refreshed comms tab for the requirement
@@ -9734,8 +9729,6 @@ async def mark_task_done(
         return await part_tab_comms(req_id, request, user, db)
 
     # Fallback — return just the updated task row
-    ctx = _base_ctx(request, user, "requisitions")
-    ctx["task"] = task
     return HTMLResponse('<div class="text-sm text-green-600">Task completed</div>')
 
 

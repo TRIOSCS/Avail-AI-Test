@@ -180,7 +180,7 @@ def complete_task(
     db: Session,
     task_id: int,
     user_id: int,
-    completion_note: str,
+    completion_note: str = "",
 ) -> RequisitionTask | None:
     """Complete a task. Only the assignee can complete it.
 

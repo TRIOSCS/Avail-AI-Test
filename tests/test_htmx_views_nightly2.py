@@ -18,7 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.constants import RequisitionStatus, SourcingStatus, TaskStatus, TicketSource
+from app.constants import RequisitionStatus, SourcingStatus, TaskStatus, TicketSource, UserRole
 from app.models import (
     Company,
     Requirement,
@@ -575,6 +575,7 @@ class TestPartTasks:
             requirement_id=item.id,
             title="Test task",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
             status=TaskStatus.TODO,
             source="manual",
         )
@@ -605,6 +606,38 @@ class TestPartTasks:
     def test_mark_task_done_not_found(self, client, db_session: Session):
         resp = client.post("/v2/partials/parts/tasks/999999/done")
         assert resp.status_code == 404
+
+    def test_mark_task_done_rejects_non_assignee(self, client, db_session: Session, test_user: User):
+        """A user who is not the assignee must not be able to complete the task."""
+        other = User(
+            email="other-assignee@example.com",
+            password_hash="x",
+            role=UserRole.SALES,
+            is_active=True,
+        )
+        db_session.add(other)
+        db_session.flush()
+
+        req = _req(db_session, test_user)
+        item = _requirement(db_session, req)
+        db_session.flush()
+        task = RequisitionTask(
+            requisition_id=req.id,
+            requirement_id=item.id,
+            title="Other's task",
+            created_by=other.id,
+            assigned_to_id=other.id,
+            status=TaskStatus.TODO,
+            source="manual",
+        )
+        db_session.add(task)
+        db_session.commit()
+
+        resp = client.post(f"/v2/partials/parts/tasks/{task.id}/done")
+        assert resp.status_code == 403
+
+        db_session.refresh(task)
+        assert task.status == TaskStatus.TODO, "Task must not have transitioned"
 
 
 # ── Archive System ────────────────────────────────────────────────────
