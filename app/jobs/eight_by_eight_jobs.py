@@ -46,7 +46,7 @@ async def _job_poll_8x8_cdrs():
 
     db = SessionLocal()
     try:
-        result = _process_cdrs(db, settings)
+        result = await _process_cdrs(db, settings)
         db.commit()
         logger.info(
             f"8x8 poll: {result['processed']} calls, {result['matched']} matched, {result['skipped']} skipped/dedup"
@@ -58,7 +58,7 @@ async def _job_poll_8x8_cdrs():
         db.close()
 
 
-def _process_cdrs(db, settings) -> dict:
+async def _process_cdrs(db, settings) -> dict:
     """Core CDR processing logic with CRM reverse lookup.
 
     After fetching CDRs, runs reverse_lookup_phone() on each external phone. If a match
@@ -91,12 +91,12 @@ def _process_cdrs(db, settings) -> dict:
 
     # Auth + fetch
     try:
-        token = get_access_token(settings)
+        token = await get_access_token(settings)
     except ValueError as e:
         logger.error(f"8x8 auth failed, skipping poll: {e}")
         return {"processed": 0, "matched": 0, "skipped": 0}
 
-    cdrs = get_cdrs(token, settings, since, until)
+    cdrs = await get_cdrs(token, settings, since, until)
     if not cdrs:
         _update_watermark(db, watermark_row, until)
         return {"processed": 0, "matched": 0, "skipped": 0}
