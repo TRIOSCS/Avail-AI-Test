@@ -199,8 +199,8 @@ class TestReviewResponseHtmxDirect:
         req = _make_req(db_session, test_user)
         vr = _make_vendor_response(db_session, req)
         mock_req = _mock_form_request(fields={"status": "reviewed"})
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("response card")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("response card")
             result = await review_response_htmx(
                 request=mock_req,
                 req_id=req.id,
@@ -219,8 +219,8 @@ class TestReviewResponseHtmxDirect:
         req = _make_req(db_session, test_user)
         vr = _make_vendor_response(db_session, req)
         mock_req = _mock_form_request(fields={"status": "rejected"})
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("response card")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("response card")
             result = await review_response_htmx(
                 request=mock_req,
                 req_id=req.id,

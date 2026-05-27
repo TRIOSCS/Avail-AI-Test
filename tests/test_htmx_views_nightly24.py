@@ -142,8 +142,8 @@ class TestCreateQuoteFromOffersDirect:
             path=f"/v2/partials/requisitions/{req.id}/create-quote",
             fields={"offer_ids": [str(offer.id)]},
         )
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("quote OK")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("quote OK")
             result = await create_quote_from_offers(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
 
@@ -158,8 +158,8 @@ class TestCreateQuoteFromOffersDirect:
             path=f"/v2/partials/requisitions/{req.id}/create-quote",
             fields={"offer_ids": [str(o1.id), str(o2.id)]},
         )
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("quote OK")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("quote OK")
             result = await create_quote_from_offers(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
 
@@ -273,8 +273,8 @@ class TestUpdateRequirementDirect:
             path=f"/v2/partials/requisitions/{req.id}/requirements/{item.id}",
             fields={"sub_mpn": ["LM741"], "sub_manufacturer": ["TI"]},
         )
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("row OK")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("row OK")
             result = await update_requirement(
                 request=mock_req,
                 req_id=req.id,
@@ -372,8 +372,8 @@ class TestUpdateRequirementDirect:
         req = _make_req(db_session, test_user)
         item = db_session.query(Requirement).filter(Requirement.requisition_id == req.id).first()
         mock_req = _mock_form_request(fields={"sub_mpn": [], "sub_manufacturer": []})
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("row OK")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("row OK")
             result = await update_requirement(
                 request=mock_req,
                 req_id=req.id,

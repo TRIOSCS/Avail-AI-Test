@@ -423,8 +423,8 @@ class TestUpdateQuoteLineDirect:
         quote = _make_quote(db_session, req, test_user)
         line = _make_quote_line(db_session, quote)
         mock_req = _mock_form_request(fields={"qty": "200", "cost_price": "0.08", "sell_price": "0.12"})
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("line row")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("line row")
             result = await update_quote_line(
                 request=mock_req,
                 quote_id=quote.id,
