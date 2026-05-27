@@ -342,6 +342,39 @@ class TestBulkArchive:
         assert data["ok"] is True
         assert data["archived_count"] >= 1
 
+    def test_bulk_archive_returns_ids(self, client, db_session, test_user):
+        """Bulk-archive response includes archived_ids matching the affected rows."""
+        other = User(
+            email="bulk_ids_other@test.com",
+            name="Bulk IDs Other",
+            role="buyer",
+            azure_id="bulk-ids-001",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(other)
+        db_session.flush()
+
+        reqs = []
+        for i in range(3):
+            r = Requisition(
+                name=f"Bulk IDs Req {i}",
+                customer_name="Test Co",
+                status=RequisitionStatus.ACTIVE,
+                created_by=other.id,
+                created_at=datetime.now(timezone.utc),
+            )
+            db_session.add(r)
+            reqs.append(r)
+        db_session.commit()
+
+        resp = client.put("/api/requisitions/bulk-archive")
+        assert resp.status_code == 200
+        body = resp.json()
+
+        expected_ids = {r.id for r in reqs}
+        assert set(body["archived_ids"]) == expected_ids
+        assert body["archived_count"] == 3
+
 
 # ── Batch Archive ────────────────────────────────────────────────────
 
@@ -423,6 +456,29 @@ class TestBatchArchive:
             for dep in [get_db, require_user, require_admin, require_buyer]:
                 app.dependency_overrides.pop(dep, None)
 
+    def test_batch_archive_returns_ids(self, client, db_session, test_user):
+        """Batch-archive response includes archived_ids matching the requested IDs."""
+        reqs = []
+        for i in range(3):
+            r = Requisition(
+                name=f"Batch IDs Req {i}",
+                customer_name="Test Co",
+                status=RequisitionStatus.ACTIVE,
+                created_by=test_user.id,
+                created_at=datetime.now(timezone.utc),
+            )
+            db_session.add(r)
+            reqs.append(r)
+        db_session.commit()
+        ids = [r.id for r in reqs]
+
+        resp = client.put("/api/requisitions/batch-archive", json={"ids": ids})
+        assert resp.status_code == 200
+        body = resp.json()
+
+        assert sorted(body["archived_ids"]) == sorted(ids)
+        assert body["archived_count"] == 3
+
 
 # ── Batch Assign ─────────────────────────────────────────────────────
 
@@ -446,6 +502,42 @@ class TestBatchAssign:
         data = resp.json()
         assert data["ok"] is True
         assert data["assigned_count"] >= 1
+
+    def test_batch_assign_returns_ids(self, client, db_session, test_user):
+        """Batch-assign response includes assigned_ids matching the requested IDs."""
+        target = User(
+            email="assign_ids_target@test.com",
+            name="Assign IDs Target",
+            role="buyer",
+            azure_id="assign-ids-001",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(target)
+        db_session.flush()
+
+        reqs = []
+        for i in range(3):
+            r = Requisition(
+                name=f"Assign IDs Req {i}",
+                customer_name="Test Co",
+                status=RequisitionStatus.ACTIVE,
+                created_by=test_user.id,
+                created_at=datetime.now(timezone.utc),
+            )
+            db_session.add(r)
+            reqs.append(r)
+        db_session.commit()
+        ids = [r.id for r in reqs]
+
+        resp = client.put(
+            "/api/requisitions/batch-assign",
+            json={"ids": ids, "owner_id": target.id},
+        )
+        assert resp.status_code == 200
+        body = resp.json()
+
+        assert sorted(body["assigned_ids"]) == sorted(ids)
+        assert body["assigned_count"] == 3
 
 
 # ── Dismiss New Offers ────────────────────────────────────────────────
