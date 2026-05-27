@@ -180,7 +180,7 @@ def complete_task(
     db: Session,
     task_id: int,
     user_id: int,
-    completion_note: str,
+    completion_note: str = "",
 ) -> RequisitionTask | None:
     """Complete a task. Only the assignee can complete it.
 
@@ -207,6 +207,29 @@ def complete_task(
     db.commit()
     db.refresh(task)
     logger.info("Task {} completed by user {}", task_id, user_id)
+    return task
+
+
+def reopen_task(
+    db: Session,
+    task_id: int,
+    user_id: int,
+) -> RequisitionTask | None:
+    """Reopen a completed task. Only the assignee can reopen it.
+
+    Returns the updated task, or None if not found. Raises PermissionError if the caller
+    is not the assignee.
+    """
+    task = db.query(RequisitionTask).filter(RequisitionTask.id == task_id).first()
+    if not task:
+        return None
+    if task.assigned_to_id != user_id:
+        raise PermissionError("Only the assignee can reopen this task")
+    task.status = TaskStatus.TODO
+    task.completed_at = None
+    db.commit()
+    db.refresh(task)
+    logger.info("Task {} reopened by user {}", task_id, user_id)
     return task
 
 
