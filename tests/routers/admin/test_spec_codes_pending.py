@@ -140,3 +140,58 @@ def test_reject_requires_reason(client_with_settings_user, pending_row):
         json={"rejected_mpns": []},  # no reason field
     )
     assert resp.status_code == 422
+
+
+def test_re_resolve_escapes_html_in_unresolved_response(client_with_settings_user, db_session, monkeypatch):
+    """Defense-in-depth: the re-resolve unresolved-response path must escape
+    HTML in spec_code so a malicious payload that somehow got persisted (e.g.
+    via a future bug or a direct DB write) can't fire as XSS when an admin
+    clicks Re-resolve.
+
+    Bypasses the `@validates` decorator on OemSpecCodePending.spec_code by
+    issuing a raw INSERT, since the validator only uppercases/strips — it
+    does NOT strip angle brackets or quotes.
+    """
+    from sqlalchemy import text
+
+    from app.services import spec_code_resolver as resolver_mod
+    from app.services.spec_code_resolver import ResolverResult
+
+    # Raw INSERT bypasses the @validates hook on the ORM model.
+    db_session.execute(
+        text(
+            """
+            INSERT INTO oem_spec_codes_pending
+                (oem, spec_code, proposed_avl, llm_confidence, citations,
+                 used_in_requirement_ids)
+            VALUES
+                (:oem, :spec_code, :proposed_avl, :llm_confidence, :citations,
+                 :used_in_requirement_ids)
+            """
+        ),
+        {
+            "oem": "IBM",
+            "spec_code": "<script>alert(1)</script>",
+            "proposed_avl": '[{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": null}]',
+            "llm_confidence": 0.5,
+            "citations": "[]",
+            "used_in_requirement_ids": "[]",
+        },
+    )
+    db_session.commit()
+    pending = (
+        db_session.query(OemSpecCodePending).filter(OemSpecCodePending.spec_code == "<script>alert(1)</script>").one()
+    )
+
+    async def fake_resolve(self, spec_code, oem="IBM"):
+        return ResolverResult(status="unresolved")
+
+    monkeypatch.setattr(resolver_mod.SpecCodeResolver, "resolve", fake_resolve)
+
+    resp = client_with_settings_user.post(f"/admin/spec-codes/pending/{pending.id}/re-resolve")
+    assert resp.status_code == 200
+    # Literal `<script>` MUST NOT appear in the rendered HTML; it must be
+    # HTML-escaped (e.g. `&lt;script&gt;`) so the browser cannot parse it as
+    # an executable tag.
+    assert b"<script>" not in resp.content
+    assert b"&lt;script&gt;" in resp.content

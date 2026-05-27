@@ -1,0 +1,10 @@
+{# spec_codes_reresolve_unresolved.html — Re-resolve response when the resolver
+   returned no result. Renders a single table row that replaces the original
+   pending row via HTMX outerHTML swap.
+   Receives: spec_code (str).
+   Called by: app/routers/admin/spec_codes.py re_resolve endpoint.
+   Depends on: Tailwind CSS (amber palette).
+#}
+<tr><td colspan="7" class="px-4 py-3 text-sm text-amber-700 bg-amber-50">
+  Re-resolution of <code>{{ spec_code }}</code> returned no result.
+</td></tr>

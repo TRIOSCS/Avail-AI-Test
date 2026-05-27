@@ -141,9 +141,10 @@ async def re_resolve(
     resolver = SpecCodeResolver(db)
     result = await resolver.resolve(spec_code, oem=oem)
     if result.status == "unresolved":
-        return HTMLResponse(
-            '<tr><td colspan="7" class="px-4 py-3 text-sm text-amber-700 bg-amber-50">'
-            f"Re-resolution of <code>{spec_code}</code> returned no result.</td></tr>",
-            status_code=200,
+        # Render via Jinja autoescape — never f-string-interpolate spec_code into
+        # HTML, since a malicious LLM-persisted payload could fire on admin click.
+        return template_response(
+            "htmx/partials/admin/spec_codes_reresolve_unresolved.html",
+            {"request": request, "spec_code": spec_code},
         )
     return HTMLResponse("", status_code=200)
