@@ -57,7 +57,10 @@ timeline back via `activity_service.get_requisition_activities()` rather than an
 inlined query. Offer creation and offer status changes now also route through
 `activity_service.log_activity()` (`ActivityType.OFFER_CREATED` /
 `ActivityType.OFFER_STATUS_CHANGED`) so offer events appear on the requisition
-Activity tab.
+Activity tab. Task completion, requisition assignment (claim/unclaim/batch),
+archive/unarchive, and sales-note edits likewise route through
+`activity_service.log_activity()` (`ActivityType.TASK_COMPLETED`,
+`ASSIGNMENT_CHANGED`, `REQ_ARCHIVED`/`REQ_UNARCHIVED`, `SALES_NOTE`).
 
 ## 2. Search (User-Initiated Only)
 

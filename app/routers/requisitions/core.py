@@ -17,7 +17,7 @@ from sqlalchemy import and_, case, exists, literal, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import RequisitionStatus, UserRole
+from ...constants import ActivityType, RequisitionStatus, UserRole
 from ...database import get_db
 from ...dependencies import get_req_for_user, require_admin, require_user
 from ...models import (
@@ -42,6 +42,7 @@ from ...schemas.requisitions import (
     RequisitionUpdate,
 )
 from ...schemas.responses import RequisitionListResponse
+from ...services.activity_service import log_activity
 from ...services.sourcing_score import compute_sourcing_score_safe
 from ...utils.sql_helpers import escape_like
 
@@ -556,9 +557,30 @@ async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Se
     if not req:
         raise HTTPException(404, "Requisition not found")
     if req.status in ("archived", "won", "lost"):
+        prior_status = req.status
         req.status = RequisitionStatus.ACTIVE
+        if prior_status == "archived":
+            unarchive_type = ActivityType.REQ_UNARCHIVED
+            unarchive_desc = "Requisition unarchived"
+        else:
+            unarchive_type = ActivityType.STATUS_CHANGED
+            unarchive_desc = f"Requisition reopened from {prior_status} to active"
+        log_activity(
+            db,
+            activity_type=unarchive_type,
+            requisition_id=req.id,
+            user_id=user.id,
+            description=unarchive_desc,
+        )
     else:
         req.status = RequisitionStatus.ARCHIVED
+        log_activity(
+            db,
+            activity_type=ActivityType.REQ_ARCHIVED,
+            requisition_id=req.id,
+            user_id=user.id,
+            description="Requisition archived",
+        )
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "status": req.status}
@@ -580,7 +602,16 @@ async def bulk_archive(user: User = Depends(require_admin), db: Session = Depend
             ]
         ),
     )
+    target_ids = [row.id for row in q.with_entities(Requisition.id).all()]
     count = q.update({"status": "archived"}, synchronize_session="fetch")
+    for rid in target_ids:
+        log_activity(
+            db,
+            activity_type=ActivityType.REQ_ARCHIVED,
+            requisition_id=rid,
+            user_id=user.id,
+            description="Requisition archived (bulk)",
+        )
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "archived_count": count}
@@ -609,7 +640,16 @@ async def batch_archive_by_ids(
     # Sales users can only archive their own requisitions
     if user.role == UserRole.SALES:
         q = q.filter(Requisition.created_by == user.id)
+    target_ids = [row.id for row in q.with_entities(Requisition.id).all()]
     count = q.update({"status": "archived"}, synchronize_session="fetch")
+    for rid in target_ids:
+        log_activity(
+            db,
+            activity_type=ActivityType.REQ_ARCHIVED,
+            requisition_id=rid,
+            user_id=user.id,
+            description="Requisition archived (bulk)",
+        )
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "archived_count": count}
@@ -631,11 +671,18 @@ async def batch_assign(
     target = db.query(User).filter(User.id == payload.owner_id).first()
     if not target:
         raise HTTPException(404, "Target user not found")
-    count = (
-        db.query(Requisition)
-        .filter(Requisition.id.in_(payload.ids))
-        .update({"claimed_by_id": payload.owner_id}, synchronize_session="fetch")
-    )
+    target_q = db.query(Requisition).filter(Requisition.id.in_(payload.ids))
+    target_ids = [row.id for row in target_q.with_entities(Requisition.id).all()]
+    count = target_q.update({"claimed_by_id": payload.owner_id}, synchronize_session="fetch")
+    for rid in target_ids:
+        log_activity(
+            db,
+            activity_type=ActivityType.ASSIGNMENT_CHANGED,
+            requisition_id=rid,
+            user_id=user.id,
+            description=f"Requisition assignment changed (batch) — owner {payload.owner_id}",
+            details={"action": "batch_assigned", "claimed_by_id": payload.owner_id},
+        )
     db.commit()
     invalidate_prefix("req_list")
     return {"ok": True, "assigned_count": count, "assigned_to": target.name or target.email}

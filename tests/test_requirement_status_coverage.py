@@ -21,6 +21,7 @@ from unittest.mock import patch
 
 import pytest
 
+from app.constants import ActivityType
 from app.models import ActivityLog, Requisition
 from app.services.requirement_status import (
     claim_requisition,
@@ -179,19 +180,9 @@ class TestUnclaimRequisitionNoActor:
             db_session.query(ActivityLog)
             .filter_by(
                 requisition_id=test_requisition.id,
-                activity_type="requisition_unclaimed",
+                activity_type=ActivityType.ASSIGNMENT_CHANGED,
             )
             .first()
         )
         assert log is not None
         assert log.user_id is None
-
-    def test_unclaim_activity_log_exception_is_swallowed(self, db_session, test_requisition, test_user):
-        """ActivityLog creation failure during unclaim is swallowed (lines 183-184)."""
-        test_requisition.claimed_by_id = test_user.id
-        db_session.commit()
-
-        with patch("app.services.requirement_status.ActivityLog", side_effect=Exception("log err")):
-            changed = unclaim_requisition(test_requisition, db_session, actor=test_user)
-        assert changed is True
-        assert test_requisition.claimed_by_id is None

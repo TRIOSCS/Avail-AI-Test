@@ -9645,7 +9645,18 @@ async def save_part_notes(
     req = db.get(Requirement, requirement_id)
     if not req:
         raise HTTPException(404, "Part not found")
+    old_sale_notes = req.sale_notes
     req.sale_notes = sale_notes.strip() or None
+    if (req.sale_notes or "") != (old_sale_notes or ""):
+        _log_activity(
+            db,
+            activity_type=ActivityType.SALES_NOTE,
+            requisition_id=req.requisition_id,
+            requirement_id=req.id,
+            user_id=user.id,
+            description="Sales note updated",
+            details={"requirement_id": req.id},
+        )
     db.commit()
     ctx = _base_ctx(request, user, "requisitions")
     ctx["requirement"] = req
@@ -9703,6 +9714,15 @@ async def mark_task_done(
 
     task.status = TaskStatus.DONE
     task.completed_at = datetime.now(timezone.utc)
+    _log_activity(
+        db,
+        activity_type=ActivityType.TASK_COMPLETED,
+        requisition_id=task.requisition_id,
+        requirement_id=task.requirement_id,
+        user_id=user.id,
+        description=f"Task completed: {task.title}",
+        details={"task_id": task.id},
+    )
     db.commit()
     logger.info("Task {} marked done by {}", task_id, user.email)
 
@@ -9795,9 +9815,18 @@ async def archive_requisition(
     if not requisition:
         raise HTTPException(404, "Requisition not found")
 
+    prior_status = requisition.status
     requisition.status = RequisitionStatus.ARCHIVED
     for child in requisition.requirements:
         child.sourcing_status = SourcingStatus.ARCHIVED
+    if prior_status != RequisitionStatus.ARCHIVED:
+        _log_activity(
+            db,
+            activity_type=ActivityType.REQ_ARCHIVED,
+            requisition_id=requisition.id,
+            user_id=user.id,
+            description="Requisition archived",
+        )
     db.commit()
     logger.info("Requisition {} ({} parts) archived by {}", req_id, len(requisition.requirements), user.email)
 
@@ -9816,10 +9845,19 @@ async def unarchive_requisition(
     if not requisition:
         raise HTTPException(404, "Requisition not found")
 
+    prior_status = requisition.status
     requisition.status = RequisitionStatus.ACTIVE
     for child in requisition.requirements:
         if child.sourcing_status == SourcingStatus.ARCHIVED:
             child.sourcing_status = SourcingStatus.OPEN
+    if prior_status != RequisitionStatus.ACTIVE:
+        _log_activity(
+            db,
+            activity_type=ActivityType.REQ_UNARCHIVED,
+            requisition_id=requisition.id,
+            user_id=user.id,
+            description="Requisition unarchived",
+        )
     db.commit()
     logger.info("Requisition {} unarchived by {}", req_id, user.email)
 
@@ -9851,6 +9889,13 @@ async def bulk_archive(
         reqs = db.query(Requisition).filter(Requisition.id.in_(requisition_ids)).all()
         for requisition in reqs:
             requisition.status = RequisitionStatus.ARCHIVED
+            _log_activity(
+                db,
+                activity_type=ActivityType.REQ_ARCHIVED,
+                requisition_id=requisition.id,
+                user_id=user.id,
+                description="Requisition archived",
+            )
         # Cascade: archive all children of these requisitions
         db.query(Requirement).filter(
             Requirement.requisition_id.in_(requisition_ids),

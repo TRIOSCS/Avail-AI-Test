@@ -17,7 +17,7 @@ from loguru import logger
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
-from ...constants import OfferStatus, RequisitionStatus, TaskStatus
+from ...constants import ActivityType, OfferStatus, RequisitionStatus, TaskStatus
 from ...database import get_db
 from ...dependencies import get_req_for_user, require_buyer, require_user
 from ...models import (
@@ -41,6 +41,7 @@ from ...schemas.requisitions import (
 )
 from ...schemas.sourcing_leads import LeadDetailOut, LeadFeedbackIn, LeadOut, LeadStatusUpdateIn
 from ...search_service import resolve_material_card
+from ...services.activity_service import log_activity
 from ...services.sourcing_leads import (
     append_lead_feedback,
     attach_lead_metadata_to_results,
@@ -679,6 +680,16 @@ async def update_requirement(
                     new_value=new_v,
                 )
             )
+    if str(new_vals.get("sale_notes") or "") != str(old_vals.get("sale_notes") or ""):
+        log_activity(
+            db,
+            activity_type=ActivityType.SALES_NOTE,
+            requisition_id=req.id,
+            requirement_id=r.id,
+            user_id=user.id,
+            description="Sales note updated",
+            details={"requirement_id": r.id},
+        )
     db.commit()
     return {"ok": True}
 
