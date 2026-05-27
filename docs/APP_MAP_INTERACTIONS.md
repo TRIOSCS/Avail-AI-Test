@@ -1011,8 +1011,13 @@ container):
 | `EIGHT_BY_EIGHT_USERNAME` | Service account username |
 | `EIGHT_BY_EIGHT_PASSWORD` | Service account password |
 | `EIGHT_BY_EIGHT_PBX_ID` | Tenant PBX identifier |
-| `EIGHT_BY_EIGHT_TIMEZONE` | Default `America/Los_Angeles` |
-| `EIGHT_BY_EIGHT_POLL_INTERVAL_MINUTES` | Default `30` |
+
+**Optional env vars** (defaults applied if unset):
+
+| Var | Default | Purpose |
+|---|---|---|
+| `EIGHT_BY_EIGHT_TIMEZONE` | `America/Los_Angeles` | Tenant timezone for CDR timestamp parsing |
+| `EIGHT_BY_EIGHT_POLL_INTERVAL_MINUTES` | `30` | How often the job pulls new CDRs |
 
 **Per-user setup:** Each user that should have their calls ingested
 needs their 8x8 extension stored on the `users` table (fields added
