@@ -1,6 +1,6 @@
-fastapi==0.136.1
-uvicorn[standard]==0.47.0
-sqlalchemy==2.0.49
+fastapi==0.136.3
+uvicorn[standard]==0.48.0
+sqlalchemy==2.0.50
 psycopg2-binary==2.9.12
 python-multipart==0.0.29
 httpx==0.28.1
@@ -37,7 +37,7 @@ orjson>=3.9.0,<4.0
 starlette-csrf==3.0.0
 # NetComponents integration
 beautifulsoup4==4.14.3
-patchright==1.59.1
+patchright==1.60.0
 # Typed settings from env vars (fail-fast validation at startup)
 pydantic-settings==2.14.1
 # SSE streaming for HTMX sourcing progress
@@ -45,7 +45,7 @@ sse-starlette>=3.4.4,<4.0
 # Anthropic Claude API (used by claude_client, enrichment, batch extraction)
 anthropic>=0.40.0,<1.0
 # HTML sanitization for untrusted email content (XSS prevention)
-nh3==0.3.3
+nh3==0.3.5
 # Safe XML parsing (XXE prevention)
 defusedxml>=0.7.0
 # Azure Communication Services (click-to-call)
