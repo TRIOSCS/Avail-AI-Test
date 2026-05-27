@@ -13,7 +13,12 @@ charset-normalizer==3.4.7
 cryptography==48.0.0
 # Observability
 loguru==0.7.3
-prometheus-fastapi-instrumentator==7.1.0
+# Pinned >=1.0.1 to fix PYSEC-2026-161 (Host header URL-reconstruction auth bypass).
+# Forces resolver to pick the fixed 1.x line; fastapi 0.136.x accepts starlette>=0.46.0 unbounded.
+starlette>=1.0.1,<2.0
+# Replaced prometheus-fastapi-instrumentator (hard-pinned starlette<1.0.0) with a small
+# ASGI middleware in app/prometheus_metrics.py that uses prometheus_client directly.
+prometheus_client>=0.20.0,<1.0
 sentry-sdk[fastapi]==2.60.0
 # Rate limiting
 slowapi==0.1.9
