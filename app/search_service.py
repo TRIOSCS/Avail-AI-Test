@@ -1362,6 +1362,7 @@ def _save_sightings(
             vendor_email=r.get("vendor_email"),
             vendor_phone=r.get("vendor_phone"),
             mpn_matched=clean_mpn,
+            material_card_id=r.get("material_card_id"),
             manufacturer=r.get("manufacturer"),
             qty_available=clean_qty,
             unit_price=clean_price,
@@ -1465,7 +1466,7 @@ def _save_sightings(
         from .models import VendorCard
         from .services.tagging import propagate_tags_to_entity
 
-        for s in sightings:  # pragma: no cover
+        for s in sightings:
             if not s.material_card_id or not s.vendor_name:
                 continue
             vn_norm = normalize_vendor_name(s.vendor_name)
@@ -1895,7 +1896,7 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
                         "confidence": result["brand"]["confidence"],
                     }
                 )
-            if result.get("commodity"):  # pragma: no cover
+            if result.get("commodity"):
                 commodity_tag = get_or_create_commodity_tag(result["commodity"]["name"], db)
                 if commodity_tag:
                     tags_to_apply.append(
@@ -1905,7 +1906,7 @@ def _upsert_material_card(pn: str, sightings: list[Sighting], db: Session, now: 
                             "confidence": result["commodity"]["confidence"],
                         }
                     )
-            if tags_to_apply:  # pragma: no cover
+            if tags_to_apply:
                 tag_material_card(card.id, tags_to_apply, db)
                 db.commit()
     except Exception:

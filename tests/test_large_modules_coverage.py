@@ -226,16 +226,16 @@ class TestAvailTagRegex:
     """Test the AVAIL tag regex used in sent folder scanning."""
 
     def test_matches_avail_tag(self):
-        from app.jobs.email_jobs import _AVAIL_TAG_RE
+        from app.shared_constants import RFQ_SUBJECT_TAG_RE
 
-        match = _AVAIL_TAG_RE.search("Re: [AVAIL-123] RFQ for parts")
+        match = RFQ_SUBJECT_TAG_RE.search("Re: [AVAIL-123] RFQ for parts")
         assert match is not None
         assert match.group(1) == "123"
 
     def test_no_match_without_tag(self):
-        from app.jobs.email_jobs import _AVAIL_TAG_RE
+        from app.shared_constants import RFQ_SUBJECT_TAG_RE
 
-        assert _AVAIL_TAG_RE.search("Regular email subject") is None
+        assert RFQ_SUBJECT_TAG_RE.search("Regular email subject") is None
 
     def test_matches_excess_bid_tag(self):
         from app.jobs.email_jobs import _EXCESS_BID_RE

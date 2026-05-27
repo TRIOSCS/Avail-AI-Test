@@ -5,14 +5,14 @@
 pytest>=9.0.3
 pytest-asyncio>=0.23.0
 pytest-cov>=4.1.0
-pytest-xdist>=3.0.0
-responses>=0.25.0
+pytest-xdist>=3.8.0
+responses>=0.26.1
 freezegun>=1.4.0
 schemathesis>=3.36.0
 nest_asyncio>=1.6.0
 
 # E2E / Playwright
-playwright>=1.45.0
+playwright>=1.60.0
 pytest-playwright>=0.5.0
 pytest-timeout>=2.3.0
 itsdangerous>=2.1.0
@@ -32,8 +32,8 @@ types-redis>=4.6.0
 pre-commit>=4.0.0
 
 # Security scanning
-bandit>=1.8.0
+bandit>=1.9.4
 pip-audit>=2.7.0
 
 # Debugging
-ipdb>=0.13.0
+ipdb>=0.13.13
