@@ -100,6 +100,15 @@ class Settings(BaseSettings):
     anthropic_api_key: str = ""
     anthropic_model: str = "claude-sonnet-4-6"
 
+    # --- OEM Spec Code Resolver ---
+    # Feature flag; resolver only fires when enabled. Min confidence is the
+    # absolute floor (post web-search penalty) below which results are dropped
+    # rather than written to oem_spec_codes_pending. Model is the Claude model
+    # ID used for the grounded web-search call.
+    spec_resolver_enabled: bool = False
+    spec_resolver_min_confidence: float = 0.3
+    spec_resolver_model: str = "claude-opus-4-7"
+
     # --- Agent service-to-service auth ---
     agent_api_key: str = ""
 
