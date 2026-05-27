@@ -717,15 +717,15 @@ async def test_preview_inquiry_success(
 
     mock_req.form = _form
 
-    with patch("app.routers.sightings.templates") as mock_templates:
-        mock_templates.TemplateResponse.return_value = MagicMock(status_code=200)
+    with patch("app.routers.sightings.template_response") as mock_template_response:
+        mock_template_response.return_value = MagicMock(status_code=200)
         resp = await sightings_preview_inquiry(
             request=mock_req,
             db=db_session,
             user=test_user,
         )
 
-    mock_templates.TemplateResponse.assert_called_once()
+    mock_template_response.assert_called_once()
 
 
 async def test_preview_inquiry_missing_ids_raises(db_session: Session, test_user: User):
@@ -880,8 +880,8 @@ async def test_vendor_modal_with_requirement_ids(db_session: Session, test_user:
     mock_req = MagicMock(spec=Request)
     mock_req.headers = {}
 
-    with patch("app.routers.sightings.templates") as mock_templates:
-        mock_templates.TemplateResponse.return_value = MagicMock(status_code=200)
+    with patch("app.routers.sightings.template_response") as mock_template_response:
+        mock_template_response.return_value = MagicMock(status_code=200)
         resp = await sightings_vendor_modal(
             request=mock_req,
             requirement_ids=str(req_item.id),
@@ -889,8 +889,8 @@ async def test_vendor_modal_with_requirement_ids(db_session: Session, test_user:
             user=test_user,
         )
 
-    mock_templates.TemplateResponse.assert_called_once()
-    call_args = mock_templates.TemplateResponse.call_args
+    mock_template_response.assert_called_once()
+    call_args = mock_template_response.call_args
     ctx = call_args[0][1] if call_args[0] else call_args[1].get("context", {})
     assert ctx.get("requirement_ids") == [req_item.id]
 
@@ -902,8 +902,8 @@ async def test_vendor_modal_empty_requirement_ids(db_session: Session, test_user
     mock_req = MagicMock(spec=Request)
     mock_req.headers = {}
 
-    with patch("app.routers.sightings.templates") as mock_templates:
-        mock_templates.TemplateResponse.return_value = MagicMock(status_code=200)
+    with patch("app.routers.sightings.template_response") as mock_template_response:
+        mock_template_response.return_value = MagicMock(status_code=200)
         resp = await sightings_vendor_modal(
             request=mock_req,
             requirement_ids="",
@@ -911,7 +911,7 @@ async def test_vendor_modal_empty_requirement_ids(db_session: Session, test_user
             user=test_user,
         )
 
-    mock_templates.TemplateResponse.assert_called_once()
+    mock_template_response.assert_called_once()
 
 
 # ── MAX_BATCH_SIZE and invalid JSON edge cases ────────────────────────────────

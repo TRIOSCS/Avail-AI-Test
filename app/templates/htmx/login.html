@@ -54,12 +54,20 @@
                 .catch(() => { error = 'Network error'; loading = false; });
             ">
         <div class="space-y-3">
-          <input type="email" name="email" required placeholder="Email"
-                 class="w-full px-3 py-2 border border-gray-300 rounded text-sm
-                        focus:outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-300">
-          <input type="password" name="password" required placeholder="Password"
-                 class="w-full px-3 py-2 border border-gray-300 rounded text-sm
-                        focus:outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-300">
+          <div>
+            <label for="login-email" class="sr-only">Email</label>
+            <input type="email" id="login-email" name="email" required placeholder="Email"
+                   autocomplete="email"
+                   class="w-full px-3 py-2 border border-gray-300 rounded text-sm
+                          focus:outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-300">
+          </div>
+          <div>
+            <label for="login-password" class="sr-only">Password</label>
+            <input type="password" id="login-password" name="password" required placeholder="Password"
+                   autocomplete="current-password"
+                   class="w-full px-3 py-2 border border-gray-300 rounded text-sm
+                          focus:outline-none focus:border-gray-400 focus:ring-1 focus:ring-gray-300">
+          </div>
         </div>
         <p x-show="error" x-text="error" class="mt-2 text-xs text-red-600"></p>
         <button type="submit" :disabled="loading"

@@ -2813,3 +2813,108 @@ def test_dedup_different_mpn_not_merged():
 def test_dedup_empty_list():
     """Empty input returns empty output."""
     assert _deduplicate_sightings([]) == []
+
+
+@pytest.mark.asyncio
+async def test_stream_search_mpn_opens_and_closes_its_own_session(monkeypatch):
+    """The worker must not depend on the caller's session.
+
+    It must open a fresh SessionLocal() at start and close it in a finally block,
+    surviving the request session being already closed by the time the background task
+    runs.
+    """
+    from unittest.mock import MagicMock
+
+    from app import search_service
+
+    # Track sessions created and closed
+    sessions_created: list[MagicMock] = []
+
+    def fake_session_local():
+        s = MagicMock(name="WorkerSession")
+        s.closed = False
+
+        def _close():
+            s.closed = True
+
+        s.close.side_effect = _close
+        # query(...).all() returns an empty list (for VendorCard lookup)
+        s.query.return_value.all.return_value = []
+        sessions_created.append(s)
+        return s
+
+    monkeypatch.setattr(search_service, "SessionLocal", fake_session_local, raising=False)
+
+    # No connectors → worker takes the early-return done path
+    monkeypatch.setattr(
+        search_service,
+        "_build_connectors",
+        lambda _db: ([], {}, []),
+    )
+
+    # Capture broker publishes instead of touching the real broker
+    publishes: list[tuple[str, str, str]] = []
+
+    class FakeBroker:
+        async def publish(self, channel, event, data):
+            publishes.append((channel, event, data))
+
+    monkeypatch.setattr(search_service, "broker", FakeBroker(), raising=False)
+
+    await search_service.stream_search_mpn("test-search-id", "LM317")
+
+    assert len(sessions_created) == 1, "worker must open exactly one session"
+    assert sessions_created[0].closed is True, "worker must close its session in finally"
+    assert any(evt == "done" for _, evt, _ in publishes), "worker must publish a done event"
+
+
+@pytest.mark.asyncio
+async def test_stream_search_mpn_publishes_done_and_closes_session_on_exception(monkeypatch):
+    """The worker must always publish a terminal done event and close its session.
+
+    Even when setup raises (pool exhaustion, _build_connectors failure, etc.) the SSE
+    client must receive a done event so the spinner can clear, and the session must be
+    closed via finally so pool slots don't leak. Without these guarantees the same user-
+    visible symptom as the original request-session bug returns.
+    """
+    from unittest.mock import MagicMock
+
+    from app import search_service
+
+    sessions_created: list[MagicMock] = []
+
+    def fake_session_local():
+        s = MagicMock(name="WorkerSession")
+        s.closed = False
+
+        def _close():
+            s.closed = True
+
+        s.close.side_effect = _close
+        sessions_created.append(s)
+        return s
+
+    monkeypatch.setattr(search_service, "SessionLocal", fake_session_local, raising=False)
+
+    def boom(_db):
+        raise RuntimeError("connector build failure")
+
+    monkeypatch.setattr(search_service, "_build_connectors", boom)
+
+    publishes: list[tuple[str, str, str]] = []
+
+    class FakeBroker:
+        async def publish(self, channel, event, data):
+            publishes.append((channel, event, data))
+
+    monkeypatch.setattr(search_service, "broker", FakeBroker(), raising=False)
+
+    # Worker must NOT propagate the exception — it must catch and publish done.
+    await search_service.stream_search_mpn("test-search-id", "LM317")
+
+    assert len(sessions_created) == 1
+    assert sessions_created[0].closed is True, "session must close in finally on exception"
+
+    done_payloads = [data for _, evt, data in publishes if evt == "done"]
+    assert done_payloads, "worker must publish a done event even on exception"
+    assert any('"error"' in p for p in done_payloads), "error done payload must include error field"

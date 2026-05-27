@@ -55,7 +55,7 @@ from ..services.excess_service import (
     send_bid_solicitation,
     update_excess_list,
 )
-from ..template_env import templates
+from ..template_env import template_response
 from ..utils.claude_client import claude_text
 from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
 from ..utils.normalization import normalize_mpn_key
@@ -83,7 +83,7 @@ async def partial_excess_list(
     result = list_excess_lists(db, q=q, status=status or None, limit=limit, offset=offset)
     companies = db.query(Company).order_by(Company.name).all()
     stats = get_excess_stats(db)
-    return templates.TemplateResponse(
+    return template_response(
         "htmx/partials/excess/list.html",
         {
             "request": request,
@@ -108,7 +108,7 @@ async def partial_excess_create_form(
 ):
     """Render the create-excess-list modal form."""
     companies = db.query(Company).order_by(Company.name).all()
-    return templates.TemplateResponse(
+    return template_response(
         "htmx/partials/excess/create_modal.html",
         {
             "request": request,
@@ -126,7 +126,7 @@ async def partial_add_line_item_form(
 ):
     """Render the add-line-item modal form."""
     get_excess_list(db, list_id)
-    return templates.TemplateResponse(
+    return template_response(
         "htmx/partials/excess/add_line_item_modal.html",
         {"request": request, "list_id": list_id},
     )
@@ -142,7 +142,7 @@ async def partial_excess_detail(
     """Render excess list detail partial for HTMX."""
     el = get_excess_list(db, list_id)
     items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
-    return templates.TemplateResponse(
+    return template_response(
         "htmx/partials/excess/detail.html",
         {
             "request": request,
@@ -174,7 +174,7 @@ async def partial_import_preview(
     if not rows:
         raise HTTPException(400, "No data rows found")
     result = preview_import(rows)
-    return templates.TemplateResponse(
+    return template_response(
         "htmx/partials/excess/import_preview.html",
         {
             "request": request,
@@ -507,7 +507,7 @@ async def partial_solicit_form(
         if ids
         else []
     )
-    return templates.TemplateResponse(
+    return template_response(
         "htmx/partials/excess/solicit_modal.html",
         {"request": request, "list_id": list_id, "items": items, "list": excess_list},
     )
@@ -543,7 +543,7 @@ async def htmx_solicit(
 
     el = get_excess_list(db, list_id)
     items = db.query(ExcessLineItem).filter_by(excess_list_id=el.id).order_by(ExcessLineItem.id).all()
-    return templates.TemplateResponse(
+    return template_response(
         "htmx/partials/excess/detail.html",
         {
             "request": request,
@@ -573,7 +573,7 @@ async def htmx_create_proactive_matches(
         if count
         else "No matching archived requirements found"
     )
-    return templates.TemplateResponse(
+    return template_response(
         "htmx/partials/excess/detail.html",
         {"request": request, "user": user, "list": el, "line_items": items, "success_msg": msg},
     )
@@ -593,7 +593,7 @@ async def partial_bid_form(
     if not item or item.excess_list_id != list_id:
         raise HTTPException(404, f"Line item {item_id} not found in list {list_id}")
     companies = db.query(Company).order_by(Company.name).all()
-    return templates.TemplateResponse(
+    return template_response(
         "htmx/partials/excess/bid_form.html",
         {
             "request": request,
@@ -620,7 +620,7 @@ async def partial_bid_list(
         raise HTTPException(404, f"Line item {item_id} not found in list {list_id}")
     bids = list_bids(db, item_id, list_id)
     companies = db.query(Company).order_by(Company.name).all()
-    return templates.TemplateResponse(
+    return template_response(
         "htmx/partials/excess/bid_list.html",
         {
             "request": request,
