@@ -194,6 +194,33 @@ class SimpleOkIdResponse(BaseModel):
     model_config = ConfigDict(extra="allow")
 
 
+# ── Bulk Requisition Endpoints ─────────────────────────────────────────
+
+
+class BulkArchiveResponse(BaseModel):
+    """Response shape for `/api/requisitions/bulk-archive` and `/batch-archive`.
+
+    Returned by both the admin "archive everything not mine" endpoint and the
+    role-narrowed "archive these IDs" endpoint. `archived_ids` always matches
+    `archived_count` in length — the field exists so callers can reconcile
+    a requested-ID set against the actually-updated set (covers auth filtering,
+    already-terminal status, and missing rows in one diff).
+    """
+
+    ok: bool = True
+    archived_count: int = 0
+    archived_ids: list[int] = Field(default_factory=list)
+
+
+class BatchAssignResponse(BaseModel):
+    """Response shape for `/api/requisitions/batch-assign` (admin only)."""
+
+    ok: bool = True
+    assigned_count: int = 0
+    assigned_ids: list[int] = Field(default_factory=list)
+    assigned_to: str = ""
+
+
 class AiFindContactsResponse(BaseModel):
     """Response from AI contact finder."""
 

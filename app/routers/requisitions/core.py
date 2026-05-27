@@ -13,7 +13,8 @@ Depends on: models, schemas, cache, dependencies, sourcing_score service
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, case, exists, literal, or_, select, update
+from loguru import logger
+from sqlalchemy import and_, case, exists, literal, or_, select
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
@@ -41,8 +42,13 @@ from ...schemas.requisitions import (
     RequisitionOutcome,
     RequisitionUpdate,
 )
-from ...schemas.responses import RequisitionListResponse
+from ...schemas.responses import BatchAssignResponse, BulkArchiveResponse, RequisitionListResponse
 from ...services.activity_service import log_activity
+from ...services.requisition_service import (
+    batch_archive_for_user,
+    batch_assign_owner,
+    bulk_archive_others,
+)
 from ...services.sourcing_score import compute_sourcing_score_safe
 from ...utils.sql_helpers import escape_like
 
@@ -586,29 +592,12 @@ async def toggle_archive(req_id: int, user: User = Depends(require_user), db: Se
     return {"ok": True, "status": req.status}
 
 
-@router.put("/api/requisitions/bulk-archive")
+@router.put("/api/requisitions/bulk-archive", response_model=BulkArchiveResponse)
 async def bulk_archive(user: User = Depends(require_admin), db: Session = Depends(get_db)):
     """Archive all active requisitions NOT created by the current user."""
     from . import invalidate_prefix
 
-    stmt = (
-        update(Requisition)
-        .where(
-            Requisition.created_by != user.id,
-            Requisition.status.notin_(
-                [
-                    RequisitionStatus.ARCHIVED,
-                    RequisitionStatus.WON,
-                    RequisitionStatus.LOST,
-                    RequisitionStatus.CANCELLED,
-                ]
-            ),
-        )
-        .values(status=RequisitionStatus.ARCHIVED)
-        .returning(Requisition.id)
-        .execution_options(synchronize_session=False)
-    )
-    archived_ids = list(db.execute(stmt).scalars().all())
+    archived_ids = bulk_archive_others(db, user.id)
     for rid in archived_ids:
         log_activity(
             db,
@@ -619,10 +608,17 @@ async def bulk_archive(user: User = Depends(require_admin), db: Session = Depend
         )
     db.commit()
     invalidate_prefix("req_list")
-    return {"ok": True, "archived_count": len(archived_ids), "archived_ids": archived_ids}
+    logger.info(
+        "admin user_id={} ({}) bulk-archived {} requisition(s) (not their own): {}",
+        user.id,
+        user.email,
+        len(archived_ids),
+        archived_ids[:50],
+    )
+    return BulkArchiveResponse(archived_count=len(archived_ids), archived_ids=archived_ids)
 
 
-@router.put("/api/requisitions/batch-archive")
+@router.put("/api/requisitions/batch-archive", response_model=BulkArchiveResponse)
 async def batch_archive_by_ids(
     payload: BatchArchiveByIds,
     user: User = Depends(require_user),
@@ -631,29 +627,7 @@ async def batch_archive_by_ids(
     """Archive specific requisitions by ID list."""
     from . import invalidate_prefix
 
-    conditions = [
-        Requisition.id.in_(payload.ids),
-        Requisition.status.notin_(
-            [
-                RequisitionStatus.ARCHIVED,
-                RequisitionStatus.WON,
-                RequisitionStatus.LOST,
-                RequisitionStatus.CANCELLED,
-            ]
-        ),
-    ]
-    # Sales users can only archive their own requisitions
-    if user.role == UserRole.SALES:
-        conditions.append(Requisition.created_by == user.id)
-
-    stmt = (
-        update(Requisition)
-        .where(*conditions)
-        .values(status=RequisitionStatus.ARCHIVED)
-        .returning(Requisition.id)
-        .execution_options(synchronize_session=False)
-    )
-    archived_ids = list(db.execute(stmt).scalars().all())
+    archived_ids = batch_archive_for_user(db, user, payload.ids)
     for rid in archived_ids:
         log_activity(
             db,
@@ -664,10 +638,22 @@ async def batch_archive_by_ids(
         )
     db.commit()
     invalidate_prefix("req_list")
-    return {"ok": True, "archived_count": len(archived_ids), "archived_ids": archived_ids}
+    if archived_ids or payload.ids:
+        # Log requested-vs-archived so support can see when rows got
+        # auth-filtered, already-terminal, or didn't exist.
+        logger.info(
+            "user_id={} role={} batch-archived {}/{} requisition(s): archived={} requested={}",
+            user.id,
+            user.role,
+            len(archived_ids),
+            len(payload.ids),
+            archived_ids[:50],
+            payload.ids[:50],
+        )
+    return BulkArchiveResponse(archived_count=len(archived_ids), archived_ids=archived_ids)
 
 
-@router.put("/api/requisitions/batch-assign")
+@router.put("/api/requisitions/batch-assign", response_model=BatchAssignResponse)
 async def batch_assign(
     payload: BatchAssign,
     user: User = Depends(require_admin),
@@ -683,14 +669,7 @@ async def batch_assign(
     if not target:
         raise HTTPException(404, "Target user not found")
 
-    stmt = (
-        update(Requisition)
-        .where(Requisition.id.in_(payload.ids))
-        .values(claimed_by_id=payload.owner_id)
-        .returning(Requisition.id)
-        .execution_options(synchronize_session=False)
-    )
-    assigned_ids = list(db.execute(stmt).scalars().all())
+    assigned_ids = batch_assign_owner(db, payload.ids, payload.owner_id)
     for rid in assigned_ids:
         log_activity(
             db,
@@ -702,12 +681,21 @@ async def batch_assign(
         )
     db.commit()
     invalidate_prefix("req_list")
-    return {
-        "ok": True,
-        "assigned_count": len(assigned_ids),
-        "assigned_ids": assigned_ids,
-        "assigned_to": target.name or target.email,
-    }
+    if assigned_ids or payload.ids:
+        logger.info(
+            "admin user_id={} batch-assigned {}/{} requisition(s) to user_id={}: assigned={} requested={}",
+            user.id,
+            len(assigned_ids),
+            len(payload.ids),
+            payload.owner_id,
+            assigned_ids[:50],
+            payload.ids[:50],
+        )
+    return BatchAssignResponse(
+        assigned_count=len(assigned_ids),
+        assigned_ids=assigned_ids,
+        assigned_to=target.name or target.email,
+    )
 
 
 @router.post("/api/requisitions/{req_id}/dismiss-new-offers")
