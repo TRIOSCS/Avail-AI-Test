@@ -28,6 +28,9 @@ alembic==1.18.4
 # Caching
 redis[hiredis]==7.4.0
 orjson>=3.9.0,<4.0
+# Pin starlette directly to clear PYSEC-2026-161 (Host-header
+# inconsistency in 0.x). FastAPI allows starlette>=0.46.0, so 1.0.1 is fine.
+starlette>=1.0.1
 # CSRF protection
 starlette-csrf==3.0.0
 # NetComponents integration
