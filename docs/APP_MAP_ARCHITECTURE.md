@@ -47,9 +47,10 @@ FastAPI Middleware Stack (in order):
     ├── 1. GZipMiddleware (compress >= 500 bytes)
     ├── 2. SessionMiddleware (HTTP-only cookie, 15-min expiry)
     ├── 3. CSRFMiddleware (double-submit cookie on mutations)
-    ├── 4. CSP Middleware (Content-Security-Policy header)
-    ├── 5. Request ID Middleware (UUID tracking, timing, logging)
-    └── 6. API Version Middleware (/api/v1/* -> /api/*)
+    ├── 4. PrometheusMiddleware (request count + duration histogram, app/prometheus_metrics.py)
+    ├── 5. CSP Middleware (Content-Security-Policy header)
+    ├── 6. Request ID Middleware (UUID tracking, timing, logging)
+    └── 7. API Version Middleware (/api/v1/* -> /api/*)
     │
     ▼
 Router (27 router modules)

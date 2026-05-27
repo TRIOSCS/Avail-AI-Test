@@ -26,7 +26,7 @@ from ..database import get_db
 from ..dependencies import require_admin, require_user
 from ..models import User
 from ..models.trouble_ticket import TroubleTicket
-from ..template_env import templates
+from ..template_env import template_response
 
 router = APIRouter(tags=["error-reports"])
 
@@ -160,7 +160,7 @@ async def _generate_ai_summary(ticket_id: int):
 @router.get("/api/trouble-tickets/form", response_class=HTMLResponse)
 async def trouble_ticket_form(request: Request, user: User = Depends(require_user)):
     """Return the trouble report form partial for the modal."""
-    return templates.TemplateResponse(
+    return template_response(
         "htmx/partials/shared/trouble_report_form.html",
         {"request": request},
     )
