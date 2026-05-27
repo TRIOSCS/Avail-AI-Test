@@ -141,7 +141,7 @@ def match_phone_to_entity(phone: str, db: Session) -> dict | None:
 
 
 def log_email_activity(
-    user_id: int,
+    user_id: int | None,
     direction: str,  # "sent" or "received"
     email_addr: str,
     subject: str | None,

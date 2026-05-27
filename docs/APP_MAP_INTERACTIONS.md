@@ -338,6 +338,10 @@ email_service.py
     +---> Match reply to original contact via graph_conversation_id
     |
     +---> DB: INSERT vendor_responses (raw email)
+    |       +---> activity_service.py: log_email_activity() --> DB: INSERT activity_log
+    |             (event_type='email', direction='inbound', activity_type='email_received';
+    |              dedups on external_id=message_id) so inbound vendor replies
+    |              appear on the requisition Activity tab
     |
     v
 ai_email_parser.py

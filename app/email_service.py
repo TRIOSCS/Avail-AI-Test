@@ -20,7 +20,7 @@ from .models import (
     VendorCard,
     VendorResponse,
 )
-from .services.activity_service import log_activity
+from .services.activity_service import log_activity, log_email_activity
 from .services.credential_service import get_credential_cached
 from .shared_constants import JUNK_DOMAINS as NOISE_DOMAINS
 from .shared_constants import JUNK_EMAIL_PREFIXES as NOISE_PREFIXES
@@ -523,6 +523,19 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
             )
             db.add(vr)
             db.flush()
+
+            # Activity timeline: log the inbound vendor reply so it appears on
+            # the requisition Activity tab. Dedups on external_id=msg_id.
+            log_email_activity(
+                user_id=scanned_by_user_id,
+                direction="received",
+                email_addr=email_addr,
+                subject=subj,
+                external_id=msg_id,
+                contact_name=sender.get("name"),
+                db=db,
+                requisition_id=matched_req_id,
+            )
 
             # H2: Record in processed_messages for cross-type dedup
             db.add(
