@@ -18,6 +18,7 @@ Depends on: models (Requisition, Contact, Offer, Quote, BuyPlan, ActivityLog, et
 from datetime import date, timedelta, timezone
 
 from loguru import logger
+from sqlalchemy import and_, or_
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session
 
@@ -448,7 +449,9 @@ def compute_sales_avail_score(db: Session, user_id: int, month: date) -> dict:
     from app.services.scoring_helpers import month_range
 
     start_dt, end_dt = month_range(month)
-    call_and_email_types = ("email_sent", "call_outbound", "call_inbound")
+    # Calls + emails, direction-agnostic: the prior tuple held both call
+    # directions, so call_logged (canonical, any direction) preserves intent.
+    call_and_email_types = ("email_sent", "call_logged")
 
     # ── B1: Account Coverage ──
     # % of owned accounts with outbound activity this month
@@ -733,7 +736,13 @@ def _sales_b3_quote_followup(db, user_id, start_dt, end_dt):
             db.query(ActivityLog.id)
             .filter(
                 ActivityLog.user_id == user_id,
-                ActivityLog.activity_type.in_(("email_sent", "call_outbound")),
+                or_(
+                    ActivityLog.activity_type == "email_sent",
+                    and_(
+                        ActivityLog.activity_type == "call_logged",
+                        ActivityLog.direction == "outbound",
+                    ),
+                ),
                 ActivityLog.created_at > sent_at,
                 ActivityLog.created_at <= followup_deadline,
             )

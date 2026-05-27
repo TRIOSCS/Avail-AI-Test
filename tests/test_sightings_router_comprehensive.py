@@ -479,7 +479,7 @@ class TestLogActivity:
         assert resp.status_code == 200
         log = (
             db_session.query(ActivityLog)
-            .filter(ActivityLog.requirement_id == r.id, ActivityLog.activity_type == "call_outbound")
+            .filter(ActivityLog.requirement_id == r.id, ActivityLog.activity_type == "call_logged")
             .first()
         )
         assert log is not None

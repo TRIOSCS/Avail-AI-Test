@@ -280,7 +280,8 @@ class TestLogCallActivity:
             db_session,
         )
         assert record is not None
-        assert record.activity_type == "call_outbound"
+        assert record.activity_type == "call_logged"
+        assert record.direction == "outbound"
         assert record.duration_seconds == 300
 
     def test_dedup_call(self, db_session, test_user):
@@ -480,7 +481,8 @@ class TestVendorManualLogging:
             db=db_session,
         )
         assert record is not None
-        assert record.activity_type == "call_outbound"
+        assert record.activity_type == "call_logged"
+        assert record.direction == "outbound"
         assert record.vendor_card_id == test_vendor_card.id
 
     def test_log_vendor_note(self, db_session, test_user, test_vendor_card, test_vendor_contact):

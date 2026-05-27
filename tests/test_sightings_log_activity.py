@@ -70,7 +70,8 @@ class TestLogActivity:
         assert resp.status_code == 422
 
     def test_channel_call(self, client: TestClient, db_session: Session, test_requisition: Requisition):
-        """Channel 'call' creates call_outbound activity type."""
+        """Channel 'call' creates the canonical call_logged activity type (outbound
+        direction)."""
         req_id = _get_requirement_id(db_session, test_requisition)
 
         resp = client.post(
@@ -81,7 +82,8 @@ class TestLogActivity:
 
         record = db_session.query(ActivityLog).filter(ActivityLog.requirement_id == req_id).first()
         assert record is not None
-        assert record.activity_type == "call_outbound"
+        assert record.activity_type == "call_logged"
+        assert record.direction == "outbound"
         assert record.channel == "call"
 
     def test_channel_email(self, client: TestClient, db_session: Session, test_requisition: Requisition):

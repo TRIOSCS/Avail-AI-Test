@@ -72,6 +72,24 @@ keyed on `activity_type`). The requisition Activity tab defaults to meaningful
 events — `get_requisition_activities(meaningful_only=True)` keeps `is_meaningful`
 True-or-unscored and hides AI-rejected rows — with a `show_all` toggle.
 
+**Phone calls** (manual logs and the 8x8 CDR poll) log the canonical
+`ActivityType.CALL_LOGGED` type; inbound/outbound is carried on the `direction`
+column (not encoded in `activity_type`). Readers that distinguish direction
+(e.g. AVAIL scoring's outbound-follow-up metric) filter on `direction`.
+
+**Enabling 8x8 call logging** (operator/ops action — not code; the
+`EIGHT_BY_EIGHT_ENABLED` default stays `False`):
+1. In `.env`: set `EIGHT_BY_EIGHT_ENABLED=true` and supply
+   `EIGHT_BY_EIGHT_API_KEY`, `EIGHT_BY_EIGHT_USERNAME`,
+   `EIGHT_BY_EIGHT_PASSWORD`, `EIGHT_BY_EIGHT_PBX_ID`
+   (`EIGHT_BY_EIGHT_TIMEZONE` / `EIGHT_BY_EIGHT_POLL_INTERVAL_MINUTES` have
+   defaults).
+2. Per user whose calls should be logged: set their `eight_by_eight_extension`
+   and enable their per-user `eight_by_eight_enabled` toggle in user settings.
+3. On restart, `register_eight_by_eight_jobs()` schedules the CDR poll. Calls
+   reverse-matched to a CRM company with an open requisition appear on that
+   requisition's Activity tab as `call_logged` events.
+
 ## 2. Search (User-Initiated Only)
 
 Sourcing is strictly user-initiated. There is no background cron, no
@@ -677,8 +695,10 @@ APScheduler (scheduler.py)
     +---> prospecting_jobs.py (daily)
     |       +---> Explorium discovery, web search for contacts
     |
-    +---> teams_call_jobs.py (6 hours)
-    |       +---> 8x8 call logs -> activity_log
+    +---> eight_by_eight_jobs.py (30 min, gated by EIGHT_BY_EIGHT_ENABLED)
+    |       +---> 8x8 CDR poll -> log_call_activity() -> activity_log
+    |             (canonical activity_type='call_logged'; in/out on the
+    |             direction column; reverse-matched calls link to an open req)
     |
     +---> health_jobs.py (5 min)
             +---> Ping each connector -> update api_sources

@@ -337,3 +337,20 @@ def test_get_requisition_activities_meaningful_only_filter(db_session, test_requ
     assert unscored.id in {r.id for r in curated}
     all_rows = get_requisition_activities(test_requisition.id, db_session, meaningful_only=False)
     assert noise.id in {r.id for r in all_rows}
+
+
+def test_log_call_activity_writes_canonical_call_logged(db_session, test_user):
+    """Phone calls are logged as the canonical call_logged type; direction holds
+    in/out."""
+    rec = log_call_activity(
+        user_id=test_user.id,
+        direction="outbound",
+        phone="+15551234567",
+        duration_seconds=120,
+        external_id="call-canon-001",
+        contact_name="Vendor Rep",
+        db=db_session,
+    )
+    assert rec is not None
+    assert rec.activity_type == ActivityType.CALL_LOGGED
+    assert rec.direction == "outbound"
