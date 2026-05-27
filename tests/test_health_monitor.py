@@ -692,7 +692,8 @@ class TestDeepTestSourceTypedErrors:
 
 class TestRedactBareKeyMasking:
     def test_bare_key_in_query_without_named_prefix(self):
-        """Bare token in URL query string (no named prefix) gets masked by _mask_bare."""
+        """Bare token in URL query string (no named prefix) gets masked by
+        _mask_bare."""
         bare_token = "A" * 25  # 25 chars, well within 20-100 range
         text = f"https://api.example.com/endpoint?data={bare_token}&q=test"
         result = _redact_api_keys(text)
