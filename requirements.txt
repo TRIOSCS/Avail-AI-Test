@@ -36,7 +36,7 @@ patchright==1.59.1
 # Typed settings from env vars (fail-fast validation at startup)
 pydantic-settings==2.14.1
 # SSE streaming for HTMX sourcing progress
-sse-starlette>=1.6.0,<4.0
+sse-starlette>=3.4.4,<4.0
 # Anthropic Claude API (used by claude_client, enrichment, batch extraction)
 anthropic>=0.40.0,<1.0
 # HTML sanitization for untrusted email content (XSS prevention)
