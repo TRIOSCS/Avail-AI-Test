@@ -604,11 +604,11 @@ async def bulk_archive(user: User = Depends(require_admin), db: Session = Depend
                 ]
             ),
         )
-        .values(status="archived")
+        .values(status=RequisitionStatus.ARCHIVED)
         .returning(Requisition.id)
-        .execution_options(synchronize_session="fetch")
+        .execution_options(synchronize_session=False)
     )
-    archived_ids = [row[0] for row in db.execute(stmt).all()]
+    archived_ids = list(db.execute(stmt).scalars().all())
     for rid in archived_ids:
         log_activity(
             db,
@@ -649,11 +649,11 @@ async def batch_archive_by_ids(
     stmt = (
         update(Requisition)
         .where(*conditions)
-        .values(status="archived")
+        .values(status=RequisitionStatus.ARCHIVED)
         .returning(Requisition.id)
-        .execution_options(synchronize_session="fetch")
+        .execution_options(synchronize_session=False)
     )
-    archived_ids = [row[0] for row in db.execute(stmt).all()]
+    archived_ids = list(db.execute(stmt).scalars().all())
     for rid in archived_ids:
         log_activity(
             db,
@@ -688,9 +688,9 @@ async def batch_assign(
         .where(Requisition.id.in_(payload.ids))
         .values(claimed_by_id=payload.owner_id)
         .returning(Requisition.id)
-        .execution_options(synchronize_session="fetch")
+        .execution_options(synchronize_session=False)
     )
-    assigned_ids = [row[0] for row in db.execute(stmt).all()]
+    assigned_ids = list(db.execute(stmt).scalars().all())
     for rid in assigned_ids:
         log_activity(
             db,
