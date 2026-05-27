@@ -3,6 +3,13 @@
 app.yourdomain.com {
     encode gzip
 
+    # Access logging — emits JSON to stdout; visible via `docker compose logs caddy`.
+    log {
+        output stdout
+        format json
+        level INFO
+    }
+
     header {
         Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
         X-Frame-Options "SAMEORIGIN"
