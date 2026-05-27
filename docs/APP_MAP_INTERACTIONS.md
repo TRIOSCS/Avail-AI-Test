@@ -165,6 +165,48 @@ search_service.py (orchestrator)
     +---> connector_status.py --> DB: UPDATE api_sources
 ```
 
+### 2b. Streaming Part-Search (`/v2/partials/search/run`)
+
+```
+Browser POST /v2/partials/search/run  (manual MPN entry)
+    |
+    v
+htmx_views.py: search_run()
+    |
+    +---> Returns HTML shell + spinner immediately (200 OK)
+    |
+    +---> _safe_bg(stream_search_mpn(search_id, mpn))   # fire-and-forget asyncio.Task
+              |
+              v
+    search_service.stream_search_mpn(search_id, mpn)
+        |
+        +---> db = SessionLocal()      # OWNS its own session — must NOT
+        |                                receive a request-scoped session: web
+        |                                framework finalizers close those as soon
+        |                                as the response is sent, so a request
+        |                                session would be dead before the worker's
+        |                                first db.query(...). The fire-and-forget
+        |                                wrapper swallows exceptions, so the
+        |                                failure would surface only as a hung SSE
+        |                                stream. Same pattern as _enrich_cards.
+        |
+        +---> connectors = _build_connectors(db)         # one-shot setup query
+        |     vendor_score_map = db.query(VendorCard...) # one-shot setup query
+        |
+        +---> for each connector: asyncio.create_task(connector.search(mpn))
+        |     loop with asyncio.wait(FIRST_COMPLETED):
+        |       publish "source-status" / "results" / "card-update" per connector
+        |     publish terminal "done" once all settle
+        |
+        +---> Always publishes a terminal "done" — including on uncaught
+              exceptions (pool exhaustion, broker outage, render errors). The
+              SSE client only knows the stream is complete via the done event,
+              so worker death without done means a hung browser spinner.
+```
+
+Browser opens `GET /v2/partials/search/stream?search_id=...` (SSE long-poll) in
+parallel to the POST so it receives events as the worker publishes them.
+
 ### Connector Failure Contract
 
 External-API connectors (`app/connectors/*.py`) follow a single contract

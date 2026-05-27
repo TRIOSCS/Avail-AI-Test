@@ -147,15 +147,15 @@ Usage:
   {%- set italic_cls = ' opp-deal--computed' if source in ('computed', 'partial') else '' -%}
   {%- set partial_cls = ' opp-deal--partial' if source == 'partial' else '' -%}
   {%- if source == 'partial' -%}
-    {%- set title_attr = ' title="Floor estimate — ' ~ priced_count ~ ' of ' ~ requirement_count ~ ' parts priced"' -%}
+    {%- set title_text = 'Floor estimate — ' ~ priced_count ~ ' of ' ~ requirement_count ~ ' parts priced' -%}
   {%- elif source == 'computed' -%}
-    {%- set title_attr = ' title="Computed from target prices (all parts priced)"' -%}
+    {%- set title_text = 'Computed from target prices (all parts priced)' -%}
   {%- elif source == 'entered' -%}
-    {%- set title_attr = ' title="Entered by broker"' -%}
+    {%- set title_text = 'Entered by broker' -%}
   {%- else -%}
-    {%- set title_attr = '' -%}
+    {%- set title_text = '' -%}
   {%- endif -%}
-<span class="opp-deal opp-deal--tier-{{ tier }}{{ italic_cls }}{{ partial_cls }}"{{ title_attr|safe }}>{{ prefix }}${{ '{:,.0f}'.format(amount) }}</span>
+<span class="opp-deal opp-deal--tier-{{ tier }}{{ italic_cls }}{{ partial_cls }}"{% if title_text %} title="{{ title_text }}"{% endif %}>{{ prefix }}${{ '{:,.0f}'.format(amount) }}</span>
 {%- endif -%}
 {%- endmacro %}
 

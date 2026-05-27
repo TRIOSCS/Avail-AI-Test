@@ -265,12 +265,18 @@ class TestSanitizeHtmlNoStyle:
         assert "style=" not in result
         assert "text" in result
 
-    def test_class_attribute_preserved(self):
+    def test_class_attribute_stripped(self):
+        """Class is no longer allowed on arbitrary tags (HIGH-SEC-2): on sanitized
+        external email HTML it would let an attacker apply the app's own CSS classes.
+
+        The element text is still preserved.
+        """
         from app.template_env import _sanitize_html_filter
 
         html = '<span class="text-red-500">warning</span>'
         result = _sanitize_html_filter(html)
-        assert 'class="text-red-500"' in result
+        assert "class=" not in result
+        assert "warning" in result
 
     def test_empty_input(self):
         from app.template_env import _sanitize_html_filter

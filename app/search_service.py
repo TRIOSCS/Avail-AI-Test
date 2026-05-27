@@ -28,6 +28,7 @@ from .connectors.oemsecrets import OEMSecretsConnector
 from .connectors.sourcengine import SourcengineConnector
 from .connectors.sources import BrokerBinConnector, NexarConnector
 from .constants import ApiSourceStatus, SourceRunStatus
+from .database import SessionLocal
 from .models import (
     ApiSource,
     MaterialCard,
@@ -2114,14 +2115,24 @@ def _score_raw_hit(r: dict, vendor_score_map: dict) -> dict:
     }
 
 
-async def stream_search_mpn(search_id: str, mpn: str, db: Session) -> None:
+async def stream_search_mpn(search_id: str, mpn: str) -> None:
     """Stream search results via SSE as each connector completes.
 
     Instead of waiting for all connectors (like _fetch_fresh with asyncio.gather),
     this fires all connectors as tasks and uses asyncio.wait(FIRST_COMPLETED) to
     publish results incrementally via the SSE broker.
 
-    Called by: routers/htmx_views.py (search stream endpoint)
+    Opens its own SessionLocal() so the worker is not tied to the caller's
+    request session (which FastAPI closes once the response is sent).
+
+    Always publishes a terminal "done" event so the SSE client can stop
+    waiting — even on uncaught exceptions (pool exhaustion, broker errors,
+    template render failures). Without this guarantee any failure mode that
+    bypasses the per-connector handler would leave the browser spinner
+    hanging indefinitely (the same user-visible symptom as the original
+    request-session bug).
+
+    Called by: routers/htmx_views.py::search_run (POST /v2/partials/search/run)
     Depends on: _build_connectors, _incremental_dedup, services/sse_broker.broker
     """
     # Allow test mocks to override the broker via module-level patching
@@ -2137,159 +2148,201 @@ async def stream_search_mpn(search_id: str, mpn: str, db: Session) -> None:
     sources_completed = 0
     t_start = time.time()
 
-    connectors, source_stats_map, _disabled = _build_connectors(db)
+    db = None
+    try:
+        db = SessionLocal()
+        try:
+            connectors, source_stats_map, _disabled = _build_connectors(db)
 
-    # Publish source-status SSE events for every non-ok source so the chip
-    # strip renders the right state immediately. Without this the operator
-    # never sees error_skipped / disabled / skipped chips — the connector
-    # contract's UI hop is dead because only connectors that actually run
-    # later emit per-source events.
-    for _src_name, _stat in source_stats_map.items():
-        _status = _stat.get("status")
-        if _status and _status != SourceRunStatus.OK.value:
+            # Publish source-status SSE events for every non-ok source so the
+            # chip strip renders the right state immediately. Without this the
+            # operator never sees error_skipped / disabled / skipped chips —
+            # only connectors that actually run later emit per-source events.
+            for _src_name, _stat in source_stats_map.items():
+                _status = _stat.get("status")
+                if _status and _status != SourceRunStatus.OK.value:
+                    await active_broker.publish(
+                        channel,
+                        "source-status",
+                        json.dumps(
+                            {
+                                "source": _stat.get("source", _src_name),
+                                "status": _status,
+                                "error": _stat.get("error"),
+                                "results": _stat.get("results", 0),
+                                "ms": _stat.get("ms", 0),
+                            },
+                            default=str,
+                        ),
+                    )
+
+            if not connectors:
+                await active_broker.publish(
+                    channel,
+                    "done",
+                    json.dumps({"total_results": 0, "sources": 0, "elapsed_seconds": 0}),
+                )
+                return
+
+            # Build vendor score lookup for scoring raw results
+            from .models import VendorCard
+
+            vendor_cards = db.query(VendorCard.normalized_name, VendorCard.vendor_score).all()
+            vendor_score_map = {vc.normalized_name: vc.vendor_score for vc in vendor_cards}
+
+            # Create a task per connector, tagging with source_name
+            task_map: dict[asyncio.Task, str] = {}
+            for conn in connectors:
+                source_name = getattr(
+                    conn, "source_name", _CONNECTOR_SOURCE_MAP.get(conn.__class__.__name__, "unknown")
+                )
+
+                async def _run(c=conn, pn=mpn):
+                    t0 = time.time()
+                    hits = await c.search(pn)
+                    elapsed = int((time.time() - t0) * 1000)
+                    return hits, elapsed
+
+                task = asyncio.create_task(_run())
+                task_map[task] = source_name
+
+            pending = set(task_map.keys())
+
+            while pending:
+                done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
+
+                for task in done:
+                    source_name = task_map[task]
+                    sources_completed += 1
+
+                    try:
+                        hits, elapsed_ms = task.result()
+                        hit_count = len(hits)
+
+                        # Score and normalize each hit
+                        scored_hits = []
+                        for r in hits:
+                            r.setdefault("mpn_matched", mpn)
+                            scored_hits.append(_score_raw_hit(r, vendor_score_map))
+
+                        # Incremental dedup against accumulated results
+                        new_cards, updated_cards = _incremental_dedup(scored_hits, accumulated)
+
+                        # Publish source status
+                        await active_broker.publish(
+                            channel,
+                            "source-status",
+                            json.dumps(
+                                {
+                                    "source": source_name,
+                                    "status": SourceRunStatus.OK.value,
+                                    "results": hit_count,
+                                    "ms": elapsed_ms,
+                                },
+                                default=str,
+                            ),
+                        )
+
+                        # Publish new result cards (HTML for sse-swap="results" — not JSON)
+                        if new_cards:
+                            start_idx = len(accumulated) - len(new_cards)
+                            cards_html = _render_search_vendor_cards_html(
+                                new_cards,
+                                search_id=search_id,
+                                start_index=start_idx,
+                                swap_oob=False,
+                            )
+                            await active_broker.publish(channel, "results", cards_html)
+
+                        # Publish updated cards as OOB HTML so existing vendor-card nodes refresh
+                        if updated_cards:
+                            update_html = "".join(
+                                _render_search_vendor_cards_html(
+                                    [card],
+                                    search_id=search_id,
+                                    start_index=0,
+                                    swap_oob=True,
+                                )
+                                for card in updated_cards
+                            )
+                            await active_broker.publish(channel, "card-update", update_html)
+
+                        total_results += hit_count
+
+                    except Exception as e:
+                        logger.exception(
+                            "Streaming connector failed: source={} search_id={} mpn={}",
+                            source_name,
+                            search_id,
+                            mpn,
+                        )
+                        await active_broker.publish(
+                            channel,
+                            "source-status",
+                            json.dumps(
+                                {
+                                    "source": source_name,
+                                    "status": SourceRunStatus.ERROR.value,
+                                    "error": str(e)[:500],
+                                    "results": 0,
+                                    "ms": 0,
+                                },
+                                default=str,
+                            ),
+                        )
+
+            # Cache results for filter endpoint (15-min TTL)
+            try:
+                rc = _get_search_redis()
+                if rc:
+                    cache_key = f"search:{search_id}:results"
+                    rc.setex(cache_key, 900, json.dumps(accumulated, default=str))
+            except Exception:
+                logger.exception(
+                    "Failed to cache search results: search_id={} accumulated={}",
+                    search_id,
+                    len(accumulated),
+                )
+
+            # All connectors done
+            elapsed_total = round(time.time() - t_start, 1)
             await active_broker.publish(
                 channel,
-                "source-status",
+                "done",
                 json.dumps(
                     {
-                        "source": _stat.get("source", _src_name),
-                        "status": _status,
-                        "error": _stat.get("error"),
-                        "results": _stat.get("results", 0),
-                        "ms": _stat.get("ms", 0),
+                        "total_results": total_results,
+                        "sources": sources_completed,
+                        "elapsed_seconds": elapsed_total,
                     },
                     default=str,
                 ),
             )
-
-    if not connectors:
-        await active_broker.publish(
-            channel,
-            "done",
-            json.dumps({"total_results": 0, "sources": 0, "elapsed_seconds": 0}),
+        finally:
+            db.close()
+    except Exception as e:
+        # Worker died before reaching the success-path "done" publish (pool
+        # exhaustion, broker outage, template render error, etc.). Without a
+        # terminal event the SSE client spins forever — same symptom as the
+        # original request-session bug, different trigger.
+        logger.exception(
+            "stream_search_mpn failed: search_id={} mpn={}",
+            search_id,
+            mpn,
         )
-        return
-
-    # Build vendor score lookup for scoring raw results
-    from .models import VendorCard
-
-    vendor_cards = db.query(VendorCard.normalized_name, VendorCard.vendor_score).all()
-    vendor_score_map = {vc.normalized_name: vc.vendor_score for vc in vendor_cards}
-
-    # Create a task per connector, tagging with source_name
-    task_map: dict[asyncio.Task, str] = {}
-    for conn in connectors:
-        source_name = getattr(conn, "source_name", _CONNECTOR_SOURCE_MAP.get(conn.__class__.__name__, "unknown"))
-
-        async def _run(c=conn, pn=mpn):
-            t0 = time.time()
-            hits = await c.search(pn)
-            elapsed = int((time.time() - t0) * 1000)
-            return hits, elapsed
-
-        task = asyncio.create_task(_run())
-        task_map[task] = source_name
-
-    pending = set(task_map.keys())
-
-    while pending:
-        done, pending = await asyncio.wait(pending, return_when=asyncio.FIRST_COMPLETED)
-
-        for task in done:
-            source_name = task_map[task]
-            sources_completed += 1
-
-            try:
-                hits, elapsed_ms = task.result()
-                hit_count = len(hits)
-
-                # Score and normalize each hit
-                scored_hits = []
-                for r in hits:
-                    r.setdefault("mpn_matched", mpn)
-                    scored_hits.append(_score_raw_hit(r, vendor_score_map))
-
-                # Incremental dedup against accumulated results
-                new_cards, updated_cards = _incremental_dedup(scored_hits, accumulated)
-
-                # Publish source status
-                await active_broker.publish(
-                    channel,
-                    "source-status",
-                    json.dumps(
-                        {
-                            "source": source_name,
-                            "status": SourceRunStatus.OK.value,
-                            "results": hit_count,
-                            "ms": elapsed_ms,
-                        },
-                        default=str,
-                    ),
-                )
-
-                # Publish new result cards (HTML for sse-swap="results" — not JSON)
-                if new_cards:
-                    start_idx = len(accumulated) - len(new_cards)
-                    cards_html = _render_search_vendor_cards_html(
-                        new_cards,
-                        search_id=search_id,
-                        start_index=start_idx,
-                        swap_oob=False,
-                    )
-                    await active_broker.publish(channel, "results", cards_html)
-
-                # Publish updated cards as OOB HTML so existing vendor-card nodes refresh
-                if updated_cards:
-                    update_html = "".join(
-                        _render_search_vendor_cards_html(
-                            [card],
-                            search_id=search_id,
-                            start_index=0,
-                            swap_oob=True,
-                        )
-                        for card in updated_cards
-                    )
-                    await active_broker.publish(channel, "card-update", update_html)
-
-                total_results += hit_count
-
-            except Exception as e:
-                logger.warning(f"Streaming search connector {source_name} failed: {e}")
-                await active_broker.publish(
-                    channel,
-                    "source-status",
-                    json.dumps(
-                        {
-                            "source": source_name,
-                            "status": SourceRunStatus.ERROR.value,
-                            "error": str(e)[:500],
-                            "results": 0,
-                            "ms": 0,
-                        },
-                        default=str,
-                    ),
-                )
-
-    # Cache results for filter endpoint (15-min TTL)
-    try:
-        rc = _get_search_redis()
-        if rc:
-            cache_key = f"search:{search_id}:results"
-            rc.setex(cache_key, 900, json.dumps(accumulated, default=str))
-    except Exception:
-        logger.warning("Failed to cache search results for filtering")
-
-    # All connectors done
-    elapsed_total = round(time.time() - t_start, 1)
-    await active_broker.publish(
-        channel,
-        "done",
-        json.dumps(
-            {
-                "total_results": total_results,
-                "sources": sources_completed,
-                "elapsed_seconds": elapsed_total,
-            },
-            default=str,
-        ),
-    )
+        try:
+            await active_broker.publish(
+                channel,
+                "done",
+                json.dumps(
+                    {
+                        "total_results": total_results,
+                        "sources": sources_completed,
+                        "elapsed_seconds": round(time.time() - t_start, 1),
+                        "error": str(e)[:500],
+                    },
+                    default=str,
+                ),
+            )
+        except Exception:
+            logger.exception("Failed to publish error done event: search_id={}", search_id)
