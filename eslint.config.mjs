@@ -23,6 +23,8 @@ export default [
         clearTimeout: 'readonly',
         clearInterval: 'readonly',
         requestAnimationFrame: 'readonly',
+        cancelAnimationFrame: 'readonly',
+        confirm: 'readonly',
         URL: 'readonly',
         URLSearchParams: 'readonly',
         CustomEvent: 'readonly',

@@ -13,6 +13,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from fastapi.testclient import TestClient
 
+from app.constants import RequisitionStatus
 from app.models import (
     Company,
     CustomerSite,
@@ -629,6 +630,40 @@ class TestCompaniesAdditional:
         match = [i for i in items if i["id"] == test_company.id]
         assert len(match) == 1
         assert match[0]["revenue_90d"] == 5000.0
+
+    def test_list_companies_revenue_90d_uses_status_enum(
+        self, client, db_session, test_company, test_customer_site, test_user
+    ):
+        """revenue_90d filter must use the RequisitionStatus.WON StrEnum constant, not a
+        raw 'won' string.
+
+        Constructing the row with the enum constant guards against the enum value
+        drifting from the literal.
+        """
+        req = Requisition(
+            name="REQ-WON-ENUM",
+            customer_site_id=test_customer_site.id,
+            status=RequisitionStatus.WON,
+            created_by=test_user.id,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(req)
+        db_session.flush()
+        q = Quote(
+            requisition_id=req.id,
+            customer_site_id=test_customer_site.id,
+            quote_number="WON-ENUM-001",
+            subtotal=4200.00,
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(q)
+        db_session.commit()
+
+        resp = client.get("/api/companies")
+        assert resp.status_code == 200
+        match = [i for i in resp.json()["items"] if i["id"] == test_company.id]
+        assert len(match) == 1
+        assert match[0]["revenue_90d"] == 4200.0
 
     def test_list_companies_revenue_90d_zero_when_no_won(self, client, db_session, test_company):
         """Companies with no won quotes should have revenue_90d=0."""

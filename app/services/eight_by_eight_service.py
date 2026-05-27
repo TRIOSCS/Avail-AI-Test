@@ -131,11 +131,13 @@ def reverse_lookup_phone(phone: str, db: Session) -> dict | None:
     return None
 
 
-def get_extension_map(token: str, settings) -> dict[str, str]:
+async def get_extension_map(token: str, settings) -> dict[str, str]:
     """Fetch 8x8 user list and build extension-to-email mapping.
 
     Calls 8x8 user list API to map internal extensions to user emails.
     Returns dict like {"1001": "michael@trio.com", "1002": "marcus@trio.com"}.
+
+    Async — uses httpx.AsyncClient so it never blocks the event loop.
 
     Called by: app/jobs/eight_by_eight_jobs.py (CDR processing)
     Depends on: 8x8 Analytics API, httpx
@@ -147,7 +149,8 @@ def get_extension_map(token: str, settings) -> dict[str, str]:
     }
 
     try:
-        resp = httpx.get(url, headers=headers, timeout=15)
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.get(url, headers=headers)
     except httpx.HTTPError as e:
         logger.error(f"8x8 user list fetch failed: {e}")
         return {}
@@ -169,11 +172,13 @@ def get_extension_map(token: str, settings) -> dict[str, str]:
     return ext_map
 
 
-def get_access_token(settings) -> str:
+async def get_access_token(settings) -> str:
     """Authenticate with 8x8 Analytics API and return an access token.
 
     POST /oauth/token with API key header + form-encoded credentials. Raises ValueError
     on auth failure or missing token.
+
+    Async — uses httpx.AsyncClient so it never blocks the event loop.
     """
     url = f"{BASE_URL}/oauth/token"
     headers = {
@@ -186,7 +191,8 @@ def get_access_token(settings) -> str:
     }
 
     try:
-        resp = httpx.post(url, headers=headers, data=data, timeout=15)
+        async with httpx.AsyncClient(timeout=15) as client:
+            resp = await client.post(url, headers=headers, data=data)
     except httpx.HTTPError as e:
         logger.error(f"8x8 auth request failed: {e}")
         raise ValueError(f"8x8 auth request failed: {e}") from e
@@ -205,11 +211,13 @@ def get_access_token(settings) -> str:
     return token
 
 
-def get_cdrs(token: str, settings, since: datetime, until: datetime) -> list[dict]:
+async def get_cdrs(token: str, settings, since: datetime, until: datetime) -> list[dict]:
     """Fetch Call Detail Records from the 8x8 Analytics API.
 
     GET /v1/cdr with pbxId=allpbxes, isCallRecord=true, time window, and timezone.
     Paginates via scrollId. Returns empty list on any error — never crashes.
+
+    Async — uses httpx.AsyncClient so it never blocks the event loop.
     """
     url = f"{BASE_URL}/cdr"
     headers = {
@@ -228,30 +236,31 @@ def get_cdrs(token: str, settings, since: datetime, until: datetime) -> list[dic
     all_records = []
     scroll_id = None
 
-    while True:
-        if scroll_id:
-            params["scrollId"] = scroll_id
+    async with httpx.AsyncClient(timeout=30) as client:
+        while True:
+            if scroll_id:
+                params["scrollId"] = scroll_id
 
-        try:
-            resp = httpx.get(url, headers=headers, params=params, timeout=30)
-        except httpx.HTTPError as e:
-            logger.error(f"8x8 CDR fetch failed: {e}")
-            return all_records
+            try:
+                resp = await client.get(url, headers=headers, params=params)
+            except httpx.HTTPError as e:
+                logger.error(f"8x8 CDR fetch failed: {e}")
+                return all_records
 
-        if resp.status_code != 200:
-            logger.error(f"8x8 CDR fetch error: HTTP {resp.status_code} — {resp.text[:200]}")
-            return all_records
+            if resp.status_code != 200:
+                logger.error(f"8x8 CDR fetch error: HTTP {resp.status_code} — {resp.text[:200]}")
+                return all_records
 
-        body = resp.json()
-        records = body.get("data", [])
-        all_records.extend(records)
+            body = resp.json()
+            records = body.get("data", [])
+            all_records.extend(records)
 
-        # Check for more pages
-        meta = body.get("meta", {})
-        new_scroll = meta.get("scrollId")
-        if not new_scroll or not records or len(all_records) >= meta.get("totalRecordCount", 0):
-            break
-        scroll_id = new_scroll
+            # Check for more pages
+            meta = body.get("meta", {})
+            new_scroll = meta.get("scrollId")
+            if not new_scroll or not records or len(all_records) >= meta.get("totalRecordCount", 0):
+                break
+            scroll_id = new_scroll
 
     logger.info(f"8x8 CDR fetch: {len(all_records)} call records")
     return all_records

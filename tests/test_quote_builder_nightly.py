@@ -126,7 +126,7 @@ class TestQuoteBuilderModalMultiNoCustomerSite:
         mock_response = HTMLResponse("<html>modal</html>")
 
         with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
-            with patch("app.template_env.templates.TemplateResponse", return_value=mock_response):
+            with patch("app.template_env.template_response", return_value=mock_response):
                 result = _run(
                     quote_builder_modal_multi(
                         request=_make_request(),
@@ -161,7 +161,7 @@ class TestQuoteBuilderModalMultiWithCustomerSite:
 
         with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
             with patch(
-                "app.template_env.templates.TemplateResponse",
+                "app.template_env.template_response",
                 side_effect=_fake_template_response,
             ):
                 result = _run(
@@ -196,7 +196,7 @@ class TestQuoteBuilderModalMultiWithCustomerSite:
 
         with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
             with patch(
-                "app.template_env.templates.TemplateResponse",
+                "app.template_env.template_response",
                 side_effect=_fake_template_response,
             ):
                 result = _run(
@@ -232,7 +232,7 @@ class TestQuoteBuilderModalMultiWithCustomerSite:
 
         with patch("app.dependencies.get_req_for_user", return_value=test_requisition):
             with patch(
-                "app.template_env.templates.TemplateResponse",
+                "app.template_env.template_response",
                 side_effect=_fake_template_response,
             ):
                 _run(

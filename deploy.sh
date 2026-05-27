@@ -10,14 +10,61 @@ if [ "${1:-}" = "--no-commit" ]; then
     shift
 fi
 
-# Step 1: Commit & push (unless --no-commit)
+# Step 1: Commit & push (unless --no-commit). Hardened against the silent-
+# failure mode where a stale local main (behind origin/main) caused every
+# `git push origin main` to be rejected as non-fast-forward — the rebuild
+# steps still ran from whatever branch was checked out, so deploys appeared
+# to succeed while origin/main drifted days out of sync.
 if [ "$NO_COMMIT" = false ]; then
+    CURRENT_BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+    if [ "$CURRENT_BRANCH" != "main" ]; then
+        echo "ERROR: ./deploy.sh (without --no-commit) must run from main." >&2
+        echo "Current branch: $CURRENT_BRANCH" >&2
+        echo "Either: git checkout main && git pull --ff-only origin main" >&2
+        echo "Or deploy the current branch without pushing: ./deploy.sh --no-commit" >&2
+        exit 1
+    fi
+
+    echo "==> Syncing local main with origin/main..."
+    git fetch origin
+    if ! git merge --ff-only origin/main; then
+        echo "ERROR: local main diverged from origin/main — cannot fast-forward." >&2
+        echo "Resolve with 'git pull --rebase origin main' or investigate before re-running." >&2
+        exit 2
+    fi
+
     if git diff --quiet && git diff --cached --quiet; then
-        echo "No changes to commit — skipping git steps"
+        echo "No changes to commit — skipping commit step"
     else
         git add -A
+        # Last line of defence before `git add -A` lands something in history.
+        # .gitignore should already exclude these, but the moment it misses a
+        # new untracked file (a secret, an SSH key, a DB dump) `git add -A`
+        # stages it. Abort the deploy rather than commit it.
+        DANGER=$(git diff --cached --name-only | grep -iE \
+            '(^|/)\.env($|\.)|\.(pem|key|p12|pfx|sql|sqlite3?|dump)$|(^|/)(credentials|service-account|id_rsa|id_ed25519)[^/]*$' \
+            || true)
+        if [ -n "$DANGER" ]; then
+            echo "ERROR: deploy aborted — refusing to commit sensitive/data files:" >&2
+            echo "$DANGER" | sed 's/^/  /' >&2
+            echo "Add them to .gitignore or commit deliberately outside ./deploy.sh." >&2
+            echo "The working tree is unchanged; nothing was committed." >&2
+            git reset -q
+            exit 4
+        fi
         git commit -m "${1:-deploy}"
-        git push origin main
+    fi
+
+    AHEAD=$(git rev-list --count origin/main..HEAD)
+    if [ "$AHEAD" -gt 0 ]; then
+        echo "==> Pushing $AHEAD commit(s) to origin/main..."
+        if ! git push origin main; then
+            echo "ERROR: git push origin main failed." >&2
+            echo "Likely causes: non-fast-forward rejection, auth failure, or branch protection." >&2
+            exit 3
+        fi
+    else
+        echo "Local main already matches origin/main — nothing to push."
     fi
 fi
 
