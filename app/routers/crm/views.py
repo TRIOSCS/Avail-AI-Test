@@ -89,14 +89,14 @@ async def crm_shell(
     user: User = Depends(require_user),
 ):
     """Render the CRM shell with Customers/Vendors tab bar."""
-    from ...template_env import templates
+    from ...template_env import template_response
 
     ctx = {
         "request": request,
         "user": user,
         "default_tab": "customers",
     }
-    return templates.TemplateResponse("htmx/partials/crm/shell.html", ctx)
+    return template_response("htmx/partials/crm/shell.html", ctx)
 
 
 @router.get("/v2/partials/crm/performance", response_class=HTMLResponse)
@@ -106,14 +106,14 @@ async def crm_performance(
     db: Session = Depends(get_db),
 ):
     """Render the team performance dashboard."""
-    from ...template_env import templates
+    from ...template_env import template_response
 
     ctx = {
         "request": request,
         "user": user,
         "users_scores": _build_user_scores(db),
     }
-    return templates.TemplateResponse("htmx/partials/crm/performance_tab.html", ctx)
+    return template_response("htmx/partials/crm/performance_tab.html", ctx)
 
 
 @router.get("/api/crm/performance-metrics")

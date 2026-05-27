@@ -10,10 +10,15 @@ jinja2==3.1.6
 filetype==1.2.0
 charset-normalizer==3.4.7
 # Credential encryption
-cryptography==46.0.7
+cryptography==48.0.0
 # Observability
 loguru==0.7.3
-prometheus-fastapi-instrumentator==7.1.0
+# Pinned >=1.0.1 to fix PYSEC-2026-161 (Host header URL-reconstruction auth bypass).
+# Forces resolver to pick the fixed 1.x line; fastapi 0.136.x accepts starlette>=0.46.0 unbounded.
+starlette>=1.0.1,<2.0
+# Replaced prometheus-fastapi-instrumentator (hard-pinned starlette<1.0.0) with a small
+# ASGI middleware in app/prometheus_metrics.py that uses prometheus_client directly.
+prometheus_client>=0.20.0,<1.0
 sentry-sdk[fastapi]==2.60.0
 # Rate limiting
 slowapi==0.1.9
@@ -36,7 +41,7 @@ patchright==1.60.0
 # Typed settings from env vars (fail-fast validation at startup)
 pydantic-settings==2.14.1
 # SSE streaming for HTMX sourcing progress
-sse-starlette>=1.6.0,<4.0
+sse-starlette>=3.4.4,<4.0
 # Anthropic Claude API (used by claude_client, enrichment, batch extraction)
 anthropic>=0.40.0,<1.0
 # HTML sanitization for untrusted email content (XSS prevention)
