@@ -59,6 +59,7 @@ def _make_task(
         title="Test Task",
         status="todo",
         created_by=user.id,
+        assigned_to_id=user.id,
         source="manual",
         created_at=datetime.now(timezone.utc),
     )
