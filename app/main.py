@@ -293,7 +293,9 @@ if os.path.isdir("app/static/dist/assets"):
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
 # Prometheus metrics
-from prometheus_fastapi_instrumentator import Instrumentator
+from fastapi import Response
+
+from app.prometheus_metrics import PrometheusMiddleware, render_metrics
 
 
 async def _metrics_auth(x_metrics_token: str = Header(default="")) -> None:
@@ -307,9 +309,14 @@ async def _metrics_auth(x_metrics_token: str = Header(default="")) -> None:
         raise HTTPException(status_code=403, detail="Forbidden")
 
 
-Instrumentator(excluded_handlers=["/metrics", "/health", "/static/*"]).instrument(app).expose(
-    app, endpoint="/metrics", include_in_schema=False, dependencies=[Depends(_metrics_auth)]
-)
+app.add_middleware(PrometheusMiddleware)
+
+
+@app.get("/metrics", include_in_schema=False, dependencies=[Depends(_metrics_auth)])
+async def metrics_endpoint() -> Response:
+    body, content_type = render_metrics()
+    return Response(content=body, media_type=content_type)
+
 
 # Secret key validation moved to lifespan (fail-fast)
 
