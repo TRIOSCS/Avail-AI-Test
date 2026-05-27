@@ -314,3 +314,49 @@ class TestTimelineEndpoints:
         data = resp.json()
         assert "items" in data
         assert data["total"] == 2
+
+
+# ═══════════════════════════════════════════════════════════════════════
+#  TestRequisitionActivityTabTimeline
+#  Plan 6 / Task 2 — unified date-grouped chronological timeline.
+# ═══════════════════════════════════════════════════════════════════════
+
+
+class TestRequisitionActivityTabTimeline:
+    def test_renders_unified_timeline(self, client, db_session, test_requisition, test_user):
+        """The requisition Activity tab renders one date-grouped chronological timeline
+        of ActivityLog rows — no legacy 'RFQ History' section."""
+        now = datetime.now(timezone.utc)
+        db_session.add(
+            ActivityLog(
+                user_id=test_user.id,
+                activity_type="rfq_sent",
+                channel="email",
+                requisition_id=test_requisition.id,
+                summary="RFQ emailed to Acme Components",
+                occurred_at=now,
+            )
+        )
+        db_session.add(
+            ActivityLog(
+                user_id=test_user.id,
+                activity_type="offer_created",
+                channel="system",
+                requisition_id=test_requisition.id,
+                notes="Offer created from vendor reply",
+                occurred_at=now - timedelta(minutes=5),
+            )
+        )
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/tab/activity")
+        assert resp.status_code == 200
+        body = resp.text
+
+        # Both events render.
+        assert "RFQ emailed to Acme Components" in body
+        assert "Offer created from vendor reply" in body
+        # A date-group header is present.
+        assert "Today" in body
+        # The legacy two-section layout is gone.
+        assert "RFQ History" not in body
