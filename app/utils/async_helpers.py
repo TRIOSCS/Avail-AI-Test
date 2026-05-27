@@ -23,6 +23,12 @@ async def safe_background_task(
     The coroutine runs in a new asyncio Task. Exceptions are logged
     but never propagate — the caller's request is never affected.
 
+    Important: the coroutine MUST manage its own SQLAlchemy session lifetime
+    (e.g., open SessionLocal() internally with try/finally close). Never pass
+    a request-scoped Session into the coroutine — web framework finalizers
+    close those as soon as the response is sent, and this wrapper would
+    swallow the resulting use-after-close exception silently.
+
     Args:
         coro: The coroutine to execute
         task_name: Label for logging on success/failure

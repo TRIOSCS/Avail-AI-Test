@@ -58,16 +58,19 @@ class TestSeedAgentUser:
 
         user = db_session.query(User).filter_by(email="agent@availai.local").first()
         assert user is not None
-        assert user.role == "admin"
+        # Least privilege: the agent service account is seeded as AGENT,
+        # never admin (CRIT-SEC-1).
+        assert user.role == "agent"
         assert user.name == "Agent"
 
     @patch("app.startup.SessionLocal")
-    def test_skips_when_agent_user_already_exists(self, mock_sl, db_session: Session):
-        """Returns early without duplicating the agent user."""
+    def test_demotes_legacy_over_privileged_agent(self, mock_sl, db_session: Session):
+        """A pre-existing agent row with a stale admin role is demoted to agent without
+        creating a duplicate (CRIT-SEC-1)."""
         from app.models.auth import User
         from app.startup import _seed_agent_user
 
-        # Pre-create the agent user
+        # Simulate a legacy agent row seeded before the least-privilege fix.
         existing = User(email="agent@availai.local", name="Agent", role="admin", is_active=True)
         db_session.add(existing)
         db_session.commit()
@@ -75,8 +78,9 @@ class TestSeedAgentUser:
         mock_sl.return_value = db_session
         _seed_agent_user()
 
-        count = db_session.query(User).filter_by(email="agent@availai.local").count()
-        assert count == 1
+        rows = db_session.query(User).filter_by(email="agent@availai.local").all()
+        assert len(rows) == 1
+        assert rows[0].role == "agent"
 
     @patch("app.startup.SessionLocal")
     def test_error_branch_rolls_back_and_reraises(self, mock_sl):

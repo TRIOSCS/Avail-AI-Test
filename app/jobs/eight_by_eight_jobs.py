@@ -27,6 +27,24 @@ from ..scheduler import _traced_job
 def register_eight_by_eight_jobs(scheduler, settings):
     """Register 8x8 CDR polling job with the scheduler."""
     if not settings.eight_by_eight_enabled:
+        logger.info("8x8 CDR polling NOT registered (EIGHT_BY_EIGHT_ENABLED is false)")
+        return
+
+    missing = [
+        name
+        for name, val in [
+            ("EIGHT_BY_EIGHT_API_KEY", settings.eight_by_eight_api_key),
+            ("EIGHT_BY_EIGHT_USERNAME", settings.eight_by_eight_username),
+            ("EIGHT_BY_EIGHT_PASSWORD", settings.eight_by_eight_password),
+            ("EIGHT_BY_EIGHT_PBX_ID", settings.eight_by_eight_pbx_id),
+        ]
+        if not val
+    ]
+    if missing:
+        logger.warning(
+            "8x8 CDR polling NOT registered — enabled flag is true but credentials missing: {}",
+            ", ".join(missing),
+        )
         return
 
     scheduler.add_job(
@@ -46,7 +64,7 @@ async def _job_poll_8x8_cdrs():
 
     db = SessionLocal()
     try:
-        result = _process_cdrs(db, settings)
+        result = await _process_cdrs(db, settings)
         db.commit()
         logger.info(
             f"8x8 poll: {result['processed']} calls, {result['matched']} matched, {result['skipped']} skipped/dedup"
@@ -58,7 +76,7 @@ async def _job_poll_8x8_cdrs():
         db.close()
 
 
-def _process_cdrs(db, settings) -> dict:
+async def _process_cdrs(db, settings) -> dict:
     """Core CDR processing logic with CRM reverse lookup.
 
     After fetching CDRs, runs reverse_lookup_phone() on each external phone. If a match
@@ -91,12 +109,12 @@ def _process_cdrs(db, settings) -> dict:
 
     # Auth + fetch
     try:
-        token = get_access_token(settings)
+        token = await get_access_token(settings)
     except ValueError as e:
         logger.error(f"8x8 auth failed, skipping poll: {e}")
         return {"processed": 0, "matched": 0, "skipped": 0}
 
-    cdrs = get_cdrs(token, settings, since, until)
+    cdrs = await get_cdrs(token, settings, since, until)
     if not cdrs:
         _update_watermark(db, watermark_row, until)
         return {"processed": 0, "matched": 0, "skipped": 0}

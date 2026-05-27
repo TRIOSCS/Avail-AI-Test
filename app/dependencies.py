@@ -91,7 +91,12 @@ def require_settings_access(request: Request, db: Session = Depends(get_db)) -> 
 
 
 def require_buyer(request: Request, db: Session = Depends(get_db)) -> User:
-    """Dependency: requires buyer role for RFQ actions."""
+    """Dependency: requires a buyer-tier role for RFQ actions.
+
+    UserRole.AGENT is intentionally absent from the allowed set: the agent
+    service account is non-interactive and must reach only non-privileged
+    (require_user-level) endpoints — never RFQ/buyer actions.
+    """
     user = require_user(request, db)
     if user.role not in (UserRole.BUYER, UserRole.SALES, UserRole.TRADER, UserRole.MANAGER, UserRole.ADMIN):
         raise HTTPException(403, "Buyer role required for this action")

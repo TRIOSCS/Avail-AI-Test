@@ -67,6 +67,27 @@ def test_deal_value_partial_has_tilde_and_italic_and_tooltip():
     assert "3 of 5 parts priced" in html
 
 
+def test_deal_value_title_attr_is_escaped_not_safe():
+    """HIGH-SEC-1: the title tooltip must be rendered through Jinja2
+    autoescaping in the attribute context. A value containing HTML/quote
+    metacharacters (priced_count/requirement_count are normally ints, but
+    the macro must not trust them) must come out escaped — never raw.
+    """
+    html = render_macro(
+        '{{ deal_value(30000, "partial", priced_count=\'"><script>x</script>\', requirement_count=5) }}'
+    )
+    # The raw payload must not appear; the escaped form must.
+    assert "<script>x</script>" not in html
+    assert "&lt;script&gt;" in html
+    # The title attribute must still be present and well-formed.
+    assert 'title="Floor estimate' in html
+
+
+def test_deal_value_no_title_attr_for_unknown_source():
+    html = render_macro('{{ deal_value(500, "mystery") }}')
+    assert "title=" not in html
+
+
 # ── coverage_meter ────────────────────────────────────────────────────
 
 

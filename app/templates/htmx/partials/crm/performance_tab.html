@@ -28,8 +28,15 @@
   function performanceCharts() {
     return {
       async loadCharts() {
-        const resp = await fetch('/api/crm/performance-metrics');
-        const data = await resp.json();
+        let data;
+        try {
+          const resp = await fetch('/api/crm/performance-metrics');
+          if (!resp.ok) throw new Error('HTTP ' + resp.status);
+          data = await resp.json();
+        } catch (err) {
+          console.error('Failed to load performance metrics', err);
+          return;
+        }
         if (!data.names.length) return;
 
         const colors = data.scores.map(s => s >= 70 ? '#059669' : s >= 40 ? '#d97706' : '#e11d48');

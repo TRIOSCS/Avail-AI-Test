@@ -73,6 +73,10 @@ services:
   app:
     build: .
     restart: always
+    # Trust X-Forwarded-* headers only from the compose network (where Caddy
+    # is the sole HTTP client) — never "*", which would trust a spoofed
+    # X-Forwarded-For from any client that reached uvicorn directly.
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "172.28.0.0/24"]
     env_file: .env
     stop_grace_period: 60s
     depends_on:
@@ -206,3 +210,14 @@ volumes:
   caddy_config:
   static_files:
   applogs:
+
+# Pin the default network to a fixed subnet so the app's --forwarded-allow-ips
+# can name it. All services already share the implicit `default` network;
+# this only fixes its address range. If 172.28.0.0/24 collides with an
+# existing Docker network on the host, change it here and in the app
+# `command:` (and docker-compose.local.yml) to a free range.
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: 172.28.0.0/24
