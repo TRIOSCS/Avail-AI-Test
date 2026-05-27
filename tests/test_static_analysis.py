@@ -116,21 +116,23 @@ _REQ_ID_HEADERED_SIGHTINGS_PARTIALS = (
 
 
 def test_sightings_template_responses_set_rendered_req_id():
-    """Every TemplateResponse rendering a context-sensitive sightings partial must set
-    the X-Rendered-Req-Id header so the client htmx:beforeSwap stale-response guard
+    """Every template_response() rendering a context-sensitive sightings partial must
+    set the X-Rendered-Req-Id header so the client htmx:beforeSwap stale-response guard
     works."""
     src = Path("app/routers/sightings.py").read_text()
     lines = src.splitlines()
     failures: list[str] = []
     for i, line in enumerate(lines, 1):
-        if "TemplateResponse(" not in line:
+        # Match both the migrated `template_response(` and any direct
+        # `templates.TemplateResponse(` that might creep back in.
+        if "template_response(" not in line and "TemplateResponse(" not in line:
             continue
         if not any(p in line for p in _REQ_ID_HEADERED_SIGHTINGS_PARTIALS):
             continue
         # Look forward up to 8 lines for X-Rendered-Req-Id assignment
         window = "\n".join(lines[i - 1 : min(len(lines), i + 8)])
         if "X-Rendered-Req-Id" not in window:
-            failures.append(f"sightings.py:{i} — TemplateResponse without X-Rendered-Req-Id within 8 lines")
+            failures.append(f"sightings.py:{i} — template_response without X-Rendered-Req-Id within 8 lines")
     assert not failures, "\n".join(failures)
 
 
