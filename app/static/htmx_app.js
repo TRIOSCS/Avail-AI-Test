@@ -243,7 +243,12 @@ document.body.addEventListener('htmx:beforeSwap', (evt) => {
  *
  * Called by: partials/shared/split_panel.html
  * Depends on: Alpine.js
+ *
+ * Sets window.__availSplitPanelRegistered so the standalone
+ * requisitions2.js fallback skips its duplicate registration when this
+ * bundle is loaded (CRIT-FE-2).
  */
+window.__availSplitPanelRegistered = true;
 Alpine.data('splitPanel', (panelId, defaultPct) => ({
     leftWidth: parseInt(localStorage.getItem('avail_split_' + panelId) || defaultPct),
     _resizing: false,

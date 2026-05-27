@@ -10,7 +10,7 @@ Depends on: app/services/eight_by_eight_service.py, app/jobs/eight_by_eight_jobs
 """
 
 from datetime import datetime, timezone
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.orm import Session
 
@@ -189,7 +189,7 @@ class TestReverseLookupUnknown:
 class TestCdrLinksToCrm:
     """Test that CDR processing links calls to CRM entities via reverse lookup."""
 
-    def test_cdr_with_known_phone_creates_linked_activity(
+    async def test_cdr_with_known_phone_creates_linked_activity(
         self, db_session: Session, test_company: Company, test_customer_site: CustomerSite
     ):
         """A CDR whose external phone matches a SiteContact should produce an
@@ -234,13 +234,19 @@ class TestCdrLinksToCrm:
         ]
 
         with (
-            patch("app.services.eight_by_eight_service.get_access_token", return_value="fake-token"),
-            patch("app.services.eight_by_eight_service.get_cdrs", return_value=fake_cdrs),
+            patch(
+                "app.services.eight_by_eight_service.get_access_token",
+                new=AsyncMock(return_value="fake-token"),
+            ),
+            patch(
+                "app.services.eight_by_eight_service.get_cdrs",
+                new=AsyncMock(return_value=fake_cdrs),
+            ),
         ):
             from app.jobs.eight_by_eight_jobs import _process_cdrs
 
             # Need to patch the imports inside _process_cdrs since they're local
-            result = _process_cdrs(db_session, _FakeSettings())
+            result = await _process_cdrs(db_session, _FakeSettings())
 
         assert result["processed"] == 1
         assert result["matched"] == 1
@@ -251,7 +257,7 @@ class TestCdrLinksToCrm:
         assert activity.company_id == test_company.id
         assert activity.contact_name == "Bob Customer"
 
-    def test_cdr_with_unknown_phone_creates_unlinked_activity(self, db_session: Session):
+    async def test_cdr_with_unknown_phone_creates_unlinked_activity(self, db_session: Session):
         """A CDR with an unknown phone should create an ActivityLog without CRM
         links."""
         user = User(
@@ -282,12 +288,18 @@ class TestCdrLinksToCrm:
         ]
 
         with (
-            patch("app.services.eight_by_eight_service.get_access_token", return_value="fake-token"),
-            patch("app.services.eight_by_eight_service.get_cdrs", return_value=fake_cdrs),
+            patch(
+                "app.services.eight_by_eight_service.get_access_token",
+                new=AsyncMock(return_value="fake-token"),
+            ),
+            patch(
+                "app.services.eight_by_eight_service.get_cdrs",
+                new=AsyncMock(return_value=fake_cdrs),
+            ),
         ):
             from app.jobs.eight_by_eight_jobs import _process_cdrs
 
-            result = _process_cdrs(db_session, _FakeSettings())
+            result = await _process_cdrs(db_session, _FakeSettings())
 
         assert result["processed"] == 1
         assert result["matched"] == 0
@@ -306,7 +318,7 @@ class TestCdrLinksToCrm:
 class TestExtensionMapping:
     """Test get_extension_map() fetches and parses 8x8 user list."""
 
-    def test_extension_maps_to_user(self):
+    async def test_extension_maps_to_user(self):
         """Extension mapping returns email for known extensions."""
         from app.services.eight_by_eight_service import get_extension_map
 
@@ -318,26 +330,26 @@ class TestExtensionMapping:
             ]
         }
 
-        with patch("app.services.eight_by_eight_service.httpx.get") as mock_get:
-            mock_get.return_value.status_code = 200
-            mock_get.return_value.json.return_value = fake_response
-
-            ext_map = get_extension_map("fake-token", _FakeSettings())
+        with patch(
+            "app.services.eight_by_eight_service.httpx.AsyncClient",
+            _mock_async_client(get_status=200, get_json=fake_response),
+        ):
+            ext_map = await get_extension_map("fake-token", _FakeSettings())
 
         assert ext_map["1001"] == "michael@trio.com"
         assert ext_map["1002"] == "marcus@trio.com"
         assert ext_map["1009"] == "martina@trio.com"  # lowercased
         assert len(ext_map) == 3
 
-    def test_extension_map_handles_api_error(self):
+    async def test_extension_map_handles_api_error(self):
         """Extension mapping returns empty dict on API error."""
         from app.services.eight_by_eight_service import get_extension_map
 
-        with patch("app.services.eight_by_eight_service.httpx.get") as mock_get:
-            mock_get.return_value.status_code = 500
-            mock_get.return_value.json.return_value = {}
-
-            ext_map = get_extension_map("fake-token", _FakeSettings())
+        with patch(
+            "app.services.eight_by_eight_service.httpx.AsyncClient",
+            _mock_async_client(get_status=500, get_json={}),
+        ):
+            ext_map = await get_extension_map("fake-token", _FakeSettings())
 
         assert ext_map == {}
 
@@ -350,7 +362,7 @@ class TestExtensionMapping:
 class TestCdrLinksToRequisition:
     """Test that CDR processing links to open requisitions for matched companies."""
 
-    def test_cdr_links_to_open_requisition(
+    async def test_cdr_links_to_open_requisition(
         self,
         db_session: Session,
         test_company: Company,
@@ -399,12 +411,18 @@ class TestCdrLinksToRequisition:
         ]
 
         with (
-            patch("app.services.eight_by_eight_service.get_access_token", return_value="fake-token"),
-            patch("app.services.eight_by_eight_service.get_cdrs", return_value=fake_cdrs),
+            patch(
+                "app.services.eight_by_eight_service.get_access_token",
+                new=AsyncMock(return_value="fake-token"),
+            ),
+            patch(
+                "app.services.eight_by_eight_service.get_cdrs",
+                new=AsyncMock(return_value=fake_cdrs),
+            ),
         ):
             from app.jobs.eight_by_eight_jobs import _process_cdrs
 
-            result = _process_cdrs(db_session, _FakeSettings())
+            result = await _process_cdrs(db_session, _FakeSettings())
 
         assert result["processed"] == 1
         assert result["matched"] == 1
@@ -429,3 +447,21 @@ class _FakeSettings:
     eight_by_eight_timezone = "America/New_York"
     eight_by_eight_enabled = True
     eight_by_eight_poll_interval_minutes = 30
+
+
+def _mock_async_client(*, get_status=200, get_json=None):
+    """Build a patch target replacing httpx.AsyncClient for GET-based calls."""
+    from unittest.mock import MagicMock
+
+    resp = MagicMock()
+    resp.status_code = get_status
+    resp.json.return_value = get_json or {}
+
+    client = MagicMock()
+    client.get = AsyncMock(return_value=resp)
+    client.post = AsyncMock(return_value=resp)
+
+    cm = MagicMock()
+    cm.__aenter__ = AsyncMock(return_value=client)
+    cm.__aexit__ = AsyncMock(return_value=False)
+    return MagicMock(return_value=cm)

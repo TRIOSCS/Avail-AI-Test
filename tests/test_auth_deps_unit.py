@@ -260,12 +260,23 @@ class TestRequireBuyer:
 
         assert result.id == user.id
 
+    def test_agent_role_rejected_403(self, db_session: Session):
+        """The agent service account (UserRole.AGENT) is non-interactive and must not
+        pass require_buyer — it may reach only non-privileged endpoints (CRIT-SEC-1)."""
+        user = _create_user(db_session, email="agent@availai.local", role="agent")
+        request = _make_request(session_data={"user_id": user.id})
+
+        with pytest.raises(HTTPException) as exc_info:
+            require_buyer(request, db_session)
+
+        assert exc_info.value.status_code == 403
+
     def test_unauthorized_role_raises_403(self, db_session: Session):
         """A user with no recognized buyer-tier role should be rejected.
 
-        Since all UserRole values are allowed by require_buyer, we test by directly
-        setting a role value not in the allowed set. In practice this can't happen with
-        the StrEnum, but it validates the guard.
+        require_buyer allows only buyer/sales/trader/manager/admin; any other role value
+        (e.g. the agent service account, or an unknown role) is rejected. Here we patch
+        in an unrecognized role to validate the guard.
         """
         # Create user then manually set role to something outside the allowed set
         user = _create_user(db_session, role="buyer")

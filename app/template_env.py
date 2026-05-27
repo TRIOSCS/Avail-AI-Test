@@ -5,10 +5,28 @@ Depends on: Jinja2
 """
 
 from datetime import datetime, timezone
+from typing import Any
 
 from fastapi.templating import Jinja2Templates
+from starlette.responses import Response
 
 templates = Jinja2Templates(directory="app/templates")
+
+
+def template_response(name: str, context: dict[str, Any], **kwargs: Any) -> Response:
+    """Render a Jinja2 template using the shared `templates` instance.
+
+    Wraps Jinja2Templates.TemplateResponse with the legacy `(name, context)`
+    calling convention used across the codebase. Starlette 1.0 removed
+    positional support for that form and now requires `request` as the first
+    positional argument. This helper extracts `request` from the context dict
+    (which already needs to be present so Jinja can render `{{ request.X }}`)
+    and calls the new signature, so callers don't carry the boilerplate.
+    """
+    request = context.get("request")
+    if request is None:
+        raise ValueError("template_response: 'request' must be present in the context dict")
+    return templates.TemplateResponse(request, name, context, **kwargs)
 
 
 # ── Shared Helpers ─────────────────────────────────────────────────────
@@ -137,7 +155,6 @@ def _sanitize_html_filter(value: str) -> str:
             "hr",
         },
         attributes={
-            "*": {"class"},
             "a": {"href", "title", "target"},
             "td": {"colspan", "rowspan", "width", "height"},
             "th": {"colspan", "rowspan", "width", "height"},

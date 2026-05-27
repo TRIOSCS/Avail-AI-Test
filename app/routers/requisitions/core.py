@@ -13,7 +13,7 @@ Depends on: models, schemas, cache, dependencies, sourcing_score service
 import re
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import and_, case, exists, literal, or_, select
+from sqlalchemy import and_, case, exists, literal, or_, select, update
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
@@ -591,20 +591,25 @@ async def bulk_archive(user: User = Depends(require_admin), db: Session = Depend
     """Archive all active requisitions NOT created by the current user."""
     from . import invalidate_prefix
 
-    q = db.query(Requisition).filter(
-        Requisition.created_by != user.id,
-        Requisition.status.notin_(
-            [
-                RequisitionStatus.ARCHIVED,
-                RequisitionStatus.WON,
-                RequisitionStatus.LOST,
-                RequisitionStatus.CANCELLED,
-            ]
-        ),
+    stmt = (
+        update(Requisition)
+        .where(
+            Requisition.created_by != user.id,
+            Requisition.status.notin_(
+                [
+                    RequisitionStatus.ARCHIVED,
+                    RequisitionStatus.WON,
+                    RequisitionStatus.LOST,
+                    RequisitionStatus.CANCELLED,
+                ]
+            ),
+        )
+        .values(status="archived")
+        .returning(Requisition.id)
+        .execution_options(synchronize_session="fetch")
     )
-    target_ids = [row.id for row in q.with_entities(Requisition.id).all()]
-    count = q.update({"status": "archived"}, synchronize_session="fetch")
-    for rid in target_ids:
+    archived_ids = [row[0] for row in db.execute(stmt).all()]
+    for rid in archived_ids:
         log_activity(
             db,
             activity_type=ActivityType.REQ_ARCHIVED,
@@ -614,7 +619,7 @@ async def bulk_archive(user: User = Depends(require_admin), db: Session = Depend
         )
     db.commit()
     invalidate_prefix("req_list")
-    return {"ok": True, "archived_count": count}
+    return {"ok": True, "archived_count": len(archived_ids), "archived_ids": archived_ids}
 
 
 @router.put("/api/requisitions/batch-archive")
@@ -626,7 +631,7 @@ async def batch_archive_by_ids(
     """Archive specific requisitions by ID list."""
     from . import invalidate_prefix
 
-    q = db.query(Requisition).filter(
+    conditions = [
         Requisition.id.in_(payload.ids),
         Requisition.status.notin_(
             [
@@ -636,13 +641,20 @@ async def batch_archive_by_ids(
                 RequisitionStatus.CANCELLED,
             ]
         ),
-    )
+    ]
     # Sales users can only archive their own requisitions
     if user.role == UserRole.SALES:
-        q = q.filter(Requisition.created_by == user.id)
-    target_ids = [row.id for row in q.with_entities(Requisition.id).all()]
-    count = q.update({"status": "archived"}, synchronize_session="fetch")
-    for rid in target_ids:
+        conditions.append(Requisition.created_by == user.id)
+
+    stmt = (
+        update(Requisition)
+        .where(*conditions)
+        .values(status="archived")
+        .returning(Requisition.id)
+        .execution_options(synchronize_session="fetch")
+    )
+    archived_ids = [row[0] for row in db.execute(stmt).all()]
+    for rid in archived_ids:
         log_activity(
             db,
             activity_type=ActivityType.REQ_ARCHIVED,
@@ -652,7 +664,7 @@ async def batch_archive_by_ids(
         )
     db.commit()
     invalidate_prefix("req_list")
-    return {"ok": True, "archived_count": count}
+    return {"ok": True, "archived_count": len(archived_ids), "archived_ids": archived_ids}
 
 
 @router.put("/api/requisitions/batch-assign")
@@ -667,14 +679,19 @@ async def batch_assign(
     """
     from . import invalidate_prefix
 
-    # Verify the target user exists
     target = db.query(User).filter(User.id == payload.owner_id).first()
     if not target:
         raise HTTPException(404, "Target user not found")
-    target_q = db.query(Requisition).filter(Requisition.id.in_(payload.ids))
-    target_ids = [row.id for row in target_q.with_entities(Requisition.id).all()]
-    count = target_q.update({"claimed_by_id": payload.owner_id}, synchronize_session="fetch")
-    for rid in target_ids:
+
+    stmt = (
+        update(Requisition)
+        .where(Requisition.id.in_(payload.ids))
+        .values(claimed_by_id=payload.owner_id)
+        .returning(Requisition.id)
+        .execution_options(synchronize_session="fetch")
+    )
+    assigned_ids = [row[0] for row in db.execute(stmt).all()]
+    for rid in assigned_ids:
         log_activity(
             db,
             activity_type=ActivityType.ASSIGNMENT_CHANGED,
@@ -685,7 +702,12 @@ async def batch_assign(
         )
     db.commit()
     invalidate_prefix("req_list")
-    return {"ok": True, "assigned_count": count, "assigned_to": target.name or target.email}
+    return {
+        "ok": True,
+        "assigned_count": len(assigned_ids),
+        "assigned_ids": assigned_ids,
+        "assigned_to": target.name or target.email,
+    }
 
 
 @router.post("/api/requisitions/{req_id}/dismiss-new-offers")

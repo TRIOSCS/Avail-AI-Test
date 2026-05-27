@@ -36,7 +36,7 @@ from ..services.activity_service import log_rfq_activity
 from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
 from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transition
-from ..template_env import templates
+from ..template_env import template_response
 from ..utils.sql_helpers import escape_like
 from ..vendor_utils import normalize_vendor_name
 
@@ -117,7 +117,7 @@ async def sightings_workspace(
     The table loads via hx-get inside.
     """
     ctx = {"request": request, "user": user}
-    return templates.TemplateResponse("htmx/partials/sightings/list.html", ctx)
+    return template_response("htmx/partials/sightings/list.html", ctx)
 
 
 @router.get("/v2/partials/sightings", response_class=HTMLResponse)
@@ -369,7 +369,7 @@ async def sightings_list(
         "link_map": link_map,
         "user": user,
     }
-    return templates.TemplateResponse("htmx/partials/sightings/table.html", ctx)
+    return template_response("htmx/partials/sightings/table.html", ctx)
 
 
 @router.get("/v2/partials/sightings/{requirement_id}/detail", response_class=HTMLResponse)
@@ -615,7 +615,7 @@ async def sightings_detail(
         "activities": activities,
         "user": user,
     }
-    resp = templates.TemplateResponse("htmx/partials/sightings/detail.html", ctx)
+    resp = template_response("htmx/partials/sightings/detail.html", ctx)
     resp.headers["X-Rendered-Req-Id"] = str(requirement_id)
     return resp
 
@@ -1070,7 +1070,7 @@ async def sightings_log_activity(
         "activities": activities,
         "requirement": requirement,
     }
-    resp = templates.TemplateResponse("htmx/partials/sightings/activity_section.html", ctx)
+    resp = template_response("htmx/partials/sightings/activity_section.html", ctx)
     resp.headers["X-Rendered-Req-Id"] = str(requirement_id)
     return resp
 
@@ -1122,7 +1122,7 @@ async def sightings_vendor_modal(
         "requirement_ids": req_id_list,
         "parts": parts,
     }
-    return templates.TemplateResponse("htmx/partials/sightings/vendor_modal.html", ctx)
+    return template_response("htmx/partials/sightings/vendor_modal.html", ctx)
 
 
 @router.post("/v2/partials/sightings/preview-inquiry", response_class=HTMLResponse)
@@ -1193,7 +1193,7 @@ async def sightings_preview_inquiry(
         "vendor_names": vendor_names,
         "email_body": email_body,
     }
-    return templates.TemplateResponse("htmx/partials/sightings/preview_inquiry.html", ctx)
+    return template_response("htmx/partials/sightings/preview_inquiry.html", ctx)
 
 
 @router.post("/v2/partials/sightings/send-inquiry", response_class=HTMLResponse)

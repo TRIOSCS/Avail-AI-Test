@@ -139,3 +139,72 @@ def test_sightings_template_responses_set_rendered_req_id():
 # changes that are not part of this hunt PR. Adding the connector enforcement
 # here without those source changes would break CI on main. Ship the test in
 # the same commit as the source changes it locks in.
+
+
+def test_htmx_views_like_patterns_are_escaped():
+    """HIGH-SEC-3: every ILIKE/LIKE pattern built from a user-supplied
+    search term in htmx_views.py must escape LIKE wildcards.
+
+    Two enforced invariants:
+      1. No f-string that interpolates a bare `.strip()` term into a
+         `%...%` pattern (must go through escape_like / SearchBuilder.safe).
+      2. Every `.ilike(...)` / `.like(...)` call that takes a `%`-wrapped
+         pattern variable must pass an explicit `escape=` character so the
+         backslash escaping done by escape_like is actually honoured.
+    """
+    src = Path("app/routers/htmx_views.py").read_text()
+    lines = src.splitlines()
+    failures: list[str] = []
+
+    # Rule 1: forbid `f"%{<term>.strip()}%"` — unescaped wildcard injection.
+    bad_fstring = re.compile(r'f"%\{[^}]*\.strip\(\)\}%"')
+    for i, line in enumerate(lines, 1):
+        if bad_fstring.search(line):
+            failures.append(
+                f"htmx_views.py:{i} — f-string builds a LIKE pattern from a raw "
+                f".strip() term; wrap it in escape_like()."
+            )
+
+    # Rule 2: an .ilike(<var>) / .like(<var>) on a %-wrapped pattern must
+    # carry escape=. We only flag calls whose argument is a known
+    # escaped-pattern variable name.
+    escaped_pattern_vars = ("term", "pattern", "safe")
+    call_re = re.compile(r"\.i?like\(\s*([A-Za-z_][A-Za-z0-9_]*)\s*([,)])")
+    for i, line in enumerate(lines, 1):
+        for m in call_re.finditer(line):
+            varname, after = m.group(1), m.group(2)
+            if varname not in escaped_pattern_vars:
+                continue
+            if after == ")":  # no further args → no escape= present
+                failures.append(
+                    f"htmx_views.py:{i} — .ilike({varname}) has no escape= argument; "
+                    f'use .ilike({varname}, escape="\\\\").'
+                )
+
+    assert not failures, "\n".join(failures)
+
+
+def test_no_asyncio_run_in_htmx_views():
+    """HIGH-BE-4: asyncio.run() must never appear in htmx_views.py — it
+    creates a fresh event loop and fails/blocks inside request or
+    background-task contexts. Use `await` on the coroutine instead.
+    """
+    src = Path("app/routers/htmx_views.py").read_text()
+    offenders = [i for i, line in enumerate(src.splitlines(), 1) if "asyncio.run(" in line]
+    assert not offenders, f"asyncio.run( found in htmx_views.py at line(s): {offenders}"
+
+
+def test_standalone_pages_register_csrf_listener():
+    """Standalone page templates that issue mutating HTMX requests but do not
+    unconditionally load htmx_app.js must register their own htmx:configRequest CSRF
+    listener — otherwise starlette_csrf rejects every hx-post/patch/delete (CRIT-FE-1).
+
+    requisitions2/page.html loads requisitions2.js for exactly this reason.
+    """
+    js = Path("app/static/js/requisitions2.js").read_text()
+    assert "htmx:configRequest" in js, (
+        "requisitions2.js must register an htmx:configRequest listener that "
+        "attaches the x-csrftoken header — page.html does not always load "
+        "htmx_app.js, which carries the shared listener."
+    )
+    assert "x-csrftoken" in js, "requisitions2.js CSRF listener must set the x-csrftoken header"
