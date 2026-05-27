@@ -594,6 +594,7 @@ class TestPartTasks:
             requirement_id=item.id,
             title="Done task",
             created_by=test_user.id,
+            assigned_to_id=test_user.id,
             status=TaskStatus.DONE,
             source="manual",
         )
@@ -602,6 +603,38 @@ class TestPartTasks:
 
         resp = client.post(f"/v2/partials/parts/tasks/{task.id}/reopen")
         assert resp.status_code == 200
+
+    def test_reopen_task_rejects_non_assignee(self, client, db_session: Session, test_user: User):
+        """A user who is not the assignee must not be able to reopen the task."""
+        other = User(
+            email="other-reopen@example.com",
+            password_hash="x",
+            role=UserRole.SALES,
+            is_active=True,
+        )
+        db_session.add(other)
+        db_session.flush()
+
+        req = _req(db_session, test_user)
+        item = _requirement(db_session, req)
+        db_session.flush()
+        task = RequisitionTask(
+            requisition_id=req.id,
+            requirement_id=item.id,
+            title="Other's done task",
+            created_by=other.id,
+            assigned_to_id=other.id,
+            status=TaskStatus.DONE,
+            source="manual",
+        )
+        db_session.add(task)
+        db_session.commit()
+
+        resp = client.post(f"/v2/partials/parts/tasks/{task.id}/reopen")
+        assert resp.status_code == 403
+
+        db_session.refresh(task)
+        assert task.status == TaskStatus.DONE, "Task must not have transitioned back to TODO"
 
     def test_mark_task_done_not_found(self, client, db_session: Session):
         resp = client.post("/v2/partials/parts/tasks/999999/done")

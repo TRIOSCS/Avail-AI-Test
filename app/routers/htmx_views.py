@@ -9739,14 +9739,18 @@ async def reopen_task(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Reopen a completed task."""
-    task = db.get(RequisitionTask, task_id)
-    if not task:
+    """Reopen a completed task.
+
+    Only the assignee may reopen the task.
+    """
+    try:
+        task = task_service.reopen_task(db, task_id, user.id)
+    except PermissionError as exc:
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
+
+    if task is None:
         raise HTTPException(404, "Task not found")
 
-    task.status = TaskStatus.TODO
-    task.completed_at = None
-    db.commit()
     logger.info("Task {} reopened by {}", task_id, user.email)
 
     req_id = task.requirement_id
