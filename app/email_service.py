@@ -23,6 +23,7 @@ from .models import (
 from .services.credential_service import get_credential_cached
 from .shared_constants import JUNK_DOMAINS as NOISE_DOMAINS
 from .shared_constants import JUNK_EMAIL_PREFIXES as NOISE_PREFIXES
+from .shared_constants import RFQ_SUBJECT_TAG_RE
 from .vendor_utils import normalize_vendor_name
 
 _EXCESS_BID_RE = re.compile(r"\[EXCESS-BID-(\d+)\]")
@@ -319,8 +320,6 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
 
     Returns list of new responses found (already saved to DB).
     """
-    import re
-
     from app.models import SyncState
     from app.utils.graph_client import GraphClient
 
@@ -446,9 +445,6 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
                     if domain not in NOISE_DOMAINS:
                         domain_map[domain] = c
 
-    # Subject token pattern: [ref:{req_id}] (new) or [AVAIL-{req_id}] (legacy)
-    avail_token_re = re.compile(r"\[(?:ref:|AVAIL-)(\d+)\]")
-
     results = []
     pending_parse = []  # VendorResponse objects awaiting AI parsing
     for msg in messages:
@@ -483,7 +479,7 @@ async def poll_inbox(token: str, db: Session, requisition_id: int = None, scanne
 
         # Tier 2: Subject [AVAIL-{id}] token
         if not matched_contact:
-            token_match = avail_token_re.search(subj)
+            token_match = RFQ_SUBJECT_TAG_RE.search(subj)
             if token_match:
                 avail_req_id = int(token_match.group(1))
                 # O(1) dict lookup instead of O(n) list comprehension
