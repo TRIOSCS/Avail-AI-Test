@@ -170,42 +170,93 @@ Empty `avl` + `confidence: 0` is the explicit "I don't know" response. Anything 
 
 ## 6. Integration with the sourcing fanout
 
-Modify `app/services/enrichment.py`. The fanout pseudocode becomes:
+### 6.1 Real fanout architecture
+
+Per `CLAUDE.md`, the canonical orchestrator is `app/search_service.py:search_requirement()`. It runs two layers of supplier interaction:
+
+1. **Synchronous API connectors** (DigiKey, Mouser, Element14, OEMSecrets, Nexar, etc.) — called inline via `_fetch_fresh()`. Sightings are written in the same request via a dedicated `write_db` session.
+2. **Asynchronous browser-automation workers** — ICsource (`ics_worker`) and NetComponents (`nc_worker`). The synchronous path enqueues each requirement via `enqueue_for_ics_search(req_id, write_db)` and `enqueue_for_nc_search(req_id, write_db)`. The workers process the queue out-of-band and write additional sightings as they complete.
+
+The integration point is inside `search_requirement()`, between step 4 (historical vendors) and the existing worker enqueue block — i.e. immediately after `_save_sightings()` and the `material_card` upsert, while the `write_db` session is still open.
+
+### 6.2 Zero-hit detection — synchronous only
+
+Zero-hit is measured against **synchronous connector results only**. The async workers run on their own schedule and may complete minutes later; waiting on them would block the buyer's request. If the synchronous fanout produces at least one sighting, the resolver does not fire — even if ICS/NC would have also returned zero.
+
+This is a conscious trade-off: in the rare case where synchronous connectors find a single low-quality sighting but the buyer would have benefited from spec-code resolution, the resolver is skipped. Acceptable cost given that the buyer can manually re-trigger resolution by editing the requirement and re-saving.
+
+### 6.3 Pseudocode
 
 ```
-function enrich_requirement(req):
+function search_requirement(req):
     # Phase 1: existing behavior, unchanged
-    normalized = ai_normalizer.normalize(req.primary_mpn)
-    results = fanout_all_connectors(normalized)
-    if aggregate_authorized_and_broker_count(results) > 0:
-        persist_sightings(req, results, resolved_via_spec_code=None, source_mpn=normalized)
-        return
+    fresh, source_stats = _fetch_fresh(to_search, db)
+    sightings = _save_sightings(fresh, write_req, write_db, succeeded_sources)
+    # ... existing material_card upsert and historical lookup ...
 
-    # Phase 2: zero-hit fallback — try spec resolver
-    if not settings.SPEC_RESOLVER_ENABLED:
-        return  # legacy behavior
+    # Phase 2: zero-hit fallback — gated by feature flag
+    if settings.SPEC_RESOLVER_ENABLED and len(sightings) == 0:
+        resolution = SpecCodeResolver(write_db, ai, web).resolve(
+            req.primary_mpn, oem=req.oem_hint or "IBM"
+        )
+        if resolution.status != "unresolved" and resolution.avl:
+            # Phase 3a: synchronous re-fanout against each AVL MPN, in parallel
+            resolved_fresh, resolved_stats = await _fetch_fresh_for_avl(
+                resolution.avl, db
+            )
+            sightings.extend(
+                _save_sightings_with_lineage(
+                    resolved_fresh, write_req, write_db,
+                    resolved_via_spec_code=req.primary_mpn,
+                )
+            )
+            source_stats.extend(resolved_stats)
 
-    resolution = SpecCodeResolver(db, ai, web).resolve(req.primary_mpn, oem=req.oem_hint or "IBM")
-    if resolution.status == "unresolved":
-        return
+            # Phase 3b: enqueue each AVL MPN to async workers, in addition to the
+            # primary MPN that the existing block enqueues below
+            for entry in resolution.avl:
+                enqueue_avl_mpn_to_workers(
+                    req_id, entry["mpn"], write_db,
+                    resolved_via_spec_code=req.primary_mpn,
+                )
 
-    # Phase 3: parallel fanout per AVL MPN
-    tagged_results = []
-    for entry in resolution.avl:
-        per_mpn = fanout_all_connectors(entry["mpn"])
-        tagged_results.append((entry["mpn"], per_mpn))
+            if resolution.status == "pending":
+                append_requirement_id_to_pending_row(req_id, req.primary_mpn)
 
-    persist_sightings(req, tagged_results,
-                      resolved_via_spec_code=req.primary_mpn,
-                      source_mpn_per_result=True)
-
-    if resolution.status == "pending":
-        append_requirement_id_to_pending_row(req.id, req.primary_mpn)
+    # Existing worker enqueue block — unchanged
+    enqueue_for_ics_search(req_id, write_db)
+    enqueue_for_nc_search(req_id, write_db)
 ```
 
-`req.oem_hint` is a new nullable column on `Requirement` (default `null`); when `null`, the resolver defaults to `"IBM"`. This is a one-line model change, not a migration risk — adding a nullable column is safe.
+### 6.4 Worker enqueue extension
 
-Phase 1 is unchanged code paths and unchanged cost. Phase 2/3 only execute when the existing path returns universal zero. The resolver itself short-circuits at any cached layer (table → pending → blacklist) before issuing an LLM call.
+The ICS and NC queue managers (`enqueue_for_ics_search`, `enqueue_for_nc_search`) currently take only a `requirement_id` and internally read `req.primary_mpn`. To support AVL MPNs, the underlying `QueueManager.enqueue_search()` in `app/services/search_worker_base/queue_manager.py` gets a new optional parameter:
+
+```python
+def enqueue_search(
+    self,
+    requirement_id: int,
+    db: Session,
+    override_mpn: str | None = None,
+    resolved_via_spec_code: str | None = None,
+) -> SearchQueueItem | None:
+    """Enqueue. When override_mpn is set, the worker searches that MPN instead of
+    req.primary_mpn; resolved_via_spec_code is recorded on resulting sightings."""
+```
+
+Backwards compatible: existing callers pass neither and behavior is unchanged. The dedup check (`already queued` short-circuit) keys on `(requirement_id, normalized_mpn)` so the same requirement can have one queue row per resolved MPN without collisions.
+
+### 6.5 Write-session discipline
+
+Per CLAUDE.md (`Search & Matching` section): `search_requirement()` uses a dedicated write session. The resolver must accept and use that same `write_db` session for all DB writes (pending row, blacklist read, sighting writes). The read session passed into `search_requirement()` is not used for resolver writes. This is verified by passing `write_db` (not `db`) into `SpecCodeResolver(...)`.
+
+### 6.6 OEM hint column
+
+`req.oem_hint` is a new nullable column on `Requirement` (see §4.5). When `null`, the resolver defaults to `"IBM"`. Adding a nullable column is a safe migration.
+
+### 6.7 Cost guarantee
+
+Phase 1 is unchanged code paths and unchanged cost. Phase 2/3 only execute when synchronous fanout produces zero sightings AND the feature flag is on. The resolver itself short-circuits at any cached layer (table → pending → blacklist) before issuing an LLM call. The async workers always run for the primary MPN regardless of resolver outcome, preserving existing behavior on partial-miss scenarios.
 
 ## 7. Admin UI for the approval queue
 
@@ -250,14 +301,16 @@ Stub the AI client and the DB session. Cover every branch:
 - WebSearch unavailable + LLM result with raw confidence 0.5 → penalty applied → 0.35, above floor 0.3 → pending row written.
 - Concurrent insert collision (simulated `IntegrityError`) → recover by re-reading existing pending row.
 
-### Integration tests — `tests/services/test_enrichment_with_spec_resolver.py`
+### Integration tests — `tests/test_search_service_with_spec_resolver.py`
 
-Real DB session (Postgres test container). Mock the connectors and the LLM, leave the resolver wiring live.
+In-memory SQLite (per project test convention — `TESTING=1`). Mock the connectors and the LLM, leave the resolver wiring live inside `search_requirement()`.
 
 - Known MPN path: assert zero resolver calls and zero LLM calls.
-- Unknown input with mocked LLM returning a 2-MPN AVL: assert two additional fanouts ran, all sightings tagged with `resolved_via_spec_code` and `source_mpn`, pending row created with `used_in_requirement_ids` containing the requirement id.
+- Unknown input with mocked LLM returning a 2-MPN AVL: assert two additional synchronous fanouts ran, all resolver-derived sightings tagged with `resolved_via_spec_code` and `source_mpn`, pending row created with `used_in_requirement_ids` containing the requirement id, and ICS/NC queue rows exist for each AVL MPN (with `resolved_via_spec_code` set).
 - Unknown input, blacklist-only candidates: assert no LLM call and no sightings.
 - `SPEC_RESOLVER_ENABLED=False`: assert resolver never runs even on zero hits.
+- Synchronous returns 1 sighting, async workers would have returned zero: assert resolver does NOT fire (zero-hit measured on synchronous results only — documents the §6.2 trade-off).
+- Write-session discipline: assert resolver writes (pending row, sightings) all use the `write_db` session, not the caller's read session.
 
 ### End-to-end — `tests/e2e/test_spec_code_resolver_e2e.py`
 
@@ -284,7 +337,7 @@ Stacked PRs, mergeable bottom-up. Each PR is small and independently testable.
 | 1 | `feat(db): migrations for oem_spec_codes tables and sighting/offer lineage columns` | Alembic migration only. Verify clean apply on empty DB. | — |
 | 2 | `feat(models): OemSpecCode, OemSpecCodePending, OemSpecCodeBlacklist, Requirement.oem_hint` | SQLAlchemy models + Pydantic schemas + unit tests for invariants. | 1 |
 | 3 | `feat(services): SpecCodeResolver service` | The resolver class, LLM prompt module, unit tests. Not wired into enrichment yet. | 2 |
-| 4 | `feat(sourcing): wire SpecCodeResolver into enrichment fanout` | Modify `enrichment.py`; add `SPEC_RESOLVER_ENABLED` flag (default `False`); integration tests; e2e test. | 3 |
+| 4 | `feat(sourcing): wire SpecCodeResolver into search_service and workers` | Modify `app/search_service.py:search_requirement()` for the zero-hit fallback and AVL re-fanout; extend `app/services/search_worker_base/queue_manager.py:enqueue_search()` with `override_mpn` + `resolved_via_spec_code` params; add `SPEC_RESOLVER_ENABLED` and `SPEC_RESOLVER_MIN_CONFIDENCE` settings (default `False` / `0.3`); integration + e2e tests. | 3 |
 | 5 | `feat(admin): pending spec-code approval queue UI` | New router + template + smoke tests. | 2 |
 | 6 | `chore(config): enable SPEC_RESOLVER_ENABLED in production; update APP_MAP docs` | Flag flip + docs. | 4, 5 |
 
