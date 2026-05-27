@@ -1,10 +1,11 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
-from ...constants import RequisitionStatus
+from ...constants import ActivityType, RequisitionStatus
 from ...database import get_db
 from ...dependencies import require_user
 from ...models import Offer, Requirement, Requisition, User
+from ...services.activity_service import log_activity
 from ...utils.normalization import (
     normalize_condition,
     normalize_mpn,
@@ -91,5 +92,16 @@ async def clone_requisition(req_id: int, user: User = Depends(require_user), db:
                 status="reference",
             )
             db.add(new_o)
+            db.flush()
+            log_activity(
+                db,
+                activity_type=ActivityType.OFFER_CREATED,
+                requisition_id=new_o.requisition_id,
+                requirement_id=new_o.requirement_id,
+                user_id=user.id,
+                vendor_card_id=new_o.vendor_card_id,
+                description=f"Offer added: {new_o.vendor_name} — {new_o.mpn}",
+                details={"offer_id": new_o.id, "source": new_o.source},
+            )
     db.commit()
     return {"ok": True, "id": new_req.id, "name": new_req.name}

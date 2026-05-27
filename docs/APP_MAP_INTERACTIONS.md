@@ -54,7 +54,10 @@ the canonical writer (`log_rfq_activity()` is kept as a thin delegating alias).
 Email and call events are written by `log_email_activity()`/`log_call_activity()`,
 which run their own contact-matching. The requisition Activity tab reads its
 timeline back via `activity_service.get_requisition_activities()` rather than an
-inlined query.
+inlined query. Offer creation and offer status changes now also route through
+`activity_service.log_activity()` (`ActivityType.OFFER_CREATED` /
+`ActivityType.OFFER_STATUS_CHANGED`) so offer events appear on the requisition
+Activity tab.
 
 ## 2. Search (User-Initiated Only)
 

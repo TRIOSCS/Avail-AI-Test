@@ -14,7 +14,7 @@ from loguru import logger
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
-from ..constants import RequisitionStatus
+from ..constants import ActivityType, RequisitionStatus
 from ..models import Offer, Requirement, Requisition
 from ..utils.normalization import (
     normalize_condition,
@@ -22,6 +22,7 @@ from ..utils.normalization import (
     normalize_mpn_key,
     normalize_packaging,
 )
+from .activity_service import log_activity
 
 # ---------------------------------------------------------------------------
 # Datetime helpers
@@ -154,6 +155,17 @@ def clone_requisition(
                 status="reference",
             )
             db.add(new_o)
+            db.flush()
+            log_activity(
+                db,
+                activity_type=ActivityType.OFFER_CREATED,
+                requisition_id=new_o.requisition_id,
+                requirement_id=new_o.requirement_id,
+                user_id=user_id,
+                vendor_card_id=new_o.vendor_card_id,
+                description=f"Offer added: {new_o.vendor_name} — {new_o.mpn}",
+                details={"offer_id": new_o.id, "source": new_o.source},
+            )
 
     safe_commit(db, entity="requisition clone")
     logger.info("Cloned requisition {} → {} for user {}", source_req.id, new_req.id, user_id)
