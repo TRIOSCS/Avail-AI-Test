@@ -54,9 +54,11 @@
               <td class="px-4 py-3 text-sm">
                 {% if row.citations %}
                   {% for c in row.citations %}
-                    {% if c.url %}
+                    {% if c.url and (c.url.startswith('http://') or c.url.startswith('https://')) %}
                       <a href="{{ c.url }}" target="_blank" rel="noopener noreferrer"
                          class="text-brand-600 hover:text-brand-700 underline">link</a>{% if not loop.last %}, {% endif %}
+                    {% elif c.url %}
+                      <span class="text-gray-400" title="{{ c.url }}">link (invalid url)</span>{% if not loop.last %}, {% endif %}
                     {% endif %}
                   {% endfor %}
                 {% else %}

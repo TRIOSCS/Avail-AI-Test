@@ -195,3 +195,53 @@ def test_re_resolve_escapes_html_in_unresolved_response(client_with_settings_use
     # an executable tag.
     assert b"<script>" not in resp.content
     assert b"&lt;script&gt;" in resp.content
+
+
+def test_pending_list_strips_javascript_url_from_citations(client_with_settings_user, db_session):
+    """Defense: citation URLs with non-http(s) schemes (e.g. javascript:)
+    must NOT be rendered as clickable links in the admin UI, even if a
+    malicious LLM proposed them."""
+    import re
+
+    from sqlalchemy import text
+
+    # Bypass @validates and pydantic by inserting raw SQL with a malicious
+    # citation. (In production this could happen via a malicious or
+    # prompt-injected LLM response that slips through ResolverLlmResponse
+    # validation — the URL field is just str, no scheme check.)
+    db_session.execute(
+        text(
+            """
+            INSERT INTO oem_spec_codes_pending
+                (oem, spec_code, proposed_avl, llm_confidence, citations,
+                 used_in_requirement_ids)
+            VALUES
+                (:oem, :spec_code, :proposed_avl, :llm_confidence, :citations,
+                 :used_in_requirement_ids)
+            """
+        ),
+        {
+            "oem": "IBM",
+            "spec_code": "SPREJ",
+            "proposed_avl": '[{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": null}]',
+            "llm_confidence": 0.8,
+            "citations": '[{"url": "javascript:alert(1)", "snippet": "evil"}]',
+            "used_in_requirement_ids": "[]",
+        },
+    )
+    db_session.commit()
+
+    resp = client_with_settings_user.get("/admin/spec-codes/pending")
+    assert resp.status_code == 200
+    body = resp.content.decode()
+
+    # The malicious URL must NOT appear as an href attribute value
+    assert 'href="javascript:' not in body
+    assert "href='javascript:" not in body
+    # The exact javascript: payload string must not appear inside any
+    # href attribute. (It may appear in a title attribute as escaped
+    # text — that's fine; browsers don't execute title content.)
+    # Find all href="..." substrings and ensure none start with javascript:
+    href_values = re.findall(r'href="([^"]*)"', body)
+    for h in href_values:
+        assert not h.lower().startswith("javascript:"), f"javascript: scheme leaked into href: {h!r}"
