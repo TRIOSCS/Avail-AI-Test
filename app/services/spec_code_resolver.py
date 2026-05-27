@@ -19,6 +19,14 @@ Resolution order (from spec §5):
     4. Call Claude (web_search grounded), validate against ``ResolverLlmResponse``
     5. Apply confidence floor + no-citations penalty
     6. Persist ``OemSpecCodePending`` row (idempotent under UNIQUE collisions)
+
+Note on the feature flag:
+    ``settings.spec_resolver_enabled`` is checked by CALLERS, not by this
+    service. The resolver itself will always run when called. This keeps
+    the service testable without flag plumbing; callers (e.g.
+    ``app/search_service.py``) are responsible for gating invocation. Do
+    not call this service in production code without first checking the
+    flag.
 """
 
 from __future__ import annotations
@@ -113,7 +121,7 @@ async def _default_claude_call(
     return await claude_json(
         user,
         system=system,
-        model_tier="smart",
+        model_tier=settings.spec_resolver_model_tier,
         max_tokens=max_tokens,
         tools=tools,
         timeout=60,
@@ -264,7 +272,7 @@ class SpecCodeResolver:
             return None
 
         try:
-            return ResolverLlmResponse.model_validate(raw)
+            llm_result = ResolverLlmResponse.model_validate(raw)
         except ValidationError:
             logger.exception(
                 "spec_resolver: LLM response failed schema validation; oem={} code={} raw={}",
@@ -273,3 +281,20 @@ class SpecCodeResolver:
                 raw,
             )
             return None
+
+        # Defense in depth: even though the system prompt instructs the LLM
+        # not to propose blacklisted MPNs, filter them out post-hoc in case
+        # the model leaks. Normalize case for the comparison.
+        blacklist_set = {m.upper().strip() for m in blacklist_mpns}
+        filtered_avl = [entry for entry in llm_result.avl if entry.mpn.upper().strip() not in blacklist_set]
+        if not filtered_avl:
+            logger.info(
+                "spec_resolver: LLM proposed only blacklisted MPNs; treating as unresolved; oem={} code={}",
+                oem,
+                spec_code,
+            )
+            return None  # caller's None check will route to unresolved
+
+        # Replace the AVL on the validated response so the rest of resolve()
+        # sees the filtered list.
+        return llm_result.model_copy(update={"avl": filtered_avl})

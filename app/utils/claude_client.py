@@ -42,6 +42,7 @@ API_VERSION = "2023-06-01"
 MODELS = {
     "fast": "claude-haiku-4-5-20251001",
     "smart": settings.anthropic_model or "claude-sonnet-4-6",
+    "opus": "claude-opus-4-7",
 }
 
 

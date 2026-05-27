@@ -233,6 +233,95 @@ async def test_llm_schema_invalid_returns_unresolved(resolver):
 # ── Concurrent insert collision (Task 3.10) ──────────────────────────
 
 
+async def test_default_claude_call_uses_configured_model_tier(monkeypatch):
+    """Verify the resolver's default claude call routes through the configured model
+    tier, not a hardcoded one."""
+    from app.config import settings
+    from app.services import spec_code_resolver as resolver_module
+
+    monkeypatch.setattr(settings, "spec_resolver_model_tier", "opus")
+
+    captured: dict = {}
+
+    async def fake_claude_json(prompt, **kwargs):
+        captured.update(kwargs)
+        return None  # don't care about the return shape
+
+    # _default_claude_call lazy-imports claude_json from app.utils.claude_client,
+    # so patch it at the source module.
+    import app.utils.claude_client as claude_client_module
+
+    monkeypatch.setattr(claude_client_module, "claude_json", fake_claude_json)
+
+    await resolver_module._default_claude_call(system="sys", user="usr", tools=[], max_tokens=100)
+    assert captured["model_tier"] == "opus"
+
+
+# ── Blacklist leak filter (defense in depth) ─────────────────────────
+
+
+async def test_llm_proposing_blacklisted_mpn_is_filtered(resolver, db_session):
+    """Defense in depth: if LLM leaks a blacklisted MPN, the resolver
+    filters it before persisting."""
+    db_session.add(
+        OemSpecCodeBlacklist(
+            oem="IBM",
+            spec_code="SPREJ",
+            rejected_mpns=["BAD_MPN"],
+            reason="known bad",
+        )
+    )
+    db_session.commit()
+
+    async def fake_claude(**kwargs):
+        return {
+            "avl": [
+                {"mpn": "BAD_MPN", "manufacturer": "Bad", "rank": 1, "notes": None},
+                {"mpn": "GOOD_MPN", "manufacturer": "Good", "rank": 2, "notes": None},
+            ],
+            "confidence": 0.9,
+            "citations": [{"url": "https://example.com", "snippet": "..."}],
+            "reasoning": "ok",
+        }
+
+    resolver._claude_call = fake_claude
+    result = await resolver.resolve("SPREJ")
+
+    assert result.status == "pending"
+    mpns = [e["mpn"] for e in result.avl]
+    assert "BAD_MPN" not in mpns
+    assert "GOOD_MPN" in mpns
+
+
+async def test_llm_proposing_only_blacklisted_mpns_returns_unresolved(resolver, db_session):
+    db_session.add(
+        OemSpecCodeBlacklist(
+            oem="IBM",
+            spec_code="SPREJ",
+            rejected_mpns=["BAD_MPN_1", "BAD_MPN_2"],
+            reason="all bad",
+        )
+    )
+    db_session.commit()
+
+    async def fake_claude(**kwargs):
+        return {
+            "avl": [
+                {"mpn": "BAD_MPN_1", "manufacturer": "X", "rank": 1, "notes": None},
+                {"mpn": "BAD_MPN_2", "manufacturer": "Y", "rank": 2, "notes": None},
+            ],
+            "confidence": 0.95,
+            "citations": [{"url": "https://example.com", "snippet": "..."}],
+            "reasoning": "all blacklisted",
+        }
+
+    resolver._claude_call = fake_claude
+    result = await resolver.resolve("SPREJ")
+
+    assert result.status == "unresolved"
+    assert resolver._db.query(OemSpecCodePending).count() == 0
+
+
 async def test_concurrent_pending_insert_recovers_via_reread(resolver, db_session):
     """Simulate a second resolver running for the same spec code by inserting a pending
     row out-of-band right before the LLM commit.
