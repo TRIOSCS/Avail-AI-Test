@@ -222,10 +222,10 @@ class TestPreviewInquiryAsync:
         db_session.add(r)
         db_session.commit()
 
-        with patch("app.routers.sightings.templates") as mock_tpl:
+        with patch("app.routers.sightings.template_response") as mock_tpl:
             from fastapi.responses import HTMLResponse
 
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("<div>preview</div>")
+            mock_tpl.return_value = HTMLResponse("<div>preview</div>")
             resp = client.post(
                 "/v2/partials/sightings/preview-inquiry",
                 data={

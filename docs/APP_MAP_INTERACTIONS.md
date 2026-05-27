@@ -49,6 +49,13 @@ htmx_views.py (router)
     +---> activity_service.py --> DB: INSERT activity_log
 ```
 
+System and RFQ activity events route through `activity_service.log_activity()`,
+the canonical writer (`log_rfq_activity()` is kept as a thin delegating alias).
+Email and call events are written by `log_email_activity()`/`log_call_activity()`,
+which run their own contact-matching. The requisition Activity tab reads its
+timeline back via `activity_service.get_requisition_activities()` rather than an
+inlined query.
+
 ## 2. Search (User-Initiated Only)
 
 Sourcing is strictly user-initiated. There is no background cron, no
