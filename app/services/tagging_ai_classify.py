@@ -41,7 +41,7 @@ Part numbers to classify:
 _SYSTEM = "You are an expert electronic component classifier. Return only valid JSON. Use null instead of 'Unknown' when unsure."
 
 
-async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:  # pragma: no cover
+async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:
     """Batch MPNs via Claude Haiku for manufacturer + commodity classification."""
     from app.utils.claude_client import claude_json
     from app.utils.claude_errors import ClaudeError, ClaudeUnavailableError
@@ -71,7 +71,7 @@ async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:  # prag
     # Validate and normalize response
     classified = []
     for item in result:
-        if not isinstance(item, dict):  # pragma: no cover
+        if not isinstance(item, dict):
             continue
         classified.append(
             {
@@ -84,7 +84,7 @@ async def classify_parts_with_ai(part_numbers: list[str]) -> list[dict]:  # prag
     return classified
 
 
-def _apply_ai_results(classified: list[dict], batch: list, db: Session) -> tuple[int, int]:  # pragma: no cover
+def _apply_ai_results(classified: list[dict], batch: list, db: Session) -> tuple[int, int]:
     """Apply classification results to DB.
 
     Returns (matched, unknown) counts.
@@ -113,7 +113,7 @@ def _apply_ai_results(classified: list[dict], batch: list, db: Session) -> tuple
         )
 
         commodity_tag = get_or_create_commodity_tag(category, db) if category and category != "Miscellaneous" else None
-        if commodity_tag:  # pragma: no cover
+        if commodity_tag:
             tags_to_apply.append(
                 {
                     "tag_id": commodity_tag.id,

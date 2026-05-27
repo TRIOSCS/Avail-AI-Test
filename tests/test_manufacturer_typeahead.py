@@ -57,3 +57,37 @@ def test_add_empty_name_returns_error(client, db_session):
     resp = client.post("/v2/partials/manufacturers/add", data={"name": "   "})
     assert resp.status_code == 200
     assert "required" in resp.text.lower()
+
+
+def test_search_wildcard_percent_is_escaped(client, db_session):
+    """HIGH-SEC-3: a bare '%' in the search term must be treated as a
+    literal, not a SQL LIKE wildcard. Without escaping, q='%' would match
+    every manufacturer."""
+    db_session.add(Manufacturer(canonical_name="Texas Instruments"))
+    db_session.add(Manufacturer(canonical_name="Analog Devices"))
+    db_session.commit()
+    resp = client.get("/v2/partials/manufacturers/search?q=%25")  # %25 == '%'
+    assert resp.status_code == 200
+    # '%' is now literal — it matches neither manufacturer name.
+    assert "Texas Instruments" not in resp.text
+    assert "Analog Devices" not in resp.text
+
+
+def test_search_wildcard_underscore_is_escaped(client, db_session):
+    """HIGH-SEC-3: a bare '_' must be a literal, not a single-char wildcard."""
+    db_session.add(Manufacturer(canonical_name="ABC"))
+    db_session.commit()
+    resp = client.get("/v2/partials/manufacturers/search?q=A_C")
+    assert resp.status_code == 200
+    # '_' is literal — 'A_C' does not match 'ABC'.
+    assert "ABC" not in resp.text
+
+
+def test_search_literal_percent_in_name_matches(client, db_session):
+    """A manufacturer whose name actually contains '%' is still found when the user
+    searches for that literal '%'."""
+    db_session.add(Manufacturer(canonical_name="Discount 50% Co"))
+    db_session.commit()
+    resp = client.get("/v2/partials/manufacturers/search?q=50%25")  # '50%'
+    assert resp.status_code == 200
+    assert "Discount 50% Co" in resp.text

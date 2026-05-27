@@ -90,17 +90,18 @@ def vendor_card(db_session: Session) -> VendorCard:
 
 class TestUtilityFunctions:
     def test_normalize_mpn_basic(self):
-        from app.services.sourcing_leads import normalize_mpn
+        # sourcing_leads now delegates to the canonical normalize_mpn_key.
+        from app.utils.normalization import normalize_mpn_key
 
-        assert normalize_mpn("LM-317T") == "LM317T"
-        assert normalize_mpn("lm317t") == "LM317T"
-        assert normalize_mpn("LM 317T") == "LM317T"
+        assert normalize_mpn_key("LM-317T") == "lm317t"
+        assert normalize_mpn_key("lm317t") == "lm317t"
+        assert normalize_mpn_key("LM 317T") == "lm317t"
 
     def test_normalize_mpn_empty(self):
-        from app.services.sourcing_leads import normalize_mpn
+        from app.utils.normalization import normalize_mpn_key
 
-        assert normalize_mpn("") == ""
-        assert normalize_mpn(None) == ""
+        assert normalize_mpn_key("") == ""
+        assert normalize_mpn_key(None) == ""
 
     def test_clamp_within_bounds(self):
         from app.services.sourcing_leads import _clamp

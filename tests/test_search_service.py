@@ -2813,3 +2813,313 @@ def test_dedup_different_mpn_not_merged():
 def test_dedup_empty_list():
     """Empty input returns empty output."""
     assert _deduplicate_sightings([]) == []
+
+
+@pytest.mark.asyncio
+async def test_stream_search_mpn_opens_and_closes_its_own_session(monkeypatch):
+    """The worker must not depend on the caller's session.
+
+    It must open a fresh SessionLocal() at start and close it in a finally block,
+    surviving the request session being already closed by the time the background task
+    runs.
+    """
+    from unittest.mock import MagicMock
+
+    from app import search_service
+
+    # Track sessions created and closed
+    sessions_created: list[MagicMock] = []
+
+    def fake_session_local():
+        s = MagicMock(name="WorkerSession")
+        s.closed = False
+
+        def _close():
+            s.closed = True
+
+        s.close.side_effect = _close
+        # query(...).all() returns an empty list (for VendorCard lookup)
+        s.query.return_value.all.return_value = []
+        sessions_created.append(s)
+        return s
+
+    monkeypatch.setattr(search_service, "SessionLocal", fake_session_local, raising=False)
+
+    # No connectors → worker takes the early-return done path
+    monkeypatch.setattr(
+        search_service,
+        "_build_connectors",
+        lambda _db: ([], {}, []),
+    )
+
+    # Capture broker publishes instead of touching the real broker
+    publishes: list[tuple[str, str, str]] = []
+
+    class FakeBroker:
+        async def publish(self, channel, event, data):
+            publishes.append((channel, event, data))
+
+    monkeypatch.setattr(search_service, "broker", FakeBroker(), raising=False)
+
+    await search_service.stream_search_mpn("test-search-id", "LM317")
+
+    assert len(sessions_created) == 1, "worker must open exactly one session"
+    assert sessions_created[0].closed is True, "worker must close its session in finally"
+    assert any(evt == "done" for _, evt, _ in publishes), "worker must publish a done event"
+
+
+@pytest.mark.asyncio
+async def test_stream_search_mpn_publishes_done_and_closes_session_on_exception(monkeypatch):
+    """The worker must always publish a terminal done event and close its session.
+
+    Even when setup raises (pool exhaustion, _build_connectors failure, etc.) the SSE
+    client must receive a done event so the spinner can clear, and the session must be
+    closed via finally so pool slots don't leak. Without these guarantees the same user-
+    visible symptom as the original request-session bug returns.
+    """
+    from unittest.mock import MagicMock
+
+    from app import search_service
+
+    sessions_created: list[MagicMock] = []
+
+    def fake_session_local():
+        s = MagicMock(name="WorkerSession")
+        s.closed = False
+
+        def _close():
+            s.closed = True
+
+        s.close.side_effect = _close
+        sessions_created.append(s)
+        return s
+
+    monkeypatch.setattr(search_service, "SessionLocal", fake_session_local, raising=False)
+
+    def boom(_db):
+        raise RuntimeError("connector build failure")
+
+    monkeypatch.setattr(search_service, "_build_connectors", boom)
+
+    publishes: list[tuple[str, str, str]] = []
+
+    class FakeBroker:
+        async def publish(self, channel, event, data):
+            publishes.append((channel, event, data))
+
+    monkeypatch.setattr(search_service, "broker", FakeBroker(), raising=False)
+
+    # Worker must NOT propagate the exception — it must catch and publish done.
+    await search_service.stream_search_mpn("test-search-id", "LM317")
+
+    assert len(sessions_created) == 1
+    assert sessions_created[0].closed is True, "session must close in finally on exception"
+
+    done_payloads = [data for _, evt, data in publishes if evt == "done"]
+    assert done_payloads, "worker must publish a done event even on exception"
+    assert any('"error"' in p for p in done_payloads), "error done payload must include error field"
+
+
+# ── Tag Propagation (HIGH-TEST-4) ────────────────────────────────────────
+
+
+class TestSaveSightingsTagPropagation:
+    """Exercise the tag-propagation block in _save_sightings — propagates MaterialTags
+    from a linked material card to the matching VendorCard."""
+
+    def test_propagates_tags_to_vendor_card(self, db_session):
+        from app.models.tags import EntityTag, MaterialTag, Tag
+
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        # A material card with a high-confidence brand tag.
+        card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", search_count=1)
+        db_session.add(card)
+        db_session.flush()
+        tag = Tag(name="Texas Instruments", tag_type="brand", created_at=datetime.now(timezone.utc))
+        db_session.add(tag)
+        db_session.flush()
+        db_session.add(
+            MaterialTag(
+                material_card_id=card.id,
+                tag_id=tag.id,
+                confidence=0.95,
+                source="ai_classified",
+                classified_at=datetime.now(timezone.utc),
+            )
+        )
+        # A VendorCard whose normalized name matches the sighting vendor.
+        vc = VendorCard(display_name="Arrow Electronics", normalized_name="arrow electronics")
+        db_session.add(vc)
+        db_session.commit()
+
+        fresh = [
+            {
+                "vendor_name": "Arrow Electronics",
+                "mpn_matched": "LM317T",
+                "material_card_id": card.id,
+                "qty_available": 1000,
+                "unit_price": 0.50,
+                "source_type": "nexar",
+            }
+        ]
+        result = _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
+        assert len(result) == 1
+        assert result[0].material_card_id == card.id
+
+        # The brand tag should have propagated onto the vendor card as an EntityTag.
+        et = db_session.query(EntityTag).filter_by(entity_type="vendor_card", entity_id=vc.id, tag_id=tag.id).first()
+        assert et is not None
+        assert et.interaction_count == 1.0
+
+    def test_no_vendor_card_no_propagation(self, db_session):
+        """When no VendorCard matches the vendor name, propagation is a no-op."""
+        from app.models.tags import EntityTag, MaterialTag, Tag
+
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        card = MaterialCard(normalized_mpn="lm317t", display_mpn="LM317T", search_count=1)
+        db_session.add(card)
+        db_session.flush()
+        tag = Tag(name="Murata", tag_type="brand", created_at=datetime.now(timezone.utc))
+        db_session.add(tag)
+        db_session.flush()
+        db_session.add(
+            MaterialTag(
+                material_card_id=card.id,
+                tag_id=tag.id,
+                confidence=0.95,
+                source="ai_classified",
+                classified_at=datetime.now(timezone.utc),
+            )
+        )
+        db_session.commit()
+
+        fresh = [
+            {
+                "vendor_name": "Unknown Vendor LLC",
+                "mpn_matched": "LM317T",
+                "material_card_id": card.id,
+                "qty_available": 10,
+                "unit_price": 1.0,
+                "source_type": "nexar",
+            }
+        ]
+        _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
+
+        # No EntityTag rows created — no matching vendor card.
+        assert db_session.query(EntityTag).count() == 0
+
+    def test_sighting_without_card_skips_propagation(self, db_session):
+        """A sighting with no material_card_id skips the propagation body."""
+        from app.models.tags import EntityTag
+
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+
+        vc = VendorCard(display_name="Arrow Electronics", normalized_name="arrow electronics")
+        db_session.add(vc)
+        db_session.commit()
+
+        fresh = [
+            {
+                "vendor_name": "Arrow Electronics",
+                "mpn_matched": "LM317T",
+                "qty_available": 5,
+                "unit_price": 2.0,
+                "source_type": "nexar",
+            }
+        ]
+        result = _save_sightings(fresh, req, db_session, succeeded_sources={"nexar"})
+        assert result[0].material_card_id is None
+        assert db_session.query(EntityTag).count() == 0
+
+
+class TestUpsertMaterialCardTagClassification:
+    """Exercise the tag-classification block in _upsert_material_card — when a card has
+    a manufacturer (and category), brand + commodity tags are written."""
+
+    def test_brand_and_commodity_tags_applied(self, db_session):
+        from app.models.tags import MaterialTag, Tag
+
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+        now = datetime.now(timezone.utc)
+
+        # Commodity tags are pre-seeded (get_or_create_commodity_tag never
+        # creates them) — seed the one "Voltage Regulators" maps to.
+        db_session.add(Tag(name="Power Management ICs", tag_type="commodity", created_at=datetime.now(timezone.utc)))
+        # Pre-create the card with a manufacturer AND a category so the
+        # commodity branch (result["commodity"]) is exercised.
+        card = MaterialCard(
+            normalized_mpn="lm317t",
+            display_mpn="LM317T",
+            manufacturer="Texas Instruments",
+            category="Voltage Regulators",
+            search_count=0,
+        )
+        db_session.add(card)
+        db_session.commit()
+
+        s = Sighting(
+            requirement_id=req.id,
+            vendor_name="Arrow",
+            mpn_matched="LM317T",
+            manufacturer="Texas Instruments",
+            qty_available=1000,
+            unit_price=0.50,
+            currency="USD",
+            source_type="nexar",
+            is_authorized=True,
+            raw_data={},
+        )
+        db_session.add(s)
+        db_session.commit()
+
+        _upsert_material_card("LM317T", [s], db_session, now)
+
+        tags = db_session.query(MaterialTag).filter_by(material_card_id=card.id).all()
+        tag_types = {db_session.get(Tag, t.tag_id).tag_type for t in tags}
+        assert "brand" in tag_types
+        assert "commodity" in tag_types
+
+    def test_brand_only_when_no_category(self, db_session):
+        """A card with manufacturer but no category gets only a brand tag."""
+        from app.models.tags import MaterialTag, Tag
+
+        user = _make_user(db_session)
+        reqn = _make_requisition(db_session, user)
+        req = _make_requirement(db_session, reqn)
+        now = datetime.now(timezone.utc)
+
+        card = MaterialCard(
+            normalized_mpn="ne555p",
+            display_mpn="NE555P",
+            manufacturer="Texas Instruments",
+            search_count=0,
+        )
+        db_session.add(card)
+        db_session.commit()
+
+        s = Sighting(
+            requirement_id=req.id,
+            vendor_name="Mouser",
+            mpn_matched="NE555P",
+            manufacturer="Texas Instruments",
+            source_type="nexar",
+            raw_data={},
+        )
+        db_session.add(s)
+        db_session.commit()
+
+        _upsert_material_card("NE555P", [s], db_session, now)
+
+        tags = db_session.query(MaterialTag).filter_by(material_card_id=card.id).all()
+        tag_types = {db_session.get(Tag, t.tag_id).tag_type for t in tags}
+        assert tag_types == {"brand"}

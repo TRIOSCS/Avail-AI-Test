@@ -25,11 +25,11 @@ from app.services.sourcing_leads import (
     _source_reliability,
     append_lead_feedback,
     get_requisition_leads,
-    normalize_mpn,
     sync_leads_for_sightings,
     update_lead_status,
     upsert_lead_from_sighting,
 )
+from app.utils.normalization import normalize_mpn_key
 
 # ── Helpers ─────────────────────────────────────────────────────────
 
@@ -111,17 +111,20 @@ def _make_vendor_card(db: Session, name: str = "arrow electronics") -> VendorCar
 
 
 class TestNormalizeMpn:
+    """sourcing_leads now uses the canonical normalize_mpn_key (lowercase, strips all
+    non-alphanumeric) instead of a local re-implementation."""
+
     def test_normalizes_dashes_spaces(self):
-        assert normalize_mpn("LM-317 T") == "LM317T"
+        assert normalize_mpn_key("LM-317 T") == "lm317t"
 
     def test_normalizes_underscores_dots(self):
-        assert normalize_mpn("LM_317.T") == "LM317T"
+        assert normalize_mpn_key("LM_317.T") == "lm317t"
 
     def test_empty_string(self):
-        assert normalize_mpn("") == ""
+        assert normalize_mpn_key("") == ""
 
     def test_none(self):
-        assert normalize_mpn(None) == ""
+        assert normalize_mpn_key(None) == ""
 
 
 class TestClamp:

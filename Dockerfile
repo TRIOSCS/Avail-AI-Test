@@ -1,5 +1,5 @@
 # Stage 1: Build frontend with Vite
-FROM node:20-alpine AS builder
+FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293 AS builder
 WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -9,7 +9,7 @@ COPY app/templates/ app/templates/
 RUN npm run build
 
 # Stage 2: Python application
-FROM python:3.12-slim
+FROM python:3.12-slim@sha256:9d3abd9fc11d06998ccdbdd93b4dd49b5ad7d67fcbbc11c016eb0eb2c2194891
 
 WORKDIR /app
 
@@ -64,4 +64,7 @@ RUN useradd -r -u 1000 -m appuser \
     && mkdir -p /app/fix_queue && chown appuser:appuser /app/fix_queue
 
 ENTRYPOINT ["tini", "--", "./docker-entrypoint.sh"]
-CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips", "*"]
+# No --forwarded-allow-ips here: uvicorn safe-defaults to 127.0.0.1 when the
+# image is run standalone. docker-compose.yml overrides `command:` to trust
+# the compose network where Caddy fronts the app.
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers"]

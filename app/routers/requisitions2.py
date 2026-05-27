@@ -39,7 +39,7 @@ from ..services.requisition_list_service import (
     list_requisitions,
 )
 from ..services.sse_broker import broker
-from ..template_env import templates
+from ..template_env import template_response
 
 router = APIRouter(prefix="/requisitions2", tags=["requisitions2"])
 
@@ -64,7 +64,7 @@ def _parse_filters(request: Request) -> ReqListFilters:
 def _table_context(request: Request, filters: ReqListFilters, db: Session, user: User) -> dict:
     """Build the shared context dict for table rendering."""
     # Import locally to avoid a circular import at module load time.
-    from app.routers.htmx_views import _vite_assets
+    from app.routers.htmx_views import _base_ctx
 
     result = list_requisitions(
         db=db,
@@ -73,15 +73,12 @@ def _table_context(request: Request, filters: ReqListFilters, db: Session, user:
         user_role=getattr(user, "role", "sales"),
     )
     users = get_team_users(db)
-    assets = _vite_assets()
     return {
-        "request": request,
+        **_base_ctx(request, user, "requisitions"),
         **result,
         "user": user,
         "users": users,
         "avail_opp_table_v2_enabled": settings.avail_opp_table_v2,
-        "vite_js": assets["js_file"],
-        "vite_css": assets["css_files"],
     }
 
 
@@ -102,9 +99,9 @@ async def requisitions_page(
     ctx = _table_context(request, filters, db, user)
 
     if _is_htmx(request):
-        return templates.TemplateResponse("requisitions2/_table.html", ctx)
+        return template_response("requisitions2/_table.html", ctx)
 
-    return templates.TemplateResponse("requisitions2/page.html", ctx)
+    return template_response("requisitions2/page.html", ctx)
 
 
 # ── SSE stream ───────────────────────────────────────────────────────
@@ -160,7 +157,7 @@ async def requisitions_table(
     """Table fragment for HTMX swap after filter/sort/paginate."""
     filters = _parse_filters(request)
     ctx = _table_context(request, filters, db, user)
-    return templates.TemplateResponse("requisitions2/_table.html", ctx)
+    return template_response("requisitions2/_table.html", ctx)
 
 
 # ── Rows-only fragment ───────────────────────────────────────────────
@@ -175,7 +172,7 @@ async def requisitions_table_rows(
     """Rows-only fragment for HTMX swap."""
     filters = _parse_filters(request)
     ctx = _table_context(request, filters, db, user)
-    return templates.TemplateResponse("requisitions2/_table_rows.html", ctx)
+    return template_response("requisitions2/_table_rows.html", ctx)
 
 
 # ── Detail panel (split-screen right panel) ─────────────────────────
@@ -200,7 +197,7 @@ async def requisition_detail_panel(
             '<div class="p-8 text-center text-sm text-gray-400">Requisition not found.</div>',
             status_code=404,
         )
-    return templates.TemplateResponse(
+    return template_response(
         "requisitions2/_detail_panel.html",
         {"request": request, **detail, "user": user},
     )
@@ -228,7 +225,7 @@ async def requisition_modal(
             '<div class="rq2-modal-error">Requisition not found.</div>',
             status_code=404,
         )
-    return templates.TemplateResponse(
+    return template_response(
         "requisitions2/_modal.html",
         {"request": request, **detail, "user": user},
     )
@@ -250,7 +247,7 @@ async def inline_edit_cell(
     if not req:
         return HTMLResponse("Not found", status_code=404)
     users = get_team_users(db) if field == InlineEditField.owner else []
-    return templates.TemplateResponse(
+    return template_response(
         "requisitions2/_inline_cell.html",
         {"request": request, "req": req, "field": field.value, "users": users},
     )
@@ -325,7 +322,7 @@ async def inline_save(
     row_ctx = get_row_context(db, req, user)
     row_ctx["request"] = request
     row_ctx["avail_opp_table_v2_enabled"] = settings.avail_opp_table_v2
-    response = templates.TemplateResponse("requisitions2/_single_row.html", row_ctx)
+    response = template_response("requisitions2/_single_row.html", row_ctx)
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
     await broker.publish("requisitions", "table-refresh", msg)
     return response
@@ -421,7 +418,7 @@ async def row_action(
     # Return refreshed table
     filters = _parse_filters(request)
     ctx = _table_context(request, filters, db, user)
-    response = templates.TemplateResponse("requisitions2/_table.html", ctx)
+    response = template_response("requisitions2/_table.html", ctx)
     response.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg}})
     await broker.publish("requisitions", "table-refresh", msg)
     return response
@@ -445,7 +442,7 @@ async def bulk_action(
     if not id_list:
         filters = _parse_filters(request)
         ctx = _table_context(request, filters, db, user)
-        return templates.TemplateResponse("requisitions2/_table.html", ctx)
+        return template_response("requisitions2/_table.html", ctx)
 
     reqs_q = db.query(Requisition).filter(Requisition.id.in_(id_list))
     if user.role == UserRole.SALES:
@@ -482,7 +479,7 @@ async def bulk_action(
 
     filters = _parse_filters(request)
     ctx = _table_context(request, filters, db, user)
-    response = templates.TemplateResponse("requisitions2/_table.html", ctx)
+    response = template_response("requisitions2/_table.html", ctx)
     word = action_name.value + ("d" if action_name.value.endswith("e") else "ed")
     msg = f"{count} requisition{'s' if count != 1 else ''} {word}"
     if errors:

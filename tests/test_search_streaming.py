@@ -218,10 +218,13 @@ async def test_stream_search_publishes_events(db_session):
     async def mock_publish(channel, event, data=""):
         published_events.append({"channel": channel, "event": event, "data": data})
 
-    # Mock broker and connectors
+    # Mock broker and connectors. The worker now opens its own SessionLocal(),
+    # so we patch it to return the test's db_session (which is bound to the
+    # in-memory test engine with tables created by conftest).
     with (
         patch("app.search_service.broker", create=True) as mock_broker,
         patch("app.search_service._build_connectors") as mock_build,
+        patch("app.search_service.SessionLocal", lambda: db_session),
     ):
         mock_broker.publish = mock_publish
 
@@ -242,7 +245,7 @@ async def test_stream_search_publishes_events(db_session):
         )
         mock_build.return_value = ([fake_connector], {}, set())
 
-        await stream_search_mpn("test-search-id", "LM317T", db_session)
+        await stream_search_mpn("test-search-id", "LM317T")
 
     # Should have published source-status + results + done events
     event_types = [e["event"] for e in published_events]
@@ -868,9 +871,10 @@ class TestStreamSearchMpnNonOkChips:
                 "app.search_service._build_connectors",
                 return_value=([fake_connector], seeded_stats, set()),
             ),
+            patch("app.search_service.SessionLocal", lambda: db_session),
         ):
             mock_broker.publish = mock_publish
-            await stream_search_mpn("test-search-id", "LM317T", db_session)
+            await stream_search_mpn("test-search-id", "LM317T")
 
         # Find the source-status event for oemsecrets (the non-ok one)
         oem_status_events = [e for e in published_events if e["event"] == "source-status" and "oemsecrets" in e["data"]]
@@ -918,9 +922,10 @@ class TestStreamSearchMpnNonOkChips:
                 "app.search_service._build_connectors",
                 return_value=([], seeded_stats, set()),
             ),
+            patch("app.search_service.SessionLocal", lambda: db_session),
         ):
             mock_broker.publish = mock_publish
-            await stream_search_mpn("test-search-id", "LM317T", db_session)
+            await stream_search_mpn("test-search-id", "LM317T")
 
         status_events = [e for e in published_events if e["event"] == "source-status"]
         assert len(status_events) == 2
@@ -951,9 +956,10 @@ class TestStreamSearchMpnNonOkChips:
                 "app.search_service._build_connectors",
                 return_value=([], seeded_stats, set()),
             ),
+            patch("app.search_service.SessionLocal", lambda: db_session),
         ):
             mock_broker.publish = mock_publish
-            await stream_search_mpn("test-search-id", "LM317T", db_session)
+            await stream_search_mpn("test-search-id", "LM317T")
 
         # No source-status events expected because the only seeded entry
         # is 'ok' (skipped by the non-ok publish loop) and there are no
