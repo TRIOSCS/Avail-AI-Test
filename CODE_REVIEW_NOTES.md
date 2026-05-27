@@ -25,12 +25,14 @@
 
 | Status | Critical | High | Total |
 |--------|----------|------|-------|
-| ✅ FIXED | 2 | 0 | **2** |
-| ◐ PARTIAL | 2 | 3 | **5** |
-| ⚠️ STILL OPEN | 7 | 32 | **39** |
+| ✅ FIXED | 2 | 4 | **6** |
+| ◐ PARTIAL | 2 | 2 | **4** |
+| ⚠️ STILL OPEN | 7 | 29 | **36** |
 | **Total** | **11** | **35** | **46** |
 
 Net movement since the original review is small: the large sourcing-engine repair + CI-unblock cascade (PRs #102, #107, #108, #109, #115, #116, backlog #92–#101) closed the two test/CI infrastructure blockers and meaningfully advanced a handful of others, but the bulk of the security, schema, frontend, and DevOps hardening work remains untouched. The 93 Medium/Low/Info findings are carried over essentially unchanged.
+
+**2026-05-27 update:** four High-tier findings closed in the cleanup cascade. PR #149 (`fix/high-httpx-webhook`) closed HIGH-BE-3 (blocking httpx → AsyncClient + await). PR #150 (`fix/high-test-quality`) closed HIGH-TEST-1 and HIGH-TEST-4 (pragma-no-cover removal on `tagging_ai_classify.py` and `search_service.py` tag-propagation). The final `asyncio.run()` callsite in `htmx_views.py:1144` (HIGH-BE-4's last remaining site) is also gone, moving HIGH-BE-4 from PARTIAL → FIXED for the originally-tracked scope. Other pre-existing `asyncio.run()` callsites in `description_service.py` and `contact_intelligence.py` were not part of HIGH-BE-4's scope.
 
 ### Top still-open issues to fix first
 
@@ -72,8 +74,8 @@ Legend: ✅ FIXED · ◐ PARTIAL · ⚠️ STILL OPEN
 | HIGH-SEC-4 | ⚠️ STILL OPEN | Graph webhook validation echo — carried over from 2026-05-04 review, not individually re-verified; conservatively open. |
 | HIGH-BE-1 | ⚠️ STILL OPEN | `htmx_views.py` is 9,918 lines (was 10,024) — not split. |
 | HIGH-BE-2 | ⚠️ STILL OPEN | God files persist (`htmx_views.py` 9918, `search_service.py` 2348, `email_service.py` 1277). |
-| HIGH-BE-3 | ⚠️ STILL OPEN | Blocking `httpx.get/post` still at `eight_by_eight_service.py:150,189,236`. |
-| HIGH-BE-4 | ◐ PARTIAL | `asyncio.run()` callsites in `htmx_views.py` reduced from 5 to 1 (`htmx_views.py:1144`); `requirements.py` site cleared. One site remains. |
+| HIGH-BE-3 | ✅ FIXED | PR #149 (merged 2026-05-27). `eight_by_eight_service.py` `get_access_token`/`get_extension_map`/`get_cdrs` are now `async def` using `httpx.AsyncClient` + `await`; no blocking calls remain. |
+| HIGH-BE-4 | ✅ FIXED | The `htmx_views.py:1144` site cleared during 2026-05-27 cleanup; zero `asyncio.run()` remain in `htmx_views.py` and `requirements.py` (the originally-tracked scope). |
 | HIGH-BE-5 | ⚠️ STILL OPEN | Business logic in routers — carried over, not individually re-verified. |
 | HIGH-BE-6 | ◐ PARTIAL | `RequisitionStatus.WON` now exists (used in `companies.py:102,104,317`), so the comparison is no longer dead code, but the raw-string `Requisition.status == "won"` at `companies.py:137` is still a StrEnum violation. |
 | HIGH-BE-7 | ⚠️ STILL OPEN | Inline rapidfuzz — carried over, not individually re-verified. |
@@ -84,10 +86,10 @@ Legend: ✅ FIXED · ◐ PARTIAL · ⚠️ STILL OPEN
 | HIGH-DB-1 | ⚠️ STILL OPEN | `Requirement.material_card` still `lazy="joined"` (`models/sourcing.py:127`). |
 | HIGH-DB-2 | ⚠️ STILL OPEN | `UTCDateTime` adopted in only 2 model files; pervasive `Column(DateTime)` remains. Not confirmed fixed → conservatively open. |
 | HIGH-DB-3 | ◐ PARTIAL | An `INSERT … ON CONFLICT DO NOTHING` path was added (`search_service.py:1704+`), but the one-by-one `Sighting(...)` insert still exists at `search_service.py:1358`. |
-| HIGH-TEST-1 | ⚠️ STILL OPEN | `# pragma: no cover` still on `classify_parts_with_ai`/`_apply_ai_results` (`tagging_ai_classify.py:44,87`). |
+| HIGH-TEST-1 | ✅ FIXED | PR #150 (merged 2026-05-27). `# pragma: no cover` removed from `classify_parts_with_ai` and `_apply_ai_results` in `tagging_ai_classify.py`. |
 | HIGH-TEST-2 | ⚠️ STILL OPEN | `workflows.spec.ts:16,89` still accept `401/307` as passing; E2E still unauthenticated. |
 | HIGH-TEST-3 | ⚠️ STILL OPEN | Single-status-code assertion pattern — carried over, not individually re-verified. |
-| HIGH-TEST-4 | ⚠️ STILL OPEN | Tag-propagation `# pragma: no cover` still present in `search_service.py` (lines ~1468, 1898, 1908). |
+| HIGH-TEST-4 | ✅ FIXED | PR #150 (merged 2026-05-27). Tag-propagation `# pragma: no cover` removed at all three previously-flagged callsites in `search_service.py`. |
 | HIGH-TEST-5 | ⚠️ STILL OPEN | Skipped tests still present: `test_req_offer_fields.py:64,118`, `test_tt105_user_validation.py:14`. |
 | HIGH-FE-1 | ⚠️ STILL OPEN | Raw `fetch()` still in `performance_tab.html:31`, `offers.html:62`, `trouble_report_form.html:55`. |
 | HIGH-FE-2 | ⚠️ STILL OPEN | `innerHTML = html` still at `trouble_report_form.html:64`. |
@@ -185,12 +187,10 @@ The detailed bodies below are retained verbatim from the 2026-05-04 review for e
 
 - **HIGH-BE-1 — God file `app/routers/htmx_views.py` is ~9,918 lines** (was 10,024) with 244 functions, 249 routes, 377 direct DB ops. Split into ~8–12 domain routers. ⚠️ STILL OPEN
 - **HIGH-BE-2 — Top god files (>700 lines):** `htmx_views.py` (9918), `search_service.py` (2348), `routers/requisitions/requirements.py`, `routers/sightings.py`, `email_service.py` (1277), `services/knowledge_service.py`, `services/excess_service.py`, `routers/crm/offers.py`, `startup.py`, `jobs/email_jobs.py`. `search_service.py` and `email_service.py` should become packages. ⚠️ STILL OPEN
-- **HIGH-BE-3 — Blocking sync `httpx.get/post` inside async APScheduler job.** ⚠️ STILL OPEN
-  `app/services/eight_by_eight_service.py:150,189,236` called from async `_job_poll_8x8_cdrs`. Freezes the event loop for the full pagination window.
-  *Fix:* `httpx.AsyncClient` + `await`, or `asyncio.to_thread`.
-- **HIGH-BE-4 — `asyncio.run()` inside FastAPI `BackgroundTasks` closures.** ◐ PARTIAL
-  Originally `app/routers/htmx_views.py:743, 1069, 1173, 1224, 2950`; `app/routers/requisitions/requirements.py:493`.
-  *Re-verify 2026-05-21:* reduced to a single remaining callsite at `htmx_views.py:1144`. The `requirements.py` site is cleared.
+- **HIGH-BE-3 — Blocking sync `httpx.get/post` inside async APScheduler job.** ✅ FIXED (PR #149, merged 2026-05-27)
+  `get_access_token` / `get_extension_map` / `get_cdrs` in `app/services/eight_by_eight_service.py` are now `async def` using `httpx.AsyncClient` + `await`; the APScheduler job no longer blocks the event loop.
+- **HIGH-BE-4 — `asyncio.run()` inside FastAPI `BackgroundTasks` closures.** ✅ FIXED (2026-05-27 cleanup cascade)
+  Originally `app/routers/htmx_views.py:743, 1069, 1173, 1224, 2950`; `app/routers/requisitions/requirements.py:493`. Re-verified 2026-05-27: zero `asyncio.run()` callsites remain in `htmx_views.py` or `requirements.py`. Other pre-existing callsites in `description_service.py` and `contact_intelligence.py` are outside this finding's original scope.
 - **HIGH-BE-5 — Business logic in routers.** `htmx_views.py` re-fetches/recomputes presentation fields and embeds cron-style background loops. Belongs in a service layer DTO. ⚠️ STILL OPEN (not individually re-verified)
 - **HIGH-BE-6 — Raw status string comparisons** (StrEnum violations). ◐ PARTIAL
   `app/routers/crm/companies.py:137` checks `Requisition.status == "won"`.
@@ -298,12 +298,12 @@ The detailed bodies below are retained verbatim from the 2026-05-04 review for e
 
 ### High
 
-- **HIGH-TEST-1 — Two reachable functions excluded with `# pragma: no cover`** in `app/services/tagging_ai_classify.py:44, 87` (`classify_parts_with_ai`, `_apply_ai_results`). ⚠️ STILL OPEN
+- **HIGH-TEST-1 — Two reachable functions excluded with `# pragma: no cover`** in `app/services/tagging_ai_classify.py:44, 87` (`classify_parts_with_ai`, `_apply_ai_results`). ✅ FIXED (PR #150, merged 2026-05-27)
   *Fix:* remove the pragmas.
 - **HIGH-TEST-2 — E2E `workflows.spec.ts` and `dead-ends.spec.ts` run unauthenticated** and accept `401`/`307` as passing (`workflows.spec.ts:16,89`). The whole login → search → RFQ → offer flow has no E2E coverage. ⚠️ STILL OPEN
   *Fix:* inject signed Starlette session cookies via `storageState` in `playwright.config.ts`.
 - **HIGH-TEST-3 — 2,392 tests assert only a single status code** with no body / DB-state assertion. ⚠️ STILL OPEN (not individually re-verified)
-- **HIGH-TEST-4 — Tag-propagation loop excluded from coverage** (`app/search_service.py` `# pragma: no cover`, lines now ~1468, 1898, 1908). ⚠️ STILL OPEN
+- **HIGH-TEST-4 — Tag-propagation loop excluded from coverage** (`app/search_service.py` `# pragma: no cover`, lines now ~1468, 1898, 1908). ✅ FIXED (PR #150, merged 2026-05-27)
 - **HIGH-TEST-5 — Skipped tests for routes/schemas removed long ago.** `tests/test_tt105_user_validation.py:14`, `tests/test_req_offer_fields.py:64,118`. ⚠️ STILL OPEN — Delete or restore.
 
 ### Medium
