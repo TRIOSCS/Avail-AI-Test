@@ -10,7 +10,11 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    # Suite has grown to ~13.8k tests; locally it runs in ~2.5 min, but the
+    # 2-vCPU GitHub runner takes longer. 15-min was being exceeded before the
+    # suite could finish (~32% complete at the 15-min mark). 25 leaves room for
+    # the suite to grow without immediate re-tuning.
+    timeout-minutes: 25
     services:
       postgres:
         image: postgres:16

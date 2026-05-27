@@ -49,9 +49,9 @@ async def quote_builder_modal(
         if site and site.company:
             customer_name = site.company.name or ""
 
-    from ..template_env import templates
+    from ..template_env import template_response
 
-    return templates.TemplateResponse(
+    return template_response(
         "htmx/partials/quote_builder/modal.html",
         {
             "request": request,
@@ -98,9 +98,9 @@ async def quote_builder_modal_multi(
         if site and site.company:
             customer_name = site.company.name or ""
 
-    from ..template_env import templates
+    from ..template_env import template_response
 
-    return templates.TemplateResponse(
+    return template_response(
         "htmx/partials/quote_builder/modal.html",
         {
             "request": request,
