@@ -9,6 +9,7 @@ from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.models import MaterialCard, Requirement, Requisition
 from app.search_service import _mpn_cooldown_partition, search_requirement
 from app.utils.normalization import normalize_mpn_key
@@ -71,7 +72,11 @@ class TestMpnCooldownPartition:
 class TestSearchRequirementCooldown:
     """Integration tests: search_requirement honors per-MPN cooldown and stamps MaterialCard."""
 
-    async def test_only_stale_mpns_hit_connectors(self, db_session: Session, test_user):
+    async def test_only_stale_mpns_hit_connectors(self, db_session: Session, test_user, monkeypatch):
+        # Defensive pin: this test asserts on _fetch_fresh call count with
+        # ([], []) return — if the resolver flag default ever flips, the
+        # resolver block would call _fetch_fresh a second time on the AVL.
+        monkeypatch.setattr(settings, "spec_resolver_enabled", False)
         now = datetime.now(timezone.utc)
         req = Requisition(
             name="REQ-CD-1",
@@ -114,7 +119,10 @@ class TestSearchRequirementCooldown:
             "FRESHMPN": "cached",
         }
 
-    async def test_searched_mpn_card_last_searched_at_updates(self, db_session: Session, test_user):
+    async def test_searched_mpn_card_last_searched_at_updates(self, db_session: Session, test_user, monkeypatch):
+        # Defensive pin: keeps zero-hit behavior stable if the resolver flag
+        # default ever flips.
+        monkeypatch.setattr(settings, "spec_resolver_enabled", False)
         now = datetime.now(timezone.utc)
         req = Requisition(
             name="REQ-CD-2",
@@ -147,8 +155,10 @@ class TestSearchRequirementCooldown:
             last = last.replace(tzinfo=timezone.utc)
         assert (now - last).total_seconds() < 60
 
-    async def test_all_cached_path_returns_affinity_matches(self, db_session: Session, test_user):
+    async def test_all_cached_path_returns_affinity_matches(self, db_session: Session, test_user, monkeypatch):
         """When every MPN is within cooldown, affinity matches still surface."""
+        # Defensive pin against future flag-default flips.
+        monkeypatch.setattr(settings, "spec_resolver_enabled", False)
         now = datetime.now(timezone.utc)
         req = Requisition(
             name="REQ-CD-AFFINITY",
@@ -190,7 +200,10 @@ class TestSearchRequirementCooldown:
 
 
 class TestIcsNcEnqueueOnRefresh:
-    async def test_enqueues_ics_and_nc_once_per_call(self, db_session: Session, test_user):
+    async def test_enqueues_ics_and_nc_once_per_call(self, db_session: Session, test_user, monkeypatch):
+        # Defensive pin: enqueue-count assertion below would break if the
+        # resolver default flips on (extra AVL enqueues).
+        monkeypatch.setattr(settings, "spec_resolver_enabled", False)
         now = datetime.now(timezone.utc)
         req = Requisition(
             name="REQ-CD-3",
@@ -224,7 +237,9 @@ class TestIcsNcEnqueueOnRefresh:
             requirement_ids = [c.args[0] for c in m.call_args_list]
             assert requirement_ids == [item.id]
 
-    async def test_no_enqueue_on_all_cached_short_circuit(self, db_session: Session, test_user):
+    async def test_no_enqueue_on_all_cached_short_circuit(self, db_session: Session, test_user, monkeypatch):
+        # Defensive pin against future flag-default flips.
+        monkeypatch.setattr(settings, "spec_resolver_enabled", False)
         now = datetime.now(timezone.utc)
         req = Requisition(
             name="REQ-CD-CACHED",

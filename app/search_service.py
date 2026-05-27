@@ -419,13 +419,28 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
             if resolution is not None and resolution.status != "unresolved" and resolution.avl:
                 avl_mpns = [entry["mpn"] for entry in resolution.avl if entry.get("mpn")]
                 if avl_mpns:
+                    # Issue 2 fix: AVL re-fanout must honor the same 48h per-MPN
+                    # cooldown that the primary path uses (line 291), otherwise
+                    # every click on a zero-hit spec-code burns connector quota
+                    # on the same AVL set. ``now`` is in scope from line 287.
+                    to_fetch_avl, _cached_avl = _mpn_cooldown_partition(write_db, avl_mpns, now=now)
+
+                    # Issue 3 fix: explicit try/except distinguishes "connectors
+                    # crashed" from "no AVL hits". Design intent: still enqueue
+                    # async workers + write pending bookkeeping even when the
+                    # live connectors fail — the buyer benefits from worker
+                    # output independent of connector outages.
                     try:
-                        resolved_fresh, resolved_stats = await _fetch_fresh(avl_mpns, db)
+                        if to_fetch_avl:
+                            resolved_fresh, resolved_stats = await _fetch_fresh(to_fetch_avl, db)
+                        else:
+                            resolved_fresh, resolved_stats = [], []
                     except Exception:
                         logger.warning(
-                            "spec_resolver: AVL re-fanout failed for req {} mpns {}",
+                            "spec_resolver: AVL fanout failed for req {} (spec_code={}); "
+                            "still enqueueing workers for async pickup",
                             req_id,
-                            avl_mpns,
+                            write_req.primary_mpn,
                             exc_info=True,
                         )
                         resolved_fresh, resolved_stats = [], []
@@ -491,12 +506,22 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
                     if resolution.status == "pending":
                         from app.models.sourcing import OemSpecCodePending
 
+                        # Issue 1 fix: ``with_for_update`` takes a row-level lock
+                        # on PG so concurrent ``search_requirement()`` calls for
+                        # different requirements targeting the same (oem,
+                        # spec_code) serialize on this row, eliminating the
+                        # lost-update race on the JSONB list. SQLite ignores the
+                        # lock but its single-threaded execution model means the
+                        # existing test still passes.
+                        oem_normalized = (write_req.oem_hint or "IBM").strip().upper()
+                        spec_code_normalized = spec_code_tag.strip().upper()
                         pending_row = (
                             write_db.query(OemSpecCodePending)
                             .filter_by(
-                                oem=(write_req.oem_hint or "IBM").strip().upper(),
-                                spec_code=spec_code_tag.strip().upper(),
+                                oem=oem_normalized,
+                                spec_code=spec_code_normalized,
                             )
+                            .with_for_update()
                             .one_or_none()
                         )
                         if pending_row is not None:
@@ -504,7 +529,7 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
                             if req_id not in used:
                                 used.append(req_id)
                                 pending_row.used_in_requirement_ids = used
-                                write_db.commit()
+                            write_db.commit()
         # --- end resolver block ---
 
         # Browser-automation workers: best-effort enqueue once per call. Both

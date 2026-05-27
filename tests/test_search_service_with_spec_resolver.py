@@ -235,3 +235,135 @@ async def test_resolver_pending_records_requirement_id(db_session, enable_flag, 
     refreshed = db_session.get(OemSpecCodePending, pending_id)
     assert refreshed is not None
     assert req_id in (refreshed.used_in_requirement_ids or [])
+
+
+async def test_used_in_requirement_ids_is_idempotent_on_double_search(
+    db_session, enable_flag, spec_code_requirement, monkeypatch
+):
+    """The same requirement searched twice should NOT duplicate its id in
+    ``used_in_requirement_ids``.
+
+    Guards the lost-update / read-modify-write fix on the JSONB column.
+    """
+    req_id = spec_code_requirement.id
+
+    # Pre-seed a pending row so resolve() returns "pending" without an LLM call.
+    pending = OemSpecCodePending(
+        oem="IBM",
+        spec_code="SPREJ",
+        proposed_avl=[{"mpn": "GRM188R71H103KA01D", "manufacturer": "Murata", "rank": 1, "notes": None}],
+        llm_confidence=0.8,
+        citations=[],
+        used_in_requirement_ids=[],
+    )
+    db_session.add(pending)
+    db_session.commit()
+    pending_id = pending.id
+
+    async def fake_fetch_fresh(mpns, db):
+        return ([], [_ok_stat("mouser")])
+
+    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+
+    # Two consecutive searches for the same requirement
+    await search_service.search_requirement(spec_code_requirement, db_session)
+    await search_service.search_requirement(spec_code_requirement, db_session)
+
+    db_session.expire_all()
+    refreshed = db_session.get(OemSpecCodePending, pending_id)
+    assert refreshed is not None
+    used = refreshed.used_in_requirement_ids or []
+    # The req.id must appear at most once — not twice
+    assert used.count(req_id) == 1
+
+
+async def test_avl_cooldown_skips_fetch_within_window(db_session, enable_flag, spec_code_requirement, monkeypatch):
+    """AVL MPNs within the 48h cooldown window should NOT trigger _fetch_fresh on the
+    AVL re-fanout — the worker async pickup still happens but live connectors aren't re-
+    burned."""
+    fetch_calls: list[list[str]] = []
+
+    async def fake_fetch_fresh(mpns, db):
+        fetch_calls.append(list(mpns))
+        return ([], [_ok_stat("mouser")])
+
+    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+
+    async def fake_resolve(self, spec_code, oem="IBM"):
+        return ResolverResult(
+            status="approved",
+            avl=[{"mpn": "GRM188R71H103KA01D", "manufacturer": "Murata", "rank": 1, "notes": None}],
+            confidence=1.0,
+            source="table",
+        )
+
+    monkeypatch.setattr(
+        "app.services.spec_code_resolver.SpecCodeResolver.resolve",
+        fake_resolve,
+    )
+
+    # Force the cooldown partition to claim the AVL MPN is cached (not stale).
+    # The primary "SPREJ" path still partitions normally — only override the AVL
+    # list to ensure the resolver block sees an all-cached partition.
+    real_partition = search_service._mpn_cooldown_partition
+
+    def fake_cooldown_partition(db, mpns, now=None):
+        if mpns == ["GRM188R71H103KA01D"]:
+            return [], mpns  # to_search=[], cached=mpns → resolver-block skips fetch
+        return real_partition(db, mpns, now=now)
+
+    monkeypatch.setattr(search_service, "_mpn_cooldown_partition", fake_cooldown_partition)
+
+    await search_service.search_requirement(spec_code_requirement, db_session)
+
+    # _fetch_fresh called for the primary (SPREJ), but NOT for the AVL MPN.
+    assert ["SPREJ"] in fetch_calls
+    assert ["GRM188R71H103KA01D"] not in fetch_calls
+
+
+async def test_avl_fetch_fresh_exception_logged_and_continues(
+    db_session, enable_flag, spec_code_requirement, monkeypatch
+):
+    """If ``_fetch_fresh`` raises during AVL re-fanout, the error is swallowed (logged)
+    and worker enqueues still happen — async workers are independent of the live
+    connectors."""
+
+    async def fake_fetch_fresh(mpns, db):
+        if mpns == ["SPREJ"]:
+            return ([], [_ok_stat("mouser")])
+        raise RuntimeError("AVL fanout boom")
+
+    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+
+    async def fake_resolve(self, spec_code, oem="IBM"):
+        return ResolverResult(
+            status="approved",
+            avl=[{"mpn": "GRM188R71H103KA01D", "manufacturer": "Murata", "rank": 1, "notes": None}],
+            confidence=1.0,
+            source="table",
+        )
+
+    monkeypatch.setattr(
+        "app.services.spec_code_resolver.SpecCodeResolver.resolve",
+        fake_resolve,
+    )
+
+    enqueue_calls: list[tuple[str, str | None]] = []
+
+    def fake_enqueue_ics(req_id, db, override_mpn=None, resolved_via_spec_code=None):
+        enqueue_calls.append(("ics", override_mpn))
+        return None
+
+    def fake_enqueue_nc(req_id, db, override_mpn=None, resolved_via_spec_code=None):
+        enqueue_calls.append(("nc", override_mpn))
+        return None
+
+    monkeypatch.setattr(search_service, "enqueue_for_ics_search", fake_enqueue_ics)
+    monkeypatch.setattr(search_service, "enqueue_for_nc_search", fake_enqueue_nc)
+
+    # Should NOT raise even though _fetch_fresh crashed on the AVL fanout.
+    await search_service.search_requirement(spec_code_requirement, db_session)
+
+    # AVL enqueues still happened despite the connector failure.
+    assert ("ics", "GRM188R71H103KA01D") in enqueue_calls
+    assert ("nc", "GRM188R71H103KA01D") in enqueue_calls
