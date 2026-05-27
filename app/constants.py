@@ -337,6 +337,7 @@ class ActivityType(StrEnum):
     SIGHTING_ADDED = "sighting_added"
     SALES_NOTE = "sales_note"
     TASK_COMPLETED = "task_completed"
+    TASK_REOPENED = "task_reopened"
     ASSIGNMENT_CHANGED = "assignment_changed"
     REQ_ARCHIVED = "req_archived"
     REQ_UNARCHIVED = "req_unarchived"
