@@ -173,3 +173,77 @@ def test_resolver_llm_response_rejects_invalid_confidence():
 
     with pytest.raises(ValidationError):
         ResolverLlmResponse.model_validate({"avl": [], "confidence": 1.5, "citations": [], "reasoning": ""})
+
+
+def test_oem_spec_code_normalizes_oem_and_spec_code_case(db_session):
+    """Unique constraint must be enforced regardless of input casing/whitespace."""
+    db_session.add(
+        OemSpecCode(
+            oem="ibm",
+            spec_code="sprej ",
+            avl=[{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
+            source="manual",
+            approved_at=datetime.now(timezone.utc),
+        )
+    )
+    db_session.commit()
+    row = db_session.query(OemSpecCode).one()
+    assert row.oem == "IBM"
+    assert row.spec_code == "SPREJ"
+
+    # Second insert with different casing must collide on the unique constraint
+    db_session.add(
+        OemSpecCode(
+            oem="IBM",
+            spec_code="SPREJ",
+            avl=[{"mpn": "Y", "manufacturer": "M", "rank": 1, "notes": None}],
+            source="manual",
+            approved_at=datetime.now(timezone.utc),
+        )
+    )
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+
+
+def test_pending_normalizes_oem_and_spec_code_case(db_session):
+    db_session.add(
+        OemSpecCodePending(
+            oem="ibm",
+            spec_code=" sprej",
+            proposed_avl=[{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
+            llm_confidence=0.7,
+        )
+    )
+    db_session.commit()
+    row = db_session.query(OemSpecCodePending).one()
+    assert row.oem == "IBM"
+    assert row.spec_code == "SPREJ"
+
+
+def test_blacklist_normalizes_oem_and_spec_code_case(db_session):
+    db_session.add(
+        OemSpecCodeBlacklist(
+            oem="ibm",
+            spec_code="sprej",
+            rejected_mpns=["X"],
+            reason="test",
+        )
+    )
+    db_session.commit()
+    row = db_session.query(OemSpecCodeBlacklist).one()
+    assert row.oem == "IBM"
+    assert row.spec_code == "SPREJ"
+
+
+def test_requirement_oem_hint_normalizes_case(db_session):
+    rset = _new_requisition(db_session)
+    req = Requirement(
+        requisition_id=rset.id,
+        primary_mpn="ABC123",
+        manufacturer="TI",
+        oem_hint=" ibm ",
+    )
+    db_session.add(req)
+    db_session.commit()
+    db_session.refresh(req)
+    assert req.oem_hint == "IBM"

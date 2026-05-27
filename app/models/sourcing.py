@@ -17,6 +17,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    func,
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
@@ -150,7 +151,7 @@ class Requirement(Base):
             raise ValueError("priority_score must be 0-100")
         return value
 
-    @validates("primary_mpn", "customer_pn", "oem_pn")
+    @validates("primary_mpn", "customer_pn", "oem_pn", "oem_hint")
     def _uppercase_mpn_fields(self, _key, value):
         return value.upper().strip() if value else value
 
@@ -332,9 +333,20 @@ class OemSpecCode(Base):
     source = Column(String(32), nullable=False)
     approved_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     approved_at = Column(UTCDateTime, nullable=False)
-    created_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(
+        UTCDateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
 
     __table_args__ = (UniqueConstraint("oem", "spec_code", name="uq_oem_spec_code"),)
+
+    @validates("oem", "spec_code")
+    def _uppercase_identity(self, _key, value):
+        if value is None:
+            return None
+        return value.upper().strip()
 
 
 class OemSpecCodePending(Base):
@@ -356,12 +368,23 @@ class OemSpecCodePending(Base):
     spec_code = Column(String(64), nullable=False, index=True)
     proposed_avl = Column(JSONB, nullable=False)
     llm_confidence = Column(Float, nullable=False)
-    citations = Column(JSONB, nullable=False, default=list)
-    discovered_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    citations = Column(JSONB, nullable=False, default=list, server_default="[]")
+    discovered_at = Column(
+        UTCDateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
     first_requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True)
-    used_in_requirement_ids = Column(JSONB, nullable=False, default=list)
+    used_in_requirement_ids = Column(JSONB, nullable=False, default=list, server_default="[]")
 
     __table_args__ = (UniqueConstraint("oem", "spec_code", name="uq_pending_oem_spec_code"),)
+
+    @validates("oem", "spec_code")
+    def _uppercase_identity(self, _key, value):
+        if value is None:
+            return None
+        return value.upper().strip()
 
 
 class OemSpecCodeBlacklist(Base):
@@ -383,5 +406,16 @@ class OemSpecCodeBlacklist(Base):
     spec_code = Column(String(64), nullable=False)
     rejected_mpns = Column(JSONB, nullable=False)
     rejected_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    rejected_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    rejected_at = Column(
+        UTCDateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
     reason = Column(Text, nullable=True)
+
+    @validates("oem", "spec_code")
+    def _uppercase_identity(self, _key, value):
+        if value is None:
+            return None
+        return value.upper().strip()
