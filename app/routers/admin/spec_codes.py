@@ -19,6 +19,8 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
+from loguru import logger
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ...database import get_db
@@ -77,7 +79,23 @@ async def approve(
     )
     db.add(approved)
     db.delete(row)
-    db.commit()
+    try:
+        db.commit()
+    except IntegrityError:
+        # Another admin already approved this same (oem, spec_code)
+        # mapping in a concurrent request. The uq_oem_spec_code unique
+        # constraint catches it cleanly; return a 409 so the UI can show
+        # an idempotent "already handled" message instead of a 500.
+        db.rollback()
+        logger.info(
+            "spec_codes: concurrent approve collision; oem={} spec_code={}",
+            row.oem,
+            row.spec_code,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail="this mapping has already been approved by another admin",
+        ) from None
     return HTMLResponse("", status_code=200)
 
 
@@ -126,6 +144,10 @@ async def re_resolve(
 
     Returns empty body on a fresh resolution (row replaced); a warning fragment if the
     resolver returned unresolved.
+
+    The delete + resolve happens inside a SAVEPOINT so that if the resolver raises (LLM
+    API down, network blip, schema-validation failure on a malformed response), the
+    original pending row is preserved — never destroyed by a transient failure.
     """
     from ...services.spec_code_resolver import SpecCodeResolver
 
@@ -135,16 +157,39 @@ async def re_resolve(
 
     spec_code = row.spec_code
     oem = row.oem
-    db.delete(row)
-    db.commit()
 
-    resolver = SpecCodeResolver(db)
-    result = await resolver.resolve(spec_code, oem=oem)
-    if result.status == "unresolved":
-        # Render via Jinja autoescape — never f-string-interpolate spec_code into
-        # HTML, since a malicious LLM-persisted payload could fire on admin click.
+    # Atomic swap: delete inside a SAVEPOINT, flush (so the resolver's
+    # pending-lookup query can't see it), then run the resolver. On any
+    # exception the SAVEPOINT auto-rolls back and the original row is
+    # restored — buyer audit trail (citations, confidence, MPNs) is
+    # never lost to a transient failure.
+    try:
+        with db.begin_nested():  # SAVEPOINT
+            db.delete(row)
+            db.flush()
+            resolver = SpecCodeResolver(db)
+            result = await resolver.resolve(spec_code, oem=oem)
+        db.commit()
+    except Exception:
+        # SAVEPOINT was auto-rolled back; outer transaction may still
+        # hold the original row. Rollback to clear any pending state
+        # and ensure the row is visible to subsequent reads.
+        db.rollback()
+        logger.exception(
+            "spec_codes: re-resolve failed for pending_id={}",
+            pending_id,
+        )
         return template_response(
             "htmx/partials/admin/spec_codes_reresolve_unresolved.html",
-            {"request": request, "spec_code": spec_code},
+            {"request": request, "spec_code": spec_code, "error": True},
+        )
+
+    if result.status == "unresolved":
+        # Resolver legitimately returned no result. The original pending
+        # row has been deleted (admin explicitly requested re-resolve);
+        # if the admin wants to blacklist, they should use reject.
+        return template_response(
+            "htmx/partials/admin/spec_codes_reresolve_unresolved.html",
+            {"request": request, "spec_code": spec_code, "error": False},
         )
     return HTMLResponse("", status_code=200)

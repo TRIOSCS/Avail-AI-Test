@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class AvlEntry(BaseModel):
@@ -23,6 +23,29 @@ class AvlEntry(BaseModel):
     notes: str | None = Field(default=None, max_length=1000)
 
 
+class Citation(BaseModel):
+    """A web citation backing a spec-code resolution claim.
+
+    URL scheme is constrained to http/https to prevent javascript:, data:, vbscript:,
+    file:,
+    and other dangerous schemes from leaking
+    into the persistence layer where they could be rendered as href
+    attributes (XSS surface).
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    url: str = Field(..., min_length=1, max_length=2000)
+    snippet: str = Field(default="", max_length=2000)
+
+    @field_validator("url")
+    @classmethod
+    def _validate_http_scheme(cls, v: str) -> str:
+        if not (v.startswith("http://") or v.startswith("https://")):
+            raise ValueError("citation url must use http:// or https:// scheme")
+        return v
+
+
 class ResolverLlmResponse(BaseModel):
     """Strict schema for what the LLM must return when resolving a spec code."""
 
@@ -30,7 +53,7 @@ class ResolverLlmResponse(BaseModel):
 
     avl: list[AvlEntry]
     confidence: float = Field(..., ge=0.0, le=1.0)
-    citations: list[dict] = Field(default_factory=list)
+    citations: list[Citation] = Field(default_factory=list)
     reasoning: str = Field(default="")
 
 
@@ -49,12 +72,6 @@ class RejectActionBody(BaseModel):
 
     reason: str = Field(..., min_length=1, max_length=1000)
     rejected_mpns: list[str] = Field(default_factory=list)
-
-
-class ReResolveActionBody(BaseModel):
-    """Admin re-resolve action; no body fields — presence of the POST is enough."""
-
-    model_config = ConfigDict(extra="forbid")
 
 
 ResolverStatus = Literal["approved", "pending", "unresolved"]

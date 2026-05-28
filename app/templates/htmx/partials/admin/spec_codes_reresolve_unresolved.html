@@ -1,10 +1,16 @@
 {# spec_codes_reresolve_unresolved.html — Re-resolve response when the resolver
-   returned no result. Renders a single table row that replaces the original
-   pending row via HTMX outerHTML swap.
-   Receives: spec_code (str).
+   could not return a fresh result. Renders a single table row that replaces
+   the original pending row via HTMX outerHTML swap.
+   Receives: spec_code (str), error (bool, optional). When error=True the
+   resolver raised mid-call and the original pending row was preserved.
    Called by: app/routers/admin/spec_codes.py re_resolve endpoint.
    Depends on: Tailwind CSS (amber palette).
 #}
 <tr><td colspan="7" class="px-4 py-3 text-sm text-amber-700 bg-amber-50">
-  Re-resolution of <code>{{ spec_code }}</code> returned no result.
+  {% if error %}
+    Re-resolution of <code>{{ spec_code }}</code> failed; the original
+    pending mapping has been preserved. Try again later.
+  {% else %}
+    Re-resolution of <code>{{ spec_code }}</code> returned no result.
+  {% endif %}
 </td></tr>

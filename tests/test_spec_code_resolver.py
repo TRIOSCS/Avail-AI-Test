@@ -322,6 +322,59 @@ async def test_llm_proposing_only_blacklisted_mpns_returns_unresolved(resolver, 
     assert resolver._db.query(OemSpecCodePending).count() == 0
 
 
+async def test_llm_citation_with_bad_scheme_is_filtered_not_fatal(resolver, db_session):
+    """If the LLM returns a citation with a non-http(s) URL scheme, the resolver must
+    drop just that citation rather than treat the whole response as unresolved.
+
+    The good citation must survive.
+    """
+
+    async def fake_claude(**kwargs):
+        return {
+            "avl": [{"mpn": "GOOD_MPN", "manufacturer": "M", "rank": 1, "notes": None}],
+            "confidence": 0.9,
+            "citations": [
+                {"url": "javascript:alert(1)", "snippet": "evil"},
+                {"url": "https://example.com", "snippet": "good"},
+            ],
+            "reasoning": "mixed citations",
+        }
+
+    resolver._claude_call = fake_claude
+    result = await resolver.resolve("FILTERED")
+
+    assert result.status == "pending"
+    assert result.source == "llm"
+    assert len(result.citations) == 1
+    assert result.citations[0]["url"] == "https://example.com"
+
+
+async def test_llm_only_bad_citations_falls_through_to_no_citation_penalty(resolver):
+    """If every citation is dropped, the response is treated as no-citations (penalty
+    applied).
+
+    With confidence 0.5 and no citations surviving, adjusted = 0.35 ≥ floor 0.3 → still
+    pending.
+    """
+
+    async def fake_claude(**kwargs):
+        return {
+            "avl": [{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
+            "confidence": 0.5,
+            "citations": [
+                {"url": "javascript:alert(1)", "snippet": "evil"},
+                {"url": "data:text/html,evil", "snippet": "evil2"},
+            ],
+            "reasoning": "all citations dangerous",
+        }
+
+    resolver._claude_call = fake_claude
+    result = await resolver.resolve("ALLBAD")
+    assert result.status == "pending"
+    assert result.confidence == pytest.approx(0.35)
+    assert result.citations == []
+
+
 async def test_concurrent_pending_insert_recovers_via_reread(resolver, db_session):
     """Simulate a second resolver running for the same spec code by inserting a pending
     row out-of-band right before the LLM commit.

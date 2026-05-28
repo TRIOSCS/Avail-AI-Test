@@ -205,7 +205,7 @@ class SpecCodeResolver:
             spec_code=norm_code,
             proposed_avl=avl_payload,
             llm_confidence=adjusted_confidence,
-            citations=list(llm_result.citations),
+            citations=[c.model_dump() for c in llm_result.citations],
         )
         self._db.add(row)
         try:
@@ -230,7 +230,7 @@ class SpecCodeResolver:
             status="pending",
             avl=avl_payload,
             confidence=adjusted_confidence,
-            citations=list(llm_result.citations),
+            citations=[c.model_dump() for c in llm_result.citations],
             source="llm",
         )
 
@@ -270,6 +270,31 @@ class SpecCodeResolver:
 
         if raw is None:
             return None
+
+        # Pre-filter citations: drop any with non-http(s) URL schemes (or
+        # malformed shape) before parent-model validation, so a single bad
+        # citation doesn't kill the whole resolution. The parent model's
+        # Citation field will still reject anything else malformed.
+        if isinstance(raw, dict):
+            raw_citations = raw.get("citations")
+            if isinstance(raw_citations, list):
+                safe_citations: list[dict] = []
+                for c in raw_citations:
+                    if not isinstance(c, dict):
+                        continue
+                    url = c.get("url")
+                    if not isinstance(url, str):
+                        continue
+                    if not (url.startswith("http://") or url.startswith("https://")):
+                        logger.info(
+                            "spec_resolver: dropping citation with non-http(s) scheme; oem={} code={} url={!r}",
+                            oem,
+                            spec_code,
+                            url,
+                        )
+                        continue
+                    safe_citations.append(c)
+                raw = {**raw, "citations": safe_citations}
 
         try:
             llm_result = ResolverLlmResponse.model_validate(raw)

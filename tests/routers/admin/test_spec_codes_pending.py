@@ -197,6 +197,71 @@ def test_re_resolve_escapes_html_in_unresolved_response(client_with_settings_use
     assert b"&lt;script&gt;" in resp.content
 
 
+def test_re_resolve_preserves_row_on_resolver_exception(
+    client_with_settings_user,
+    pending_row,
+    db_session,
+    monkeypatch,
+):
+    """If the resolver raises during re-resolve, the original pending row must NOT be
+    destroyed.
+
+    The route must return a friendly error fragment, not a 500.
+    """
+
+    async def fake_resolve(self, spec_code, oem="IBM"):
+        raise RuntimeError("LLM API down")
+
+    monkeypatch.setattr(
+        "app.services.spec_code_resolver.SpecCodeResolver.resolve",
+        fake_resolve,
+    )
+
+    pending_id = pending_row.id
+    resp = client_with_settings_user.post(f"/admin/spec-codes/pending/{pending_id}/re-resolve")
+    assert resp.status_code == 200
+    # The error variant of the partial mentions the preservation.
+    assert b"original" in resp.content.lower() or b"preserved" in resp.content.lower()
+
+    # The original pending row must still exist with its data intact.
+    db_session.expire_all()
+    still_there = db_session.get(OemSpecCodePending, pending_id)
+    assert still_there is not None
+    assert still_there.spec_code == "SPREJ"
+    assert still_there.oem == "IBM"
+    assert still_there.proposed_avl[0]["mpn"] == "GRM188R71H103KA01D"
+
+
+def test_approve_concurrent_returns_409_not_500(
+    client_with_settings_user,
+    pending_row,
+    db_session,
+):
+    """If two admins approve the same (oem, spec_code) mapping concurrently, the loser
+    must get a clean 409 — not a 500 from the uq_oem_spec_code IntegrityError leaking up
+    the stack."""
+    from datetime import datetime, timezone
+
+    # Simulate "another admin already approved" by pre-inserting a
+    # conflicting OemSpecCode row that will collide with the approve.
+    db_session.add(
+        OemSpecCode(
+            oem=pending_row.oem,
+            spec_code=pending_row.spec_code,
+            avl=[{"mpn": "OTHER", "manufacturer": "X", "rank": 1, "notes": None}],
+            source="manual",
+            approved_at=datetime.now(timezone.utc),
+        )
+    )
+    db_session.commit()
+
+    resp = client_with_settings_user.post(
+        f"/admin/spec-codes/pending/{pending_row.id}/approve",
+        json={"edited_avl": None},
+    )
+    assert resp.status_code == 409
+
+
 def test_pending_list_strips_javascript_url_from_citations(client_with_settings_user, db_session):
     """Defense: citation URLs with non-http(s) schemes (e.g. javascript:)
     must NOT be rendered as clickable links in the admin UI, even if a
