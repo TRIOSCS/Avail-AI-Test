@@ -1,0 +1,12 @@
+{# spec_codes_empty.html — Empty-state for the pending OEM spec-code queue.
+   Receives: oob (bool) — when true, render with hx-swap-oob so it can replace
+             the #spec-codes-content region after the last row is approved/rejected.
+   Called by: spec_codes_pending.html (inline) and
+              app/routers/admin/spec_codes.py (OOB swap on last-row removal).
+   Depends on: Tailwind CSS with brand palette.
+#}
+<div id="spec-codes-content"{% if oob %} hx-swap-oob="true"{% endif %}>
+  <div class="bg-white border border-brand-200 rounded-lg px-4 py-8 text-center">
+    <p class="text-sm text-gray-500">No pending mappings.</p>
+  </div>
+</div>

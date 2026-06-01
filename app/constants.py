@@ -311,6 +311,25 @@ class SourceRunStatus(StrEnum):
     DISABLED = "disabled"
 
 
+class SpecCodeSource(StrEnum):
+    """Provenance of an ``oem_spec_codes.source`` row — how the approved mapping entered
+    the authoritative table.
+
+    Single source of truth for the ``OemSpecCode.source`` string column
+    (validated via ``@validates`` on the model). These are the *stored*
+    provenance values, distinct from the in-memory ``ResolverSource`` Literal
+    (``table``/``llm``/``none``) that describes a single ``resolve()`` outcome.
+
+    - MANUAL: a human typed the mapping directly.
+    - LLM_APPROVED: an LLM proposal that a human approved in the pending queue.
+    - CSV_IMPORT: bulk-loaded from a spreadsheet.
+    """
+
+    MANUAL = "manual"
+    LLM_APPROVED = "llm_approved"
+    CSV_IMPORT = "csv_import"
+
+
 BROWSER_WORKER_SOURCES = frozenset({"icsource", "netcomponents"})
 """api_sources rows backed by queue-driven browser workers, not request/response
 connectors.

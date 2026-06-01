@@ -159,8 +159,13 @@ def test_sighting_source_searched_at(db_session, test_requisition):
     assert sighting.source_type == "netcomponents"
 
 
-def test_nc_search_queue_unique_requirement(db_session, test_requisition):
-    """requirement_id has a unique constraint — can't queue same requirement twice."""
+def test_nc_search_queue_allows_multiple_mpns_per_requirement(db_session, test_requisition):
+    """The legacy per-requirement UNIQUE constraint was removed when the
+    spec-code resolver landed: one requirement can have multiple queue rows
+    (e.g. primary MPN + each resolved AVL MPN). Dedup on
+    ``(requirement_id, normalized_mpn)`` is now enforced at the application
+    layer by ``QueueManager.enqueue_search``, not by the DB.
+    """
     req = test_requisition.requirements[0]
     item1 = NcSearchQueue(
         requirement_id=req.id,
@@ -174,13 +179,14 @@ def test_nc_search_queue_unique_requirement(db_session, test_requisition):
     item2 = NcSearchQueue(
         requirement_id=req.id,
         requisition_id=test_requisition.id,
-        mpn="LM317T",
-        normalized_mpn="LM317T",
+        mpn="GRM188R71H103KA01D",
+        normalized_mpn="GRM188R71H103KA01D",
+        resolved_via_spec_code="SPREJ",
     )
     db_session.add(item2)
-    import pytest as pt
-    import sqlalchemy
+    db_session.commit()  # No IntegrityError — both rows persist.
 
-    with pt.raises(sqlalchemy.exc.IntegrityError):
-        db_session.commit()
-    db_session.rollback()
+    rows = db_session.query(NcSearchQueue).filter_by(requirement_id=req.id).all()
+    assert len(rows) == 2
+    mpns = sorted(r.normalized_mpn for r in rows)
+    assert mpns == ["GRM188R71H103KA01D", "LM317T"]
