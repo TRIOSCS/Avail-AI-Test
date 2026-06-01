@@ -37,40 +37,22 @@ Phase 4: HIGH-BE-1/2 (split god files)
 
 ---
 
-## Phase 1 — HIGH-DB-2: UTCDateTime migration
+## Phase 1 — HIGH-DB-2: UTCDateTime migration — DONE (shipped via #183)
 
-**Goal:** Every `Column(DateTime)` / `Mapped[datetime]` on a timestamp column uses `UTCDateTime` (which maps to PostgreSQL `TIMESTAMPTZ`), so application reads/writes never depend on the implicit local-time interpretation.
+**Status: DONE.** Shipped as PR #183. The actual fix:
 
-**Current state** (re-verified 2026-05-27 against main `7ef11639`):
-- `UTCDateTime` already defined in `app/database.py` (search for `class UTCDateTime`).
-- Already adopted in `app/models/sourcing.py` and `app/models/crm.py` (per CODE_REVIEW_NOTES.md).
-- Not yet adopted across the other ~10 model files.
+- A **symmetric `UTCDateTime`** type in `app/database.py` — `load_dialect_impl` forces
+  PostgreSQL `TIMESTAMPTZ`, and `process_bind_param` normalizes writes to tz-aware UTC
+  (symmetric bind + result). Reads and writes are timezone-aware on both sides.
+- Migration **`085_utcdatetime_timestamptz`** — a guarded conversion of the columns that
+  were still tz-naive, preserving values. Columns that were already deliberately
+  `timezone=True` are left as-is (their per-column `timezone=True` is preserved).
 
-**Scope:**
-1. Audit all `app/models/*.py` for `Column(DateTime` / `Mapped[datetime]` declarations.
-2. Replace with `UTCDateTime` / appropriate column subclass.
-3. Add an Alembic migration converting affected columns to `TIMESTAMPTZ`, preserving values (`AT TIME ZONE 'UTC'` cast where needed).
-4. Audit any callsite that calls `.replace(tzinfo=None)` or `datetime.utcnow()` and uses the value as a column write — those now insert naive values into TZ-aware columns and will surface as Postgres errors.
-
-**PR shape:**
-- **PR-1.1 (foundation):** Audit doc + migration ordering plan. No code change. Maps every model column to its target type. ~50 lines.
-- **PR-1.2 (model migration):** All model files updated to `UTCDateTime` for in-scope columns. No DB migration yet — relies on existing data being TZ-naive but interpretable as UTC. CI green required.
-- **PR-1.3 (Alembic migration):** New migration converting columns to `TIMESTAMPTZ`. Production deploy required. Reversible.
-- **PR-1.4 (callsite cleanup):** Any `datetime.utcnow()` write-site converted to `datetime.now(timezone.utc)`. Use ripgrep audit; expect ~30-50 sites in `tests/` per CODE_REVIEW_NOTES.md HIGH-DEVOPS-5 neighborhood + dozens in `app/`.
-
-**Dependencies:** none.
-
-**Risks:**
-- *Production migration on a live `db-backup` schedule.* PostgreSQL `ALTER TYPE` on TIMESTAMPTZ is O(rows). On AVAIL's current single-user stage this is small, but the migration must be idempotent + reversible.
-- *Naive datetimes inserted post-migration.* Mitigation: PR-1.4 catches the write-side; we'll likely find a few that only fail at runtime — covered by integration tests.
-
-**Checkpoints (review gates):**
-- After PR-1.1 (audit doc) — confirm the column-mapping table before any code changes.
-- After PR-1.3 (migration) — verify the Alembic up/down/up cycle on a fresh database before merging.
-
-**Rollback:** PR-1.3's Alembic migration includes a `downgrade()` that converts back to `TIMESTAMP WITHOUT TIME ZONE`. PR-1.2 and PR-1.4 are pure code changes — revert via `git revert`.
-
-**Estimated total:** 4 PRs, ~500-800 LOC, one session.
+The earlier blanket plan in this doc (PR-1.1 → PR-1.4: "convert all ~197 `Column(DateTime)`
+→ `UTCDateTime` and flip everything to `TIMESTAMPTZ` via one big PR-1.3") was **dropped as
+inaccurate** — it mis-scoped the 38 columns that were intentionally `timezone=True` and
+treated them as needing conversion. The shipped approach (symmetric type + guarded
+per-column migration) is the correct, narrower fix.
 
 ---
 
@@ -265,4 +247,4 @@ These can be slotted in between the four primary phases as appetite allows; they
 
 ## Next step
 
-Pick a phase. Phase 1 (UTCDateTime) is the natural starting point if you want to begin, but Phase 2 (Graph webhook) is the cheapest single PR if you want a quick win first.
+Phase 1 (UTCDateTime) is **done** (shipped via #183). Pick from the remaining phases: Phase 2 (Graph webhook) is the cheapest single PR if you want a quick win first.
