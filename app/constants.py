@@ -9,7 +9,7 @@ Called by: models, routers, services
 Depends on: nothing (leaf module)
 """
 
-from enum import StrEnum
+from enum import StrEnum, nonmember
 
 
 class ProactiveMatchStatus(StrEnum):
@@ -72,6 +72,13 @@ class RequisitionStatus(StrEnum):
     LOST = "lost"
     ARCHIVED = "archived"
     CANCELLED = "cancelled"
+
+    # Statuses considered "done" — excluded from re-archiving and shown under
+    # the Archive filter. Single source of truth for terminal-status checks.
+    # `nonmember` keeps this off the enum's member list (it's a constant, not a
+    # status value). StrEnum members compare equal to their string values, so
+    # `status.in_(RequisitionStatus.TERMINAL)` matches correctly.
+    TERMINAL = nonmember(frozenset({"archived", "won", "lost", "cancelled"}))
 
 
 class SourcingStatus(StrEnum):

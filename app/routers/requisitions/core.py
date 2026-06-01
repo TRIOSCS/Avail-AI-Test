@@ -78,14 +78,7 @@ async def requisition_counts(
     archive_cnt = db.scalar(
         select(sqlfunc.count(Requisition.id)).where(
             *base_filter,
-            Requisition.status.in_(
-                [
-                    RequisitionStatus.ARCHIVED,
-                    RequisitionStatus.WON,
-                    RequisitionStatus.LOST,
-                    RequisitionStatus.CANCELLED,
-                ]
-            ),
+            Requisition.status.in_(RequisitionStatus.TERMINAL),
         )
     )
     return {"total": total or 0, "open": open_cnt or 0, "archive": archive_cnt or 0}
@@ -364,16 +357,7 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
             )
         )
     elif status == "archive":
-        query = query.filter(
-            Requisition.status.in_(
-                [
-                    RequisitionStatus.ARCHIVED,
-                    RequisitionStatus.WON,
-                    RequisitionStatus.LOST,
-                    RequisitionStatus.CANCELLED,
-                ]
-            )
-        )
+        query = query.filter(Requisition.status.in_(RequisitionStatus.TERMINAL))
     elif status:
         statuses = [s.strip() for s in status.split(",") if s.strip()]
         if len(statuses) == 1:
@@ -381,16 +365,7 @@ def _build_requisition_list(q, status, sort, order, limit, offset, user, db):
         else:
             query = query.filter(Requisition.status.in_(statuses))
     else:
-        query = query.filter(
-            Requisition.status.notin_(
-                [
-                    RequisitionStatus.ARCHIVED,
-                    RequisitionStatus.WON,
-                    RequisitionStatus.LOST,
-                    RequisitionStatus.CANCELLED,
-                ]
-            )
-        )
+        query = query.filter(Requisition.status.notin_(RequisitionStatus.TERMINAL))
 
     # Resolve sort column — whitelist to prevent SQL injection
     allowed_sorts = {

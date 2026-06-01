@@ -9,7 +9,9 @@ Depends on: pydantic
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # ── Base Wrappers ───────────────────────────────────────────────────────
 
@@ -211,6 +213,12 @@ class BulkArchiveResponse(BaseModel):
     archived_count: int = 0
     archived_ids: list[int] = Field(default_factory=list)
 
+    @model_validator(mode="after")
+    def _count_matches_ids(self) -> Self:
+        if self.archived_count != len(self.archived_ids):
+            raise ValueError(f"archived_count ({self.archived_count}) != len(archived_ids) ({len(self.archived_ids)})")
+        return self
+
 
 class BatchAssignResponse(BaseModel):
     """Response shape for `/api/requisitions/batch-assign` (admin only)."""
@@ -218,7 +226,13 @@ class BatchAssignResponse(BaseModel):
     ok: bool = True
     assigned_count: int = 0
     assigned_ids: list[int] = Field(default_factory=list)
-    assigned_to: str = ""
+    assigned_to: str
+
+    @model_validator(mode="after")
+    def _count_matches_ids(self) -> Self:
+        if self.assigned_count != len(self.assigned_ids):
+            raise ValueError(f"assigned_count ({self.assigned_count}) != len(assigned_ids) ({len(self.assigned_ids)})")
+        return self
 
 
 class AiFindContactsResponse(BaseModel):

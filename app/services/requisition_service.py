@@ -25,14 +25,6 @@ from ..utils.normalization import (
 )
 from .activity_service import log_activity
 
-_TERMINAL_STATUSES = [
-    RequisitionStatus.ARCHIVED,
-    RequisitionStatus.WON,
-    RequisitionStatus.LOST,
-    RequisitionStatus.CANCELLED,
-]
-
-
 # ---------------------------------------------------------------------------
 # Bulk archive / assign — UPDATE...RETURNING
 # ---------------------------------------------------------------------------
@@ -54,7 +46,7 @@ def bulk_archive_others(db: Session, user_id: int) -> list[int]:
         update(Requisition)
         .where(
             Requisition.created_by != user_id,
-            Requisition.status.notin_(_TERMINAL_STATUSES),
+            Requisition.status.notin_(RequisitionStatus.TERMINAL),
         )
         .values(status=RequisitionStatus.ARCHIVED)
         .returning(Requisition.id)
@@ -72,7 +64,7 @@ def batch_archive_for_user(db: Session, user: User, ids: list[int]) -> list[int]
     """
     conditions = [
         Requisition.id.in_(ids),
-        Requisition.status.notin_(_TERMINAL_STATUSES),
+        Requisition.status.notin_(RequisitionStatus.TERMINAL),
     ]
     if user.role == UserRole.SALES:
         conditions.append(Requisition.created_by == user.id)
