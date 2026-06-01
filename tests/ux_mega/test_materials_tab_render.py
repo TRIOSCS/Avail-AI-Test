@@ -93,14 +93,14 @@ def _ns(**kw):
         (
             "htmx/partials/materials/tabs/price_history.html",
             {
-                "sightings": [
+                "snapshots": [
                     _ns(
                         vendor_name="ACME",
                         price=9.8765,
                         quantity=1_000,
                         currency="USD",
                         source="bb",
-                        seen_at=None,
+                        recorded_at=None,
                     )
                 ],
                 "card": _ns(id=1),
