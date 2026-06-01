@@ -21,7 +21,7 @@
       <td class="py-2 px-3 font-semibold text-gray-900">{{ v.vendor_name }}</td>
       <td class="py-2 px-3">{% if v.is_authorized %}<span class="text-emerald-600 font-medium">Yes</span>{% else %}<span class="text-gray-400">-</span>{% endif %}</td>
       <td class="py-2 px-3 text-right">{% if v.last_price %}<span class="text-emerald-700 font-medium">${{ "%.4f"|format(v.last_price) }}</span>{% else %}<span class="text-gray-400">-</span>{% endif %}</td>
-      <td class="py-2 px-3 text-right">{{ "{:,}"|format(v.last_qty) if v.last_qty else '-' }}</td>
+      <td class="py-2 px-3 text-right">{{ "{:,}".format(v.last_qty) if v.last_qty else '-' }}</td>
       <td class="py-2 px-3">{{ v.last_currency or 'USD' }}</td>
       <td class="py-2 px-3">{{ v.first_seen.strftime('%Y-%m-%d') if v.first_seen else '-' }}</td>
       <td class="py-2 px-3">{{ v.last_seen.strftime('%Y-%m-%d') if v.last_seen else '-' }}</td>
