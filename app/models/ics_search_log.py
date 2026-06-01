@@ -9,8 +9,9 @@ Depends on: ics_search_queue table
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Column, ForeignKey, Index, Integer, String, Text
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -19,7 +20,7 @@ class IcsSearchLog(Base):
 
     id = Column(Integer, primary_key=True)
     queue_id = Column(Integer, ForeignKey("ics_search_queue.id", ondelete="CASCADE"), nullable=False)
-    searched_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    searched_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     duration_ms = Column(Integer)
     results_found = Column(Integer)
     sightings_created = Column(Integer)

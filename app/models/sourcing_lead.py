@@ -26,7 +26,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     Column,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -37,6 +36,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -61,8 +61,8 @@ class SourcingLead(Base):
     primary_source_type = Column(String(64), nullable=False)
     primary_source_name = Column(String(128), nullable=False)
     source_reference = Column(String(1000))
-    source_first_seen_at = Column(DateTime(timezone=True))
-    source_last_seen_at = Column(DateTime(timezone=True))
+    source_first_seen_at = Column(UTCDateTime(timezone=True))
+    source_last_seen_at = Column(UTCDateTime(timezone=True))
 
     contact_name = Column(String(255))
     contact_email = Column(String(255))
@@ -88,16 +88,16 @@ class SourcingLead(Base):
     vendor_safety_band = Column(String(24))
     vendor_safety_summary = Column(Text)
     vendor_safety_flags = Column(JSON, nullable=False, default=list)
-    vendor_safety_last_checked_at = Column(DateTime(timezone=True))
+    vendor_safety_last_checked_at = Column(UTCDateTime(timezone=True))
 
     buyer_status = Column(String(32), nullable=False, default="new")
     buyer_owner_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), index=True)
-    last_buyer_action_at = Column(DateTime(timezone=True))
+    last_buyer_action_at = Column(UTCDateTime(timezone=True))
     buyer_feedback_summary = Column(Text)
 
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime(timezone=True),
+        UTCDateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -137,7 +137,7 @@ class LeadEvidence(Base):
     part_number_observed = Column(String(255))
     vendor_name_observed = Column(String(255))
     observed_text = Column(Text)
-    observed_at = Column(DateTime(timezone=True))
+    observed_at = Column(UTCDateTime(timezone=True))
     freshness_age_days = Column(Float)
 
     weight = Column(Float)
@@ -147,7 +147,7 @@ class LeadEvidence(Base):
     source_reliability_band = Column(String(16))
     verification_state = Column(String(32), default="raw")
 
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     lead = relationship("SourcingLead", back_populates="evidence")
 
@@ -170,7 +170,7 @@ class LeadFeedbackEvent(Base):
     contact_attempt_count = Column(Integer, default=0)
 
     created_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), index=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     lead = relationship("SourcingLead", back_populates="feedback_events")
 

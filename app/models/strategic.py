@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -21,6 +20,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -31,13 +31,13 @@ class StrategicVendor(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="CASCADE"), nullable=False)
     claimed_at = Column(
-        DateTime(timezone=True),
+        UTCDateTime(timezone=True),
         nullable=False,
         default=lambda: datetime.now(timezone.utc),
     )
-    last_offer_at = Column(DateTime(timezone=True), nullable=True)
-    expires_at = Column(DateTime(timezone=True), nullable=False)
-    released_at = Column(DateTime(timezone=True), nullable=True)
+    last_offer_at = Column(UTCDateTime(timezone=True), nullable=True)
+    expires_at = Column(UTCDateTime(timezone=True), nullable=False)
+    released_at = Column(UTCDateTime(timezone=True), nullable=True)
     release_reason = Column(String(20), nullable=True)
 
     # Relationships

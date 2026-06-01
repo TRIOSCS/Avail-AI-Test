@@ -4,9 +4,10 @@ Called by: price_snapshot_service.record_price_snapshot()
 Depends on: MaterialCard (FK)
 """
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, Numeric, String
+from sqlalchemy import Column, ForeignKey, Index, Integer, Numeric, String
 from sqlalchemy.sql import func
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -21,4 +22,4 @@ class MaterialPriceSnapshot(Base):
     currency = Column(String(3), default="USD")
     quantity = Column(Integer, nullable=True)
     source = Column(String(50), nullable=False)
-    recorded_at = Column(DateTime, server_default=func.now(), index=True)
+    recorded_at = Column(UTCDateTime, server_default=func.now(), index=True)
