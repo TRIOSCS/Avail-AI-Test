@@ -14,7 +14,6 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -24,6 +23,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -39,7 +39,7 @@ class CustomerPartHistory(Base):
     mpn = Column(String(100), nullable=False)  # Denormalized for display
     source = Column(String(50), nullable=False)  # salesforce_import, avail_offer, avail_quote_won, acctivate_po
 
-    last_purchased_at = Column(DateTime)
+    last_purchased_at = Column(UTCDateTime)
     purchase_count = Column(Integer, default=1)
     last_unit_price = Column(Numeric(12, 4))
     avg_unit_price = Column(Numeric(12, 4))
@@ -47,9 +47,9 @@ class CustomerPartHistory(Base):
     total_quantity = Column(Integer, default=0)
     source_ref = Column(String(255))  # SF opportunity ID, AVAIL offer ID, PO number
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )

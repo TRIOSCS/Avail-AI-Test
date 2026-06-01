@@ -1,4 +1,5 @@
-"""test_nightly_coverage_connectors.py — Coverage for ebay, mouser, digikey, oemsecrets connectors.
+"""test_nightly_coverage_connectors.py — Coverage for ebay, mouser, digikey, oemsecrets
+connectors.
 
 Targets:
 - app/connectors/ebay.py: lines 56-156

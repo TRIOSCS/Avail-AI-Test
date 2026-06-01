@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     Boolean,
     Column,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -24,6 +23,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import relationship
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -37,7 +37,7 @@ class KnowledgeEntry(Base):
         String(20), nullable=False, default="manual"
     )  # manual, ai_generated, system, email_parsed, teams_bot
     confidence = Column(Float, nullable=True)  # 0.0-1.0 for AI-generated
-    expires_at = Column(DateTime(timezone=True), nullable=True)
+    expires_at = Column(UTCDateTime(timezone=True), nullable=True)
     is_resolved = Column(Boolean, default=False, nullable=False)  # Q&A: marks question as answered
     parent_id = Column(Integer, ForeignKey("knowledge_entries.id", ondelete="SET NULL"), nullable=True)
     assigned_to_ids = Column(JSON, default=list)  # user IDs for Q&A routing
@@ -53,13 +53,13 @@ class KnowledgeEntry(Base):
     requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True)
 
     # Phase 2: Teams Q&A routing
-    nudged_at = Column(DateTime(timezone=True), nullable=True)
-    delivered_at = Column(DateTime(timezone=True), nullable=True)
+    nudged_at = Column(UTCDateTime(timezone=True), nullable=True)
+    delivered_at = Column(UTCDateTime(timezone=True), nullable=True)
     answered_via = Column(String(10), nullable=True)  # 'web' or 'teams'
 
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(UTCDateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
-        DateTime(timezone=True),
+        UTCDateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )

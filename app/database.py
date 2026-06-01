@@ -4,7 +4,7 @@ All naive datetimes from PostgreSQL are auto-tagged as UTC via event listener to
 naive-vs-aware comparison errors.
 """
 
-from datetime import timezone
+from datetime import datetime, timezone
 
 from sqlalchemy import DateTime, TypeDecorator, create_engine
 from sqlalchemy.orm import sessionmaker
@@ -13,10 +13,38 @@ from .config import settings
 
 
 class UTCDateTime(TypeDecorator):
-    """DateTime type that ensures UTC timezone on load."""
+    """DateTime that stores and returns timezone-aware UTC values.
+
+    Maps to ``TIMESTAMP WITH TIME ZONE`` on every dialect (via
+    ``load_dialect_impl``) so column storage is uniform regardless of whether a
+    column was declared ``UTCDateTime`` or ``UTCDateTime(timezone=True)``.
+
+    Normalizes on both directions:
+    - write (``process_bind_param``): naive values are assumed UTC; aware values
+      are converted to UTC. This closes the silent-corruption gap where a naive
+      *local* time would otherwise be stored verbatim and later mislabeled UTC.
+    - read (``process_result_value``): naive values coming back (legacy rows,
+      SQLite) are tagged UTC.
+
+    Net effect: the application layer always sees aware UTC datetimes.
+    """
 
     impl = DateTime
     cache_ok = True
+
+    def load_dialect_impl(self, dialect):
+        # Force TIMESTAMP WITH TIME ZONE uniformly; on SQLite the timezone flag
+        # is ignored by the dialect (values round-trip through bind/result).
+        return dialect.type_descriptor(DateTime(timezone=True))
+
+    def process_bind_param(self, value, dialect):
+        # Only normalize real datetimes; strings/None pass through (callers may
+        # bind ISO strings or NULL, and the dialect handles those).
+        if not isinstance(value, datetime):
+            return value
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
 
     def process_result_value(self, value, dialect):
         if value is not None and value.tzinfo is None:

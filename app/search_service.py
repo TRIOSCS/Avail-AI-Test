@@ -1616,7 +1616,7 @@ def _get_material_history(material_card_ids: list[int], fresh_vendors: set, db: 
 
 def _history_to_result(h: dict, now: datetime) -> dict:
     last_seen = h["last_seen"]
-    age_days = (now.replace(tzinfo=None) - last_seen.replace(tzinfo=None)).days if last_seen else 999
+    age_days = (now - last_seen).days if last_seen else 999
 
     if age_days < 7:
         base = 55

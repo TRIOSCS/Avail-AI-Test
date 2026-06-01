@@ -8,7 +8,6 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     JSON,
     Column,
-    DateTime,
     ForeignKey,
     Index,
     Integer,
@@ -18,6 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship, validates
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -44,18 +44,18 @@ class Quote(Base):
     notes = Column(Text)
 
     status = Column(String(20), default="draft")
-    sent_at = Column(DateTime)
-    followup_alert_sent_at = Column(DateTime(timezone=True), nullable=True)
+    sent_at = Column(UTCDateTime)
+    followup_alert_sent_at = Column(UTCDateTime(timezone=True), nullable=True)
     result = Column(String(20))
     result_reason = Column(String(255))
     result_notes = Column(Text)
-    result_at = Column(DateTime)
+    result_at = Column(UTCDateTime)
     won_revenue = Column(Numeric(12, 2))
 
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
