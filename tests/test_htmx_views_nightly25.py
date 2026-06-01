@@ -189,8 +189,8 @@ class TestOfferChangelogDirect:
         req = _make_req(db_session, test_user)
         offer = _make_offer(db_session, req, test_user)
         mock_req = _mock_get_request(f"/v2/partials/offers/{offer.id}/changelog")
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("changelog")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("changelog")
             result = await offer_changelog(request=mock_req, offer_id=offer.id, user=test_user, db=db_session)
         assert result.status_code == 200
 
@@ -216,8 +216,8 @@ class TestRfqComposeGetDirect:
 
         req = _make_req(db_session, test_user)
         mock_req = _mock_get_request(f"/v2/partials/requisitions/{req.id}/rfq-compose")
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("rfq compose")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("rfq compose")
             result = await rfq_compose(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
 
@@ -298,8 +298,8 @@ class TestSendFollowUpHtmxDirect:
             path=f"/v2/partials/follow-ups/{contact.id}/send",
             fields={"body": "Follow-up message"},
         )
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("sent OK")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("sent OK")
             result = await send_follow_up_htmx(request=mock_req, contact_id=contact.id, user=test_user, db=db_session)
         assert result.status_code == 200
         db_session.refresh(contact)
@@ -330,10 +330,10 @@ class TestSearchRunDirect:
         mock_req.query_params.get = lambda k, d=None: d
         with (
             patch("app.routers.htmx_views._get_enabled_sources", return_value=[]) as _src,
-            patch("app.routers.htmx_views.templates") as mock_tpl,
+            patch("app.routers.htmx_views.template_response") as mock_tpl,
             patch("app.utils.async_helpers.safe_background_task", new_callable=AsyncMock),
         ):
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("results shell")
+            mock_tpl.return_value = HTMLResponse("results shell")
             result = await search_run(
                 request=mock_req,
                 mpn="LM317T",
@@ -412,7 +412,7 @@ class TestSearchFilterDirect:
         card_tpl.render.return_value = "<div>card</div>"
         with (
             patch("app.routers.htmx_views._get_cached_search_results", return_value=cached),
-            patch("app.routers.htmx_views.templates") as mock_tpl,
+            patch("app.routers.htmx_views.template_response") as mock_tpl,
         ):
             mock_tpl.get_template.return_value = card_tpl
             result = await search_filter(
@@ -437,8 +437,8 @@ class TestRequisitionPickerDirect:
 
         req = _make_req(db_session, test_user)
         mock_req = _mock_get_request("/v2/partials/search/requisition-picker")
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("picker")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("picker")
             result = await requisition_picker(
                 request=mock_req,
                 mpn="LM317T",
@@ -459,8 +459,8 @@ class TestFindByPartPartialDirect:
         from app.routers.htmx_views import find_by_part_partial
 
         mock_req = _mock_get_request("/v2/partials/vendors/find-by-part")
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("find by part")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("find by part")
             result = await find_by_part_partial(
                 request=mock_req,
                 mpn="",
@@ -478,10 +478,10 @@ class TestFindByPartPartialDirect:
 
         mock_req = _mock_get_request("/v2/partials/vendors/find-by-part")
         with (
-            patch("app.routers.htmx_views.templates") as mock_tpl,
+            patch("app.routers.htmx_views.template_response") as mock_tpl,
             patch("app.services.vendor_affinity_service.find_vendor_affinity", return_value=[]),
         ):
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("find by part mpn")
+            mock_tpl.return_value = HTMLResponse("find by part mpn")
             result = await find_by_part_partial(
                 request=mock_req,
                 mpn="LM317T",

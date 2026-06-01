@@ -1259,17 +1259,9 @@ async def requisition_tab(
         return template_response("htmx/partials/requisitions/tabs/responses.html", ctx)
 
     else:  # activity
-        from ..models.offers import Contact as RfqContact
         from ..services.activity_service import get_requisition_activities
 
-        contacts = (
-            db.query(RfqContact)
-            .filter(RfqContact.requisition_id == req_id)
-            .order_by(RfqContact.created_at.desc())
-            .all()
-        )
         show_all = request.query_params.get("show_all") == "1"
-        ctx["contacts"] = contacts
         ctx["activities"] = get_requisition_activities(req_id, db, meaningful_only=not show_all)
         ctx["show_all"] = show_all
         ctx["req"] = req
@@ -2674,8 +2666,8 @@ async def follow_ups_list_partial(
     now = datetime.now(tz.utc)
     follow_ups = []
     for c in stale:
-        ca = c.created_at.replace(tzinfo=None) if c.created_at else now.replace(tzinfo=None)
-        days_waiting = (now.replace(tzinfo=None) - ca).days
+        ca = c.created_at if c.created_at else now
+        days_waiting = (now - ca).days
         follow_ups.append(
             {
                 "contact_id": c.id,
@@ -8900,15 +8892,18 @@ async def parts_list_partial(
     offset = max(0, offset)
     limit = max(1, min(200, limit))
 
-    # Validate date filters
+    # Validate + parse date filters into datetimes (bind real datetimes, not
+    # raw strings, so UTCDateTime columns receive UTC-aware values)
+    date_from_dt = None
+    date_to_dt = None
     if date_from:
         try:
-            datetime.strptime(date_from, "%Y-%m-%d")
+            date_from_dt = datetime.strptime(date_from, "%Y-%m-%d")
         except ValueError:
             date_from = ""
     if date_to:
         try:
-            datetime.strptime(date_to, "%Y-%m-%d")
+            date_to_dt = datetime.strptime(date_to, "%Y-%m-%d")
         except ValueError:
             date_to = ""
 
@@ -8954,10 +8949,10 @@ async def parts_list_partial(
         query = query.filter(Requirement.sourcing_status == status)
     if owner:
         query = query.filter(Requisition.claimed_by_id == owner)
-    if date_from:
-        query = query.filter(Requirement.created_at >= date_from)
-    if date_to:
-        query = query.filter(Requirement.created_at <= date_to)
+    if date_from_dt:
+        query = query.filter(Requirement.created_at >= date_from_dt)
+    if date_to_dt:
+        query = query.filter(Requirement.created_at <= date_to_dt)
 
     total = query.count()
 

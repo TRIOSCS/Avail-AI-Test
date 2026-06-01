@@ -9,12 +9,28 @@ Depends on: app/template_env.py, conftest.py
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.template_env import (
     _elapsed_seconds,
     _fmtdate_filter,
     _timeago_filter,
     _timesince_filter,
+    template_response,
 )
+
+
+class TestTemplateResponse:
+    """The helper's only enforced invariant: 'request' must be in context."""
+
+    def test_raises_when_request_missing_from_context(self):
+        with pytest.raises(ValueError, match="must be present"):
+            template_response("any/template.html", {"user": "alice"})
+
+    def test_raises_when_request_key_is_none(self):
+        with pytest.raises(ValueError, match="must be present"):
+            template_response("any/template.html", {"request": None})
+
 
 # ═══════════════════════════════════════════════════════════════════════
 #  _elapsed_seconds — helper function

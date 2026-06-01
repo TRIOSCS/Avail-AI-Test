@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     Column,
     Date,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -23,6 +22,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -60,12 +60,12 @@ class UnifiedScoreSnapshot(Base):
     # AI blurb
     ai_blurb_strength = Column(Text)
     ai_blurb_improvement = Column(Text)
-    ai_blurb_generated_at = Column(DateTime)
+    ai_blurb_generated_at = Column(UTCDateTime)
 
     # Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )

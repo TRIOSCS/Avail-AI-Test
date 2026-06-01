@@ -218,3 +218,15 @@ def _part_description(obj) -> str:
 
 
 templates.env.filters["part_description"] = _part_description
+
+
+# ── Jinja2 Globals ──────────────────────────────────────────────────
+
+
+def _now() -> datetime:
+    """Current UTC time — for relative date grouping in templates (e.g. the requisition
+    Activity tab's Today/Yesterday timeline headers)."""
+    return datetime.now(timezone.utc)
+
+
+templates.env.globals["now"] = _now

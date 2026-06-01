@@ -174,8 +174,8 @@ async def sightings_list(
 
     top_vendors = {}
     coverage_map = {}
-    # Stale threshold uses naive datetime for SQLite compat
-    stale_threshold = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(days=settings.sighting_stale_days)
+    # Stale threshold is UTC-aware; UTCDateTime columns read back aware too
+    stale_threshold = datetime.now(timezone.utc) - timedelta(days=settings.sighting_stale_days)
     stale_req_ids: set[int] = set()
 
     if requirements:
@@ -208,7 +208,7 @@ async def sightings_list(
             last = activity_map.get(rid)
             if last is None:
                 stale_req_ids.add(rid)
-            elif last.replace(tzinfo=None) < stale_threshold:
+            elif last < stale_threshold:
                 stale_req_ids.add(rid)
 
         # Fulfillment coverage per requirement (Phase 2)
@@ -432,7 +432,7 @@ async def sightings_detail(
         # Intelligence fields
         age_days = None
         if s.newest_sighting_at:
-            age_days = (datetime.now(timezone.utc).replace(tzinfo=None) - s.newest_sighting_at).days
+            age_days = (datetime.now(timezone.utc) - s.newest_sighting_at).days
 
         lead_explanation = explain_lead(
             vendor_name=s.vendor_name,
@@ -504,7 +504,7 @@ async def sightings_detail(
             .scalar()
         )
         if last_rfq:
-            days_since = (datetime.now(timezone.utc).replace(tzinfo=None) - last_rfq).days
+            days_since = (datetime.now(timezone.utc) - last_rfq).days
             if days_since > 3:
                 suggested_action = f"RFQs pending for {days_since} days — follow up"
             else:

@@ -28,7 +28,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     Column,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -46,6 +45,7 @@ from ..constants import (
     LineIssueType,
     SOVerificationStatus,
 )
+from ..database import UTCDateTime
 from .base import Base
 
 # Re-export enums so existing `from app.models.buy_plan import BuyPlanStatus` still works
@@ -98,41 +98,41 @@ class BuyPlan(Base):
     # ── Approval
     auto_approved = Column(Boolean, default=False)
     approved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    approved_at = Column(DateTime)
+    approved_at = Column(UTCDateTime)
     approval_notes = Column(Text)
 
     # ── SO verification
     so_verified_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    so_verified_at = Column(DateTime)
+    so_verified_at = Column(UTCDateTime)
     so_rejection_note = Column(Text)
 
     # ── Submission
     submitted_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    submitted_at = Column(DateTime)
+    submitted_at = Column(UTCDateTime)
     salesperson_notes = Column(Text)
 
     # ── Completion
-    completed_at = Column(DateTime)
+    completed_at = Column(UTCDateTime)
     case_report = Column(Text)
 
     # ── Cancellation / halt
-    cancelled_at = Column(DateTime)
+    cancelled_at = Column(UTCDateTime)
     cancelled_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     cancellation_reason = Column(Text)
     halted_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    halted_at = Column(DateTime)
+    halted_at = Column(UTCDateTime)
 
     # ── Stock sale flag
     is_stock_sale = Column(Boolean, default=False)
 
     # ── Token-based approval
     approval_token = Column(String(100), unique=True)
-    token_expires_at = Column(DateTime)
+    token_expires_at = Column(UTCDateTime)
 
     # ── Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -204,12 +204,12 @@ class BuyPlanLine(Base):
 
     # ── PO confirmation
     po_number = Column(String(100))
-    estimated_ship_date = Column(DateTime)
-    po_confirmed_at = Column(DateTime)
+    estimated_ship_date = Column(UTCDateTime)
+    po_confirmed_at = Column(UTCDateTime)
 
     # ── PO verification
     po_verified_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    po_verified_at = Column(DateTime)
+    po_verified_at = Column(UTCDateTime)
     po_rejection_note = Column(Text)
 
     # ── Issue tracking
@@ -221,9 +221,9 @@ class BuyPlanLine(Base):
     manager_note = Column(Text)
 
     # ── Timestamps
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -266,7 +266,7 @@ class VerificationGroupMember(Base):
     id = Column(Integer, primary_key=True)
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False, unique=True)
     is_active = Column(Boolean, default=True, nullable=False)
-    added_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    added_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     user = relationship("User", foreign_keys=[user_id])
 

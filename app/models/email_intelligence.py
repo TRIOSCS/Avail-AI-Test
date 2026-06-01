@@ -13,7 +13,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     Column,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -21,6 +20,7 @@ from sqlalchemy import (
     String,
 )
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -46,7 +46,7 @@ class EmailIntelligence(Base):
 
     # Email metadata
     subject = Column(String(500))
-    received_at = Column(DateTime)
+    received_at = Column(UTCDateTime)
     conversation_id = Column(String(255), index=True)
 
     # Processing state
@@ -56,7 +56,7 @@ class EmailIntelligence(Base):
     # Thread summary (Phase 4)
     thread_summary = Column(JSON)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("ix_email_intel_user_received", "user_id", "received_at"),

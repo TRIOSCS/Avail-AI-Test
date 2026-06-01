@@ -6,7 +6,6 @@ from sqlalchemy import (
     Boolean,
     Column,
     Date,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -15,6 +14,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -44,7 +44,7 @@ class VendorMetricsSnapshot(Base):
     rfqs_answered = Column(Integer, default=0)
     pos_in_window = Column(Integer, default=0)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
 
@@ -78,9 +78,9 @@ class BuyerLeaderboardSnapshot(Base):
 
     rank = Column(Integer)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -104,8 +104,8 @@ class StockListHash(Base):
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"))
     file_name = Column(String(500))
     row_count = Column(Integer)
-    first_seen_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
-    last_seen_at = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    first_seen_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    last_seen_at = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     upload_count = Column(Integer, default=1)
 
     user = relationship("User", foreign_keys=[user_id])
@@ -177,9 +177,9 @@ class AvailScoreSnapshot(Base):
     qualified = Column(Boolean, default=False)  # meets minimum activity threshold
     bonus_amount = Column(Float, default=0)  # $500/$250 or 0
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -247,9 +247,9 @@ class MultiplierScoreSnapshot(Base):
     qualified = Column(Boolean, default=False)
     bonus_amount = Column(Float, default=0)  # $500/$250 or 0
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -281,11 +281,11 @@ class BuyerVendorStats(Base):
     offers_won = Column(Integer, default=0)
     win_rate = Column(Float)
     avg_response_hours = Column(Float)
-    last_contact_at = Column(DateTime)
+    last_contact_at = Column(UTCDateTime)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )

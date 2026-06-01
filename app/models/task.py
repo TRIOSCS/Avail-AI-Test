@@ -12,7 +12,6 @@ from datetime import datetime, timezone
 
 from sqlalchemy import (
     Column,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -22,6 +21,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -57,11 +57,11 @@ class RequisitionTask(Base):
     completion_note = Column(Text, nullable=True)  # note from assignee on task resolution
 
     # Dates
-    due_at = Column(DateTime(timezone=True), nullable=True)
-    completed_at = Column(DateTime(timezone=True), nullable=True)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    due_at = Column(UTCDateTime(timezone=True), nullable=True)
+    completed_at = Column(UTCDateTime(timezone=True), nullable=True)
+    created_at = Column(UTCDateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
     updated_at = Column(
-        DateTime(timezone=True),
+        UTCDateTime(timezone=True),
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )

@@ -6,7 +6,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     Column,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -17,6 +16,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import relationship, validates
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -46,7 +46,7 @@ class VendorCard(Base):
     hq_country = Column(String(100))
     industry = Column(String(255))
 
-    last_enriched_at = Column(DateTime)
+    last_enriched_at = Column(UTCDateTime)
     enrichment_source = Column(String(50))
 
     cancellation_rate = Column(Float)
@@ -57,44 +57,44 @@ class VendorCard(Base):
     total_wins = Column(Integer, default=0)
     ghost_rate = Column(Float)
     response_velocity_hours = Column(Float)
-    last_contact_at = Column(DateTime)
+    last_contact_at = Column(UTCDateTime)
     relationship_months = Column(Integer)
     engagement_score = Column(Float)
-    engagement_computed_at = Column(DateTime)
+    engagement_computed_at = Column(UTCDateTime)
 
     # Unified vendor score (order advancement based)
     vendor_score = Column(Float)  # 0-100 unified score, or None
     advancement_score = Column(Float)  # 0-100 raw advancement component
     is_new_vendor = Column(Boolean, default=True)
-    vendor_score_computed_at = Column(DateTime)
+    vendor_score_computed_at = Column(UTCDateTime)
 
     # v1.3.0: Vendor scorecard fields
     avg_response_hours = Column(Float)
     overall_win_rate = Column(Float)
     total_pos = Column(Integer, default=0)
     total_revenue = Column(Numeric(12, 4), default=0)
-    last_activity_at = Column(DateTime)
+    last_activity_at = Column(UTCDateTime)
 
     # AI-generated material intelligence
     brand_tags = Column(JSONB, default=list)
     commodity_tags = Column(JSONB, default=list)
-    material_tags_updated_at = Column(DateTime)
+    material_tags_updated_at = Column(UTCDateTime)
 
     # Email health scoring (Phase 5)
     email_health_score = Column(Float)  # 0-100 composite score
-    email_health_computed_at = Column(DateTime)
+    email_health_computed_at = Column(UTCDateTime)
     response_rate = Column(Float)  # 0.0-1.0 ratio
     quote_quality_rate = Column(Float)  # 0.0-1.0 ratio
 
     # Deep enrichment tracking
-    deep_enrichment_at = Column(DateTime)
+    deep_enrichment_at = Column(UTCDateTime)
 
     # Full-text search (PostgreSQL tsvector, managed by trigger)
     search_vector = Column(TSVECTOR)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -152,18 +152,18 @@ class VendorContact(Base):
     is_verified = Column(Boolean, default=False)
     confidence = Column(Integer, default=50)
     interaction_count = Column(Integer, default=0)
-    last_interaction_at = Column(DateTime)
-    first_seen_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    last_seen_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_interaction_at = Column(UTCDateTime)
+    first_seen_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    last_seen_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     # Contact intelligence (computed nightly)
     relationship_score = Column(Float)  # 0-100
     activity_trend = Column(String(20))  # warming/stable/cooling/dormant
-    score_computed_at = Column(DateTime)
+    score_computed_at = Column(UTCDateTime)
 
     # OOO detection (from AI email classification)
     is_ooo = Column(Boolean, default=False)
-    ooo_return_date = Column(DateTime)
+    ooo_return_date = Column(UTCDateTime)
 
     vendor_card = relationship("VendorCard", back_populates="vendor_contacts")
 
@@ -194,7 +194,7 @@ class VendorReview(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     rating = Column(Integer, nullable=False)
     comment = Column(String(500))
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     vendor_card = relationship("VendorCard", back_populates="reviews")
     user = relationship("User")

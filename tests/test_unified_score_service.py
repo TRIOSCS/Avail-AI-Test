@@ -703,8 +703,8 @@ class TestRefreshBlurbs:
         from app.services.unified_score_service import _refresh_blurbs
 
         month = date(2026, 2, 1)
-        # SQLite strips timezone info, so use naive UTC to match cutoff comparison
-        stale_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(hours=3)
+        # UTCDateTime columns read back UTC-aware; keep seeded values aware too
+        stale_time = datetime.now(timezone.utc) - timedelta(hours=3)
         snap = UnifiedScoreSnapshot(
             user_id=test_user.id,
             month=month,
@@ -730,8 +730,8 @@ class TestRefreshBlurbs:
         ]
 
         blurb_return = {"strength": "New strength!", "improvement": "New improvement!"}
-        # Patch datetime.now inside the service so cutoff is also naive
-        fake_now = datetime.now(timezone.utc).replace(tzinfo=None)
+        # Patch datetime.now in the service so cutoff is aware UTC
+        fake_now = datetime.now(timezone.utc)
         with (
             patch("app.services.unified_score_service.datetime") as mock_dt,
             patch("app.services.unified_score_service._generate_blurb", return_value=blurb_return),
@@ -749,8 +749,8 @@ class TestRefreshBlurbs:
         from app.services.unified_score_service import _refresh_blurbs
 
         month = date(2026, 2, 1)
-        # SQLite strips timezone info, so use naive UTC to match cutoff comparison
-        fresh_time = datetime.now(timezone.utc).replace(tzinfo=None) - timedelta(minutes=30)
+        # UTCDateTime columns read back UTC-aware; keep seeded values aware too
+        fresh_time = datetime.now(timezone.utc) - timedelta(minutes=30)
         snap = UnifiedScoreSnapshot(
             user_id=test_user.id,
             month=month,
@@ -775,8 +775,8 @@ class TestRefreshBlurbs:
             }
         ]
 
-        # Patch datetime.now inside the service so cutoff is also naive
-        fake_now = datetime.now(timezone.utc).replace(tzinfo=None)
+        # Patch datetime.now in the service so cutoff is aware UTC
+        fake_now = datetime.now(timezone.utc)
         with (
             patch("app.services.unified_score_service.datetime") as mock_dt,
             patch("app.services.unified_score_service._generate_blurb") as mock_gen,

@@ -159,6 +159,35 @@ def test_update_requirement_sales_note_logs(client, db_session, test_requisition
     assert len(rows) == 1
 
 
+def test_reopen_task_logs_task_reopened(db_session, test_requisition, test_user):
+    """Reopening a task writes a task_reopened activity row on its requisition."""
+    from app.constants import TaskStatus
+    from app.models import RequisitionTask
+    from app.services.task_service import reopen_task
+
+    task = RequisitionTask(
+        requisition_id=test_requisition.id,
+        title="Follow up with vendor",
+        created_by=test_user.id,
+        assigned_to_id=test_user.id,
+        status=TaskStatus.DONE,
+    )
+    db_session.add(task)
+    db_session.flush()
+
+    reopen_task(
+        db=db_session,
+        task_id=task.id,
+        user_id=test_user.id,
+    )
+    db_session.commit()
+
+    rows = _activity_rows(db_session, test_requisition.id, ActivityType.TASK_REOPENED)
+    assert len(rows) == 1
+    assert rows[0].user_id == test_user.id
+    assert rows[0].details["task_id"] == task.id
+
+
 def test_mark_task_done_logs_task_completed(client, db_session, test_requisition, test_user):
     """Marking a task done via the htmx route writes a task_completed row."""
     from app.models import RequisitionTask

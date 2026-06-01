@@ -2,9 +2,10 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, Integer, String, Text
 from sqlalchemy.orm import relationship, validates
 
+from ..database import UTCDateTime
 from ..utils.encrypted_type import EncryptedText
 from .base import Base
 
@@ -21,14 +22,14 @@ class User(Base):
     access_token = Column(EncryptedText)
     # PBKDF2 password hash stored as "<salt_b64>$<hash_b64>", encrypted at rest
     password_hash = Column(EncryptedText)
-    token_expires_at = Column(DateTime)
+    token_expires_at = Column(UTCDateTime)
     email_signature = Column(Text)
-    last_email_scan = Column(DateTime)
-    last_inbox_scan = Column(DateTime)
-    last_contacts_sync = Column(DateTime)
+    last_email_scan = Column(UTCDateTime)
+    last_inbox_scan = Column(UTCDateTime)
+    last_contacts_sync = Column(UTCDateTime)
     m365_connected = Column(Boolean, default=False)
     m365_error_reason = Column(String(255))
-    m365_last_healthy = Column(DateTime)
+    m365_last_healthy = Column(UTCDateTime)
     commodity_tags = Column(JSON, default=list)
 
     # Mailbox settings (from Graph /me/mailboxSettings)
@@ -40,7 +41,7 @@ class User(Base):
     eight_by_eight_extension = Column(String(20))
     eight_by_eight_enabled = Column(Boolean, default=False)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     requisitions = relationship("Requisition", back_populates="creator", foreign_keys="[Requisition.created_by]")
     contacts = relationship("Contact", back_populates="user")

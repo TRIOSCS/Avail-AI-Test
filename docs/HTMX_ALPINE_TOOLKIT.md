@@ -710,7 +710,7 @@ async def vendors_page(request: Request, db: Session = Depends(get_db)):
     template = "htmx/partials/vendors/list.html"
     if "HX-Request" not in request.headers:
         template = "htmx/base_page.html"  # full page wrapper
-    return templates.TemplateResponse(template, {"request": request, "vendors": vendors})
+    return template_response(template, {"request": request, "vendors": vendors})
 ```
 
 ---

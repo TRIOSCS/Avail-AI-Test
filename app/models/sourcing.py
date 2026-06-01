@@ -7,7 +7,6 @@ from sqlalchemy import (
     Boolean,
     Column,
     Date,
-    DateTime,
     FetchedValue,
     Float,
     ForeignKey,
@@ -44,21 +43,21 @@ class Requisition(Base):
     status = Column(String(50), default="active")
     cloned_from_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"))
     created_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     deadline = Column(String(50))  # ISO date or "ASAP"
-    last_searched_at = Column(DateTime)
-    offers_viewed_at = Column(DateTime)
+    last_searched_at = Column(UTCDateTime)
+    offers_viewed_at = Column(UTCDateTime)
 
     # Buyer claim — which buyer picked up this requisition for sourcing
     claimed_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    claimed_at = Column(DateTime)
+    claimed_at = Column(UTCDateTime)
 
     # Sales context — helps buyers prioritize
     urgency = Column(String(20), default="normal")  # normal | hot | critical
     opportunity_value = Column(Numeric(12, 2))  # Estimated deal value in USD
 
     # Audit trail
-    updated_at = Column(DateTime)
+    updated_at = Column(UTCDateTime)
     updated_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
 
     creator = relationship("User", back_populates="requisitions", foreign_keys=[created_by])
@@ -120,7 +119,7 @@ class Requirement(Base):
     sourcing_status = Column(String(20), default="open")  # open | sourcing | offered | quoted | won | lost
     priority_score = Column(Float, nullable=True)  # AI-computed 0-100 for sort order
     assigned_buyer_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     last_searched_at = Column(UTCDateTime)
 
     requisition = relationship("Requisition", back_populates="requirements")
@@ -171,7 +170,7 @@ class Manufacturer(Base):
     canonical_name = Column(String(255), nullable=False, unique=True, index=True)
     aliases = Column(JSON, default=list)
     website = Column(String(500))
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class Sighting(Base):
@@ -208,14 +207,14 @@ class Sighting(Base):
     source_company_id = Column(Integer, ForeignKey("companies.id", ondelete="SET NULL"))
 
     # NC integration: when the source data was fetched
-    source_searched_at = Column(DateTime(timezone=True))
+    source_searched_at = Column(UTCDateTime(timezone=True))
 
     # Evidence tier — provenance tag for data trust (T1–T7)
     evidence_tier = Column(String(4))
     # Multi-factor score breakdown (JSON: {trust, price, qty, freshness, completeness})
     score_components = Column(JSON)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     requirement = relationship("Requirement", back_populates="sightings")
 
@@ -280,7 +279,7 @@ class RequisitionAttachment(Base):
     content_type = Column(String(100))
     size_bytes = Column(Integer)
     uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
@@ -299,7 +298,7 @@ class RequirementAttachment(Base):
     content_type = Column(String(100))
     size_bytes = Column(Integer)
     uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     requirement = relationship("Requirement", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
