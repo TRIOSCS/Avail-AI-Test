@@ -32,6 +32,8 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # full history so merge-base / changed-files diff works
 
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -60,8 +62,19 @@ jobs:
       - name: Install frontend dependencies
         run: npm ci
 
-      - name: Run pre-commit checks
-        run: pre-commit run --all-files --show-diff-on-failure
+      - name: Run pre-commit checks (files changed vs base)
+        # Scope to files this branch changed, not --all-files, so pre-existing
+        # drift in untouched files never blocks a PR. $GITHUB_BASE_REF is a
+        # built-in env var (PR base branch; empty on push) — no template input.
+        run: |
+          if [ -n "$GITHUB_BASE_REF" ]; then
+            git fetch -q origin "$GITHUB_BASE_REF"
+            base=$(git merge-base "origin/$GITHUB_BASE_REF" HEAD)
+          else
+            base=$(git rev-parse HEAD^ 2>/dev/null || git rev-parse HEAD)
+          fi
+          echo "Running pre-commit on files changed in $base..HEAD"
+          pre-commit run --from-ref "$base" --to-ref HEAD --show-diff-on-failure
 
       - name: Lint with ruff
         run: ruff check app/ tests/
