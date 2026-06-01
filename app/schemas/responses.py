@@ -9,7 +9,9 @@ Depends on: pydantic
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from typing import Self
+
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 # ── Base Wrappers ───────────────────────────────────────────────────────
 
@@ -192,6 +194,45 @@ class SimpleOkIdResponse(BaseModel):
     id: int = 0
 
     model_config = ConfigDict(extra="allow")
+
+
+# ── Bulk Requisition Endpoints ─────────────────────────────────────────
+
+
+class BulkArchiveResponse(BaseModel):
+    """Response shape for `/api/requisitions/bulk-archive` and `/batch-archive`.
+
+    Returned by both the admin "archive everything not mine" endpoint and the
+    role-narrowed "archive these IDs" endpoint. `archived_ids` always matches
+    `archived_count` in length — the field exists so callers can reconcile
+    a requested-ID set against the actually-updated set (covers auth filtering,
+    already-terminal status, and missing rows in one diff).
+    """
+
+    ok: bool = True
+    archived_count: int = 0
+    archived_ids: list[int] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _count_matches_ids(self) -> Self:
+        if self.archived_count != len(self.archived_ids):
+            raise ValueError(f"archived_count ({self.archived_count}) != len(archived_ids) ({len(self.archived_ids)})")
+        return self
+
+
+class BatchAssignResponse(BaseModel):
+    """Response shape for `/api/requisitions/batch-assign` (admin only)."""
+
+    ok: bool = True
+    assigned_count: int = 0
+    assigned_ids: list[int] = Field(default_factory=list)
+    assigned_to: str
+
+    @model_validator(mode="after")
+    def _count_matches_ids(self) -> Self:
+        if self.assigned_count != len(self.assigned_ids):
+            raise ValueError(f"assigned_count ({self.assigned_count}) != len(assigned_ids) ({len(self.assigned_ids)})")
+        return self
 
 
 class AiFindContactsResponse(BaseModel):
