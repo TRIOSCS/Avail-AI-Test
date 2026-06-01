@@ -5,7 +5,7 @@ Depends on: conftest.py (db_session, test SQLite engine)
 """
 
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -21,20 +21,19 @@ def _run(coro):
     return loop.run_until_complete(coro)
 
 
-# Use naive datetimes throughout — SQLite strips tzinfo, and the service
-# creates ``now = datetime.now(timezone.utc)`` which is tz-aware.  We patch
-# ``datetime`` inside the service so ``now`` is also naive, avoiding the
-# "can't subtract offset-naive and offset-aware datetimes" error.
+# UTCDateTime columns read back UTC-aware, and the service computes
+# ``now = datetime.now(timezone.utc)`` (aware), so the fixed ``now`` and every
+# seeded datetime below are tz-aware UTC to keep subtraction/comparison valid.
 
-_NOW_NAIVE = datetime(2026, 3, 1, 12, 0, 0)
+_NOW = datetime(2026, 3, 1, 12, 0, 0, tzinfo=timezone.utc)
 
 
 class _FakeDatetime(datetime):
-    """Datetime subclass that returns a naive 'now' for the service."""
+    """Datetime subclass that returns a fixed aware UTC 'now' for the service."""
 
     @classmethod
     def now(cls, tz=None):
-        return _NOW_NAIVE
+        return _NOW
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -46,7 +45,7 @@ def _make_user(db, name="Owner User", email="owner@trioscs.com"):
         email=email,
         role="buyer",
         azure_id=f"az-{email}",
-        created_at=_NOW_NAIVE,
+        created_at=_NOW,
     )
     db.add(user)
     db.flush()
@@ -57,7 +56,7 @@ def _make_company(db, **kwargs):
     defaults = dict(
         name="Test Corp",
         is_active=True,
-        created_at=_NOW_NAIVE,
+        created_at=_NOW,
     )
     defaults.update(kwargs)
     co = Company(**defaults)
@@ -95,7 +94,7 @@ def _make_requisition(db, customer_site_id, name="REQ-001", status="active", cre
         customer_site_id=customer_site_id,
         name=name,
         status=status,
-        created_at=created_at if created_at is not None else _NOW_NAIVE,
+        created_at=created_at if created_at is not None else _NOW,
     )
     db.add(req)
     db.flush()
@@ -106,7 +105,7 @@ def _make_requirement(db, requisition_id, primary_mpn="LM317T"):
     item = Requirement(
         requisition_id=requisition_id,
         primary_mpn=primary_mpn,
-        created_at=_NOW_NAIVE,
+        created_at=_NOW,
     )
     db.add(item)
     db.flush()
@@ -119,7 +118,7 @@ def _make_activity(db, company_id, user_id, activity_type="email_sent", created_
         user_id=user_id,
         activity_type=activity_type,
         channel="email",
-        created_at=created_at if created_at is not None else _NOW_NAIVE,
+        created_at=created_at if created_at is not None else _NOW,
     )
     db.add(act)
     db.flush()
@@ -201,15 +200,15 @@ class TestAccountSummaryService:
         _make_contact(db_session, site.id, "Alice VP", title="VP Procurement", is_primary=True)
         _make_contact(db_session, site.id, "Bob Buyer", title="Buyer")
 
-        req1 = _make_requisition(db_session, site.id, "REQ-100", "open", _NOW_NAIVE - timedelta(days=5))
-        req2 = _make_requisition(db_session, site.id, "REQ-101", "closed", _NOW_NAIVE - timedelta(days=30))
+        req1 = _make_requisition(db_session, site.id, "REQ-100", "open", _NOW - timedelta(days=5))
+        req2 = _make_requisition(db_session, site.id, "REQ-101", "closed", _NOW - timedelta(days=30))
         _make_requirement(db_session, req1.id, "LM317T")
         _make_requirement(db_session, req1.id, "LM7805")
         _make_requirement(db_session, req2.id, "NE555")
 
-        _make_activity(db_session, co.id, owner.id, "email_sent", _NOW_NAIVE - timedelta(days=1))
-        _make_activity(db_session, co.id, owner.id, "call", _NOW_NAIVE - timedelta(days=3))
-        _make_activity(db_session, co.id, owner.id, "email_sent", _NOW_NAIVE - timedelta(days=7))
+        _make_activity(db_session, co.id, owner.id, "email_sent", _NOW - timedelta(days=1))
+        _make_activity(db_session, co.id, owner.id, "call", _NOW - timedelta(days=3))
+        _make_activity(db_session, co.id, owner.id, "email_sent", _NOW - timedelta(days=7))
         db_session.commit()
 
         result = _run(generate_account_summary(co.id, db_session))
@@ -329,7 +328,7 @@ class TestAccountSummaryService:
         owner = _make_user(db_session)
         co = _make_company(db_session, account_owner_id=owner.id)
         # Add activity directly on company (no site needed)
-        _make_activity(db_session, co.id, owner.id, "note", _NOW_NAIVE)
+        _make_activity(db_session, co.id, owner.id, "note", _NOW)
         db_session.commit()
 
         result = _run(generate_account_summary(co.id, db_session))
@@ -441,7 +440,7 @@ class TestAccountSummaryService:
         req = Requisition(
             customer_site_id=site.id,
             name="REQ-NOSTATUS",
-            created_at=_NOW_NAIVE,
+            created_at=_NOW,
         )
         db_session.add(req)
         db_session.flush()
