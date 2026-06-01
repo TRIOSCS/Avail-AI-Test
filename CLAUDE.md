@@ -17,6 +17,9 @@ full CRM (companies, quotes, buy plans, customer matching).
 - `docs/APP_MAP_ARCHITECTURE.md` — stack, infra, project structure
 - `docs/APP_MAP_DATABASE.md` — models, tables, relationships
 - `docs/APP_MAP_INTERACTIONS.md` — service interactions, data flows, integration patterns
+- `docs/BRANCH_AND_CI_WORKFLOW.md` — branch naming/lifecycle, the changed-files
+  formatting gate (do NOT bundle unrelated drift), and quarantine-before-delete
+  branch hygiene (`scripts/branch-cleanup.sh`)
 
 These are the canonical reference. CLAUDE.md only points at them. **After any code
 change, update the relevant APP_MAP doc(s) in the same PR.**
