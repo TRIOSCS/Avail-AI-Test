@@ -9,8 +9,9 @@ Depends on: nc_search_queue table
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, ForeignKey, Integer, String, Text
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -19,7 +20,7 @@ class NcSearchLog(Base):
 
     id = Column(Integer, primary_key=True)
     queue_id = Column(Integer, ForeignKey("nc_search_queue.id", ondelete="CASCADE"), nullable=False, index=True)
-    searched_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    searched_at = Column(UTCDateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     duration_ms = Column(Integer)
     results_found = Column(Integer)
     sightings_created = Column(Integer)

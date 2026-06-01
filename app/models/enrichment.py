@@ -6,7 +6,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     Column,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -17,6 +16,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -33,10 +33,10 @@ class EnrichmentJob(Base):
     error_count = Column(Integer, default=0)
     scope = Column(JSONB, default=dict)
     started_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    started_at = Column(DateTime)
-    completed_at = Column(DateTime)
+    started_at = Column(UTCDateTime)
+    completed_at = Column(UTCDateTime)
     error_log = Column(JSONB, default=list)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     started_by = relationship("User", foreign_keys=[started_by_id])
 
@@ -70,8 +70,8 @@ class EnrichmentQueue(Base):
     batch_job_id = Column(Integer, ForeignKey("enrichment_jobs.id", ondelete="SET NULL"))
 
     reviewed_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    reviewed_at = Column(DateTime)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    reviewed_at = Column(UTCDateTime)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     vendor_card = relationship("VendorCard", foreign_keys=[vendor_card_id])
     company = relationship("Company", foreign_keys=[company_id])
@@ -111,9 +111,9 @@ class EmailSignatureExtract(Base):
     extraction_method = Column(String(20))
     confidence = Column(Float, default=0.5)
     seen_count = Column(Integer, default=1)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -138,7 +138,7 @@ class ProspectContact(Base):
 
     source = Column(String(50), nullable=False)
     confidence = Column(String(10), nullable=False)
-    found_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    found_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     is_saved = Column(Boolean, default=False)
     saved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
@@ -146,9 +146,9 @@ class ProspectContact(Base):
     promoted_to_type = Column(String(20))
     promoted_to_id = Column(Integer)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -169,5 +169,5 @@ class IntelCache(Base):
     cache_key = Column(String(500), nullable=False, unique=True, index=True)
     data = Column(JSON, nullable=False)
     ttl_days = Column(Integer, nullable=False, default=7)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    expires_at = Column(DateTime, nullable=False)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(UTCDateTime, nullable=False)

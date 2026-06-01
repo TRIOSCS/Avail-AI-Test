@@ -13,7 +13,6 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     JSON,
     Column,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -24,6 +23,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship, validates
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -60,10 +60,10 @@ class TroubleTicket(Base):
     cost_usd = Column(Float)
     resolution_notes = Column(Text)
     parent_ticket_id = Column(Integer, ForeignKey("trouble_tickets.id", ondelete="SET NULL"))
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
-    updated_at = Column(DateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
-    diagnosed_at = Column(DateTime)
-    resolved_at = Column(DateTime)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc), server_default=func.now())
+    updated_at = Column(UTCDateTime, onupdate=lambda: datetime.now(timezone.utc), server_default=func.now())
+    diagnosed_at = Column(UTCDateTime)
+    resolved_at = Column(UTCDateTime)
 
     # Columns from ErrorReport (unified in migration 043)
     screenshot_b64 = Column(Text)

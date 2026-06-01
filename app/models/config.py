@@ -2,10 +2,11 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -23,20 +24,20 @@ class ApiSource(Base):
     signup_url = Column(String(500))
     env_vars = Column(JSON, default=list)
     credentials = Column(JSONB, default=dict)
-    last_success = Column(DateTime)
+    last_success = Column(UTCDateTime)
     last_error = Column(String(500))
-    last_error_at = Column(DateTime)
+    last_error_at = Column(UTCDateTime)
     error_count_24h = Column(Integer, default=0, nullable=False, server_default="0")
     total_searches = Column(Integer, default=0)
     total_results = Column(Integer, default=0)
     avg_response_ms = Column(Integer, default=0)
     monthly_quota = Column(Integer, nullable=True)
     calls_this_month = Column(Integer, default=0, server_default="0")
-    last_ping_at = Column(DateTime)
-    last_deep_test_at = Column(DateTime)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    last_ping_at = Column(UTCDateTime)
+    last_deep_test_at = Column(UTCDateTime)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -55,7 +56,7 @@ class SystemConfig(Base):
     description = Column(String(500))
     updated_by = Column(String(255))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -70,9 +71,9 @@ class GraphSubscription(Base):
     subscription_id = Column(String(255), nullable=False, unique=True)
     resource = Column(String(255), nullable=False)
     change_type = Column(String(100), nullable=False)
-    expiration_dt = Column(DateTime, nullable=False)
+    expiration_dt = Column(UTCDateTime, nullable=False)
     client_state = Column(String(255))
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     user = relationship("User", foreign_keys=[user_id])
 
@@ -88,7 +89,7 @@ class ApiUsageLog(Base):
     __tablename__ = "api_usage_log"
     id = Column(Integer, primary_key=True)
     source_id = Column(Integer, ForeignKey("api_sources.id", ondelete="CASCADE"), nullable=False)
-    timestamp = Column(DateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
+    timestamp = Column(UTCDateTime, nullable=False, default=lambda: datetime.now(timezone.utc))
     endpoint = Column(String(200))
     status_code = Column(Integer)
     response_ms = Column(Integer)

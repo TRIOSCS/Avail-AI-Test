@@ -89,7 +89,6 @@ batch of PRs merges.
 - **Worktrees:** remove agent/eval worktrees when done (`git worktree remove`);
   `git worktree list` should normally show only the main checkout.
 - **Stashes:** don't let them pile up — archive (§3) and clear.
-- **Do not run `scripts/frprp.py` to open coverage PRs** — it produces perpetually-red drafts.
 
 ## 6. Schema / datetime note
 

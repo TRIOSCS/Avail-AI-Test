@@ -8,9 +8,11 @@ Depends on: models/base.py, models/auth.py
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, Column, ForeignKey, Integer, String, Text
 
 from app.models.base import Base
+
+from ..database import UTCDateTime
 
 
 class Notification(Base):
@@ -23,4 +25,4 @@ class Notification(Base):
     title = Column(String(500), nullable=False)
     body = Column(Text, nullable=True)
     is_read = Column(Boolean, default=False, nullable=False)
-    created_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)
+    created_at = Column(UTCDateTime(timezone=True), default=lambda: datetime.now(timezone.utc), nullable=False)

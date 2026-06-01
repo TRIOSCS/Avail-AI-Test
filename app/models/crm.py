@@ -2,7 +2,7 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import JSON, Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text, UniqueConstraint
+from sqlalchemy import JSON, Boolean, Column, ForeignKey, Index, Integer, String, Text, UniqueConstraint
 from sqlalchemy.orm import relationship, validates
 
 from ..database import UTCDateTime
@@ -28,12 +28,12 @@ class Company(Base):
     hq_city = Column(String(255))
     hq_state = Column(String(100))
     hq_country = Column(String(100))
-    last_enriched_at = Column(DateTime)
+    last_enriched_at = Column(UTCDateTime)
     enrichment_source = Column(String(50))  # "explorium", "apollo", "manual"
 
     # v1.3.0: Customer ownership fields
     is_strategic = Column(Boolean, default=False, index=True)
-    ownership_cleared_at = Column(DateTime)
+    ownership_cleared_at = Column(UTCDateTime)
     last_activity_at = Column(UTCDateTime, index=True)
     account_owner_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
 
@@ -48,7 +48,7 @@ class Company(Base):
     # AI-generated material intelligence (mirrors VendorCard pattern)
     brand_tags = Column(JSON, default=list)
     commodity_tags = Column(JSON, default=list)
-    material_tags_updated_at = Column(DateTime)
+    material_tags_updated_at = Column(UTCDateTime)
 
     # Denormalized counts (kept in sync by PostgreSQL triggers)
     site_count = Column(Integer, default=0, server_default="0", nullable=False)
@@ -62,15 +62,15 @@ class Company(Base):
     import_priority = Column(String(20))  # "priority", "standard", "dismissed"
 
     # Deep enrichment tracking
-    deep_enrichment_at = Column(DateTime)
+    deep_enrichment_at = Column(UTCDateTime)
 
     # Customer enrichment waterfall tracking
-    customer_enrichment_at = Column(DateTime)
+    customer_enrichment_at = Column(UTCDateTime)
     customer_enrichment_status = Column(String(20))  # complete, partial, missing, stale
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -135,11 +135,11 @@ class CustomerSite(Base):
 
     # v2.10: Prospecting pool fields
     last_activity_at = Column(UTCDateTime)
-    ownership_cleared_at = Column(DateTime)
+    ownership_cleared_at = Column(UTCDateTime)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -178,18 +178,18 @@ class SiteContact(Base):
     # Customer enrichment fields
     phone_verified = Column(Boolean, default=False)
     email_verified = Column(Boolean, default=False)
-    email_verified_at = Column(DateTime)
+    email_verified_at = Column(UTCDateTime)
     email_verification_status = Column(String(20))  # valid, invalid, accept_all, unknown
     enrichment_source = Column(String(50))  # lusha, apollo, hunter, manual
     contact_role = Column(String(50))  # buyer, technical, decision_maker, operations
     needs_refresh = Column(Boolean, default=False)
-    last_enriched_at = Column(DateTime)
+    last_enriched_at = Column(UTCDateTime)
     linkedin_url = Column(String(500))
     enrichment_field_sources = Column(JSON)  # Per-field source tracking
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )

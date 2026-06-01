@@ -6,7 +6,6 @@ from sqlalchemy import (
     JSON,
     Boolean,
     Column,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -19,6 +18,7 @@ from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import relationship, validates
 
 from ..constants import ProactiveMatchStatus
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -30,7 +30,7 @@ class MaterialCard(Base):
     manufacturer = Column(String(255), index=True)
     description = Column(String(1000))
     search_count = Column(Integer, default=0)
-    last_searched_at = Column(DateTime)
+    last_searched_at = Column(UTCDateTime)
     search_vector = Column(TSVECTOR)
 
     # Enrichment fields (populated by AI agent)
@@ -46,15 +46,15 @@ class MaterialCard(Base):
         JSONB
     )  # Structured specs: {"ddr_type": {"value": "DDR4", "source": "...", "confidence": 0.99, "updated_at": "..."}}
     enrichment_source = Column(String(50))  # "claude_ai", "manual", etc.
-    enriched_at = Column(DateTime)
+    enriched_at = Column(UTCDateTime)
 
     is_internal_part = Column(Boolean, default=False, server_default="false")  # Internal/custom PN (not a standard MPN)
 
-    deleted_at = Column(DateTime, nullable=True, index=True)  # NULL = active, non-NULL = soft-deleted
+    deleted_at = Column(UTCDateTime, nullable=True, index=True)  # NULL = active, non-NULL = soft-deleted
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )
@@ -75,8 +75,8 @@ class MaterialVendorHistory(Base):
     vendor_name_normalized = Column(String(255))
     source_type = Column(String(50))
     is_authorized = Column(Boolean, default=False)
-    first_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    last_seen = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    first_seen = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    last_seen = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     times_seen = Column(Integer, default=1)
     last_qty = Column(Integer)
     last_price = Column(Numeric(12, 4))
@@ -86,7 +86,7 @@ class MaterialVendorHistory(Base):
 
     source = Column(String(50), default="api_sighting")
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     material_card = relationship("MaterialCard")
 
@@ -110,7 +110,7 @@ class MaterialCardAudit(Base):
     new_card_id = Column(Integer)
     normalized_mpn = Column(String(255), index=True)
     details = Column(JSON)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     created_by = Column(String(255))  # system, user email, scheduler
 
     __table_args__ = (Index("ix_mca_card_action", "material_card_id", "action"),)
@@ -136,11 +136,11 @@ class ProactiveMatch(Base):
     margin_pct = Column(Numeric(5, 2))  # Potential margin %
     customer_purchase_count = Column(Integer, default=0)
     customer_last_price = Column(Numeric(12, 4))
-    customer_last_purchased_at = Column(DateTime)
+    customer_last_purchased_at = Column(UTCDateTime)
     our_cost = Column(Numeric(12, 4))
     dismiss_reason = Column(String(255))
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     offer = relationship("Offer", foreign_keys=[offer_id])
     requirement = relationship("Requirement", foreign_keys=[requirement_id])
@@ -182,13 +182,13 @@ class ProactiveOffer(Base):
     email_body_html = Column(Text)
     graph_message_id = Column(String(500))
     status = Column(String(20), default="sent")
-    sent_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    sent_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     converted_requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="SET NULL"))
     converted_quote_id = Column(Integer, ForeignKey("quotes.id", ondelete="SET NULL"))
-    converted_at = Column(DateTime)
+    converted_at = Column(UTCDateTime)
     total_sell = Column(Numeric(12, 2))
     total_cost = Column(Numeric(12, 2))
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     customer_site = relationship("CustomerSite", foreign_keys=[customer_site_id])
 
@@ -207,7 +207,7 @@ class ProactiveThrottle(Base):
     id = Column(Integer, primary_key=True)
     mpn = Column(String(255), nullable=False)
     customer_site_id = Column(Integer, ForeignKey("customer_sites.id", ondelete="CASCADE"), nullable=False)
-    last_offered_at = Column(DateTime, nullable=False)
+    last_offered_at = Column(UTCDateTime, nullable=False)
     proactive_offer_id = Column(Integer, ForeignKey("proactive_offers.id", ondelete="SET NULL"))
 
     __table_args__ = (
@@ -225,7 +225,7 @@ class ProactiveDoNotOffer(Base):
     company_id = Column(Integer, ForeignKey("companies.id", ondelete="CASCADE"), nullable=False)
     created_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
     reason = Column(String(255))
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     company = relationship("Company", foreign_keys=[company_id])
     created_by = relationship("User", foreign_keys=[created_by_id])
@@ -244,7 +244,7 @@ class ChangeLog(Base):
     field_name = Column(String(100), nullable=False)
     old_value = Column(Text)
     new_value = Column(Text)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     user = relationship("User", foreign_keys=[user_id])
 
@@ -285,9 +285,9 @@ class ActivityLog(Base):
     duration_seconds = Column(Integer)
     external_id = Column(String(255))
     notes = Column(Text)
-    dismissed_at = Column(DateTime)
+    dismissed_at = Column(UTCDateTime)
     auto_logged = Column(Boolean, default=False)
-    occurred_at = Column(DateTime)
+    occurred_at = Column(UTCDateTime)
 
     # Communication Intelligence columns (migration 058)
     direction = Column(String(20))  # "inbound" | "outbound"
@@ -298,10 +298,10 @@ class ActivityLog(Base):
     # AI Quality Scoring (Phase 2b)
     quality_score = Column(Float)
     quality_classification = Column(String(30))
-    quality_assessed_at = Column(DateTime)
+    quality_assessed_at = Column(UTCDateTime)
     is_meaningful = Column(Boolean)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     user = relationship("User", foreign_keys=[user_id])
     company = relationship("Company", foreign_keys=[company_id])

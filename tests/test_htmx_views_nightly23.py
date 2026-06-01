@@ -240,8 +240,8 @@ class TestRfqSendDirect:
                 "parts_summary": "BC547 x 100",
             },
         )
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("OK")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("OK")
             result = await rfq_send(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
 
@@ -270,8 +270,8 @@ class TestRfqSendDirect:
                 "subject": "RFQ",
             },
         )
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("OK")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("OK")
             result = await rfq_send(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
 
@@ -293,8 +293,8 @@ class TestSaveParsedOffersDirect:
             "offers[0].condition": "new",
         }
         mock_req = _mock_form_request(path=f"/v2/partials/requisitions/{req.id}/save-parsed-offers", fields=fields)
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("OK")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("OK")
             result = await save_parsed_offers(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
 
@@ -310,8 +310,8 @@ class TestSaveParsedOffersDirect:
             "offers[0].qty_available": "200",
         }
         mock_req = _mock_form_request(path=f"/v2/partials/requisitions/{req.id}/save-parsed-offers", fields=fields)
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("OK")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("OK")
             result = await save_parsed_offers(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
 
@@ -484,8 +484,8 @@ class TestLeadStatusUpdateDirect:
             path=f"/v2/partials/sourcing/leads/{lead.id}/status",
             fields={"status": "has_stock", "note": "Confirmed 500 units"},
         )
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("lead OK")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("lead OK")
             result = await lead_status_update(request=mock_req, lead_id=lead.id, user=test_user, db=db_session)
         assert result.status_code == 200
 
@@ -499,8 +499,8 @@ class TestLeadStatusUpdateDirect:
             path=f"/v2/partials/sourcing/leads/{lead.id}/status",
             fields={"status": "no_stock"},
         )
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("lead OK")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("lead OK")
             result = await lead_status_update(request=mock_req, lead_id=lead.id, user=test_user, db=db_session)
         assert result.status_code == 200
 
@@ -546,8 +546,8 @@ class TestLogPhoneCallDirect:
                 "notes": "Discussed pricing for BC547",
             },
         )
-        with patch("app.routers.htmx_views.templates") as mock_tpl:
-            mock_tpl.TemplateResponse.return_value = HTMLResponse("phone OK")
+        with patch("app.routers.htmx_views.template_response") as mock_tpl:
+            mock_tpl.return_value = HTMLResponse("phone OK")
             result = await log_phone_call(request=mock_req, req_id=req.id, user=test_user, db=db_session)
         assert result.status_code == 200
 

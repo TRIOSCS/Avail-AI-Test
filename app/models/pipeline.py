@@ -5,7 +5,6 @@ from datetime import datetime, timezone
 from sqlalchemy import (
     JSON,
     Column,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -15,6 +14,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -24,7 +24,7 @@ class ProcessedMessage(Base):
     __tablename__ = "processed_messages"
     message_id = Column(Text, primary_key=True)
     processing_type = Column(Text, primary_key=True)
-    processed_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    processed_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
 
 class SyncState(Base):
@@ -35,7 +35,7 @@ class SyncState(Base):
     user_id = Column(Integer, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     folder = Column(String(100), nullable=False)
     delta_token = Column(Text)
-    last_sync_at = Column(DateTime)
+    last_sync_at = Column(UTCDateTime)
 
     __table_args__ = (Index("ix_sync_state_user_folder", "user_id", "folder", unique=True),)
 
@@ -49,7 +49,7 @@ class ColumnMappingCache(Base):
     file_fingerprint = Column(Text, nullable=False)
     mapping = Column(JSON, nullable=False)
     confidence = Column(Float, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (Index("ix_colmap_domain_fp", "vendor_domain", "file_fingerprint", unique=True),)
 
@@ -63,8 +63,8 @@ class PendingBatch(Base):
     batch_type = Column(String(50), default="inbox_parse")
     request_map = Column(JSONB)
     status = Column(String(20), default="processing")
-    submitted_at = Column(DateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
-    completed_at = Column(DateTime(timezone=True))
+    submitted_at = Column(UTCDateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
+    completed_at = Column(UTCDateTime(timezone=True))
     result_count = Column(Integer)
     error_message = Column(Text)
 

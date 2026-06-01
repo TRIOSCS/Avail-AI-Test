@@ -11,7 +11,6 @@ Depends on: Requirement model
 from sqlalchemy import (
     Boolean,
     Column,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -22,6 +21,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.postgresql import JSON
 from sqlalchemy.orm import relationship
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -47,11 +47,11 @@ class VendorSightingSummary(Base):
     source_types = Column(JSON, nullable=True)
     score = Column(Float, nullable=True)
     tier = Column(String(20), nullable=True)
-    updated_at = Column(DateTime, nullable=True)
+    updated_at = Column(UTCDateTime, nullable=True)
 
     # Pre-aggregated fields (rebuilt by sighting_aggregation service)
     vendor_card_id = Column(Integer, ForeignKey("vendor_cards.id", ondelete="SET NULL"), nullable=True)
-    newest_sighting_at = Column(DateTime, nullable=True)
+    newest_sighting_at = Column(UTCDateTime, nullable=True)
     best_lead_time_days = Column(Integer, nullable=True)
     min_moq = Column(Integer, nullable=True)
     has_contact_info = Column(Boolean, default=False, server_default="false")

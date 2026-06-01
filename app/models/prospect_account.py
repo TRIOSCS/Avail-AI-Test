@@ -2,10 +2,11 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Column, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -51,9 +52,9 @@ class ProspectAccount(Base):
 
     # Claim / dismiss
     claimed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    claimed_at = Column(DateTime)
+    claimed_at = Column(UTCDateTime)
     dismissed_by = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    dismissed_at = Column(DateTime)
+    dismissed_at = Column(UTCDateTime)
     dismiss_reason = Column(String(255))
 
     # Link to Company (set for SF imports, created on claim for discoveries)
@@ -65,11 +66,11 @@ class ProspectAccount(Base):
     enrichment_data = Column(JSONB, default=dict)
     email_pattern = Column(String(100))
     ai_writeup = Column(Text)
-    last_enriched_at = Column(DateTime)
+    last_enriched_at = Column(UTCDateTime)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     updated_at = Column(
-        DateTime,
+        UTCDateTime,
         default=lambda: datetime.now(timezone.utc),
         onupdate=lambda: datetime.now(timezone.utc),
     )

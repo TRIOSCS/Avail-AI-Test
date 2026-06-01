@@ -7,7 +7,6 @@ from sqlalchemy import (
     Boolean,
     Column,
     Date,
-    DateTime,
     Float,
     ForeignKey,
     Index,
@@ -18,6 +17,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.orm import relationship, validates
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -62,7 +62,7 @@ class Offer(Base):
     parse_confidence = Column(Float)
     # Promotion audit trail — when a human reviews and promotes a T4 offer
     promoted_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    promoted_at = Column(DateTime)
+    promoted_at = Column(UTCDateTime)
 
     excess_line_item_id = Column(Integer, ForeignKey("excess_line_items.id", ondelete="SET NULL"))
 
@@ -71,23 +71,23 @@ class Offer(Base):
     is_stale = Column(
         Boolean, nullable=False, default=False, server_default="false"
     )  # display-only: True if >14 days old
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     # Audit trail
-    updated_at = Column(DateTime)
+    updated_at = Column(UTCDateTime)
     updated_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
 
     # Approval workflow
     approved_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    approved_at = Column(DateTime)
+    approved_at = Column(UTCDateTime)
 
     # Quote candidate selection — sales picks offers for quoting
     selected_for_quote = Column(Boolean, nullable=False, default=False, server_default="false")
-    selected_at = Column(DateTime)
+    selected_at = Column(UTCDateTime)
 
     # v1.3.0: Attribution fields — 14-day TTL with reconfirmation
-    expires_at = Column(DateTime)
-    reconfirmed_at = Column(DateTime)
+    expires_at = Column(UTCDateTime)
+    reconfirmed_at = Column(UTCDateTime)
     reconfirm_count = Column(Integer, default=0)
     attribution_status = Column(String(20), default="active")  # active, expired, converted
 
@@ -158,7 +158,7 @@ class OfferAttachment(Base):
     content_type = Column(String(100))
     size_bytes = Column(Integer)
     uploaded_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     offer = relationship("Offer", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
@@ -179,14 +179,14 @@ class Contact(Base):
     subject = Column(String(500))
     details = Column(Text)
     status = Column(String(50), default="sent")
-    status_updated_at = Column(DateTime)
+    status_updated_at = Column(UTCDateTime)
     graph_message_id = Column(String(500))
     graph_conversation_id = Column(String(500))
     needs_review = Column(Boolean, default=False)
     parse_result_json = Column(JSON)
     parse_confidence = Column(Float)
     error_message = Column(String(500))  # Error detail when status="failed"
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     requisition = relationship("Requisition", back_populates="contacts")
     user = relationship("User", back_populates="contacts")
@@ -211,7 +211,7 @@ class VendorResponse(Base):
     vendor_email = Column(String(255))
     subject = Column(String(500))
     body = Column(Text)
-    received_at = Column(DateTime)
+    received_at = Column(UTCDateTime)
     parsed_data = Column(JSON)
     confidence = Column(Float)
     classification = Column(String(50))
@@ -221,7 +221,7 @@ class VendorResponse(Base):
     message_id = Column(String(255), unique=True, index=True, nullable=True)
     graph_conversation_id = Column(String(500))
     scanned_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
     match_method = Column(String(50), nullable=True)
 
     __table_args__ = (

@@ -2,9 +2,10 @@
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, DateTime, Index, Integer, String, Text
+from sqlalchemy import Column, Index, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 
+from ..database import UTCDateTime
 from .base import Base
 
 
@@ -32,9 +33,9 @@ class DiscoveryBatch(Base):
     credits_used = Column(Integer, default=0)
     error_message = Column(Text)
 
-    started_at = Column(DateTime, nullable=False)
-    completed_at = Column(DateTime)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    started_at = Column(UTCDateTime, nullable=False)
+    completed_at = Column(UTCDateTime)
+    created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
         Index("ix_discovery_batches_status", "status"),
