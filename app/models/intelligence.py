@@ -385,7 +385,7 @@ class ActivityDigest(Base):
 
     __tablename__ = "activity_digest"
     id = Column(Integer, primary_key=True)
-    entity_type = Column(String(20), nullable=False)  # DigestEntityType
+    entity_type = Column(String(50), nullable=False)  # DigestEntityType
     entity_id = Column(Integer, nullable=False)
 
     headline = Column(String(300))
@@ -401,9 +401,15 @@ class ActivityDigest(Base):
     model = Column(String(50))
 
     @validates("entity_type")
-    def _validate_entity_type(self, key, value):
+    def _validate_entity_type(self, _key, value):
         from ..constants import DigestEntityType
 
         return DigestEntityType(value).value  # raises ValueError on unknown
+
+    @validates("status_signal")
+    def _validate_status_signal(self, _key, value):
+        from ..constants import DigestStatusSignal
+
+        return DigestStatusSignal(value).value if value is not None else None
 
     __table_args__ = (UniqueConstraint("entity_type", "entity_id", name="uq_activity_digest_entity"),)
