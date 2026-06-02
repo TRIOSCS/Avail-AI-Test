@@ -8,6 +8,7 @@ Called by: main.py (router mount)
 Depends on: models, dependencies, database, search_service
 """
 
+import asyncio
 import html as html_mod
 import json
 import time
@@ -2857,11 +2858,11 @@ async def poll_inbox_htmx(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Poll inbox for vendor responses (test mode: no-op, returns refreshed responses
-    tab)."""
+    """Poll inbox for vendor responses — runs a real scan then returns the responses
+    tab."""
     get_requisition_or_404(db, req_id)  # validates existence
     logger.info("Inbox poll requested for req {} by {}", req_id, user.email)
-    # Return refreshed responses tab
+    await _run_inbox_scan_now(user, db)
     return await requisition_tab(request=request, req_id=req_id, tab="responses", user=user, db=db)
 
 
@@ -8047,9 +8048,42 @@ async def settings_profile_tab(
     db: Session = Depends(get_db),
 ):
     """User profile tab."""
+    from ..services.activity_service import get_inbox_sync_status
+
     ctx = _base_ctx(request, user, "settings")
     ctx["profile_user"] = user
+    ctx["inbox_status"] = get_inbox_sync_status(user)
     return template_response("htmx/partials/settings/profile.html", ctx)
+
+
+async def _run_inbox_scan_now(user: User, db: Session) -> None:
+    """Run a real on-demand inbox scan for the current user, unless under TESTING."""
+    import os
+
+    if os.getenv("TESTING") == "1":
+        return  # hermetic tests: do not touch Graph
+    from ..jobs.email_jobs import _scan_user_inbox
+
+    try:
+        await asyncio.wait_for(_scan_user_inbox(user, db), timeout=90)
+    except asyncio.TimeoutError:
+        logger.warning("Manual inbox scan timed out for {}", user.email)
+
+
+@router.post("/v2/partials/settings/inbox/scan-now", response_class=HTMLResponse)
+async def settings_scan_now(
+    request: Request,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Manual inbox scan from the Settings mailbox-sync card."""
+    from ..services.activity_service import get_inbox_sync_status
+
+    await _run_inbox_scan_now(user, db)
+    db.refresh(user)
+    ctx = _base_ctx(request, user, "settings")
+    ctx["inbox_status"] = get_inbox_sync_status(user)
+    return template_response("htmx/partials/settings/_mailbox_sync_card.html", ctx)
 
 
 @router.post("/api/user/toggle-8x8", response_class=HTMLResponse)
