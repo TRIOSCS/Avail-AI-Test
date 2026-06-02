@@ -121,10 +121,8 @@ def _load_activities(entity_type: DigestEntityType, entity_id: int, db: Session)
     from .activity_service import get_company_activities, get_requisition_activities
 
     if entity_type == DigestEntityType.REQUISITION:
-        acts = get_requisition_activities(entity_id, db, limit=ACTIVITY_CAP, meaningful_only=True)
-    else:
-        acts = get_company_activities(entity_id, db, limit=ACTIVITY_CAP, meaningful_only=True)
-    return acts
+        return get_requisition_activities(entity_id, db, limit=ACTIVITY_CAP, meaningful_only=True)
+    return get_company_activities(entity_id, db, limit=ACTIVITY_CAP, meaningful_only=True)
 
 
 def _digest_to_dict(row: ActivityDigest) -> DigestResult:
