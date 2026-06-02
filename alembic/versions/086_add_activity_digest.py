@@ -6,7 +6,7 @@ See app/models/intelligence.py (ActivityDigest) and
 app/services/activity_digest_service.py.
 
 Revision ID: 086_add_activity_digest
-Revises: 085_utcdatetime_tz
+Revises: cf06dcdb7839
 Create Date: 2026-06-02
 """
 
@@ -15,7 +15,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision = "086_add_activity_digest"
-down_revision = "085_utcdatetime_tz"
+down_revision = "cf06dcdb7839"
 branch_labels = None
 depends_on = None
 
