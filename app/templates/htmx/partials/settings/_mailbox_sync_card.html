@@ -9,8 +9,12 @@
     </h3>
     <button hx-post="/v2/partials/settings/inbox/scan-now"
             hx-target="#mailbox-sync-card" hx-swap="outerHTML" data-loading-disable
-            class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100">
+            hx-indicator="#mailbox-scan-spinner"
+            class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 inline-flex items-center gap-1.5">
       Scan now
+      <span id="mailbox-scan-spinner" class="htmx-indicator">
+        <svg class="animate-spin h-3 w-3 text-brand-500" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+      </span>
     </button>
   </div>
   <dl class="mt-2 space-y-1 text-xs text-gray-600">

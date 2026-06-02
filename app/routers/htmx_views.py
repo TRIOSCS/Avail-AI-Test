@@ -11,6 +11,7 @@ Depends on: models, dependencies, database, search_service
 import asyncio
 import html as html_mod
 import json
+import os
 import time
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -2858,8 +2859,8 @@ async def poll_inbox_htmx(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Poll inbox for vendor responses — runs a real scan then returns the responses
-    tab."""
+    """Trigger a FULL inbox scan for the current user (not requisition-scoped), then
+    return the refreshed responses tab."""
     get_requisition_or_404(db, req_id)  # validates existence
     logger.info("Inbox poll requested for req {} by {}", req_id, user.email)
     await _run_inbox_scan_now(user, db)
@@ -8058,14 +8059,13 @@ async def settings_profile_tab(
 
 async def _run_inbox_scan_now(user: User, db: Session) -> None:
     """Run a real on-demand inbox scan for the current user, unless under TESTING."""
-    import os
-
     if os.getenv("TESTING") == "1":
         return  # hermetic tests: do not touch Graph
     from ..jobs.email_jobs import _scan_user_inbox
 
     try:
-        await asyncio.wait_for(_scan_user_inbox(user, db), timeout=90)
+        # stay under the HTMX client timeout (app/static/htmx_app.js); scan is idempotent + scheduler-backed
+        await asyncio.wait_for(_scan_user_inbox(user, db), timeout=12)
     except asyncio.TimeoutError:
         logger.warning("Manual inbox scan timed out for {}", user.email)
 
