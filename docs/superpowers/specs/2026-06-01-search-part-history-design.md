@@ -109,8 +109,10 @@ def get_part_history(db: Session, normalized_mpn: str) -> PartHistory: ...
 In `app/routers/htmx_views.py`:
 
 - `require_user` (consistent with the other `/v2/partials/search/*` endpoints).
-- Normalizes `mpn` via `app/utils/normalization.normalize_mpn`, resolves the card,
-  calls `get_part_history`, renders `htmx/partials/search/history_panel.html`.
+- Normalizes `mpn` via `app/utils/normalization.normalize_mpn_key` (the same key
+  `MaterialCard.normalized_mpn` is stored under — strip-all-nonalphanumeric,
+  lowercase), looks up the card **read-only** (no create), calls `get_part_history`,
+  renders `htmx/partials/search/history_panel.html`.
 - Wrapped in `try/except` → logs via Loguru and returns a small inline error notice.
   **No silent failure.** A single failed sub-section degrades to an error sliver
   rather than blanking the whole panel.
