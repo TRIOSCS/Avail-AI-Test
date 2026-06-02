@@ -25,9 +25,24 @@ _qm = QueueManager(
 )
 
 
-def enqueue_for_nc_search(requirement_id: int, db: Session) -> NcSearchQueue | None:
-    """Queue a requirement for NetComponents search."""
-    return _qm.enqueue_search(requirement_id, db)
+def enqueue_for_nc_search(
+    requirement_id: int,
+    db: Session,
+    override_mpn: str | None = None,
+    resolved_via_spec_code: str | None = None,
+) -> NcSearchQueue | None:
+    """Queue a requirement for NetComponents search.
+
+    Optional ``override_mpn`` enables enqueueing a resolved-AVL MPN distinct
+    from ``req.primary_mpn`` (spec §6.4). ``resolved_via_spec_code`` is
+    recorded on the queue row for lineage tracking.
+    """
+    return _qm.enqueue_search(
+        requirement_id,
+        db,
+        override_mpn=override_mpn,
+        resolved_via_spec_code=resolved_via_spec_code,
+    )
 
 
 def recover_stale_searches(db: Session) -> int:

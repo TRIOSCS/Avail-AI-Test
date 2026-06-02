@@ -543,7 +543,7 @@ class TestIcsQueueManager:
         mock_db = MagicMock()
         mock_qm.enqueue_search.return_value = MagicMock(id=1)
         result = enqueue_for_ics_search(42, mock_db)
-        mock_qm.enqueue_search.assert_called_once_with(42, mock_db)
+        mock_qm.enqueue_search.assert_called_once_with(42, mock_db, override_mpn=None, resolved_via_spec_code=None)
         assert result is not None
 
     @patch("app.services.ics_worker.queue_manager._qm")

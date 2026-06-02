@@ -424,8 +424,18 @@
 
 ### Search Queues
 
-**`ics_search_queue`** — ICS browser automation queue (priority, status, gate_decision)
-**`nc_search_queue`** — NetComponents browser automation queue (same structure)
+**`ics_search_queue`** — ICS browser automation queue (priority, status, gate_decision). Dedup keyed on `(requirement_id, normalized_mpn)` at the app layer (legacy per-requirement UNIQUE dropped) so the spec-code resolver can enqueue multiple AVL MPNs per requirement; carries `resolved_via_spec_code` lineage.
+**`nc_search_queue`** — NetComponents browser automation queue (same structure + same dedup/lineage change)
+
+### OEM Spec-Code Resolver
+
+Translates an OEM spec code (e.g. IBM `SPREJ`) to approved MPNs when the normal connector fanout returns universal zero. See `app/services/spec_code_resolver.py` and `app/routers/admin/spec_codes.py`.
+
+**`oem_spec_codes`** — Authoritative, human-approved spec-code → AVL mappings. `source` (validated against `SpecCodeSource`: manual/llm_approved/csv_import), `avl` (JSONB), `approved_at` (TIMESTAMPTZ), UNIQUE `(oem, spec_code)`.
+**`oem_spec_codes_pending`** — LLM-discovered mappings awaiting approval. `llm_confidence` (0–1, model-validated), `citations` (JSONB, structural http(s) URL check at model layer), `used_in_requirement_ids` (JSONB), UNIQUE `(oem, spec_code)`. Resolver flushes (not commits) its insert; caller owns the transaction via a SAVEPOINT.
+**`oem_spec_codes_blacklist`** — Rejected MPNs fed back into the LLM exclusion prompt; multiple rows per `(oem, spec_code)` allowed.
+
+Lineage columns added to existing tables: `requirements.oem_hint`; `sightings.resolved_via_spec_code` / `sightings.source_mpn`; `offers.resolved_via_spec_code` / `offers.source_mpn`. (Today only the synchronous fanout tags sightings; the async ICS/NC workers record the tag on the queue row but do not yet copy it onto worker-created sightings.)
 
 ### Faceted Search
 
