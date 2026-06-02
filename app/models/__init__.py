@@ -46,6 +46,7 @@ from .ics_search_log import IcsSearchLog  # noqa: F401
 from .ics_search_queue import IcsSearchQueue  # noqa: F401
 from .ics_worker_status import IcsWorkerStatus  # noqa: F401
 from .intelligence import (  # noqa: F401
+    ActivityDigest,
     ActivityLog,
     ChangeLog,
     MaterialCard,
