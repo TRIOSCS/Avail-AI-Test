@@ -370,6 +370,26 @@
 - direction: inbound\|outbound
 - quality_score, quality_classification
 
+**`activity_digest`** — AI-generated digest cache (one row per entity, migration `086_add_activity_digest.py`)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| entity_type | String(50) | DigestEntityType: requisition\|company |
+| entity_id | Integer | FK target (no DB-level FK — polymorphic) |
+| headline | String(300) | One-line summary |
+| narrative | Text | 2-4 sentence plain-language summary |
+| highlights | JSON | list[{"label": str, "value": str}], max 5 |
+| next_step | String(500) | Suggested next action |
+| status_signal | String(20) | DigestStatusSignal: on_track\|stalled\|needs_attention |
+| generated_at | UTCDateTime | When Claude produced this version |
+| basis_last_activity_at | UTCDateTime | Max created_at of source activities (freshness key) |
+| basis_activity_count | Integer | Count of source activities (freshness key) |
+| cooldown_until | UTCDateTime | No regen before this time (default: 120 s after last build) |
+| model | String(50) | Model tier used ("smart") |
+
+Unique constraint on `(entity_type, entity_id)` — always exactly one cached row per entity.
+Self-invalidates: service regens when `basis_last_activity_at` or `basis_activity_count` changes.
+
 **`change_log`** — Field-level edit history on offers/requirements/requisitions
 
 **`email_intelligence`** — Classified inbox emails (offer, stock_list, ooo, spam)
