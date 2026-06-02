@@ -71,3 +71,31 @@ async def test_digest_endpoint_generating_state(client, test_requisition, monkey
     resp = client.get(f"/v2/partials/requisitions/{test_requisition.id}/activity-digest")
     assert resp.status_code == 200
     assert "being prepared" in resp.text
+
+
+@pytest.mark.asyncio
+async def test_customer_digest_endpoint_renders(client, test_company, monkeypatch):
+    """Ready-state customer digest renders headline and status signal."""
+
+    async def fake(*a, **k):
+        return {
+            "state": "ready",
+            "headline": "Account summary",
+            "narrative": "Recent engagement.",
+            "highlights": [],
+            "next_step": None,
+            "status_signal": "on_track",
+            "generated_at": None,
+        }
+
+    monkeypatch.setattr("app.services.activity_digest_service.get_or_build_digest", fake)
+
+    resp = client.get(f"/v2/partials/customers/{test_company.id}/activity-digest")
+    assert resp.status_code == 200
+    assert "Account summary" in resp.text
+
+
+def test_customer_digest_endpoint_404_for_missing_company(client):
+    """Non-existent company returns 404."""
+    resp = client.get("/v2/partials/customers/999999/activity-digest")
+    assert resp.status_code == 404

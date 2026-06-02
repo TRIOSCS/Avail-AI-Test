@@ -1300,6 +1300,11 @@ async def customer_activity_digest(
     db: Session = Depends(get_db),
 ):
     """AI digest card for a company's activity timeline (HTMX lazy-load)."""
+    from ..models import Company
+
+    if not db.get(Company, company_id):
+        raise HTTPException(404, "Company not found")
+
     from ..constants import DigestEntityType
     from ..services.activity_digest_service import get_or_build_digest
 
