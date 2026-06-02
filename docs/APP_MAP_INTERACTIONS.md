@@ -114,6 +114,36 @@ Every MPN whose card was searched within 48h is skipped; prior sightings
 on those MPNs (across all requirements) are surfaced via the
 `material_card_id` linkage on Sighting rows.
 
+### 2a. Search-page part-history panel ("What we know")
+
+The `/v2/search` results shell (`results_shell.html`) renders a two-column
+grid: the left column streams live supplier offers over SSE (above), and the
+right column shows the searched part's **internal history**, loaded in
+parallel with — and independent of — the SSE stream:
+
+```
+results_shell.html (right column)
+    |
+    +---> hx-get /v2/partials/search/history?mpn=<searched mpn>   (hx-trigger=load)
+              |
+              v
+          htmx_views.search_history_panel
+              |
+              +---> normalize_mpn_key(mpn)        # same key MaterialCard stores
+              +---> part_history_service.get_part_history(db, key)   # READ-ONLY
+              |        resolves MaterialCard (deleted_at IS NULL), then aggregates
+              |        BY material_card_id: offers, distinct buyers, confirmed/won
+              |        (won/sold offers + won requisitions + customer purchases),
+              |        sightings, requirements, and a min/max/last price trend.
+              +---> renders history_panel.html (or empty state if no card)
+```
+
+`get_part_history` is the single source of truth for a part's history; the
+materials detail router (`material_detail_partial`, `material_tab_partial`)
+consumes the same `*_for_card` helpers, so the search panel and the full part
+page can never drift. The endpoint is wrapped in try/except (logged via
+Loguru) and degrades to an empty/error panel rather than failing the page.
+
 ```
 Browser POST /v2/partials/sightings/{requirement_id}/refresh?source=user
     |

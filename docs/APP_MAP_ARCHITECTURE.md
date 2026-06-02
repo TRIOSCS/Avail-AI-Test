@@ -109,7 +109,7 @@ authoritative reference. Static-analysis tests in
 | Parts | 13 | partials/parts/ |
 | Quotes | 9 | partials/quotes/ |
 | Sightings | 7 | partials/sightings/ |
-| Search | 7 | partials/search/ |
+| Search | 8 | partials/search/ |
 | Prospecting | 5 | partials/prospecting/ |
 | Proactive | 4 | partials/proactive/ |
 | Emails | 4 | partials/emails/ |
@@ -180,7 +180,7 @@ authoritative reference. Static-analysis tests in
 | HTML templates | 167 |
 | Database tables | 50+ |
 | API endpoints | 400+ |
-| Service modules | 118 |
+| Service modules | 119 |
 | Supplier connectors | 12 |
 | Background jobs | 15 modules |
 | Test files | 100+ |

@@ -10,7 +10,7 @@ Depends on: requirements, requisitions tables
 
 from datetime import datetime, timezone
 
-from sqlalchemy import Column, ForeignKey, Index, Integer, SmallInteger, String, Text
+from sqlalchemy import Column, ForeignKey, Index, Integer, SmallInteger, String, Text, UniqueConstraint
 
 from ..database import UTCDateTime
 from .base import Base
@@ -20,7 +20,11 @@ class NcSearchQueue(Base):
     __tablename__ = "nc_search_queue"
 
     id = Column(Integer, primary_key=True)
-    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False, unique=True)
+    # Dedup is keyed on (requirement_id, normalized_mpn) so one requirement
+    # can have multiple queue rows when the spec-code resolver enqueues
+    # additional AVL MPNs alongside the primary MPN. Application-level
+    # check lives in QueueManager.enqueue_search.
+    requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="CASCADE"), nullable=False)
     requisition_id = Column(Integer, ForeignKey("requisitions.id", ondelete="CASCADE"), nullable=False)
     mpn = Column(String(100), nullable=False)
     normalized_mpn = Column(String(100), nullable=False)
@@ -35,10 +39,18 @@ class NcSearchQueue(Base):
     last_searched_at = Column(UTCDateTime(timezone=True))
     results_count = Column(Integer)
     error_message = Column(Text)
+    # Spec-code resolver lineage — populated when this queue row was created
+    # for an AVL MPN resolved from an OEM spec code (see SpecCodeResolver).
+    resolved_via_spec_code = Column(String(64), nullable=True)
     created_at = Column(UTCDateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
     updated_at = Column(UTCDateTime(timezone=True), default=lambda: datetime.now(timezone.utc))
 
     __table_args__ = (
+        # DB-level backing for the (requirement_id, normalized_mpn) dedup that
+        # QueueManager.enqueue_search checks in Python. The app check loses to a
+        # concurrent enqueue race; this constraint makes the duplicate insert
+        # fail loudly (caught as IntegrityError) instead of silently doubling.
+        UniqueConstraint("requirement_id", "normalized_mpn", name="uq_nc_queue_requirement_mpn"),
         Index(
             "ix_nc_queue_poll",
             "status",
