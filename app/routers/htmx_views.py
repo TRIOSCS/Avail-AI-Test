@@ -2944,6 +2944,34 @@ async def search_form_partial(
     return template_response("htmx/partials/search/form.html", ctx)
 
 
+@router.get("/v2/partials/search/history", response_class=HTMLResponse)
+async def search_history_panel(
+    request: Request,
+    mpn: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the 'What we know' history panel for the searched MPN.
+
+    Called by: results_shell.html right column (hx-get).
+    Depends on: part_history_service.get_part_history, normalize_mpn_key.
+    """
+    from ..services.part_history_service import PartHistory, get_part_history
+    from ..utils.normalization import normalize_mpn_key
+
+    try:
+        key = normalize_mpn_key(mpn)
+        history = get_part_history(db, key)
+    except Exception:
+        logger.exception("search_history_panel failed for mpn={}", mpn)
+        ctx = _base_ctx(request, user, "search")
+        ctx.update({"history": PartHistory(found=False), "error": True})
+        return template_response("htmx/partials/search/history_panel.html", ctx)
+    ctx = _base_ctx(request, user, "search")
+    ctx.update({"history": history, "error": False})
+    return template_response("htmx/partials/search/history_panel.html", ctx)
+
+
 @router.post("/v2/partials/search/run", response_class=HTMLResponse)
 async def search_run(
     request: Request,
