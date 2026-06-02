@@ -877,3 +877,47 @@ def dismiss_activity(activity_id: int, db: Session) -> ActivityLog | None:
 
     logger.info(f"Activity {activity_id} dismissed")
     return activity
+
+
+def get_inbox_sync_status(user) -> dict:
+    """Derive inbox-sync health for the Settings card / disconnected banner.
+
+    Reads existing User fields (no new columns). See
+    app/jobs/core_jobs.py:_job_inbox_scan for the scheduled poll this surfaces.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from ..config import settings
+    from ..constants import InboxSyncHealth
+    from ..utils.token_manager import _utc
+
+    now = datetime.now(timezone.utc)
+    connected = bool(getattr(user, "m365_connected", False))
+    last_scan = getattr(user, "last_inbox_scan", None)
+
+    token_ok = bool(getattr(user, "access_token", None))
+    exp = getattr(user, "token_expires_at", None)
+    if exp is not None and _utc(exp) <= now:
+        token_ok = False
+
+    interval = settings.inbox_scan_interval_min
+    if last_scan is None:
+        is_stale = True
+    else:
+        is_stale = (now - _utc(last_scan)) > timedelta(minutes=2 * interval)
+
+    if not connected or not token_ok:
+        health = InboxSyncHealth.ERROR
+    elif is_stale:
+        health = InboxSyncHealth.WARNING
+    else:
+        health = InboxSyncHealth.OK
+
+    return {
+        "connected": connected,
+        "last_scan_at": _utc(last_scan) if last_scan else None,
+        "is_stale": is_stale,
+        "token_ok": token_ok,
+        "error_reason": getattr(user, "m365_error_reason", None),
+        "health": health,
+    }
