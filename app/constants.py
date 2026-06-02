@@ -348,3 +348,26 @@ class ActivityType(StrEnum):
     ASSIGNMENT_CHANGED = "assignment_changed"
     REQ_ARCHIVED = "req_archived"
     REQ_UNARCHIVED = "req_unarchived"
+
+
+class DigestEntityType(StrEnum):
+    """Entity kinds an ActivityDigest can summarize."""
+
+    REQUISITION = "requisition"
+    COMPANY = "company"
+
+
+class DigestStatusSignal(StrEnum):
+    """Digest semantic state — drives the card's color."""
+
+    ON_TRACK = "on_track"
+    STALLED = "stalled"
+    NEEDS_ATTENTION = "needs_attention"
+
+
+class InboxSyncHealth(StrEnum):
+    """Inbox-sync health for the Settings card and disconnected banner."""
+
+    OK = "ok"
+    WARNING = "warning"
+    ERROR = "error"
