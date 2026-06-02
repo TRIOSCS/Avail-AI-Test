@@ -490,6 +490,8 @@ async def requisitions_list_partial(
     if user.role != UserRole.SALES:
         users = db.query(User).order_by(User.name).all()
 
+    from ..services.activity_service import get_inbox_sync_status
+
     ctx = _base_ctx(request, user, "requisitions")
     ctx.update(
         {
@@ -508,6 +510,7 @@ async def requisitions_list_partial(
             "offset": offset,
             "users": users,
             "user_role": user.role,
+            "inbox_status": get_inbox_sync_status(user),
         }
     )
     return template_response("htmx/partials/requisitions/list.html", ctx)

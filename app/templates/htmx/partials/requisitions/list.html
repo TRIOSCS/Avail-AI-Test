@@ -7,6 +7,8 @@
 
 <div class="max-w-7xl mx-auto" x-data="{ selectedIds: new Set(), rStatus: '{{ status }}', rSort: '{{ sort }}', rDir: '{{ dir }}' }">
 
+  {% include "htmx/partials/shared/inbox_disconnected_banner.html" %}
+
   {# Header #}
   <div class="flex items-center justify-between mb-4">
     <div>

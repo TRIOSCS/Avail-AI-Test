@@ -1,0 +1,16 @@
+{# inbox_disconnected_banner.html — shown only when inbox sync is unhealthy/stale.
+   Receives: inbox_status (dict). Dismissible per-session via Alpine.
+   Included by: htmx/partials/requisitions/list.html
+#}
+{% if inbox_status and (inbox_status.health == 'error' or inbox_status.is_stale) %}
+<div x-data="{ show: true }" x-show="show"
+     class="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 mb-3">
+  <p class="text-xs text-amber-800">
+    Your mailbox sync looks {{ 'disconnected' if inbox_status.health == 'error' else 'stale' }} —
+    new vendor replies may not appear.
+    <a hx-get="/v2/partials/settings/profile" hx-target="#main-content"
+       class="font-medium underline cursor-pointer">Open Settings → Profile</a> to reconnect.
+  </p>
+  <button @click="show = false" class="text-amber-700 text-sm">&times;</button>
+</div>
+{% endif %}
