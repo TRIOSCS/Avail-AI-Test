@@ -1,5 +1,7 @@
 """Tests for activity digest constants, service, and helpers."""
 
+import pytest
+
 from app.constants import DigestEntityType, DigestStatusSignal, InboxSyncHealth
 
 
@@ -72,9 +74,6 @@ def test_select_system_prompt_by_entity():
     assert "relationship" in svc._system_prompt(DigestEntityType.COMPANY).lower()
 
 
-import pytest
-
-
 def _mk_activity(db, **kw):
     from datetime import datetime, timezone
 
@@ -143,7 +142,7 @@ async def test_generates_then_serves_cache(db_session, monkeypatch):
     assert calls["n"] == 1
     out2 = await svc.get_or_build_digest(DigestEntityType.REQUISITION, 2, db_session)
     assert out2["state"] == "ready"
-    assert calls["n"] == 1  # cooldown + unchanged basis → cached
+    assert calls["n"] == 1  # within cooldown window → cached (cooldown guard fires first)
 
 
 @pytest.mark.asyncio
@@ -184,3 +183,32 @@ async def test_ai_failure_returns_error_no_row(db_session, monkeypatch):
     out = await svc.get_or_build_digest(DigestEntityType.REQUISITION, 4, db_session)
     assert out["state"] == "error"
     assert db_session.query(ActivityDigest).filter_by(entity_id=4).first() is None
+
+
+@pytest.mark.asyncio
+async def test_lock_miss_without_existing_returns_generating(db_session, monkeypatch):
+    from app.constants import DigestEntityType
+    from app.services import activity_digest_service as svc
+
+    ai_calls = {"n": 0}
+
+    async def fake_cs(*a, **k):
+        ai_calls["n"] += 1
+        return {"headline": "h", "narrative": "n", "highlights": [], "status_signal": "on_track"}
+
+    monkeypatch.setattr("app.utils.claude_client.claude_structured", fake_cs)
+
+    class FakeRedis:
+        def set(self, *a, **k):
+            return False  # lock already held by someone else
+
+        def delete(self, *a, **k):
+            return None
+
+    monkeypatch.setattr(svc, "_get_redis", lambda: FakeRedis())
+
+    _mk_activity(db_session, requisition_id=5)
+    _mk_activity(db_session, requisition_id=5)
+    out = await svc.get_or_build_digest(DigestEntityType.REQUISITION, 5, db_session)
+    assert out["state"] == "generating"
+    assert ai_calls["n"] == 0  # lock miss must NOT call the AI

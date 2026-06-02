@@ -11,6 +11,7 @@ Depends on: app/utils/claude_client.py (claude_structured), app/services/activit
 
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
+from typing import Any
 
 from loguru import logger
 from sqlalchemy.orm import Session
@@ -97,6 +98,7 @@ def _build_activity_lines(activities) -> str:
 
 
 def _get_redis():
+    """Indirection over intel_cache._get_redis so tests can patch the lock backend."""
     from ..cache.intel_cache import _get_redis as _r
 
     return _r()
@@ -113,7 +115,7 @@ def _load_activities(entity_type: DigestEntityType, entity_id: int, db: Session)
     return acts
 
 
-def _digest_to_dict(row: ActivityDigest) -> dict:
+def _digest_to_dict(row: ActivityDigest) -> dict[str, Any]:
     return {
         "state": DigestState.READY,
         "headline": row.headline,
@@ -125,7 +127,9 @@ def _digest_to_dict(row: ActivityDigest) -> dict:
     }
 
 
-async def get_or_build_digest(entity_type: DigestEntityType, entity_id: int, db: Session, force: bool = False) -> dict:
+async def get_or_build_digest(
+    entity_type: DigestEntityType, entity_id: int, db: Session, force: bool = False
+) -> dict[str, Any]:
     """Return a cached or freshly-built digest dict.
 
     See module docstring for the algorithm.
