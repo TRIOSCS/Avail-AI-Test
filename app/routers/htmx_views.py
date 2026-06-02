@@ -1268,6 +1268,48 @@ async def requisition_tab(
         return template_response("htmx/partials/requisitions/tabs/activity.html", ctx)
 
 
+# ── AI Digest Endpoints ───────────────────────────────────────────────────────
+
+
+@router.get("/v2/partials/requisitions/{req_id}/activity-digest", response_class=HTMLResponse)
+async def requisition_activity_digest(
+    request: Request,
+    req_id: int,
+    force: int = 0,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """AI digest card for a requisition's activity timeline (HTMX lazy-load)."""
+    from ..constants import DigestEntityType
+    from ..services.activity_digest_service import get_or_build_digest
+
+    get_requisition_or_404(db, req_id)
+    digest = await get_or_build_digest(DigestEntityType.REQUISITION, req_id, db, force=bool(force))
+    ctx = _base_ctx(request, user, "requisitions")
+    ctx["digest"] = digest
+    ctx["refresh_url"] = f"/v2/partials/requisitions/{req_id}/activity-digest"
+    return template_response("htmx/partials/shared/activity_digest_card.html", ctx)
+
+
+@router.get("/v2/partials/customers/{company_id}/activity-digest", response_class=HTMLResponse)
+async def customer_activity_digest(
+    request: Request,
+    company_id: int,
+    force: int = 0,
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """AI digest card for a company's activity timeline (HTMX lazy-load)."""
+    from ..constants import DigestEntityType
+    from ..services.activity_digest_service import get_or_build_digest
+
+    digest = await get_or_build_digest(DigestEntityType.COMPANY, company_id, db, force=bool(force))
+    ctx = _base_ctx(request, user, "customers")
+    ctx["digest"] = digest
+    ctx["refresh_url"] = f"/v2/partials/customers/{company_id}/activity-digest"
+    return template_response("htmx/partials/shared/activity_digest_card.html", ctx)
+
+
 # ── Column Prefs Save Endpoints ──────────────────────────────────────────────
 
 

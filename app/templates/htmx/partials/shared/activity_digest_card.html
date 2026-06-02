@@ -1,0 +1,40 @@
+{# activity_digest_card.html — AI digest of an entity's activity timeline.
+   Receives: digest (dict with 'state' and, when ready, headline/narrative/highlights/
+   next_step/status_signal/generated_at), refresh_url (str).
+   Called by: digest endpoints in htmx_views.py. #}
+{% set signal = digest.status_signal if digest.state == 'ready' else none %}
+{% set ring = {'on_track': 'border-green-200 bg-green-50',
+               'stalled': 'border-amber-200 bg-amber-50',
+               'needs_attention': 'border-red-200 bg-red-50'} %}
+<div class="rounded-lg border p-4 {{ ring.get(signal, 'border-brand-200 bg-white') }}">
+  {% if digest.state == 'ready' %}
+    <div class="flex items-start justify-between gap-3">
+      <p class="text-sm font-semibold text-gray-900">{{ digest.headline }}</p>
+      <a hx-get="{{ refresh_url }}?force=1" hx-target="closest div" hx-swap="outerHTML"
+         class="text-xs text-brand-600 hover:text-brand-700 cursor-pointer whitespace-nowrap">Refresh</a>
+    </div>
+    {% if digest.narrative %}
+    <p class="text-xs text-gray-600 mt-1 leading-relaxed">{{ digest.narrative }}</p>
+    {% endif %}
+    {% if digest.highlights %}
+    <ul class="mt-2 grid grid-cols-2 gap-1">
+      {% for h in digest.highlights %}
+      <li class="text-xs text-gray-700"><span class="text-gray-400">{{ h.label }}:</span> {{ h.value }}</li>
+      {% endfor %}
+    </ul>
+    {% endif %}
+    {% if digest.next_step %}
+    <p class="text-xs font-medium text-brand-700 mt-2">Next: {{ digest.next_step }}</p>
+    {% endif %}
+  {% elif digest.state == 'insufficient' %}
+    <p class="text-xs text-gray-400">Not enough activity to summarize yet.</p>
+  {% elif digest.state == 'generating' %}
+    <div hx-get="{{ refresh_url }}" hx-trigger="load delay:3s" hx-target="this" hx-swap="innerHTML">
+      <p class="text-xs text-gray-400">Summary is being prepared…</p>
+    </div>
+  {% else %}
+    <p class="text-xs text-gray-400">Couldn't generate a summary —
+      <a hx-get="{{ refresh_url }}?force=1" hx-target="closest div" hx-swap="outerHTML"
+         class="text-brand-600 cursor-pointer">try Refresh</a>.</p>
+  {% endif %}
+</div>
