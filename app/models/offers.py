@@ -64,6 +64,11 @@ class Offer(Base):
     promoted_by_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"))
     promoted_at = Column(UTCDateTime)
 
+    # Spec-code resolver lineage — populated when this offer was sourced
+    # against an AVL MPN resolved from an OEM spec code (see SpecCodeResolver).
+    resolved_via_spec_code = Column(String(64), nullable=True)
+    source_mpn = Column(String(255), nullable=True)
+
     excess_line_item_id = Column(Integer, ForeignKey("excess_line_items.id", ondelete="SET NULL"))
 
     notes = Column(Text)

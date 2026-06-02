@@ -636,7 +636,7 @@ class TestNcQueueManager:
         mock_db = MagicMock()
         mock_qm.enqueue_search.return_value = MagicMock(id=10)
         result = enqueue_for_nc_search(99, mock_db)
-        mock_qm.enqueue_search.assert_called_once_with(99, mock_db)
+        mock_qm.enqueue_search.assert_called_once_with(99, mock_db, override_mpn=None, resolved_via_spec_code=None)
 
     @patch("app.services.nc_worker.queue_manager._qm")
     def test_recover_stale_searches(self, mock_qm):

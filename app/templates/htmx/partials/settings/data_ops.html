@@ -5,6 +5,26 @@
 #}
 <div class="space-y-6">
 
+  {# ── Pending OEM Spec-Code Mappings (admin approval queue) ── #}
+  <div class="bg-white border border-brand-200 rounded-lg overflow-hidden">
+    <div class="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
+      <h2 class="text-lg font-semibold text-gray-900">OEM Spec-Code Approvals</h2>
+      <a hx-get="/admin/spec-codes/pending"
+         hx-target="#main-content"
+         hx-push-url="true"
+         href="/admin/spec-codes/pending"
+         class="px-3 py-1 text-xs font-medium text-brand-600 border border-brand-200 rounded hover:bg-brand-50">
+        Open queue
+      </a>
+    </div>
+    <div class="px-4 py-3">
+      <p class="text-sm text-gray-600">
+        Review LLM-discovered spec-code mappings (e.g. IBM SPREJ codes) awaiting approval
+        before promotion to the authoritative table.
+      </p>
+    </div>
+  </div>
+
   {# ── Vendor Dedup ──────────────────────────────────────── #}
   <div class="bg-white border border-brand-200 rounded-lg overflow-hidden">
     <div class="px-4 py-3 bg-gray-50 border-b flex items-center justify-between">
