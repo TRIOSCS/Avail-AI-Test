@@ -13,6 +13,7 @@ from typing import Any, Callable
 
 from loguru import logger
 from sqlalchemy import func
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.models import Requirement, Sighting
@@ -192,7 +193,23 @@ class QueueManager:
             resolved_via_spec_code=resolved_via_spec_code,
         )
         db.add(item)
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # Lost the insert race against a concurrent enqueue for the same
+            # (requirement_id, normalized_mpn): the uq_*_queue_requirement_mpn
+            # constraint rejected our row. Roll back and return the row the
+            # winner committed — identical to the in-Python ``existing`` path.
+            db.rollback()
+            winner = db.query(model).filter_by(requirement_id=requirement_id, normalized_mpn=norm_mpn).first()
+            logger.debug(
+                "{} enqueue race: requirement {} mpn {} already inserted concurrently (id={})",
+                self.log_prefix,
+                requirement_id,
+                norm_mpn,
+                getattr(winner, "id", None),
+            )
+            return winner
         db.refresh(item)
         logger.info(
             "{} enqueue: requirement {} queued as item {} (mpn={})", self.log_prefix, requirement_id, item.id, norm_mpn

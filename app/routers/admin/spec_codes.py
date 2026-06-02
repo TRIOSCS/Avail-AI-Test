@@ -165,15 +165,17 @@ async def re_resolve(
     user: User = Depends(require_settings_access),
     db: Session = Depends(get_db),
 ):
-    """Delete the existing pending row and re-invoke the resolver.
+    """Re-invoke the resolver for an existing pending row, replacing it only on success.
 
-    Returns empty body on a fresh resolution (row replaced); a warning fragment if the
-    resolver returned unresolved.
+    Returns empty body on a fresh resolution (row swapped); a warning fragment if the
+    resolver returned unresolved or raised.
 
-    The delete + resolve happens inside a SAVEPOINT so that if the resolver raises (LLM
-    API down, network blip), the original pending row is preserved — never destroyed by
-    a transient failure. (Schema-validation failures don't raise: the resolver catches
-    them and returns ``unresolved`` rather than propagating.)
+    The fresh resolution runs FIRST (``propose`` forces a new LLM attempt instead of
+    reusing the existing pending row) and the original row is swapped out only once we
+    have a better result. A miss or a transient failure therefore leaves the buyer audit
+    trail (citations, confidence, MPNs) completely intact — overwrite-on-success, never
+    delete-then-hope. ``propose`` also runs the ~60s LLM call without holding a DB
+    transaction, so the connection isn't pinned for its duration.
     """
     from ...services.spec_code_resolver import SpecCodeResolver
 
@@ -184,22 +186,12 @@ async def re_resolve(
     spec_code = row.spec_code
     oem = row.oem
 
-    # Atomic swap: delete inside a SAVEPOINT, flush (so the resolver's
-    # pending-lookup query can't see it), then run the resolver. On any
-    # exception the SAVEPOINT auto-rolls back and the original row is
-    # restored — buyer audit trail (citations, confidence, MPNs) is
-    # never lost to a transient failure.
+    resolver = SpecCodeResolver(db)
     try:
-        with db.begin_nested():  # SAVEPOINT
-            db.delete(row)
-            db.flush()
-            resolver = SpecCodeResolver(db)
-            result = await resolver.resolve(spec_code, oem=oem)
-        db.commit()
+        # Force a fresh attempt (don't reuse the row we're trying to replace). No
+        # writes happen here, so the original row is untouched whatever the outcome.
+        result, persist_payload = await resolver.propose(spec_code, oem=oem, allow_pending_reuse=False)
     except Exception:
-        # SAVEPOINT was auto-rolled back; outer transaction may still
-        # hold the original row. Rollback to clear any pending state
-        # and ensure the row is visible to subsequent reads.
         db.rollback()
         logger.exception(
             "spec_codes: re-resolve failed for pending_id={}",
@@ -211,11 +203,31 @@ async def re_resolve(
         )
 
     if result.status == "unresolved":
-        # Resolver legitimately returned no result. The original pending
-        # row has been deleted (admin explicitly requested re-resolve);
-        # if the admin wants to blacklist, they should use reject.
+        # Fresh attempt found nothing — leave the original pending row intact. No
+        # overwrite, no data loss; the admin can still reject to blacklist it.
         return template_response(
             "htmx/partials/admin/spec_codes_reresolve_unresolved.html",
             {"request": request, "spec_code": spec_code, "error": False},
         )
+
+    # Fresh resolution succeeded — atomically swap the old row for the new one. The
+    # LLM call is already done, so this transaction is short.
+    try:
+        with db.begin_nested():
+            db.delete(row)
+            db.flush()
+            if persist_payload is not None:
+                resolver.persist(persist_payload)
+        db.commit()
+    except Exception:
+        db.rollback()
+        logger.exception(
+            "spec_codes: re-resolve swap failed for pending_id={}",
+            pending_id,
+        )
+        return template_response(
+            "htmx/partials/admin/spec_codes_reresolve_unresolved.html",
+            {"request": request, "spec_code": spec_code, "error": True},
+        )
+
     return HTMLResponse("", status_code=200)

@@ -183,10 +183,10 @@ def test_re_resolve_escapes_html_in_unresolved_response(client_with_settings_use
         db_session.query(OemSpecCodePending).filter(OemSpecCodePending.spec_code == "<script>alert(1)</script>").one()
     )
 
-    async def fake_resolve(self, spec_code, oem="IBM"):
-        return ResolverResult(status="unresolved")
+    async def fake_propose(self, spec_code, oem="IBM", *, allow_pending_reuse=True):
+        return ResolverResult(status="unresolved"), None
 
-    monkeypatch.setattr(resolver_mod.SpecCodeResolver, "resolve", fake_resolve)
+    monkeypatch.setattr(resolver_mod.SpecCodeResolver, "propose", fake_propose)
 
     resp = client_with_settings_user.post(f"/admin/spec-codes/pending/{pending.id}/re-resolve")
     assert resp.status_code == 200
@@ -195,6 +195,93 @@ def test_re_resolve_escapes_html_in_unresolved_response(client_with_settings_use
     # an executable tag.
     assert b"<script>" not in resp.content
     assert b"&lt;script&gt;" in resp.content
+
+
+def test_re_resolve_preserves_row_when_resolver_returns_unresolved(
+    client_with_settings_user,
+    pending_row,
+    db_session,
+    monkeypatch,
+):
+    """A re-resolve that legitimately comes back ``unresolved`` must NOT throw away the
+    original pending row.
+
+    Today the buyer audit trail (citations, confidence, proposed AVL) is the only record
+    of what the LLM previously proposed; silently deleting it on a fresh miss is
+    irreversible data loss. The endpoint must preserve the row and tell the admin
+    nothing new was found.
+    """
+
+    async def fake_propose(self, spec_code, oem="IBM", *, allow_pending_reuse=True):
+        from app.services.spec_code_resolver import ResolverResult
+
+        return ResolverResult(status="unresolved"), None
+
+    monkeypatch.setattr(
+        "app.services.spec_code_resolver.SpecCodeResolver.propose",
+        fake_propose,
+    )
+
+    pending_id = pending_row.id
+    resp = client_with_settings_user.post(f"/admin/spec-codes/pending/{pending_id}/re-resolve")
+    assert resp.status_code == 200
+
+    # The original pending row and its full audit trail must survive.
+    db_session.expire_all()
+    still_there = db_session.get(OemSpecCodePending, pending_id)
+    assert still_there is not None, "unresolved re-resolve must not delete the audit trail"
+    assert still_there.spec_code == "SPREJ"
+    assert still_there.proposed_avl[0]["mpn"] == "GRM188R71H103KA01D"
+    assert still_there.citations[0]["url"] == "https://example.com"
+    assert still_there.llm_confidence == 0.8
+
+
+def test_re_resolve_swaps_row_on_fresh_success(
+    client_with_settings_user,
+    pending_row,
+    db_session,
+    monkeypatch,
+):
+    """A successful fresh re-resolve replaces the old pending row with the new proposal
+    (old gone, new persisted) — the success path the original code never covered."""
+
+    async def fake_propose(self, spec_code, oem="IBM", *, allow_pending_reuse=True):
+        from app.services.spec_code_resolver import ResolverResult
+
+        result = ResolverResult(
+            status="pending",
+            avl=[{"mpn": "NEW_MPN", "manufacturer": "Vishay", "rank": 1, "notes": None}],
+            confidence=0.91,
+            citations=[{"url": "https://new.example.com", "snippet": "fresh"}],
+            source="llm",
+        )
+        payload = {
+            "oem": oem,
+            "spec_code": spec_code,
+            "proposed_avl": result.avl,
+            "llm_confidence": result.confidence,
+            "citations": result.citations,
+        }
+        return result, payload
+
+    monkeypatch.setattr(
+        "app.services.spec_code_resolver.SpecCodeResolver.propose",
+        fake_propose,
+    )
+
+    resp = client_with_settings_user.post(f"/admin/spec-codes/pending/{pending_row.id}/re-resolve")
+    assert resp.status_code == 200
+
+    db_session.expire_all()
+    # Exactly one pending row remains, carrying the FRESH proposal — the old
+    # GRM188R71H103KA01D proposal has been swapped out for NEW_MPN. (We assert by
+    # data, not row id: SQLite reuses the deleted rowid for the replacement insert.)
+    rows = db_session.query(OemSpecCodePending).filter_by(oem="IBM", spec_code="SPREJ").all()
+    assert len(rows) == 1
+    assert rows[0].proposed_avl[0]["mpn"] == "NEW_MPN"
+    assert rows[0].llm_confidence == 0.91
+    assert all(r.proposed_avl[0]["mpn"] != "GRM188R71H103KA01D" for r in rows)
+    assert rows[0].llm_confidence == 0.91
 
 
 def test_re_resolve_preserves_row_on_resolver_exception(
@@ -209,12 +296,12 @@ def test_re_resolve_preserves_row_on_resolver_exception(
     The route must return a friendly error fragment, not a 500.
     """
 
-    async def fake_resolve(self, spec_code, oem="IBM"):
+    async def fake_propose(self, spec_code, oem="IBM", *, allow_pending_reuse=True):
         raise RuntimeError("LLM API down")
 
     monkeypatch.setattr(
-        "app.services.spec_code_resolver.SpecCodeResolver.resolve",
-        fake_resolve,
+        "app.services.spec_code_resolver.SpecCodeResolver.propose",
+        fake_propose,
     )
 
     pending_id = pending_row.id

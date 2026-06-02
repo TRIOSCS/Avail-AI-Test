@@ -321,6 +321,44 @@ async def test_avl_cooldown_skips_fetch_within_window(db_session, enable_flag, s
     assert ["GRM188R71H103KA01D"] not in fetch_calls
 
 
+async def test_avl_refanout_stamps_material_card_so_cooldown_engages(
+    db_session, enable_flag, spec_code_requirement, monkeypatch
+):
+    """Regression: the AVL re-fanout must stamp a MaterialCard.last_searched_at for
+    each searched AVL MPN. Without it ``_mpn_cooldown_partition`` always re-returns the
+    AVL set as stale and every zero-hit click re-burns connector quota. Uses the REAL
+    partition (no monkeypatch) and a zero-hit AVL fanout so the resolve_material_card
+    fallback path is exercised."""
+
+    async def fake_fetch_fresh(mpns, db):
+        # Both the primary and the AVL fanout return zero hits.
+        return ([], [_ok_stat("oemsecrets")])
+
+    async def fake_resolve(self, spec_code, oem="IBM"):
+        return ResolverResult(
+            status="pending",
+            avl=[{"mpn": "GRM188R71H103KA01D", "manufacturer": "Murata", "rank": 1, "notes": None}],
+            confidence=0.8,
+            citations=[{"url": "https://example.com", "snippet": "..."}],
+            source="llm",
+        )
+
+    monkeypatch.setattr(search_service, "_fetch_fresh", fake_fetch_fresh)
+    monkeypatch.setattr(
+        "app.services.spec_code_resolver.SpecCodeResolver.resolve",
+        fake_resolve,
+    )
+
+    await search_service.search_requirement(spec_code_requirement, db_session)
+
+    from app.models import MaterialCard
+
+    norm = search_service.normalize_mpn_key("GRM188R71H103KA01D")
+    card = db_session.query(MaterialCard).filter_by(normalized_mpn=norm).one_or_none()
+    assert card is not None, "AVL MPN must get a MaterialCard so the per-MPN cooldown can engage"
+    assert card.last_searched_at is not None, "cooldown clock must be stamped on the searched AVL MPN's card"
+
+
 async def test_avl_fetch_fresh_exception_logged_and_continues(
     db_session, enable_flag, spec_code_requirement, monkeypatch
 ):

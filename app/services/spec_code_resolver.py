@@ -38,6 +38,7 @@ from urllib.parse import urlparse
 
 from loguru import logger
 from pydantic import ValidationError
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -145,45 +146,73 @@ class SpecCodeResolver:
         # via a thin adapter that normalizes keyword args.
         self._claude_call = claude_call if claude_call is not None else _default_claude_call
 
-    async def resolve(self, spec_code: str, oem: str = "IBM") -> ResolverResult:
-        """Resolve a single (oem, spec_code) pair to an AVL.
+    async def propose(
+        self,
+        spec_code: str,
+        oem: str = "IBM",
+        *,
+        allow_pending_reuse: bool = True,
+    ) -> tuple[ResolverResult, dict | None]:
+        """Resolve a (oem, spec_code) pair WITHOUT holding a DB connection across the
+        LLM call.
 
-        Normalizes input (strip + uppercase), walks the table → pending → LLM ladder,
-        and writes a pending row on a fresh LLM-derived hit.
+        Walks the table → pending → LLM ladder and returns ``(result, persist_payload)``.
+        ``persist_payload`` is non-None ONLY for a fresh LLM-derived hit the caller
+        should write via ``persist()`` inside a short, LLM-free SAVEPOINT; it is
+        ``None`` for table hits, pending reuse, and unresolved outcomes.
+
+        The read-only table/pending/blacklist queries are rolled back before the
+        grounded LLM call so a pooled connection isn't pinned for the call's ~60s
+        duration — callers MUST therefore have no uncommitted writes when they call
+        propose(). Pass ``allow_pending_reuse=False`` to force a fresh LLM attempt
+        (admin re-resolve) instead of returning an existing pending row.
         """
         norm_code = (spec_code or "").strip().upper()
         norm_oem = (oem or "IBM").strip().upper()
         if not norm_code:
-            return ResolverResult(status="unresolved")
+            return ResolverResult(status="unresolved"), None
 
         # 1. Authoritative table
         approved = self._db.query(OemSpecCode).filter_by(oem=norm_oem, spec_code=norm_code).one_or_none()
         if approved is not None:
-            return ResolverResult(
-                status="approved",
-                avl=list(approved.avl or []),
-                confidence=1.0,
-                source="table",
+            return (
+                ResolverResult(
+                    status="approved",
+                    avl=list(approved.avl or []),
+                    confidence=1.0,
+                    source="table",
+                ),
+                None,
             )
 
-        # 2. Pending — reuse prior LLM result
-        pending = self._db.query(OemSpecCodePending).filter_by(oem=norm_oem, spec_code=norm_code).one_or_none()
-        if pending is not None:
-            return ResolverResult(
-                status="pending",
-                avl=list(pending.proposed_avl or []),
-                confidence=pending.llm_confidence,
-                citations=list(pending.citations or []),
-                source="llm",
-            )
+        # 2. Pending — reuse prior LLM result unless the caller forces a fresh attempt
+        if allow_pending_reuse:
+            pending = self._db.query(OemSpecCodePending).filter_by(oem=norm_oem, spec_code=norm_code).one_or_none()
+            if pending is not None:
+                return (
+                    ResolverResult(
+                        status="pending",
+                        avl=list(pending.proposed_avl or []),
+                        confidence=pending.llm_confidence,
+                        citations=list(pending.citations or []),
+                        source="llm",
+                    ),
+                    None,
+                )
 
         # 3. Blacklist — accumulated rejected MPNs feed into the LLM prompt
         blacklist_mpns = self._load_blacklist(norm_oem, norm_code)
 
+        # Release the read-only transaction before the slow grounded LLM call so a
+        # pooled connection isn't pinned for its duration. Everything queried above
+        # is read-only and the caller guarantees no uncommitted writes here, so the
+        # rollback discards nothing of value.
+        self._db.rollback()
+
         # 4. LLM call (validated against ResolverLlmResponse)
         llm_result = await self._call_llm(norm_code, norm_oem, blacklist_mpns)
         if llm_result is None:
-            return ResolverResult(status="unresolved")
+            return ResolverResult(status="unresolved"), None
 
         # 5. Confidence floor — apply no-citations penalty first, then compare
         adjusted_confidence = llm_result.confidence
@@ -196,34 +225,73 @@ class SpecCodeResolver:
                 norm_code,
                 adjusted_confidence,
             )
-            return ResolverResult(status="unresolved")
+            return ResolverResult(status="unresolved"), None
 
-        # 6. Persist pending row (idempotent under concurrency)
+        # 6. Build the fresh result + the payload the caller persists.
         avl_payload = [entry.model_dump() for entry in llm_result.avl]
-        row = OemSpecCodePending(
-            oem=norm_oem,
-            spec_code=norm_code,
-            proposed_avl=avl_payload,
-            llm_confidence=adjusted_confidence,
-            citations=[c.model_dump() for c in llm_result.citations],
-        )
-        self._db.add(row)
-        # Caller-owned transaction: flush (not commit) so the surrounding
-        # write session keeps ownership of the outer transaction. The caller
-        # (search_service / re_resolve) wraps this resolve() in a SAVEPOINT
-        # via ``write_db.begin_nested()`` and catches IntegrityError, rolling
-        # back ONLY the savepoint so a concurrent-insert race can't abort the
-        # caller's already-saved sightings. We deliberately let IntegrityError
-        # propagate here rather than swallowing it.
-        self._db.flush()
-
-        return ResolverResult(
+        citations_payload = [c.model_dump() for c in llm_result.citations]
+        result = ResolverResult(
             status="pending",
             avl=avl_payload,
             confidence=adjusted_confidence,
-            citations=[c.model_dump() for c in llm_result.citations],
+            citations=citations_payload,
             source="llm",
         )
+        persist_payload = {
+            "oem": norm_oem,
+            "spec_code": norm_code,
+            "proposed_avl": avl_payload,
+            "llm_confidence": adjusted_confidence,
+            "citations": citations_payload,
+        }
+        return result, persist_payload
+
+    def persist(self, persist_payload: dict) -> None:
+        """Insert the proposed pending row from ``propose()``.
+
+        The caller owns the transaction and wraps this in a SAVEPOINT so a
+        concurrent-insert race (UNIQUE on oem+spec_code) rolls back only this insert.
+        We deliberately let ``IntegrityError`` propagate to the caller's race handler.
+        """
+        row = OemSpecCodePending(**persist_payload)
+        self._db.add(row)
+        self._db.flush()
+
+    async def resolve(self, spec_code: str, oem: str = "IBM") -> ResolverResult:
+        """Convenience wrapper: ``propose()`` then ``persist()`` a fresh hit in a SAVEPOINT.
+
+        Owns its own persistence transaction, so (via ``propose``) no DB connection is
+        held during the LLM call. On a concurrent-insert race it reuses the winning
+        row's data rather than failing. Callers that must bundle the persist with other
+        writes (e.g. admin re-resolve's atomic delete+insert swap) should call
+        ``propose``/``persist`` directly instead of this wrapper.
+        """
+        result, persist_payload = await self.propose(spec_code, oem)
+        if persist_payload is None:
+            return result
+
+        try:
+            with self._db.begin_nested():
+                self.persist(persist_payload)
+        except IntegrityError:
+            # Lost the insert race: a concurrent resolve persisted the same
+            # (oem, spec_code). The SAVEPOINT already rolled our insert back; reuse
+            # the winner's row so both callers converge on one mapping.
+            self._db.rollback()
+            winner = (
+                self._db.query(OemSpecCodePending)
+                .filter_by(oem=persist_payload["oem"], spec_code=persist_payload["spec_code"])
+                .one_or_none()
+            )
+            if winner is not None:
+                return ResolverResult(
+                    status="pending",
+                    avl=list(winner.proposed_avl or []),
+                    confidence=winner.llm_confidence,
+                    citations=list(winner.citations or []),
+                    source="llm",
+                )
+        return result
 
     def _load_blacklist(self, oem: str, spec_code: str) -> list[str]:
         """Flatten every rejected MPN for this (oem, spec_code) pair."""
@@ -260,6 +328,18 @@ class SpecCodeResolver:
             return None
 
         if raw is None:
+            # The adapter collapses two distinct failures to ``None``: an empty
+            # LLM response, and a non-empty response whose JSON ``safe_json_parse``
+            # could not parse (logged only at DEBUG, below Sentry's capture floor).
+            # Either way a hallucinated/truncated answer is otherwise
+            # indistinguishable from a legitimate "no match" — warn so it's
+            # observable instead of vanishing into a silent ``unresolved``.
+            logger.warning(
+                "spec_resolver: LLM returned no usable JSON (empty or unparseable); "
+                "treating as unresolved; oem={} code={}",
+                oem,
+                spec_code,
+            )
             return None
 
         # Pre-filter citations: drop any with non-http(s) URL schemes (or

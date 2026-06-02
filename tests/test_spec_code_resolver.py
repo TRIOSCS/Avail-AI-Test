@@ -17,6 +17,7 @@ from datetime import datetime, timezone
 from unittest.mock import AsyncMock
 
 import pytest
+from loguru import logger
 
 from app.models.sourcing import (
     OemSpecCode,
@@ -32,6 +33,19 @@ from app.services.spec_code_resolver import ResolverResult, SpecCodeResolver
 def resolver(db_session):
     """Resolver bound to the test session; LLM is unset until a test wires it."""
     return SpecCodeResolver(db_session, claude_call=AsyncMock())
+
+
+@pytest.fixture
+def loguru_warnings():
+    """Capture loguru WARNING+ messages into a list.
+
+    Loguru isn't bridged to
+    stdlib logging here, so pytest's caplog won't see logger.warning(...).
+    """
+    captured: list[str] = []
+    sink_id = logger.add(lambda msg: captured.append(str(msg)), level="WARNING")
+    yield captured
+    logger.remove(sink_id)
 
 
 @pytest.fixture
@@ -221,6 +235,26 @@ async def test_llm_none_returns_unresolved(resolver):
     assert result.status == "unresolved"
 
 
+async def test_llm_none_emits_sentry_visible_warning(resolver, loguru_warnings):
+    """A ``None`` from the LLM adapter (empty response OR malformed JSON that
+    ``safe_json_parse`` dropped) must surface as a WARNING — not vanish silently into an
+    indistinguishable 'unresolved'.
+
+    WARNING is the Sentry capture floor, so this is what makes a hallucinated/truncated
+    response observable.
+    """
+
+    async def fake_claude(**kwargs):
+        return None
+
+    resolver._claude_call = fake_claude
+    await resolver.resolve("SPREJ", oem="IBM")
+
+    assert any("SPREJ" in m and "IBM" in m for m in loguru_warnings), (
+        f"expected a WARNING naming the oem/spec_code on the None path; got {loguru_warnings!r}"
+    )
+
+
 async def test_llm_schema_invalid_returns_unresolved(resolver):
     async def fake_claude(**kwargs):
         return {"avl": "not a list", "confidence": 0.9}  # invalid
@@ -228,6 +262,33 @@ async def test_llm_schema_invalid_returns_unresolved(resolver):
     resolver._claude_call = fake_claude
     result = await resolver.resolve("FOO")
     assert result.status == "unresolved"
+
+
+async def test_no_db_transaction_held_during_llm_call(resolver, db_session):
+    """The ~60s grounded LLM call must NOT pin a DB connection inside an open
+    transaction — under concurrency that exhausts the pool.
+
+    The read-only table/pending/blacklist queries are released (rolled back) before the
+    network call, so the session holds no transaction while the LLM is in flight.
+    """
+    observed: dict = {}
+
+    async def fake_claude(**kwargs):
+        observed["in_transaction"] = db_session.in_transaction()
+        return {
+            "avl": [{"mpn": "X", "manufacturer": "M", "rank": 1, "notes": None}],
+            "confidence": 0.9,
+            "citations": [{"url": "https://example.com", "snippet": "s"}],
+            "reasoning": "r",
+        }
+
+    resolver._claude_call = fake_claude
+    await resolver.resolve("FOO", oem="IBM")
+
+    assert observed.get("in_transaction") is False, (
+        "the DB transaction must be released before the LLM network call so the "
+        "connection isn't pinned for the call's duration"
+    )
 
 
 # ── Concurrent insert collision (Task 3.10) ──────────────────────────
@@ -402,18 +463,17 @@ async def test_resolve_uses_flush_not_commit(resolver, db_session, monkeypatch):
     assert result.avl[0]["mpn"] == "GOOD_MPN"
 
 
-async def test_concurrent_pending_insert_propagates_integrity_error(resolver, db_session):
-    """Simulate a second resolver winning the same (oem, spec_code) first.
+async def test_concurrent_pending_insert_recovers_to_winner(resolver, db_session):
+    """If a concurrent resolver commits the same (oem, spec_code) first, resolve() must
+    NOT raise.
 
-    With the caller-owned-transaction design, resolve() flushes its insert and lets the
-    UNIQUE-constraint IntegrityError propagate. The CALLER (search_service / re_resolve)
-    wraps resolve() in a SAVEPOINT and treats the race as unresolved — the resolver
-    itself no longer swallows the error.
+    ``resolve()`` owns its persistence SAVEPOINT and, on the UNIQUE
+    collision, recovers by reusing the winner's row so both callers converge on a
+    single mapping — the race no longer surfaces as an error every caller must catch.
     """
-    from sqlalchemy.exc import IntegrityError
 
     async def fake_claude(**kwargs):
-        # Sneak a competing row in just before the resolver flushes its own.
+        # A competing resolver commits the same (oem, spec_code) first.
         db_session.add(
             OemSpecCodePending(
                 oem="IBM",
@@ -423,7 +483,7 @@ async def test_concurrent_pending_insert_propagates_integrity_error(resolver, db
                 citations=[],
             )
         )
-        db_session.flush()
+        db_session.commit()
         return {
             "avl": [{"mpn": "LOSER", "manufacturer": "M", "rank": 1, "notes": None}],
             "confidence": 0.9,
@@ -432,5 +492,10 @@ async def test_concurrent_pending_insert_propagates_integrity_error(resolver, db
         }
 
     resolver._claude_call = fake_claude
-    with pytest.raises(IntegrityError):
-        await resolver.resolve("FOO")
+    result = await resolver.resolve("FOO")
+
+    # Recovered to the winner's data — not the LOSER we computed — without raising.
+    assert result.status == "pending"
+    assert result.avl[0]["mpn"] == "WINNER"
+    # Exactly one row survives the race.
+    assert db_session.query(OemSpecCodePending).filter_by(oem="IBM", spec_code="FOO").count() == 1
