@@ -49,14 +49,14 @@ Add `get_inbox_sync_status(user: User) -> dict` to `app/services/activity_servic
     "is_stale": bool,         # last scan older than 2× inbox_scan_interval_min, or never
     "token_ok": bool,         # token present and not expired (token_expires_at > now)
     "error_reason": str | None,  # user.m365_error_reason
-    "health": "ok" | "warning" | "error",  # derived: error if not connected/token bad;
-                                            # warning if stale; else ok
+    "health": InboxSyncHealth,  # OK | WARNING | ERROR (StrEnum, see Constants)
 }
 ```
 
+`health` is an `InboxSyncHealth` StrEnum value (not a raw string — see **Constants** below).
 `is_stale` rule: `last_scan_at is None` OR `now - last_scan_at > 2 * inbox_scan_interval_min`.
-`health` derivation: `error` when `not connected or not token_ok`; else `warning` when
-`is_stale`; else `ok`.
+`health` derivation: `ERROR` when `not connected or not token_ok`; else `WARNING` when
+`is_stale`; else `OK`.
 
 ### A2. Mailbox-sync health card
 
@@ -101,52 +101,95 @@ session; reappears on next full page load while the condition persists.
 
 ## Feature B — AI timeline digest (requisition + account)
 
+### B0. Constants (new StrEnums in `app/constants.py`)
+
+Per the CLAUDE.md non-negotiable ("always use `StrEnum` constants, never raw strings"),
+add three StrEnums alongside `ActivityType`:
+
+```python
+class DigestEntityType(StrEnum):
+    REQUISITION = "requisition"
+    COMPANY = "company"
+
+class DigestStatusSignal(StrEnum):   # semantic state of the entity, drives card color
+    ON_TRACK = "on_track"
+    STALLED = "stalled"
+    NEEDS_ATTENTION = "needs_attention"
+
+class InboxSyncHealth(StrEnum):      # Feature A health card / banner
+    OK = "ok"
+    WARNING = "warning"
+    ERROR = "error"
+```
+
+The runtime render-state of a digest (`ready` / `insufficient` / `generating` / `error`)
+is ephemeral view state returned by the service, **not** persisted; it is a small
+module-level `DigestState` StrEnum in `activity_digest_service.py`, not stored on the row.
+
 ### B1. Data model — `ActivityDigest`
 
-New table (new model in `app/models/intelligence.py`; Alembic migration with downgrade):
+New model added to `app/models/intelligence.py` (alongside `ActivityLog` / `ChangeLog` /
+`ProactiveMatch`), exported from `app/models/__init__.py`; Alembic migration with a working
+downgrade. Datetime columns use the `UTCDateTime` type from `app/database.py` (matching
+every other column in `intelligence.py`).
 
 | Column | Type | Notes |
 |---|---|---|
 | `id` | int PK | |
-| `entity_type` | String(20) | `"requisition"` or `"company"` |
+| `entity_type` | String(20) | `DigestEntityType` value; `@validates` guard rejects others |
 | `entity_id` | int | FK-by-convention to requisitions.id / companies.id (no hard FK — polymorphic) |
 | `headline` | String(300) | one-line summary |
 | `narrative` | Text | 2–4 sentence summary |
 | `highlights` | JSON | list of `{label, value}` bullets |
 | `next_step` | String(500) | nullable suggested next action |
-| `status_signal` | String(20) | `on_track` / `stalled` / `needs_attention` |
+| `status_signal` | String(20) | `DigestStatusSignal` value |
 | `generated_at` | UTCDateTime | when produced |
 | `basis_last_activity_at` | UTCDateTime | max(activity.created_at) at generation |
 | `basis_activity_count` | int | count of considered activities at generation |
+| `cooldown_until` | UTCDateTime, nullable | regeneration suppressed until this time (see B2) |
 | `model` | String(50) | model id used |
 
-Unique constraint on `(entity_type, entity_id)` — one current digest per entity (upsert).
+Unique constraint on `(entity_type, entity_id)` — one current digest per entity. Writes use
+`INSERT … ON CONFLICT (entity_type, entity_id) DO UPDATE` (PostgreSQL upsert) so the final
+write is race-safe even if two generations finish near-simultaneously.
 
 ### B2. Generation service — `app/services/activity_digest_service.py`
 
-`async def get_or_build_digest(entity_type: str, entity_id: int, db: Session, force: bool = False) -> dict`
+`async def get_or_build_digest(entity_type: DigestEntityType, entity_id: int, db: Session, force: bool = False) -> dict`
 
 Algorithm:
-1. Load activities for the entity:
-   - requisition → `get_requisition_activities(entity_id, db, meaningful_only=True)`
-   - company → `get_company_activities(entity_id, db)` (meaningful filter applied in service)
-2. Compute current basis: `basis_last_activity_at = max(created_at)`,
-   `basis_activity_count = len(meaningful activities)`.
-3. **Insufficient-activity short-circuit:** if `basis_activity_count < 2`, return a
-   sentinel `{"state": "insufficient"}` WITHOUT calling the AI and without writing a row.
-4. Load existing `ActivityDigest` for `(entity_type, entity_id)`. If it exists, `force` is
-   False, and its `basis_last_activity_at == current` and
-   `basis_activity_count == current` → return cached digest (`state: "ready"`).
-5. Otherwise regenerate: build prompt (B3), call `claude_structured(schema=DIGEST_SCHEMA,
-   system=<entity-specific>, model_tier="smart", max_tokens=700, cache_system=True)`,
-   upsert the row (update in place if exists, else insert), commit, return
-   (`state: "ready"`).
-6. On AI failure (no result / Claude error): return `{"state": "error"}`; do NOT write a
+1. Load existing `ActivityDigest` for `(entity_type, entity_id)`.
+2. **Cooldown guard (skip when `force`):** if a row exists and `cooldown_until` is in the
+   future, return it as-is (`state: "ready"`) without computing the basis or calling the
+   AI. Cooldown default **120s** (`settings.digest_cooldown_seconds`); the Refresh button
+   sends `force=1` and bypasses it. This caps Sonnet calls during write bursts (e.g. a
+   sighting batch logging many rows) while keeping the digest near-fresh.
+3. Load activities for the entity, **hard-capped at the 30 most recent**:
+   - requisition → `get_requisition_activities(entity_id, db, meaningful_only=True, limit=30)`
+   - company → `get_company_activities(entity_id, db, limit=30)`
+4. Compute current basis: `basis_last_activity_at = max(created_at)`,
+   `basis_activity_count = len(activities)`.
+5. **Insufficient-activity short-circuit:** if `basis_activity_count < 2`, return
+   `{"state": "insufficient"}` WITHOUT calling the AI and without writing a row.
+6. **Freshness check (skip when `force`):** if the existing row's `basis_last_activity_at`
+   and `basis_activity_count` both equal current → return cached (`state: "ready"`).
+7. **Stampede guard:** acquire a Redis `nx` lock `lock:digest:{entity_type}:{entity_id}`
+   with `ex=30` via `_get_redis()` (`app/cache/intel_cache.py`), released in a `finally` —
+   the exact pattern at `core_jobs.py:121-150`. **If the lock is NOT acquired**, another
+   request is already regenerating: return the existing row if present (`state: "ready"`,
+   possibly stale) else `{"state": "generating"}`. Do not block, do not call the AI.
+8. Holding the lock: build prompt (B3), call `claude_structured(schema=DIGEST_SCHEMA,
+   system=<entity-specific>, model_tier="smart", max_tokens=700, cache_system=True)`, upsert
+   the row via `ON CONFLICT DO UPDATE` (setting `cooldown_until = now + cooldown`), commit,
+   return (`state: "ready"`).
+9. On AI failure (no result / Claude error): return `{"state": "error"}`; do NOT write a
    poisoned row. Errors are surfaced in the card, never silently swallowed.
 
-This basis-comparison **is** the auto-invalidation: any new activity changes
-`max(created_at)` and/or the count, so the next view regenerates. No write-path hooks
-needed; the mechanism is self-healing.
+The basis-comparison **is** the auto-invalidation: any new activity changes
+`max(created_at)` and/or the count, so the next view (past cooldown) regenerates. No
+write-path hooks needed; the mechanism is self-healing. The Redis lock prevents concurrent
+duplicate Sonnet calls; the cooldown prevents burst-driven repeat calls; the `ON CONFLICT`
+upsert makes the final write race-safe.
 
 ### B3. Prompt + schema
 
@@ -166,9 +209,21 @@ System prompts:
 - **Account/company** — relationship framing: recent engagement, open RFQs, responsiveness
   / sentiment trend, recommended follow-up.
 
-Prompt body lists the meaningful activities (type, date, direction, contact, subject,
-existing `summary`/`notes`) newest-first, plus light entity metadata
-(requisition: status, part count, offer count; company: name, is_strategic).
+Prompt body lists the (capped, 30) meaningful activities newest-first, plus light entity
+metadata (requisition: status, part count, offer count; company: name, is_strategic).
+
+**Token economy — reuse the AI-cleaned summary.** For each activity, feed
+`activity.summary` (the clean text `activity_quality_service` already wrote for
+emails/sightings) and fall back to `activity.notes[:200]` only when `summary` is None.
+Never feed raw email bodies. This makes the quality pass and the digest compound rather
+than re-paying Sonnet to re-clean the same text.
+
+**Why `claude_structured`, not `claude_text` (deliberate, overrides architect note 4a).**
+The digest is rendered as a *structured card* — a one-line headline, an enum
+`status_signal` that drives the card's color, scannable highlight bullets, and an explicit
+next step. Reliable structured fields are exactly what makes the record "easy to process"
+(the original user goal), so schema-enforced output is correct here; a prose blob would
+lose that. `cache_system=True` still applies to the static system prompt.
 
 ### B4. Rendering — HTMX lazy-load
 
@@ -179,10 +234,13 @@ Claude call never blocks tab-open:
   `customers/tabs/activity_tab.html`:
   ```html
   <div hx-get="/v2/partials/requisitions/{{ req.id }}/activity-digest"
-       hx-trigger="load" hx-swap="innerHTML">
+       hx-trigger="load" hx-target="this" hx-swap="innerHTML">
     <!-- skeleton -->
   </div>
   ```
+  `hx-target="this"` is required so the swap replaces the placeholder, not the parent
+  `#main-content` / `#tab-content` target it would otherwise inherit (pattern:
+  `vendors/detail.html` lazy-loaded sections).
 - New endpoints return a shared digest-card partial
   (`htmx/partials/shared/activity_digest_card.html`):
   - `GET /v2/partials/requisitions/{req_id}/activity-digest`
@@ -192,6 +250,9 @@ Claude call never blocks tab-open:
   - `ready`: headline, status_signal color, narrative, highlight bullets, next_step,
     "Updated {relative}" + a Refresh link (`?force=1`).
   - `insufficient`: muted "Not enough activity to summarize yet."
+  - `generating`: muted "Summary is being prepared…" with a self-retry
+    (`hx-trigger="load delay:3s"`) so the card fills in once the in-flight generation
+    commits. Only reachable on a cold cache during a concurrent first view.
   - `error`: muted "Couldn't generate a summary — try Refresh." (no crash, no fake data)
 
 ### B5. Model
@@ -205,8 +266,11 @@ basis cache regenerates only when the timeline changes.
 
 - **Digest service:** insufficient short-circuit (<2 activities, asserts no Claude call);
   cached hit when basis unchanged (asserts no Claude call); regeneration when a newer
-  activity exists; `force=1` regeneration; entity-type prompt selection; AI-failure path
-  returns `error` and writes no row; upsert keeps one row per entity.
+  activity exists; `force=1` regeneration; **cooldown** suppresses regen within the window
+  but `force=1` overrides; **lock-miss** returns the stale row / `generating` without a
+  Claude call; 30-activity cap enforced; prompt uses `summary` over raw `notes`;
+  entity-type prompt selection; AI-failure path returns `error` and writes no row; upsert
+  keeps one row per entity.
 - **Inbox status helper:** `ok` / `warning` (stale) / `error` (disconnected, bad token)
   derivations; never-scanned → stale.
 - **Scan-now endpoints:** `TESTING` guard returns refreshed partial without Graph;
@@ -221,11 +285,15 @@ basis cache regenerates only when the timeline changes.
 
 ## Build sequence
 
-1. Alembic migration + `ActivityDigest` model.
-2. `activity_digest_service.py` + tests.
-3. Digest endpoints + shared card partial + lazy-load placeholders + tests.
-4. `get_inbox_sync_status` helper + tests.
-5. Settings mailbox-sync card + real Scan-now endpoints + tests.
-6. Disconnected banner.
-7. APP_MAP docs update.
-8. Full pipeline: `pre-commit run --all-files`, full pytest, review agents.
+1. Constants: add `DigestEntityType`, `DigestStatusSignal`, `InboxSyncHealth` to
+   `app/constants.py`; add `digest_cooldown_seconds` (default 120) to `config.py`.
+2. `ActivityDigest` model in `app/models/intelligence.py` + export in
+   `app/models/__init__.py`; then `alembic revision --autogenerate`, review, and test
+   upgrade → downgrade → upgrade; confirm single `alembic heads`.
+3. `activity_digest_service.py` (basis/cooldown/lock/upsert) + tests.
+4. Digest endpoints + shared card partial + lazy-load placeholders + tests.
+5. `get_inbox_sync_status` helper + tests.
+6. Settings mailbox-sync card + real Scan-now endpoints + tests.
+7. Disconnected banner on the requisitions list.
+8. APP_MAP docs update (`APP_MAP_DATABASE.md`, `APP_MAP_INTERACTIONS.md`).
+9. Full pipeline: `pre-commit run --all-files`, full pytest, then the PR-review agents.
