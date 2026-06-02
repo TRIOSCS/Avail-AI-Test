@@ -21,7 +21,8 @@ def test_requisitions_list_shows_banner_when_disconnected(client, monkeypatch):
     )
     resp = client.get("/v2/partials/requisitions")
     assert resp.status_code == 200
-    assert "mailbox" in resp.text.lower()
+    assert "mailbox sync looks" in resp.text
+    assert "disconnected" in resp.text
 
 
 def test_requisitions_list_no_banner_when_healthy(client, monkeypatch):
