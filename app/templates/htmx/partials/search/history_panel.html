@@ -1,7 +1,12 @@
 {# What-we-know panel — searched part's internal history.
    Called by: htmx_views.search_history_panel
-   Depends on: PartHistory (history), Alpine.js for the accordion. #}
-{% if not history.found %}
+   Depends on: PartHistory (history), error flag, Alpine.js for the accordion. #}
+{% if error %}
+<div class="rounded-xl bg-white p-6 text-center border border-amber-200 shadow-sm">
+  <p class="text-sm font-medium text-amber-700">History could not be loaded.</p>
+  <p class="text-xs text-amber-600 mt-1">Try again, or open the part page directly.</p>
+</div>
+{% elif not history.found %}
 <div class="rounded-xl bg-white p-6 text-center border border-gray-100 shadow-sm">
   <p class="text-sm font-medium text-gray-500">No prior history</p>
   <p class="text-xs text-gray-400 mt-1">This part looks new to us.</p>
@@ -25,9 +30,6 @@
          hx-target="#main-content" hx-push-url="/v2/materials/{{ history.card_id }}"
          class="shrink-0 text-xs font-medium text-blue-600 hover:text-blue-700">Open full part page →</a>
     </div>
-    {% if error %}
-    <p class="mt-2 text-xs text-amber-600">Some history could not be loaded.</p>
-    {% endif %}
     {# Summary stat row #}
     <div class="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-xs text-gray-600">
       <span><span class="font-semibold text-gray-900">{{ history.offers_count }}</span> Offers</span>

@@ -186,3 +186,81 @@ def test_sightings_requirements_price_trend(db_session: Session):
     assert h.price_trend is not None
     assert h.price_trend.min_price == Decimal("3.0")
     assert h.price_trend.max_price == Decimal("5.0")
+
+
+def test_price_trend_none_when_no_snapshots(db_session: Session):
+    """A card with offers but no price snapshots has no price trend."""
+    card = _make_card(db_session)
+    req = _make_requisition(db_session)
+    u1 = _make_user(db_session)
+    _make_offer(db_session, card, req, u1)
+    assert get_part_history(db_session, "lm317t").price_trend is None
+
+
+def test_price_trend_scoped_to_latest_currency(db_session: Session):
+    """Min/max are scoped to the most-recent snapshot's currency, not mixed."""
+    card = _make_card(db_session)
+    base = datetime(2026, 1, 1, tzinfo=timezone.utc)
+    # Older EUR snapshot (would skew an unscoped min/max); newest two are USD.
+    db_session.add(
+        MaterialPriceSnapshot(
+            material_card_id=card.id,
+            vendor_name="V",
+            price=Decimal("99.0"),
+            currency="EUR",
+            source="brokerbin",
+            recorded_at=base,
+        )
+    )
+    for i, p in enumerate((Decimal("3.0"), Decimal("5.0")), start=1):
+        db_session.add(
+            MaterialPriceSnapshot(
+                material_card_id=card.id,
+                vendor_name="V",
+                price=p,
+                currency="USD",
+                source="brokerbin",
+                recorded_at=base.replace(day=1 + i),
+            )
+        )
+    db_session.commit()
+    h = get_part_history(db_session, "lm317t")
+    assert h.price_trend.currency == "USD"
+    assert h.price_trend.min_price == Decimal("3.0")
+    assert h.price_trend.max_price == Decimal("5.0")  # EUR 99 excluded
+
+
+def test_offers_truncated_to_top_n_but_count_is_total(db_session: Session):
+    """List previews cap at TOP_N while *_count reflects the true total."""
+    from app.services.part_history_service import TOP_N
+
+    card = _make_card(db_session)
+    req = _make_requisition(db_session)
+    u1 = _make_user(db_session)
+    for i in range(TOP_N + 2):
+        _make_offer(db_session, card, req, u1, vendor=f"V{i}")
+    h = get_part_history(db_session, "lm317t")
+    assert h.offers_count == TOP_N + 2
+    assert len(h.offers) == TOP_N
+
+
+def test_buyers_excludes_offers_with_null_entered_by(db_session: Session):
+    """Offers with no entered_by contribute no buyer (inner join)."""
+    card = _make_card(db_session)
+    req = _make_requisition(db_session)
+    o = Offer(
+        requisition_id=req.id,
+        material_card_id=card.id,
+        vendor_name="Avnet",
+        mpn="LM317T",
+        qty_available=1,
+        unit_price=Decimal("1.0"),
+        status="active",
+        entered_by_id=None,
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add(o)
+    db_session.commit()
+    h = get_part_history(db_session, "lm317t")
+    assert h.offers_count == 1
+    assert h.buyers == []

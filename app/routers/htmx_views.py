@@ -2959,16 +2959,17 @@ async def search_history_panel(
     from ..services.part_history_service import PartHistory, get_part_history
     from ..utils.normalization import normalize_mpn_key
 
+    key = normalize_mpn_key(mpn)  # pure/cheap; outside try so it can be logged on failure
     try:
-        key = normalize_mpn_key(mpn)
         history = get_part_history(db, key)
+        error = False
     except Exception:
-        logger.exception("search_history_panel failed for mpn={}", mpn)
-        ctx = _base_ctx(request, user, "search")
-        ctx.update({"history": PartHistory(found=False), "error": True})
-        return template_response("htmx/partials/search/history_panel.html", ctx)
+        logger.exception("search_history_panel failed mpn={} key={} user={}", mpn, key, user.id)
+        history = PartHistory(found=False)
+        error = True
+
     ctx = _base_ctx(request, user, "search")
-    ctx.update({"history": history, "error": False})
+    ctx.update({"history": history, "error": error})
     return template_response("htmx/partials/search/history_panel.html", ctx)
 
 

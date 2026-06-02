@@ -1,8 +1,12 @@
 """Assemble a material part's internal history for display.
 
-What it does: given a MaterialCard's normalized key, returns a PartHistory summary
-(offers, buyers, confirmed/won, sightings, requirements, price trend).
-Called by: htmx_views search-history endpoint and materials detail/tab partials.
+What it does: given a MaterialCard's normalized key, ``get_part_history`` returns a
+PartHistory summary (offers, buyers, confirmed/won, sightings, requirements, price
+trend). The per-section ``*_for_card`` query helpers below can also be used on their
+own.
+Called by: ``get_part_history`` → htmx_views.search_history_panel (the search-page
+           panel). The ``*_for_card`` helpers are called directly by htmx_views
+           material_detail_partial / material_tab_partial (the materials detail page).
 Depends on: MaterialCard, Offer, Sighting, Requirement, CustomerPartHistory,
             MaterialPriceSnapshot, User.
 """
@@ -29,28 +33,39 @@ _WON_OFFER_STATUSES = (OfferStatus.WON, OfferStatus.SOLD)
 
 @dataclass
 class PriceTrend:
-    min_price: Decimal | None = None
-    max_price: Decimal | None = None
+    """A part's price range, scoped to the most-recent snapshot's currency."""
+
+    min_price: Decimal
+    max_price: Decimal
     last_price: Decimal | None = None
     currency: str = "USD"
 
 
 @dataclass
 class PartHistory:
+    """A part's internal history summary for the search-page panel.
+
+    Contracts: all payload fields below are meaningful only when ``found`` is True.
+    The ``*_count`` fields are full totals, while the parallel list fields are capped
+    at ``TOP_N`` (previews) — the template uses ``count > list|length`` to show a
+    "view all" link. ``confirmed_count`` is a cross-source SUM (won/sold offers + won
+    requisitions + customer-purchase rows), NOT the length of any single list.
+    """
+
     found: bool = False
     card_id: int | None = None
     display_mpn: str = ""
     manufacturer: str = ""
     lifecycle_status: str | None = None
-    offers: list = field(default_factory=list)
+    offers: list[Offer] = field(default_factory=list)
     offers_count: int = 0
-    buyers: list = field(default_factory=list)
-    won_offers: list = field(default_factory=list)
-    customer_purchases: list = field(default_factory=list)
+    buyers: list[User] = field(default_factory=list)
+    won_offers: list[Offer] = field(default_factory=list)
+    customer_purchases: list[CustomerPartHistory] = field(default_factory=list)
     confirmed_count: int = 0
-    sightings: list = field(default_factory=list)
+    sightings: list[Sighting] = field(default_factory=list)
     sightings_count: int = 0
-    requirements: list = field(default_factory=list)
+    requirements: list[Requirement] = field(default_factory=list)
     requirements_count: int = 0
     price_trend: PriceTrend | None = None
 
@@ -119,24 +134,30 @@ def requirements_for_card(db: Session, card_id: int, limit: int = TOP_N) -> list
 
 
 def price_trend_for_card(db: Session, card_id: int) -> PriceTrend | None:
-    agg = (
-        db.query(func.min(MaterialPriceSnapshot.price), func.max(MaterialPriceSnapshot.price))
-        .filter(MaterialPriceSnapshot.material_card_id == card_id)
-        .first()
-    )
-    if not agg or agg[0] is None:
-        return None
+    # Anchor on the most-recent snapshot, then scope min/max to ITS currency so the
+    # range is meaningful (mixing currencies into one min/max would be nonsense).
     last = (
         db.query(MaterialPriceSnapshot)
         .filter(MaterialPriceSnapshot.material_card_id == card_id)
         .order_by(MaterialPriceSnapshot.recorded_at.desc().nullslast())
         .first()
     )
+    if last is None:
+        return None
+    currency = last.currency or "USD"
+    agg = (
+        db.query(func.min(MaterialPriceSnapshot.price), func.max(MaterialPriceSnapshot.price))
+        .filter(
+            MaterialPriceSnapshot.material_card_id == card_id,
+            MaterialPriceSnapshot.currency == currency,
+        )
+        .first()
+    )
     return PriceTrend(
         min_price=agg[0],
         max_price=agg[1],
-        last_price=last.price if last else None,
-        currency=(last.currency if last else "USD"),
+        last_price=last.price,
+        currency=currency,
     )
 
 
@@ -163,6 +184,9 @@ def get_part_history(db: Session, normalized_key: str) -> PartHistory:
     offers_count = db.query(func.count(Offer.id)).filter(Offer.material_card_id == card.id).scalar() or 0
     buyers = buyers_for_card(db, card.id)
 
+    # "Confirmed / Won" = three independent kinds of evidence the part actually moved:
+    # won/sold offers (_WON_OFFER_STATUSES includes SOLD; the UI labels it "Won"),
+    # WON requisitions, and customer-purchase rows. The total is their sum.
     won_offers = won_offers_for_card(db, card.id)
     customer_purchases = customer_purchases_for_card(db, card.id)
     won_offer_count = (
