@@ -74,6 +74,12 @@ from ..services.faceted_search_service import (
     search_materials_faceted,
 )
 from ..services.freeform_parser_service import parse_freeform_rfq
+from ..services.part_history_service import (
+    customer_purchases_for_card,
+    offers_for_card,
+    requirements_for_card,
+    sightings_for_card,
+)
 from ..services.status_machine import require_valid_transition
 from ..template_env import template_response, templates
 from ..utils.search_builder import SearchBuilder
@@ -7210,20 +7216,8 @@ async def material_detail_partial(
     if not card:
         raise HTTPException(404, "Material card not found")
 
-    sightings = (
-        db.query(Sighting)
-        .filter(Sighting.material_card_id == card_id)
-        .order_by(Sighting.created_at.desc().nullslast())
-        .limit(50)
-        .all()
-    )
-    offers = (
-        db.query(Offer)
-        .filter(Offer.material_card_id == card_id)
-        .order_by(Offer.created_at.desc().nullslast())
-        .limit(50)
-        .all()
-    )
+    sightings = sightings_for_card(db, card_id, limit=50)
+    offers = offers_for_card(db, card_id, limit=50)
     ctx = _base_ctx(request, user, "materials")
     ctx.update({"card": card, "sightings": sightings, "offers": offers})
     return template_response("htmx/partials/materials/detail.html", ctx)
@@ -7262,24 +7256,10 @@ async def material_tab_partial(
         )
         return template_response("htmx/partials/materials/tabs/vendors.html", ctx)
     elif tab_name == "customers":
-        from ..models.purchase_history import CustomerPartHistory
-
-        ctx["customers"] = (
-            db.query(CustomerPartHistory)
-            .filter_by(material_card_id=card_id)
-            .order_by(CustomerPartHistory.last_purchased_at.desc().nullslast())
-            .all()
-        )
+        ctx["customers"] = customer_purchases_for_card(db, card_id, limit=200)
         return template_response("htmx/partials/materials/tabs/customers.html", ctx)
     elif tab_name == "sourcing":
-        from ..models.sourcing import Requirement
-
-        ctx["requirements"] = (
-            db.query(Requirement)
-            .filter(Requirement.material_card_id == card_id)
-            .order_by(Requirement.created_at.desc())
-            .all()
-        )
+        ctx["requirements"] = requirements_for_card(db, card_id, limit=200)
         return template_response("htmx/partials/materials/tabs/sourcing.html", ctx)
     elif tab_name == "price_history":
         from ..models.price_snapshot import MaterialPriceSnapshot
