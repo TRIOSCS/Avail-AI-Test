@@ -284,15 +284,20 @@ def log_call_activity(
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def get_company_activities(company_id: int, db: Session, limit: int = 50) -> list[ActivityLog]:
-    """Get recent activity for a company."""
-    return (
-        db.query(ActivityLog)
-        .filter(ActivityLog.company_id == company_id)
-        .order_by(ActivityLog.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+def get_company_activities(
+    company_id: int, db: Session, limit: int = 50, meaningful_only: bool = False
+) -> list[ActivityLog]:
+    """Get recent activity for a company.
+
+    meaningful_only (default False preserves existing caller behaviour). When True,
+    filters out activities that the AI quality pass classified as not meaningful
+    (is_meaningful=False); rows that are meaningful (True) or not yet scored (None) are
+    kept, matching the requisition path semantics.
+    """
+    q = db.query(ActivityLog).filter(ActivityLog.company_id == company_id)
+    if meaningful_only:
+        q = q.filter((ActivityLog.is_meaningful.is_(True)) | (ActivityLog.is_meaningful.is_(None)))
+    return q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
 
 
 def get_vendor_activities(vendor_card_id: int, db: Session, limit: int = 50) -> list[ActivityLog]:

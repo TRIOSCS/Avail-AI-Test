@@ -11,14 +11,15 @@ Depends on: app/utils/claude_client.py (claude_structured), app/services/activit
 
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
-from typing import Any
+from typing import Any, TypedDict
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
 from ..config import settings
-from ..constants import DigestEntityType
+from ..constants import DigestEntityType, DigestStatusSignal
 from ..models.intelligence import ActivityDigest
+from ..utils.claude_errors import ClaudeError, ClaudeUnavailableError
 
 ACTIVITY_CAP = 30
 
@@ -28,6 +29,18 @@ class DigestState(StrEnum):
     INSUFFICIENT = "insufficient"
     GENERATING = "generating"
     ERROR = "error"
+
+
+class DigestResult(TypedDict, total=False):
+    """Return type for get_or_build_digest and _digest_to_dict."""
+
+    state: DigestState
+    headline: str | None
+    narrative: str | None
+    highlights: list[dict[str, str]]
+    next_step: str | None
+    status_signal: str | None
+    generated_at: Any
 
 
 DIGEST_SCHEMA = {
@@ -50,7 +63,7 @@ DIGEST_SCHEMA = {
         "next_step": {"type": "string", "description": "Suggested next action, or empty."},
         "status_signal": {
             "type": "string",
-            "enum": ["on_track", "stalled", "needs_attention"],
+            "enum": [s.value for s in DigestStatusSignal],
         },
     },
     "required": ["headline", "narrative", "highlights", "status_signal"],
@@ -110,12 +123,11 @@ def _load_activities(entity_type: DigestEntityType, entity_id: int, db: Session)
     if entity_type == DigestEntityType.REQUISITION:
         acts = get_requisition_activities(entity_id, db, limit=ACTIVITY_CAP, meaningful_only=True)
     else:
-        acts = get_company_activities(entity_id, db, limit=ACTIVITY_CAP)
-        acts = [a for a in acts if a.is_meaningful in (True, None)]
+        acts = get_company_activities(entity_id, db, limit=ACTIVITY_CAP, meaningful_only=True)
     return acts
 
 
-def _digest_to_dict(row: ActivityDigest) -> dict[str, Any]:
+def _digest_to_dict(row: ActivityDigest) -> DigestResult:
     return {
         "state": DigestState.READY,
         "headline": row.headline,
@@ -129,7 +141,7 @@ def _digest_to_dict(row: ActivityDigest) -> dict[str, Any]:
 
 async def get_or_build_digest(
     entity_type: DigestEntityType, entity_id: int, db: Session, force: bool = False
-) -> dict[str, Any]:
+) -> DigestResult:
     """Return a cached or freshly-built digest dict.
 
     See module docstring for the algorithm.
@@ -164,7 +176,7 @@ async def get_or_build_digest(
     acquired = False
     if r is not None:
         try:
-            acquired = bool(r.set(lock_key, "1", nx=True, ex=30))
+            acquired = bool(r.set(lock_key, "1", nx=True, ex=45))  # 45s > claude_structured default 30s timeout
         except Exception as e:
             logger.warning("Digest lock acquire failed ({}): {}", lock_key, e)
             acquired = True
@@ -180,17 +192,27 @@ async def get_or_build_digest(
         from ..utils.claude_client import claude_structured
 
         prompt = "Recent activity (newest first):\n" + _build_activity_lines(activities)
-        result = await claude_structured(
-            prompt=prompt,
-            schema=DIGEST_SCHEMA,
-            system=_system_prompt(entity_type),
-            model_tier="smart",
-            max_tokens=700,
-            cache_system=True,
-        )
+        try:
+            result = await claude_structured(
+                prompt=prompt,
+                schema=DIGEST_SCHEMA,
+                system=_system_prompt(entity_type),
+                model_tier="smart",
+                max_tokens=700,
+                cache_system=True,
+            )
+        except (ClaudeUnavailableError, ClaudeError) as e:
+            logger.warning("Digest AI call failed for {} {}: {} ({})", entity_type, entity_id, type(e).__name__, e)
+            return {"state": DigestState.ERROR}
+
         if not result:
             logger.error("Digest AI returned no result for {} {}", entity_type, entity_id)
             return {"state": DigestState.ERROR}
+
+        sig = result.get("status_signal")
+        if sig and sig not in {s.value for s in DigestStatusSignal}:
+            logger.warning("Unexpected status_signal from digest AI: {!r}", sig)
+            sig = None
 
         cooldown = now + timedelta(seconds=settings.digest_cooldown_seconds)
         row = existing or ActivityDigest(entity_type=entity_type, entity_id=entity_id)
@@ -198,7 +220,7 @@ async def get_or_build_digest(
         row.narrative = result.get("narrative") or None
         row.highlights = result.get("highlights") or []
         row.next_step = (result.get("next_step") or "")[:500] or None
-        row.status_signal = result.get("status_signal") or None
+        row.status_signal = sig
         row.generated_at = now
         row.basis_last_activity_at = basis_last
         row.basis_activity_count = basis_count

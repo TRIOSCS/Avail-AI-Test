@@ -212,3 +212,133 @@ async def test_lock_miss_without_existing_returns_generating(db_session, monkeyp
     out = await svc.get_or_build_digest(DigestEntityType.REQUISITION, 5, db_session)
     assert out["state"] == "generating"
     assert ai_calls["n"] == 0  # lock miss must NOT call the AI
+
+
+@pytest.mark.asyncio
+async def test_ai_raised_exception_returns_error(db_session, monkeypatch):
+    from app.constants import DigestEntityType
+    from app.models.intelligence import ActivityDigest
+    from app.services import activity_digest_service as svc
+    from app.utils.claude_errors import ClaudeError
+
+    async def boom(*a, **k):
+        raise ClaudeError("boom")
+
+    monkeypatch.setattr("app.utils.claude_client.claude_structured", boom)
+    monkeypatch.setattr(svc, "_get_redis", lambda: None)
+    _mk_activity(db_session, requisition_id=20)
+    _mk_activity(db_session, requisition_id=20)
+    out = await svc.get_or_build_digest(DigestEntityType.REQUISITION, 20, db_session)
+    assert out["state"] == "error"
+    assert db_session.query(ActivityDigest).filter_by(entity_id=20).first() is None
+
+
+@pytest.mark.asyncio
+async def test_basis_change_regenerates_after_cooldown(db_session, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from app.constants import DigestEntityType
+    from app.models.intelligence import ActivityDigest
+    from app.services import activity_digest_service as svc
+
+    calls = {"n": 0}
+
+    async def fake_cs(*a, **k):
+        calls["n"] += 1
+        return {"headline": f"h{calls['n']}", "narrative": "n", "highlights": [], "status_signal": "on_track"}
+
+    monkeypatch.setattr("app.utils.claude_client.claude_structured", fake_cs)
+    monkeypatch.setattr(svc, "_get_redis", lambda: None)
+
+    _mk_activity(db_session, requisition_id=21)
+    _mk_activity(db_session, requisition_id=21)
+    await svc.get_or_build_digest(DigestEntityType.REQUISITION, 21, db_session)
+    assert calls["n"] == 1
+    # expire the cooldown and grow the timeline
+    row = db_session.query(ActivityDigest).filter_by(entity_id=21).first()
+    row.cooldown_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db_session.commit()
+    _mk_activity(db_session, requisition_id=21)
+    await svc.get_or_build_digest(DigestEntityType.REQUISITION, 21, db_session)
+    assert calls["n"] == 2  # basis changed → regenerated
+    row2 = db_session.query(ActivityDigest).filter_by(entity_id=21).first()
+    assert row2.basis_activity_count == 3
+
+
+@pytest.mark.asyncio
+async def test_lock_miss_with_existing_serves_stale(db_session, monkeypatch):
+    from datetime import datetime, timedelta, timezone
+
+    from app.constants import DigestEntityType
+    from app.models.intelligence import ActivityDigest
+    from app.services import activity_digest_service as svc
+
+    calls = {"n": 0}
+
+    async def fake_cs(*a, **k):
+        calls["n"] += 1
+        return {"headline": "first", "narrative": "n", "highlights": [], "status_signal": "on_track"}
+
+    monkeypatch.setattr("app.utils.claude_client.claude_structured", fake_cs)
+    # first build with no lock contention
+    monkeypatch.setattr(svc, "_get_redis", lambda: None)
+    _mk_activity(db_session, requisition_id=22)
+    _mk_activity(db_session, requisition_id=22)
+    await svc.get_or_build_digest(DigestEntityType.REQUISITION, 22, db_session)
+
+    # now expire cooldown, grow timeline, and make the lock unavailable
+    row = db_session.query(ActivityDigest).filter_by(entity_id=22).first()
+    row.cooldown_until = datetime.now(timezone.utc) - timedelta(seconds=1)
+    db_session.commit()
+    _mk_activity(db_session, requisition_id=22)
+
+    class BusyRedis:
+        def set(self, *a, **k):
+            return False
+
+        def delete(self, *a, **k):
+            return None
+
+    monkeypatch.setattr(svc, "_get_redis", lambda: BusyRedis())
+
+    out = await svc.get_or_build_digest(DigestEntityType.REQUISITION, 22, db_session)
+    assert out["state"] == "ready"
+    assert out["headline"] == "first"  # served the stale cached row
+    assert calls["n"] == 1  # no new AI call under lock contention
+
+
+@pytest.mark.asyncio
+async def test_company_path_filters_non_meaningful(db_session, monkeypatch):
+    from app.constants import DigestEntityType
+    from app.models import Company
+    from app.models.intelligence import ActivityLog
+    from app.services import activity_digest_service as svc
+
+    captured = {"prompt": None}
+
+    async def fake_cs(prompt, **k):
+        captured["prompt"] = prompt
+        return {"headline": "h", "narrative": "n", "highlights": [], "status_signal": "on_track"}
+
+    monkeypatch.setattr("app.utils.claude_client.claude_structured", fake_cs)
+    monkeypatch.setattr(svc, "_get_redis", lambda: None)
+
+    c = Company(name="Acme")
+    db_session.add(c)
+    db_session.commit()
+    for meaningful, subj in [(True, "good1"), (None, "good2"), (False, "JUNK_NOISE")]:
+        db_session.add(
+            ActivityLog(
+                activity_type="email_received",
+                channel="email",
+                company_id=c.id,
+                subject=subj,
+                is_meaningful=meaningful,
+            )
+        )
+    db_session.commit()
+
+    out = await svc.get_or_build_digest(DigestEntityType.COMPANY, c.id, db_session)
+    assert out["state"] == "ready"
+    assert "JUNK_NOISE" not in captured["prompt"]
+    assert "good1" in captured["prompt"] and "good2" in captured["prompt"]
