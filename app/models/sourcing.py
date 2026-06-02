@@ -1,6 +1,7 @@
 """Core sourcing models — Requisitions, Requirements, Sightings."""
 
 from datetime import datetime, timezone
+from urllib.parse import urlparse
 
 from sqlalchemy import (
     JSON,
@@ -15,7 +16,10 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
+    func,
 )
+from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship, validates
 
 from ..database import UTCDateTime
@@ -114,6 +118,7 @@ class Requirement(Base):
     package_type = Column(String(100))  # Physical package (QFP, BGA, SOIC, DIP, etc.)
     revision = Column(String(100))  # Part revision / version level
     customer_pn = Column(String(255))  # Customer's internal part number
+    oem_hint = Column(String(64), nullable=True)  # which OEM's spec-code vocabulary applies; null → "IBM"
     need_by_date = Column(Date)  # When customer needs the parts
     sale_notes = Column(Text)
     sourcing_status = Column(String(20), default="open")  # open | sourcing | offered | quoted | won | lost
@@ -146,7 +151,7 @@ class Requirement(Base):
             raise ValueError("priority_score must be 0-100")
         return value
 
-    @validates("primary_mpn", "customer_pn", "oem_pn")
+    @validates("primary_mpn", "customer_pn", "oem_pn", "oem_hint")
     def _uppercase_mpn_fields(self, _key, value):
         return value.upper().strip() if value else value
 
@@ -213,6 +218,11 @@ class Sighting(Base):
     evidence_tier = Column(String(4))
     # Multi-factor score breakdown (JSON: {trust, price, qty, freshness, completeness})
     score_components = Column(JSON)
+
+    # Spec-code resolver lineage — populated when this sighting was sourced
+    # against an AVL MPN resolved from an OEM spec code (see SpecCodeResolver).
+    resolved_via_spec_code = Column(String(64), nullable=True)
+    source_mpn = Column(String(255), nullable=True)
 
     created_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
 
@@ -302,3 +312,145 @@ class RequirementAttachment(Base):
 
     requirement = relationship("Requirement", back_populates="attachments")
     uploaded_by = relationship("User", foreign_keys=[uploaded_by_id])
+
+
+class OemSpecCode(Base):
+    """Authoritative OEM spec code → approved MPN list.
+
+    Only human-approved mappings live here. LLM proposals start in
+    OemSpecCodePending and get promoted on approval.
+
+    Called by: app/services/spec_code_resolver.py
+    Depends on: User (foreign key)
+    """
+
+    __tablename__ = "oem_spec_codes"
+
+    id = Column(Integer, primary_key=True)
+    oem = Column(String(64), nullable=False, index=True)
+    spec_code = Column(String(64), nullable=False, index=True)
+    avl = Column(JSONB, nullable=False)
+    source = Column(String(32), nullable=False)
+    approved_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    approved_at = Column(UTCDateTime, nullable=False)
+    created_at = Column(
+        UTCDateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+
+    __table_args__ = (UniqueConstraint("oem", "spec_code", name="uq_oem_spec_code"),)
+
+    @validates("oem", "spec_code")
+    def _uppercase_identity(self, _key, value):
+        if value is None:
+            return None
+        return value.upper().strip()
+
+    @validates("source")
+    def _validate_source(self, _key, value):
+        from ..constants import SpecCodeSource
+
+        valid = {e.value for e in SpecCodeSource}
+        if value is not None and value not in valid:
+            raise ValueError(f"OemSpecCode.source must be one of {sorted(valid)}, got {value!r}")
+        return value
+
+
+class OemSpecCodePending(Base):
+    """LLM-discovered mappings awaiting human approval.
+
+    Speculatively used for sourcing while pending; promoted to OemSpecCode on
+    approve; deleted on reject (with rejected MPNs copied into
+    OemSpecCodeBlacklist).
+
+    Called by: app/services/spec_code_resolver.py,
+               app/routers/admin/spec_codes.py
+    Depends on: Requirement (foreign key)
+    """
+
+    __tablename__ = "oem_spec_codes_pending"
+
+    id = Column(Integer, primary_key=True)
+    oem = Column(String(64), nullable=False, index=True)
+    spec_code = Column(String(64), nullable=False, index=True)
+    proposed_avl = Column(JSONB, nullable=False)
+    llm_confidence = Column(Float, nullable=False)
+    citations = Column(JSONB, nullable=False, default=list, server_default="[]")
+    discovered_at = Column(
+        UTCDateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+    first_requirement_id = Column(Integer, ForeignKey("requirements.id", ondelete="SET NULL"), nullable=True)
+    used_in_requirement_ids = Column(JSONB, nullable=False, default=list, server_default="[]")
+
+    __table_args__ = (UniqueConstraint("oem", "spec_code", name="uq_pending_oem_spec_code"),)
+
+    @validates("oem", "spec_code")
+    def _uppercase_identity(self, _key, value):
+        if value is None:
+            return None
+        return value.upper().strip()
+
+    @validates("llm_confidence")
+    def _validate_llm_confidence(self, _key, value):
+        if value is not None and not (0.0 <= value <= 1.0):
+            raise ValueError("llm_confidence must be between 0.0 and 1.0")
+        return value
+
+    @validates("citations")
+    def _validate_citations(self, _key, value):
+        # Structural guard only — each citation must be a dict carrying an
+        # http(s) ``url``. Full citation validation (snippet length, etc.)
+        # lives in the schema layer (app/schemas/spec_codes.Citation); we must
+        # NOT import that Pydantic model here (keeps the model layer free of a
+        # schema-layer dependency). Use urllib directly to reject javascript:,
+        # data:, and leading-whitespace scheme tricks.
+        if value is None:
+            return value
+        if not isinstance(value, list):
+            raise ValueError("citations must be a list")
+        for item in value:
+            if not isinstance(item, dict):
+                raise ValueError("each citation must be a dict")
+            url = item.get("url")
+            if not isinstance(url, str) or urlparse(url.strip()).scheme.lower() not in {"http", "https"}:
+                raise ValueError("each citation url must use an http:// or https:// scheme")
+        return value
+
+
+class OemSpecCodeBlacklist(Base):
+    """Rejected mappings — the resolver passes these to the LLM as an exclusion list so
+    the same wrong MPNs aren't proposed again.
+
+    Multiple rows per (oem, spec_code) are allowed; each row represents one
+    rejection event with its own reason.
+
+    Called by: app/services/spec_code_resolver.py,
+               app/routers/admin/spec_codes.py
+    Depends on: User (foreign key)
+    """
+
+    __tablename__ = "oem_spec_codes_blacklist"
+
+    id = Column(Integer, primary_key=True)
+    oem = Column(String(64), nullable=False, index=True)
+    spec_code = Column(String(64), nullable=False)
+    rejected_mpns = Column(JSONB, nullable=False)
+    rejected_by_user_id = Column(Integer, ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+    rejected_at = Column(
+        UTCDateTime,
+        nullable=False,
+        default=lambda: datetime.now(timezone.utc),
+        server_default=func.now(),
+    )
+    reason = Column(Text, nullable=True)
+
+    @validates("oem", "spec_code")
+    def _uppercase_identity(self, _key, value):
+        if value is None:
+            return None
+        return value.upper().strip()
