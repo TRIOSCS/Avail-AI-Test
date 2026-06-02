@@ -140,6 +140,7 @@ class Settings(BaseSettings):
 
     # --- M365 Integration v2 ---
     inbox_scan_interval_min: int = 30
+    digest_cooldown_seconds: int = 120  # min seconds between AI digest regenerations per entity
     inbox_backfill_days: int = 180
     contacts_sync_enabled: bool = True
 

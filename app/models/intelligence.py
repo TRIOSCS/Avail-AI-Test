@@ -13,6 +13,7 @@ from sqlalchemy import (
     Numeric,
     String,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, TSVECTOR
 from sqlalchemy.orm import relationship, validates
@@ -373,3 +374,42 @@ class ActivityLog(Base):
             postgresql_where=Column("requirement_id").isnot(None),
         ),
     )
+
+
+class ActivityDigest(Base):
+    """AI-generated digest of an entity's activity timeline (cache).
+
+    One row per (entity_type, entity_id). Regenerated lazily on view when the timeline
+    basis changes; see app/services/activity_digest_service.py.
+    """
+
+    __tablename__ = "activity_digest"
+    id = Column(Integer, primary_key=True)
+    entity_type = Column(String(50), nullable=False)  # DigestEntityType
+    entity_id = Column(Integer, nullable=False)
+
+    headline = Column(String(300))
+    narrative = Column(Text)
+    highlights = Column(JSON)  # list[{"label": str, "value": str}]
+    next_step = Column(String(500))
+    status_signal = Column(String(20))  # DigestStatusSignal
+
+    generated_at = Column(UTCDateTime, default=lambda: datetime.now(timezone.utc))
+    basis_last_activity_at = Column(UTCDateTime)
+    basis_activity_count = Column(Integer, default=0)
+    cooldown_until = Column(UTCDateTime)
+    model = Column(String(50))
+
+    @validates("entity_type")
+    def _validate_entity_type(self, _key, value):
+        from ..constants import DigestEntityType
+
+        return DigestEntityType(value).value  # raises ValueError on unknown
+
+    @validates("status_signal")
+    def _validate_status_signal(self, _key, value):
+        from ..constants import DigestStatusSignal
+
+        return DigestStatusSignal(value).value if value is not None else None
+
+    __table_args__ = (UniqueConstraint("entity_type", "entity_id", name="uq_activity_digest_entity"),)

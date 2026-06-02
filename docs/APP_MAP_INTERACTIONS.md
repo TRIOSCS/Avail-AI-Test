@@ -497,6 +497,95 @@ User sends:
     +---> activity_service.py --> DB: INSERT activity_log
 ```
 
+## 8. Activity Digest (AI Timeline Summary)
+
+```
+Browser (Activity tab loads) — lazy HTMX placeholder fires GET
+    |
+    +---> GET /v2/partials/requisitions/{req_id}/activity-digest?force=0
+    |     GET /v2/partials/customers/{company_id}/activity-digest?force=0
+    |
+    v
+htmx_views.py: requisition_activity_digest() / customer_activity_digest()
+    |
+    v
+activity_digest_service.get_or_build_digest(entity_type, entity_id, db, force)
+    |
+    +---> Cooldown guard: if existing row and cooldown_until > now (and not force)
+    |       -> return cached digest immediately
+    |
+    +---> Load up to 30 meaningful activities via
+    |     get_requisition_activities(meaningful_only=True) or get_company_activities()
+    |
+    +---> Insufficient guard: < 2 activities -> return {state: "insufficient"}
+    |
+    +---> Basis freshness check: if existing and (basis_last_activity_at, basis_activity_count)
+    |     unchanged and not force -> return cached digest
+    |
+    +---> Redis nx-lock (key: lock:digest:{type}:{id}, ex=30s):
+    |       lock miss -> serve stale if exists, else return {state: "generating"}
+    |
+    +---> claude_structured(model_tier="smart"/Sonnet, DIGEST_SCHEMA, max_tokens=700)
+    |       +---> headline, narrative, highlights[{label,value}], next_step, status_signal
+    |
+    +---> DB: UPSERT activity_digest (one row per entity, unique on entity_type+entity_id)
+    +---> Set cooldown_until = now + digest_cooldown_seconds (default 120s)
+    |
+    v
+Rendered via shared/activity_digest_card.html (states: ready/insufficient/generating/error)
+```
+
+Self-invalidating: the service regens automatically when `basis_last_activity_at` or
+`basis_activity_count` changes on next view — no write-path hooks needed.
+`?force=1` bypasses both the cooldown and the basis freshness check.
+
+---
+
+## 9. Inbox Observability
+
+```
+GET /v2/partials/requisitions (list page load)
+GET /v2/partials/settings/profile (Settings → Profile tab)
+    |
+    v
+activity_service.get_inbox_sync_status(user)
+    |
+    +---> Reads existing User fields:
+    |       m365_connected, last_inbox_scan, access_token, token_expires_at
+    |
+    +---> Derives health:
+    |       ERROR  — m365_connected=False OR token expired/missing
+    |       WARNING — last_inbox_scan > 2× inbox_scan_interval_min ago
+    |       OK     — connected, token valid, scan recent
+    |
+    +---> Returns: {connected, last_scan_at, is_stale, token_ok, error_reason, health}
+    |
+    v
+Two surfaces:
+    1. Requisitions list: shared/inbox_disconnected_banner.html
+       (shown when health=error or is_stale=True; included at top of list.html)
+    2. Settings → Profile: settings/_mailbox_sync_card.html
+       (always shows sync status + "Scan now" button)
+
+"Scan now" button:
+    POST /v2/partials/settings/inbox/scan-now
+        |
+        v
+    htmx_views.settings_scan_now()
+        |
+        +---> _run_inbox_scan_now(user, db)  [TESTING=1 skips, else 12s timeout]
+        |       +---> email_jobs._scan_user_inbox(user, db)
+        |               +---> Graph API inbox poll -> parse -> activity_log
+        |                     (same path as scheduled _job_inbox_scan)
+        |
+        +---> db.refresh(user)
+        +---> get_inbox_sync_status(user) -> re-render _mailbox_sync_card.html
+```
+
+`poll_inbox_htmx` (`POST /v2/partials/requisitions/{req_id}/poll-inbox`) also calls
+`_run_inbox_scan_now` and returns the refreshed responses tab; the scan is user-scoped,
+not requisition-scoped.
+
 ---
 
 ## Enrichment Pipeline

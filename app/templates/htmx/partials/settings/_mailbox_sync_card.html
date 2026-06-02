@@ -1,0 +1,29 @@
+{# _mailbox_sync_card.html — inbox-sync health for Settings → Profile.
+   Receives: inbox_status (dict from get_inbox_sync_status). #}
+{% set dot = {'ok': 'bg-emerald-500', 'warning': 'bg-amber-500', 'error': 'bg-rose-500'} %}
+<div id="mailbox-sync-card" class="bg-white rounded-lg border border-brand-200 p-4">
+  <div class="flex items-center justify-between">
+    <h3 class="text-sm font-semibold text-gray-900 flex items-center gap-2">
+      <span class="w-2.5 h-2.5 rounded-full {{ dot.get(inbox_status.health, 'bg-gray-300') }}"></span>
+      Mailbox sync
+    </h3>
+    <button hx-post="/v2/partials/settings/inbox/scan-now"
+            hx-target="#mailbox-sync-card" hx-swap="outerHTML" data-loading-disable
+            hx-indicator="#mailbox-scan-spinner"
+            class="px-3 py-1.5 text-xs font-medium text-brand-600 bg-brand-50 border border-brand-200 rounded-lg hover:bg-brand-100 inline-flex items-center gap-1.5">
+      Scan now
+      <span id="mailbox-scan-spinner" class="htmx-indicator">
+        <svg class="animate-spin h-3 w-3 text-brand-500" viewBox="0 0 24 24"><circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4" fill="none"/><path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"/></svg>
+      </span>
+    </button>
+  </div>
+  <dl class="mt-2 space-y-1 text-xs text-gray-600">
+    <div>{{ 'Connected' if inbox_status.connected else 'Not connected' }}</div>
+    <div>Last inbox scan:
+      {% if inbox_status.last_scan_at %}{{ inbox_status.last_scan_at|timeago }}{% else %}never{% endif %}
+    </div>
+    {% if inbox_status.error_reason %}
+    <div class="text-rose-600">{{ inbox_status.error_reason }}</div>
+    {% endif %}
+  </dl>
+</div>

@@ -1,0 +1,19 @@
+{# inbox_disconnected_banner.html — shown only when inbox sync is unhealthy/stale.
+   Receives: inbox_status (dict). Dismissible per-session via Alpine.
+   Included by: htmx/partials/requisitions/list.html
+#}
+{# NOTE: dismissal is per-render (Alpine x-data). The banner re-appears after a list
+   refresh/filter — intentional: it's a genuine 'your mailbox is disconnected' warning,
+   not a one-time nag. It disappears for good once inbox sync is healthy. #}
+{% if inbox_status and (inbox_status.health == 'error' or inbox_status.is_stale) %}
+<div x-data="{ show: true }" x-show="show"
+     class="flex items-center justify-between gap-3 rounded-lg border border-amber-300 bg-amber-50 px-4 py-2 mb-3">
+  <p class="text-xs text-amber-800">
+    Your mailbox sync looks {{ 'disconnected' if inbox_status.health == 'error' else 'stale' }} —
+    new vendor replies may not appear.
+    <a hx-get="/v2/partials/settings?tab=profile" hx-target="#main-content" hx-push-url="/v2/settings"
+       class="font-medium underline cursor-pointer">Open Settings → Profile</a> to reconnect.
+  </p>
+  <button @click="show = false" aria-label="Dismiss" class="text-amber-700 text-sm p-1 leading-none">&times;</button>
+</div>
+{% endif %}

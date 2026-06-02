@@ -7,14 +7,16 @@ Usage:
     from app.services.activity_service import log_email_activity, log_call_activity, match_contact
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.constants import ActivityType
+from app.config import settings
+from app.constants import ActivityType, InboxSyncHealth
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
+from app.utils.token_manager import _utc
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
 
 # Activity types that are inherently meaningful — flagged is_meaningful=True at
@@ -282,15 +284,20 @@ def log_call_activity(
 # ═══════════════════════════════════════════════════════════════════════
 
 
-def get_company_activities(company_id: int, db: Session, limit: int = 50) -> list[ActivityLog]:
-    """Get recent activity for a company."""
-    return (
-        db.query(ActivityLog)
-        .filter(ActivityLog.company_id == company_id)
-        .order_by(ActivityLog.created_at.desc())
-        .limit(limit)
-        .all()
-    )
+def get_company_activities(
+    company_id: int, db: Session, limit: int = 50, meaningful_only: bool = False
+) -> list[ActivityLog]:
+    """Get recent activity for a company.
+
+    meaningful_only (default False preserves existing caller behaviour). When True,
+    filters out activities that the AI quality pass classified as not meaningful
+    (is_meaningful=False); rows that are meaningful (True) or not yet scored (None) are
+    kept, matching the requisition path semantics.
+    """
+    q = db.query(ActivityLog).filter(ActivityLog.company_id == company_id)
+    if meaningful_only:
+        q = q.filter((ActivityLog.is_meaningful.is_(True)) | (ActivityLog.is_meaningful.is_(None)))
+    return q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
 
 
 def get_vendor_activities(vendor_card_id: int, db: Session, limit: int = 50) -> list[ActivityLog]:
@@ -877,3 +884,41 @@ def dismiss_activity(activity_id: int, db: Session) -> ActivityLog | None:
 
     logger.info(f"Activity {activity_id} dismissed")
     return activity
+
+
+def get_inbox_sync_status(user) -> dict:
+    """Derive inbox-sync health for the Settings card / disconnected banner.
+
+    Reads existing User fields (no new columns). See
+    app/jobs/core_jobs.py:_job_inbox_scan for the scheduled poll this surfaces.
+    """
+    now = datetime.now(timezone.utc)
+    connected = bool(getattr(user, "m365_connected", False))
+    last_scan = getattr(user, "last_inbox_scan", None)
+
+    token_ok = bool(getattr(user, "access_token", None))
+    exp = getattr(user, "token_expires_at", None)
+    if exp is not None and _utc(exp) <= now:
+        token_ok = False
+
+    interval = settings.inbox_scan_interval_min
+    if last_scan is None:
+        is_stale = True
+    else:
+        is_stale = (now - _utc(last_scan)) > timedelta(minutes=2 * interval)
+
+    if not connected or not token_ok:
+        health = InboxSyncHealth.ERROR
+    elif is_stale:
+        health = InboxSyncHealth.WARNING
+    else:
+        health = InboxSyncHealth.OK
+
+    return {
+        "connected": connected,
+        "last_scan_at": _utc(last_scan) if last_scan else None,
+        "is_stale": is_stale,
+        "token_ok": token_ok,
+        "error_reason": getattr(user, "m365_error_reason", None),
+        "health": health,
+    }
