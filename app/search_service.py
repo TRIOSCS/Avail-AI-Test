@@ -400,32 +400,20 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
         from .config import settings as _settings
 
         if _settings.spec_resolver_enabled and len(sightings) == 0 and write_req.primary_mpn:
-            from sqlalchemy.exc import IntegrityError
-
             try:
                 from app.services.spec_code_resolver import SpecCodeResolver
 
-                # Caller-owned transaction: the resolver flushes (not commits)
-                # its pending-row insert. Wrap it in a SAVEPOINT so a concurrent-
-                # insert race (UNIQUE on oem+spec_code) rolls back ONLY the
-                # resolver insert — never the sightings already committed above.
+                # resolve() owns its own persistence SAVEPOINT and releases the DB
+                # connection during the grounded LLM call, so we do NOT wrap it in a
+                # transaction here — doing so would pin a pooled connection for the
+                # call's ~60s duration. The sightings committed just above are durable
+                # and unaffected, and a concurrent-insert race is recovered inside
+                # resolve() (it reuses the winning row).
                 resolver = SpecCodeResolver(write_db)
-                with write_db.begin_nested():
-                    resolution = await resolver.resolve(
-                        write_req.primary_mpn,
-                        oem=write_req.oem_hint or "IBM",
-                    )
-            except IntegrityError:
-                # Lost the insert race; the savepoint already rolled back the
-                # resolver insert. Treat as unresolved — saved sightings stay
-                # intact. ``rollback()`` here unwinds to the savepoint only.
-                write_db.rollback()
-                logger.info(
-                    "spec_resolver: lost pending-insert race for req {} mpn {}; treating as unresolved",
-                    req_id,
+                resolution = await resolver.resolve(
                     write_req.primary_mpn,
+                    oem=write_req.oem_hint or "IBM",
                 )
-                resolution = None
             except Exception:
                 logger.warning(
                     "spec_resolver: resolve() failed for req {} mpn {}",
@@ -488,6 +476,25 @@ async def search_requirement(req: Requirement, db: Session) -> dict:
                         req_id,
                         spec_code_tag,
                     )
+
+                    # Stamp the cooldown clock on every AVL MPN we actually
+                    # searched. Without this, ``_mpn_cooldown_partition`` keeps
+                    # returning the full AVL set as stale on every subsequent
+                    # zero-hit click and re-burns connector quota — the bug the
+                    # partition gate above is meant to prevent. Mirror the
+                    # primary path: upsert a card from the AVL sightings, fall
+                    # back to ``resolve_material_card`` when the fanout was empty
+                    # so a card always exists to carry ``last_searched_at``.
+                    for avl_pn in to_fetch_avl:
+                        try:
+                            avl_card = _upsert_material_card(avl_pn, resolved_sightings, write_db, now)
+                            if avl_card is None:
+                                avl_card = resolve_material_card(avl_pn, write_db)
+                            if avl_card:
+                                avl_card.last_searched_at = now
+                        except Exception as e:
+                            logger.error("AVL_MATERIAL_CARD_STAMP_FAIL: mpn={} error={}", avl_pn, e)
+                            write_db.rollback()
 
                     # Enqueue each AVL MPN to ICS and NC workers in addition
                     # to the primary-MPN enqueue below.

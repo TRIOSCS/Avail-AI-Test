@@ -3,9 +3,11 @@
 Adds ``resolved_via_spec_code`` lineage column to ``ics_search_queue`` and
 ``nc_search_queue`` to record spec-code provenance on each queue row. Also
 drops the legacy ``requirement_id`` UNIQUE
-constraints on both queue tables — dedup is now keyed on
-``(requirement_id, normalized_mpn)`` at the application layer so the
-spec-code resolver can enqueue multiple AVL MPNs per requirement.
+constraints on both queue tables and replaces them with a composite
+``(requirement_id, normalized_mpn)`` UNIQUE — dedup is keyed on that pair so
+the spec-code resolver can enqueue multiple AVL MPNs per requirement while a
+DB constraint still rejects true duplicates (the in-Python check in
+``QueueManager.enqueue_search`` loses to concurrent enqueues otherwise).
 
 Revision ID: cf06dcdb7839
 Revises: 9868c839df65
@@ -40,8 +42,26 @@ def upgrade() -> None:
     op.execute("ALTER TABLE ics_search_queue DROP CONSTRAINT IF EXISTS ics_search_queue_requirement_id_key")
     op.execute("ALTER TABLE nc_search_queue DROP CONSTRAINT IF EXISTS nc_search_queue_requirement_id_key")
 
+    # Replace it with the composite (requirement_id, normalized_mpn) UNIQUE so
+    # the multi-AVL enqueue is allowed but true duplicates are still rejected
+    # at the DB layer (matches the model __table_args__).
+    op.create_unique_constraint(
+        "uq_ics_queue_requirement_mpn",
+        "ics_search_queue",
+        ["requirement_id", "normalized_mpn"],
+    )
+    op.create_unique_constraint(
+        "uq_nc_queue_requirement_mpn",
+        "nc_search_queue",
+        ["requirement_id", "normalized_mpn"],
+    )
+
 
 def downgrade() -> None:
+    # Drop the composite UNIQUE first.
+    op.drop_constraint("uq_nc_queue_requirement_mpn", "nc_search_queue", type_="unique")
+    op.drop_constraint("uq_ics_queue_requirement_mpn", "ics_search_queue", type_="unique")
+
     # Restore the per-requirement UNIQUE constraint. If duplicate rows now
     # exist (because the resolver enqueued multiple AVL MPNs for the same
     # requirement), this will fail — operator must clean up duplicates

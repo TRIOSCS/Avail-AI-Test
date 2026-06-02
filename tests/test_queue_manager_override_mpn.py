@@ -12,6 +12,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from app.models import IcsSearchQueue, NcSearchQueue, Requirement
 from app.models.sourcing import Requisition
@@ -123,3 +124,31 @@ def test_nc_wrapper_propagates_kwargs(db_session, requirement):
     # And NC table row is independent from ICS rows
     nc_rows = db_session.query(NcSearchQueue).filter_by(requirement_id=requirement.id).all()
     assert len(nc_rows) == 1
+
+
+@pytest.mark.parametrize("model", [IcsSearchQueue, NcSearchQueue])
+def test_duplicate_requirement_mpn_pair_is_rejected_at_db_level(db_session, requirement, model):
+    """The (requirement_id, normalized_mpn) dedup is backed by a DB UNIQUE constraint,
+    not just an application-level check — two concurrent enqueues that both pass the in-
+    Python lookup still cannot create duplicate rows."""
+    first = model(
+        requirement_id=requirement.id,
+        requisition_id=requirement.requisition_id,
+        mpn="SPREJ",
+        normalized_mpn="SPREJ",
+        status="pending",
+    )
+    db_session.add(first)
+    db_session.commit()
+
+    dup = model(
+        requirement_id=requirement.id,
+        requisition_id=requirement.requisition_id,
+        mpn="SPREJ",
+        normalized_mpn="SPREJ",
+        status="pending",
+    )
+    db_session.add(dup)
+    with pytest.raises(IntegrityError):
+        db_session.commit()
+    db_session.rollback()
