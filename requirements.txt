@@ -32,7 +32,7 @@ apscheduler>=3.11.2,<4.0
 alembic==1.18.4
 # Caching
 redis[hiredis]==7.4.0
-orjson>=3.9.0,<4.0
+orjson>=3.11.9,<4.0
 # CSRF protection
 starlette-csrf==3.0.0
 # NetComponents integration

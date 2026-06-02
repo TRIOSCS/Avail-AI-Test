@@ -1,0 +1,106 @@
+{# spec_codes_pending.html — Admin pending OEM spec-code approval queue.
+   Receives: rows (list[OemSpecCodePending]), user (User).
+   Called by: app/routers/admin/spec_codes.py list_pending endpoint.
+   Depends on: HTMX, json-enc extension, Tailwind CSS with brand palette.
+#}
+<div class="max-w-7xl mx-auto">
+  <header class="mb-6">
+    <h2 class="text-lg font-bold text-gray-900">Pending OEM Spec-Code Mappings</h2>
+    <p class="text-sm text-gray-600 mt-1">
+      LLM-discovered mappings awaiting approval. Approve to promote to the
+      authoritative table; reject to blacklist proposed MPNs; re-resolve to
+      re-run the LLM with the current blacklist.
+    </p>
+  </header>
+
+  {% if not rows %}
+    {% include "htmx/partials/admin/spec_codes_empty.html" with context %}
+  {% else %}
+    <div id="spec-codes-content" class="bg-white border border-brand-200 rounded-lg overflow-hidden">
+      <div class="overflow-x-auto">
+        <table class="min-w-full divide-y divide-gray-200">
+          <thead class="bg-gray-50">
+            <tr>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">OEM</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Spec code</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Proposed AVL</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Confidence</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Citations</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Used in</th>
+              <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-gray-100" id="spec-codes-pending-tbody">
+            {% for row in rows %}
+            <tr id="spec-row-{{ row.id }}" class="align-top hover:bg-brand-50/30 transition-colors">
+              <td class="px-4 py-3 text-sm font-mono text-gray-900">{{ row.oem }}</td>
+              <td class="px-4 py-3 text-sm font-mono text-gray-900">{{ row.spec_code }}</td>
+              <td class="px-4 py-3 text-sm">
+                <ul class="space-y-1">
+                  {% for entry in row.proposed_avl %}
+                    <li>
+                      <code class="text-gray-900">{{ entry.mpn }}</code>
+                      <span class="text-gray-500">— {{ entry.manufacturer }} (rank {{ entry.rank }})</span>
+                      {% if entry.notes %}
+                        <span class="block text-xs text-gray-500 pl-3">{{ entry.notes }}</span>
+                      {% endif %}
+                    </li>
+                  {% endfor %}
+                </ul>
+              </td>
+              <td class="px-4 py-3 text-sm text-gray-900">{{ "%.2f"|format(row.llm_confidence) }}</td>
+              <td class="px-4 py-3 text-sm">
+                {% if row.citations %}
+                  {% for c in row.citations %}
+                    {% if c.url and (c.url.startswith('http://') or c.url.startswith('https://')) %}
+                      <a href="{{ c.url }}" target="_blank" rel="noopener noreferrer"
+                         class="text-brand-600 hover:text-brand-700 underline">link</a>{% if not loop.last %}, {% endif %}
+                    {% elif c.url %}
+                      <span class="text-gray-400" title="{{ c.url }}">link (invalid url)</span>{% if not loop.last %}, {% endif %}
+                    {% endif %}
+                  {% endfor %}
+                {% else %}
+                  <span class="text-gray-400">—</span>
+                {% endif %}
+              </td>
+              <td class="px-4 py-3 text-sm text-gray-600">
+                {{ (row.used_in_requirement_ids or [])|length }} req(s)
+              </td>
+              <td class="px-4 py-3">
+                <div class="flex flex-wrap gap-2">
+                  <button data-loading-disable
+                          hx-post="/admin/spec-codes/pending/{{ row.id }}/approve"
+                          hx-ext="json-enc"
+                          hx-vals='{"edited_avl": null}'
+                          hx-target="#spec-row-{{ row.id }}"
+                          hx-swap="outerHTML"
+                          class="px-2 py-1 text-xs font-medium bg-brand-50 text-brand-600 border border-brand-200 rounded hover:bg-brand-100">
+                    Approve
+                  </button>
+                  <button data-loading-disable
+                          hx-post="/admin/spec-codes/pending/{{ row.id }}/reject"
+                          hx-ext="json-enc"
+                          hx-vals='{"reason": "rejected from admin UI", "rejected_mpns": []}'
+                          hx-confirm="Reject this mapping and blacklist all proposed MPNs?"
+                          hx-target="#spec-row-{{ row.id }}"
+                          hx-swap="outerHTML"
+                          class="px-2 py-1 text-xs font-medium bg-rose-50 text-rose-600 border border-rose-200 rounded hover:bg-rose-100">
+                    Reject
+                  </button>
+                  <button data-loading-disable
+                          hx-post="/admin/spec-codes/pending/{{ row.id }}/re-resolve"
+                          hx-target="#spec-row-{{ row.id }}"
+                          hx-swap="outerHTML"
+                          class="px-2 py-1 text-xs font-medium bg-gray-50 text-gray-700 border border-gray-200 rounded hover:bg-gray-100">
+                    Re-resolve
+                  </button>
+                </div>
+              </td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  {% endif %}
+</div>

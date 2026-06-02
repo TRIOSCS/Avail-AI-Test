@@ -78,29 +78,59 @@ class QueueManager:
             created_at=datetime.now(timezone.utc),
         )
 
-    def enqueue_search(self, requirement_id: int, db: Session):
-        """Queue a requirement for search.
+    def enqueue_search(
+        self,
+        requirement_id: int,
+        db: Session,
+        override_mpn: str | None = None,
+        resolved_via_spec_code: str | None = None,
+    ):
+        """Queue a requirement for browser-driven search.
 
-        Checks for dedup (same normalized MPN searched within dedup window). If deduped,
-        links existing sightings to this requirement's material card. Returns the queue
-        item or None if deduped/skipped.
+        When ``override_mpn`` is None (default), the worker reads
+        ``req.primary_mpn``. When ``override_mpn`` is provided (a resolved
+        AVL MPN from the spec-code resolver), the worker searches that MPN
+        instead; ``resolved_via_spec_code`` is recorded on the queue row.
+        (The worker's sighting writers do not yet copy that lineage tag onto
+        the sightings they create — only the synchronous fanout in
+        search_service.py tags sightings today.)
+
+        Dedup short-circuit keys on ``(requirement_id, normalized_mpn)`` so
+        one requirement can have multiple queue rows (primary + resolved
+        AVL MPNs).
+
+        Checks for cross-requirement dedup (same normalized MPN searched
+        within dedup window). If deduped, links existing sightings to this
+        requirement's material card. Returns the queue item or None if
+        deduped/skipped.
         """
         req = db.get(Requirement, requirement_id)
-        if not req or not req.primary_mpn:
+        if not req:
+            logger.debug("{} enqueue skip: requirement {} not found", self.log_prefix, requirement_id)
+            return None
+
+        mpn_to_search = override_mpn or req.primary_mpn
+        if not mpn_to_search:
             logger.debug("{} enqueue skip: requirement {} has no MPN", self.log_prefix, requirement_id)
             return None
 
-        norm_mpn = strip_packaging_suffixes(req.primary_mpn)
+        norm_mpn = strip_packaging_suffixes(mpn_to_search)
         if not norm_mpn:
             return None
 
         model = self.queue_model
 
-        # Check if already queued
-        existing = db.query(model).filter_by(requirement_id=requirement_id).first()
+        # Already queued for THIS (requirement, mpn) pair? Re-keyed from the
+        # legacy per-requirement check so resolver-driven AVL enqueues can
+        # coexist with the primary MPN row for the same requirement.
+        existing = db.query(model).filter_by(requirement_id=requirement_id, normalized_mpn=norm_mpn).first()
         if existing:
             logger.debug(
-                "{} enqueue skip: requirement {} already queued (id={})", self.log_prefix, requirement_id, existing.id
+                "{} enqueue skip: requirement {} mpn {} already queued (id={})",
+                self.log_prefix,
+                requirement_id,
+                norm_mpn,
+                existing.id,
             )
             return existing
 
@@ -154,11 +184,12 @@ class QueueManager:
         item = model(
             requirement_id=requirement_id,
             requisition_id=req.requisition_id,
-            mpn=req.primary_mpn,
+            mpn=mpn_to_search,
             normalized_mpn=norm_mpn,
             manufacturer=req.brand,
             status="pending",
             priority=priority,
+            resolved_via_spec_code=resolved_via_spec_code,
         )
         db.add(item)
         db.commit()

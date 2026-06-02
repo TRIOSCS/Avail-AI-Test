@@ -418,10 +418,18 @@ class TestRefreshPerMpnToast:
     MaterialCard.last_searched_at; this endpoint just surfaces the result.
     """
 
-    def test_toast_describes_searched_and_cached_mpns(self, client: TestClient, db_session: Session, test_user: User):
+    def test_toast_describes_searched_and_cached_mpns(
+        self, client: TestClient, db_session: Session, test_user: User, monkeypatch
+    ):
+        from app.config import settings
         from app.models import MaterialCard, Requirement, Requisition
         from app.utils.normalization import normalize_mpn_key
 
+        # Defensive pin: this test mocks _fetch_fresh to return ([], []) and
+        # asserts on the resulting toast. If the resolver flag default ever
+        # flips, the resolver block would call _fetch_fresh on an empty/no AVL
+        # and the counts in the toast could shift.
+        monkeypatch.setattr(settings, "spec_resolver_enabled", False)
         now = datetime.now(timezone.utc)
         r = Requisition(
             name="R",
@@ -451,8 +459,8 @@ class TestRefreshPerMpnToast:
 
         with (
             patch("app.search_service._fetch_fresh", new=AsyncMock(return_value=([], []))),
-            patch("app.services.ics_worker.queue_manager.enqueue_for_ics_search"),
-            patch("app.services.nc_worker.queue_manager.enqueue_for_nc_search"),
+            patch("app.search_service.enqueue_for_ics_search"),
+            patch("app.search_service.enqueue_for_nc_search"),
         ):
             resp = client.post(f"/v2/partials/sightings/{item.id}/refresh")
 
