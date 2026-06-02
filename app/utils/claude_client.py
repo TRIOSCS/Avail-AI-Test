@@ -42,6 +42,7 @@ API_VERSION = "2023-06-01"
 MODELS = {
     "fast": "claude-haiku-4-5-20251001",
     "smart": settings.anthropic_model or "claude-sonnet-4-6",
+    "opus": "claude-opus-4-7",
 }
 
 
@@ -77,7 +78,7 @@ async def claude_structured(
         prompt: User message content
         schema: JSON Schema that the model MUST conform to
         system: System prompt (cached if cache_system=True)
-        model_tier: "fast" (Haiku) or "smart" (Sonnet)
+        model_tier: "fast" (Haiku), "smart" (Sonnet), or "opus" (Opus)
         max_tokens: Max output tokens
         cache_system: Whether to mark the system prompt as cacheable (H10)
         timeout: Request timeout seconds
@@ -230,7 +231,7 @@ async def claude_text(
     Args:
         prompt: User message
         system: System prompt
-        model_tier: "fast" or "smart"
+        model_tier: "fast", "smart", or "opus"
         max_tokens: Max output tokens
         tools: Optional tools (e.g., web_search)
         cache_system: Whether to cache the system prompt

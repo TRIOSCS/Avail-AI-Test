@@ -8,7 +8,7 @@ app/main.py can continue to do:
 without any changes.
 
 Called by: app/main.py
-Depends on: .users, .system, .data_ops sub-modules
+Depends on: .system, .spec_codes sub-modules
 """
 
 from fastapi import APIRouter
@@ -18,7 +18,9 @@ from fastapi import APIRouter
 # The sub-modules import these via "from . import decrypt_value" at call
 # time so that the patched version is picked up.
 from ...services.credential_service import decrypt_value, encrypt_value, mask_value  # noqa: F401
+from .spec_codes import router as spec_codes_router
 from .system import router as system_router
 
 router = APIRouter()
 router.include_router(system_router)
+router.include_router(spec_codes_router)
