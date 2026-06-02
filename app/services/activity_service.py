@@ -7,14 +7,16 @@ Usage:
     from app.services.activity_service import log_email_activity, log_call_activity, match_contact
 """
 
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
-from app.constants import ActivityType
+from app.config import settings
+from app.constants import ActivityType, InboxSyncHealth
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
+from app.utils.token_manager import _utc
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
 
 # Activity types that are inherently meaningful — flagged is_meaningful=True at
@@ -885,12 +887,6 @@ def get_inbox_sync_status(user) -> dict:
     Reads existing User fields (no new columns). See
     app/jobs/core_jobs.py:_job_inbox_scan for the scheduled poll this surfaces.
     """
-    from datetime import datetime, timedelta, timezone
-
-    from ..config import settings
-    from ..constants import InboxSyncHealth
-    from ..utils.token_manager import _utc
-
     now = datetime.now(timezone.utc)
     connected = bool(getattr(user, "m365_connected", False))
     last_scan = getattr(user, "last_inbox_scan", None)

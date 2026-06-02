@@ -45,3 +45,9 @@ def test_status_warning_when_stale():
 def test_status_stale_when_never_scanned():
     s = get_inbox_sync_status(_user(last_inbox_scan=None))
     assert s["is_stale"] is True
+
+
+def test_status_error_when_connected_but_no_token():
+    s = get_inbox_sync_status(_user(access_token=None))
+    assert s["health"] == InboxSyncHealth.ERROR
+    assert s["token_ok"] is False
