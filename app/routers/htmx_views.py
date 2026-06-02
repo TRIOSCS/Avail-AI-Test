@@ -74,6 +74,12 @@ from ..services.faceted_search_service import (
     search_materials_faceted,
 )
 from ..services.freeform_parser_service import parse_freeform_rfq
+from ..services.part_history_service import (
+    customer_purchases_for_card,
+    offers_for_card,
+    requirements_for_card,
+    sightings_for_card,
+)
 from ..services.status_machine import require_valid_transition
 from ..template_env import template_response, templates
 from ..utils.search_builder import SearchBuilder
@@ -2936,6 +2942,35 @@ async def search_form_partial(
     """Return the search form partial."""
     ctx = _base_ctx(request, user, "search")
     return template_response("htmx/partials/search/form.html", ctx)
+
+
+@router.get("/v2/partials/search/history", response_class=HTMLResponse)
+async def search_history_panel(
+    request: Request,
+    mpn: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render the 'What we know' history panel for the searched MPN.
+
+    Called by: results_shell.html right column (hx-get).
+    Depends on: part_history_service.get_part_history, normalize_mpn_key.
+    """
+    from ..services.part_history_service import PartHistory, get_part_history
+    from ..utils.normalization import normalize_mpn_key
+
+    key = normalize_mpn_key(mpn)  # pure/cheap; outside try so it can be logged on failure
+    try:
+        history = get_part_history(db, key)
+        error = False
+    except Exception:
+        logger.exception("search_history_panel failed mpn={} key={} user={}", mpn, key, user.id)
+        history = PartHistory(found=False)
+        error = True
+
+    ctx = _base_ctx(request, user, "search")
+    ctx.update({"history": history, "error": error})
+    return template_response("htmx/partials/search/history_panel.html", ctx)
 
 
 @router.post("/v2/partials/search/run", response_class=HTMLResponse)
@@ -7210,20 +7245,8 @@ async def material_detail_partial(
     if not card:
         raise HTTPException(404, "Material card not found")
 
-    sightings = (
-        db.query(Sighting)
-        .filter(Sighting.material_card_id == card_id)
-        .order_by(Sighting.created_at.desc().nullslast())
-        .limit(50)
-        .all()
-    )
-    offers = (
-        db.query(Offer)
-        .filter(Offer.material_card_id == card_id)
-        .order_by(Offer.created_at.desc().nullslast())
-        .limit(50)
-        .all()
-    )
+    sightings = sightings_for_card(db, card_id, limit=50)
+    offers = offers_for_card(db, card_id, limit=50)
     ctx = _base_ctx(request, user, "materials")
     ctx.update({"card": card, "sightings": sightings, "offers": offers})
     return template_response("htmx/partials/materials/detail.html", ctx)
@@ -7262,24 +7285,10 @@ async def material_tab_partial(
         )
         return template_response("htmx/partials/materials/tabs/vendors.html", ctx)
     elif tab_name == "customers":
-        from ..models.purchase_history import CustomerPartHistory
-
-        ctx["customers"] = (
-            db.query(CustomerPartHistory)
-            .filter_by(material_card_id=card_id)
-            .order_by(CustomerPartHistory.last_purchased_at.desc().nullslast())
-            .all()
-        )
+        ctx["customers"] = customer_purchases_for_card(db, card_id, limit=200)
         return template_response("htmx/partials/materials/tabs/customers.html", ctx)
     elif tab_name == "sourcing":
-        from ..models.sourcing import Requirement
-
-        ctx["requirements"] = (
-            db.query(Requirement)
-            .filter(Requirement.material_card_id == card_id)
-            .order_by(Requirement.created_at.desc())
-            .all()
-        )
+        ctx["requirements"] = requirements_for_card(db, card_id, limit=200)
         return template_response("htmx/partials/materials/tabs/sourcing.html", ctx)
     elif tab_name == "price_history":
         from ..models.price_snapshot import MaterialPriceSnapshot

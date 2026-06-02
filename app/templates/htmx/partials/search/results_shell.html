@@ -2,6 +2,7 @@
    Called by: htmx_views.search_run
    Depends on: SSE stream at /v2/partials/search/stream
 #}
+<div class="grid grid-cols-1 lg:grid-cols-[1fr_360px] gap-4 items-start">
 <div id="search-results-wrapper" class="space-y-4">
   <div id="source-progress" class="flex flex-wrap gap-2 items-center">
     <span class="text-xs font-medium text-gray-500 mr-1">Sources:</span>
@@ -42,6 +43,23 @@
   </div>
 
   {% include "htmx/partials/search/shortlist_bar.html" %}
+</div>
+
+  {# Right column — "What we know" history panel, loaded in parallel with the SSE stream #}
+  <aside id="part-history-col"
+         hx-get="/v2/partials/search/history?mpn={{ mpn | urlencode }}"
+         hx-trigger="load"
+         hx-swap="innerHTML"
+         class="lg:sticky lg:top-4">
+    <div class="rounded-xl bg-white p-6 border border-gray-100 shadow-sm animate-pulse">
+      <div class="h-4 w-2/3 bg-gray-100 rounded"></div>
+      <div class="mt-3 h-3 w-1/2 bg-gray-100 rounded"></div>
+      <div class="mt-4 space-y-2">
+        <div class="h-3 w-full bg-gray-100 rounded"></div>
+        <div class="h-3 w-5/6 bg-gray-100 rounded"></div>
+      </div>
+    </div>
+  </aside>
 </div>
 <script>
   (function() {
