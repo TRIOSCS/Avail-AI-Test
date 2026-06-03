@@ -13,11 +13,19 @@
    that could only be dismissed by Escape/backdrop. Fix: one persistent X in the
    chrome.
 
+3. Same bug class as (1): the materials manufacturer filter embedded `|tojson`
+   in a DOUBLE-quoted `x-data` attribute. `tojson` returns a Markup-safe string,
+   so the `|e` that was meant to protect it is a no-op — the inner `"` truncated
+   the attribute, breaking the filter. Fix: single-quoted attribute (tojson
+   escapes `'`). The general guard below catches this class anywhere.
+
 Called by: pytest
 Depends on: app/routers/htmx_views.py, app/routers/sightings.py, conftest.py
 """
 
+import glob
 import os
+import re
 
 os.environ["TESTING"] = "1"
 
@@ -106,4 +114,35 @@ class TestGlobalModalCloseAffordance:
         # up with the chrome X); the only close path is the chrome.
         assert card.count("$dispatch('close-modal')") == 0, (
             "material card should not add its own close — the chrome X handles it"
+        )
+
+
+class TestNoQuoteTruncatedAlpineAttributes:
+    """General guard for the attribute-truncation bug class (#1, #3): a literal double-
+    quote inside a double-quoted Alpine attribute closes it early and breaks the
+    component.
+
+    Scans every template.
+    """
+
+    # `|tojson` inside a DOUBLE-quoted x-data: tojson keeps `"`, so the attribute
+    # truncates (any `|e`/escape after it is a no-op on the Markup-safe result).
+    _TOJSON_IN_DQ_XDATA = re.compile(r'x-data="\{\{[^"]*\|\s*tojson')
+
+    def test_no_tojson_in_double_quoted_x_data(self):
+        offenders = []
+        for path in glob.glob(os.path.join(_REPO_ROOT, "app/templates/**/*.html"), recursive=True):
+            with open(path, encoding="utf-8") as f:
+                if self._TOJSON_IN_DQ_XDATA.search(f.read()):
+                    offenders.append(os.path.relpath(path, _REPO_ROOT))
+        assert not offenders, (
+            "tojson embedded in a double-quoted x-data attribute truncates it "
+            '(inner " closes the attribute). Use a single-quoted attribute. '
+            f"Offending templates: {offenders}"
+        )
+
+    def test_manufacturer_filter_uses_single_quoted_xdata(self):
+        html = _read_template("app/templates/htmx/partials/materials/filters/manufacturers.html")
+        assert re.search(r"x-data='\{\{[^']*\|\s*tojson[^']*\}\}'", html), (
+            "manufacturer label must embed tojson in a SINGLE-quoted x-data attribute"
         )

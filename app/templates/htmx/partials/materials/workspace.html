@@ -34,6 +34,7 @@
       {# Manufacturer filter — always visible, reloads on commodity change #}
       <div id="manufacturer-filter-container"
            hx-get="/v2/partials/materials/filters/manufacturers"
+           hx-target="this"
            hx-trigger="load, commodity-changed from:body"
            hx-indicator="#mfr-filter-spinner"
            hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
@@ -50,6 +51,7 @@
       {# Commodity tree — loaded once #}
       <span id="mfr-filter-spinner" class="htmx-indicator text-xs text-gray-400">Loading...</span>
       <div hx-get="/v2/partials/materials/filters/tree"
+           hx-target="this"
            hx-trigger="load, commodity-changed from:body"
            hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
            hx-swap="innerHTML">
@@ -62,6 +64,7 @@
 
       {# Dynamic sub-filters — reloads on commodity change AND filter change #}
       <div id="subfilters-container"
+           hx-target="this"
            hx-get="/v2/partials/materials/filters/sub"
            hx-trigger="commodity-changed from:body, filters-changed from:body"
            hx-vals='js:{
@@ -153,8 +156,12 @@
       </template>
     </div>
 
+    {# Results loading indicator (referenced by #materials-results hx-indicator) #}
+    <div id="materials-results-spinner" class="htmx-indicator px-4 py-2 text-xs text-gray-400">Loading materials…</div>
+
     {# Results container #}
     <div id="materials-results"
+         hx-target="this"
          hx-get="/v2/partials/materials/faceted"
          hx-trigger="load, filters-changed from:body"
          hx-indicator="#materials-results-spinner"
