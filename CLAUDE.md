@@ -65,6 +65,7 @@ change, update the relevant APP_MAP doc(s) in the same PR.**
 - `db.query(Model).get(id)` → use `db.get(Model, id)`
 - Anything with a literal `"` inside a **double-quoted** Alpine attribute (`x-data`/`@event`/`:bind`) → the `"` closes the attribute early and breaks Alpine init for the whole component (dead handlers, often only a console warning). Two common triggers: (a) prose / JS `//` comments — move them to a Jinja `{# #}` comment *outside* the attribute; (b) `{{ ...|tojson }}` — `tojson` is Markup-safe so a trailing `|e` is a **no-op**; embed it in a **single-quoted** attribute instead (`x-data='{{ x|tojson }}'`, tojson escapes `'`).
 - Inner htmx container that should swap into **itself** but omits `hx-target` → under `<main id="main-content" hx-target="this">` it inherits `hx-target="this"` (resolving to `#main-content`) and **replaces the whole page** on its `load`/trigger. Always set an explicit `hx-target` (e.g. `hx-target="this"`) on faceted/lazy-load sub-containers.
+- htmx event filter `[condition]` **not** hugging the event name → `keyup[cond]` is valid, but `keyup changed delay:800ms[cond]` (filter trailing a modifier) throws `htmx:syntax:error` and silently disables the trigger. The `[filter]` must immediately follow the event.
 
 ### Linear Development
 - Memory references specific code (line numbers, function names)? Verify against current files before acting

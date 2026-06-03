@@ -110,7 +110,9 @@
           <input aria-label="Search materials" type="text" x-model="q"
                  @input.debounce.400ms="applyFilters()"
                  hx-get="/v2/partials/materials/ai-interpret"
-                 hx-trigger="keyup changed delay:800ms[this.value.trim().split(/\s+/).length >= 3]"
+                 {# htmx event filter [..] MUST hug the event name; trailing a modifier
+                    (delay:800ms[..]) throws htmx:syntax:error. Gate: 3+ word query. #}
+                 hx-trigger="keyup[this.value.trim().split(/\s+/).length >= 3] changed delay:800ms"
                  hx-include="this"
                  hx-vals='js:{"q": document.querySelector("[x-model=q]")?.value || ""}'
                  hx-swap="none"

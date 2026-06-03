@@ -146,3 +146,32 @@ class TestNoQuoteTruncatedAlpineAttributes:
         assert re.search(r"x-data='\{\{[^']*\|\s*tojson[^']*\}\}'", html), (
             "manufacturer label must embed tojson in a SINGLE-quoted x-data attribute"
         )
+
+
+class TestHxTriggerEventFilterPlacement:
+    """An htmx event filter `[condition]` must hug the event name (e.g. `keyup[cond]`).
+
+    Trailing a modifier (`delay:800ms[cond]`) throws `htmx:syntax:error` and silently
+    disables the trigger. Scans every template.
+    """
+
+    def test_event_filter_hugs_event_name(self):
+        offenders = []
+        for path in glob.glob(os.path.join(_REPO_ROOT, "app/templates/**/*.html"), recursive=True):
+            with open(path, encoding="utf-8") as f:
+                txt = f.read()
+            for m in re.finditer(r'hx-trigger="([^"]*)"', txt):
+                for spec in m.group(1).split(","):
+                    spec = spec.strip()
+                    if "[" not in spec or "{{" in spec:  # skip jinja-templated
+                        continue
+                    before_bracket = spec[: spec.index("[")]
+                    # Valid: the bracket directly follows the event token, so nothing
+                    # but the event name precedes it (no spaces / modifiers).
+                    if " " in before_bracket:
+                        rel = os.path.relpath(path, _REPO_ROOT)
+                        offenders.append(f"{rel}: {spec}")
+        assert not offenders, (
+            "htmx [filter] must immediately follow the event name (keyup[cond]); "
+            "trailing a modifier throws htmx:syntax:error. Offenders: " + str(offenders)
+        )
