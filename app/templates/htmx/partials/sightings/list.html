@@ -32,6 +32,12 @@
   </div>
 </div>
 
+{# Row click is read-only: selectReq() does GET /detail to render the cached panel.
+   The only way to fire a connector search is the per-row refresh icon (table.html)
+   or the Search button in the detail panel header (_macros.html::search_button);
+   both POST /v2/.../refresh, gated by the 48h per-MPN cooldown in search_requirement.
+   NOTE: keep prose comments OUT of the x-data attribute below — a literal double-quote
+   inside the double-quoted x-data attribute truncates it and breaks Alpine init. #}
 <div class="h-[calc(100vh-90px)] flex flex-col lg:flex-row"
      x-data="{
        splitRatio: parseFloat(localStorage.getItem('sightings-split') || '0.50'),
@@ -55,11 +61,6 @@
            localStorage.setItem('sightings-split', this.splitRatio.toFixed(3));
          }
        },
-       // Row click is read-only: GET /detail renders the cached panel. The
-       // only way to fire a connector search is the per-row refresh icon
-       // (table.html) or the "Search" button in the detail panel header
-       // (_macros.html::search_button). Both POST /v2/.../refresh which is
-       // gated by the 48h per-MPN cooldown enforced in search_requirement.
        selectReq(id) {
          const store = Alpine.store('sightingSelection');
          this.selectedReqId = id;

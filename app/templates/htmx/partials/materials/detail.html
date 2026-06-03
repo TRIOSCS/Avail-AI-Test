@@ -8,8 +8,10 @@
 <div class="max-w-7xl mx-auto" x-data="{ editing: false }">
 
   {# ── Hero Header ─────────────────────────────────────────── #}
+  {# pr-8 keeps the top-right stats/Enrich cluster clear of the global modal
+     close X (base.html chrome), which floats over the panel's top-right. #}
   <div class="bg-white border border-brand-200 rounded-lg p-6 mb-6">
-    <div class="flex items-start justify-between">
+    <div class="flex items-start justify-between pr-8">
       <div>
         <h1 class="text-3xl font-bold text-gray-900 font-mono">{{ card.display_mpn or card.normalized_mpn }}</h1>
         <div class="mt-2 flex flex-wrap items-center gap-2">

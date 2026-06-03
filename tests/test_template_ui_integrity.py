@@ -1,0 +1,109 @@
+"""test_template_ui_integrity.py — Regression guards for two shipped UI bugs.
+
+1. Sightings split-panel was dead (right panel never populated, slide-bar would
+   not drag) because a JS `//` comment inside the root `x-data="..."` attribute
+   contained a literal double-quote (`the "Search" button`). The double-quote
+   prematurely closed the double-quoted attribute, so the browser truncated the
+   `x-data` expression and Alpine threw a SyntaxError on init — leaving
+   `selectReq` / `startDrag` / `selectedReqId` undefined. Fix: keep prose out of
+   the attribute (sightings/list.html).
+
+2. The global modal chrome (base.html) had no close (X) control, so any content
+   template lacking its own close — e.g. materials/detail.html — opened a modal
+   that could only be dismissed by Escape/backdrop. Fix: one persistent X in the
+   chrome.
+
+Called by: pytest
+Depends on: app/routers/htmx_views.py, app/routers/sightings.py, conftest.py
+"""
+
+import os
+
+os.environ["TESTING"] = "1"
+
+from fastapi.testclient import TestClient
+
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _read_template(rel_path: str) -> str:
+    with open(os.path.join(_REPO_ROOT, rel_path), encoding="utf-8") as f:
+        return f.read()
+
+
+def _extract_attr_value(html: str, attr_open: str, near_marker: str) -> str:
+    """Return the value of the `attr_open` (e.g. ``x-data="``) attribute whose opening
+    precedes ``near_marker``.
+
+    The value ends at the first double-quote after the opening — which is exactly what a
+    stray inner double-quote would (incorrectly) trigger, so a truncated attribute is
+    observable here.
+    """
+    marker = html.find(near_marker)
+    assert marker != -1, f"marker {near_marker!r} not found in rendered HTML"
+    start = html.rfind(attr_open, 0, marker)
+    assert start != -1, f"{attr_open!r} not found before {near_marker!r}"
+    value_start = start + len(attr_open)
+    end = html.find('"', value_start)
+    assert end != -1, "unterminated attribute"
+    return html[value_start:end]
+
+
+class TestSightingsRootXDataIntegrity:
+    """The root split-panel x-data must render intact (not truncated by a stray quote),
+    or the whole sightings page goes dead."""
+
+    def test_root_x_data_not_truncated(self, client: TestClient):
+        resp = client.get("/v2/partials/sightings/workspace", headers={"HX-Request": "true"})
+        assert resp.status_code == 200
+        # The root x-data is the one declaring splitRatio (drag) + selectReq (panel).
+        attr = _extract_attr_value(resp.text, 'x-data="', "splitRatio")
+
+        # If a stray double-quote truncates the attribute, these members defined
+        # AFTER the truncation point fall outside the parsed value.
+        assert "selectReq" in attr, (
+            "root x-data truncated before selectReq — a literal double-quote "
+            "inside the attribute closed it early (regression of the //comment bug)"
+        )
+        assert "closeMobileDetail" in attr, "root x-data truncated before closeMobileDetail — attribute closed early"
+        # The attribute value must be quote-balanced JS (no naked double-quote).
+        assert '"' not in attr, "stray double-quote inside x-data attribute value"
+        # Prose JS // comments must not live inside the attribute (fragile: any
+        # quote in the prose re-breaks it).
+        assert "//" not in attr, (
+            "JS // comment inside x-data attribute — move prose to a Jinja {# #} comment outside the attribute"
+        )
+
+
+class TestGlobalModalCloseAffordance:
+    """Every modal must be closable via a visible control supplied by the chrome,
+    independent of whatever content template is loaded into #modal-content.
+
+    The close button is static chrome (no Jinja conditionals), so we assert against the
+    base template directly.
+    """
+
+    def test_modal_chrome_has_close_button(self):
+        html = _read_template("app/templates/htmx/base.html")
+        assert 'id="modal-content"' in html, "global modal mount missing from base.html"
+        assert 'aria-label="Close"' in html, "global modal chrome has no labelled close button"
+        assert "$dispatch('close-modal')" in html, "modal close button does not dispatch close-modal"
+        # The close control is chrome: it precedes #modal-content, so it exists
+        # regardless of which content template loads (which may supply no close).
+        assert html.index('aria-label="Close"') < html.index('id="modal-content"'), (
+            "close button should be part of the modal chrome, before #modal-content"
+        )
+
+    def test_material_card_relies_on_chrome_close(self):
+        """The material card (loaded into #modal-content) historically shipped no close
+        control of its own — it now relies on the chrome X.
+
+        Guard that the chrome remains the close path (no regression to a dead-end
+        modal).
+        """
+        card = _read_template("app/templates/htmx/partials/materials/detail.html")
+        # It must not reintroduce its own redundant top-right close (would double
+        # up with the chrome X); the only close path is the chrome.
+        assert card.count("$dispatch('close-modal')") == 0, (
+            "material card should not add its own close — the chrome X handles it"
+        )

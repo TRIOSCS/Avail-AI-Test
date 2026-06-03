@@ -870,9 +870,12 @@ BROWSER (HTMX + Alpine.js)
          -> Server pushes event -> HTMX swaps element
 
   7. Modal:
-     Button -> Alpine @click="$dispatch('open-modal')"
-     Modal -> hx-get loads content
-     Close -> Alpine @close-modal.window
+     Button -> Alpine @click="$dispatch('open-modal', {url, wide})"
+     Modal  -> base.html chrome htmx.ajax()'s url into #modal-content
+     Close  -> base.html chrome renders ONE persistent X (dispatches
+               close-modal); also Escape + backdrop click. Content templates
+               loaded into #modal-content do NOT need their own close control,
+               and must not add a top-right X (it would double up with chrome).
      MPN chip click -> open-modal with material card detail URL
 
   8. Loading:

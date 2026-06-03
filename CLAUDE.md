@@ -63,6 +63,7 @@ change, update the relevant APP_MAP doc(s) in the same PR.**
 - Pydantic `class Config` → use `model_config = ConfigDict()`
 - Alpine `_x_dataStack` → use `Alpine.store()`
 - `db.query(Model).get(id)` → use `db.get(Model, id)`
+- Prose / JS `//` comments inside an `x-data`/`@event`/`:bind` attribute → put prose in a Jinja `{# #}` comment *outside* the attribute. A literal `"` in the comment closes the double-quoted attribute and breaks Alpine init for the whole component (dead handlers, no obvious error).
 
 ### Linear Development
 - Memory references specific code (line numbers, function names)? Verify against current files before acting
