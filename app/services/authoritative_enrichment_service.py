@@ -16,6 +16,7 @@ from typing import Any
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.connectors.errors import ConnectorAuthError, ConnectorQuotaError
 from app.models import MaterialCard
 from app.utils.normalization import normalize_mpn_key
 
@@ -89,12 +90,24 @@ def _connectors_in_order(db: Session) -> list:
     return [by_name[n] for n in SOURCE_ORDER if n in by_name]
 
 
-async def fetch_authoritative(display_mpn: str, normalized_mpn: str, connectors: list) -> dict[str, list[dict]]:
+async def fetch_authoritative(
+    display_mpn: str,
+    normalized_mpn: str,
+    connectors: list,
+    disabled: set[str] | None = None,
+) -> dict[str, list[dict]]:
     """Query connectors in priority order; short-circuit before paid Nexar once
-    adequate."""
+    adequate.
+
+    A source that hits a quota or auth wall is added to ``disabled`` and skipped
+    for the rest of the run (so we don't keep burning failed calls), and surfaced
+    loudly. Transient per-MPN failures are logged and treated as no result.
+    """
     results: dict[str, list[dict]] = {}
     for conn in connectors:
         name = _SOURCE_TYPE_ALIASES.get(conn.source_name, conn.source_name)
+        if disabled is not None and name in disabled:
+            continue
         if name == "nexar":
             merged, _, _ = merge_authoritative(normalized_mpn, results)
             if all(f in merged for f in _ADEQUATE):
@@ -102,7 +115,13 @@ async def fetch_authoritative(display_mpn: str, normalized_mpn: str, connectors:
                 break
         try:
             results[name] = await conn.search(display_mpn)
-        except Exception as e:  # connector-level failure is non-fatal for this MPN
+        except (ConnectorQuotaError, ConnectorAuthError) as e:
+            # Source is unusable for the rest of the run — disable + surface loudly.
+            if disabled is not None:
+                disabled.add(name)
+            logger.error("AUTH_ENRICH: {} DISABLED for run ({}): {}", name, type(e).__name__, e)
+            results[name] = []
+        except Exception as e:  # transient connector failure — non-fatal for this MPN
             logger.warning("AUTH_ENRICH: {} failed for {}: {}", name, normalized_mpn, type(e).__name__)
             results[name] = []
     return results
@@ -123,16 +142,24 @@ def apply_authoritative(
     card.enriched_at = datetime.now(timezone.utc)
 
 
-async def enrich_card(card: MaterialCard, db: Session, *, connectors: list | None = None, refresh: bool = False) -> str:
+async def enrich_card(
+    card: MaterialCard,
+    db: Session,
+    *,
+    connectors: list | None = None,
+    refresh: bool = False,
+    disabled: set[str] | None = None,
+) -> str:
     """Enrich one card: authoritative -> flagged AI inference -> not_found.
 
     Returns the resulting enrichment_status. Does not commit (caller controls txn).
+    ``disabled`` accumulates sources that hit a quota/auth wall (skipped run-wide).
     """
     if card.enrichment_status == "verified" and not refresh:
         return "verified"
 
     conns = connectors if connectors is not None else _connectors_in_order(db)
-    results = await fetch_authoritative(card.display_mpn, card.normalized_mpn, conns)
+    results = await fetch_authoritative(card.display_mpn, card.normalized_mpn, conns, disabled)
     merged, provenance, contributors = merge_authoritative(card.normalized_mpn, results)
 
     if merged:
@@ -170,6 +197,7 @@ async def enrich_cards(card_ids: list[int], db: Session, *, concurrency: int = 5
     Commits in batches of 50.
     """
     conns = _connectors_in_order(db)
+    disabled: set[str] = set()
     sem = asyncio.Semaphore(concurrency)
     counts = {"verified": 0, "ai_inferred": 0, "not_found": 0}
 
@@ -178,7 +206,7 @@ async def enrich_cards(card_ids: list[int], db: Session, *, concurrency: int = 5
         if card is None:
             return
         async with sem:
-            status = await enrich_card(card, db, connectors=conns, refresh=refresh)
+            status = await enrich_card(card, db, connectors=conns, refresh=refresh, disabled=disabled)
         counts[status] = counts.get(status, 0) + 1
 
     for i in range(0, len(card_ids), 50):
@@ -186,4 +214,7 @@ async def enrich_cards(card_ids: list[int], db: Session, *, concurrency: int = 5
         await asyncio.gather(*(_one(c) for c in batch))
         db.commit()
         logger.info("AUTH_ENRICH: committed {}/{} cards", min(i + 50, len(card_ids)), len(card_ids))
+    if disabled:
+        counts["disabled_sources"] = sorted(disabled)
+        logger.error("AUTH_ENRICH: sources disabled this run (quota/auth): {}", sorted(disabled))
     return counts

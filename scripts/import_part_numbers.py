@@ -53,6 +53,7 @@ async def _run(file_path: str, commit: bool, report_path: str, refresh: bool) ->
         logger.info("Parsed {} part numbers from {}", len(mpns), file_path)
 
         conns = _connectors_in_order(db)
+        disabled: set[str] = set()
         rows = []
         counts = {"verified": 0, "ai_inferred": 0, "not_found": 0}
 
@@ -77,7 +78,7 @@ async def _run(file_path: str, commit: bool, report_path: str, refresh: bool) ->
                     display_mpn=raw.strip(),
                     created_at=datetime.now(timezone.utc),
                 )
-            status = await enrich_card(card, db, connectors=conns, refresh=refresh)
+            status = await enrich_card(card, db, connectors=conns, refresh=refresh, disabled=disabled)
             counts[status] = counts.get(status, 0) + 1
             prov = card.enrichment_provenance or {}
             rows.append(
@@ -116,7 +117,9 @@ async def _run(file_path: str, commit: bool, report_path: str, refresh: bool) ->
             w.writeheader()
             w.writerows(rows)
         logger.info("Wrote report -> {}", report_path)
-        logger.info("SUMMARY: {} (committed={})", counts, commit)
+        if disabled:
+            logger.error("Sources DISABLED this run (quota/auth): {}", sorted(disabled))
+        logger.info("SUMMARY: {} disabled_sources={} (committed={})", counts, sorted(disabled), commit)
     finally:
         db.close()
 
@@ -124,6 +127,11 @@ async def _run(file_path: str, commit: bool, report_path: str, refresh: bool) ->
 if __name__ == "__main__":
     ap = argparse.ArgumentParser()
     ap.add_argument("--file", required=True)
+    ap.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Preview only, no DB writes (this is the default; flag accepted explicitly)",
+    )
     ap.add_argument("--commit", action="store_true", help="Write to DB (default is dry-run)")
     ap.add_argument("--refresh", action="store_true", help="Re-enrich already-verified cards")
     ap.add_argument("--report", default=None)

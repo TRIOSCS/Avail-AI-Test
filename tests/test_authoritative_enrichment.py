@@ -149,3 +149,29 @@ def test_enrich_card_not_found(mock_conns, mock_claude, db_session):
     asyncio.run(enrich_card(card, db_session))
     assert card.enrichment_status == "not_found"
     assert card.description is None
+
+
+def test_quota_error_disables_source_for_run():
+    """A ConnectorQuotaError disables that source for the rest of the run."""
+    import asyncio
+
+    from app.connectors.errors import ConnectorQuotaError
+    from app.services.authoritative_enrichment_service import fetch_authoritative
+
+    calls = {"n": 0}
+
+    class _QuotaConn:
+        source_name = "digikey"
+
+        async def search(self, pn):
+            calls["n"] += 1
+            raise ConnectorQuotaError("quota exceeded")
+
+    disabled: set[str] = set()
+    conn = _QuotaConn()
+    asyncio.run(fetch_authoritative("X1", "x1", [conn], disabled))
+    assert "digikey" in disabled
+    assert calls["n"] == 1
+    # Second MPN: source already disabled -> not retried.
+    asyncio.run(fetch_authoritative("X2", "x2", [conn], disabled))
+    assert calls["n"] == 1
