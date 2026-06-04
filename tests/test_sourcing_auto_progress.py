@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 import pytest
 from sqlalchemy.orm import Session
 
-from app.constants import SourcingStatus
+from app.constants import ActivityType, SourcingStatus
 from app.models import ActivityLog, Requirement, Requisition, User
 from app.services.sourcing_auto_progress import auto_progress_status
 
@@ -145,7 +145,7 @@ class TestAutoProgressStatus:
             db_session.query(ActivityLog)
             .filter(
                 ActivityLog.requirement_id == requirement.id,
-                ActivityLog.activity_type == "status_change",
+                ActivityLog.activity_type == ActivityType.STATUS_CHANGED,
             )
             .all()
         )

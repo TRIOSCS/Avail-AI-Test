@@ -10,7 +10,7 @@ Depends on: enums.py, models (ActivityLog)
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from ..constants import RequisitionStatus
+from ..constants import ActivityType, Channel, RequisitionStatus
 from ..models import ActivityLog
 
 ALLOWED_TRANSITIONS: dict[str, set[str]] = {
@@ -50,8 +50,8 @@ def transition(req, new_status: str | RequisitionStatus, actor, db: Session) -> 
         actor_id = actor.id if actor else None
         log_entry = ActivityLog(
             user_id=actor_id,
-            activity_type="status_change",
-            channel="system",
+            activity_type=ActivityType.STATUS_CHANGED,
+            channel=Channel.SYSTEM,
             requisition_id=req.id,
             subject=f"Status: {old_status} → {new_val}",
         )

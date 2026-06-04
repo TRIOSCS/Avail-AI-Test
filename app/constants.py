@@ -368,6 +368,62 @@ class ActivityType(StrEnum):
     REQ_ARCHIVED = "req_archived"
     REQ_UNARCHIVED = "req_unarchived"
     STRATEGIC_VENDOR_EXPIRING = "strategic_expiring"  # 18 chars — fits String(20)
+    # Communication / manual-entry types
+    EMAIL_SENT = "email_sent"
+    NOTE = "note"
+    CONTACT_NOTE = "contact_note"
+    # Buy-plan lifecycle
+    BUYPLAN_APPROVED = "buyplan_approved"
+    BUYPLAN_REJECTED = "buyplan_rejected"
+    BUYPLAN_PENDING = "buyplan_pending"
+    BUYPLAN_COMPLETED = "buyplan_completed"
+    # Offer / quote lifecycle
+    OFFER_PENDING_REVIEW = "offer_pending_review"  # exactly 20 chars
+    NEW_OFFER = "new_offer"
+    COMPETITIVE_QUOTE = "competitive_quote"
+    BID_RECEIVED = "bid_received"
+    # Sourcing / ownership / part / comms signals
+    OWNERSHIP_WARNING = "ownership_warning"
+    PROACTIVE_MATCH = "proactive_match"
+    PART_STATUS_CHANGE = "part_status_change"
+    TEAMS_MESSAGE = "teams_message"
+
+
+class Channel(StrEnum):
+    """Canonical activity_log.channel values (the medium the activity came through)."""
+
+    SYSTEM = "system"
+    PHONE = "phone"
+    MANUAL = "manual"
+    EMAIL = "email"
+    CHROME = "chrome"
+    TEAMS = "teams"
+    OUTLOOK = "outlook"
+    CALENDAR = "calendar"
+    AVAIL_SYSTEM = "avail_system"
+
+
+class EventType(StrEnum):
+    """Canonical activity_log.event_type values (Communication-Intelligence kind)."""
+
+    EMAIL = "email"
+    CALL = "call"
+    MESSAGE = "message"
+    API_SOURCE_DOWN = "api_source_down"
+    API_QUOTA_WARNING = "api_quota_warning"
+    API_QUOTA_CRITICAL = "api_quota_critical"
+
+
+class Direction(StrEnum):
+    """Canonical stored activity_log.direction values.
+
+    Writers may pass the input synonyms ``sent`` / ``received`` to log_email_activity /
+    log_call_activity, which normalize them to these stored values. Genuinely-unknown
+    direction is stored as NULL, never a sentinel string.
+    """
+
+    INBOUND = "inbound"
+    OUTBOUND = "outbound"
 
 
 class DigestEntityType(StrEnum):

@@ -7,7 +7,7 @@ Depends on: status_machine.py transitions, ActivityLog model
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from ..constants import SourcingStatus
+from ..constants import ActivityType, Channel, SourcingStatus
 from ..models.intelligence import ActivityLog
 from ..services.status_machine import validate_transition
 
@@ -64,8 +64,8 @@ def auto_progress_status(
             requirement_id=requirement.id,
             requisition_id=requirement.requisition_id,
             user_id=user_id,
-            activity_type="status_change",
-            channel="system",
+            activity_type=ActivityType.STATUS_CHANGED,
+            channel=Channel.SYSTEM,
             notes=f"Auto-progressed from {old_status} to {target_status}",
         )
     )

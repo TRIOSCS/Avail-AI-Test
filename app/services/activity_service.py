@@ -14,7 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
-from app.constants import ActivityType, InboxSyncHealth
+from app.constants import ActivityType, Direction, InboxSyncHealth
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
 from app.utils.token_manager import _utc
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
@@ -218,9 +218,23 @@ def log_email_activity(
     return record
 
 
+def _normalize_direction(direction: str | None) -> str | None:
+    """Canonicalize a direction input to a stored Direction value or None.
+
+    sent->outbound, received->inbound, inbound/outbound pass through; anything else
+    (None, 'unknown', ...) is stored as NULL — never a sentinel string.
+    """
+    return {
+        "sent": Direction.OUTBOUND,
+        "received": Direction.INBOUND,
+        "inbound": Direction.INBOUND,
+        "outbound": Direction.OUTBOUND,
+    }.get((direction or "").strip().lower())
+
+
 def log_call_activity(
     user_id: int,
-    direction: str,  # "outbound" or "inbound"
+    direction: str | None,  # accepts sent/received/inbound/outbound/None
     phone: str,
     duration_seconds: int | None,
     external_id: str | None,
@@ -231,6 +245,7 @@ def log_call_activity(
     requirement_id: int | None = None,
 ) -> ActivityLog | None:
     """Log a phone call activity."""
+    direction = _normalize_direction(direction)
     if external_id:
         existing = db.query(ActivityLog).filter(ActivityLog.external_id == external_id).first()
         if existing:

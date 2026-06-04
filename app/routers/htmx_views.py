@@ -28,6 +28,7 @@ from ..constants import (
     ActivityType,
     AttributionStatus,
     BuyPlanStatus,
+    Channel,
     ContactStatus,
     OfferStatus,
     ProactiveMatchStatus,
@@ -5160,8 +5161,8 @@ async def add_site_contact_note(
 
     log = ActivityLog(
         user_id=user.id,
-        activity_type="contact_note",
-        channel="note",
+        activity_type=ActivityType.CONTACT_NOTE,
+        channel=Channel.MANUAL,
         contact_name=contact.full_name or "",
         contact_email=contact.email or "",
         notes=notes_text,
