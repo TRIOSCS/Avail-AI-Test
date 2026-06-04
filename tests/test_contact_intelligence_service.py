@@ -611,7 +611,7 @@ class TestContactEndpoints:
         # Verify ActivityLog created
         al = (
             db_session.query(ActivityLog)
-            .filter_by(vendor_contact_id=test_vendor_contact.id, activity_type="call_initiated")
+            .filter_by(vendor_contact_id=test_vendor_contact.id, activity_type="call_logged")
             .first()
         )
         assert al is not None
