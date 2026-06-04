@@ -299,6 +299,30 @@ Non-band-aid choices fixed for the repair effort (no half-measures, root-cause o
   **corrected** to assert that envelope (the current tests pin the wrong bare-array shape and are
   treated as the bug, not the contract).
 
+## Implementation status — 2026-06-04 (branch `feat/activity-audit-repairs`)
+
+| Workstream | Status | Commits |
+|---|---|---|
+| **C** — this doc | ✅ shipped | `944fa94e` |
+| **A** — quick-win repairs (#1,#2,#3,#5,#6,#13) | ✅ shipped, TDD, 595 tests green | `944fa94e` |
+| **B3** — v13 list `{items,total,limit,offset}` envelope (#10) | ✅ shipped | `5d3d4286`, `54269d89` |
+| **B1** — canonical `activity_row` macro across 5 timelines (#25) | ✅ shipped, −125 lines | `6332f825` |
+| **B2 core** — `Channel`/`EventType`/`Direction` enums + 15 `ActivityType` members + synonym-bug fixes (`status_change`→`status_changed` ×2 writers, stored `channel="note"`→`manual`, teams `direction="unknown"`→NULL, centralized `_normalize_direction`) | ✅ shipped, 591 tests green | `3b315c3e` |
+
+**Remaining (follow-up) for "full" normalization:**
+- Route the ~50 *no-behavior-change* raw literals (buyplan / proactive / calendar / api-quota /
+  offers writers) through the new `Channel`/`EventType`/`Direction`/`ActivityType` enums —
+  type-safety/consistency only; `StrEnum` value == the string, so no stored-value change and no
+  test churn.
+- Deeper **#9 click-to-call rework**: route `phone_call`/`call_initiated` writers through
+  `log_call_activity`/`log_vendor_call` so they get contact-matching + `last_activity_at` bumps
+  (not just a literal rename). Entangled with the requisition log-activity form's dropdown values.
+- A backfill **data migration** is only needed if/when a non-empty DB appears (staging is
+  intentionally empty; writers are canonical going forward).
+
+> Note: this branch was worked concurrently with another session (commits `2bd1a497` dedupe,
+> `dc453b2d` materials docs). All activity work above is intact and independently verified.
+
 ## Full dataset
 
 The complete raw audit — all **125 confirmed findings** with per-finding evidence, impact,
