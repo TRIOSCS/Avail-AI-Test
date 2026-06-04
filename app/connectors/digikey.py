@@ -14,6 +14,7 @@ from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
+from ._core_attrs import clean_str, digikey_parameter, map_lifecycle, map_rohs, safe_pin_count
 from .errors import ConnectorRateLimitError
 from .sources import BaseConnector, _parse_retry_after
 
@@ -144,6 +145,22 @@ class DigiKeyConnector(BaseConnector):
             else:
                 price = prod.get("UnitPrice") or prod.get("unitPrice")
 
+            # Core attributes (optional — None when absent)
+            cat = prod.get("Category") or {}
+            category = clean_str(cat.get("Name") if isinstance(cat, dict) else cat, maxlen=255)
+            status = prod.get("ProductStatus") or {}
+            lifecycle = map_lifecycle(status.get("Status") if isinstance(status, dict) else status)
+            params = prod.get("Parameters")
+            package = clean_str(digikey_parameter(params, ("Package / Case", "Supplier Device Package")), maxlen=100)
+            pin_count = safe_pin_count(
+                digikey_parameter(params, ("Number of Terminations", "Number of I/O", "Number of Pins"))
+            )
+            classifications = prod.get("Classifications")
+            rohs_raw = (
+                classifications.get("RohsStatus") if isinstance(classifications, dict) else prod.get("RohsStatus")
+            )
+            rohs = map_rohs(rohs_raw)
+
             results.append(
                 {
                     "vendor_name": "DigiKey",
@@ -159,6 +176,11 @@ class DigiKeyConnector(BaseConnector):
                     "vendor_sku": dk_pn,
                     "vendor_url": "https://www.digikey.com",
                     "description": detail_desc,
+                    "category": category,
+                    "lifecycle_status": lifecycle,
+                    "package_type": package,
+                    "pin_count": pin_count,
+                    "rohs_status": rohs,
                 }
             )
 

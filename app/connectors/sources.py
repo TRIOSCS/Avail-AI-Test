@@ -11,6 +11,7 @@ import httpx
 from loguru import logger
 
 from ..utils import safe_float, safe_int
+from ._core_attrs import clean_str
 from .errors import ConnectorAuthError, ConnectorError, ConnectorQuotaError, ConnectorRateLimitError
 
 # ── Async-compatible circuit breaker ─────────────────────────────────
@@ -198,6 +199,7 @@ class NexarConnector(BaseConnector):
         results { part {
           mpn
           manufacturer { name }
+          category { name }
           sellers {
             company { name homepageUrl }
             isAuthorized
@@ -447,6 +449,8 @@ class NexarConnector(BaseConnector):
             mpn = part.get("mpn", pn)
             mfr = (part.get("manufacturer") or {}).get("name", "")
             sellers = part.get("sellers") or []
+            # Core attribute: category (optional)
+            category = clean_str((part.get("category") or {}).get("name"), maxlen=255)
 
             if not sellers:
                 key = f"_ref_{mpn}_{mfr}"
@@ -464,6 +468,7 @@ class NexarConnector(BaseConnector):
                             "is_authorized": False,
                             "confidence": 2,
                             "octopart_url": octopart_url,
+                            "category": category,
                         }
                     )
                 continue
@@ -493,6 +498,7 @@ class NexarConnector(BaseConnector):
                                 "confidence": 3 if auth else 2,
                                 "octopart_url": octopart_url,
                                 "vendor_url": homepage,
+                                "category": category,
                             }
                         )
                     continue
@@ -529,6 +535,7 @@ class NexarConnector(BaseConnector):
                             "click_url": click_url,
                             "vendor_url": homepage,
                             "vendor_sku": sku,
+                            "category": category,
                         }
                     )
 

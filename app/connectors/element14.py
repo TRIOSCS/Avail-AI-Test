@@ -14,6 +14,7 @@ from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
+from ._core_attrs import clean_str, generic_attribute, map_rohs
 from .errors import ConnectorAuthError, ConnectorRateLimitError
 from .sources import BaseConnector
 
@@ -100,6 +101,18 @@ class Element14Connector(BaseConnector):
 
             click_url = f"https://www.newark.com/search?st={quote_plus(mpn)}"
 
+            # Core attributes (optional — None when absent)
+            attrs = prod.get("attributes")
+            rohs = map_rohs(
+                generic_attribute(attrs, "attributeLabel", "attributeValue", ("RoHS", "RoHS Status", "ROHS"))
+            )
+            package = clean_str(
+                generic_attribute(
+                    attrs, "attributeLabel", "attributeValue", ("Package", "Case / Package", "Package / Case")
+                ),
+                maxlen=100,
+            )
+
             results.append(
                 {
                     "vendor_name": "element14",
@@ -115,6 +128,8 @@ class Element14Connector(BaseConnector):
                     "vendor_sku": sku,
                     "vendor_url": "https://www.newark.com",
                     "description": desc[:500] if desc else "",
+                    "rohs_status": rohs,
+                    "package_type": package,
                 }
             )
 
