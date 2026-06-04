@@ -9,6 +9,7 @@ guess.
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone
 from typing import Any
 
@@ -120,3 +121,69 @@ def apply_authoritative(
     card.enrichment_source = contributors[0] if contributors else card.enrichment_source
     card.enrichment_status = "verified"
     card.enriched_at = datetime.now(timezone.utc)
+
+
+async def enrich_card(card: MaterialCard, db: Session, *, connectors: list | None = None, refresh: bool = False) -> str:
+    """Enrich one card: authoritative -> flagged AI inference -> not_found.
+
+    Returns the resulting enrichment_status. Does not commit (caller controls txn).
+    """
+    if card.enrichment_status == "verified" and not refresh:
+        return "verified"
+
+    conns = connectors if connectors is not None else _connectors_in_order(db)
+    results = await fetch_authoritative(card.display_mpn, card.normalized_mpn, conns)
+    merged, provenance, contributors = merge_authoritative(card.normalized_mpn, results)
+
+    if merged:
+        apply_authoritative(card, merged, provenance, contributors)
+        return "verified"
+
+    # No authoritative hit -> flagged inference
+    from app.services.ai_inference_fallback import infer_part
+
+    inf = await infer_part(card.display_mpn)
+    now = datetime.now(timezone.utc)
+    card.enriched_at = now
+    if inf.status == "ai_inferred":
+        card.description = inf.description
+        card.category = inf.category
+        card.enrichment_source = "claude_opus_inferred"
+        card.enrichment_status = "ai_inferred"
+        card.enrichment_provenance = {
+            "description": {
+                "source": "claude_opus_inferred",
+                "confidence": inf.confidence,
+                "fetched_at": now.isoformat(),
+            }
+        }
+        return "ai_inferred"
+
+    card.enrichment_status = "not_found"
+    card.enrichment_source = card.enrichment_source or "claude_opus_inferred"
+    return "not_found"
+
+
+async def enrich_cards(card_ids: list[int], db: Session, *, concurrency: int = 5, refresh: bool = False) -> dict:
+    """Enrich many cards with bounded concurrency.
+
+    Commits in batches of 50.
+    """
+    conns = _connectors_in_order(db)
+    sem = asyncio.Semaphore(concurrency)
+    counts = {"verified": 0, "ai_inferred": 0, "not_found": 0}
+
+    async def _one(cid: int) -> None:
+        card = db.get(MaterialCard, cid)
+        if card is None:
+            return
+        async with sem:
+            status = await enrich_card(card, db, connectors=conns, refresh=refresh)
+        counts[status] = counts.get(status, 0) + 1
+
+    for i in range(0, len(card_ids), 50):
+        batch = card_ids[i : i + 50]
+        await asyncio.gather(*(_one(c) for c in batch))
+        db.commit()
+        logger.info("AUTH_ENRICH: committed {}/{} cards", min(i + 50, len(card_ids)), len(card_ids))
+    return counts
