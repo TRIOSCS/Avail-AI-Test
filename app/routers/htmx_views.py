@@ -7202,6 +7202,7 @@ async def materials_faceted_partial(
     sub_filters: str = "{}",
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    verified_only: bool = Query(False),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -7221,6 +7222,7 @@ async def materials_faceted_partial(
         q=q or None,
         sub_filters=parsed_filters or None,
         manufacturers=manufacturers,
+        verified_only=verified_only,
         limit=limit,
         offset=offset,
     )
