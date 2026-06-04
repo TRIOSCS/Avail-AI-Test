@@ -7238,12 +7238,15 @@ async def materials_faceted_partial(
                 MaterialVendorHistory.material_card_id,
                 sqlfunc.count(MaterialVendorHistory.id),
                 sqlfunc.min(MaterialVendorHistory.last_price),
+                sqlfunc.count(sqlfunc.distinct(MaterialVendorHistory.last_currency)),
+                sqlfunc.max(MaterialVendorHistory.last_currency),
             )
             .filter(MaterialVendorHistory.material_card_id.in_(card_ids))
             .group_by(MaterialVendorHistory.material_card_id)
             .all()
         )
-        vendor_stats = {s[0]: (s[1], s[2]) for s in stats}
+        # currency shown only when a card's vendor rows are single-currency; mixed → default $
+        vendor_stats = {s[0]: (s[1], s[2], s[4] if s[3] == 1 else None) for s in stats}
 
     # Attach primary spec chips for display
     primary_keys = {}
@@ -7254,9 +7257,10 @@ async def materials_faceted_partial(
         }
 
     for m in materials:
-        vc, bp = vendor_stats.get(m.id, (0, None))
+        vc, bp, cur = vendor_stats.get(m.id, (0, None, None))
         m._vendor_count = vc
         m._best_price = bp
+        m._best_currency = cur
         specs = m.specs_structured or {}
         m._primary_specs = [
             {"label": primary_keys[k], "value": specs[k].get("value", "")} for k in primary_keys if k in specs

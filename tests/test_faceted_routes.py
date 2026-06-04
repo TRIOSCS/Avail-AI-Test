@@ -204,3 +204,35 @@ def test_filters_sub_ignores_manufacturers_key(client, db_session):
     assert resp.status_code == 200
     # The package facet count (1) must still be reflected, not zeroed by the bogus key.
     assert "LQFP-48" in resp.text
+
+
+def test_list_renders_zero_price_and_currency():
+    """A $0 best price renders (not '--'); a non-USD currency shows its ISO code."""
+    from types import SimpleNamespace
+
+    from app.template_env import templates
+
+    tmpl = templates.env.get_template("htmx/partials/materials/list.html")
+
+    def _card(price, currency):
+        return SimpleNamespace(
+            id=1,
+            display_mpn="X",
+            normalized_mpn="x",
+            description=None,
+            manufacturer=None,
+            category="other",
+            lifecycle_status=None,
+            last_searched_at=None,
+            specs_structured=None,
+            _primary_specs=[],
+            _vendor_count=1,
+            _best_price=price,
+            _best_currency=currency,
+        )
+
+    html0 = tmpl.render(materials=[_card(0, "USD")], q="", total=1, limit=50, offset=0, faceted=True)
+    assert "$0.0000" in html0  # zero price is shown, not '--'
+
+    html_eur = tmpl.render(materials=[_card(1.5, "EUR")], q="", total=1, limit=50, offset=0, faceted=True)
+    assert "EUR 1.5000" in html_eur  # non-USD currency labelled with its code
