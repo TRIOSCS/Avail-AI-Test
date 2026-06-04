@@ -44,6 +44,6 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    op.drop_index("ix_material_cards_enrichment_status", table_name="material_cards")
+    op.drop_index("ix_material_cards_enrichment_status", table_name="material_cards", if_exists=True)
     op.execute("ALTER TABLE IF EXISTS material_cards DROP COLUMN IF EXISTS enrichment_provenance")
     op.execute("ALTER TABLE IF EXISTS material_cards DROP COLUMN IF EXISTS enrichment_status")
