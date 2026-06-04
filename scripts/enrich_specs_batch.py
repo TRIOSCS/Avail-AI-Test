@@ -23,94 +23,21 @@ from loguru import logger
 sys.path.insert(0, os.environ.get("APP_ROOT", "/app"))
 from app.database import SessionLocal
 from app.models.intelligence import MaterialCard
-from app.services.commodity_registry import get_batch_spec_schema
+from app.services.spec_enrichment_service import (
+    COMMODITY_SPECS,
+)
+from app.services.spec_enrichment_service import (
+    build_spec_prompt as _build_spec_prompt,
+)
+from app.services.spec_enrichment_service import (
+    build_spec_schema as _build_spec_schema,
+)
+from app.services.spec_enrichment_service import (
+    specs_to_summary as _specs_to_summary,
+)
 from app.services.spec_write_service import record_spec
 
 BATCH_SIZE = 50  # MPNs per request
-
-# ── Commodity spec schemas — single source of truth from commodity_registry ──
-COMMODITY_SPECS = get_batch_spec_schema()
-
-
-def _build_spec_prompt(category: str, cards: list[dict]) -> str:
-    """Build a commodity-specific spec extraction prompt."""
-    schema = COMMODITY_SPECS[category]
-    spec_instructions = []
-    for spec in schema["specs"]:
-        line = f"- {spec['key']}: {spec['label']}"
-        if spec["type"] == "enum":
-            line += f" (one of: {spec.get('values', 'see common values')})"
-        elif spec["type"] == "numeric":
-            unit = spec.get("unit", "")
-            line += f" (number{', unit: ' + unit if unit else ''})"
-        elif spec["type"] == "boolean":
-            line += " (true/false)"
-        spec_instructions.append(line)
-
-    spec_text = "\n".join(spec_instructions)
-
-    card_lines = []
-    for c in cards:
-        entry = f"- MPN: {c['display_mpn']}"
-        if c.get("manufacturer"):
-            entry += f" | Mfg: {c['manufacturer']}"
-        if c.get("description"):
-            entry += f" | Desc: {c['description'][:200]}"
-        card_lines.append(entry)
-
-    cards_text = "\n".join(card_lines)
-
-    return (
-        f"Extract technical specifications for these {category} components.\n\n"
-        f"Specs to extract:\n{spec_text}\n\n"
-        f"Components:\n{cards_text}\n\n"
-        f"For each component, return its specs. Set null for specs you cannot determine. "
-        f"Include a 'confidence' (0.0-1.0) for each spec value."
-    )
-
-
-def _build_spec_schema(category: str) -> dict:
-    """Build JSON schema for spec extraction output."""
-    schema = COMMODITY_SPECS[category]
-    spec_props = {}
-    for spec in schema["specs"]:
-        spec_props[spec["key"]] = {"type": ["string", "number", "boolean", "null"]}
-        spec_props[f"{spec['key']}_confidence"] = {"type": "number"}
-
-    return {
-        "type": "object",
-        "properties": {
-            "parts": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "mpn": {"type": "string"},
-                        **spec_props,
-                    },
-                    "required": ["mpn"],
-                },
-            }
-        },
-        "required": ["parts"],
-    }
-
-
-def _specs_to_summary(category: str, ai_part: dict) -> str | None:
-    """Convert AI-extracted specs to parseable specs_summary string.
-
-    Format: "Key: Value | Key: Value | ..."
-    Only includes specs with confidence >= 0.85.
-    """
-    schema = COMMODITY_SPECS[category]
-    parts = []
-    for spec in schema["specs"]:
-        value = ai_part.get(spec["key"])
-        conf = ai_part.get(f"{spec['key']}_confidence", 0.0)
-        if value is not None and conf >= 0.85:
-            parts.append(f"{spec['label']}: {value}")
-
-    return " | ".join(parts) if parts else None
 
 
 async def submit_spec_extraction(db, category: str, limit: int = 0) -> dict:

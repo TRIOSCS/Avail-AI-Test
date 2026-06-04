@@ -363,3 +363,28 @@ class TestFacetedSearchEdgeCases:
         _make_dram_card(db_session, "MEM-001", "DDR4", 16)
         results, total = search_materials_faceted(db_session, sub_filters={})
         assert total >= 1
+
+
+def test_boolean_subfilter_hidden_when_no_facet_data(db_session):
+    """Boolean specs must not expose Yes/No values when no facets back them."""
+    from app.models.faceted_search import MaterialSpecFacet
+    from app.models.intelligence import MaterialCard
+    from app.services.commodity_registry import seed_commodity_schemas
+    from app.services.faceted_search_service import get_subfilter_options
+
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(normalized_mpn="mc2", display_mpn="MC2", category="microcontrollers", description="mcu")
+    db_session.add(card)
+    db_session.commit()
+
+    opts = {o["spec_key"]: o for o in get_subfilter_options(db_session, "microcontrollers")}
+    # A boolean spec with NO facet rows → empty values (template will hide it).
+    assert opts["has_usb"]["values"] == []
+
+    # Once a facet row exists, the boolean exposes its toggle values.
+    db_session.add(
+        MaterialSpecFacet(material_card_id=card.id, category="microcontrollers", spec_key="has_usb", value_text="true")
+    )
+    db_session.commit()
+    opts2 = {o["spec_key"]: o for o in get_subfilter_options(db_session, "microcontrollers")}
+    assert opts2["has_usb"]["values"] == ["true", "false"]

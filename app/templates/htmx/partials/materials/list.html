@@ -62,8 +62,8 @@
           </td>
           <td class="text-right font-medium">{{ m._vendor_count or 0 }}</td>
           <td class="text-right">
-            {% if m._best_price %}
-            <span class="text-emerald-700 font-medium">${{ "%.4f"|format(m._best_price) }}</span>
+            {% if m._best_price is not none %}
+            <span class="text-emerald-700 font-medium">{{ '$' if (m._best_currency or 'USD') == 'USD' else m._best_currency ~ ' ' }}{{ "%.4f"|format(m._best_price) }}</span>
             {% else %}
             <span class="text-gray-400 text-xs">--</span>
             {% endif %}

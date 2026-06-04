@@ -212,6 +212,7 @@ async def _job_material_enrichment():
     db = SessionLocal()
     try:
         from ..services.material_enrichment_service import enrich_pending_cards
+        from ..services.spec_enrichment_service import enrich_pending_specs
 
         result = await enrich_pending_cards(db, limit=settings.material_enrichment_batch_size)
         logger.info(
@@ -219,6 +220,15 @@ async def _job_material_enrichment():
             result["enriched"],
             result["errors"],
             result.get("pending", 0),
+        )
+
+        spec_stats = await enrich_pending_specs(db, limit=settings.material_enrichment_batch_size)
+        logger.info(
+            "Material spec enrichment: cards={} specs={} errors={} skipped_no_schema={}",
+            spec_stats["cards_processed"],
+            spec_stats["specs_written"],
+            spec_stats["errors"],
+            spec_stats["skipped_no_schema"],
         )
     except Exception:
         logger.exception("Material enrichment job failed")

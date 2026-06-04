@@ -7043,8 +7043,10 @@ async def materials_workspace_partial(
     from ..models.intelligence import MaterialCard
 
     total_materials = db.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None)).count()
+    all_subs = [sub for subs in COMMODITY_TREE.values() for sub in subs]
     ctx = _base_ctx(request, user, "materials")
     ctx["total_materials"] = total_materials
+    ctx["display_names"] = {sub: get_display_name(sub) for sub in all_subs}
     return template_response("htmx/partials/materials/workspace.html", ctx)
 
 
@@ -7162,6 +7164,10 @@ async def materials_filters_sub_partial(
 
     # Parse active filters so facet counts reflect current selection
     parsed_filters = _parse_filter_json(sub_filters)
+    # 'manufacturers' is a MaterialCard column, not a spec facet — drop it so it does
+    # not zero every facet count (mirrors the faceted-list endpoint).
+    if parsed_filters:
+        parsed_filters.pop("manufacturers", None)
 
     subfilter_options = get_subfilter_options(db, commodity)
     facet_counts = get_facet_counts(db, commodity, active_filters=parsed_filters or None)
@@ -7239,12 +7245,15 @@ async def materials_faceted_partial(
                 MaterialVendorHistory.material_card_id,
                 sqlfunc.count(MaterialVendorHistory.id),
                 sqlfunc.min(MaterialVendorHistory.last_price),
+                sqlfunc.count(sqlfunc.distinct(MaterialVendorHistory.last_currency)),
+                sqlfunc.max(MaterialVendorHistory.last_currency),
             )
             .filter(MaterialVendorHistory.material_card_id.in_(card_ids))
             .group_by(MaterialVendorHistory.material_card_id)
             .all()
         )
-        vendor_stats = {s[0]: (s[1], s[2]) for s in stats}
+        # currency shown only when a card's vendor rows are single-currency; mixed → default $
+        vendor_stats = {s[0]: (s[1], s[2], s[4] if s[3] == 1 else None) for s in stats}
 
     # Attach primary spec chips for display
     primary_keys = {}
@@ -7255,9 +7264,10 @@ async def materials_faceted_partial(
         }
 
     for m in materials:
-        vc, bp = vendor_stats.get(m.id, (0, None))
+        vc, bp, cur = vendor_stats.get(m.id, (0, None, None))
         m._vendor_count = vc
         m._best_price = bp
+        m._best_currency = cur
         specs = m.specs_structured or {}
         m._primary_specs = [
             {"label": primary_keys[k], "value": specs[k].get("value", "")} for k in primary_keys if k in specs
@@ -8698,9 +8708,17 @@ async def enrich_material(
 
     try:
         await enrich_material_cards([material_id], db)
-        db.refresh(mc)
     except Exception as e:
         logger.warning("Enrichment failed for material {}: {}", material_id, e)
+
+    try:
+        from ..services.spec_enrichment_service import enrich_card_specs
+
+        await enrich_card_specs([material_id], db, force=True)
+    except Exception as e:  # noqa: BLE001 — card-level enrichment may still have succeeded
+        logger.warning("Spec enrichment failed for material {}: {}", material_id, e)
+
+    db.refresh(mc)
 
     return await material_detail_partial(request, material_id, user, db)
 

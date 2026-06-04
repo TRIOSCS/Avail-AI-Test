@@ -643,10 +643,10 @@ tagging_ai.py (orchestrator)
 ## Material Enrichment Pipeline
 
 ```
-Trigger: hourly job (_job_material_enrichment) OR Enrich button on material detail
+Trigger: every 2h job (_job_material_enrichment) OR Enrich button on material detail
     |
     v
-tagging_jobs.py -> enrich_pending_cards() [scheduled]
+tagging_jobs.py -> enrich_pending_cards() [scheduled, first pass]
   OR
 materials router -> enrich_material_cards() [user-triggered, batch processing]
     |
@@ -654,11 +654,35 @@ materials router -> enrich_material_cards() [user-triggered, batch processing]
     |       (ensures MPN list and card list stay in sync)
     |
     v
-Claude Haiku (Anthropic API)
+Claude Haiku (Anthropic API)  — FIRST PASS
     |
     +---> Classify card: description, category, lifecycle_status
     +---> DB: UPDATE material_cards (description, category, lifecycle_status)
     +---> search_vector trigger auto-updates TSVECTOR with new description/category
+    +---> Stamps material_cards.enriched_at
+
+After first pass (scheduled job only):
+tagging_jobs.py -> enrich_pending_specs() [spec extraction, second pass]
+  OR
+POST /v2/partials/materials/{id}/enrich (Enrich button) -> enrich_card_specs([id], force=True)
+  OR
+python -m app.management.enrich_specs --limit N  (one-time/on-demand backfill)
+    |
+    v
+spec_enrichment_service.py  — SECOND PASS
+    |
+    +---> Per-commodity structured-spec extraction via claude_structured (model_tier="smart")
+    |       +---> COMMODITY_SPECS schema drives prompt (per category: key, label, type, values)
+    |       +---> Records facets at confidence >= 0.70
+    |
+    +---> spec_write_service.record_spec()
+    |       +---> DB: UPDATE material_cards.specs_structured (JSONB — keyed parametric values)
+    |       +---> DB: UPSERT material_spec_facets (one row per spec facet per card)
+    |       +---> DB: UPDATE material_cards.specs_summary (plain-text key-spec summary)
+    |
+    +---> DB: UPDATE material_cards.specs_enriched_at = now()
+    |       (idempotent gate: NULL cards are processed; non-NULL cards are skipped
+    |        unless force=True, e.g. from the Enrich button)
 
 Startup backfill:
     _backfill_material_cards() in startup.py
@@ -807,9 +831,10 @@ APScheduler (scheduler.py)
     +---> inventory_jobs.py (4 hours)
     |       +---> Refresh material_cards, price snapshots
     |
-    +---> tagging_jobs.py (hourly)
+    +---> tagging_jobs.py (2 hours)
     |       +---> Claude batch classify -> material_tags, entity_tags
-    |       +---> _job_material_enrichment -> enrich_pending_cards() (Claude Haiku)
+    |       +---> _job_material_enrichment -> enrich_pending_cards() (Claude Haiku, first pass)
+    |       +---> _job_material_enrichment -> enrich_pending_specs() (Claude Sonnet, second pass)
     |
     +---> sourcing_refresh_jobs.py (4 hours)
     |       +---> Re-search stale requirements through all connectors
@@ -1119,7 +1144,7 @@ the current implementation.
 | CRM & Data | 20+ | company_merge, vendor_merge, auto_dedup, enrichment |
 | Vendor Mgmt | 8 | vendor_analysis, vendor_affinity, vendor_scorecard |
 | Buy Plans | 6 | buyplan_builder, buyplan_workflow, buyplan_scoring |
-| Materials | 6 | material_enrichment, materials_ai_search, faceted_search_service, excess_service |
+| Materials | 7 | material_enrichment, spec_enrichment_service, materials_ai_search, faceted_search_service, excess_service |
 | Admin & Health | 6 | health_monitor, integrity_service, audit_service |
 | Misc | 14 | knowledge_service, document_service, sse_broker, webhook_service |
 
