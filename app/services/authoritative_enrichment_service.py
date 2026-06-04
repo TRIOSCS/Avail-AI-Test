@@ -37,11 +37,6 @@ CORE_FIELDS = [
 _ADEQUATE = ("description", "manufacturer", "category")
 
 
-def _source_of(hit: dict) -> str:
-    st = str(hit.get("source_type", "")).lower()
-    return _SOURCE_TYPE_ALIASES.get(st, st)
-
-
 def merge_authoritative(
     normalized_mpn: str, results_by_source: dict[str, list[dict]]
 ) -> tuple[dict[str, Any], dict[str, Any], list[str]]:
