@@ -5464,8 +5464,8 @@ async def log_phone_call(
     if not vendor_name or not vendor_phone:
         raise HTTPException(400, "Vendor name and phone are required")
 
-    from ..models.intelligence import ActivityLog
     from ..models.offers import Contact as RfqContact
+    from ..services.activity_service import log_call_activity
 
     contact = RfqContact(
         requisition_id=req_id,
@@ -5478,16 +5478,20 @@ async def log_phone_call(
     )
     db.add(contact)
 
-    log = ActivityLog(
+    # Route through log_call_activity so the call is matched to a vendor/company,
+    # recorded as the canonical CALL_LOGGED type, and bumps last_activity_at.
+    log = log_call_activity(
         user_id=user.id,
-        activity_type="phone_call",
-        channel="phone",
-        company_id=None,
+        direction="outbound",
+        phone=vendor_phone,
+        duration_seconds=None,
+        external_id=None,
         contact_name=vendor_name,
-        contact_email=vendor_phone,
-        notes=notes or f"Called {vendor_name} at {vendor_phone}",
+        db=db,
+        requisition_id=req_id,
     )
-    db.add(log)
+    if log is not None:
+        log.notes = notes or f"Called {vendor_name} at {vendor_phone}"
     db.commit()
     logger.info("Phone call logged for req {} vendor {} by {}", req_id, vendor_name, user.email)
 

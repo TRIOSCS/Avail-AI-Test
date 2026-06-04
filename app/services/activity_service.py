@@ -746,7 +746,7 @@ def _increment_vendor_contact(vendor_contact_id: int, db: Session):
     now = datetime.now(timezone.utc)
     db.query(VendorContact).filter(VendorContact.id == vendor_contact_id).update(
         {
-            "interaction_count": VendorContact.interaction_count + 1,
+            "interaction_count": func.coalesce(VendorContact.interaction_count, 0) + 1,
             "last_interaction_at": now,
         },
         synchronize_session=False,
