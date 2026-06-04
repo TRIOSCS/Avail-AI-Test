@@ -12,6 +12,7 @@ from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float, safe_int
+from ._core_attrs import clean_str, map_lifecycle
 from .errors import ConnectorAuthError, ConnectorRateLimitError
 from .sources import BaseConnector
 
@@ -139,6 +140,10 @@ class OEMSecretsConnector(BaseConnector):
                 auth_status == "authorised" if auth_status else item.get("authorized", item.get("is_authorized", True))
             )
 
+            # Core attributes (optional — None when absent)
+            category = clean_str(item.get("category"), maxlen=255)
+            lifecycle = map_lifecycle(item.get("lifecycle_status"))
+
             results.append(
                 {
                     "vendor_name": dist_name,
@@ -154,6 +159,8 @@ class OEMSecretsConnector(BaseConnector):
                     "vendor_sku": sku,
                     "moq": safe_int(moq) or None,
                     "datasheet_url": datasheet,
+                    "category": category,
+                    "lifecycle_status": lifecycle,
                 }
             )
 

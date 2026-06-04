@@ -13,6 +13,7 @@ from loguru import logger
 
 from ..http_client import http
 from ..utils import safe_float
+from ._core_attrs import clean_str, generic_attribute, map_lifecycle, safe_pin_count
 from .errors import ConnectorAuthError, ConnectorRateLimitError
 from .sources import BaseConnector
 
@@ -122,6 +123,28 @@ class MouserConnector(BaseConnector):
                 if price_str:
                     price = safe_float(price_str.replace("$", "").replace(",", ""))
 
+            # Core attributes (optional — None when absent)
+            product_attrs = part.get("ProductAttributes")
+            category = clean_str(part.get("Category"), maxlen=255)
+            lifecycle = map_lifecycle(part.get("LifecycleStatus"))
+            package = clean_str(
+                generic_attribute(
+                    product_attrs,
+                    "AttributeName",
+                    "AttributeValue",
+                    ("Package / Case", "Package", "Case / Package"),
+                ),
+                maxlen=100,
+            )
+            pin_count = safe_pin_count(
+                generic_attribute(
+                    product_attrs,
+                    "AttributeName",
+                    "AttributeValue",
+                    ("Number of Pins", "Number of Terminations", "Pin Count"),
+                )
+            )
+
             results.append(
                 {
                     "vendor_name": "Mouser",
@@ -137,6 +160,10 @@ class MouserConnector(BaseConnector):
                     "vendor_sku": mouser_pn,
                     "vendor_url": "https://www.mouser.com",
                     "description": desc,
+                    "category": category,
+                    "lifecycle_status": lifecycle,
+                    "package_type": package,
+                    "pin_count": pin_count,
                 }
             )
 

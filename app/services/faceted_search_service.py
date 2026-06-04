@@ -159,6 +159,7 @@ def search_materials_faceted(
     q: str | None = None,
     sub_filters: dict | None = None,
     manufacturers: list[str] | None = None,
+    verified_only: bool = False,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[MaterialCard], int]:
@@ -168,6 +169,8 @@ def search_materials_faceted(
         commodity: Filter by commodity category (lowercased)
         q: Text search on MPN/manufacturer/description
         sub_filters: {spec_key: [values]} for enums, {spec_key_min: val} for ranges
+        manufacturers: Restrict to these manufacturer names
+        verified_only: When True, return only cards with enrichment_status == "verified"
         limit: Max results
         offset: Pagination offset
 
@@ -215,6 +218,9 @@ def search_materials_faceted(
 
     if manufacturers:
         query = query.filter(MaterialCard.manufacturer.in_(manufacturers))
+
+    if verified_only:
+        query = query.filter(MaterialCard.enrichment_status == "verified")
 
     if sub_filters and commodity:
         commodity_lower = commodity.lower().strip()

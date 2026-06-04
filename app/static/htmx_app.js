@@ -554,6 +554,7 @@ Alpine.data('materialsFilter', () => ({
   page: 0,
   drawerOpen: false,
   displayNames: {},
+  verifiedOnly: false,
   _onPopstate: null,
 
   get commodityDisplayName() {
@@ -589,6 +590,7 @@ Alpine.data('materialsFilter', () => ({
       const params = new URLSearchParams(window.location.search);
       this.commodity = params.get('commodity') || '';
       this.q = params.get('q') || '';
+      this.verifiedOnly = params.get('verified_only') === 'true';
       const pageVal = parseInt(params.get('page') || '0', 10);
       this.page = isNaN(pageVal) ? 0 : pageVal;
       this.subFilters = {};
@@ -617,6 +619,7 @@ Alpine.data('materialsFilter', () => ({
       // Broken URL — reset to defaults
       this.commodity = '';
       this.q = '';
+      this.verifiedOnly = false;
       this.page = 0;
       this.subFilters = {};
     }
@@ -626,6 +629,7 @@ Alpine.data('materialsFilter', () => ({
     const params = new URLSearchParams();
     if (this.commodity) params.set('commodity', this.commodity);
     if (this.q) params.set('q', this.q);
+    if (this.verifiedOnly) params.set('verified_only', 'true'); else params.delete('verified_only');
     if (this.page > 0) params.set('page', this.page);
     for (const [key, val] of Object.entries(this.subFilters)) {
       if (Array.isArray(val) && val.length > 0) {
