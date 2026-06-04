@@ -309,14 +309,21 @@ Non-band-aid choices fixed for the repair effort (no half-measures, root-cause o
 | **B1** — canonical `activity_row` macro across 5 timelines (#25) | ✅ shipped, −125 lines | `6332f825` |
 | **B2 core** — `Channel`/`EventType`/`Direction` enums + 15 `ActivityType` members + synonym-bug fixes (`status_change`→`status_changed` ×2 writers, stored `channel="note"`→`manual`, teams `direction="unknown"`→NULL, centralized `_normalize_direction`) | ✅ shipped, 591 tests green | `3b315c3e` |
 
+**Also shipped (later in the session):**
+- `daa67fa6` — routed the central `activity_service` log helpers (the most-used writers) through
+  the new enums (no stored-value change).
+- `890188b0` — **#9 click-to-call canonicalization** (2 of 3 sites): `phone_call` and
+  `call_initiated` → `CALL_LOGGED` + `is_meaningful`, and the vendor-contact log-call now bumps
+  `VendorCard.last_activity_at`.
+
 **Remaining (follow-up) for "full" normalization:**
-- Route the ~50 *no-behavior-change* raw literals (buyplan / proactive / calendar / api-quota /
-  offers writers) through the new `Channel`/`EventType`/`Direction`/`ActivityType` enums —
-  type-safety/consistency only; `StrEnum` value == the string, so no stored-value change and no
-  test churn.
-- Deeper **#9 click-to-call rework**: route `phone_call`/`call_initiated` writers through
-  `log_call_activity`/`log_vendor_call` so they get contact-matching + `last_activity_at` bumps
-  (not just a literal rename). Entangled with the requisition log-activity form's dropdown values.
+- Route the ~40 *no-behavior-change* raw literals in the **peripheral** writers (buyplan /
+  proactive / calendar / api-quota / offers / sightings / htmx log-activity handler) through the
+  enums — type-safety only; `StrEnum` value == the string, so no stored change and no test churn.
+- **#9 third site**: route the requisition manual phone-log (`htmx_views`) through
+  `log_call_activity` for phone-matching + linkage.
+- **#31**: fix `_increment_vendor_contact`'s NULL-increment (`interaction_count + 1` → NULL when
+  NULL) so the vendor-contact log-call can fully consolidate onto `log_vendor_call`.
 - A backfill **data migration** is only needed if/when a non-empty DB appears (staging is
   intentionally empty; writers are canonical going forward).
 
