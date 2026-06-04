@@ -14,7 +14,7 @@ from sqlalchemy import func
 from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
-from app.constants import ActivityType, Direction, InboxSyncHealth
+from app.constants import ActivityType, Channel, Direction, EventType, InboxSyncHealth
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
 from app.utils.token_manager import _utc
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
@@ -184,12 +184,12 @@ def log_email_activity(
 
     match = match_email_to_entity(email_addr, db)
 
-    activity_type = "email_sent" if direction == "sent" else "email_received"
+    activity_type = ActivityType.EMAIL_SENT if direction == "sent" else ActivityType.EMAIL_RECEIVED
 
     record = ActivityLog(
         user_id=user_id,
         activity_type=activity_type,
-        channel="email",
+        channel=Channel.EMAIL,
         company_id=match["id"] if match and match["type"] == "company" else None,
         vendor_card_id=match["id"] if match and match["type"] == "vendor" else None,
         vendor_contact_id=match.get("vendor_contact_id") if match and match["type"] == "vendor" else None,
@@ -198,8 +198,8 @@ def log_email_activity(
         contact_name=contact_name,
         subject=subject,
         external_id=external_id,
-        direction="outbound" if direction == "sent" else "inbound",
-        event_type="email",
+        direction=Direction.OUTBOUND if direction == "sent" else Direction.INBOUND,
+        event_type=EventType.EMAIL,
         summary=f"Email {'to' if direction == 'sent' else 'from'} {contact_name or email_addr}",
         requisition_id=requisition_id,
         requirement_id=requirement_id,
@@ -264,7 +264,7 @@ def log_call_activity(
     record = ActivityLog(
         user_id=user_id,
         activity_type=activity_type,
-        channel="phone",
+        channel=Channel.PHONE,
         company_id=match["id"] if match and match["type"] == "company" else None,
         vendor_card_id=match["id"] if match and match["type"] == "vendor" else None,
         vendor_contact_id=match.get("vendor_contact_id") if match and match["type"] == "vendor" else None,
@@ -275,7 +275,7 @@ def log_call_activity(
         external_id=external_id,
         subject=subject,
         direction=direction,
-        event_type="call",
+        event_type=EventType.CALL,
         summary=subject,
         requisition_id=requisition_id,
         requirement_id=requirement_id,
@@ -521,7 +521,7 @@ def log_company_call(
     record = ActivityLog(
         user_id=user_id,
         activity_type=activity_type,
-        channel="phone",
+        channel=Channel.PHONE,
         company_id=company_id,
         contact_phone=phone,
         contact_name=contact_name,
@@ -548,8 +548,8 @@ def log_company_note(
     """Log a manual note against a company."""
     record = ActivityLog(
         user_id=user_id,
-        activity_type="note",
-        channel="manual",
+        activity_type=ActivityType.NOTE,
+        channel=Channel.MANUAL,
         company_id=company_id,
         contact_name=contact_name,
         notes=notes,
@@ -580,8 +580,8 @@ def log_site_contact_note(
     contact = db.get(SiteContact, site_contact_id)
     record = ActivityLog(
         user_id=user_id,
-        activity_type="note",
-        channel="manual",
+        activity_type=ActivityType.NOTE,
+        channel=Channel.MANUAL,
         company_id=company_id,
         customer_site_id=customer_site_id,
         site_contact_id=site_contact_id,
@@ -636,7 +636,7 @@ def log_vendor_call(
     record = ActivityLog(
         user_id=user_id,
         activity_type=activity_type,
-        channel="phone",
+        channel=Channel.PHONE,
         vendor_card_id=vendor_card_id,
         vendor_contact_id=vendor_contact_id,
         contact_phone=phone,
@@ -672,8 +672,8 @@ def log_vendor_note(
     """Log a manual note against a vendor."""
     record = ActivityLog(
         user_id=user_id,
-        activity_type="note",
-        channel="manual",
+        activity_type=ActivityType.NOTE,
+        channel=Channel.MANUAL,
         vendor_card_id=vendor_card_id,
         vendor_contact_id=vendor_contact_id,
         contact_name=contact_name,
@@ -845,7 +845,7 @@ def log_rfq_activity(
     return log_activity(
         db,
         activity_type=activity_type,
-        channel="system",
+        channel=Channel.SYSTEM,
         requisition_id=rfq_id,
         requirement_id=requirement_id,
         user_id=user_id,
