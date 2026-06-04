@@ -123,3 +123,31 @@ async def test_pending_selects_unmarked_cards(db: Session, _schemas):
     with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=_payload("PENDING1")):
         stats = await enrich_pending_specs(db, limit=10)
     assert stats["cards_processed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_enrich_button_triggers_spec_pass(client, test_material_card):
+    with (
+        patch("app.services.material_enrichment_service.enrich_material_cards", new_callable=AsyncMock) as mcard,
+        patch("app.services.spec_enrichment_service.enrich_card_specs", new_callable=AsyncMock) as mspec,
+    ):
+        resp = client.post(f"/v2/partials/materials/{test_material_card.id}/enrich")
+    assert resp.status_code == 200
+    mcard.assert_awaited_once()
+    mspec.assert_awaited_once()
+    # force=True so the just-clicked card re-extracts even if previously marked
+    assert mspec.call_args.kwargs.get("force") is True
+
+
+@pytest.mark.asyncio
+async def test_enrich_button_survives_spec_failure(client, test_material_card):
+    with (
+        patch("app.services.material_enrichment_service.enrich_material_cards", new_callable=AsyncMock),
+        patch(
+            "app.services.spec_enrichment_service.enrich_card_specs",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("boom"),
+        ),
+    ):
+        resp = client.post(f"/v2/partials/materials/{test_material_card.id}/enrich")
+    assert resp.status_code == 200  # card-level enrichment already succeeded; no 500

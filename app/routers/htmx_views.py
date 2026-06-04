@@ -8693,9 +8693,17 @@ async def enrich_material(
 
     try:
         await enrich_material_cards([material_id], db)
-        db.refresh(mc)
     except Exception as e:
         logger.warning("Enrichment failed for material {}: {}", material_id, e)
+
+    try:
+        from ..services.spec_enrichment_service import enrich_card_specs
+
+        await enrich_card_specs([material_id], db, force=True)
+    except Exception as e:  # noqa: BLE001 — card-level enrichment may still have succeeded
+        logger.warning("Spec enrichment failed for material {}: {}", material_id, e)
+
+    db.refresh(mc)
 
     return await material_detail_partial(request, material_id, user, db)
 
