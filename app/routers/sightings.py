@@ -839,7 +839,7 @@ async def sightings_batch_status(
             r.sourcing_status = new_status
             activity = ActivityLog(
                 user_id=user.id,
-                activity_type="status_change",
+                activity_type=ActivityType.STATUS_CHANGED,
                 channel="system",
                 requirement_id=r.id,
                 requisition_id=r.requisition_id,
@@ -990,7 +990,7 @@ async def sightings_advance_status(
     log_rfq_activity(
         db=db,
         rfq_id=requirement.requisition_id,
-        activity_type="status_change",
+        activity_type=ActivityType.STATUS_CHANGED,
         description=f"Status changed from {old_status} to {target_status}",
         user_id=user.id,
         requirement_id=requirement_id,

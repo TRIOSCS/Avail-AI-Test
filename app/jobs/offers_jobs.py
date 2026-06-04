@@ -12,7 +12,7 @@ from apscheduler.triggers.cron import CronTrigger
 from apscheduler.triggers.interval import IntervalTrigger
 from loguru import logger
 
-from ..constants import OfferStatus, ProactiveMatchStatus, ProactiveOfferStatus
+from ..constants import ActivityType, OfferStatus, ProactiveMatchStatus, ProactiveOfferStatus
 from ..scheduler import _traced_job
 
 
@@ -300,7 +300,7 @@ async def _job_warn_strategic_expiring():
                 db.query(ActivityLog.id)
                 .filter(
                     ActivityLog.user_id == sv.user_id,
-                    ActivityLog.activity_type == "strategic_vendor_expiring",
+                    ActivityLog.activity_type == ActivityType.STRATEGIC_VENDOR_EXPIRING,
                     ActivityLog.external_id == str(sv.id),
                     ActivityLog.dismissed_at.is_(None),
                 )
@@ -312,7 +312,7 @@ async def _job_warn_strategic_expiring():
             db.add(
                 ActivityLog(
                     user_id=sv.user_id,
-                    activity_type="strategic_vendor_expiring",
+                    activity_type=ActivityType.STRATEGIC_VENDOR_EXPIRING,
                     channel="system",
                     contact_name=vendor_name,
                     subject=f"Strategic vendor {vendor_name} expires in {days_left} days — get an offer to keep them",

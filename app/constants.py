@@ -367,6 +367,7 @@ class ActivityType(StrEnum):
     ASSIGNMENT_CHANGED = "assignment_changed"
     REQ_ARCHIVED = "req_archived"
     REQ_UNARCHIVED = "req_unarchived"
+    STRATEGIC_VENDOR_EXPIRING = "strategic_expiring"  # 18 chars — fits String(20)
 
 
 class DigestEntityType(StrEnum):

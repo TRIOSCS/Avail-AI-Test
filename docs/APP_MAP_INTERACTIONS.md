@@ -77,8 +77,12 @@ rows as one date-grouped chronological timeline (newest-first, "Today" /
 "Yesterday" / dated headers keyed on `occurred_at or created_at`). RFQ sends
 appear inline as `rfq_sent` events — there is no separate "RFQ History"
 section. Each row's leading glyph comes from the `activity_icon` macro
-(`shared/_macros.html`), which maps the 12 canonical `ActivityType` values to a
-heroicon + accent color.
+(`shared/_macros.html`), which maps the canonical `ActivityType` values to a
+heroicon + accent color (unmapped types fall back to a neutral info glyph).
+Vendor attribution on a row reads `vendor_card.display_name` (the canonical
+attribute — `VendorCard` has no `name`). The paginated account/contact timeline
+read helpers (`get_account_timeline` / `get_contact_timeline`) `selectinload`
+`user`/`company`/`vendor_card` so serializing a page is O(1) queries, not O(N).
 
 **Phone calls** (manual logs and the 8x8 CDR poll) log the canonical
 `ActivityType.CALL_LOGGED` type; inbound/outbound is carried on the `direction`

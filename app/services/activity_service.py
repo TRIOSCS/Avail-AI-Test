@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
 from app.constants import ActivityType, InboxSyncHealth
@@ -339,6 +339,20 @@ def get_requisition_activities(
     return q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
 
 
+def _eager_timeline_options():
+    """Selectinload options for the relationships every timeline serializer reads.
+
+    Timeline serializers (e.g. routers.activity._timeline_item) touch a.user, a.company
+    and a.vendor_card per row; selectinload batches each into one query instead of N.
+    Apply to the row fetch only — never to the .count() query.
+    """
+    return (
+        selectinload(ActivityLog.user),
+        selectinload(ActivityLog.company),
+        selectinload(ActivityLog.vendor_card),
+    )
+
+
 def get_account_timeline(
     db: Session,
     company_id: int,
@@ -351,19 +365,27 @@ def get_account_timeline(
     offset: int = 0,
 ) -> tuple[list[ActivityLog], int]:
     """Get filtered, paginated activity timeline for a company."""
-    q = db.query(ActivityLog).filter(ActivityLog.company_id == company_id)
+    filters = [ActivityLog.company_id == company_id]
     if channel:
-        q = q.filter(ActivityLog.channel.in_(channel))
+        filters.append(ActivityLog.channel.in_(channel))
     if direction:
-        q = q.filter(ActivityLog.direction == direction)
+        filters.append(ActivityLog.direction == direction)
     if event_type:
-        q = q.filter(ActivityLog.event_type == event_type)
+        filters.append(ActivityLog.event_type == event_type)
     if date_from:
-        q = q.filter(ActivityLog.created_at >= date_from)
+        filters.append(ActivityLog.created_at >= date_from)
     if date_to:
-        q = q.filter(ActivityLog.created_at <= date_to)
-    total = q.count()
-    items = q.order_by(ActivityLog.created_at.desc()).offset(offset).limit(limit).all()
+        filters.append(ActivityLog.created_at <= date_to)
+    total = db.query(func.count(ActivityLog.id)).filter(*filters).scalar() or 0
+    items = (
+        db.query(ActivityLog)
+        .options(*_eager_timeline_options())
+        .filter(*filters)
+        .order_by(ActivityLog.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
     return items, total
 
 

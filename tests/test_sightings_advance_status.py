@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from app.constants import SourcingStatus
+from app.constants import ActivityType, SourcingStatus
 from app.models import Requirement, Requisition
 from app.models.intelligence import ActivityLog
 
@@ -99,7 +99,7 @@ class TestAdvanceStatusActivityLog:
             db_session.query(ActivityLog)
             .filter(
                 ActivityLog.requirement_id == requirement_open.id,
-                ActivityLog.activity_type == "status_change",
+                ActivityLog.activity_type == ActivityType.STATUS_CHANGED,
             )
             .first()
         )
@@ -119,7 +119,7 @@ class TestAdvanceStatusActivityLog:
             db_session.query(ActivityLog)
             .filter(
                 ActivityLog.requirement_id == requirement_open.id,
-                ActivityLog.activity_type == "status_change",
+                ActivityLog.activity_type == ActivityType.STATUS_CHANGED,
             )
             .count()
         )

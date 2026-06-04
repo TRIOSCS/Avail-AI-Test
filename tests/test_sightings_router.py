@@ -8,6 +8,7 @@ import json
 import re
 from datetime import datetime, timedelta, timezone
 
+from app.constants import ActivityType
 from app.models.intelligence import ActivityLog, MaterialCard
 from app.models.offers import Offer
 from app.models.sourcing import Requirement, Requisition, Sighting
@@ -953,7 +954,7 @@ class TestBatchStatus:
             db_session.query(ActivityLog)
             .filter(
                 ActivityLog.requirement_id == r.id,
-                ActivityLog.activity_type == "status_change",
+                ActivityLog.activity_type == ActivityType.STATUS_CHANGED,
             )
             .all()
         )

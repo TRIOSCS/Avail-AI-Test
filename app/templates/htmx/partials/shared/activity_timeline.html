@@ -28,7 +28,7 @@
         {% if a.user and a.user.name %}
         <span class="font-medium">{{ a.user.name }}</span> —
         {% endif %}
-        {{ a.notes or a.details or a.activity_type|replace('_', ' ')|capitalize }}
+        {{ a.summary or a.notes or a.activity_type|replace('_', ' ')|capitalize }}
       </p>
       {% if a.contact_name %}
       <p class="text-[10px] text-gray-500 mt-0.5">re: {{ a.contact_name }}</p>
