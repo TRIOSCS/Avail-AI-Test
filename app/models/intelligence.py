@@ -48,6 +48,7 @@ class MaterialCard(Base):
     )  # Structured specs: {"ddr_type": {"value": "DDR4", "source": "...", "confidence": 0.99, "updated_at": "..."}}
     enrichment_source = Column(String(50))  # "claude_ai", "manual", etc.
     enriched_at = Column(UTCDateTime)
+    specs_enriched_at = Column(UTCDateTime, index=True)  # NULL = spec pass not yet run
 
     is_internal_part = Column(Boolean, default=False, server_default="false")  # Internal/custom PN (not a standard MPN)
 
