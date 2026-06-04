@@ -301,6 +301,8 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
         elif schema.data_type == "numeric":
             option["range"] = numeric_map.get(schema.spec_key)
         elif schema.data_type == "boolean":
-            option["values"] = ["true", "false"]
+            # Only offer Yes/No when facet rows actually back this spec, so the toggle
+            # never renders as a clickable control that returns zero results.
+            option["values"] = ["true", "false"] if schema.spec_key in text_map else []
         result.append(option)
     return result
