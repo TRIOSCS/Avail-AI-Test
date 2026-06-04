@@ -382,6 +382,57 @@ async def backfill_manufacturers(user: User = Depends(require_admin), db: Sessio
     return {"enriched_records": count}
 
 
+# -- Part Number Import -------------------------------------------------------
+
+
+@router.post("/api/materials/import-part-numbers")
+async def import_part_numbers(request: Request, user: User = Depends(require_buyer), db: Session = Depends(get_db)):
+    """Import a bare list of part numbers (one MPN per row) as MaterialCards.
+
+    Accepts CSV/XLSX/TSV and HTML-table-as-.xls. Creates bare cards
+    (enrichment_status='unenriched'); enrichment runs separately.
+    """
+    import os as _os
+
+    from ..file_utils import extract_mpns, parse_tabular_file
+    from ..search_service import resolve_material_card
+
+    form = await request.form()
+    file = form.get("file")
+    if not file:
+        raise HTTPException(400, "No file uploaded")
+    ext = _os.path.splitext(file.filename or "")[1].lower()
+    if ext not in {".csv", ".xlsx", ".xls", ".tsv"}:
+        raise HTTPException(400, f"Invalid file type '{ext}'")
+    content = await file.read()
+    if len(content) > 10_000_000:
+        raise HTTPException(413, "File too large -- 10MB maximum")
+
+    rows = parse_tabular_file(content, file.filename or "")
+    mpns = extract_mpns(rows)
+    if not mpns:
+        raise HTTPException(400, "No part numbers found in file")
+
+    created = existing = skipped = 0
+    for mpn in mpns:
+        card = resolve_material_card(mpn, db)
+        if card is None:
+            skipped += 1
+            continue
+        # resolve_material_card logs created vs resolved; detect new by enrichment_status default
+        if card.enrichment_status == "unenriched" and card.enriched_at is None and card.search_count == 0:
+            created += 1
+        else:
+            existing += 1
+    db.commit()
+    return {
+        "created": created,
+        "existing": existing,
+        "skipped": skipped,
+        "total_rows": len(mpns),
+    }
+
+
 # -- Standalone Stock Import ---------------------------------------------------
 
 
