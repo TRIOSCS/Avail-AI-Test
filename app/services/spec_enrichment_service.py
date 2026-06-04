@@ -157,8 +157,10 @@ async def enrich_card_specs(
             parts = (result or {}).get("parts", [])
             mpn_to_part = {p.get("mpn"): p for p in parts if isinstance(p, dict)}
 
-            for idx, c in enumerate(chunk):
-                ai_part = mpn_to_part.get(c.display_mpn) or (parts[idx] if idx < len(parts) else None)
+            for c in chunk:
+                # Exact MPN match only — the output schema requires `mpn` per part; a positional
+                # fallback could mis-assign one card's specs to another if the AI drops a part.
+                ai_part = mpn_to_part.get(c.display_mpn)
                 stats["cards_processed"] += 1
                 wrote_any = False
                 if ai_part:
@@ -166,7 +168,7 @@ async def enrich_card_specs(
                         value = ai_part.get(spec["key"])
                         conf = ai_part.get(f"{spec['key']}_confidence", 0.0)
                         if value is not None and conf >= FACET_MIN_CONF:
-                            record_spec(
+                            if record_spec(
                                 db,
                                 int(c.id),
                                 spec["key"],
@@ -174,9 +176,9 @@ async def enrich_card_specs(
                                 source="spec_extraction",
                                 confidence=conf,
                                 unit=spec.get("canonical_unit"),
-                            )
-                            stats["specs_written"] += 1
-                            wrote_any = True
+                            ):
+                                stats["specs_written"] += 1
+                                wrote_any = True
                     summary = specs_to_summary(cat, ai_part)
                     if summary:
                         c.specs_summary = summary

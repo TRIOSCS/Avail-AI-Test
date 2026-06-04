@@ -37,21 +37,25 @@ def record_spec(
     confidence: float,
     unit: str | None = None,
     schema_cache: dict | None = None,
-) -> None:
+) -> bool:
     """Record a structured spec value for a material card.
 
     Handles normalization, validation, conflict resolution, and facet sync. Does not
     commit — caller manages the transaction.
+
+    Returns True if the spec was persisted, False if it was skipped for any reason (card
+    not found, no category, no schema, enum mismatch, unparseable numeric, vendor-API
+    conflict, or same-source lower-confidence).
     """
     card = db.get(MaterialCard, card_id)
     if card is None:
         logger.warning("record_spec: card_id={} not found, skipping", card_id)
-        return
+        return False
 
     category = (card.category or "").lower().strip()
     if not category:
         logger.debug("record_spec: card {} has no category, skipping", card_id)
-        return
+        return False
 
     # Look up schema — use cache if provided
     if schema_cache is not None:
@@ -64,7 +68,7 @@ def record_spec(
             category,
             spec_key,
         )
-        return
+        return False
 
     # Validate enum
     if schema.data_type == "enum" and schema.enum_values:
@@ -76,7 +80,7 @@ def record_spec(
                 category,
                 spec_key,
             )
-            return
+            return False
 
     # Normalize unit for numeric types
     canonical_value = value
@@ -94,10 +98,10 @@ def record_spec(
                         unit = m.group(2).strip()
                 except ValueError:
                     logger.warning("record_spec: cannot parse numeric value '{}' for {}.{}", value, category, spec_key)
-                    return
+                    return False
             else:
                 logger.debug("record_spec: non-numeric string '{}' for numeric spec {}.{}", value, category, spec_key)
-                return
+                return False
         if unit and canonical_unit:
             canonical_value = normalize_value(canonical_value, unit, canonical_unit)
 
@@ -137,7 +141,7 @@ def record_spec(
                     source,
                     confidence,
                 )
-                return
+                return False
 
             # Latest write wins for different non-vendor sources
             logger.info(
@@ -163,7 +167,7 @@ def record_spec(
                     existing_conf,
                     confidence,
                 )
-                return
+                return False
 
     # Write to JSONB (source of truth)
     if schema.data_type == "boolean":
@@ -204,3 +208,4 @@ def record_spec(
         source,
         confidence,
     )
+    return True
