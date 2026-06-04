@@ -48,6 +48,12 @@ class MaterialCard(Base):
     )  # Structured specs: {"ddr_type": {"value": "DDR4", "source": "...", "confidence": 0.99, "updated_at": "..."}}
     enrichment_source = Column(String(50))  # "claude_ai", "manual", etc.
     enriched_at = Column(UTCDateTime)
+    # Verification provenance (added 2026-06-04 — verified-enrichment feature)
+    # enrichment_status: "unenriched" | "verified" | "ai_inferred" | "not_found"
+    enrichment_status = Column(String(20), nullable=False, server_default="unenriched", index=True)
+    # Per-field provenance: {"<field>": {"source": "digikey", "confidence": 1.0,
+    #                                    "fetched_at": "2026-06-04T..Z", "matched_mpn": "..."}}
+    enrichment_provenance = Column(JSONB)
 
     is_internal_part = Column(Boolean, default=False, server_default="false")  # Internal/custom PN (not a standard MPN)
 
