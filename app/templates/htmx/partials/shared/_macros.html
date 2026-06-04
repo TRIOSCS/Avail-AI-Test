@@ -442,6 +442,47 @@ Usage:
 {%- endmacro %}
 
 
+{# ── Activity Row ─────────────────────────────────────────────────── #}
+{#
+  Purpose:     Canonical activity-timeline row (icon style). Renders one
+               ActivityLog `a`. The single source of truth for every entity
+               timeline (requisitions, parts, sightings, vendors, customers).
+  Depends on:  activity_icon (same file — call directly, no import), |timeago.
+  Called-by:   requisitions/tabs/activity.html, shared/activity_timeline.html,
+               customers/tabs/activity_tab.html, vendors/contact_timeline.html,
+               parts/tabs/activity.html
+  Business:    Vendor attribution uses display_name (VendorCard has no `name`).
+               Time uses occurred_at or created_at. The 'system'/'manual'
+               channels are internal and never surfaced as a pill badge.
+  Usage:
+    {% from "htmx/partials/shared/_macros.html" import activity_row %}
+    {{ activity_row(a) }}
+#}
+{% macro activity_row(a) %}
+<div class="flex gap-3 py-3 border-b border-gray-50 last:border-0 group">
+  {{ activity_icon(a.activity_type) }}
+  <div class="flex-1 min-w-0">
+    <div class="flex items-center gap-2 flex-wrap">
+      <p class="text-sm font-medium text-gray-900">{{ a.activity_type|replace('_', ' ')|title }}</p>
+      {% set who = a.vendor_card.display_name if a.vendor_card_id and a.vendor_card else a.contact_name %}
+      {% if who %}
+      <span class="text-xs text-gray-500 truncate">{{ who }}</span>
+      {% endif %}
+      {% if a.channel and a.channel not in ('system', 'manual') %}
+      <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full bg-gray-100 text-gray-600">{{ a.channel|capitalize }}</span>
+      {% endif %}
+    </div>
+    {% if a.summary or a.notes %}
+    <p class="text-xs text-gray-600 mt-1 leading-relaxed line-clamp-2">{{ a.summary or a.notes }}</p>
+    {% endif %}
+  </div>
+  <div class="text-right flex-shrink-0">
+    <p class="text-[11px] text-gray-400 whitespace-nowrap">{{ (a.occurred_at or a.created_at)|timeago }}</p>
+  </div>
+</div>
+{% endmacro %}
+
+
 {# ── Opportunity Table v2 — Row Action Rail ───────────────────────── #}
 {% macro opp_row_action_rail(req, user) %}
 <td class="opp-action-rail-cell">

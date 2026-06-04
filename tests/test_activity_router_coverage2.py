@@ -320,8 +320,8 @@ class TestCompanyActivities:
         resp = client.get(f"/api/companies/{test_company.id}/activities")
         assert resp.status_code == 200
         data = resp.json()
-        assert isinstance(data, list)
-        assert len(data) >= 1
+        assert isinstance(data["items"], list)
+        assert data["total"] >= 1
 
     def test_log_company_call_404_company(self, client):
         """POST call log for missing company returns 404."""
@@ -386,7 +386,9 @@ class TestVendorActivities:
 
         resp = client.get(f"/api/vendors/{test_vendor_card.id}/activities")
         assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
+        data = resp.json()
+        assert isinstance(data["items"], list)
+        assert data["total"] >= 1
 
     def test_log_vendor_call_404_vendor(self, client):
         """POST call log for missing vendor returns 404."""
@@ -449,7 +451,9 @@ class TestUserActivities:
 
         resp = client.get(f"/api/users/{test_user.id}/activities")
         assert resp.status_code == 200
-        assert isinstance(resp.json(), list)
+        data = resp.json()
+        assert isinstance(data["items"], list)
+        assert data["total"] >= 1
 
 
 # ── Email Click ──────────────────────────────────────────────────────

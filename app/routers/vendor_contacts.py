@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from ..cache.decorators import cached_endpoint
-from ..constants import ContactStatus
+from ..constants import ActivityType, Channel, ContactStatus, Direction, EventType
 from ..database import get_db
 from ..dependencies import require_buyer, require_user
 from ..models import Contact, User, VendorCard, VendorContact, VendorResponse
@@ -359,8 +359,11 @@ async def log_contact_call(
     now = datetime.now(timezone.utc)
     activity = ActivityLog(
         user_id=user.id,
-        activity_type="call_initiated",
-        channel="phone",
+        activity_type=ActivityType.CALL_LOGGED,
+        channel=Channel.PHONE,
+        direction=Direction.OUTBOUND,
+        event_type=EventType.CALL,
+        is_meaningful=True,
         vendor_card_id=card_id,
         vendor_contact_id=contact_id,
         contact_phone=vc.phone or vc.phone_mobile,
@@ -370,6 +373,8 @@ async def log_contact_call(
         created_at=now,
     )
     db.add(activity)
+
+    db.query(VendorCard).filter(VendorCard.id == card_id).update({"last_activity_at": now}, synchronize_session=False)
 
     vc.interaction_count = (vc.interaction_count or 0) + 1
     vc.last_interaction_at = now

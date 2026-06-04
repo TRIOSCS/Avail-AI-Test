@@ -14,7 +14,7 @@ os.environ["TESTING"] = "1"
 
 import pytest
 
-from app.constants import RequisitionStatus
+from app.constants import ActivityType, RequisitionStatus
 from app.models import ActivityLog
 from app.services.requisition_state import ALLOWED_TRANSITIONS, transition
 
@@ -59,7 +59,7 @@ class TestTransition:
             db_session.query(ActivityLog)
             .filter_by(
                 requisition_id=test_requisition.id,
-                activity_type="status_change",
+                activity_type=ActivityType.STATUS_CHANGED,
             )
             .all()
         )

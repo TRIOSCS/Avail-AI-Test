@@ -32,7 +32,8 @@ class TestCallInitiated:
         assert data["id"] is not None
 
         record = db_session.get(ActivityLog, data["id"])
-        assert record.activity_type == "phone_call"
+        assert record.activity_type == "call_logged"
+        assert record.is_meaningful is True
         assert record.channel == "phone"
         assert record.contact_phone == "+14155551234"
         assert "Call to" in record.subject

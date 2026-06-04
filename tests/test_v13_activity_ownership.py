@@ -39,7 +39,9 @@ def _seed_activity(db, user_id: int, company_id: int, **overrides) -> ActivityLo
 def test_get_company_activities_empty(client, test_company):
     resp = client.get(f"/api/companies/{test_company.id}/activities")
     assert resp.status_code == 200
-    assert resp.json() == []
+    data = resp.json()
+    assert data["items"] == []
+    assert data["total"] == 0
 
 
 def test_get_company_activities_returns_records(client, db_session, test_user, test_company):
@@ -48,14 +50,16 @@ def test_get_company_activities_returns_records(client, db_session, test_user, t
     resp = client.get(f"/api/companies/{test_company.id}/activities")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 2
-    assert all("id" in a and "activity_type" in a for a in data)
+    assert data["total"] == 2
+    assert all("id" in a and "activity_type" in a for a in data["items"])
 
 
 def test_get_vendor_activities_empty(client, test_vendor_card):
     resp = client.get(f"/api/vendors/{test_vendor_card.id}/activities")
     assert resp.status_code == 200
-    assert resp.json() == []
+    data = resp.json()
+    assert data["items"] == []
+    assert data["total"] == 0
 
 
 def test_get_vendor_activities_returns_records(client, db_session, test_user, test_vendor_card):
@@ -68,14 +72,14 @@ def test_get_vendor_activities_returns_records(client, db_session, test_user, te
     )
     resp = client.get(f"/api/vendors/{test_vendor_card.id}/activities")
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
+    assert resp.json()["total"] == 1
 
 
 def test_get_user_activities(client, db_session, test_user, test_company):
     _seed_activity(db_session, test_user.id, test_company.id)
     resp = client.get(f"/api/users/{test_user.id}/activities")
     assert resp.status_code == 200
-    assert len(resp.json()) >= 1
+    assert resp.json()["total"] >= 1
 
 
 def test_log_phone_call_no_match(client):

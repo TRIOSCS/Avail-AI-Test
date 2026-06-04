@@ -20,6 +20,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from ..constants import ActivityType, Channel, Direction, EventType
 from ..database import get_db
 from ..dependencies import require_user
 from ..models import ActivityLog, Company, User, VendorCard
@@ -101,8 +102,11 @@ def call_initiated(
         # Create activity_log entry
         record = ActivityLog(
             user_id=user.id,
-            activity_type="phone_call",
-            channel="phone",
+            activity_type=ActivityType.CALL_LOGGED,
+            channel=Channel.PHONE,
+            direction=Direction.OUTBOUND,
+            event_type=EventType.CALL,
+            is_meaningful=True,
             vendor_card_id=vendor_card_id,
             company_id=company_id,
             customer_site_id=body.customer_site_id,

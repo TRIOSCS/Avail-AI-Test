@@ -94,7 +94,7 @@ async def _job_sync_teams_calls():
                 # Full direction detection requires /callRecords/{id}/sessions sub-resource
                 result = log_call_activity(
                     user_id=user.id,
-                    direction="unknown",
+                    direction=None,  # genuinely unknown — store NULL, not a sentinel
                     phone="",  # Phone not available from callRecords list endpoint
                     duration_seconds=duration,
                     external_id=f"teams-call-{call_id}",

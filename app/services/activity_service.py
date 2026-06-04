@@ -11,10 +11,10 @@ from datetime import datetime, timedelta, timezone
 
 from loguru import logger
 from sqlalchemy import func
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, selectinload
 
 from app.config import settings
-from app.constants import ActivityType, InboxSyncHealth
+from app.constants import ActivityType, Channel, Direction, EventType, InboxSyncHealth
 from app.models import ActivityLog, Company, CustomerSite, SiteContact, VendorCard, VendorContact
 from app.utils.token_manager import _utc
 from app.vendor_utils import GENERIC_EMAIL_DOMAINS as _GENERIC_DOMAINS
@@ -184,12 +184,12 @@ def log_email_activity(
 
     match = match_email_to_entity(email_addr, db)
 
-    activity_type = "email_sent" if direction == "sent" else "email_received"
+    activity_type = ActivityType.EMAIL_SENT if direction == "sent" else ActivityType.EMAIL_RECEIVED
 
     record = ActivityLog(
         user_id=user_id,
         activity_type=activity_type,
-        channel="email",
+        channel=Channel.EMAIL,
         company_id=match["id"] if match and match["type"] == "company" else None,
         vendor_card_id=match["id"] if match and match["type"] == "vendor" else None,
         vendor_contact_id=match.get("vendor_contact_id") if match and match["type"] == "vendor" else None,
@@ -198,8 +198,8 @@ def log_email_activity(
         contact_name=contact_name,
         subject=subject,
         external_id=external_id,
-        direction="outbound" if direction == "sent" else "inbound",
-        event_type="email",
+        direction=Direction.OUTBOUND if direction == "sent" else Direction.INBOUND,
+        event_type=EventType.EMAIL,
         summary=f"Email {'to' if direction == 'sent' else 'from'} {contact_name or email_addr}",
         requisition_id=requisition_id,
         requirement_id=requirement_id,
@@ -218,9 +218,23 @@ def log_email_activity(
     return record
 
 
+def _normalize_direction(direction: str | None) -> str | None:
+    """Canonicalize a direction input to a stored Direction value or None.
+
+    sent->outbound, received->inbound, inbound/outbound pass through; anything else
+    (None, 'unknown', ...) is stored as NULL — never a sentinel string.
+    """
+    return {
+        "sent": Direction.OUTBOUND,
+        "received": Direction.INBOUND,
+        "inbound": Direction.INBOUND,
+        "outbound": Direction.OUTBOUND,
+    }.get((direction or "").strip().lower())
+
+
 def log_call_activity(
     user_id: int,
-    direction: str,  # "outbound" or "inbound"
+    direction: str | None,  # accepts sent/received/inbound/outbound/None
     phone: str,
     duration_seconds: int | None,
     external_id: str | None,
@@ -231,6 +245,7 @@ def log_call_activity(
     requirement_id: int | None = None,
 ) -> ActivityLog | None:
     """Log a phone call activity."""
+    direction = _normalize_direction(direction)
     if external_id:
         existing = db.query(ActivityLog).filter(ActivityLog.external_id == external_id).first()
         if existing:
@@ -249,7 +264,7 @@ def log_call_activity(
     record = ActivityLog(
         user_id=user_id,
         activity_type=activity_type,
-        channel="phone",
+        channel=Channel.PHONE,
         company_id=match["id"] if match and match["type"] == "company" else None,
         vendor_card_id=match["id"] if match and match["type"] == "vendor" else None,
         vendor_contact_id=match.get("vendor_contact_id") if match and match["type"] == "vendor" else None,
@@ -260,7 +275,7 @@ def log_call_activity(
         external_id=external_id,
         subject=subject,
         direction=direction,
-        event_type="call",
+        event_type=EventType.CALL,
         summary=subject,
         requisition_id=requisition_id,
         requirement_id=requirement_id,
@@ -339,6 +354,31 @@ def get_requisition_activities(
     return q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
 
 
+def _paginate_timeline(db: Session, *conditions, limit: int, offset: int) -> tuple[list[ActivityLog], int]:
+    """Count + fetch a newest-first ActivityLog page matching ``conditions``.
+
+    Shared tail for the per-entity timeline functions. The row fetch eager-loads a.user,
+    a.company and a.vendor_card (touched per row by timeline serializers such as
+    routers.activity._timeline_item) so selectinload batches each into one query instead
+    of N; the .count() query stays lean and skips the eager options.
+    """
+    total = db.query(func.count(ActivityLog.id)).filter(*conditions).scalar() or 0
+    items = (
+        db.query(ActivityLog)
+        .options(
+            selectinload(ActivityLog.user),
+            selectinload(ActivityLog.company),
+            selectinload(ActivityLog.vendor_card),
+        )
+        .filter(*conditions)
+        .order_by(ActivityLog.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return items, total
+
+
 def get_account_timeline(
     db: Session,
     company_id: int,
@@ -351,20 +391,30 @@ def get_account_timeline(
     offset: int = 0,
 ) -> tuple[list[ActivityLog], int]:
     """Get filtered, paginated activity timeline for a company."""
-    q = db.query(ActivityLog).filter(ActivityLog.company_id == company_id)
+    filters = [ActivityLog.company_id == company_id]
     if channel:
-        q = q.filter(ActivityLog.channel.in_(channel))
+        filters.append(ActivityLog.channel.in_(channel))
     if direction:
-        q = q.filter(ActivityLog.direction == direction)
+        filters.append(ActivityLog.direction == direction)
     if event_type:
-        q = q.filter(ActivityLog.event_type == event_type)
+        filters.append(ActivityLog.event_type == event_type)
     if date_from:
-        q = q.filter(ActivityLog.created_at >= date_from)
+        filters.append(ActivityLog.created_at >= date_from)
     if date_to:
-        q = q.filter(ActivityLog.created_at <= date_to)
-    total = q.count()
-    items = q.order_by(ActivityLog.created_at.desc()).offset(offset).limit(limit).all()
-    return items, total
+        filters.append(ActivityLog.created_at <= date_to)
+    return _paginate_timeline(db, *filters, limit=limit, offset=offset)
+
+
+def get_vendor_timeline(
+    db: Session, vendor_card_id: int, limit: int = 50, offset: int = 0
+) -> tuple[list[ActivityLog], int]:
+    """Paginated, eager-loaded activity timeline for a vendor card."""
+    return _paginate_timeline(db, ActivityLog.vendor_card_id == vendor_card_id, limit=limit, offset=offset)
+
+
+def get_user_timeline(db: Session, user_id: int, limit: int = 50, offset: int = 0) -> tuple[list[ActivityLog], int]:
+    """Paginated, eager-loaded activity timeline for a user."""
+    return _paginate_timeline(db, ActivityLog.user_id == user_id, limit=limit, offset=offset)
 
 
 def get_contact_timeline(
@@ -471,7 +521,7 @@ def log_company_call(
     record = ActivityLog(
         user_id=user_id,
         activity_type=activity_type,
-        channel="phone",
+        channel=Channel.PHONE,
         company_id=company_id,
         contact_phone=phone,
         contact_name=contact_name,
@@ -498,8 +548,8 @@ def log_company_note(
     """Log a manual note against a company."""
     record = ActivityLog(
         user_id=user_id,
-        activity_type="note",
-        channel="manual",
+        activity_type=ActivityType.NOTE,
+        channel=Channel.MANUAL,
         company_id=company_id,
         contact_name=contact_name,
         notes=notes,
@@ -530,8 +580,8 @@ def log_site_contact_note(
     contact = db.get(SiteContact, site_contact_id)
     record = ActivityLog(
         user_id=user_id,
-        activity_type="note",
-        channel="manual",
+        activity_type=ActivityType.NOTE,
+        channel=Channel.MANUAL,
         company_id=company_id,
         customer_site_id=customer_site_id,
         site_contact_id=site_contact_id,
@@ -586,7 +636,7 @@ def log_vendor_call(
     record = ActivityLog(
         user_id=user_id,
         activity_type=activity_type,
-        channel="phone",
+        channel=Channel.PHONE,
         vendor_card_id=vendor_card_id,
         vendor_contact_id=vendor_contact_id,
         contact_phone=phone,
@@ -622,8 +672,8 @@ def log_vendor_note(
     """Log a manual note against a vendor."""
     record = ActivityLog(
         user_id=user_id,
-        activity_type="note",
-        channel="manual",
+        activity_type=ActivityType.NOTE,
+        channel=Channel.MANUAL,
         vendor_card_id=vendor_card_id,
         vendor_contact_id=vendor_contact_id,
         contact_name=contact_name,
@@ -696,7 +746,7 @@ def _increment_vendor_contact(vendor_contact_id: int, db: Session):
     now = datetime.now(timezone.utc)
     db.query(VendorContact).filter(VendorContact.id == vendor_contact_id).update(
         {
-            "interaction_count": VendorContact.interaction_count + 1,
+            "interaction_count": func.coalesce(VendorContact.interaction_count, 0) + 1,
             "last_interaction_at": now,
         },
         synchronize_session=False,
@@ -795,7 +845,7 @@ def log_rfq_activity(
     return log_activity(
         db,
         activity_type=activity_type,
-        channel="system",
+        channel=Channel.SYSTEM,
         requisition_id=rfq_id,
         requirement_id=requirement_id,
         user_id=user_id,

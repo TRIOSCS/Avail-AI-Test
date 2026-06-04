@@ -229,12 +229,18 @@ def _activity_to_dict(a) -> dict:
 
 
 @router.get("/api/companies/{company_id}/activities")
-async def get_company_activities(company_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    """Get activity log for a company."""
-    from app.services.activity_service import get_company_activities as _get
+async def get_company_activities(
+    company_id: int,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get the paginated activity timeline for a company."""
+    from app.services.activity_service import get_account_timeline
 
-    activities = _get(company_id, db)
-    return [_activity_to_dict(a) for a in activities]
+    items, total = get_account_timeline(db, company_id, limit=limit, offset=offset)
+    return {"items": [_activity_to_dict(a) for a in items], "total": total, "limit": limit, "offset": offset}
 
 
 @router.post("/api/companies/{company_id}/activities/call")
@@ -291,25 +297,33 @@ async def log_company_note_endpoint(
 
 
 @router.get("/api/vendors/{vendor_id}/activities")
-async def get_vendor_activities(vendor_id: int, user: User = Depends(require_user), db: Session = Depends(get_db)):
-    """Get activity log for a vendor."""
-    from app.services.activity_service import get_vendor_activities as _get
+async def get_vendor_activities(
+    vendor_id: int,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Get the paginated activity timeline for a vendor."""
+    from app.services.activity_service import get_vendor_timeline
 
-    activities = _get(vendor_id, db)
-    return [_activity_to_dict(a) for a in activities]
+    items, total = get_vendor_timeline(db, vendor_id, limit=limit, offset=offset)
+    return {"items": [_activity_to_dict(a) for a in items], "total": total, "limit": limit, "offset": offset}
 
 
 @router.get("/api/users/{target_user_id}/activities")
 async def get_user_activities(
     target_user_id: int,
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Get activity log for a specific user."""
-    from app.services.activity_service import get_user_activities as _get
+    """Get the paginated activity timeline for a specific user."""
+    from app.services.activity_service import get_user_timeline
 
-    activities = _get(target_user_id, db)
-    return [_activity_to_dict(a) for a in activities]
+    items, total = get_user_timeline(db, target_user_id, limit=limit, offset=offset)
+    return {"items": [_activity_to_dict(a) for a in items], "total": total, "limit": limit, "offset": offset}
 
 
 @router.post("/api/activities/email")

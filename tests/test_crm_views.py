@@ -310,8 +310,15 @@ class TestEmailIntelligenceInActivity:
 
         resp = client.get(f"/v2/partials/customers/{company.id}/tab/activity")
         assert resp.status_code == 200
-        assert "Offer" in resp.text
-        assert ">$</span>" in resp.text
+        # Phase B1: the customer Activity Log rows now render via the canonical
+        # activity_row macro (icon style). The previous test pinned the divergent
+        # customer-surface chrome — the email-intelligence "Offer" pill and the
+        # ">$</span>" pricing badge — which the unified row intentionally drops.
+        # The canonical row surfaces the activity-type label, the actor, and the
+        # channel badge instead.
+        assert "Email Received" in resp.text
+        assert "John Vendor" in resp.text
+        assert "Email" in resp.text
 
 
 class TestPerformanceMetrics:
