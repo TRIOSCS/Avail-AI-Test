@@ -291,6 +291,8 @@
 | rohs_status | String 50 | compliant\|non-compliant\|exempt |
 | cross_references | JSONB | Alternative MPNs |
 | specs_structured | JSONB | Parametric data |
+| enriched_at | UTCDateTime, nullable | When the first-pass card enrichment (description/category/lifecycle) ran; NULL = not yet run |
+| specs_enriched_at | UTCDateTime, nullable, indexed | When the second-pass structured-spec extraction ran; NULL = spec pass not yet run |
 | search_vector | TSVECTOR | Trigger-maintained FTS (weighted: MPN=A, manufacturer=B, description/category=C) |
 
 > **Startup backfill:** `_backfill_material_cards()` in `startup.py` runs at boot to ensure every MPN in requirements has a corresponding material card.

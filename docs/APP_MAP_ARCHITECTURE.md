@@ -164,12 +164,19 @@ authoritative reference. Static-analysis tests in
 | health_check | 5 min | DB, Redis, API connector health |
 | backup | 6 hours | pg_dump |
 | tagging_auto | Hourly | AI-classify parts by commodity/brand |
-| material_enrichment | Hourly | Enrich pending material cards (Claude Haiku: description, category, lifecycle_status) |
+| material_enrichment | 2 hours | First pass: enrich pending material cards (Claude Haiku: description, category, lifecycle_status); second pass: structured-spec extraction via `spec_enrichment_service` (Claude Sonnet: `specs_structured` + `material_spec_facets`) |
 | task_reminder | 2 hours | Notify overdue tasks |
 | teams_sync | 6 hours | Sync Teams call history |
 | prospecting_refresh | Daily | Web search for new prospects |
 | maintenance | Daily | DB ANALYZE, cache cleanup, integrity checks |
 | quality | Daily | Vendor scorecards, engagement scoring |
+
+## Management Commands (`app/management/`)
+
+| Module | Invocation | Purpose |
+|--------|-----------|---------|
+| `reenrich.py` | `python -m app.management.reenrich` | Re-run first-pass card enrichment (description/category/lifecycle) on existing cards |
+| `enrich_specs.py` | `python -m app.management.enrich_specs --limit N` | One-time / on-demand backfill of structured-spec extraction for cards missing `specs_enriched_at` |
 
 ## Key Numbers
 
