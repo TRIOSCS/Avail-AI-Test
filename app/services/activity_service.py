@@ -339,18 +339,29 @@ def get_requisition_activities(
     return q.order_by(ActivityLog.created_at.desc()).limit(limit).all()
 
 
-def _eager_timeline_options():
-    """Selectinload options for the relationships every timeline serializer reads.
+def _paginate_timeline(db: Session, *conditions, limit: int, offset: int) -> tuple[list[ActivityLog], int]:
+    """Count + fetch a newest-first ActivityLog page matching ``conditions``.
 
-    Timeline serializers (e.g. routers.activity._timeline_item) touch a.user, a.company
-    and a.vendor_card per row; selectinload batches each into one query instead of N.
-    Apply to the row fetch only — never to the .count() query.
+    Shared tail for the per-entity timeline functions. The row fetch eager-loads a.user,
+    a.company and a.vendor_card (touched per row by timeline serializers such as
+    routers.activity._timeline_item) so selectinload batches each into one query instead
+    of N; the .count() query stays lean and skips the eager options.
     """
-    return (
-        selectinload(ActivityLog.user),
-        selectinload(ActivityLog.company),
-        selectinload(ActivityLog.vendor_card),
+    total = db.query(func.count(ActivityLog.id)).filter(*conditions).scalar() or 0
+    items = (
+        db.query(ActivityLog)
+        .options(
+            selectinload(ActivityLog.user),
+            selectinload(ActivityLog.company),
+            selectinload(ActivityLog.vendor_card),
+        )
+        .filter(*conditions)
+        .order_by(ActivityLog.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
     )
+    return items, total
 
 
 def get_account_timeline(
@@ -376,51 +387,19 @@ def get_account_timeline(
         filters.append(ActivityLog.created_at >= date_from)
     if date_to:
         filters.append(ActivityLog.created_at <= date_to)
-    total = db.query(func.count(ActivityLog.id)).filter(*filters).scalar() or 0
-    items = (
-        db.query(ActivityLog)
-        .options(*_eager_timeline_options())
-        .filter(*filters)
-        .order_by(ActivityLog.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
-    return items, total
+    return _paginate_timeline(db, *filters, limit=limit, offset=offset)
 
 
 def get_vendor_timeline(
     db: Session, vendor_card_id: int, limit: int = 50, offset: int = 0
 ) -> tuple[list[ActivityLog], int]:
     """Paginated, eager-loaded activity timeline for a vendor card."""
-    cond = ActivityLog.vendor_card_id == vendor_card_id
-    total = db.query(func.count(ActivityLog.id)).filter(cond).scalar() or 0
-    items = (
-        db.query(ActivityLog)
-        .options(*_eager_timeline_options())
-        .filter(cond)
-        .order_by(ActivityLog.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
-    return items, total
+    return _paginate_timeline(db, ActivityLog.vendor_card_id == vendor_card_id, limit=limit, offset=offset)
 
 
 def get_user_timeline(db: Session, user_id: int, limit: int = 50, offset: int = 0) -> tuple[list[ActivityLog], int]:
     """Paginated, eager-loaded activity timeline for a user."""
-    cond = ActivityLog.user_id == user_id
-    total = db.query(func.count(ActivityLog.id)).filter(cond).scalar() or 0
-    items = (
-        db.query(ActivityLog)
-        .options(*_eager_timeline_options())
-        .filter(cond)
-        .order_by(ActivityLog.created_at.desc())
-        .offset(offset)
-        .limit(limit)
-        .all()
-    )
-    return items, total
+    return _paginate_timeline(db, ActivityLog.user_id == user_id, limit=limit, offset=offset)
 
 
 def get_contact_timeline(
