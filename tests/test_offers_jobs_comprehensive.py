@@ -257,7 +257,7 @@ class TestWarnStrategicExpiring:
 
             asyncio.run(_job_warn_strategic_expiring())
 
-        log = scheduler_db.query(ActivityLog).filter(ActivityLog.activity_type == "strategic_vendor_expiring").first()
+        log = scheduler_db.query(ActivityLog).filter(ActivityLog.activity_type == "strategic_expiring").first()
         assert log is not None
         assert "Arrow Electronics" in log.subject
         assert "expires in" in log.subject
@@ -269,7 +269,7 @@ class TestWarnStrategicExpiring:
         # Create existing alert
         existing = ActivityLog(
             user_id=test_user.id,
-            activity_type="strategic_vendor_expiring",
+            activity_type="strategic_expiring",
             channel="system",
             external_id="99",
         )
@@ -287,7 +287,7 @@ class TestWarnStrategicExpiring:
 
             asyncio.run(_job_warn_strategic_expiring())
 
-        count = scheduler_db.query(ActivityLog).filter(ActivityLog.activity_type == "strategic_vendor_expiring").count()
+        count = scheduler_db.query(ActivityLog).filter(ActivityLog.activity_type == "strategic_expiring").count()
         assert count == 1  # No duplicate created
 
     def test_warn_naive_timezone_handling(self, scheduler_db, test_user, test_vendor_card):
@@ -318,7 +318,7 @@ class TestWarnStrategicExpiring:
 
             asyncio.run(_job_warn_strategic_expiring())
 
-        log = scheduler_db.query(ActivityLog).filter(ActivityLog.activity_type == "strategic_vendor_expiring").first()
+        log = scheduler_db.query(ActivityLog).filter(ActivityLog.activity_type == "strategic_expiring").first()
         assert log is not None
         assert "Unknown" in log.subject
 
