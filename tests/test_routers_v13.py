@@ -107,23 +107,27 @@ def test_activity_to_dict_includes_all_keys():
 def test_get_company_activities_empty(client, test_company):
     resp = client.get(f"/api/companies/{test_company.id}/activities")
     assert resp.status_code == 200
-    assert resp.json() == []
+    data = resp.json()
+    assert data["items"] == []
+    assert data["total"] == 0
 
 
 def test_get_company_activities_with_data(client, test_company, test_activity):
     resp = client.get(f"/api/companies/{test_company.id}/activities")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) == 1
-    assert data[0]["activity_type"] == "email_sent"
-    assert data[0]["contact_email"] == "vendor@example.com"
-    assert data[0]["subject"] == "RFQ for LM317T"
+    assert data["total"] == 1
+    assert data["items"][0]["activity_type"] == "email_sent"
+    assert data["items"][0]["contact_email"] == "vendor@example.com"
+    assert data["items"][0]["subject"] == "RFQ for LM317T"
 
 
 def test_get_vendor_activities_empty(client, test_vendor_card):
     resp = client.get(f"/api/vendors/{test_vendor_card.id}/activities")
     assert resp.status_code == 200
-    assert resp.json() == []
+    data = resp.json()
+    assert data["items"] == []
+    assert data["total"] == 0
 
 
 def test_get_vendor_activities_with_data(client, db_session, test_user, test_vendor_card):
@@ -142,14 +146,15 @@ def test_get_vendor_activities_with_data(client, db_session, test_user, test_ven
     db_session.commit()
     resp = client.get(f"/api/vendors/{test_vendor_card.id}/activities")
     assert resp.status_code == 200
-    assert len(resp.json()) == 1
-    assert resp.json()[0]["vendor_card_id"] == test_vendor_card.id
+    data = resp.json()
+    assert data["total"] == 1
+    assert data["items"][0]["vendor_card_id"] == test_vendor_card.id
 
 
 def test_get_user_activities(client, test_activity):
     resp = client.get(f"/api/users/{test_activity.user_id}/activities")
     assert resp.status_code == 200
-    assert len(resp.json()) >= 1
+    assert resp.json()["total"] >= 1
 
 
 def test_log_phone_call_no_match(client):

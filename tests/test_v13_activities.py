@@ -22,17 +22,18 @@ def test_get_company_activities_returns_list(client, test_activity):
     resp = client.get(f"/api/companies/{test_activity.company_id}/activities")
     assert resp.status_code == 200
     data = resp.json()
-    assert isinstance(data, list)
-    assert len(data) >= 1
-    assert data[0]["activity_type"] == "email_sent"
-    assert data[0]["contact_email"] == "vendor@example.com"
+    assert data["total"] >= 1
+    assert data["items"][0]["activity_type"] == "email_sent"
+    assert data["items"][0]["contact_email"] == "vendor@example.com"
 
 
 def test_get_company_activities_empty(client, test_company):
-    """Company with no activities returns empty list, not 404."""
+    """Company with no activities returns an empty timeline envelope, not 404."""
     resp = client.get(f"/api/companies/{test_company.id}/activities")
     assert resp.status_code == 200
-    assert resp.json() == []
+    data = resp.json()
+    assert data["items"] == []
+    assert data["total"] == 0
 
 
 # ── GET /api/vendors/{id}/activities ──────────────────────────────────
@@ -54,14 +55,16 @@ def test_get_vendor_activities_returns_list(client, db_session, test_user, test_
     resp = client.get(f"/api/vendors/{test_vendor_card.id}/activities")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) >= 1
-    assert data[0]["vendor_card_id"] == test_vendor_card.id
+    assert data["total"] >= 1
+    assert data["items"][0]["vendor_card_id"] == test_vendor_card.id
 
 
 def test_get_vendor_activities_empty(client, test_vendor_card):
     resp = client.get(f"/api/vendors/{test_vendor_card.id}/activities")
     assert resp.status_code == 200
-    assert resp.json() == []
+    data = resp.json()
+    assert data["items"] == []
+    assert data["total"] == 0
 
 
 # ── GET /api/users/{id}/activities ────────────────────────────────────
@@ -71,15 +74,17 @@ def test_get_user_activities_returns_list(client, test_user, test_activity):
     resp = client.get(f"/api/users/{test_user.id}/activities")
     assert resp.status_code == 200
     data = resp.json()
-    assert len(data) >= 1
-    assert data[0]["user_id"] == test_user.id
+    assert data["total"] >= 1
+    assert data["items"][0]["user_id"] == test_user.id
 
 
 def test_get_user_activities_other_user_empty(client, sales_user):
-    """Querying a user with no activities returns empty list."""
+    """Querying a user with no activities returns an empty timeline envelope."""
     resp = client.get(f"/api/users/{sales_user.id}/activities")
     assert resp.status_code == 200
-    assert resp.json() == []
+    data = resp.json()
+    assert data["items"] == []
+    assert data["total"] == 0
 
 
 # ── POST /api/activities/call ─────────────────────────────────────────

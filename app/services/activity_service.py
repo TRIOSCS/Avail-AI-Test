@@ -389,6 +389,40 @@ def get_account_timeline(
     return items, total
 
 
+def get_vendor_timeline(
+    db: Session, vendor_card_id: int, limit: int = 50, offset: int = 0
+) -> tuple[list[ActivityLog], int]:
+    """Paginated, eager-loaded activity timeline for a vendor card."""
+    cond = ActivityLog.vendor_card_id == vendor_card_id
+    total = db.query(func.count(ActivityLog.id)).filter(cond).scalar() or 0
+    items = (
+        db.query(ActivityLog)
+        .options(*_eager_timeline_options())
+        .filter(cond)
+        .order_by(ActivityLog.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return items, total
+
+
+def get_user_timeline(db: Session, user_id: int, limit: int = 50, offset: int = 0) -> tuple[list[ActivityLog], int]:
+    """Paginated, eager-loaded activity timeline for a user."""
+    cond = ActivityLog.user_id == user_id
+    total = db.query(func.count(ActivityLog.id)).filter(cond).scalar() or 0
+    items = (
+        db.query(ActivityLog)
+        .options(*_eager_timeline_options())
+        .filter(cond)
+        .order_by(ActivityLog.created_at.desc())
+        .offset(offset)
+        .limit(limit)
+        .all()
+    )
+    return items, total
+
+
 def get_contact_timeline(
     db: Session,
     site_contact_id: int,
