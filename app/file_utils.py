@@ -11,6 +11,59 @@ import io
 from loguru import logger
 
 
+def _looks_like_html(content: bytes) -> bool:
+    """Return True when the byte payload looks like an HTML document."""
+    head = content[:512].lstrip().lower()
+    return head.startswith((b"<head", b"<html", b"<table", b"<!doctype", b"<meta"))
+
+
+def _parse_html_table(content: bytes) -> list[dict]:
+    """Parse an HTML <table> export (e.g. ERP 'Excel' that is really HTML)."""
+    from html.parser import HTMLParser
+
+    class _T(HTMLParser):
+        def __init__(self):
+            super().__init__()
+            self.rows: list[list[str]] = []
+            self._cur: list[str] | None = None
+            self._cell: list[str] | None = None
+
+        def handle_starttag(self, tag, attrs):
+            if tag == "tr":
+                self._cur = []
+            elif tag in ("td", "th"):
+                self._cell = []
+
+        def handle_endtag(self, tag):
+            if tag == "tr" and self._cur is not None:
+                self.rows.append(self._cur)
+                self._cur = None
+            elif tag in ("td", "th") and self._cell is not None and self._cur is not None:
+                self._cur.append("".join(self._cell).strip())
+                self._cell = None
+
+        def handle_data(self, data):
+            if self._cell is not None:
+                self._cell.append(data)
+
+    try:
+        text = content.decode("iso-8859-1")
+    except Exception:
+        text = content.decode("utf-8", errors="replace")
+    p = _T()
+    p.feed(text)
+    table = [r for r in p.rows if any(c.strip() for c in r)]
+    if not table:
+        return []
+    headers = [str(c or "").strip().lower() for c in table[0]]
+    out = []
+    for row in table[1:]:
+        if not any(c.strip() for c in row):
+            continue
+        out.append(dict(zip(headers, [str(v or "").strip() for v in row])))
+    return out
+
+
 def parse_tabular_file(content: bytes, filename: str) -> list[dict]:
     """Parse CSV/TSV/Excel file bytes into a list of row dicts.
 
@@ -22,7 +75,12 @@ def parse_tabular_file(content: bytes, filename: str) -> list[dict]:
 
     try:
         if fname.endswith((".xlsx", ".xls")):
-            rows = _parse_excel(content)
+            if _looks_like_html(content):
+                rows = _parse_html_table(content)
+            else:
+                rows = _parse_excel(content)
+        elif _looks_like_html(content):
+            rows = _parse_html_table(content)
         else:
             delimiter = "\t" if fname.endswith(".tsv") else ","
             rows = _parse_csv(content, delimiter)
@@ -59,6 +117,40 @@ def _parse_csv(content: bytes, delimiter: str = ",") -> list[dict]:
     for row in reader:
         rows.append({k.strip().lower(): v.strip() for k, v in row.items() if k})
     return rows
+
+
+_MPN_COLUMN_NAMES = (
+    "material: material name",
+    "material name",
+    "mpn",
+    "part number",
+    "part_number",
+    "partnumber",
+    "pn",
+    "part#",
+)
+
+
+def extract_mpns(rows: list[dict]) -> list[str]:
+    """Pull part numbers from parsed rows.
+
+    Prefers a recognized column name; otherwise uses the single column present.
+    Preserves order, drops blanks.
+    """
+    if not rows:
+        return []
+    keys = list(rows[0].keys())
+    col = next((k for k in keys if k in _MPN_COLUMN_NAMES), None)
+    if col is None and len(keys) == 1:
+        col = keys[0]
+    if col is None:
+        return []
+    out = []
+    for r in rows:
+        v = (r.get(col) or "").strip()
+        if v:
+            out.append(v)
+    return out
 
 
 # ── Stock list row normalization ────────────────────────────────────────
