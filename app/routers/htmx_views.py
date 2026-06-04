@@ -7157,6 +7157,10 @@ async def materials_filters_sub_partial(
 
     # Parse active filters so facet counts reflect current selection
     parsed_filters = _parse_filter_json(sub_filters)
+    # 'manufacturers' is a MaterialCard column, not a spec facet — drop it so it does
+    # not zero every facet count (mirrors the faceted-list endpoint).
+    if parsed_filters:
+        parsed_filters.pop("manufacturers", None)
 
     subfilter_options = get_subfilter_options(db, commodity)
     facet_counts = get_facet_counts(db, commodity, active_filters=parsed_filters or None)

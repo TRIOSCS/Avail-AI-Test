@@ -176,3 +176,31 @@ def test_manufacturer_filter_partial_renders(client, db_session: Session):
     assert "MemCo" in resp.text
     assert "mfrLabel" in resp.text
     assert 'x-data="{name:' not in resp.text
+
+
+def test_filters_sub_ignores_manufacturers_key(client, db_session):
+    """Selecting a manufacturer must not zero out the enum facet counts."""
+    import json
+
+    from app.models.faceted_search import MaterialSpecFacet
+    from app.models.intelligence import MaterialCard
+    from app.services.commodity_registry import seed_commodity_schemas
+
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(
+        normalized_mpn="mc1", display_mpn="MC1", manufacturer="ST", category="microcontrollers", description="mcu"
+    )
+    db_session.add(card)
+    db_session.flush()
+    db_session.add(
+        MaterialSpecFacet(
+            material_card_id=card.id, category="microcontrollers", spec_key="package", value_text="LQFP-48"
+        )
+    )
+    db_session.commit()
+
+    sub_filters = json.dumps({"manufacturers": ["ST"]})
+    resp = client.get(f"/v2/partials/materials/filters/sub?commodity=microcontrollers&sub_filters={sub_filters}")
+    assert resp.status_code == 200
+    # The package facet count (1) must still be reflected, not zeroed by the bogus key.
+    assert "LQFP-48" in resp.text
