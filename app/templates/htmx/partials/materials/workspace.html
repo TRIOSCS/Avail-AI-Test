@@ -2,7 +2,8 @@
    Called by: htmx_views.py materials_workspace route
    Depends on: Alpine.js materialsFilter() in htmx_app.js
 #}
-<div id="materials-workspace" x-data="materialsFilter" class="flex h-full">
+<div id="materials-workspace" x-data="materialsFilter"
+     data-display-names='{{ display_names|tojson }}' class="flex h-full">
 
   {# -- Mobile drawer backdrop -- #}
   <div x-show="drawerOpen" x-cloak x-transition:enter="transition-opacity ease-out duration-200"

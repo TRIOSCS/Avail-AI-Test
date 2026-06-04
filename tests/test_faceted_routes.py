@@ -236,3 +236,10 @@ def test_list_renders_zero_price_and_currency():
 
     html_eur = tmpl.render(materials=[_card(1.5, "EUR")], q="", total=1, limit=50, offset=0, faceted=True)
     assert "EUR 1.5000" in html_eur  # non-USD currency labelled with its code
+
+
+def test_workspace_injects_display_names(client):
+    resp = client.get("/v2/partials/materials/workspace")
+    assert resp.status_code == 200
+    assert "data-display-names=" in resp.text
+    assert "Analog ICs" in resp.text  # canonical name from _DISPLAY_NAMES

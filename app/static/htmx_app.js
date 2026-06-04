@@ -553,10 +553,13 @@ Alpine.data('materialsFilter', () => ({
   q: '',
   page: 0,
   drawerOpen: false,
+  displayNames: {},
   _onPopstate: null,
 
   get commodityDisplayName() {
-    return this.commodity ? this.commodity.replace(/_/g, ' ').replace(/(^|\s)\S/g, l => l.toUpperCase()) : '';
+    if (!this.commodity) return '';
+    return this.displayNames[this.commodity]
+      || this.commodity.replace(/_/g, ' ').replace(/(^|\s)\S/g, l => l.toUpperCase());
   },
 
   get activeFilterCount() {
@@ -569,6 +572,7 @@ Alpine.data('materialsFilter', () => ({
   },
 
   init() {
+    try { this.displayNames = JSON.parse(this.$el.dataset.displayNames || '{}'); } catch (e) { this.displayNames = {}; }
     this.syncFromURL();
     this._onPopstate = () => this.syncFromURL();
     window.addEventListener('popstate', this._onPopstate);

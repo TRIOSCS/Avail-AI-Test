@@ -7038,8 +7038,10 @@ async def materials_workspace_partial(
     from ..models.intelligence import MaterialCard
 
     total_materials = db.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None)).count()
+    all_subs = [sub for subs in COMMODITY_TREE.values() for sub in subs]
     ctx = _base_ctx(request, user, "materials")
     ctx["total_materials"] = total_materials
+    ctx["display_names"] = {sub: get_display_name(sub) for sub in all_subs}
     return template_response("htmx/partials/materials/workspace.html", ctx)
 
 
