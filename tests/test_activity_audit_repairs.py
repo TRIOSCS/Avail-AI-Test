@@ -100,8 +100,10 @@ def test_shared_timeline_does_not_render_raw_json_details():
     html = tmpl.render(activities=[act])
     assert "{'phase'" not in html
     assert "'vendor': 'Arrow'" not in html
-    # Falls back to a human-readable label.
-    assert "Rfq sent" in html
+    # Falls back to a human-readable label. Phase B1: the shared timeline now
+    # renders via the canonical activity_row macro, which title-cases the type
+    # ("Rfq Sent") rather than the old per-surface |capitalize ("Rfq sent").
+    assert "Rfq Sent" in html
 
 
 # ── #6 — N+1 relationship loads on the account timeline ───────────────────
