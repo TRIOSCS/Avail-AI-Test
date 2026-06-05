@@ -189,3 +189,269 @@ def test_quota_error_disables_source_for_run():
     # Second MPN: source already disabled -> not retried.
     asyncio.run(fetch_authoritative("X2", "x2", [conn], disabled))
     assert calls["n"] == 1
+
+
+# ── Additional coverage tests ────────────────────────────────────────────────
+
+import asyncio
+
+from app.connectors.errors import ConnectorAuthError
+from app.services.authoritative_enrichment_service import (
+    apply_authoritative,
+    enrich_cards,
+    fetch_authoritative,
+)
+
+# ── fetch_authoritative edge cases ───────────────────────────────────────────
+
+
+def test_fetch_auth_error_disables_source():
+    """ConnectorAuthError must also disable the source for the rest of the run."""
+
+    class _AuthErrConn:
+        source_name = "mouser"
+
+        async def search(self, pn):
+            raise ConnectorAuthError("bad credentials")
+
+    disabled: set[str] = set()
+    asyncio.run(fetch_authoritative("LM317T", "lm317t", [_AuthErrConn()], disabled))
+    assert "mouser" in disabled
+
+
+def test_fetch_transient_exception_returns_empty_result():
+    """An unexpected exception must not propagate — source gets an empty result."""
+
+    class _TransientConn:
+        source_name = "element14"
+
+        async def search(self, pn):
+            raise RuntimeError("transient network blip")
+
+    disabled: set[str] = set()
+    results = asyncio.run(fetch_authoritative("LM317T", "lm317t", [_TransientConn()], disabled))
+    # Source returned empty list, NOT removed from results (key present)
+    assert results.get("element14") == []
+    # Transient errors must NOT disable the source
+    assert "element14" not in disabled
+
+
+def test_fetch_nexar_skipped_when_adequate():
+    """Nexar connector is skipped once description/manufacturer/category are present."""
+    nexar_calls = {"n": 0}
+
+    class _DigiKeyConn:
+        source_name = "digikey"
+
+        async def search(self, pn):
+            return [
+                {
+                    "source_type": "digikey",
+                    "mpn_matched": "LM317T",
+                    "manufacturer": "TI",
+                    "description": "Adjustable regulator",
+                    "category": "Voltage Regulator",
+                }
+            ]
+
+    class _NexarConn:
+        source_name = "nexar"
+
+        async def search(self, pn):
+            nexar_calls["n"] += 1
+            return []
+
+    results = asyncio.run(fetch_authoritative("LM317T", "lm317t", [_DigiKeyConn(), _NexarConn()], set()))
+    # DigiKey filled all _ADEQUATE fields -> nexar must be skipped
+    assert nexar_calls["n"] == 0
+    assert "digikey" in results
+
+
+def test_fetch_nexar_called_when_not_adequate():
+    """Nexar is queried when adequate fields are missing from earlier sources."""
+    nexar_calls = {"n": 0}
+
+    class _DigiKeyConn:
+        source_name = "digikey"
+
+        async def search(self, pn):
+            # Only returns manufacturer — not all _ADEQUATE fields
+            return [
+                {
+                    "source_type": "digikey",
+                    "mpn_matched": "LM317T",
+                    "manufacturer": "TI",
+                    "description": None,
+                    "category": None,
+                }
+            ]
+
+    class _NexarConn:
+        source_name = "nexar"
+
+        async def search(self, pn):
+            nexar_calls["n"] += 1
+            return []
+
+    asyncio.run(fetch_authoritative("LM317T", "lm317t", [_DigiKeyConn(), _NexarConn()], set()))
+    assert nexar_calls["n"] == 1
+
+
+# ── apply_authoritative ──────────────────────────────────────────────────────
+
+
+def test_apply_authoritative_writes_all_fields(db_session):
+    """All merged fields, provenance, source and status are written to the card."""
+    card = _card(db_session, "LM317T")
+    merged = {
+        "description": "Adjustable Voltage Regulator",
+        "manufacturer": "Texas Instruments",
+        "category": "Analog ICs",
+        "lifecycle_status": "active",
+    }
+    provenance = {
+        "description": {"source": "digikey", "confidence": 1.0, "fetched_at": "2024-01-01"},
+    }
+    apply_authoritative(card, merged, provenance, ["digikey"])
+    assert card.description == "Adjustable Voltage Regulator"
+    assert card.manufacturer == "Texas Instruments"
+    assert card.category == "Analog ICs"
+    assert card.lifecycle_status == "active"
+    assert card.enrichment_status == "verified"
+    assert card.enrichment_source == "digikey"
+    assert card.enrichment_provenance == provenance
+    assert card.enriched_at is not None
+
+
+def test_apply_authoritative_empty_contributors_preserves_source(db_session):
+    """When contributors is empty, enrichment_source stays unchanged."""
+    card = _card(db_session, "LM317T")
+    card.enrichment_source = "previous_source"
+    apply_authoritative(card, {"description": "desc"}, {}, [])
+    assert card.enrichment_source == "previous_source"
+    assert card.enrichment_status == "verified"
+
+
+# ── _connectors_in_order ─────────────────────────────────────────────────────
+
+
+def test_connectors_in_order_filters_and_aliases(db_session):
+    """_connectors_in_order returns connectors ordered by SOURCE_ORDER and applies aliases."""
+    from app.services.authoritative_enrichment_service import SOURCE_ORDER, _connectors_in_order
+
+    class _FakeConnector:
+        def __init__(self, name):
+            self.source_name = name
+
+    # Provide connectors out of order, with octopart alias and an unknown source
+    fake_conns = [
+        _FakeConnector("mouser"),
+        _FakeConnector("octopart"),  # alias -> nexar
+        _FakeConnector("digikey"),
+        _FakeConnector("unknown_source"),  # not in SOURCE_ORDER -> excluded
+    ]
+
+    with patch("app.search_service._build_connectors", return_value=(fake_conns, {}, {})):
+        ordered = _connectors_in_order(db_session)
+
+    names = [c.source_name for c in ordered]
+    # Must follow SOURCE_ORDER; octopart aliased to nexar; unknown excluded
+    for name in names:
+        assert name in SOURCE_ORDER or name == "octopart"
+    # digikey before mouser before nexar (octopart)
+    positions = {c.source_name: i for i, c in enumerate(ordered)}
+    assert positions["digikey"] < positions["mouser"]
+    assert "octopart" in positions  # nexar slot, original source_name preserved
+
+
+# ── enrich_cards (batch) ─────────────────────────────────────────────────────
+
+
+@patch("app.services.authoritative_enrichment_service._connectors_in_order")
+def test_enrich_cards_returns_counts(mock_conns, db_session):
+    """enrich_cards commits per batch and returns status counts."""
+    card1 = _card(db_session, "LM317T")
+    card2 = _card(db_session, "NE555")
+    db_session.flush()
+
+    mock_conns.return_value = [
+        _FakeConn(
+            "digikey",
+            [
+                {
+                    "source_type": "digikey",
+                    "mpn_matched": "LM317T",
+                    "manufacturer": "TI",
+                    "description": "Regulator",
+                    "category": "Analog",
+                }
+            ],
+        )
+    ]
+
+    with patch("app.services.ai_inference_fallback.claude_structured", new_callable=AsyncMock) as mock_claude:
+        mock_claude.return_value = {"description": "", "category": "", "confidence": 0.0}
+        counts = asyncio.run(enrich_cards([card1.id, card2.id], db_session))
+
+    assert counts["verified"] >= 1
+    assert "verified" in counts or "not_found" in counts
+
+
+@patch("app.services.authoritative_enrichment_service._connectors_in_order")
+def test_enrich_cards_skips_missing_card(mock_conns, db_session):
+    """enrich_cards silently skips card IDs that no longer exist."""
+    mock_conns.return_value = []
+
+    counts = asyncio.run(enrich_cards([999999], db_session))
+    # Nothing to count — all statuses zero or absent
+    assert counts.get("verified", 0) == 0
+    assert counts.get("ai_inferred", 0) == 0
+    assert counts.get("not_found", 0) == 0
+
+
+@patch("app.services.authoritative_enrichment_service._connectors_in_order")
+def test_enrich_cards_disabled_sources_logged(mock_conns, db_session):
+    """enrich_cards records disabled_sources in counts when quota/auth errors occur."""
+    card = _card(db_session, "XYZ999")
+    db_session.flush()
+
+    class _QuotaConn:
+        source_name = "digikey"
+
+        async def search(self, pn):
+            from app.connectors.errors import ConnectorQuotaError
+
+            raise ConnectorQuotaError("quota exceeded")
+
+    mock_conns.return_value = [_QuotaConn()]
+
+    with patch("app.services.ai_inference_fallback.claude_structured", new_callable=AsyncMock) as mock_claude:
+        mock_claude.return_value = {"description": "", "category": "", "confidence": 0.0}
+        counts = asyncio.run(enrich_cards([card.id], db_session))
+
+    assert "disabled_sources" in counts
+    assert "digikey" in counts["disabled_sources"]
+
+
+@patch("app.services.authoritative_enrichment_service._connectors_in_order")
+def test_enrich_cards_already_verified_skipped(mock_conns, db_session):
+    """Cards already verified are not re-enriched unless refresh=True."""
+    card = _card(db_session, "LM317T")
+    card.enrichment_status = "verified"
+    db_session.flush()
+
+    # Connector should not be called since card is already verified
+    call_count = {"n": 0}
+
+    class _TrackingConn:
+        source_name = "digikey"
+
+        async def search(self, pn):
+            call_count["n"] += 1
+            return []
+
+    mock_conns.return_value = [_TrackingConn()]
+
+    counts = asyncio.run(enrich_cards([card.id], db_session, refresh=False))
+    assert call_count["n"] == 0
+    assert counts.get("verified", 0) == 1
