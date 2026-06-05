@@ -68,13 +68,15 @@ if [ "$NO_COMMIT" = false ]; then
     fi
 fi
 
-# Step 2: Rebuild app with unique build arg to bust Docker cache
-# Note: Dockerfile Stage 1 runs npm build inside Docker, scanning
-# app/templates/ for Tailwind classes. --no-cache ensures fresh rebuild.
-# Append timestamp so --no-commit deploys also invalidate COPY layers
+# Step 2: Rebuild app with a unique BUILD_COMMIT each deploy.
+# No --no-cache: the Dockerfile consumes BUILD_COMMIT right before the source COPYs (in
+# BOTH stages), so the template/static COPYs + the Vite build + the app COPY ALWAYS
+# re-run with fresh content (fresh Tailwind CSS guaranteed), while the expensive,
+# input-pinned layers (apt, gh, pip, Chromium, `npm ci`) stay cached. ~4x faster deploys
+# with no stale-template risk. The unique timestamp also invalidates --no-commit deploys.
 BUILD_COMMIT="$(git rev-parse --short HEAD)-$(date +%s)"
 echo "==> Rebuilding app container (build tag: $BUILD_COMMIT)..."
-docker compose build --no-cache --build-arg BUILD_COMMIT="$BUILD_COMMIT" app
+docker compose build --build-arg BUILD_COMMIT="$BUILD_COMMIT" app
 
 # Step 3: Recreate only the app container with the new image
 # Clean up any orphaned rename containers from previous deploys
