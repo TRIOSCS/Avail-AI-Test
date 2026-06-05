@@ -21,24 +21,28 @@
   </button>
 </div>
 
-{# Inline script to apply AI-suggested filters to the Alpine component #}
+{# Inline script to apply AI-suggested filters to the Alpine component.
+   SINGLE-quoted x-init with double-quoted JS strings: the interpolated values go through
+   |tojson, which emits double quotes (and escapes single quotes) — safe inside single
+   quotes, but it would close a double-quoted attribute and break Alpine init. tojson output
+   is already a valid JS literal, so assign it directly (no JSON.parse). #}
 <div id="ai-apply-trigger" hx-swap-oob="true:#ai-script-container"
-     x-data x-init="
-       const ws = document.querySelector('#materials-workspace');
+     x-data x-init='
+       const ws = document.querySelector("#materials-workspace");
        if (ws) {
-         const d = Alpine.evaluate(ws, '$data');
+         const d = Alpine.evaluate(ws, "$data");
          {% if ai_result.commodity %}
-         d.commodity = '{{ ai_result.commodity }}';
+         d.commodity = {{ ai_result.commodity | tojson }};
          {% endif %}
          {% if ai_result.filters %}
-         d.subFilters = JSON.parse('{{ ai_result.filters | tojson }}');
+         d.subFilters = {{ ai_result.filters | tojson }};
          {% endif %}
          d.page = 0;
          d.pushURL();
-         document.body.dispatchEvent(new CustomEvent('commodity-changed'));
-         document.body.dispatchEvent(new CustomEvent('filters-changed'));
+         document.body.dispatchEvent(new CustomEvent("commodity-changed"));
+         document.body.dispatchEvent(new CustomEvent("filters-changed"));
        }
-     ">
+     '>
 </div>
 {% else %}
 {# No result / error — show empty #}

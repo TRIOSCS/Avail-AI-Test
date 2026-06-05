@@ -113,6 +113,51 @@ _REQ_ID_HEADERED_SIGHTINGS_PARTIALS = (
 )
 
 
+# Sites where |tojson sits inside a DOUBLE-quoted Alpine attribute but is SAFE because the
+# value it serialises is an int/bool — tojson renders true/false or [1, 2, 3], which contain
+# no double quote, so the attribute cannot be broken. Anything else (a string or list of
+# strings) MUST use a single-quoted attribute (or a JS Alpine.data factory). Keyed (file, line
+# of the attribute's opening). Do NOT add a string/array site here — fix the call site instead.
+_TOJSON_IN_DOUBLE_QUOTED_ALPINE_ALLOWLIST: set[tuple[str, int]] = {
+    ("app/templates/htmx/partials/quote_builder/modal.html", 9),  # has_customer_site|tojson -> true/false
+    ("app/templates/htmx/partials/requisitions/rfq_compose.html", 44),  # vendors|map(id)|list|tojson -> [1,2,3]
+    ("app/templates/requisitions2/_table.html", 65),  # requisitions|map(id)|list|tojson -> [1,2,3]
+}
+
+# Alpine directive attributes: x-data, x-init, x-bind:x / :x, x-on:x / @x.
+_ALPINE_ATTR_TOJSON = re.compile(r'(?:x-data|x-init|x-bind:[\w.:-]+|x-on:[\w.:-]+|@[\w.:-]+|:[\w.-]+)\s*=\s*"([^"]*)"')
+
+
+def test_no_tojson_in_double_quoted_alpine_attribute():
+    """|tojson emits UNESCAPED double quotes (it escapes ', <, >, & — but never ").
+
+    Inside a DOUBLE-quoted Alpine attribute (x-data / x-init / @event / :bind / x-on:)
+    the first such double quote closes the attribute early, so Alpine fails to parse the
+    expression and the whole component goes inert — a bug class that has shipped
+    silently more than once (e.g. the sightings "Send RFQ" modal opened blank). The fix
+    is a SINGLE-quoted attribute (tojson escapes ', so single quotes are safe) or a JS
+    Alpine.data() factory invoked with the tojson args. See CLAUDE.md.
+
+    Allowlisted sites serialise only an int/bool and therefore cannot emit a double
+    quote.
+    """
+    offenders: list[str] = []
+    for path in sorted(Path("app/templates").rglob("*.html")):
+        text = path.read_text()
+        for m in _ALPINE_ATTR_TOJSON.finditer(text):
+            if "tojson" not in m.group(1):
+                continue
+            line = text[: m.start()].count("\n") + 1
+            rel = str(path.relative_to(Path(".")))
+            if (rel, line) in _TOJSON_IN_DOUBLE_QUOTED_ALPINE_ALLOWLIST:
+                continue
+            offenders.append(f"{rel}:{line}: {m.group(0)[:90].strip()}")
+    assert not offenders, (
+        "|tojson inside a DOUBLE-quoted Alpine attribute breaks Alpine init (tojson emits "
+        "unescaped double quotes). Use a SINGLE-quoted attribute or a JS Alpine.data factory:\n" + "\n".join(offenders)
+    )
+
+
 def test_sightings_template_responses_set_rendered_req_id():
     """Every template_response() rendering a context-sensitive sightings partial must
     set the X-Rendered-Req-Id header so the client htmx:beforeSwap stale-response guard
