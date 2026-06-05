@@ -198,14 +198,21 @@ async def run_one_batch(
             )
             breaker.record_claude_error()
         except Exception as e:
-            # Non-Claude failure (a bug, a DB hiccup) — log loudly but do NOT trip the
-            # Claude-specific breaker; the card is left unenriched and retried next batch.
+            # Non-Claude failure (a bug, a DB hiccup). Log loudly, but do NOT trip the
+            # Claude-specific breaker. Quarantine the card as not_found + stamp enriched_at
+            # so the not_found retry backoff applies — otherwise a poison-pill card (one
+            # whose data deterministically triggers the failure) would be re-selected at
+            # the front of EVERY batch (fast-lane) and spin forever. It self-heals at the
+            # next retry window if the underlying bug is fixed.
             logger.error(
-                "ENRICH_WORKER: enrich_card failed for {} ({}): {}",
+                "ENRICH_WORKER: enrich_card failed for {} ({}): {} — quarantining as not_found",
                 card.display_mpn,
                 card.normalized_mpn,
                 e,
             )
+            card.enrichment_status = MaterialEnrichmentStatus.NOT_FOUND
+            card.enriched_at = now
+            counts[MaterialEnrichmentStatus.NOT_FOUND] = counts.get(MaterialEnrichmentStatus.NOT_FOUND, 0) + 1
 
     web_state["web_calls"] = web_calls_today
 
@@ -354,51 +361,52 @@ async def main() -> None:
                     await asyncio.sleep(3600)
                     continue
 
-                # Run one batch
+                # Run one batch. The session is closed exactly once (in finally) so the
+                # connection is released before the idle/loop sleep below.
                 db = SessionLocal()
+                batch_counts: dict[str, int] = {}
                 try:
                     batch_counts = await run_one_batch(db, config, cooldown, breaker, disabled, web_state)
 
-                    if not batch_counts:
-                        # Queue empty — idle sleep
-                        logger.debug("ENRICH_WORKER: queue empty, sleeping {}s", config.idle_sleep_seconds)
-                        db.close()
-                        await asyncio.sleep(config.idle_sleep_seconds)
-                        continue
+                    if batch_counts:
+                        # Accumulate daily totals
+                        total_this_batch = sum(batch_counts.values())
+                        enriched_today += total_this_batch
+                        web_sourced_today += batch_counts.get(MaterialEnrichmentStatus.WEB_SOURCED, 0)
+                        ai_inferred_today += batch_counts.get(MaterialEnrichmentStatus.AI_INFERRED, 0)
+                        not_found_today += batch_counts.get(MaterialEnrichmentStatus.NOT_FOUND, 0)
 
-                    # Accumulate daily totals
-                    total_this_batch = sum(batch_counts.values())
-                    enriched_today += total_this_batch
-                    web_sourced_today += batch_counts.get(MaterialEnrichmentStatus.WEB_SOURCED, 0)
-                    ai_inferred_today += batch_counts.get(MaterialEnrichmentStatus.AI_INFERRED, 0)
-                    not_found_today += batch_counts.get(MaterialEnrichmentStatus.NOT_FOUND, 0)
+                        # Heartbeat + counters
+                        update_enrichment_worker_status(
+                            db,
+                            last_heartbeat=datetime.now(timezone.utc),
+                            last_enriched_at=datetime.now(timezone.utc),
+                            enriched_today=enriched_today,
+                            web_sourced_today=web_sourced_today,
+                            ai_inferred_today=ai_inferred_today,
+                            not_found_today=not_found_today,
+                            circuit_breaker_open=False,
+                            circuit_breaker_reason=None,
+                        )
 
-                    # Heartbeat + counters
-                    update_enrichment_worker_status(
-                        db,
-                        last_heartbeat=datetime.now(timezone.utc),
-                        last_enriched_at=datetime.now(timezone.utc),
-                        enriched_today=enriched_today,
-                        web_sourced_today=web_sourced_today,
-                        ai_inferred_today=ai_inferred_today,
-                        not_found_today=not_found_today,
-                        circuit_breaker_open=False,
-                        circuit_breaker_reason=None,
-                    )
-
-                    logger.info(
-                        "ENRICH_WORKER: batch done {} (today: {}/{})",
-                        batch_counts,
-                        enriched_today,
-                        config.daily_cap,
-                    )
+                        logger.info(
+                            "ENRICH_WORKER: batch done {} (today: {}/{})",
+                            batch_counts,
+                            enriched_today,
+                            config.daily_cap,
+                        )
 
                 except Exception as e:
                     logger.error("ENRICH_WORKER: batch error: {}", e)
                 finally:
                     db.close()
 
-                await asyncio.sleep(config.loop_sleep_seconds)
+                if not batch_counts:
+                    # Queue empty — idle sleep (longer; connection already released).
+                    logger.debug("ENRICH_WORKER: queue empty, sleeping {}s", config.idle_sleep_seconds)
+                    await asyncio.sleep(config.idle_sleep_seconds)
+                else:
+                    await asyncio.sleep(config.loop_sleep_seconds)
 
             except Exception as e:
                 logger.error("ENRICH_WORKER: unexpected error in main loop: {}", e)

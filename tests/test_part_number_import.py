@@ -3,27 +3,27 @@
 import io
 
 
-def test_poison_mpn_does_not_sink_chunk(monkeypatch, db_session, tmp_path):
-    # one MPN raises inside enrich_card; the rest of the chunk must still be reported
+def test_bare_loader_creates_cards_without_enriching(monkeypatch, db_session, tmp_path):
+    """The CLI loader upserts bare cards only — it never imports or calls enrich_card,
+    so a large operator load cannot fire uncapped connector/web/AI calls (the worker is
+    the single paced enrichment authority).
+
+    Counts reflect what would be created.
+    """
     import scripts.import_part_numbers as imp
 
-    async def fake_enrich(card, db, **kw):
-        if card.display_mpn == "BOOM":
-            raise RuntimeError("poison")
-        card.enrichment_status = "not_found"
-        return "not_found"
+    # Structural guard: the inline-enrichment plumbing must be gone.
+    assert not hasattr(imp, "enrich_card")
+    assert not hasattr(imp, "_connectors_in_order")
 
-    monkeypatch.setattr(imp, "enrich_card", fake_enrich)
-    monkeypatch.setattr(imp, "_connectors_in_order", lambda db: [])
     monkeypatch.setattr(imp, "SessionLocal", lambda: db_session)
     f = tmp_path / "s.csv"
-    f.write_text("mpn\nOK1\nBOOM\nOK2\n")
-    rep = tmp_path / "out.csv"
-    import asyncio
+    f.write_text("mpn\nOK1\nOK2\n")
 
-    asyncio.run(imp._run(str(f), commit=False, report_path=str(rep), refresh=False, concurrency=4))
-    rows = rep.read_text()
-    assert "OK1" in rows and "OK2" in rows and "error" in rows  # poison -> status=error, chunk survives
+    result = imp._run(str(f), commit=False)  # dry-run: rolled back, counts still computed
+    assert result["total"] == 2
+    assert result["created"] == 2
+    assert result["skipped"] == 0
 
 
 def test_import_part_numbers_creates_bare_cards(client, db_session):

@@ -841,3 +841,53 @@ def test_run_one_batch_disabled_set_persists_across_calls(db_session):
 
     assert "digikey" in seen[0]  # passed through to enrich_card this batch
     assert "digikey" in disabled  # and still present afterward (same persistent object)
+
+
+def test_run_one_batch_does_not_overshoot_cap_mid_batch(db_session):
+    """The per-card gate prevents overshooting WEB_DAILY_CAP within a single batch: with
+    cap=2 and 5 cards, exactly the first 2 fire a web call and the rest see the web tier
+    disabled; web_state ends at exactly the cap (no batch_size-1 overshoot)."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import patch
+
+    from app.constants import MaterialEnrichmentStatus
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+
+    now = datetime.now(timezone.utc)
+    # Distinct created_at so the selection order is deterministic (fast-lane: newest first).
+    for i in range(5):
+        db_session.add(
+            MaterialCard(
+                normalized_mpn=f"mc{i}",
+                display_mpn=f"MC{i}",
+                enrichment_status="unenriched",
+                created_at=now - timedelta(seconds=i),
+            )
+        )
+    db_session.flush()
+
+    web_enabled_seen: list[bool] = []
+
+    async def fake_enrich_card(card, db, disabled=None, **kw):
+        web_enabled_seen.append("web_search" not in (disabled or set()))
+        return MaterialEnrichmentStatus.NOT_FOUND
+
+    cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=2)
+    breaker = EnrichmentCircuitBreaker(cfg)
+    web_state = {"web_calls": 0}
+
+    with (
+        patch("app.services.enrichment_worker.worker.enrich_card", side_effect=fake_enrich_card),
+        patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value=None),
+        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
+    ):
+        asyncio.run(run_one_batch(db_session, cfg, {}, breaker, set(), web_state))
+
+    # Exactly the first 2 cards web-enabled (charge); remaining 3 disabled — no overshoot.
+    assert web_enabled_seen == [True, True, False, False, False]
+    assert web_state["web_calls"] == 2
