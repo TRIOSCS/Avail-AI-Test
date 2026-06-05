@@ -74,6 +74,14 @@ class MaterialCard(Base):
             raise ValueError(f"search_count must be >= 0, got {value}")
         return value
 
+    @validates("enrichment_status")
+    def _validate_enrichment_status(self, _key, value):
+        from ..constants import MaterialEnrichmentStatus
+
+        if value is None:
+            return MaterialEnrichmentStatus.UNENRICHED.value
+        return MaterialEnrichmentStatus(value).value  # raises ValueError on unknown
+
 
 class MaterialVendorHistory(Base):
     __tablename__ = "material_vendor_history"
