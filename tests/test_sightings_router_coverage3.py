@@ -649,7 +649,9 @@ class TestSendInquiryCoverage:
     def test_send_single_vendor_singular_message(self, client: TestClient, req_item):
         """Line 1236: sent_count==1 → 'vendor' (not 'vendors') in message."""
         _, item = req_item
-        with patch("app.email_service.send_batch_rfq", new=AsyncMock(return_value=[{}])):
+        # Realistic send_batch_rfq result: one record tagged "sent" (sent_count counts
+        # status=="sent", not list length).
+        with patch("app.email_service.send_batch_rfq", new=AsyncMock(return_value=[{"status": "sent"}])):
             with patch("app.services.sourcing_auto_progress.auto_progress_status", return_value=False):
                 resp = client.post(
                     "/v2/partials/sightings/send-inquiry",

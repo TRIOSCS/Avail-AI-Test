@@ -436,8 +436,9 @@ class TestSightingsSendInquiryResultHeaders:
         _, r, _ = _seed_data(db_session)
 
         async def fake_send(**kwargs):
-            # One result per vendor group => all sent.
-            return [{"vendor": g} for g in kwargs["vendor_groups"]]
+            # Real send_batch_rfq returns one record per attempted vendor tagged with a
+            # status; all "sent" here.
+            return [{"vendor_name": g["vendor_name"], "status": "sent"} for g in kwargs["vendor_groups"]]
 
         monkeypatch.setattr("app.email_service.send_batch_rfq", fake_send)
         resp = self._post(client, r)
@@ -449,12 +450,19 @@ class TestSightingsSendInquiryResultHeaders:
         _, r, _ = _seed_data(db_session)
 
         async def fake_send(**kwargs):
-            return [{"vendor": kwargs["vendor_groups"][0]}]  # only 1 of 2 delivered
+            # Mirror the real contract: one record per vendor, the second tagged "failed"
+            # (NOT a shorter list — that never happens in production and would hide the
+            # len(results) over-count bug).
+            groups = kwargs["vendor_groups"]
+            return [
+                {"vendor_name": groups[0]["vendor_name"], "status": "sent"},
+                {"vendor_name": groups[1]["vendor_name"], "status": "failed"},
+            ]
 
         monkeypatch.setattr("app.email_service.send_batch_rfq", fake_send)
         resp = self._post(client, r)
         assert resp.status_code == 200
-        assert resp.headers["X-RFQ-Sent"] == "1"
+        assert resp.headers["X-RFQ-Sent"] == "1"  # only the "sent" record counts
         assert resp.headers["X-RFQ-Total"] == "2"
 
     def test_total_failure_still_200_with_headers(self, client, db_session, monkeypatch):

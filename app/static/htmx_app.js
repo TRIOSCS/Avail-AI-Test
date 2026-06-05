@@ -1518,13 +1518,19 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   // OPEN→SOURCING, new "RFQ sent" activity rows) and the requirements list. Refresh
   // whichever is on screen.
   _refreshSightings() {
+    // The send already succeeded; if a panel refresh fails, warn rather than silently
+    // leaving a stale status pill / requirements list on screen.
+    const onRefreshError = (err) => {
+      console.error('[rfqVendorModal] post-send refresh failed', err);
+      this._toast('Sent — refresh the page to see updated status', 'warning');
+    };
     const selectedReqId = Alpine.store('sightingSelection')?.selectedReqId;
     if (selectedReqId) {
       htmx.ajax('GET', '/v2/partials/sightings/' + selectedReqId + '/detail', {
         target: '#sightings-detail',
         swap: 'innerHTML',
         indicator: '#sightings-detail-skeleton',
-      });
+      }).catch(onRefreshError);
     }
     const table = document.getElementById('sightings-table');
     const tableUrl = table && table.getAttribute('hx-get');
@@ -1533,7 +1539,7 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
         target: '#sightings-table',
         swap: 'innerHTML',
         indicator: '#sightings-load-spinner',
-      });
+      }).catch(onRefreshError);
     }
   },
 }));
