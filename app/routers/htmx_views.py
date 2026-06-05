@@ -2035,7 +2035,7 @@ async def add_offer(
 
     from datetime import date as date_type
 
-    from ..utils.normalization import normalize_mpn
+    from ..utils.normalization import normalize_mpn_key
     from ..vendor_utils import normalize_vendor_name
 
     offer = Offer(
@@ -2043,7 +2043,9 @@ async def add_offer(
         vendor_name=vendor_name,
         vendor_name_normalized=normalize_vendor_name(vendor_name),
         mpn=mpn,
-        normalized_mpn=normalize_mpn(mpn),
+        # Canonical dedup key (dash-stripped) so the part-centric offers query
+        # matches consistently with create_offer's normalize_mpn_key.
+        normalized_mpn=normalize_mpn_key(mpn),
         qty_available=_safe_int(form.get("qty_available")),
         unit_price=_safe_float(form.get("unit_price")),
         lead_time=form.get("lead_time") or None,

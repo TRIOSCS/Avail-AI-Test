@@ -33,6 +33,7 @@ from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorCard, VendorContact
 from ..schemas.sightings import SightingsListParams
 from ..services.activity_service import log_rfq_activity
+from ..services.part_offers import part_offers_for
 from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
 from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transition
@@ -86,6 +87,26 @@ def _oob_toast(msg: str, level: str = "success") -> HTMLResponse:
         f"$store.toast.type='{level}';"
         f'$store.toast.show=true"></div>'
     )
+
+
+def _render_offers_panel(request: Request, requirement: Requirement, db: Session) -> HTMLResponse:
+    """Render the part-centric Offers panel for swap into #sightings-offers-panel."""
+    ctx = {
+        "request": request,
+        "requirement": requirement,
+        "requisition": db.get(Requisition, requirement.requisition_id),
+        "part_offers": part_offers_for(requirement, db),
+    }
+    resp = template_response("htmx/partials/sightings/offers_panel.html", ctx)
+    resp.headers["X-Rendered-Req-Id"] = str(requirement.id)
+    return resp
+
+
+def _with_toast(resp: HTMLResponse, msg: str, level: str = "success") -> HTMLResponse:
+    """Attach an HX-Trigger toast to an HTMX response (base.html listens for
+    showToast)."""
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg, "type": level}})
+    return resp
 
 
 async def _publish_if_user_source(source: str, user_id: int, requirement_id: int) -> None:
@@ -596,6 +617,9 @@ async def sightings_detail(
     # ── Available Status Transitions (Phase 4.3) ────────────────
     available_statuses = sorted(SOURCING_TRANSITIONS.get(status, set()))
 
+    # Part-centric offers for the Offers tab (primary + substitute MPNs, any req).
+    part_offers = part_offers_for(requirement, db)
+
     ctx = {
         "request": request,
         "requirement": requirement,
@@ -603,6 +627,7 @@ async def sightings_detail(
         "summaries": summaries,
         "vendor_statuses": vendor_statuses,
         "pending_offers": pending_offers,
+        "part_offers": part_offers,
         "vendor_phones": vendor_phones,
         "vendor_intel": vendor_intel,
         "ooo_map": ooo_map,

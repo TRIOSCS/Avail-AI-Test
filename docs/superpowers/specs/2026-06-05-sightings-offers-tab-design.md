@@ -63,18 +63,29 @@ Approve/Reject actions in-line via the row kebab).
 Given the open requirement `r`:
 
 ```
-mpns = { r.normalized_mpn } ∪ { normalize_mpn(s) for s in substitutes(r) }
-offers = Offer where Offer.normalized_mpn IN mpns
-                 and status != deleted/soft-removed (per existing convention)
-         order by created_at desc
-         joinedload(requisition)   # for the source hint
+parts   = [r.primary_mpn] + sub_mpns(r)                       # display strings
+keys    = { normalize_mpn_key(p) for p in parts } ∪ { normalize_mpn(p) for p in parts }   # both forms
+cards   = { MaterialCard.id where normalized_mpn == normalize_mpn_key(p) }  for each p
+offers  = Offer where ( Offer.material_card_id IN cards
+                        OR Offer.normalized_mpn IN keys )
+          order by created_at desc
+          joinedload(requisition)   # for the source hint
 ```
 
-- Substitute MPNs come from the canonical substitutes parsing
-  (`parse_substitute_mpns` / the same source the `|sub_mpns` filter uses), then
-  `normalize_mpn()`-ed; `None`/<3-char results dropped.
-- Matching on `normalized_mpn` (not `material_card_id`) makes the query robust to
-  offers that predate a MaterialCard. Where both exist they agree.
+- **Why both `material_card_id` and `normalized_mpn`:** the two existing creation
+  paths write `Offer.normalized_mpn` differently — `create_offer` uses
+  `normalize_mpn_key` (dash-stripped, e.g. `lm2596s50`), while the requisitions
+  `add_offer` HTMX handler uses `normalize_mpn` (display form, keeps dashes). So a
+  single-form match misses offers from the other path. Matching on
+  `material_card_id` **OR** `normalized_mpn ∈ {both forms}` captures every offer.
+- **Root-cause fix (in scope):** correct `add_offer` (`htmx_views.py`) to write
+  `normalized_mpn = normalize_mpn_key(mpn)` so new offers are consistent. The
+  dual-form query still covers any legacy rows.
+- Substitute MPNs come from the same source the `|sub_mpns` filter uses
+  (`parse_substitute_mpns`); `None`/<3-char normalized results dropped.
+- Encapsulate this in a helper `part_offers_for(requirement, db) -> list[Offer]`
+  in the sightings router (or a small `app/services/` helper) used by both the
+  detail view and the panel re-render.
 - Status visibility: show **all** statuses (the status pill differentiates).
   `pending_review` offers are shown with Approve/Reject (this is the consolidated
   replacement for the old Vendors-panel pending block). This matches the existing
@@ -128,21 +139,32 @@ plan step):
     from the `VendorSightingSummary` row; `mpn` defaults to the part's primary MPN.
   - Enter (blank): no prefill except `mpn` = part's primary MPN (editable).
 - `POST /v2/partials/sightings/{requirement_id}/offers`
-  → create the offer through the **shared offer-creation path** (same vendor-card
-  / material-card resolution, `OFFER_CREATED` activity, status auto-progression as
-  the requisitions path). `requirement_id` + its `requisition_id` are set so the
-  offer has a home; it surfaces for the part everywhere. Returns the refreshed
-  `offers_panel.html` (swap `#sightings-offers-panel`) + OOB close-modal + OOB toast.
+  → build an `OfferCreate` from the form and **call the canonical
+  `create_offer(...)` function** (`app/routers/crm/offers.py`) directly — it already
+  does vendor-card + material-card resolution, sets the dedup-correct
+  `normalized_mpn`, logs `OFFER_CREATED`, and auto-progresses requisition +
+  requirement status. We reuse it rather than re-implementing (the requisitions
+  `add_offer` HTMX handler is the existing *duplicate*; we deliberately do **not**
+  extend that duplication). `requirement_id` + `requisition_id` are set so the
+  offer has a home; it surfaces for the part everywhere. Then return the refreshed
+  `offers_panel.html` swapped into `#sightings-offers-panel`; the modal form closes
+  itself client-side via `hx-on::after-request` → `$dispatch('close-modal')`, and an
+  OOB toast div reports success.
 
-Offer **mutations** (approve / reject / reconfirm / mark-sold / edit / delete):
-add **thin sightings-scoped HTMX endpoints** that call the same shared
-offer-operation functions the requisitions endpoints use and re-render
-`#sightings-offers-panel`. If a given operation's logic is currently inline in the
-requisitions router rather than a reusable function, extract it into a shared
-location (e.g. `app/services/offers_service.py`) first and route **all** callers
-through it — no copy-paste of the logic. We do not parameterise the existing
-requisitions endpoints (they target `#tab-content`); keeping separate thin
-wrappers avoids regressing the requisitions Offers tab.
+Offer **mutations** (approve / reject / reconfirm / mark-sold / edit / delete): add
+**thin sightings-scoped HTMX endpoints** that call the existing canonical
+offer-operation functions in `app/routers/crm/offers.py` directly (`approve_offer`,
+`reject_offer`, `reconfirm_offer`, `mark_sold`, `update_offer`, `delete_offer`) and
+then re-render `offers_panel.html` into `#sightings-offers-panel`. No logic is
+copied — we call the same functions the API uses. We do **not** parameterise the
+requisitions HTMX endpoints (they target `#tab-content`); separate thin wrappers
+avoid regressing the requisitions Offers tab.
+
+> Why call router functions directly: they are plain `async def`s taking
+> `(…, user, db)` (and a Pydantic body where relevant). Invoking them in-process
+> reuses 100% of their behaviour with zero duplication and zero refactor blast
+> radius. Their JSON return value is ignored; the sightings endpoint re-renders the
+> panel for the HTMX swap.
 
 ---
 
