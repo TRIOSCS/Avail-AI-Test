@@ -203,10 +203,37 @@ def test_standalone_pages_register_csrf_listener():
 
     requisitions2/page.html loads requisitions2.js for exactly this reason.
     """
-    js = Path("app/static/js/requisitions2.js").read_text()
+    js = Path("app/static/public/js/requisitions2.js").read_text()
     assert "htmx:configRequest" in js, (
         "requisitions2.js must register an htmx:configRequest listener that "
         "attaches the x-csrftoken header — page.html does not always load "
         "htmx_app.js, which carries the shared listener."
     )
     assert "x-csrftoken" in js, "requisitions2.js CSRF listener must set the x-csrftoken header"
+
+
+def test_requisitions2_js_is_published_under_public():
+    """requisitions2/page.html unconditionally loads /static/js/requisitions2.js, which
+    carries the page-only Alpine components rq2Page and resizableTable (and the CSRF
+    listener) — components NOT present in the htmx_app bundle.
+
+    Production serves /static/* from Vite's build output, and Vite copies ONLY its
+    publicDir (app/static/public/) into that tree verbatim, preserving subdirs (e.g.
+    public/icons/ -> /static/icons/). The script therefore must live under
+    app/static/public/js/ or it 404s through Caddy in production despite existing in the
+    source tree — which is exactly what happened while it sat at app/static/js/.
+
+    The page.html URL (/static/js/requisitions2.js) is unchanged by this location: Vite
+    flattens publicDir into the served root, so public/js/requisitions2.js is served at
+    /static/js/requisitions2.js.
+    """
+    served = Path("app/static/public/js/requisitions2.js")
+    assert served.exists(), (
+        "requisitions2.js must live under app/static/public/js/ so Vite publishes it to "
+        "/static/js/requisitions2.js; only files under publicDir reach the served tree."
+    )
+    # It must NOT linger at the old, unpublished top-level location.
+    assert not Path("app/static/js/requisitions2.js").exists(), (
+        "Stale copy at app/static/js/requisitions2.js — that path is never published to "
+        "the served static tree. Keep a single copy under app/static/public/js/."
+    )
