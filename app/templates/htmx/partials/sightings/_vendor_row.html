@@ -49,7 +49,7 @@
           <span class="inline-flex px-1 py-0.5 text-[9px] font-mono rounded bg-amber-50 text-amber-600 border border-amber-100">via {{ mpn }}</span>
           {% endfor %}
         </div>
-        {# Inline metrics: response rate + best price with freshness #}
+        {# Inline metrics: response rate + best price with freshness, then actions #}
         <div class="flex items-center gap-3 mt-0.5 text-[11px] text-gray-400">
           {% if intel.get('response_rate') is not none %}
           <span>{{ (intel.response_rate * 100)|int }}% response</span>
@@ -59,6 +59,25 @@
             {% if intel.get('age_days') is not none %}
             <span class="text-{{ 'amber-500' if intel.age_days > stale_days|default(3) else 'gray-300' }}">— {{ intel.age_days }}d ago</span>
             {% endif %}
+          </span>
+          {% endif %}
+          {# Actions — always visible on the collapsed row; @click.stop keeps a button press from toggling expand #}
+          {% if vs != 'blacklisted' and vs != 'unavailable' %}
+          <span class="flex items-center gap-2">
+            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids={{ requirement.id }}&preselect={{ s.vendor_name|urlencode }}'})"
+                    class="text-[10px] text-brand-600 hover:text-brand-800 font-medium">
+              Send RFQ
+            </button>
+            <button hx-post="/v2/partials/sightings/{{ requirement.id }}/mark-unavailable"
+                    hx-vals='{"vendor_name": "{{ s.vendor_name }}"}'
+                    hx-target="#sightings-detail"
+                    hx-swap="innerHTML"
+                    hx-confirm="Mark {{ s.vendor_name }} as unavailable for this part?"
+                    data-loading-disable
+                    @click.stop
+                    class="text-[10px] text-gray-400 hover:text-rose-500">
+              Mark Unavail
+            </button>
           </span>
           {% endif %}
         </div>
@@ -153,26 +172,6 @@
         {{ intel.explain_lead }}
       </p>
       {% endif %}
-
-      {# Actions row #}
-      <div class="flex items-center gap-2 mt-2 pt-1.5 border-t border-gray-100">
-        {% if vs != 'blacklisted' and vs != 'unavailable' %}
-        <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/vendor-modal?requirement_ids={{ requirement.id }}&preselect={{ s.vendor_name|urlencode }}'})"
-                class="text-[10px] text-brand-600 hover:text-brand-800 font-medium">
-          Send RFQ
-        </button>
-        <button hx-post="/v2/partials/sightings/{{ requirement.id }}/mark-unavailable"
-                hx-vals='{"vendor_name": "{{ s.vendor_name }}"}'
-                hx-target="#sightings-detail"
-                hx-swap="innerHTML"
-                hx-confirm="Mark {{ s.vendor_name }} as unavailable for this part?"
-                data-loading-disable
-                @click.stop
-                class="text-[10px] text-gray-400 hover:text-rose-500">
-          Mark Unavail
-        </button>
-        {% endif %}
-      </div>
     </div>
   </td>
 </tr>

@@ -1401,6 +1401,51 @@ class TestSightingsVendorMatchedMpns:
         assert "via MULTI-SUB-2" in resp.text
 
 
+class TestSightingsVendorRowActions:
+    """Send RFQ / Mark Unavail actions live on the always-visible collapsed vendor row,
+    not tucked inside the expandable detail (x-show="expanded")."""
+
+    def _seed_vendor_row(self, db_session, status="open"):
+        req = Requisition(name="Action RFQ", status="active", customer_name="ActCo")
+        db_session.add(req)
+        db_session.flush()
+        r = Requirement(
+            requisition_id=req.id,
+            primary_mpn="ACT-PRIMARY",
+            manufacturer="Mfr",
+            target_qty=50,
+            sourcing_status=status,
+        )
+        db_session.add(r)
+        db_session.flush()
+        db_session.add(
+            VendorSightingSummary(
+                requirement_id=r.id,
+                vendor_name="ActVendor",
+                listing_count=1,
+                score=60.0,
+            )
+        )
+        db_session.commit()
+        return r
+
+    def test_actions_present_on_collapsed_row(self, client, db_session):
+        """Both actions render and sit BEFORE the expandable detail block, so they are
+        reachable on the collapsed row without expanding."""
+        r = self._seed_vendor_row(db_session)
+        resp = client.get(f"/v2/partials/sightings/{r.id}/detail")
+        assert resp.status_code == 200
+        body = resp.text
+        assert "Send RFQ" in body
+        assert "Mark Unavail" in body
+        # The expandable detail is marked by x-show="expanded"; the actions must
+        # appear earlier in the markup (i.e. on the always-visible row).
+        expanded_marker = 'x-show="expanded"'
+        assert expanded_marker in body
+        assert body.index("Send RFQ") < body.index(expanded_marker)
+        assert body.index("Mark Unavail") < body.index(expanded_marker)
+
+
 class TestMPNClickableLinks:
     """MPN chips link to material card detail pages when a card exists."""
 
