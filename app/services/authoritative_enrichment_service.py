@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 
 from app.connectors.errors import ConnectorAuthError, ConnectorQuotaError, ConnectorRateLimitError
 from app.models import MaterialCard
+from app.services.enrichment_worker.web_extractor import WebExtractResult, extract_part_from_web
 from app.utils.normalization import normalize_mpn_key
 
 _RATE_COOLDOWN_SECONDS = 300  # 5 min
@@ -162,6 +163,41 @@ def apply_authoritative(
     card.enriched_at = datetime.now(timezone.utc)
 
 
+def apply_web_sourced(card: MaterialCard, result: WebExtractResult) -> None:
+    """Write web-sourced fields + provenance onto the card.
+
+    Only sets non-empty fields. Records per-field provenance entries for every field
+    that was written, plus top-level metadata (web_sourced, confidence, source_urls,
+    source_domains, fetched_at).
+    """
+    now = datetime.now(timezone.utc)
+    fields = {
+        "description": result.description,
+        "manufacturer": result.manufacturer,
+        "category": result.category,
+        "datasheet_url": result.datasheet_url,
+    }
+    prov: dict = {
+        "web_sourced": True,
+        "confidence": result.confidence,
+        "source_urls": result.source_urls,
+        "source_domains": result.source_domains,
+        "fetched_at": now.isoformat(),
+    }
+    for f, v in fields.items():
+        if v:
+            setattr(card, f, v)
+            prov[f] = {
+                "source": "web_search",
+                "confidence": result.confidence,
+                "fetched_at": now.isoformat(),
+            }
+    card.enrichment_source = "web_search"
+    card.enrichment_status = "web_sourced"
+    card.enrichment_provenance = prov
+    card.enriched_at = now
+
+
 async def enrich_card(
     card: MaterialCard,
     db: Session,
@@ -196,6 +232,16 @@ async def enrich_card(
     if merged:
         apply_authoritative(card, merged, provenance, contributors)
         return "verified"
+
+    # Web-sourced tier: grounded web search on authoritative distributor/manufacturer pages.
+    # Skipped when "web_search" is in the disabled set (e.g. daily budget exhausted).
+    # CONCURRENCY INVARIANT: this await is pure async (no DB) — no DB query/flush follows it;
+    # see the docstring above for the full invariant.
+    if not (disabled and "web_search" in disabled):
+        web = await extract_part_from_web(card.display_mpn, card.normalized_mpn)
+        if web.status == "web_sourced":
+            apply_web_sourced(card, web)
+            return "web_sourced"
 
     # No authoritative hit -> flagged inference
     from app.services.ai_inference_fallback import infer_part
