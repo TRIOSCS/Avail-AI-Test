@@ -175,7 +175,9 @@ def test_hx_vals_js_is_object_literal():
     for path in sorted(Path("app/templates").rglob("*.html")):
         text = path.read_text()
         for m in _HX_VALS_JS.finditer(text):
-            body = m.group(2).strip()
+            # Do NOT strip: htmx slices the `js:` prefix and checks indexOf('{') == 0 WITHOUT
+            # re-trimming, so `js: {...}` (a space/newline after the colon) breaks too.
+            body = m.group(2)
             if not body.startswith("{"):
                 line = text[: m.start()].count("\n") + 1
                 offenders.append(f"{path.relative_to(Path('.'))}:{line}: got {body[:30]!r}")
@@ -183,6 +185,40 @@ def test_hx_vals_js_is_object_literal():
         "hx-vals='js:...' must be an OBJECT LITERAL (start with '{'). htmx wraps a non-'{' "
         "expression in {...}, turning an IIFE/function-call into invalid JS, so the request "
         "silently never fires:\n" + "\n".join(offenders)
+    )
+
+
+def test_dockerfile_cache_bust_precedes_source_copies():
+    """deploy.sh dropped --no-cache (PR #211); template freshness now relies entirely on
+    a per-deploy BUILD_COMMIT cache-bust placed BEFORE the source COPYs in each
+    Dockerfile stage.
+
+    If a future edit moves a `COPY app/...` above the bust, that layer caches on
+    content alone and a deploy can SILENTLY ship stale templates (the build-tag check only
+    verifies the env var, not file content). Enforce the ordering mechanically.
+    """
+    lines = Path("Dockerfile").read_text().splitlines()
+
+    def first(pred) -> int:
+        return next((i for i, ln in enumerate(lines) if pred(ln)), -1)
+
+    # Builder stage: `RUN echo "$BUILD_COMMIT"` must precede the static/template COPYs.
+    builder_bust = first(lambda ln: 'echo "$BUILD_COMMIT"' in ln)
+    static_copy = first(lambda ln: ln.strip().startswith("COPY app/static"))
+    tmpl_copy = first(lambda ln: ln.strip().startswith("COPY app/templates"))
+    assert builder_bust != -1, (
+        'builder-stage BUILD_COMMIT cache-bust (RUN echo "$BUILD_COMMIT") is gone — without '
+        "--no-cache the Vite build can reuse a stale template layer."
+    )
+    assert builder_bust < static_copy, "COPY app/static must come AFTER the builder BUILD_COMMIT cache-bust"
+    assert builder_bust < tmpl_copy, "COPY app/templates must come AFTER the builder BUILD_COMMIT cache-bust"
+
+    # Stage 2: an `ARG BUILD_COMMIT` cache-bust must precede `COPY app/ app/`.
+    arg_idxs = [i for i, ln in enumerate(lines) if ln.strip().startswith("ARG BUILD_COMMIT")]
+    app_copy = first(lambda ln: ln.strip() == "COPY app/ app/")
+    assert arg_idxs and app_copy != -1, "ARG BUILD_COMMIT / COPY app/ app/ structure changed unexpectedly"
+    assert any(a < app_copy for a in arg_idxs), (
+        "COPY app/ app/ must come AFTER an ARG BUILD_COMMIT cache-bust (else stage-2 app code caches stale)"
     )
 
 

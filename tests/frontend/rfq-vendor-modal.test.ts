@@ -44,7 +44,7 @@ vi.mock('htmx-ext-sse', () => ({}));
 vi.mock('htmx-ext-json-enc', () => ({}));
 vi.mock('htmx-ext-preload', () => ({}));
 vi.mock('htmx-ext-loading-states', () => ({}));
-vi.mock('htmx-ext-path-deps', () => ({}));
+vi.mock('htmx-ext-path-params', () => ({}));
 vi.mock('htmx-ext-remove-me', () => ({}));
 
 import htmx from 'htmx.org';
@@ -65,7 +65,6 @@ function fetchResponse(sent: string | null, total: string | null, ok = true, sta
 
 beforeEach(async () => {
   registry = {};
-  alpineMock.data = (n: string, f: any) => { registry[n] = f; };
   alpineMock.store.mockReset();
   (htmx.ajax as any).mockReset();
   (htmx.ajax as any).mockResolvedValue(undefined);
@@ -230,6 +229,17 @@ describe('rfqVendorModal (real factory)', () => {
       alpineMock.store.mockReturnValue({ selectedReqId: null });
       m._refreshSightings();
       expect(htmx.ajax).not.toHaveBeenCalled();
+    });
+
+    it('warns when a refresh htmx.ajax rejects (network/timeout)', async () => {
+      const m = makeModal(['a'], [5]);
+      alpineMock.store.mockReturnValue({ selectedReqId: 5 });
+      (htmx.ajax as any).mockRejectedValue(new Error('offline'));
+      m._refreshSightings();
+      await Promise.resolve();
+      await Promise.resolve(); // flush the .catch microtask
+      expect(m.$store.toast.type).toBe('warning');
+      expect(m.$store.toast.message).toContain('refresh the page');
     });
   });
 
