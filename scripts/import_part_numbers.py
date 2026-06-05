@@ -74,6 +74,9 @@ def _report_row(raw: str, norm: str, status: str, card: MaterialCard, transient:
 
 async def _run(file_path: str, commit: bool, report_path: str, refresh: bool, concurrency: int = 8) -> None:
     db = SessionLocal()
+    disabled: set[str] = set()
+    counts: dict[str, int] = {"verified": 0, "ai_inferred": 0, "not_found": 0}
+    rows: list[dict] = []
     try:
         content = open(file_path, "rb").read()
         mpns = extract_mpns(parse_tabular_file(content, file_path))
@@ -81,9 +84,6 @@ async def _run(file_path: str, commit: bool, report_path: str, refresh: bool, co
 
         conns = _connectors_in_order(db)
         logger.info("Active connectors: {}", [c.source_name for c in conns])
-        disabled: set[str] = set()
-        counts = {"verified": 0, "ai_inferred": 0, "not_found": 0}
-        rows: list[dict] = []
 
         # Phase 1 (serial): resolve existing or build transient cards.
         work: list[_WorkItem] = []
@@ -112,29 +112,47 @@ async def _run(file_path: str, commit: bool, report_path: str, refresh: bool, co
         done = 0
         for start in range(0, len(work), chunk_size):
             chunk = work[start : start + chunk_size]
-            statuses = await asyncio.gather(*(_enrich(item.card) for item in chunk))
+            statuses = await asyncio.gather(*(_enrich(item.card) for item in chunk), return_exceptions=True)
             for item, status in zip(chunk, statuses):
+                if isinstance(status, Exception):
+                    logger.error("enrich failed for {}: {}", item.raw, status)
+                    rows.append(
+                        {
+                            "input_mpn": item.raw,
+                            "normalized_mpn": item.norm,
+                            "status": "error",
+                            "notes": f"{type(status).__name__}: {status}",
+                        }
+                    )
+                    continue
                 counts[status] = counts.get(status, 0) + 1
                 rows.append(_report_row(item.raw, item.norm, status, item.card, item.transient))
                 if commit and item.transient:
                     db.add(item.card)
             if commit:
-                db.commit()
+                try:
+                    db.commit()
+                except Exception as e:
+                    logger.error("commit failed for chunk {}-{}: {}", start, start + len(chunk), e)
+                    db.rollback()
+                    continue
             done += len(chunk)
             logger.info("Processed {}/{} ({}) committed={}", done, len(work), counts, commit)
 
         if not commit:
             db.rollback()
-
-        with open(report_path, "w", newline="") as f:
-            w = csv.DictWriter(f, fieldnames=_REPORT_COLS, extrasaction="ignore")
-            w.writeheader()
-            w.writerows(rows)
-        logger.info("Wrote report -> {}", report_path)
+    finally:
+        try:
+            with open(report_path, "w", newline="") as f:
+                w = csv.DictWriter(f, fieldnames=_REPORT_COLS, extrasaction="ignore")
+                w.writeheader()
+                w.writerows(rows)
+            logger.info("Wrote report -> {}", report_path)
+        except Exception as e:
+            logger.error("Failed to write report to {}: {}", report_path, e)
         if disabled:
             logger.error("Sources DISABLED this run (quota/auth): {}", sorted(disabled))
         logger.info("SUMMARY: {} disabled_sources={} (committed={})", counts, sorted(disabled), commit)
-    finally:
         db.close()
 
 
