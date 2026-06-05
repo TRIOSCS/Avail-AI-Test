@@ -7,7 +7,8 @@ is allowed via CHECK constraint.
 Business Rules:
 - Exactly one row exists (id=1), inserted by migration
 - Worker updates this row periodically with heartbeat and stats
-- Tracks daily enrichment counts by tier (web_sourced, ai_inferred, not_found)
+- Tracks daily enrichment counts by tier (web_sourced, oem_sourced, ai_inferred,
+  not_found, not_catalogued)
 - Circuit breaker state is persisted here for observability
 
 Called by: enrichment_worker.worker (heartbeat updates)
@@ -33,6 +34,8 @@ class EnrichmentWorkerStatus(Base):
     web_sourced_today = Column(Integer, default=0, server_default="0", nullable=False)
     ai_inferred_today = Column(Integer, default=0, server_default="0", nullable=False)
     not_found_today = Column(Integer, default=0, server_default="0", nullable=False)
+    oem_sourced_today = Column(Integer, default=0, server_default="0", nullable=False)
+    not_catalogued_today = Column(Integer, default=0, server_default="0", nullable=False)
     circuit_breaker_open = Column(Boolean, default=False, server_default="false", nullable=False)
     circuit_breaker_reason = Column(Text)
     daily_stats_json = Column(JSON)

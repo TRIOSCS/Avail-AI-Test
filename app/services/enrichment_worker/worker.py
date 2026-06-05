@@ -1,9 +1,9 @@
 """Enrichment worker — paced background loop.
 
 Selects small batches of unenriched/retryable parts, runs each through
-``enrich_card`` (verified → web_sourced → ai_inferred → not_found),
-paces via a daily web-call budget + per-source cooldowns, and heartbeats to
-``enrichment_worker_status``.
+``enrich_card`` (verified → web_sourced → oem_sourced → ai_inferred →
+not_found/not_catalogued), paces via a daily web-call budget + per-source
+cooldowns, and heartbeats to ``enrichment_worker_status``.
 
 Run: python -m app.services.enrichment_worker
 
@@ -63,6 +63,9 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
     - ``unenriched``: always eligible.
     - ``not_found``: eligible only when ``enriched_at IS NULL`` OR older than
       ``not_found_retry_hours`` (self-heal as quotas reset daily).
+    - ``not_catalogued``: eligible when ``enriched_at IS NULL`` OR older than
+      ``not_catalogued_retry_days`` (long backoff — uncatalogued OEM service parts
+      rarely become catalogued, so re-check infrequently).
     - ``is_internal_part``, ``deleted_at`` are excluded.
     - Ordered by ``search_count DESC, created_at DESC``: demand still wins
       (high-demand parts first); among equal demand — the common case where
@@ -272,8 +275,10 @@ async def main() -> None:
     # Running totals for today
     enriched_today = 0
     web_sourced_today = 0
+    oem_sourced_today = 0
     ai_inferred_today = 0
     not_found_today = 0
+    not_catalogued_today = 0
     last_stats_date = None
 
     logger.info(
@@ -308,11 +313,14 @@ async def main() -> None:
                 if last_stats_date != today_date:
                     if last_stats_date is not None:
                         logger.info(
-                            "ENRICH_WORKER daily summary: enriched={}, web={}, ai={}, not_found={}",
+                            "ENRICH_WORKER daily summary: enriched={}, web={}, oem={}, ai={}, "
+                            "not_found={}, not_catalogued={}",
                             enriched_today,
                             web_sourced_today,
+                            oem_sourced_today,
                             ai_inferred_today,
                             not_found_today,
+                            not_catalogued_today,
                         )
                         db = SessionLocal()
                         try:
@@ -322,20 +330,26 @@ async def main() -> None:
                                     "date": str(last_stats_date),
                                     "enriched": enriched_today,
                                     "web_sourced": web_sourced_today,
+                                    "oem_sourced": oem_sourced_today,
                                     "ai_inferred": ai_inferred_today,
                                     "not_found": not_found_today,
+                                    "not_catalogued": not_catalogued_today,
                                 },
                                 enriched_today=0,
                                 web_sourced_today=0,
+                                oem_sourced_today=0,
                                 ai_inferred_today=0,
                                 not_found_today=0,
+                                not_catalogued_today=0,
                             )
                         finally:
                             db.close()
                     enriched_today = 0
                     web_sourced_today = 0
+                    oem_sourced_today = 0
                     ai_inferred_today = 0
                     not_found_today = 0
+                    not_catalogued_today = 0
                     last_stats_date = today_date
                     # New day: quotas/budgets reset, so re-enable disabled sources and the
                     # web tier, and zero the in-process web tally (the cache counter is
@@ -384,8 +398,10 @@ async def main() -> None:
                         total_this_batch = sum(batch_counts.values())
                         enriched_today += total_this_batch
                         web_sourced_today += batch_counts.get(MaterialEnrichmentStatus.WEB_SOURCED, 0)
+                        oem_sourced_today += batch_counts.get(MaterialEnrichmentStatus.OEM_SOURCED, 0)
                         ai_inferred_today += batch_counts.get(MaterialEnrichmentStatus.AI_INFERRED, 0)
                         not_found_today += batch_counts.get(MaterialEnrichmentStatus.NOT_FOUND, 0)
+                        not_catalogued_today += batch_counts.get(MaterialEnrichmentStatus.NOT_CATALOGUED, 0)
 
                         # Heartbeat + counters
                         update_enrichment_worker_status(
@@ -394,8 +410,10 @@ async def main() -> None:
                             last_enriched_at=datetime.now(timezone.utc),
                             enriched_today=enriched_today,
                             web_sourced_today=web_sourced_today,
+                            oem_sourced_today=oem_sourced_today,
                             ai_inferred_today=ai_inferred_today,
                             not_found_today=not_found_today,
+                            not_catalogued_today=not_catalogued_today,
                             circuit_breaker_open=False,
                             circuit_breaker_reason=None,
                         )
@@ -425,11 +443,13 @@ async def main() -> None:
 
     finally:
         logger.info(
-            "ENRICH_WORKER shutting down: enriched_today={}, web={}, ai={}, not_found={}",
+            "ENRICH_WORKER shutting down: enriched_today={}, web={}, oem={}, ai={}, not_found={}, not_catalogued={}",
             enriched_today,
             web_sourced_today,
+            oem_sourced_today,
             ai_inferred_today,
             not_found_today,
+            not_catalogued_today,
         )
         db = SessionLocal()
         try:
