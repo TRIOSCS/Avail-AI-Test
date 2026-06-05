@@ -109,32 +109,33 @@ services:
         max-size: "100m"
         max-file: "10"
 
-  # --- Enrichment Worker — DISABLED (AI-only enrichment removed) ---
-  # Rebuild with real connector data (DigiKey, Mouser, Nexar) before re-enabling.
+  # --- Enrichment Worker ---
   enrichment-worker:
     build: .
-    restart: "no"
-    entrypoint: ["echo", "Enrichment worker disabled — AI-only enrichment removed"]
-    command: []
+    restart: always
+    command: ["python", "-m", "app.services.enrichment_worker"]
     env_file: .env
     environment:
-      - ENRICHMENT_INTERVAL_HOURS=${ENRICHMENT_INTERVAL_HOURS:-6}
+      - ENRICHMENT_BATCH_SIZE=${ENRICHMENT_BATCH_SIZE:-5}
+      - ENRICHMENT_DAILY_CAP=${ENRICHMENT_DAILY_CAP:-200}
+      - ENRICHMENT_WEB_DAILY_CAP=${ENRICHMENT_WEB_DAILY_CAP:-80}
+      - ENRICHMENT_LOOP_SLEEP_SECONDS=${ENRICHMENT_LOOP_SLEEP_SECONDS:-30}
+      - ENRICHMENT_IDLE_SLEEP_SECONDS=${ENRICHMENT_IDLE_SLEEP_SECONDS:-60}
+      - ENRICHMENT_NOT_FOUND_RETRY_HOURS=${ENRICHMENT_NOT_FOUND_RETRY_HOURS:-22}
+      - ENRICHMENT_CIRCUIT_BREAKER_ERRORS=${ENRICHMENT_CIRCUIT_BREAKER_ERRORS:-5}
     depends_on:
       db:
         condition: service_healthy
+      redis:
+        condition: service_healthy
       app:
         condition: service_healthy
-    volumes:
-      - ./scripts:/app/scripts:ro
     healthcheck:
       disable: true
     deploy:
       resources:
         limits:
-          memory: 1G
-          cpus: '1'
-        reservations:
-          memory: 256M
+          memory: 512M
     logging:
       driver: json-file
       options:

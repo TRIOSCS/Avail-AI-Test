@@ -25,7 +25,7 @@ _ENRICH_TARGET = "app.services.spec_enrichment_service.enrich_pending_specs"
 class TestEnrichSpecsMain:
     @pytest.mark.asyncio
     async def test_main_calls_enrich_pending_specs_with_default_limit(self):
-        """main() calls enrich_pending_specs with db and default limit=100."""
+        """Main() calls enrich_pending_specs with db and default limit=100."""
         mock_db = MagicMock()
         mock_session_cls = MagicMock(return_value=mock_db)
         mock_enrich = AsyncMock(return_value={"processed": 5})
@@ -42,7 +42,7 @@ class TestEnrichSpecsMain:
 
     @pytest.mark.asyncio
     async def test_main_calls_enrich_pending_specs_with_custom_limit(self):
-        """main() passes custom limit to enrich_pending_specs."""
+        """Main() passes custom limit to enrich_pending_specs."""
         mock_db = MagicMock()
         mock_session_cls = MagicMock(return_value=mock_db)
         mock_enrich = AsyncMock(return_value={"processed": 3})
@@ -59,7 +59,7 @@ class TestEnrichSpecsMain:
 
     @pytest.mark.asyncio
     async def test_main_closes_db_on_success(self):
-        """main() always closes the DB session on success."""
+        """Main() always closes the DB session on success."""
         mock_db = MagicMock()
         mock_session_cls = MagicMock(return_value=mock_db)
         mock_enrich = AsyncMock(return_value={"processed": 5})
@@ -76,7 +76,7 @@ class TestEnrichSpecsMain:
 
     @pytest.mark.asyncio
     async def test_main_closes_db_when_enrich_raises(self):
-        """main() closes the DB session even when enrich_pending_specs raises."""
+        """Main() closes the DB session even when enrich_pending_specs raises."""
         mock_db = MagicMock()
         mock_session_cls = MagicMock(return_value=mock_db)
         mock_enrich = AsyncMock(side_effect=RuntimeError("service crashed"))
@@ -94,7 +94,7 @@ class TestEnrichSpecsMain:
 
     @pytest.mark.asyncio
     async def test_main_returns_none(self):
-        """main() returns None (no explicit return value)."""
+        """Main() returns None (no explicit return value)."""
         mock_db = MagicMock()
         mock_session_cls = MagicMock(return_value=mock_db)
         mock_enrich = AsyncMock(return_value={"processed": 0})
@@ -111,7 +111,7 @@ class TestEnrichSpecsMain:
 
     @pytest.mark.asyncio
     async def test_main_creates_session_from_sessionlocal(self):
-        """main() creates exactly one DB session via SessionLocal()."""
+        """Main() creates exactly one DB session via SessionLocal()."""
         mock_db = MagicMock()
         mock_session_cls = MagicMock(return_value=mock_db)
         mock_enrich = AsyncMock(return_value={})

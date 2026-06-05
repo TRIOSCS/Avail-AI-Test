@@ -50,7 +50,8 @@ class MaterialCard(Base):
     enriched_at = Column(UTCDateTime)
     specs_enriched_at = Column(UTCDateTime, index=True)  # NULL = spec pass not yet run
     # Verification provenance (added 2026-06-04 — verified-enrichment feature)
-    # enrichment_status: "unenriched" | "verified" | "ai_inferred" | "not_found"
+    # enrichment_status: see constants.MaterialEnrichmentStatus (validated on write):
+    # unenriched | verified | web_sourced | ai_inferred | not_found
     enrichment_status = Column(String(20), nullable=False, server_default="unenriched", index=True)
     # Per-field provenance: {"<field>": {"source": "digikey", "confidence": 1.0,
     #                                    "fetched_at": "2026-06-04T..Z", "matched_mpn": "..."}}
@@ -73,6 +74,14 @@ class MaterialCard(Base):
         if value is not None and value < 0:
             raise ValueError(f"search_count must be >= 0, got {value}")
         return value
+
+    @validates("enrichment_status")
+    def _validate_enrichment_status(self, _key, value):
+        from ..constants import MaterialEnrichmentStatus
+
+        if value is None:
+            return MaterialEnrichmentStatus.UNENRICHED.value
+        return MaterialEnrichmentStatus(value).value  # raises ValueError on unknown
 
 
 class MaterialVendorHistory(Base):

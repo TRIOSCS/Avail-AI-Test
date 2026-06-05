@@ -7214,6 +7214,7 @@ async def materials_faceted_partial(
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
     verified_only: bool = Query(False),
+    statuses: str = Query(""),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -7227,6 +7228,10 @@ async def materials_faceted_partial(
         mfr_val = parsed_filters.pop("manufacturers")
         manufacturers = mfr_val if isinstance(mfr_val, list) else [mfr_val]
 
+    parsed_statuses: list[str] | None = None
+    if statuses:
+        parsed_statuses = [s.strip() for s in statuses.split(",") if s.strip()]
+
     materials, total = search_materials_faceted(
         db,
         commodity=commodity or None,
@@ -7234,6 +7239,7 @@ async def materials_faceted_partial(
         sub_filters=parsed_filters or None,
         manufacturers=manufacturers,
         verified_only=verified_only,
+        statuses=parsed_statuses,
         limit=limit,
         offset=offset,
     )

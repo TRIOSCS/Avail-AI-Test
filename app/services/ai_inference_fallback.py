@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from loguru import logger
 
 from app.utils.claude_client import claude_structured
+from app.utils.claude_errors import ClaudeError
 
 # A guess is only accepted at >= 95% confidence (and then flagged "reconfirm needed").
 _MIN_CONFIDENCE = 0.95
@@ -68,8 +69,13 @@ async def infer_part(display_mpn: str) -> InferenceResult:
             model_tier="opus",
             max_tokens=300,
         )
+    except ClaudeError:
+        # Claude backend failure — surface it so the worker's circuit breaker can detect a
+        # sustained outage instead of silently marking every part not_found. A confident
+        # "I don't recognize it" reply is parsed data with low confidence, not an exception.
+        raise
     except Exception as e:
-        logger.warning("AI_INFER: claude error for {}: {}", display_mpn, type(e).__name__)
+        logger.warning("AI_INFER: unexpected error for {}: {}", display_mpn, type(e).__name__)
         data = None
 
     if not data:

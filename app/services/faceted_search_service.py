@@ -9,6 +9,7 @@ Depends on: MaterialCard, MaterialSpecFacet, CommoditySpecSchema
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.constants import MaterialEnrichmentStatus
 from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
 from app.utils.search_builder import SearchBuilder
 
@@ -160,6 +161,7 @@ def search_materials_faceted(
     sub_filters: dict | None = None,
     manufacturers: list[str] | None = None,
     verified_only: bool = False,
+    statuses: list[str] | None = None,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[MaterialCard], int]:
@@ -170,7 +172,10 @@ def search_materials_faceted(
         q: Text search on MPN/manufacturer/description
         sub_filters: {spec_key: [values]} for enums, {spec_key_min: val} for ranges
         manufacturers: Restrict to these manufacturer names
-        verified_only: When True, return only cards with enrichment_status == "verified"
+        verified_only: Legacy boolean — when True (and ``statuses`` is empty), return only
+            cards with enrichment_status == "verified"
+        statuses: When provided, restrict to cards whose enrichment_status is in this list.
+            Takes precedence over ``verified_only`` (the two are never ANDed).
         limit: Max results
         offset: Pagination offset
 
@@ -219,8 +224,13 @@ def search_materials_faceted(
     if manufacturers:
         query = query.filter(MaterialCard.manufacturer.in_(manufacturers))
 
-    if verified_only:
-        query = query.filter(MaterialCard.enrichment_status == "verified")
+    # `statuses` (multi-select) takes precedence over the legacy `verified_only` boolean.
+    # ANDing both would yield an impossible filter (e.g. status==verified AND status IN
+    # ('web_sourced')) and silently return nothing.
+    if statuses:
+        query = query.filter(MaterialCard.enrichment_status.in_(statuses))
+    elif verified_only:
+        query = query.filter(MaterialCard.enrichment_status == MaterialEnrichmentStatus.VERIFIED)
 
     if sub_filters and commodity:
         commodity_lower = commodity.lower().strip()

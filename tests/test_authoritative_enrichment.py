@@ -336,7 +336,8 @@ def test_apply_authoritative_empty_contributors_preserves_source(db_session):
 
 
 def test_connectors_in_order_filters_and_aliases(db_session):
-    """_connectors_in_order returns connectors ordered by SOURCE_ORDER and applies aliases."""
+    """_connectors_in_order returns connectors ordered by SOURCE_ORDER and applies
+    aliases."""
     from app.services.authoritative_enrichment_service import SOURCE_ORDER, _connectors_in_order
 
     class _FakeConnector:

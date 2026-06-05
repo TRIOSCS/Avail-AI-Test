@@ -126,3 +126,16 @@ Raw HTML scraping; parametric facet sliders; multi-worker scaling; auto-expandin
 ## 13. Known follow-ups
 - Manufacturer-domain allowlist is curated (top vendors); parts whose manufacturer isn't on it won't get `web_sourced` from the manufacturer site (still eligible via authorized distys). Grow the list as needed.
 - DigiKey daily-quota exhaustion from the earlier bulk run may persist until reset; the worker's pacing + cooldown avoids re-triggering it.
+
+## 14. Addendum (2026-06-05) — Auto-enrich new part numbers via the saved worker
+
+**Request:** "save the worker and when a new part number is added it should be sent to search along with api and AI inquiries to get the best data possible."
+
+**Finding:** every path that creates a `MaterialCard` already leaves it `enrichment_status='unenriched'` (column server_default + `@validates`): `resolve_material_card`, `POST /api/materials/import-part-numbers`, `POST /api/materials/import-stock`, and the background email-attachment job. The worker's `select_batch` already selects `unenriched` cards. So new parts already reach the worker — the worker IS the single enrichment authority. The only gap was *promptness/priority* for a just-added part.
+
+**Decision:** keep the worker as the single authority; route new parts to it (no inline at-creation full-pipeline enrichment — that thrashed free-tier quotas and is explicitly rejected). Two behavior changes + a contract test:
+1. **Fresh-part fast lane** — `select_batch` ordering tiebreaker `created_at ASC → DESC`. Demand stays primary (`search_count DESC`); among equal demand (the common case where new parts have `search_count=0`) the most-recently-added part is enriched first, so a just-added part heads the next batch.
+2. **Idle responsiveness** — `idle_sleep_seconds` 300 → 60 (config default, `from_env()` fallback, AND `docker-compose.yml` Compose fallback — all three, or the change is inert in the container). A part added to an otherwise-empty queue is enriched within ~1 min.
+3. **Contract regression test** — assert new cards (constructor + `resolve_material_card`) are `unenriched` and selected by `select_batch`, so a future creation path can't silently bypass enrichment.
+
+**Left as-is (follow-up, not a band-aid conflict):** the inline `_schedule_background_enrichment` during search is a manufacturer-only connector hint that does NOT set a terminal `enrichment_status`, so the worker still performs the authoritative full pass. Unifying it into the worker is a separate, non-blocking follow-up.

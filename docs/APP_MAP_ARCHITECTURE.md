@@ -31,7 +31,7 @@ AvailAI is a production electronic component sourcing platform and CRM. Buyers s
 | **redis** | Cache + coordination | 768 MB |
 | **caddy** | Reverse proxy, HTTPS | 512 MB |
 | **db-backup** | pg_dump every 6 hours | 256 MB |
-| **enrichment-worker** | Material card enrichment (Claude Haiku) | 512 MB |
+| **enrichment-worker** | Paced material-card enrichment — trust chain `verified` (distributor API) → `web_sourced` (Claude web search, authorized domains) → `ai_inferred` (Opus 4.8, ≥0.95, flagged). Fast-lane: newest-added parts head the queue (`select_batch` orders `search_count DESC, created_at DESC`); ~60s idle poll | 512 MB |
 
 ## Request Flow — Browser to Database
 

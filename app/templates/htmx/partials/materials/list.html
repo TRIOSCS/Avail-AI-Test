@@ -68,6 +68,13 @@
                   title="Verified from {{ (m.enrichment_provenance or {}).get('description', {}).get('source', 'catalog') }}">
               VERIFIED
             </span>
+            {% elif es == "web_sourced" %}
+            {% set _u = (m.enrichment_provenance or {}).get('source_urls', [None])[0] %}
+            <a href="{{ _u or '#' }}" target="_blank" rel="noopener"
+               class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-sky-50 text-sky-700 border-sky-200"
+               title="Web-sourced from {{ (m.enrichment_provenance or {}).get('source_domains', ['authoritative page'])|join(', ') }} — below API-verified">
+              WEB-SOURCED
+            </a>
             {% elif es == "ai_inferred" %}
             <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-amber-50 text-amber-700 border-amber-200"
                   title="AI guess (&ge;95% confidence) — RECONFIRM NEEDED before trusting; not verified">

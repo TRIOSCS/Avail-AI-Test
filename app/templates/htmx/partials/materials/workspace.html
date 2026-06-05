@@ -43,13 +43,23 @@
       </div>
 
       {# Verified only toggle #}
-      <div class="mb-3">
+      <div class="mb-1">
         <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer text-sm">
           <input type="checkbox"
                  :checked="verifiedOnly"
                  @change="verifiedOnly = !verifiedOnly; applyFilters()"
                  class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5">
           <span class="text-gray-700 font-medium">Verified only</span>
+        </label>
+      </div>
+      {# Web-sourced toggle #}
+      <div class="mb-3">
+        <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer text-sm">
+          <input type="checkbox"
+                 :checked="webSourced"
+                 @change="webSourced = !webSourced; applyFilters()"
+                 class="rounded border-gray-300 text-sky-600 focus:ring-sky-500 h-3.5 w-3.5">
+          <span class="text-gray-700 font-medium">Web-sourced</span>
         </label>
       </div>
 
@@ -179,14 +189,23 @@
          hx-get="/v2/partials/materials/faceted"
          hx-trigger="load, filters-changed from:body"
          hx-indicator="#materials-results-spinner"
-         hx-vals='js:{
-           "commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || "",
-           "q": Alpine.evaluate(document.querySelector("#materials-workspace"), "q") || "",
-           "sub_filters": JSON.stringify(Alpine.evaluate(document.querySelector("#materials-workspace"), "subFilters") || {}),
-           "verified_only": Alpine.evaluate(document.querySelector("#materials-workspace"), "verifiedOnly") || false,
-           "limit": 50,
-           "offset": Alpine.evaluate(document.querySelector("#materials-workspace"), "page") * 50 || 0
-         }'
+         hx-vals='js:(function(){
+           var ws = document.querySelector("#materials-workspace");
+           var verifiedOnly = Alpine.evaluate(ws, "verifiedOnly") || false;
+           var webSourced = Alpine.evaluate(ws, "webSourced") || false;
+           var statusList = [];
+           if (verifiedOnly) statusList.push("verified");
+           if (webSourced) statusList.push("web_sourced");
+           return {
+             "commodity": Alpine.evaluate(ws, "commodity") || "",
+             "q": Alpine.evaluate(ws, "q") || "",
+             "sub_filters": JSON.stringify(Alpine.evaluate(ws, "subFilters") || {}),
+             "verified_only": verifiedOnly,
+             "statuses": statusList.join(","),
+             "limit": 50,
+             "offset": Alpine.evaluate(ws, "page") * 50 || 0
+           };
+         })()'
          hx-swap="innerHTML"
          hx-sync="this:replace">
       {# Skeleton loading #}

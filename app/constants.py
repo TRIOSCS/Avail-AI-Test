@@ -447,3 +447,17 @@ class InboxSyncHealth(StrEnum):
     OK = "ok"
     WARNING = "warning"
     ERROR = "error"
+
+
+class MaterialEnrichmentStatus(StrEnum):
+    """Enrichment tier for MaterialCard.enrichment_status.
+
+    Single source of truth for the five valid enrichment tiers. Enforced at the ORM
+    layer via @validates on MaterialCard.
+    """
+
+    UNENRICHED = "unenriched"
+    VERIFIED = "verified"
+    WEB_SOURCED = "web_sourced"
+    AI_INFERRED = "ai_inferred"
+    NOT_FOUND = "not_found"
