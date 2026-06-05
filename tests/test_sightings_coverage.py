@@ -505,7 +505,10 @@ class TestSendInquiryEndpoint:
     def test_send_inquiry_logs_rfq_activity(self, client, db_session):
         """Send-inquiry logs rfq_sent activity for each requirement+vendor."""
         req, r, _ = _seed_active(db_session)
-        with patch("app.email_service.send_batch_rfq", new=AsyncMock(return_value=[{"ok": True}])):
+        with patch(
+            "app.email_service.send_batch_rfq",
+            new=AsyncMock(return_value=[{"vendor_name": "Cover Vendor", "status": "sent"}]),
+        ):
             resp = client.post(
                 "/v2/partials/sightings/send-inquiry",
                 data={

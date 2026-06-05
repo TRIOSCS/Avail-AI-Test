@@ -251,5 +251,15 @@ describe('rfqVendorModal (real factory)', () => {
       expect(m._sendOutcome(1, 3)).toMatchObject({ type: 'warning', delivered: true });
       expect(m._sendOutcome(0, 3)).toMatchObject({ type: 'error', delivered: false });
     });
+
+    it('distinguishes no-email (skipped) from failed in the partial message', () => {
+      const m = makeModal(['a'], [1]);
+      // 1 sent of 3: 2 skipped (no email), 0 failed
+      expect(m._sendOutcome(1, 3, 2).message).toBe('Sent to 1 of 3 vendors — 2 had no email');
+      // 1 sent of 3: 1 skipped + 1 failed
+      expect(m._sendOutcome(1, 3, 1).message).toBe('Sent to 1 of 3 vendors — 1 failed, 1 had no email');
+      // 1 sent of 3: 0 skipped, 2 failed (default skipped=0)
+      expect(m._sendOutcome(1, 3).message).toBe('Sent to 1 of 3 vendors — 2 failed');
+    });
   });
 });

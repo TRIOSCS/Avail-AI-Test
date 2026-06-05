@@ -781,7 +781,7 @@ def test_send_inquiry_broker_publish_per_requirement(client, db_session, test_us
         with patch(
             "app.email_service.send_batch_rfq",
             new_callable=AsyncMock,
-            return_value=[{"vendor_name": "Arrow", "sent": True}],
+            return_value=[{"vendor_name": "Arrow", "status": "sent"}],
         ):
             resp = client.post(
                 "/v2/partials/sightings/send-inquiry",
@@ -810,7 +810,7 @@ def test_send_inquiry_auto_progress_increments_count(client, db_session, test_us
         with patch(
             "app.email_service.send_batch_rfq",
             new_callable=AsyncMock,
-            return_value=[{"vendor_name": "Arrow", "sent": True}],
+            return_value=[{"vendor_name": "Arrow", "status": "sent"}],
         ):
             resp = client.post(
                 "/v2/partials/sightings/send-inquiry",
@@ -841,7 +841,7 @@ def test_send_inquiry_success_toast_with_progressed_count(client, db_session, te
         with patch(
             "app.email_service.send_batch_rfq",
             new_callable=AsyncMock,
-            return_value=[{"vendor_name": "Arrow", "sent": True}],
+            return_value=[{"vendor_name": "Arrow", "status": "sent"}],
         ):
             with patch(
                 "app.services.sourcing_auto_progress.auto_progress_status",

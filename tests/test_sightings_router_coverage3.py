@@ -595,7 +595,7 @@ class TestSendInquiryCoverage:
         db_session.add(contact)
         db_session.commit()
 
-        with patch("app.email_service.send_batch_rfq", new=AsyncMock(return_value=[{}])):
+        with patch("app.email_service.send_batch_rfq", new=AsyncMock(return_value=[{"status": "sent"}])):
             with patch("app.services.sourcing_auto_progress.auto_progress_status", return_value=False):
                 resp = client.post(
                     "/v2/partials/sightings/send-inquiry",
@@ -612,7 +612,10 @@ class TestSendInquiryCoverage:
     def test_send_with_auto_progress_multiple_reqs(self, client: TestClient, two_items):
         """Lines 1215-1217: auto_progress_status returns True for each req → progressed_count."""
         _, items = two_items
-        with patch("app.email_service.send_batch_rfq", new=AsyncMock(return_value=[{}])):
+        with patch(
+            "app.email_service.send_batch_rfq",
+            new=AsyncMock(return_value=[{"vendor_name": "Some Vendor", "status": "sent"}]),
+        ):
             with patch("app.services.sourcing_auto_progress.auto_progress_status", return_value=True):
                 resp = client.post(
                     "/v2/partials/sightings/send-inquiry",

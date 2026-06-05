@@ -566,7 +566,11 @@ class TestSendBatchRfq:
                 vendor_groups=vendor_groups,
             )
 
-        assert len(results) == 0
+        # Email-less vendors are recorded as "skipped" (not silently dropped), and no send
+        # is attempted for them.
+        assert len(results) == 2
+        assert all(r["status"] == "skipped" for r in results)
+        assert all("no contact email" in r["error"] for r in results)
         mock_gc.post_json.assert_not_called()
 
     @pytest.mark.asyncio

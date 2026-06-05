@@ -400,7 +400,10 @@ class TestSendInquiry:
 
     def test_send_rfq_auto_progress(self, client: TestClient, req_with_item: tuple):
         _, item = req_with_item
-        with patch("app.email_service.send_batch_rfq", new=AsyncMock(return_value=[{"vendor": "Arrow"}])):
+        with patch(
+            "app.email_service.send_batch_rfq",
+            new=AsyncMock(return_value=[{"vendor_name": "Arrow Electronics", "status": "sent"}]),
+        ):
             with patch("app.services.sourcing_auto_progress.auto_progress_status", return_value=True):
                 resp = client.post(
                     "/v2/partials/sightings/send-inquiry",
