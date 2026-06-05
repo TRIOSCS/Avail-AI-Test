@@ -92,6 +92,13 @@ def _oob_toast(msg: str, level: str = "success") -> HTMLResponse:
     )
 
 
+# Result headers on POST /v2/partials/sightings/send-inquiry: the route returns HTTP 200
+# even on a partial/total send failure, so the browser modal reads the true delivered
+# count from these rather than inferring success from the status code.
+RFQ_SENT_HEADER = "X-RFQ-Sent"
+RFQ_TOTAL_HEADER = "X-RFQ-Total"
+
+
 def _render_offers_panel(request: Request, requirement: Requirement, db: Session) -> HTMLResponse:
     """Render the part-centric Offers panel for swap into #sightings-offers-panel."""
     ctx = {
@@ -1292,7 +1299,10 @@ async def sightings_send_inquiry(
             requisition_id=requisition_id,
             vendor_groups=vendor_groups,
         )
-        sent_count = len(results)
+        # Count only records the email service tagged "sent". send_batch_rfq returns one
+        # record per attempted vendor INCLUDING per-vendor failures (status="failed"), so
+        # len(results) would over-count and report a false success on a partial failure.
+        sent_count = sum(1 for r in results if r.get("status") == "sent")
 
         for r in requirements:
             for vn in vendor_names:
@@ -1334,8 +1344,8 @@ async def sightings_send_inquiry(
     # or total send failure (the failures are captured above, not raised), so the
     # client must not infer success from the HTTP status alone.
     resp = _oob_toast(msg, "warning" if failed_vendors else "success")
-    resp.headers["X-RFQ-Sent"] = str(sent_count)
-    resp.headers["X-RFQ-Total"] = str(total)
+    resp.headers[RFQ_SENT_HEADER] = str(sent_count)
+    resp.headers[RFQ_TOTAL_HEADER] = str(total)
     return resp
 
 
