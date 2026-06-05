@@ -29,7 +29,7 @@ def _render(status, provenance=None):
             "last_searched_at": None,
         },
     )()
-    return tmpl.module if False else tmpl.render(materials=[card], lc_colors={}, total=1, limit=50, offset=0)
+    return tmpl.render(materials=[card], lc_colors={}, total=1, limit=50, offset=0)
 
 
 def test_oem_sourced_badge_renders():

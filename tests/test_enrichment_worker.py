@@ -941,3 +941,92 @@ def test_select_batch_not_catalogued_eligibility(db_session):
     picked = {c.normalized_mpn for c in select_batch(db_session, cfg)}
     assert "a2" in picked  # past 30-day backoff → eligible
     assert "a1" not in picked  # within backoff → not yet
+
+
+def test_breaker_resets_on_claude_ok_without_web(db_session):
+    """A Claude call that returns OK with zero web calls (e.g. infer_part) still resets
+    the breaker and does NOT charge the web budget."""
+    import asyncio
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+
+    now = datetime.now(timezone.utc)
+    db_session.add(MaterialCard(normalized_mpn="e0", display_mpn="E0", enrichment_status="unenriched", created_at=now))
+    db_session.flush()
+
+    successes: list[int] = []
+
+    class SpyBreaker(EnrichmentCircuitBreaker):
+        def record_claude_success(self):
+            successes.append(1)
+            super().record_claude_success()
+
+    async def fake_enrich_card(card, db, web_meter=None, **kw):
+        if web_meter is not None:
+            web_meter.mark_claude_ok()  # infer_part returned OK, no web call
+        return MaterialEnrichmentStatus.AI_INFERRED
+
+    charged: list[int] = []
+    cfg = EnrichmentWorkerConfig(batch_size=10, web_daily_cap=80)
+    web_state = {"web_calls": 0}
+
+    with (
+        patch("app.services.enrichment_worker.worker.enrich_card", side_effect=fake_enrich_card),
+        patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value=None),
+        patch(
+            "app.services.enrichment_worker.worker.intel_cache.set_cached",
+            side_effect=lambda *a, **k: charged.append(1),
+        ),
+    ):
+        asyncio.run(run_one_batch(db_session, cfg, {}, SpyBreaker(cfg), set(), web_state))
+
+    assert successes == [1]  # claude_ok latched → breaker reset
+    assert charged == []  # no web call → budget untouched
+    assert web_state["web_calls"] == 0
+
+
+def test_verified_only_does_not_reset_breaker(db_session):
+    """A VERIFIED-via-connector result (no Claude call, claude_ok False, web_calls 0)
+    must NOT reset the breaker — only an actual Claude success should."""
+    import asyncio
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+
+    now = datetime.now(timezone.utc)
+    db_session.add(MaterialCard(normalized_mpn="f0", display_mpn="F0", enrichment_status="unenriched", created_at=now))
+    db_session.flush()
+
+    successes: list[int] = []
+
+    class SpyBreaker(EnrichmentCircuitBreaker):
+        def record_claude_success(self):
+            successes.append(1)
+            super().record_claude_success()
+
+    async def fake_enrich_card(card, db, web_meter=None, **kw):
+        return MaterialEnrichmentStatus.VERIFIED  # connector hit; no Claude, no web
+
+    cfg = EnrichmentWorkerConfig(batch_size=10, web_daily_cap=80)
+    web_state = {"web_calls": 0}
+
+    with (
+        patch("app.services.enrichment_worker.worker.enrich_card", side_effect=fake_enrich_card),
+        patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value=None),
+        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
+    ):
+        asyncio.run(run_one_batch(db_session, cfg, {}, SpyBreaker(cfg), set(), web_state))
+
+    assert successes == []  # claude_ok False → breaker NOT reset
+    assert web_state["web_calls"] == 0

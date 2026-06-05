@@ -56,3 +56,11 @@ def test_rejects_non_oem(mpn):
 def test_case_insensitive_and_stripped():
     assert classify_oem_vendor("  0b200-00930000  ") == "asus"
     assert classify_oem_vendor("nb.mbc11.003") == "acer"
+
+
+def test_dell_pattern_is_broad_known_tradeoff():
+    """The Dell 5-char alnum-with-letter pattern is deliberately broad: a generic part like
+    LM317 classifies as 'dell' (accepted false positive — it only costs a wasted web call,
+    and a Dell miss terminates not_found, not not_catalogued). This pins the breadth so any
+    future narrowing is a deliberate change, not an accident."""
+    assert classify_oem_vendor("LM317") == "dell"
