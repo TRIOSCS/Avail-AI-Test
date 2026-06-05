@@ -1,0 +1,37 @@
+{# offer_form_modal.html — offer entry/edit form loaded into #modal-content by the
+   global open-modal handler. The base modal renders its own ✕ / backdrop / Escape.
+   Receives: requirement, prefill (dict|None), offer (Offer|None for edit).
+   On success: re-renders #sightings-offers-panel and closes the modal. #}
+<div class="p-4">
+  <h3 class="text-sm font-semibold text-gray-900 mb-3">
+    {% if offer %}Edit Offer
+    {% elif prefill and prefill.get('vendor_name') %}Convert to Offer — {{ prefill.get('vendor_name') }}
+    {% else %}Enter Offer{% endif %}
+  </h3>
+
+  <form {% if offer %}hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ offer.id }}"
+        {% else %}hx-post="/v2/partials/sightings/{{ requirement.id }}/offers"{% endif %}
+        hx-target="#sightings-offers-panel" hx-swap="innerHTML"
+        hx-on::after-request="if(event.detail.successful) $dispatch('close-modal')"
+        data-loading-disable class="space-y-3">
+
+    {% set mpn_default = requirement.primary_mpn %}
+    {% include "htmx/partials/offers/_offer_form_fields.html" %}
+
+    <div>
+      <label class="block text-xs text-gray-500 mb-1">Notes</label>
+      <textarea name="notes" rows="2"
+                class="w-full px-2 py-1.5 text-sm border border-gray-300 rounded focus:ring-brand-500 focus:border-brand-500"
+                placeholder="Any additional details...">{{ prefill.get('notes', '') if prefill else '' }}</textarea>
+    </div>
+
+    <div class="flex justify-end gap-2 pt-1">
+      <button type="button" @click="$dispatch('close-modal')"
+              class="px-3 py-1.5 text-sm text-gray-600 hover:text-gray-800">Cancel</button>
+      <button type="submit"
+              class="px-4 py-1.5 text-sm font-medium text-white bg-brand-500 rounded hover:bg-brand-600">
+        Save Offer
+      </button>
+    </div>
+  </form>
+</div>

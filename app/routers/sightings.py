@@ -24,7 +24,7 @@ from sqlalchemy.orm import Session, joinedload
 from ..config import settings
 from ..constants import ActivityType, OfferStatus, RequisitionStatus, SourcingStatus
 from ..database import get_db
-from ..dependencies import require_fresh_token, require_user
+from ..dependencies import require_buyer, require_fresh_token, require_user
 from ..models import User
 from ..models.intelligence import ActivityLog, MaterialCard
 from ..models.offers import Offer
@@ -1328,3 +1328,289 @@ async def sightings_send_inquiry(
             msg += f" {progressed_count} requirement{'s' if progressed_count != 1 else ''} advanced to sourcing."
 
     return _oob_toast(msg, "warning" if failed_vendors else "success")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Offers tab (part-centric) — Convert-to-offer, Enter-offer, and mutations.
+# Creation/mutation logic is reused from app.routers.crm.offers (no duplication);
+# these endpoints just adapt form input and re-render #sightings-offers-panel.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _opt_int(v: str | None) -> int | None:
+    """Parse an optional integer form field ('' → None)."""
+    try:
+        return int(v) if v and str(v).strip() else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _opt_float(v: str | None) -> float | None:
+    """Parse an optional float form field ('' → None)."""
+    try:
+        return float(v) if v and str(v).strip() else None
+    except (TypeError, ValueError):
+        return None
+
+
+@router.get("/v2/partials/sightings/{requirement_id}/offer-form", response_class=HTMLResponse)
+async def sightings_offer_form(
+    request: Request,
+    requirement_id: int,
+    vendor_name: str = Query(""),
+    unit_price: str = Query(""),
+    qty: str = Query(""),
+    moq: str = Query(""),
+    lead_days: str = Query(""),
+    manufacturer: str = Query(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Modal offer form — pre-filled from a sighting (Convert) or blank (Enter)."""
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    prefill = None
+    if vendor_name:
+        prefill = {
+            "vendor_name": vendor_name,
+            "mpn": requirement.primary_mpn,
+            "manufacturer": manufacturer or requirement.manufacturer or "",
+            "unit_price": unit_price,
+            "qty_available": qty,
+            "moq": moq,
+            "lead_time": f"{lead_days} days" if lead_days else "",
+        }
+    ctx = {"request": request, "requirement": requirement, "prefill": prefill, "offer": None}
+    return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
+
+
+@router.post("/v2/partials/sightings/{requirement_id}/offers", response_class=HTMLResponse)
+async def sightings_create_offer(
+    request: Request,
+    requirement_id: int,
+    vendor_name: str = Form(...),
+    mpn: str = Form(...),
+    manufacturer: str = Form(""),
+    qty_available: str = Form(""),
+    unit_price: str = Form(""),
+    lead_time: str = Form(""),
+    date_code: str = Form(""),
+    condition: str = Form("new"),
+    packaging: str = Form(""),
+    firmware: str = Form(""),
+    hardware_code: str = Form(""),
+    moq: str = Form(""),
+    spq: str = Form(""),
+    warranty: str = Form(""),
+    country_of_origin: str = Form(""),
+    notes: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_buyer),
+):
+    """Create an offer for this part via the canonical create_offer, then re-render the
+    offers panel.
+
+    Reused for both Convert-to-offer and Enter-offer.
+    """
+    from ..routers.crm.offers import create_offer
+    from ..schemas.crm import OfferCreate
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+
+    payload = OfferCreate(
+        mpn=mpn,
+        vendor_name=vendor_name,
+        requirement_id=requirement_id,
+        manufacturer=manufacturer or None,
+        qty_available=_opt_int(qty_available),
+        unit_price=_opt_float(unit_price),
+        lead_time=lead_time or None,
+        date_code=date_code or None,
+        condition=condition or "new",
+        packaging=packaging or None,
+        firmware=firmware or None,
+        hardware_code=hardware_code or None,
+        moq=_opt_int(moq),
+        spq=_opt_int(spq),
+        warranty=warranty or None,
+        country_of_origin=country_of_origin or None,
+        notes=notes or None,
+        source="manual",
+    )
+    await create_offer(requirement.requisition_id, payload, user=user, db=db)
+    db.expire_all()
+    requirement = db.get(Requirement, requirement_id)
+    return _with_toast(_render_offers_panel(request, requirement, db), "Offer saved")
+
+
+@router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}/review", response_class=HTMLResponse)
+async def sightings_review_offer(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    action: str = Form(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Approve or reject a pending_review offer, then re-render the offers panel."""
+    from ..routers.crm.offers import approve_offer, reject_offer
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    if action == "approve":
+        await approve_offer(offer_id, user=user, db=db)
+    else:
+        await reject_offer(offer_id, user=user, db=db)
+    db.expire_all()
+    return _render_offers_panel(request, db.get(Requirement, requirement_id), db)
+
+
+@router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}/reconfirm", response_class=HTMLResponse)
+async def sightings_reconfirm_offer(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Reconfirm an offer, then re-render the offers panel."""
+    from ..routers.crm.offers import reconfirm_offer
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    await reconfirm_offer(offer_id, user=user, db=db)
+    db.expire_all()
+    return _render_offers_panel(request, db.get(Requirement, requirement_id), db)
+
+
+@router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}/mark-sold", response_class=HTMLResponse)
+async def sightings_mark_offer_sold(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_buyer),
+):
+    """Mark an offer sold, then re-render the offers panel."""
+    from ..routers.crm.offers import mark_offer_sold
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    await mark_offer_sold(offer_id, user=user, db=db)
+    db.expire_all()
+    return _render_offers_panel(request, db.get(Requirement, requirement_id), db)
+
+
+@router.delete("/v2/partials/sightings/{requirement_id}/offers/{offer_id}", response_class=HTMLResponse)
+async def sightings_delete_offer(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_buyer),
+):
+    """Delete an offer, then re-render the offers panel."""
+    from ..routers.crm.offers import delete_offer
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    await delete_offer(offer_id, user=user, db=db)
+    db.expire_all()
+    return _render_offers_panel(request, db.get(Requirement, requirement_id), db)
+
+
+@router.get("/v2/partials/sightings/{requirement_id}/offers/{offer_id}/edit-form", response_class=HTMLResponse)
+async def sightings_offer_edit_form(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Modal offer form pre-filled from an existing offer (edit mode)."""
+    requirement = db.get(Requirement, requirement_id)
+    offer = db.get(Offer, offer_id)
+    if not requirement or not offer:
+        raise HTTPException(404, "Not found")
+    fields = [
+        "vendor_name",
+        "mpn",
+        "manufacturer",
+        "qty_available",
+        "unit_price",
+        "lead_time",
+        "date_code",
+        "condition",
+        "packaging",
+        "firmware",
+        "hardware_code",
+        "moq",
+        "spq",
+        "warranty",
+        "country_of_origin",
+        "notes",
+    ]
+    prefill = {f: ("" if getattr(offer, f) is None else getattr(offer, f)) for f in fields}
+    ctx = {"request": request, "requirement": requirement, "prefill": prefill, "offer": offer}
+    return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
+
+
+@router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}", response_class=HTMLResponse)
+async def sightings_update_offer(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    vendor_name: str = Form(""),
+    mpn: str = Form(""),
+    manufacturer: str = Form(""),
+    qty_available: str = Form(""),
+    unit_price: str = Form(""),
+    lead_time: str = Form(""),
+    date_code: str = Form(""),
+    condition: str = Form(""),
+    packaging: str = Form(""),
+    firmware: str = Form(""),
+    hardware_code: str = Form(""),
+    moq: str = Form(""),
+    spq: str = Form(""),
+    warranty: str = Form(""),
+    country_of_origin: str = Form(""),
+    notes: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_buyer),
+):
+    """Update an offer via the canonical update_offer, then re-render the panel."""
+    from ..routers.crm.offers import update_offer
+    from ..schemas.crm import OfferUpdate
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    payload = OfferUpdate(
+        vendor_name=vendor_name or None,
+        mpn=mpn or None,
+        manufacturer=manufacturer or None,
+        qty_available=_opt_int(qty_available),
+        unit_price=_opt_float(unit_price),
+        lead_time=lead_time or None,
+        date_code=date_code or None,
+        condition=condition or None,
+        packaging=packaging or None,
+        firmware=firmware or None,
+        hardware_code=hardware_code or None,
+        moq=_opt_int(moq),
+        spq=_opt_int(spq),
+        warranty=warranty or None,
+        country_of_origin=country_of_origin or None,
+        notes=notes or None,
+    )
+    await update_offer(offer_id, payload, user=user, db=db)
+    db.expire_all()
+    return _with_toast(_render_offers_panel(request, db.get(Requirement, requirement_id), db), "Offer updated")

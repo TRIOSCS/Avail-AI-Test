@@ -78,6 +78,10 @@
                     class="text-[10px] text-gray-400 hover:text-rose-500">
               Mark Unavail
             </button>
+            <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/offer-form?vendor_name={{ s.vendor_name|urlencode }}&unit_price={{ s.best_price or '' }}&qty={{ s.estimated_qty or '' }}&moq={{ s.min_moq or '' }}&lead_days={{ s.best_lead_time_days or '' }}'})"
+                    class="text-[10px] text-emerald-600 hover:text-emerald-800 font-medium">
+              Convert to offer
+            </button>
           </span>
           {% endif %}
         </div>
