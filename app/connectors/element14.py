@@ -18,6 +18,9 @@ from ._core_attrs import clean_str, generic_attribute, map_rohs
 from .errors import ConnectorAuthError, ConnectorRateLimitError
 from .sources import BaseConnector
 
+# Markers that mean a 403 is a credential rejection (not a transient QPS cap).
+_AUTH_MARKERS = ("invalid", "unauthorized", "forbidden", "api key", "not accepted")
+
 
 class Element14Connector(BaseConnector):
     """Element14 Product Search — API key auth, Newark US store."""
@@ -70,7 +73,6 @@ class Element14Connector(BaseConnector):
         # rate cap ("Account Over Queries Per Second Limit"). Distinguish by body:
         # QPS errors contain "queries per second" but no auth-failure markers.
         body = r.text.lower()
-        _AUTH_MARKERS = ("invalid", "unauthorized", "forbidden", "api key", "not accepted")
         if r.status_code == 403 and "queries per second" in body and not any(m in body for m in _AUTH_MARKERS):
             raise ConnectorRateLimitError(f"element14 rate limited (QPS): {r.text[:200]}")
         if r.status_code in (401, 403):

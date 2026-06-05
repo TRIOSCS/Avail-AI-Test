@@ -234,6 +234,7 @@ async def enrich_cards(card_ids: list[int], db: Session, *, concurrency: int = 5
     """
     conns = _connectors_in_order(db)
     disabled: set[str] = set()
+    cooldown: dict[str, float] = {}
     sem = asyncio.Semaphore(concurrency)
     counts = {"verified": 0, "ai_inferred": 0, "not_found": 0}
 
@@ -242,7 +243,9 @@ async def enrich_cards(card_ids: list[int], db: Session, *, concurrency: int = 5
         if card is None:
             return
         async with sem:
-            status = await enrich_card(card, db, connectors=conns, refresh=refresh, disabled=disabled)
+            status = await enrich_card(
+                card, db, connectors=conns, refresh=refresh, disabled=disabled, cooldown=cooldown
+            )
         counts[status] = counts.get(status, 0) + 1
 
     for i in range(0, len(card_ids), 50):
