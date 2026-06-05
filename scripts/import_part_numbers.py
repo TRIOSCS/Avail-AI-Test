@@ -45,7 +45,26 @@ _REPORT_COLS = [
 ]
 
 
-async def _run(file_path: str, commit: bool, report_path: str, refresh: bool) -> None:
+def _report_row(raw: str, norm: str, status: str, card: MaterialCard, transient: bool) -> dict:
+    prov = card.enrichment_provenance or {}
+    return {
+        "input_mpn": raw,
+        "normalized_mpn": norm,
+        "status": status,
+        "source": (prov.get("description") or {}).get("source", ""),
+        "manufacturer": card.manufacturer or "",
+        "category": card.category or "",
+        "lifecycle_status": card.lifecycle_status or "",
+        "package_type": card.package_type or "",
+        "pin_count": card.pin_count or "",
+        "rohs_status": card.rohs_status or "",
+        "description": card.description or "",
+        "datasheet_url": card.datasheet_url or "",
+        "notes": "new card" if transient else "",
+    }
+
+
+async def _run(file_path: str, commit: bool, report_path: str, refresh: bool, concurrency: int = 8) -> None:
     db = SessionLocal()
     try:
         content = open(file_path, "rb").read()
@@ -53,63 +72,50 @@ async def _run(file_path: str, commit: bool, report_path: str, refresh: bool) ->
         logger.info("Parsed {} part numbers from {}", len(mpns), file_path)
 
         conns = _connectors_in_order(db)
+        logger.info("Active connectors: {}", [c.source_name for c in conns])
         disabled: set[str] = set()
-        rows = []
         counts = {"verified": 0, "ai_inferred": 0, "not_found": 0}
+        rows: list[dict] = []
 
-        for i, raw in enumerate(mpns):
+        # Phase 1 (serial): resolve existing or build transient cards.
+        work: list[list] = []  # [raw, norm, card, transient]
+        for raw in mpns:
             norm = normalize_mpn_key(raw)
             if not norm:
-                rows.append(
-                    {
-                        "input_mpn": raw,
-                        "normalized_mpn": "",
-                        "status": "skipped",
-                        "notes": "unparseable mpn",
-                    }
-                )
+                rows.append({"input_mpn": raw, "normalized_mpn": "", "status": "skipped", "notes": "unparseable mpn"})
                 continue
-            # In dry-run, use a transient card not added to the session.
             card = db.query(MaterialCard).filter_by(normalized_mpn=norm).first()
             transient = card is None
             if transient:
-                card = MaterialCard(
-                    normalized_mpn=norm,
-                    display_mpn=raw.strip(),
-                    created_at=datetime.now(timezone.utc),
-                )
-            status = await enrich_card(card, db, connectors=conns, refresh=refresh, disabled=disabled)
-            counts[status] = counts.get(status, 0) + 1
-            prov = card.enrichment_provenance or {}
-            rows.append(
-                {
-                    "input_mpn": raw,
-                    "normalized_mpn": norm,
-                    "status": status,
-                    "source": (prov.get("description") or {}).get("source", ""),
-                    "manufacturer": card.manufacturer or "",
-                    "category": card.category or "",
-                    "lifecycle_status": card.lifecycle_status or "",
-                    "package_type": card.package_type or "",
-                    "pin_count": card.pin_count or "",
-                    "rohs_status": card.rohs_status or "",
-                    "description": card.description or "",
-                    "datasheet_url": card.datasheet_url or "",
-                    "notes": "" if not transient else "new card",
-                }
-            )
-            if commit:
-                if transient:
-                    db.add(card)
-                if (i + 1) % 50 == 0:
-                    db.commit()
-                    logger.info("Committed {}/{}", i + 1, len(mpns))
-            if (i + 1) % 25 == 0:
-                logger.info("Processed {}/{} ({})", i + 1, len(mpns), counts)
+                card = MaterialCard(normalized_mpn=norm, display_mpn=raw.strip(), created_at=datetime.now(timezone.utc))
+            work.append([raw, norm, card, transient])
 
-        if commit:
-            db.commit()
-        else:
+        # Phase 2: enrich concurrently (only the network calls overlap; sync DB ops
+        # run atomically between awaits, so the shared Session stays consistent).
+        # Commit per chunk for partial-progress durability; report rows are built
+        # BEFORE each commit to avoid expire_on_commit reloads.
+        sem = asyncio.Semaphore(concurrency)
+
+        async def _enrich(card: MaterialCard) -> str:
+            async with sem:
+                return await enrich_card(card, db, connectors=conns, refresh=refresh, disabled=disabled)
+
+        chunk_size = 100
+        done = 0
+        for start in range(0, len(work), chunk_size):
+            chunk = work[start : start + chunk_size]
+            statuses = await asyncio.gather(*(_enrich(item[2]) for item in chunk))
+            for (raw, norm, card, transient), status in zip(chunk, statuses):
+                counts[status] = counts.get(status, 0) + 1
+                rows.append(_report_row(raw, norm, status, card, transient))
+                if commit and transient:
+                    db.add(card)
+            if commit:
+                db.commit()
+            done += len(chunk)
+            logger.info("Processed {}/{} ({}) committed={}", done, len(work), counts, commit)
+
+        if not commit:
             db.rollback()
 
         with open(report_path, "w", newline="") as f:
@@ -134,10 +140,11 @@ if __name__ == "__main__":
     )
     ap.add_argument("--commit", action="store_true", help="Write to DB (default is dry-run)")
     ap.add_argument("--refresh", action="store_true", help="Re-enrich already-verified cards")
+    ap.add_argument("--concurrency", type=int, default=8, help="Concurrent enrichments (network overlap)")
     ap.add_argument("--report", default=None)
     args = ap.parse_args()
     report = args.report or f"reports/part_import_report_{datetime.now(timezone.utc):%Y%m%dT%H%M%SZ}.csv"
     os.makedirs(os.path.dirname(report) or ".", exist_ok=True)
     if not args.commit:
         logger.info("DRY RUN — no DB writes. Use --commit to persist.")
-    asyncio.run(_run(args.file, args.commit, report, args.refresh))
+    asyncio.run(_run(args.file, args.commit, report, args.refresh, args.concurrency))
