@@ -3,6 +3,13 @@ FROM node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb836
 WORKDIR /build
 COPY package.json package-lock.json ./
 RUN npm ci
+# Per-deploy cache-bust: BUILD_COMMIT is unique each deploy and this RUN consumes it, so
+# every layer below (the source COPYs + the Vite build) ALWAYS re-runs with fresh
+# templates/static — fresh Tailwind CSS guaranteed — while `npm ci` above stays cached.
+# This is what lets deploy.sh build WITHOUT --no-cache (apt/pip/npm ci all cache) yet
+# never ship a stale template.
+ARG BUILD_COMMIT=unknown
+RUN echo "$BUILD_COMMIT" > /build/.build_commit
 COPY vite.config.js tailwind.config.js postcss.config.js ./
 COPY app/static/ app/static/
 COPY app/templates/ app/templates/
