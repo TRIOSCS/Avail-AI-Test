@@ -1,0 +1,75 @@
+{# _offer_row.html — one compact offer row for the sightings Offers panel.
+   Context: o (Offer), requirement.
+   Kebab: Edit opens the offer modal; pending offers show Approve/Reject; active or
+   approved offers show Reconfirm/Mark Sold; all show Delete. The mutating actions
+   (review/reconfirm/mark-sold/delete) re-render #sightings-offers-panel. #}
+{% set sc = {
+  'active': 'bg-emerald-50 text-emerald-700',
+  'pending_review': 'bg-amber-50 text-amber-700',
+  'approved': 'bg-emerald-50 text-emerald-700',
+  'rejected': 'bg-rose-50 text-rose-700',
+  'sold': 'bg-gray-100 text-gray-600',
+  'won': 'bg-emerald-50 text-emerald-700',
+  'expired': 'bg-gray-100 text-gray-500',
+} %}
+<div id="offer-row-{{ o.id }}" class="group px-2 py-1.5 hover:bg-gray-50/50" x-data="{ open: false }">
+  <div class="flex items-center gap-2">
+    <div class="flex-1 min-w-0">
+      <div class="flex items-center gap-2">
+        <span class="font-medium text-gray-900 text-sm truncate">{{ o.vendor_name or '—' }}</span>
+        <span class="inline-flex px-1.5 py-0.5 text-[10px] font-medium rounded-full {{ sc.get(o.status, 'bg-gray-100 text-gray-600') }}">
+          {{ (o.status or 'unknown')|replace('_', ' ')|capitalize }}
+        </span>
+      </div>
+      <div class="text-[11px] text-gray-400 mt-0.5 font-mono">
+        {{ '$%.4f'|format(o.unit_price) if o.unit_price is not none else 'RFQ' }}
+        · {{ '{:,}'.format(o.qty_available) if o.qty_available else '—' }} pcs
+        {% if o.lead_time %}<span class="font-sans">· {{ o.lead_time }}</span>{% endif %}
+      </div>
+      <div class="text-[10px] text-gray-300 mt-0.5">
+        ↳ {{ (o.requisition.customer_name or '—') if o.requisition else '—' }}
+        {% if o.requisition_id %}· Req #{{ o.requisition_id }}{% endif %}
+      </div>
+    </div>
+    <div class="relative shrink-0" @click.outside="open = false">
+      <button @click.stop="open = !open"
+              class="p-1 text-gray-300 hover:text-gray-600 opacity-0 group-hover:opacity-100 transition-opacity">
+        <svg class="h-4 w-4" fill="currentColor" viewBox="0 0 20 20">
+          <path d="M10 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4zm0 6a2 2 0 110-4 2 2 0 010 4z"/>
+        </svg>
+      </button>
+      <div x-show="open" x-cloak
+           class="absolute right-0 top-full mt-1 w-36 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1 text-xs">
+        <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/edit-form'}); open = false"
+                class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50">Edit</button>
+        {% if o.status == 'pending_review' %}
+        <button hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/review"
+                hx-vals='{"action": "approve"}'
+                hx-target="#sightings-offers-panel" hx-swap="innerHTML" data-loading-disable
+                @click.stop="open = false"
+                class="w-full text-left px-3 py-1.5 text-emerald-600 hover:bg-emerald-50">Approve</button>
+        <button hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/review"
+                hx-vals='{"action": "reject"}'
+                hx-target="#sightings-offers-panel" hx-swap="innerHTML" data-loading-disable
+                @click.stop="open = false"
+                class="w-full text-left px-3 py-1.5 text-rose-600 hover:bg-rose-50">Reject</button>
+        {% elif o.status in ('active', 'approved') %}
+        <button hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/reconfirm"
+                hx-target="#sightings-offers-panel" hx-swap="innerHTML" data-loading-disable
+                @click.stop="open = false"
+                class="w-full text-left px-3 py-1.5 text-brand-600 hover:bg-brand-50">Reconfirm</button>
+        <button hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/mark-sold"
+                hx-target="#sightings-offers-panel" hx-swap="innerHTML"
+                hx-confirm="Mark this offer as sold?" data-loading-disable
+                @click.stop="open = false"
+                class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50">Mark Sold</button>
+        {% endif %}
+        <button hx-delete="/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}"
+                hx-target="#sightings-offers-panel" hx-swap="innerHTML"
+                hx-confirm="Delete this offer? This cannot be undone." data-loading-disable
+                @click.stop="open = false"
+                class="w-full text-left px-3 py-1.5 text-rose-600 hover:bg-rose-50 border-t border-gray-100">Delete</button>
+      </div>
+    </div>
+  </div>
+</div>

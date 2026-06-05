@@ -12,19 +12,21 @@ Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
 import asyncio
 import json
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Final, Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse
 from loguru import logger
+from pydantic import ValidationError
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
 from ..config import settings
 from ..constants import ActivityType, OfferStatus, RequisitionStatus, SourcingStatus
 from ..database import get_db
-from ..dependencies import require_fresh_token, require_user
+from ..dependencies import require_buyer, require_fresh_token, require_user
 from ..models import User
 from ..models.intelligence import ActivityLog, MaterialCard
 from ..models.offers import Offer
@@ -33,10 +35,12 @@ from ..models.vendor_sighting_summary import VendorSightingSummary
 from ..models.vendors import VendorCard, VendorContact
 from ..schemas.sightings import SightingsListParams
 from ..services.activity_service import log_rfq_activity
+from ..services.part_offers import part_offers_for
 from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
 from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transition
 from ..template_env import template_response
+from ..utils import safe_float, safe_int
 from ..utils.sql_helpers import escape_like
 from ..vendor_utils import normalize_vendor_name
 
@@ -86,6 +90,25 @@ def _oob_toast(msg: str, level: str = "success") -> HTMLResponse:
         f"$store.toast.type='{level}';"
         f'$store.toast.show=true"></div>'
     )
+
+
+def _render_offers_panel(request: Request, requirement: Requirement, db: Session) -> HTMLResponse:
+    """Render the part-centric Offers panel for swap into #sightings-offers-panel."""
+    ctx = {
+        "request": request,
+        "requirement": requirement,
+        "part_offers": part_offers_for(requirement, db),
+    }
+    resp = template_response("htmx/partials/sightings/offers_panel.html", ctx)
+    resp.headers["X-Rendered-Req-Id"] = str(requirement.id)
+    return resp
+
+
+def _with_toast(resp: HTMLResponse, msg: str, level: str = "success") -> HTMLResponse:
+    """Attach the `showToast` HX-Trigger to an HTMX response (the same toast trigger
+    this router already emits via HX-Trigger elsewhere)."""
+    resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg, "type": level}})
+    return resp
 
 
 async def _publish_if_user_source(source: str, user_id: int, requirement_id: int) -> None:
@@ -596,6 +619,9 @@ async def sightings_detail(
     # ── Available Status Transitions (Phase 4.3) ────────────────
     available_statuses = sorted(SOURCING_TRANSITIONS.get(status, set()))
 
+    # Part-centric offers for the Offers tab (primary + substitute MPNs, any req).
+    part_offers = part_offers_for(requirement, db)
+
     ctx = {
         "request": request,
         "requirement": requirement,
@@ -603,6 +629,7 @@ async def sightings_detail(
         "summaries": summaries,
         "vendor_statuses": vendor_statuses,
         "pending_offers": pending_offers,
+        "part_offers": part_offers,
         "vendor_phones": vendor_phones,
         "vendor_intel": vendor_intel,
         "ooo_map": ooo_map,
@@ -1303,3 +1330,304 @@ async def sightings_send_inquiry(
             msg += f" {progressed_count} requirement{'s' if progressed_count != 1 else ''} advanced to sourcing."
 
     return _oob_toast(msg, "warning" if failed_vendors else "success")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Offers tab (part-centric) — Convert-to-offer, Enter-offer, and mutations.
+# Creation/mutation logic is reused from app.routers.crm.offers (no duplication);
+# these endpoints just adapt form input and re-render #sightings-offers-panel.
+# ─────────────────────────────────────────────────────────────────────────────
+
+
+def _refresh_offers_panel(request: Request, requirement_id: int, db: Session) -> HTMLResponse:
+    """Re-fetch the requirement (post-mutation) and render the offers panel, or 404."""
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    return _render_offers_panel(request, requirement, db)
+
+
+def _parse_iso_date(v: str | None) -> date | None:
+    """Parse an optional ISO-date form field ('' or unparseable → None)."""
+    s = (v or "").strip()
+    if not s:
+        return None
+    try:
+        return date.fromisoformat(s)
+    except ValueError:
+        return None
+
+
+@router.get("/v2/partials/sightings/{requirement_id}/offer-form", response_class=HTMLResponse)
+async def sightings_offer_form(
+    request: Request,
+    requirement_id: int,
+    vendor_name: str = Query(""),
+    unit_price: str = Query(""),
+    qty: str = Query(""),
+    moq: str = Query(""),
+    lead_days: str = Query(""),
+    manufacturer: str = Query(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Modal offer form — pre-filled from a sighting (Convert) or blank (Enter)."""
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    prefill = None
+    if vendor_name:
+        prefill = {
+            "vendor_name": vendor_name,
+            "mpn": requirement.primary_mpn,
+            "manufacturer": manufacturer or requirement.manufacturer or "",
+            "unit_price": unit_price,
+            "qty_available": qty,
+            "moq": moq,
+            "lead_time": f"{lead_days} days" if lead_days else "",
+        }
+    ctx = {"request": request, "requirement": requirement, "prefill": prefill, "offer": None}
+    return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
+
+
+@router.post("/v2/partials/sightings/{requirement_id}/offers", response_class=HTMLResponse)
+async def sightings_create_offer(
+    request: Request,
+    requirement_id: int,
+    vendor_name: str = Form(...),
+    mpn: str = Form(...),
+    manufacturer: str = Form(""),
+    qty_available: str = Form(""),
+    unit_price: str = Form(""),
+    lead_time: str = Form(""),
+    date_code: str = Form(""),
+    condition: str = Form("new"),
+    packaging: str = Form(""),
+    firmware: str = Form(""),
+    hardware_code: str = Form(""),
+    moq: str = Form(""),
+    spq: str = Form(""),
+    warranty: str = Form(""),
+    country_of_origin: str = Form(""),
+    valid_until: str = Form(""),
+    notes: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_buyer),
+) -> HTMLResponse:
+    """Create an offer for this part via the canonical create_offer, then re-render the
+    offers panel.
+
+    Reused for both Convert-to-offer and Enter-offer.
+    """
+    from ..routers.crm.offers import create_offer
+    from ..schemas.crm import OfferCreate
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+
+    try:
+        payload = OfferCreate(
+            mpn=mpn,
+            vendor_name=vendor_name,
+            requirement_id=requirement_id,
+            manufacturer=manufacturer or None,
+            qty_available=safe_int(qty_available),
+            unit_price=safe_float(unit_price),
+            lead_time=lead_time or None,
+            date_code=date_code or None,
+            condition=condition or "new",
+            packaging=packaging or None,
+            firmware=firmware or None,
+            hardware_code=hardware_code or None,
+            moq=safe_int(moq),
+            spq=safe_int(spq),
+            warranty=warranty or None,
+            country_of_origin=country_of_origin or None,
+            valid_until=_parse_iso_date(valid_until),
+            notes=notes or None,
+            source="manual",
+        )
+    except ValidationError as e:
+        # Surface as a 422 (not a 500) so a bad numeric/date is reported, not crashed.
+        raise RequestValidationError(e.errors()) from e
+
+    await create_offer(requirement.requisition_id, payload, user=user, db=db)
+    db.expire_all()
+    return _with_toast(_refresh_offers_panel(request, requirement_id, db), "Offer saved")
+
+
+@router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}/review", response_class=HTMLResponse)
+async def sightings_review_offer(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    action: str = Form(...),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Approve or reject a pending_review offer, then re-render the offers panel."""
+    from ..routers.crm.offers import approve_offer, reject_offer
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    if action == "approve":
+        await approve_offer(offer_id, user=user, db=db)
+    else:
+        await reject_offer(offer_id, user=user, db=db)
+    db.expire_all()
+    return _refresh_offers_panel(request, requirement_id, db)
+
+
+@router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}/reconfirm", response_class=HTMLResponse)
+async def sightings_reconfirm_offer(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Reconfirm an offer, then re-render the offers panel."""
+    from ..routers.crm.offers import reconfirm_offer
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    await reconfirm_offer(offer_id, user=user, db=db)
+    db.expire_all()
+    return _refresh_offers_panel(request, requirement_id, db)
+
+
+@router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}/mark-sold", response_class=HTMLResponse)
+async def sightings_mark_offer_sold(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_buyer),
+):
+    """Mark an offer sold, then re-render the offers panel."""
+    from ..routers.crm.offers import mark_offer_sold
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    await mark_offer_sold(offer_id, user=user, db=db)
+    db.expire_all()
+    return _refresh_offers_panel(request, requirement_id, db)
+
+
+@router.delete("/v2/partials/sightings/{requirement_id}/offers/{offer_id}", response_class=HTMLResponse)
+async def sightings_delete_offer(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_buyer),
+):
+    """Delete an offer, then re-render the offers panel."""
+    from ..routers.crm.offers import delete_offer
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    await delete_offer(offer_id, user=user, db=db)
+    db.expire_all()
+    return _refresh_offers_panel(request, requirement_id, db)
+
+
+@router.get("/v2/partials/sightings/{requirement_id}/offers/{offer_id}/edit-form", response_class=HTMLResponse)
+async def sightings_offer_edit_form(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    db: Session = Depends(get_db),
+    user: User = Depends(require_user),
+):
+    """Modal offer form pre-filled from an existing offer (edit mode)."""
+    requirement = db.get(Requirement, requirement_id)
+    offer = db.get(Offer, offer_id)
+    if not requirement or not offer:
+        raise HTTPException(404, "Not found")
+    fields = [
+        "vendor_name",
+        "mpn",
+        "manufacturer",
+        "qty_available",
+        "unit_price",
+        "lead_time",
+        "date_code",
+        "condition",
+        "packaging",
+        "firmware",
+        "hardware_code",
+        "moq",
+        "spq",
+        "warranty",
+        "country_of_origin",
+        "notes",
+    ]
+    prefill = {f: ("" if getattr(offer, f) is None else getattr(offer, f)) for f in fields}
+    ctx = {"request": request, "requirement": requirement, "prefill": prefill, "offer": offer}
+    return template_response("htmx/partials/sightings/offer_form_modal.html", ctx)
+
+
+@router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}", response_class=HTMLResponse)
+async def sightings_update_offer(
+    request: Request,
+    requirement_id: int,
+    offer_id: int,
+    vendor_name: str = Form(""),
+    mpn: str = Form(""),
+    manufacturer: str = Form(""),
+    qty_available: str = Form(""),
+    unit_price: str = Form(""),
+    lead_time: str = Form(""),
+    date_code: str = Form(""),
+    condition: str = Form(""),
+    packaging: str = Form(""),
+    firmware: str = Form(""),
+    hardware_code: str = Form(""),
+    moq: str = Form(""),
+    spq: str = Form(""),
+    warranty: str = Form(""),
+    country_of_origin: str = Form(""),
+    valid_until: str = Form(""),
+    notes: str = Form(""),
+    db: Session = Depends(get_db),
+    user: User = Depends(require_buyer),
+) -> HTMLResponse:
+    """Update an offer via the canonical update_offer, then re-render the panel."""
+    from ..routers.crm.offers import update_offer
+    from ..schemas.crm import OfferUpdate
+
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    try:
+        payload = OfferUpdate(
+            vendor_name=vendor_name or None,
+            mpn=mpn or None,
+            manufacturer=manufacturer or None,
+            qty_available=safe_int(qty_available),
+            unit_price=safe_float(unit_price),
+            lead_time=lead_time or None,
+            date_code=date_code or None,
+            condition=condition or None,
+            packaging=packaging or None,
+            firmware=firmware or None,
+            hardware_code=hardware_code or None,
+            moq=safe_int(moq),
+            spq=safe_int(spq),
+            warranty=warranty or None,
+            country_of_origin=country_of_origin or None,
+            valid_until=_parse_iso_date(valid_until),
+            notes=notes or None,
+        )
+    except ValidationError as e:
+        raise RequestValidationError(e.errors()) from e
+
+    await update_offer(offer_id, payload, user=user, db=db)
+    db.expire_all()
+    return _with_toast(_refresh_offers_panel(request, requirement_id, db), "Offer updated")

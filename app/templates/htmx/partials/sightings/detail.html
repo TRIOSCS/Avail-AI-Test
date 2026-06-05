@@ -1,8 +1,8 @@
-{# Sightings detail panel — requirement info + tabbed vendors/activity panes.
+{# Sightings detail panel — requirement info + tabbed Vendors/Offers/Activity panes.
    Called by: GET /v2/partials/sightings/{id}/detail (sightings router)
-   Depends on: _macros.html, activity_timeline.html, source_badge.html
+   Depends on: _macros.html, activity_timeline.html, source_badge.html, offers_panel.html
    Context: requirement, requisition, summaries, vendor_statuses,
-            pending_offers, vendor_phones, overlap_counts, activities,
+            pending_offers, part_offers, vendor_phones, overlap_counts, activities,
             user, vendor_matched_mpns, link_map
 #}
 
@@ -75,7 +75,7 @@
 <div x-data="{ activeTab: 'vendors' }">
   <div class="border-b border-gray-200 mb-3">
     <nav class="flex gap-6 -mb-px">
-      {% for tab_id, tab_label in [('vendors', 'Vendors'), ('activity', 'Activity')] %}
+      {% for tab_id, tab_label in [('vendors', 'Vendors'), ('offers', 'Offers'), ('activity', 'Activity')] %}
       <button @click="activeTab = '{{ tab_id }}'"
               type="button"
               :class="activeTab === '{{ tab_id }}' ? 'border-brand-500 text-brand-500' : 'border-transparent text-gray-500 hover:text-gray-900 hover:border-gray-200'"
@@ -142,41 +142,15 @@
     {% endif %}
   </div>
   {% endif %}
-
-  {# ── Pending Offers (AI-parsed, need approval) ──────────── #}
-  {% if pending_offers %}
-  <div class="mt-3 border-t border-gray-100 pt-3">
-    <h4 class="text-xs font-semibold text-amber-600 uppercase tracking-wider mb-2">
-      Pending Review ({{ pending_offers|length }})
-    </h4>
-    {% for o in pending_offers %}
-    <div class="flex items-center justify-between py-1.5 border-b border-gray-50 last:border-0">
-      <div class="text-xs">
-        <span class="font-medium text-gray-700">{{ o.vendor_name }}</span>
-        <span class="text-gray-400 ml-2">{{ o.qty_available or '?' }} pcs @ ${{ '%.2f'|format(o.unit_price) if o.unit_price else '?' }}</span>
-      </div>
-      <div class="flex gap-1">
-        <button hx-put="/api/offers/{{ o.id }}/approve"
-                hx-target="#sightings-detail"
-                hx-swap="innerHTML"
-                data-loading-disable
-                class="px-2 py-0.5 text-[10px] font-medium rounded bg-emerald-50 text-emerald-700 hover:bg-emerald-100">
-          Approve
-        </button>
-        <button hx-put="/api/offers/{{ o.id }}/reject"
-                hx-target="#sightings-detail"
-                hx-swap="innerHTML"
-                data-loading-disable
-                class="px-2 py-0.5 text-[10px] font-medium rounded bg-gray-50 text-gray-500 hover:bg-gray-100">
-          Reject
-        </button>
-      </div>
-    </div>
-    {% endfor %}
-  </div>
-  {% endif %}
 </div>
   </div>{# /vendors panel #}
+
+  {# ── Offers panel (part-centric — all offers for this MPN incl. subs) ─── #}
+  <div x-show="activeTab === 'offers'" x-cloak>
+    <div id="sightings-offers-panel">
+      {% include "htmx/partials/sightings/offers_panel.html" %}
+    </div>
+  </div>
 
   {# ── Activity panel ───────────────────────────────────────── #}
   <div x-show="activeTab === 'activity'" x-cloak>

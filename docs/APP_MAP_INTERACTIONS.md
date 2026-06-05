@@ -367,6 +367,48 @@ heartbeats; both singletons are seeded at startup so
   `POST /api/requisitions/{id}/search-all` routes
 - Row-click POST `/refresh` (row click is read-only `GET /detail` only)
 
+### 2c. Sightings detail — Offers tab (part-centric)
+
+The sightings detail pane (`GET /v2/partials/sightings/{requirement_id}/detail`)
+has three tabs: **Vendors · Offers · Activity**. The Offers tab is
+**part-centric** — it shows every Offer for the part number, not just the open
+requirement.
+
+```
+sightings_detail (router)
+  +-- part_offers_for(requirement, db)   [app/services/part_offers.py]
+  |     +-- MPN set = primary_mpn + substitute MPNs (parse_substitute_mpns)
+  |     +-- match Offer WHERE material_card_id IN {cards}
+  |         OR normalized_mpn IN {both normalize_mpn_key + normalize_mpn forms}
+  |     +-- returns offers across ALL requisitions, newest first
+  +-- renders offers_panel.html into #sightings-offers-panel
+        +-- _offer_row.html per offer (vendor, price/qty/lead, status pill,
+            "↳ customer · Req #" source hint, kebab actions)
+
+Pending-review offers render here (Approve/Reject) — moved out of the Vendors
+panel so offers have a single home.
+
+Offer actions (all on the prefix-less sightings router) call the canonical
+crm.offers functions directly (no logic duplication) and re-render the panel:
+  GET  .../offer-form            modal, blank (Enter) or prefilled (Convert)
+  POST .../offers                -> create_offer(...)        [Convert / Enter]
+  GET  .../offers/{id}/edit-form modal prefilled from the offer
+  POST .../offers/{id}           -> update_offer(...)
+  POST .../offers/{id}/review    -> approve_offer / reject_offer
+  POST .../offers/{id}/reconfirm -> reconfirm_offer
+  POST .../offers/{id}/mark-sold -> mark_offer_sold
+  DELETE .../offers/{id}         -> delete_offer
+
+"Convert to offer" sits on the collapsed vendor row (next to Send RFQ / Mark
+Unavail) and opens the modal prefilled from the VendorSightingSummary. The modal
+and the requisitions add-offer form share one field grid
+(offers/_offer_form_fields.html). Offer creation logs OFFER_CREATED, so converted/
+entered offers appear in the Activity tab automatically.
+
+NOTE: the two creation paths historically wrote Offer.normalized_mpn differently
+(create_offer = normalize_mpn_key, add_offer = normalize_mpn); add_offer was
+fixed to use normalize_mpn_key, and the part query matches both forms for safety.
+
 ## 3. RFQ Email Sending
 
 ```

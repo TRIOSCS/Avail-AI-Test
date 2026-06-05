@@ -368,6 +368,7 @@ async def create_offer(
         moq=payload.moq,
         warranty=payload.warranty,
         country_of_origin=payload.country_of_origin,
+        valid_until=payload.valid_until,
         source=payload.source,
         vendor_response_id=payload.vendor_response_id,
         entered_by_id=user.id,
