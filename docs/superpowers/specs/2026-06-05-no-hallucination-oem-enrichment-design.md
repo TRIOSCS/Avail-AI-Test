@@ -243,10 +243,14 @@ Two precise edits, both forced by the new tiers:
   web_meter delta`**: pass a fresh `web_meter={"calls":0}` into each `enrich_card`, read
   `web_meter["calls"]` after, add that to the running total, and persist to the cache.
   This stays exact when a single card fires 1–3 web calls.
-- **Circuit-breaker reset.** Reset the breaker when **`web_meter delta > 0`** (a Claude
-  web call returned without raising), replacing the current `status != VERIFIED` proxy.
-  That proxy is now wrong: a **cross-ref result is `verified` yet did call Claude**, while
-  a plain distributor `verified` makes no Claude call. Metering is the correct signal.
+- **Circuit-breaker reset.** The meter is `{"web_calls": int, "claude_ok": bool}`:
+  `web_calls` counts billable web-search calls (budget); `claude_ok` is set True after
+  **any** Claude call (web tier, cross-ref, OEM description, *or* `infer_part`) returns
+  without raising. Worker resets the breaker when `claude_ok` is True, replacing the
+  current `status != VERIFIED` proxy. That proxy is now wrong on both ends: a **cross-ref
+  result is `verified` yet did call Claude** (must reset), while a plain distributor
+  `verified` makes no Claude call (must not). `claude_ok` is the precise signal; budget
+  uses `web_calls` so a non-web Claude success (AI-inferred) never miscounts spend.
 
 ### 4.5 `constants.py` + model validator
 Add to `MaterialEnrichmentStatus`: `OEM_SOURCED = "oem_sourced"`, `NOT_CATALOGUED =
