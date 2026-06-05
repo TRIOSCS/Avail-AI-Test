@@ -741,6 +741,22 @@ NOTE: Uses tsvector + trgm for multi-word queries, ILIKE fallback for
       single tokens. GIN-indexed TSVECTOR with weighted fields
       (MPN=A, manufacturer=B, description/category=C).
 
+Sidebar facets (workspace.html + materialsFilter Alpine component):
+    +---> Data confidence (trust ladder): 5 ordered, color-coded enrichment
+    |     tiers (verified > web_sourced > ai_inferred > not_found > unenriched).
+    |     Multi-select; default selection = verified + web_sourced. Alpine state
+    |     `statuses[]` → `?statuses=` CSV → search_materials_faceted(statuses=...)
+    |     which IN-filters MaterialCard.enrichment_status. `statuses` takes
+    |     precedence over the legacy `verified_only` boolean (never ANDed).
+    +---> Global facets (MaterialCard columns, OR-within each, AND across):
+    |       +---> lifecycle  → lifecycle_status IN (active|nrfnd|eol|obsolete|ltb)
+    |       +---> rohs        → rohs_status IN (compliant|non-compliant|exempt)
+    |       +---> has_datasheet (boolean) → datasheet_url IS NOT NULL
+    |     Counts come from get_global_facet_counts(); rendered by
+    |     /v2/partials/materials/filters/global (reloads on commodity-changed).
+    +---> Manufacturer facet → /v2/partials/materials/filters/manufacturers
+    +---> Commodity sub-filters → /v2/partials/materials/filters/sub (spec facets)
+
 Search coverage:
     +---> global_search_service.py includes substitutes_text.ilike for
     |     cross-MPN matching in global search

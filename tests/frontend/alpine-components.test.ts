@@ -63,12 +63,18 @@ describe('_viewFromPath', () => {
 describe('materialsFilter', () => {
   // Factory that creates a materialsFilter data object (mirrors htmx_app.js)
   function createFilter() {
+    const DEFAULT_STATUSES = ['verified', 'web_sourced'];
     const filter: any = {
       commodity: '',
       subFilters: {} as Record<string, any>,
       q: '',
       page: 0,
       drawerOpen: false,
+      statuses: ['verified', 'web_sourced'] as string[],
+      lifecycle: [] as string[],
+      rohs: [] as string[],
+      hasDatasheet: false,
+      DEFAULT_STATUSES,
       _onPopstate: null,
       _pushedUrls: [] as string[],
 
@@ -78,12 +84,20 @@ describe('materialsFilter', () => {
           : '';
       },
 
+      get nonDefaultStatuses() {
+        return this.statuses.filter((s: string) => !this.DEFAULT_STATUSES.includes(s));
+      },
+
       get activeFilterCount() {
         let count = 0;
         for (const [, val] of Object.entries(this.subFilters)) {
           if (Array.isArray(val)) count += (val as any[]).length;
           else if (val !== '' && val !== null) count += 1;
         }
+        count += this.nonDefaultStatuses.length;
+        count += this.lifecycle.length;
+        count += this.rohs.length;
+        if (this.hasDatasheet) count += 1;
         return count;
       },
 
@@ -91,6 +105,18 @@ describe('materialsFilter', () => {
         const params = new URLSearchParams(window.location.search);
         this.commodity = params.get('commodity') || '';
         this.q = params.get('q') || '';
+        const statusesParam = params.get('statuses');
+        if (statusesParam !== null) {
+          this.statuses = statusesParam.split(',').filter((s: string) => s !== '');
+        } else {
+          const legacy: string[] = [];
+          if (params.get('verified_only') === 'true') legacy.push('verified');
+          if (params.get('web_sourced') === 'true') legacy.push('web_sourced');
+          this.statuses = legacy.length > 0 ? legacy : [...this.DEFAULT_STATUSES];
+        }
+        this.lifecycle = (params.get('lifecycle') || '').split(',').filter((s: string) => s !== '');
+        this.rohs = (params.get('rohs') || '').split(',').filter((s: string) => s !== '');
+        this.hasDatasheet = params.get('has_datasheet') === 'true';
         const pageVal = parseInt(params.get('page') || '0', 10);
         this.page = isNaN(pageVal) ? 0 : pageVal;
         this.subFilters = {};
@@ -112,6 +138,12 @@ describe('materialsFilter', () => {
         const params = new URLSearchParams();
         if (this.commodity) params.set('commodity', this.commodity);
         if (this.q) params.set('q', this.q);
+        const isDefault = this.statuses.length === this.DEFAULT_STATUSES.length
+          && this.DEFAULT_STATUSES.every((s: string) => this.statuses.includes(s));
+        if (!isDefault) params.set('statuses', this.statuses.join(','));
+        if (this.lifecycle.length > 0) params.set('lifecycle', this.lifecycle.join(','));
+        if (this.rohs.length > 0) params.set('rohs', this.rohs.join(','));
+        if (this.hasDatasheet) params.set('has_datasheet', 'true');
         if (this.page > 0) params.set('page', String(this.page));
         for (const [key, val] of Object.entries(this.subFilters)) {
           if (Array.isArray(val) && (val as any[]).length > 0) {
@@ -123,6 +155,21 @@ describe('materialsFilter', () => {
         const search = params.toString();
         const url = window.location.pathname + (search ? '?' + search : '');
         this._pushedUrls.push(url);
+      },
+
+      toggleStatus(key: string) {
+        const idx = this.statuses.indexOf(key);
+        if (idx >= 0) this.statuses.splice(idx, 1);
+        else this.statuses.push(key);
+        this.applyFilters();
+      },
+
+      toggleGlobalFacet(facet: string, value: string) {
+        const arr = this[facet];
+        if (!Array.isArray(arr)) return;
+        const idx = arr.indexOf(value);
+        if (idx >= 0) arr.splice(idx, 1);
+        else arr.push(value);
       },
 
       selectCommodity(commodity: string) {
@@ -317,6 +364,100 @@ describe('materialsFilter', () => {
 
     it('activeFilterCount returns 0 when no filters', () => {
       expect(filter.activeFilterCount).toBe(0);
+    });
+  });
+
+  describe('trust ladder (statuses)', () => {
+    it('defaults to the trustworthy set', () => {
+      expect(filter.statuses).toEqual(['verified', 'web_sourced']);
+    });
+
+    it('toggleStatus adds a tier when absent', () => {
+      filter.toggleStatus('ai_inferred');
+      expect(filter.statuses).toContain('ai_inferred');
+    });
+
+    it('toggleStatus removes a tier when present', () => {
+      filter.toggleStatus('verified');
+      expect(filter.statuses).not.toContain('verified');
+      expect(filter.statuses).toContain('web_sourced');
+    });
+
+    it('nonDefaultStatuses excludes the default trustworthy set', () => {
+      filter.statuses = ['verified', 'web_sourced', 'ai_inferred', 'not_found'];
+      expect(filter.nonDefaultStatuses).toEqual(['ai_inferred', 'not_found']);
+    });
+
+    it('pushURL omits statuses when default selection', () => {
+      filter.pushURL();
+      expect(filter._pushedUrls[0]).not.toContain('statuses=');
+    });
+
+    it('pushURL writes statuses CSV when non-default', () => {
+      filter.statuses = ['verified', 'ai_inferred'];
+      filter.pushURL();
+      expect(filter._pushedUrls[0]).toContain('statuses=verified%2Cai_inferred');
+    });
+
+    it('syncFromURL reads statuses CSV', () => {
+      window.location.search = '?statuses=ai_inferred,not_found';
+      filter.syncFromURL();
+      expect(filter.statuses).toEqual(['ai_inferred', 'not_found']);
+    });
+
+    it('syncFromURL maps legacy verified_only/web_sourced links', () => {
+      window.location.search = '?verified_only=true&web_sourced=true';
+      filter.syncFromURL();
+      expect(filter.statuses).toEqual(['verified', 'web_sourced']);
+    });
+
+    it('syncFromURL falls back to default when no status params', () => {
+      window.location.search = '?commodity=resistors';
+      filter.syncFromURL();
+      expect(filter.statuses).toEqual(['verified', 'web_sourced']);
+    });
+  });
+
+  describe('global facets (lifecycle / rohs / hasDatasheet)', () => {
+    it('toggleGlobalFacet adds and removes lifecycle values', () => {
+      filter.toggleGlobalFacet('lifecycle', 'active');
+      expect(filter.lifecycle).toEqual(['active']);
+      filter.toggleGlobalFacet('lifecycle', 'active');
+      expect(filter.lifecycle).toEqual([]);
+    });
+
+    it('toggleGlobalFacet supports OR-within rohs', () => {
+      filter.toggleGlobalFacet('rohs', 'compliant');
+      filter.toggleGlobalFacet('rohs', 'exempt');
+      expect(filter.rohs).toEqual(['compliant', 'exempt']);
+    });
+
+    it('pushURL writes lifecycle/rohs/has_datasheet params', () => {
+      filter.lifecycle = ['active', 'eol'];
+      filter.rohs = ['compliant'];
+      filter.hasDatasheet = true;
+      filter.pushURL();
+      const url = filter._pushedUrls[0];
+      expect(url).toContain('lifecycle=active%2Ceol');
+      expect(url).toContain('rohs=compliant');
+      expect(url).toContain('has_datasheet=true');
+    });
+
+    it('syncFromURL reads lifecycle/rohs/has_datasheet', () => {
+      window.location.search = '?lifecycle=active,eol&rohs=compliant&has_datasheet=true';
+      filter.syncFromURL();
+      expect(filter.lifecycle).toEqual(['active', 'eol']);
+      expect(filter.rohs).toEqual(['compliant']);
+      expect(filter.hasDatasheet).toBe(true);
+    });
+
+    it('activeFilterCount counts non-default tiers and global facets', () => {
+      filter.statuses = ['verified', 'web_sourced', 'ai_inferred'];
+      filter.lifecycle = ['active'];
+      filter.rohs = ['compliant', 'exempt'];
+      filter.hasDatasheet = true;
+      // 1 non-default tier + 1 lifecycle + 2 rohs + 1 datasheet = 5
+      expect(filter.activeFilterCount).toBe(5);
     });
   });
 

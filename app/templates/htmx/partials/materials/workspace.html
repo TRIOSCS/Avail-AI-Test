@@ -32,6 +32,33 @@
         </button>
       </div>
 
+      {# ── Data confidence (trust ladder) ──────────────────────────────
+         Ordered, color-coded enrichment tiers (most → least trustworthy).
+         Multi-select; default = Verified + Web-sourced. Sends a `statuses`
+         CSV that the faceted endpoint already consumes. #}
+      {% set trust_tiers = [
+        ('verified', 'Verified', 'bg-emerald-500'),
+        ('web_sourced', 'Web-sourced', 'bg-sky-500'),
+        ('ai_inferred', 'AI-inferred', 'bg-amber-500'),
+        ('not_found', 'Not found', 'bg-gray-400'),
+        ('unenriched', 'Unenriched', 'bg-gray-300'),
+      ] %}
+      <div class="mb-3">
+        <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Data confidence</h4>
+        <div class="space-y-0.5">
+          {% for key, label, dot in trust_tiers %}
+          <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm">
+            <input aria-label="Filter by {{ label }}" type="checkbox" value="{{ key }}"
+                   :checked="statuses.includes('{{ key }}')"
+                   @change="toggleStatus('{{ key }}')"
+                   class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+            <span class="inline-block w-2 h-2 rounded-full {{ dot }} flex-shrink-0"></span>
+            <span class="text-gray-700 truncate flex-1 text-[13px]">{{ label }}</span>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+
       {# Manufacturer filter — always visible, reloads on commodity change #}
       <div id="manufacturer-filter-container"
            hx-get="/v2/partials/materials/filters/manufacturers"
@@ -42,25 +69,13 @@
            hx-swap="innerHTML">
       </div>
 
-      {# Verified only toggle #}
-      <div class="mb-1">
-        <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer text-sm">
-          <input type="checkbox"
-                 :checked="verifiedOnly"
-                 @change="verifiedOnly = !verifiedOnly; applyFilters()"
-                 class="rounded border-gray-300 text-emerald-600 focus:ring-emerald-500 h-3.5 w-3.5">
-          <span class="text-gray-700 font-medium">Verified only</span>
-        </label>
-      </div>
-      {# Web-sourced toggle #}
-      <div class="mb-3">
-        <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer text-sm">
-          <input type="checkbox"
-                 :checked="webSourced"
-                 @change="webSourced = !webSourced; applyFilters()"
-                 class="rounded border-gray-300 text-sky-600 focus:ring-sky-500 h-3.5 w-3.5">
-          <span class="text-gray-700 font-medium">Web-sourced</span>
-        </label>
+      {# Global facets — lifecycle / RoHS / has-datasheet, reload on commodity change #}
+      <div id="global-filter-container"
+           hx-get="/v2/partials/materials/filters/global"
+           hx-target="this"
+           hx-trigger="load, commodity-changed from:body"
+           hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
+           hx-swap="innerHTML">
       </div>
 
       {# "All Materials" button #}
@@ -154,12 +169,40 @@
       <div id="ai-script-container"></div>
 
       {# Active filter chips #}
-      <template x-if="commodity || q || Object.keys(subFilters).length > 0" x-cloak>
+      <template x-if="commodity || q || Object.keys(subFilters).length > 0 || nonDefaultStatuses.length > 0 || lifecycle.length > 0 || rohs.length > 0 || hasDatasheet" x-cloak>
         <div class="flex flex-wrap gap-1.5 mt-2">
           <template x-if="q" x-cloak>
             <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs">
               Search: <span x-text="q"></span>
               <button @click="q = ''; applyFilters()" class="hover:text-blue-900" aria-label="Remove filter">&times;</button>
+            </span>
+          </template>
+          {# Trust-ladder chips — only non-default tiers surface (Verified/Web-sourced are implicit) #}
+          <template x-for="tier in nonDefaultStatuses" :key="'status-' + tier">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs">
+              <span x-text="statusLabel(tier)"></span>
+              <button @click="toggleStatus(tier)" class="hover:text-amber-900" aria-label="Remove filter">&times;</button>
+            </span>
+          </template>
+          {# Lifecycle chips #}
+          <template x-for="val in lifecycle" :key="'lc-' + val">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
+              <span x-text="'Lifecycle: ' + val.toUpperCase()"></span>
+              <button @click="removeGlobalFacet('lifecycle', val)" class="hover:text-gray-900" aria-label="Remove filter">&times;</button>
+            </span>
+          </template>
+          {# RoHS chips #}
+          <template x-for="val in rohs" :key="'rohs-' + val">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
+              <span x-text="'RoHS: ' + val"></span>
+              <button @click="removeGlobalFacet('rohs', val)" class="hover:text-gray-900" aria-label="Remove filter">&times;</button>
+            </span>
+          </template>
+          {# Has-datasheet chip #}
+          <template x-if="hasDatasheet" x-cloak>
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
+              Has datasheet
+              <button @click="hasDatasheet = false; applyFilters()" class="hover:text-gray-900" aria-label="Remove filter">&times;</button>
             </span>
           </template>
           <template x-if="commodity" x-cloak>
@@ -191,17 +234,17 @@
          hx-indicator="#materials-results-spinner"
          hx-vals='js:(function(){
            var ws = document.querySelector("#materials-workspace");
-           var verifiedOnly = Alpine.evaluate(ws, "verifiedOnly") || false;
-           var webSourced = Alpine.evaluate(ws, "webSourced") || false;
-           var statusList = [];
-           if (verifiedOnly) statusList.push("verified");
-           if (webSourced) statusList.push("web_sourced");
+           var statusList = Alpine.evaluate(ws, "statuses") || [];
+           var lifecycleList = Alpine.evaluate(ws, "lifecycle") || [];
+           var rohsList = Alpine.evaluate(ws, "rohs") || [];
            return {
              "commodity": Alpine.evaluate(ws, "commodity") || "",
              "q": Alpine.evaluate(ws, "q") || "",
              "sub_filters": JSON.stringify(Alpine.evaluate(ws, "subFilters") || {}),
-             "verified_only": verifiedOnly,
              "statuses": statusList.join(","),
+             "lifecycle": lifecycleList.join(","),
+             "rohs": rohsList.join(","),
+             "has_datasheet": Alpine.evaluate(ws, "hasDatasheet") || false,
              "limit": 50,
              "offset": Alpine.evaluate(ws, "page") * 50 || 0
            };

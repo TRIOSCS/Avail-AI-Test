@@ -1,0 +1,68 @@
+{# Global facets — MaterialCard-column filters (lifecycle / RoHS / has-datasheet).
+   Called by: workspace.html global-filter-container (hx-get .../filters/global)
+   Depends on: Alpine.js materialsFilter() — lifecycle[], rohs[], hasDatasheet
+               global_facet_counts {lifecycle:{..}, rohs:{..}, has_datasheet:{true:n}}
+#}
+{% set lc_counts = global_facet_counts.get('lifecycle', {}) %}
+{% set rohs_counts = global_facet_counts.get('rohs', {}) %}
+{% set ds_count = global_facet_counts.get('has_datasheet', {}).get('true', 0) %}
+
+{# Lifecycle facet — stored values: active|eol|obsolete|nrfnd|ltb (NRND→nrfnd) #}
+{% set lifecycle_opts = [
+  ('active', 'Active'), ('nrfnd', 'NRND'), ('eol', 'EOL'),
+  ('obsolete', 'Obsolete'), ('ltb', 'LTB')
+] %}
+<div class="mb-3">
+  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Lifecycle</h4>
+  <div class="space-y-0.5">
+    {% for value, label in lifecycle_opts %}
+    {% if lc_counts.get(value, 0) > 0 %}
+    <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm">
+      <input aria-label="Filter by lifecycle {{ label }}" type="checkbox" value="{{ value }}"
+             :checked="lifecycle.includes('{{ value }}')"
+             @change="toggleGlobalFacet('lifecycle', '{{ value }}')"
+             class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+      <span class="text-gray-700 truncate flex-1 text-[13px]">{{ label }}</span>
+      <span class="text-[11px] text-gray-400 tabular-nums">{{ lc_counts[value] }}</span>
+    </label>
+    {% endif %}
+    {% endfor %}
+  </div>
+</div>
+
+{# RoHS facet — stored values: compliant|non-compliant|exempt #}
+{% set rohs_opts = [
+  ('compliant', 'Compliant'), ('non-compliant', 'Non-compliant'), ('exempt', 'Exempt')
+] %}
+<div class="mb-3">
+  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">RoHS</h4>
+  <div class="space-y-0.5">
+    {% for value, label in rohs_opts %}
+    {% if rohs_counts.get(value, 0) > 0 %}
+    <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm">
+      <input aria-label="Filter by RoHS {{ label }}" type="checkbox" value="{{ value }}"
+             :checked="rohs.includes('{{ value }}')"
+             @change="toggleGlobalFacet('rohs', '{{ value }}')"
+             class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+      <span class="text-gray-700 truncate flex-1 text-[13px]">{{ label }}</span>
+      <span class="text-[11px] text-gray-400 tabular-nums">{{ rohs_counts[value] }}</span>
+    </label>
+    {% endif %}
+    {% endfor %}
+  </div>
+</div>
+
+{# Has-datasheet boolean toggle — datasheet_url IS NOT NULL #}
+{% if ds_count > 0 %}
+<div class="mb-3">
+  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Datasheet</h4>
+  <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer text-sm">
+    <input aria-label="Only parts with a datasheet" type="checkbox"
+           :checked="hasDatasheet"
+           @change="toggleDatasheet()"
+           class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+    <span class="text-gray-700 truncate flex-1 text-[13px]">Has datasheet</span>
+    <span class="text-[11px] text-gray-400 tabular-nums">{{ ds_count }}</span>
+  </label>
+</div>
+{% endif %}

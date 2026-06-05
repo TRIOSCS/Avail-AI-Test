@@ -153,6 +153,40 @@ def get_manufacturer_options(
     return [{"name": name, "count": count} for name, count in rows]
 
 
+def get_global_facet_counts(
+    db: Session,
+    commodity: str | None = None,
+) -> dict[str, dict[str, int]]:
+    """Return value counts for the global MaterialCard-column facets.
+
+    These are columns that live directly on MaterialCard (not spec facets):
+    ``lifecycle_status``, ``rohs_status`` and a derived ``has_datasheet`` boolean.
+
+    Args:
+        commodity: If set, scope counts to this commodity only.
+
+    Returns: {"lifecycle": {value: count}, "rohs": {value: count},
+              "has_datasheet": {"true": count}}
+    """
+    base = db.query(MaterialCard).filter(MaterialCard.deleted_at.is_(None))
+    if commodity:
+        base = base.filter(func.lower(func.trim(MaterialCard.category)) == commodity.lower().strip())
+
+    def _count_col(column) -> dict[str, int]:
+        rows = base.with_entities(column, func.count(MaterialCard.id)).filter(column.isnot(None)).group_by(column).all()
+        return {val: count for val, count in rows if val}
+
+    lifecycle_counts = _count_col(MaterialCard.lifecycle_status)
+    rohs_counts = _count_col(MaterialCard.rohs_status)
+    has_ds = base.with_entities(func.count(MaterialCard.id)).filter(MaterialCard.datasheet_url.isnot(None)).scalar()
+
+    return {
+        "lifecycle": lifecycle_counts,
+        "rohs": rohs_counts,
+        "has_datasheet": {"true": has_ds or 0},
+    }
+
+
 def search_materials_faceted(
     db: Session,
     *,
@@ -162,6 +196,9 @@ def search_materials_faceted(
     manufacturers: list[str] | None = None,
     verified_only: bool = False,
     statuses: list[str] | None = None,
+    lifecycle: list[str] | None = None,
+    rohs: list[str] | None = None,
+    has_datasheet: bool = False,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[MaterialCard], int]:
@@ -176,6 +213,10 @@ def search_materials_faceted(
             cards with enrichment_status == "verified"
         statuses: When provided, restrict to cards whose enrichment_status is in this list.
             Takes precedence over ``verified_only`` (the two are never ANDed).
+        lifecycle: When provided, restrict to cards whose lifecycle_status is in this list
+            (OR-within, e.g. ``["active", "eol"]``).
+        rohs: When provided, restrict to cards whose rohs_status is in this list (OR-within).
+        has_datasheet: When True, restrict to cards that have a non-null datasheet_url.
         limit: Max results
         offset: Pagination offset
 
@@ -231,6 +272,14 @@ def search_materials_faceted(
         query = query.filter(MaterialCard.enrichment_status.in_(statuses))
     elif verified_only:
         query = query.filter(MaterialCard.enrichment_status == MaterialEnrichmentStatus.VERIFIED)
+
+    # Global facets — clean MaterialCard columns (OR-within each facet).
+    if lifecycle:
+        query = query.filter(MaterialCard.lifecycle_status.in_(lifecycle))
+    if rohs:
+        query = query.filter(MaterialCard.rohs_status.in_(rohs))
+    if has_datasheet:
+        query = query.filter(MaterialCard.datasheet_url.isnot(None))
 
     if sub_filters and commodity:
         commodity_lower = commodity.lower().strip()
