@@ -154,6 +154,14 @@ async def enrich_card(
 
     Returns the resulting enrichment_status. Does not commit (caller controls txn).
     ``disabled`` accumulates sources that hit a quota/auth wall (skipped run-wide).
+
+    CONCURRENCY INVARIANT: safe to run over a shared Session via asyncio.gather
+    because, after its first ``await``, this function performs NO DB query/flush —
+    only in-memory attribute writes on ``card`` — so synchronous session ops never
+    interleave across awaits on the single-threaded event loop. Do NOT add a
+    db.query()/db.flush() after the await without switching callers to per-card
+    sessions, or concurrent runs (import script, enrichment worker) will corrupt
+    the identity map.
     """
     if card.enrichment_status == "verified" and not refresh:
         return "verified"
