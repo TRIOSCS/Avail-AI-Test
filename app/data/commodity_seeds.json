@@ -60,6 +60,2772 @@
       "sort_order": 5
     }
   ],
+  "transformers": [
+    {
+      "spec_key": "transformer_type",
+      "display_name": "Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Power",
+        "Gate Drive",
+        "Signal / Audio",
+        "Pulse",
+        "Current Sense",
+        "Ethernet / LAN / PoE",
+        "RF / Balun",
+        "Isolation",
+        "Flyback",
+        "Toroidal"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "turns_ratio",
+      "display_name": "Turns Ratio",
+      "data_type": "enum",
+      "enum_values": [
+        "1:1",
+        "1:1.1",
+        "1:1.5",
+        "1:2",
+        "2:1",
+        "1:3",
+        "1:4",
+        "1:5",
+        "1:10",
+        "Center-Tapped",
+        "Multiple / Custom"
+      ],
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "power_rating",
+      "display_name": "Power Rating (W)",
+      "data_type": "numeric",
+      "unit": "W",
+      "canonical_unit": "W",
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "primary_voltage",
+      "display_name": "Primary Voltage (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "secondary_voltage",
+      "display_name": "Secondary Voltage (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "isolation_voltage",
+      "display_name": "Isolation Voltage (Vrms)",
+      "data_type": "numeric",
+      "unit": "Vrms",
+      "canonical_unit": "Vrms",
+      "sort_order": 6
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "chassis",
+        "DIN rail"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "fuses": [
+    {
+      "spec_key": "current_rating",
+      "display_name": "Current Rating (A)",
+      "data_type": "numeric",
+      "unit": "A",
+      "canonical_unit": "A",
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "voltage_rating",
+      "display_name": "Voltage Rating (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "fuse_type",
+      "display_name": "Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Cartridge",
+        "Chip / SMD",
+        "Blade / Automotive",
+        "PTC Resettable",
+        "Thermal Cutoff",
+        "Glass",
+        "Ceramic",
+        "Subminiature"
+      ],
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "response_time",
+      "display_name": "Response Time",
+      "data_type": "enum",
+      "enum_values": [
+        "Fast Acting",
+        "Medium / Time Lag",
+        "Slow Blow",
+        "Very Fast Acting"
+      ],
+      "sort_order": 4
+    },
+    {
+      "spec_key": "breaking_capacity",
+      "display_name": "Breaking Capacity (A)",
+      "data_type": "numeric",
+      "unit": "A",
+      "canonical_unit": "A",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "package",
+      "display_name": "Package / Size",
+      "data_type": "enum",
+      "enum_values": [
+        "0402",
+        "0603",
+        "0805",
+        "1206",
+        "1812",
+        "2410",
+        "5x20mm",
+        "6.3x32mm",
+        "blade",
+        "through-hole"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "holder / cartridge",
+        "panel"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "oscillators": [
+    {
+      "spec_key": "frequency",
+      "display_name": "Frequency (MHz)",
+      "data_type": "numeric",
+      "unit": "MHz",
+      "canonical_unit": "MHz",
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "oscillator_type",
+      "display_name": "Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Crystal (XTAL)",
+        "XO (Standard)",
+        "TCXO",
+        "VCXO",
+        "OCXO",
+        "VCTCXO",
+        "MEMS",
+        "Ceramic Resonator",
+        "SAW",
+        "Programmable"
+      ],
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "frequency_stability",
+      "display_name": "Frequency Stability (ppm)",
+      "data_type": "numeric",
+      "unit": "ppm",
+      "canonical_unit": "ppm",
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "supply_voltage",
+      "display_name": "Supply Voltage (V)",
+      "data_type": "enum",
+      "enum_values": [
+        "1.8V",
+        "2.5V",
+        "2.8V",
+        "3.0V",
+        "3.3V",
+        "5.0V",
+        "1.6V-3.6V"
+      ],
+      "sort_order": 4
+    },
+    {
+      "spec_key": "load_capacitance",
+      "display_name": "Load Capacitance (pF)",
+      "data_type": "numeric",
+      "unit": "pF",
+      "canonical_unit": "pF",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "output_type",
+      "display_name": "Output Type",
+      "data_type": "enum",
+      "enum_values": [
+        "HCMOS",
+        "LVCMOS",
+        "LVPECL",
+        "LVDS",
+        "CML",
+        "Clipped Sine",
+        "Sine Wave"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "package",
+      "display_name": "Package / Size",
+      "data_type": "enum",
+      "enum_values": [
+        "2016 (2.0x1.6mm)",
+        "2520 (2.5x2.0mm)",
+        "3225 (3.2x2.5mm)",
+        "5032 (5.0x3.2mm)",
+        "7050 (7.0x5.0mm)",
+        "HC-49",
+        "DIP-8",
+        "DIP-14",
+        "through-hole"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "filters": [
+    {
+      "spec_key": "filter_type",
+      "display_name": "Filter Type",
+      "data_type": "enum",
+      "enum_values": [
+        "EMI / EMC",
+        "Low Pass",
+        "High Pass",
+        "Band Pass",
+        "Band Reject / Notch",
+        "SAW",
+        "BAW",
+        "Ceramic",
+        "LC",
+        "Crystal",
+        "Common Mode Choke",
+        "Feedthrough",
+        "Diplexer"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "center_frequency",
+      "display_name": "Center / Cutoff Frequency (MHz)",
+      "data_type": "numeric",
+      "unit": "MHz",
+      "canonical_unit": "MHz",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "bandwidth",
+      "display_name": "Bandwidth (MHz)",
+      "data_type": "numeric",
+      "unit": "MHz",
+      "canonical_unit": "MHz",
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "impedance",
+      "display_name": "Impedance (Ω)",
+      "data_type": "enum",
+      "enum_values": [
+        "50Ω",
+        "75Ω",
+        "100Ω",
+        "150Ω",
+        "200Ω",
+        "300Ω",
+        "Other"
+      ],
+      "sort_order": 4
+    },
+    {
+      "spec_key": "insertion_loss",
+      "display_name": "Insertion Loss (dB)",
+      "data_type": "numeric",
+      "unit": "dB",
+      "canonical_unit": "dB",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "current_rating",
+      "display_name": "Current Rating (A)",
+      "data_type": "numeric",
+      "unit": "A",
+      "canonical_unit": "A",
+      "sort_order": 6
+    },
+    {
+      "spec_key": "package",
+      "display_name": "Package / Size",
+      "data_type": "enum",
+      "enum_values": [
+        "0402",
+        "0603",
+        "0805",
+        "1206",
+        "1210",
+        "1806",
+        "2220",
+        "module",
+        "through-hole"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "transistors": [
+    {
+      "spec_key": "transistor_type",
+      "display_name": "Transistor Type",
+      "data_type": "enum",
+      "enum_values": [
+        "BJT NPN",
+        "BJT PNP",
+        "JFET",
+        "IGBT",
+        "Darlington",
+        "RF/microwave",
+        "digital/bias",
+        "phototransistor"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "vceo",
+      "display_name": "Collector-Emitter Voltage Vceo (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "ic_max",
+      "display_name": "Collector Current Ic (A)",
+      "data_type": "numeric",
+      "unit": "A",
+      "canonical_unit": "A",
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "power_dissipation",
+      "display_name": "Power Dissipation Pd (W)",
+      "data_type": "numeric",
+      "unit": "W",
+      "canonical_unit": "W",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "hfe_min",
+      "display_name": "DC Gain hFE (min)",
+      "data_type": "numeric",
+      "unit": "ratio",
+      "canonical_unit": "ratio",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "ft_mhz",
+      "display_name": "Transition Frequency fT (MHz)",
+      "data_type": "numeric",
+      "unit": "MHz",
+      "canonical_unit": "MHz",
+      "sort_order": 6
+    },
+    {
+      "spec_key": "package",
+      "display_name": "Package / Case",
+      "data_type": "enum",
+      "enum_values": [
+        "SOT-23",
+        "SOT-223",
+        "SOT-323",
+        "SOT-89",
+        "TO-92",
+        "TO-126",
+        "TO-220",
+        "TO-247",
+        "TO-263",
+        "TO-3P",
+        "DPAK",
+        "D2PAK"
+      ],
+      "sort_order": 7
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "press-fit"
+      ],
+      "sort_order": 8
+    }
+  ],
+  "thyristors": [
+    {
+      "spec_key": "thyristor_type",
+      "display_name": "Thyristor Type",
+      "data_type": "enum",
+      "enum_values": [
+        "SCR",
+        "TRIAC",
+        "DIAC",
+        "GTO",
+        "SIDAC",
+        "SCR module"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "vdrm",
+      "display_name": "Off-State Voltage Vdrm (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "it_rms",
+      "display_name": "On-State Current It(RMS) (A)",
+      "data_type": "numeric",
+      "unit": "A",
+      "canonical_unit": "A",
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "igt_max",
+      "display_name": "Gate Trigger Current Igt (mA)",
+      "data_type": "numeric",
+      "unit": "mA",
+      "canonical_unit": "A",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "ith_holding",
+      "display_name": "Holding Current Ih (mA)",
+      "data_type": "numeric",
+      "unit": "mA",
+      "canonical_unit": "A",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "package",
+      "display_name": "Package / Case",
+      "data_type": "enum",
+      "enum_values": [
+        "TO-92",
+        "TO-220",
+        "TO-220AB",
+        "TO-251",
+        "TO-252",
+        "TO-247",
+        "D2PAK",
+        "DPAK",
+        "SOT-223",
+        "TO-263",
+        "module"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "press-fit"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "analog_ic": [
+    {
+      "spec_key": "function",
+      "display_name": "Function",
+      "data_type": "enum",
+      "enum_values": [
+        "op-amp",
+        "comparator",
+        "instrumentation amp",
+        "ADC",
+        "DAC",
+        "voltage reference",
+        "analog switch/mux",
+        "current sense amp",
+        "PGA",
+        "sample-and-hold",
+        "video amp",
+        "audio amp"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "channels",
+      "display_name": "Channels",
+      "data_type": "numeric",
+      "unit": "channels",
+      "canonical_unit": "channels",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "supply_voltage_max",
+      "display_name": "Max Supply Voltage (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "bandwidth_mhz",
+      "display_name": "Gain-Bandwidth / Bandwidth (MHz)",
+      "data_type": "numeric",
+      "unit": "MHz",
+      "canonical_unit": "MHz",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "resolution_bits",
+      "display_name": "Resolution (bits)",
+      "data_type": "numeric",
+      "unit": "bits",
+      "canonical_unit": "bits",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "interface",
+      "display_name": "Digital Interface",
+      "data_type": "enum",
+      "enum_values": [
+        "SPI",
+        "I2C",
+        "parallel",
+        "analog",
+        "LVDS",
+        "none"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "package",
+      "display_name": "Package / Case",
+      "data_type": "enum",
+      "enum_values": [
+        "SOT-23-5",
+        "SOT-23-6",
+        "SC-70",
+        "SOIC-8",
+        "SOIC-14",
+        "MSOP-8",
+        "MSOP-10",
+        "TSSOP",
+        "QFN",
+        "DFN",
+        "WLCSP",
+        "DIP-8",
+        "LQFP"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "logic_ic": [
+    {
+      "spec_key": "function",
+      "display_name": "Logic Function",
+      "data_type": "enum",
+      "enum_values": [
+        "gate",
+        "buffer/driver",
+        "flip-flop",
+        "latch",
+        "counter",
+        "shift register",
+        "multiplexer",
+        "decoder/encoder",
+        "comparator",
+        "level shifter",
+        "transceiver",
+        "FIFO"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "logic_family",
+      "display_name": "Logic Family",
+      "data_type": "enum",
+      "enum_values": [
+        "74HC",
+        "74HCT",
+        "74LVC",
+        "74LV",
+        "74AHC",
+        "74AHCT",
+        "74AUP",
+        "74LS",
+        "74ALS",
+        "74F",
+        "CD4000",
+        "AUC",
+        "AXC"
+      ],
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "supply_voltage_min",
+      "display_name": "Min Supply Voltage (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 3
+    },
+    {
+      "spec_key": "supply_voltage_max",
+      "display_name": "Max Supply Voltage (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "channels",
+      "display_name": "Number of Elements / Bits",
+      "data_type": "numeric",
+      "unit": "bits",
+      "canonical_unit": "bits",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "max_freq_mhz",
+      "display_name": "Max Frequency (MHz)",
+      "data_type": "numeric",
+      "unit": "MHz",
+      "canonical_unit": "MHz",
+      "sort_order": 6
+    },
+    {
+      "spec_key": "output_type",
+      "display_name": "Output Type",
+      "data_type": "enum",
+      "enum_values": [
+        "push-pull",
+        "open-drain",
+        "open-collector",
+        "tri-state"
+      ],
+      "sort_order": 7
+    },
+    {
+      "spec_key": "package",
+      "display_name": "Package / Case",
+      "data_type": "enum",
+      "enum_values": [
+        "SOT-23-5",
+        "SOT-23-6",
+        "SC-70",
+        "SOIC-14",
+        "SOIC-16",
+        "TSSOP-14",
+        "TSSOP-16",
+        "TSSOP-20",
+        "TSSOP-24",
+        "QFN",
+        "DIP-14",
+        "DIP-16",
+        "WLCSP"
+      ],
+      "sort_order": 8
+    }
+  ],
+  "power_ic": [
+    {
+      "spec_key": "function",
+      "display_name": "PMIC Function",
+      "data_type": "enum",
+      "enum_values": [
+        "LDO regulator",
+        "buck (step-down)",
+        "boost (step-up)",
+        "buck-boost",
+        "switching controller",
+        "battery charger",
+        "load switch",
+        "power MUX / OR-ing",
+        "hot-swap",
+        "supervisor / reset",
+        "gate driver",
+        "PMIC (multi-rail)",
+        "isolated DC-DC"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "vin_max",
+      "display_name": "Max Input Voltage Vin (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "iout_max",
+      "display_name": "Max Output Current (A)",
+      "data_type": "numeric",
+      "unit": "A",
+      "canonical_unit": "A",
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "vout_min",
+      "display_name": "Min Output Voltage (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "vout_max",
+      "display_name": "Max Output Voltage (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "switching_freq_khz",
+      "display_name": "Switching Frequency (kHz)",
+      "data_type": "numeric",
+      "unit": "kHz",
+      "canonical_unit": "MHz",
+      "sort_order": 6
+    },
+    {
+      "spec_key": "topology",
+      "display_name": "Topology / Output Config",
+      "data_type": "enum",
+      "enum_values": [
+        "fixed",
+        "adjustable",
+        "single-output",
+        "dual-output",
+        "multi-output",
+        "synchronous",
+        "non-synchronous"
+      ],
+      "sort_order": 7
+    },
+    {
+      "spec_key": "package",
+      "display_name": "Package / Case",
+      "data_type": "enum",
+      "enum_values": [
+        "SOT-23-5",
+        "SOT-23-6",
+        "SOT-223",
+        "SOT-89",
+        "SOIC-8",
+        "MSOP-8",
+        "MSOP-10",
+        "TSSOP",
+        "QFN",
+        "DFN",
+        "PowerPAK",
+        "TO-220",
+        "TO-263",
+        "WLCSP"
+      ],
+      "sort_order": 8
+    }
+  ],
+  "microprocessors": [
+    {
+      "spec_key": "core",
+      "display_name": "Core",
+      "data_type": "enum",
+      "enum_values": [
+        "ARM Cortex-A53",
+        "ARM Cortex-A55",
+        "ARM Cortex-A7",
+        "ARM Cortex-A9",
+        "ARM Cortex-A72",
+        "ARM Cortex-A78",
+        "RISC-V",
+        "PowerPC",
+        "MIPS",
+        "x86"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "core_count",
+      "display_name": "Core Count",
+      "data_type": "numeric",
+      "unit": "cores",
+      "canonical_unit": "cores",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "max_clock_mhz",
+      "display_name": "Max Clock (MHz)",
+      "data_type": "numeric",
+      "unit": "MHz",
+      "canonical_unit": "MHz",
+      "sort_order": 3
+    },
+    {
+      "spec_key": "supply_voltage",
+      "display_name": "Supply Voltage (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "graphics",
+      "display_name": "Integrated Graphics",
+      "data_type": "boolean",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "memory_interface",
+      "display_name": "Memory Interface",
+      "data_type": "enum",
+      "enum_values": [
+        "DDR3",
+        "DDR3L",
+        "DDR4",
+        "LPDDR2",
+        "LPDDR3",
+        "LPDDR4"
+      ],
+      "sort_order": 6
+    }
+  ],
+  "dsp": [
+    {
+      "spec_key": "core",
+      "display_name": "Core / Family",
+      "data_type": "enum",
+      "enum_values": [
+        "TI C6000",
+        "TI C5000",
+        "TI C2000",
+        "ADI SHARC",
+        "ADI Blackfin",
+        "ADI TigerSHARC",
+        "ARM Cortex-M (DSP ext)",
+        "Xtensa HiFi"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "max_clock_mhz",
+      "display_name": "Max Clock (MHz)",
+      "data_type": "numeric",
+      "unit": "MHz",
+      "canonical_unit": "MHz",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "data_width_bits",
+      "display_name": "Data Width (bits)",
+      "data_type": "enum",
+      "enum_values": [
+        "16-bit",
+        "24-bit",
+        "32-bit",
+        "64-bit"
+      ],
+      "sort_order": 3
+    },
+    {
+      "spec_key": "arithmetic",
+      "display_name": "Arithmetic",
+      "data_type": "enum",
+      "enum_values": [
+        "Fixed-point",
+        "Floating-point",
+        "Fixed/Floating"
+      ],
+      "sort_order": 4
+    },
+    {
+      "spec_key": "ram_kb",
+      "display_name": "On-chip RAM (KB)",
+      "data_type": "numeric",
+      "unit": "KB",
+      "canonical_unit": "KB",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "supply_voltage",
+      "display_name": "Supply Voltage (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 6
+    }
+  ],
+  "fpga": [
+    {
+      "spec_key": "family",
+      "display_name": "Family",
+      "data_type": "enum",
+      "enum_values": [
+        "Artix",
+        "Kintex",
+        "Virtex",
+        "Spartan",
+        "Zynq",
+        "Versal",
+        "Cyclone",
+        "Arria",
+        "Stratix",
+        "Agilex",
+        "MAX",
+        "ECP5",
+        "iCE40",
+        "PolarFire",
+        "IGLOO"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "logic_elements",
+      "display_name": "Logic Elements (K)",
+      "data_type": "numeric",
+      "unit": "KLE",
+      "canonical_unit": "KLE",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "io_count",
+      "display_name": "User I/O",
+      "data_type": "numeric",
+      "unit": "pins",
+      "canonical_unit": "pins",
+      "sort_order": 3
+    },
+    {
+      "spec_key": "block_ram_kb",
+      "display_name": "Block RAM (Kb)",
+      "data_type": "numeric",
+      "unit": "Kb",
+      "canonical_unit": "Kb",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "has_hard_processor",
+      "display_name": "Hard Processor (SoC)",
+      "data_type": "boolean",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "speed_grade",
+      "display_name": "Speed Grade",
+      "data_type": "enum",
+      "enum_values": [
+        "-1",
+        "-2",
+        "-3",
+        "-6",
+        "-7",
+        "-8"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "transceiver_count",
+      "display_name": "High-Speed Transceivers",
+      "data_type": "numeric",
+      "unit": "count",
+      "canonical_unit": "count",
+      "sort_order": 7
+    }
+  ],
+  "asic": [
+    {
+      "spec_key": "application",
+      "display_name": "Application",
+      "data_type": "enum",
+      "enum_values": [
+        "Crypto/Mining",
+        "AI/ML Accelerator",
+        "Networking/Switch",
+        "Video/Codec",
+        "Automotive",
+        "Custom/Other"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "process_node_nm",
+      "display_name": "Process Node (nm)",
+      "data_type": "enum",
+      "enum_values": [
+        "3",
+        "5",
+        "7",
+        "10",
+        "14",
+        "16",
+        "28",
+        "40",
+        "65",
+        "90"
+      ],
+      "sort_order": 2
+    },
+    {
+      "spec_key": "interface",
+      "display_name": "Host Interface",
+      "data_type": "enum",
+      "enum_values": [
+        "PCIe",
+        "Ethernet",
+        "USB",
+        "SPI",
+        "Memory-mapped",
+        "Proprietary"
+      ],
+      "sort_order": 3
+    },
+    {
+      "spec_key": "supply_voltage",
+      "display_name": "Core Voltage (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 4
+    }
+  ],
+  "cables": [
+    {
+      "spec_key": "cable_type",
+      "display_name": "Cable Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Jumper/Pre-crimped",
+        "Ribbon (IDC)",
+        "Coaxial/RF",
+        "USB",
+        "Ethernet/RJ45",
+        "Power Cord",
+        "Fiber Optic",
+        "FFC/FPC",
+        "Multi-conductor",
+        "D-Sub",
+        "SATA/SAS",
+        "Custom Assembly"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "length",
+      "display_name": "Length",
+      "data_type": "numeric",
+      "unit": "mm",
+      "canonical_unit": "mm",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "conductor_count",
+      "display_name": "Number of Conductors",
+      "data_type": "numeric",
+      "unit": "conductors",
+      "canonical_unit": "conductors",
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "wire_gauge_awg",
+      "display_name": "Wire Gauge (AWG)",
+      "data_type": "numeric",
+      "unit": "AWG",
+      "canonical_unit": "AWG",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "shielding",
+      "display_name": "Shielding",
+      "data_type": "enum",
+      "enum_values": [
+        "Unshielded",
+        "Foil",
+        "Braid",
+        "Foil + Braid",
+        "Spiral"
+      ],
+      "sort_order": 5
+    },
+    {
+      "spec_key": "end_a_termination",
+      "display_name": "End A Connector",
+      "data_type": "enum",
+      "enum_values": [
+        "Free End/Unterminated",
+        "Header/Socket",
+        "USB-A",
+        "USB-C",
+        "RJ45",
+        "D-Sub",
+        "Ring/Spade Terminal",
+        "JST",
+        "Molex",
+        "Other"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "end_b_termination",
+      "display_name": "End B Connector",
+      "data_type": "enum",
+      "enum_values": [
+        "Free End/Unterminated",
+        "Header/Socket",
+        "USB-A",
+        "USB-C",
+        "RJ45",
+        "D-Sub",
+        "Ring/Spade Terminal",
+        "JST",
+        "Molex",
+        "Other"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "relays": [
+    {
+      "spec_key": "relay_type",
+      "display_name": "Relay Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Electromechanical (EMR)",
+        "Solid State (SSR)",
+        "Reed",
+        "Automotive",
+        "Latching",
+        "Signal",
+        "Power",
+        "Time Delay"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "coil_voltage",
+      "display_name": "Coil / Control Voltage",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "contact_configuration",
+      "display_name": "Contact Form",
+      "data_type": "enum",
+      "enum_values": [
+        "SPST-NO (1A)",
+        "SPST-NC (1B)",
+        "SPDT (1C)",
+        "DPST",
+        "DPDT (2C)",
+        "3PDT",
+        "4PDT"
+      ],
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "switching_current",
+      "display_name": "Switching/Contact Current",
+      "data_type": "numeric",
+      "unit": "A",
+      "canonical_unit": "A",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "switching_voltage",
+      "display_name": "Switching/Contact Voltage",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "coil_type",
+      "display_name": "Coil Type",
+      "data_type": "enum",
+      "enum_values": [
+        "DC",
+        "AC",
+        "Non-Latching",
+        "Single Latching",
+        "Dual Latching"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "through-hole",
+        "SMD",
+        "panel-mount",
+        "DIN-rail",
+        "socketable/plug-in",
+        "chassis"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "switches": [
+    {
+      "spec_key": "switch_type",
+      "display_name": "Switch Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Tactile",
+        "Pushbutton",
+        "Toggle",
+        "Slide",
+        "Rocker",
+        "Rotary",
+        "DIP",
+        "Detect",
+        "Key/Keylock",
+        "Snap-Action/Limit",
+        "Thumbwheel"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "contact_configuration",
+      "display_name": "Circuit / Contact Form",
+      "data_type": "enum",
+      "enum_values": [
+        "SPST-NO",
+        "SPST-NC",
+        "SPDT",
+        "DPST",
+        "DPDT",
+        "3PDT",
+        "4PDT"
+      ],
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "current_rating",
+      "display_name": "Current Rating",
+      "data_type": "numeric",
+      "unit": "A",
+      "canonical_unit": "A",
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "actuator_type",
+      "display_name": "Actuator",
+      "data_type": "enum",
+      "enum_values": [
+        "Round Button",
+        "Flat Button",
+        "Lever",
+        "Plunger",
+        "Paddle",
+        "Rocker",
+        "Knob",
+        "Slide",
+        "Standard"
+      ],
+      "sort_order": 4
+    },
+    {
+      "spec_key": "voltage_rating",
+      "display_name": "Voltage Rating",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "through-hole",
+        "SMD",
+        "panel-mount",
+        "PCB",
+        "snap-in",
+        "chassis"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "ip_rating",
+      "display_name": "IP / Sealing Rating",
+      "data_type": "enum",
+      "enum_values": [
+        "None",
+        "IP40",
+        "IP54",
+        "IP65",
+        "IP67",
+        "IP68"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "sockets": [
+    {
+      "spec_key": "socket_type",
+      "display_name": "Socket Type",
+      "data_type": "enum",
+      "enum_values": [
+        "IC Socket (DIP)",
+        "IC Socket (PLCC)",
+        "IC Socket (PGA)",
+        "BGA Socket",
+        "CPU Socket",
+        "Relay Socket",
+        "Pin/Receptacle Strip",
+        "ZIF",
+        "Test/Burn-in",
+        "Fuse Holder"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "pin_count",
+      "display_name": "Positions / Pins",
+      "data_type": "numeric",
+      "unit": "pins",
+      "canonical_unit": "pins",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "pitch_mm",
+      "display_name": "Pitch",
+      "data_type": "numeric",
+      "unit": "mm",
+      "canonical_unit": "mm",
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "through-hole",
+        "SMD",
+        "press-fit",
+        "panel-mount",
+        "DIN-rail"
+      ],
+      "sort_order": 4
+    },
+    {
+      "spec_key": "rows",
+      "display_name": "Number of Rows",
+      "data_type": "enum",
+      "enum_values": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "sort_order": 5
+    },
+    {
+      "spec_key": "contact_plating",
+      "display_name": "Contact Plating",
+      "data_type": "enum",
+      "enum_values": [
+        "Gold",
+        "Tin",
+        "Tin-Lead",
+        "Selective Gold",
+        "Nickel"
+      ],
+      "sort_order": 6
+    }
+  ],
+  "voltage_regulators": [
+    {
+      "spec_key": "regulator_type",
+      "display_name": "Regulator Type",
+      "data_type": "enum",
+      "enum_values": [
+        "LDO (Linear)",
+        "Switching Buck",
+        "Switching Boost",
+        "Buck-Boost",
+        "Inverting",
+        "Switching Controller",
+        "Charge Pump",
+        "Reference"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "output_voltage",
+      "display_name": "Output Voltage",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "output_current_max",
+      "display_name": "Output Current (max)",
+      "data_type": "numeric",
+      "unit": "A",
+      "canonical_unit": "A",
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "input_voltage_max",
+      "display_name": "Input Voltage (max)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "output_config",
+      "display_name": "Output Configuration",
+      "data_type": "enum",
+      "enum_values": [
+        "Fixed",
+        "Adjustable",
+        "Sequencer/Multi-output"
+      ],
+      "sort_order": 5
+    },
+    {
+      "spec_key": "number_of_outputs",
+      "display_name": "Number of Outputs",
+      "data_type": "numeric",
+      "unit": "outputs",
+      "canonical_unit": "outputs",
+      "sort_order": 6
+    },
+    {
+      "spec_key": "package",
+      "display_name": "Package",
+      "data_type": "enum",
+      "enum_values": [
+        "SOT-23",
+        "SOT-223",
+        "SOT-89",
+        "TO-220",
+        "TO-263 (D2PAK)",
+        "DPAK",
+        "SOIC",
+        "QFN",
+        "DFN",
+        "module"
+      ],
+      "sort_order": 7
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "press-fit"
+      ],
+      "sort_order": 8
+    }
+  ],
+  "batteries": [
+    {
+      "spec_key": "chemistry",
+      "display_name": "Chemistry",
+      "data_type": "enum",
+      "enum_values": [
+        "Lithium (Li-MnO2)",
+        "Lithium-Ion",
+        "LiPo",
+        "LiFePO4",
+        "Alkaline",
+        "NiMH",
+        "NiCd",
+        "Lead-Acid",
+        "Lithium Thionyl Chloride (Li-SOCl2)",
+        "Silver Oxide",
+        "Zinc-Air"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "rechargeable",
+      "display_name": "Rechargeable",
+      "data_type": "boolean",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "nominal_voltage",
+      "display_name": "Nominal Voltage",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "capacity_mah",
+      "display_name": "Capacity",
+      "data_type": "numeric",
+      "unit": "mAh",
+      "canonical_unit": "mAh",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "form_factor",
+      "display_name": "Form / Size",
+      "data_type": "enum",
+      "enum_values": [
+        "Coin/Button (CR2032)",
+        "Coin/Button (Other)",
+        "AA",
+        "AAA",
+        "AAAA",
+        "C",
+        "D",
+        "9V",
+        "18650",
+        "21700",
+        "Prismatic",
+        "Pouch",
+        "PCB Mount"
+      ],
+      "sort_order": 5
+    },
+    {
+      "spec_key": "termination",
+      "display_name": "Termination",
+      "data_type": "enum",
+      "enum_values": [
+        "Standard Contacts",
+        "PC Pins (through-hole)",
+        "SMD",
+        "Solder Tabs",
+        "Wire Leads",
+        "Spring Contacts",
+        "Connector"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "operating_temp_max",
+      "display_name": "Max Operating Temp",
+      "data_type": "numeric",
+      "unit": "C",
+      "canonical_unit": "C",
+      "sort_order": 7
+    }
+  ],
+  "leds": [
+    {
+      "spec_key": "color",
+      "display_name": "Color",
+      "data_type": "enum",
+      "enum_values": [
+        "Red",
+        "Green",
+        "Blue",
+        "Yellow",
+        "Amber",
+        "Orange",
+        "White",
+        "Warm White",
+        "Cool White",
+        "RGB",
+        "Infrared (IR)",
+        "Ultraviolet (UV)",
+        "Bi-color"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "led_type",
+      "display_name": "LED Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Standard",
+        "High Brightness",
+        "Lighting / Illumination",
+        "Addressable (RGB IC)",
+        "COB",
+        "Indicator",
+        "IR Emitter",
+        "UV Emitter"
+      ],
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "forward_voltage",
+      "display_name": "Forward Voltage (Vf)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 3
+    },
+    {
+      "spec_key": "forward_current",
+      "display_name": "Forward Current (If)",
+      "data_type": "numeric",
+      "unit": "mA",
+      "canonical_unit": "A",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "luminous_intensity",
+      "display_name": "Luminous Intensity",
+      "data_type": "numeric",
+      "unit": "mcd",
+      "canonical_unit": "mcd",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "wavelength",
+      "display_name": "Wavelength",
+      "data_type": "numeric",
+      "unit": "nm",
+      "canonical_unit": "nm",
+      "sort_order": 6
+    },
+    {
+      "spec_key": "viewing_angle",
+      "display_name": "Viewing Angle",
+      "data_type": "numeric",
+      "unit": "deg",
+      "canonical_unit": "deg",
+      "sort_order": 7
+    },
+    {
+      "spec_key": "package",
+      "display_name": "Package / Size",
+      "data_type": "enum",
+      "enum_values": [
+        "0402",
+        "0603",
+        "0805",
+        "1206",
+        "3528",
+        "5050",
+        "PLCC-2",
+        "PLCC-4",
+        "PLCC-6",
+        "5mm THT",
+        "3mm THT",
+        "COB",
+        "through-hole"
+      ],
+      "sort_order": 8
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "panel/chassis"
+      ],
+      "sort_order": 9
+    }
+  ],
+  "displays": [
+    {
+      "spec_key": "display_technology",
+      "display_name": "Display Technology",
+      "data_type": "enum",
+      "enum_values": [
+        "LCD (Character)",
+        "LCD (Graphic)",
+        "LCD (TFT)",
+        "OLED",
+        "E-Paper / EPD",
+        "LED (7-Segment)",
+        "LED (Dot Matrix)",
+        "VFD"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "diagonal_size",
+      "display_name": "Diagonal Size",
+      "data_type": "numeric",
+      "unit": "in",
+      "canonical_unit": "in",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "resolution",
+      "display_name": "Resolution",
+      "data_type": "enum",
+      "enum_values": [
+        "16x2",
+        "20x4",
+        "128x64",
+        "128x32",
+        "240x320",
+        "320x240",
+        "480x272",
+        "800x480",
+        "1024x600",
+        "1280x800",
+        "1920x1080"
+      ],
+      "sort_order": 3
+    },
+    {
+      "spec_key": "interface",
+      "display_name": "Interface",
+      "data_type": "enum",
+      "enum_values": [
+        "Parallel",
+        "SPI",
+        "I2C",
+        "RGB",
+        "MIPI DSI",
+        "LVDS",
+        "HDMI",
+        "UART"
+      ],
+      "sort_order": 4
+    },
+    {
+      "spec_key": "color_depth",
+      "display_name": "Color Depth",
+      "data_type": "enum",
+      "enum_values": [
+        "Monochrome",
+        "Grayscale",
+        "8-bit (256)",
+        "16-bit (65K)",
+        "18-bit (262K)",
+        "24-bit (16.7M)"
+      ],
+      "sort_order": 5
+    },
+    {
+      "spec_key": "backlight",
+      "display_name": "Backlight",
+      "data_type": "enum",
+      "enum_values": [
+        "LED White",
+        "LED RGB",
+        "EL",
+        "None",
+        "Reflective"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "touch",
+      "display_name": "Touchscreen",
+      "data_type": "enum",
+      "enum_values": [
+        "None",
+        "Resistive",
+        "Capacitive"
+      ],
+      "sort_order": 7
+    },
+    {
+      "spec_key": "operating_voltage",
+      "display_name": "Operating Voltage",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 8
+    }
+  ],
+  "optoelectronics": [
+    {
+      "spec_key": "opto_type",
+      "display_name": "Device Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Optocoupler / Optoisolator",
+        "Photodiode",
+        "Phototransistor",
+        "Photointerrupter",
+        "IR Receiver",
+        "Laser Diode",
+        "Light Sensor (Ambient)",
+        "Fiber Optic Tx/Rx",
+        "Solar Cell"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "isolation_voltage",
+      "display_name": "Isolation Voltage",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "channels",
+      "display_name": "Number of Channels",
+      "data_type": "numeric",
+      "unit": "channels",
+      "canonical_unit": "channels",
+      "sort_order": 3
+    },
+    {
+      "spec_key": "ctr",
+      "display_name": "Current Transfer Ratio (CTR)",
+      "data_type": "numeric",
+      "unit": "%",
+      "canonical_unit": "%",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "wavelength",
+      "display_name": "Wavelength",
+      "data_type": "numeric",
+      "unit": "nm",
+      "canonical_unit": "nm",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "output_type",
+      "display_name": "Output Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Transistor",
+        "Darlington",
+        "Logic Gate",
+        "Triac/SCR",
+        "MOSFET",
+        "IGBT Driver",
+        "Analog"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "panel/chassis"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "sensors": [
+    {
+      "spec_key": "sensor_type",
+      "display_name": "Sensor Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Temperature",
+        "Humidity",
+        "Pressure",
+        "Accelerometer",
+        "Gyroscope",
+        "IMU",
+        "Magnetic / Hall",
+        "Proximity",
+        "Ambient Light",
+        "Current",
+        "Gas / Air Quality",
+        "Optical / Image",
+        "Force / Load",
+        "Flow",
+        "Position / Encoder"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "output_type",
+      "display_name": "Output Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Analog Voltage",
+        "Analog Current (4-20mA)",
+        "I2C",
+        "SPI",
+        "PWM",
+        "Digital (Switch)",
+        "Frequency",
+        "UART",
+        "CAN"
+      ],
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "measurement_range",
+      "display_name": "Measurement Range",
+      "data_type": "enum",
+      "enum_values": [
+        "See datasheet"
+      ],
+      "sort_order": 3
+    },
+    {
+      "spec_key": "accuracy",
+      "display_name": "Accuracy",
+      "data_type": "numeric",
+      "unit": "%",
+      "canonical_unit": "%",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "supply_voltage",
+      "display_name": "Supply Voltage",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "operating_temp_max",
+      "display_name": "Max Operating Temp",
+      "data_type": "numeric",
+      "unit": "C",
+      "canonical_unit": "C",
+      "sort_order": 6
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "module / board",
+        "panel/chassis"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "rf": [
+    {
+      "spec_key": "rf_type",
+      "display_name": "Device Type",
+      "data_type": "enum",
+      "enum_values": [
+        "RF Transceiver",
+        "RF Receiver",
+        "RF Transmitter",
+        "RF Amplifier (PA/LNA)",
+        "RF Mixer",
+        "RF Filter",
+        "Antenna",
+        "RF Switch",
+        "RF Module",
+        "Balun",
+        "Attenuator",
+        "VCO/PLL"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "protocol",
+      "display_name": "Protocol / Standard",
+      "data_type": "enum",
+      "enum_values": [
+        "Bluetooth / BLE",
+        "Wi-Fi",
+        "Zigbee",
+        "LoRa",
+        "Thread",
+        "Cellular (LTE/5G)",
+        "GPS/GNSS",
+        "NFC/RFID",
+        "Sub-GHz (ISM)",
+        "UWB",
+        "Proprietary"
+      ],
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "frequency",
+      "display_name": "Frequency",
+      "data_type": "numeric",
+      "unit": "MHz",
+      "canonical_unit": "MHz",
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "gain",
+      "display_name": "Gain",
+      "data_type": "numeric",
+      "unit": "dB",
+      "canonical_unit": "dB",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "output_power",
+      "display_name": "Output Power",
+      "data_type": "numeric",
+      "unit": "dBm",
+      "canonical_unit": "dBm",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "impedance",
+      "display_name": "Impedance",
+      "data_type": "enum",
+      "enum_values": [
+        "50 ohm",
+        "75 ohm"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "supply_voltage",
+      "display_name": "Supply Voltage",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 7
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "module / board",
+        "connector / cable"
+      ],
+      "sort_order": 8
+    }
+  ],
+  "raid_controllers": [
+    {
+      "spec_key": "interface",
+      "display_name": "Drive Interface",
+      "data_type": "enum",
+      "enum_values": [
+        "SATA",
+        "SAS-6G",
+        "SAS-12G",
+        "SAS-24G",
+        "NVMe",
+        "SAS/SATA",
+        "Tri-Mode"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "raid_levels",
+      "display_name": "RAID Levels",
+      "data_type": "enum",
+      "enum_values": [
+        "JBOD/HBA",
+        "0",
+        "1",
+        "5",
+        "6",
+        "10",
+        "50",
+        "60"
+      ],
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "port_count",
+      "display_name": "Internal Ports",
+      "data_type": "numeric",
+      "unit": "ports",
+      "canonical_unit": "ports",
+      "sort_order": 3
+    },
+    {
+      "spec_key": "cache_mb",
+      "display_name": "Cache (MB)",
+      "data_type": "numeric",
+      "unit": "MB",
+      "canonical_unit": "MB",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "host_interface",
+      "display_name": "Host Interface",
+      "data_type": "enum",
+      "enum_values": [
+        "PCIe 3.0 x8",
+        "PCIe 4.0 x8",
+        "PCIe 4.0 x16",
+        "PCIe 5.0 x8",
+        "Mezzanine",
+        "OCP",
+        "Proprietary/Integrated"
+      ],
+      "sort_order": 5
+    },
+    {
+      "spec_key": "controller_chip",
+      "display_name": "Controller Family",
+      "data_type": "enum",
+      "enum_values": [
+        "Broadcom/LSI MegaRAID",
+        "Broadcom/LSI SAS HBA",
+        "Microchip/Adaptec",
+        "Marvell",
+        "Areca",
+        "Intel VROC"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "mode",
+      "display_name": "Mode",
+      "data_type": "enum",
+      "enum_values": [
+        "Hardware RAID",
+        "IT/HBA Mode",
+        "IR Mode",
+        "Tri-Mode"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "server_chassis": [
+    {
+      "spec_key": "rack_units",
+      "display_name": "Rack Units (U)",
+      "data_type": "enum",
+      "enum_values": [
+        "1U",
+        "2U",
+        "3U",
+        "4U",
+        "5U",
+        "Tower",
+        "Blade",
+        "Multi-node"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "drive_bays",
+      "display_name": "Drive Bays",
+      "data_type": "numeric",
+      "unit": "bays",
+      "canonical_unit": "bays",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "bay_form_factor",
+      "display_name": "Bay Form Factor",
+      "data_type": "enum",
+      "enum_values": [
+        "3.5\" LFF",
+        "2.5\" SFF",
+        "EDSFF E1.S",
+        "EDSFF E3.S",
+        "Mixed",
+        "M.2 only"
+      ],
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "socket_support",
+      "display_name": "Socket Support",
+      "data_type": "enum",
+      "enum_values": [
+        "Intel LGA3647",
+        "Intel LGA4189",
+        "Intel LGA4677",
+        "AMD SP3",
+        "AMD SP5",
+        "Single",
+        "Dual",
+        "Barebone"
+      ],
+      "sort_order": 4
+    },
+    {
+      "spec_key": "psu_config",
+      "display_name": "PSU Configuration",
+      "data_type": "enum",
+      "enum_values": [
+        "Single",
+        "1+1 Redundant",
+        "2+2 Redundant",
+        "Redundant Hot-Swap",
+        "None"
+      ],
+      "sort_order": 5
+    },
+    {
+      "spec_key": "psu_wattage",
+      "display_name": "PSU Wattage (W)",
+      "data_type": "numeric",
+      "unit": "W",
+      "canonical_unit": "W",
+      "sort_order": 6
+    },
+    {
+      "spec_key": "backplane_type",
+      "display_name": "Backplane",
+      "data_type": "enum",
+      "enum_values": [
+        "SATA/SAS",
+        "SAS Expander",
+        "NVMe",
+        "Tri-Mode",
+        "Direct-Attach",
+        "Passive"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "fans_cooling": [
+    {
+      "spec_key": "cooling_type",
+      "display_name": "Cooling Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Case/Chassis Fan",
+        "CPU Air Cooler",
+        "CPU Heatsink (passive)",
+        "AIO Liquid",
+        "Cold Plate/Liquid Block",
+        "Blower",
+        "Fan Module/FRU"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "fan_size_mm",
+      "display_name": "Fan Size (mm)",
+      "data_type": "enum",
+      "enum_values": [
+        "40",
+        "60",
+        "80",
+        "92",
+        "120",
+        "140",
+        "200"
+      ],
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "connector",
+      "display_name": "Connector / Pins",
+      "data_type": "enum",
+      "enum_values": [
+        "2-pin",
+        "3-pin",
+        "4-pin PWM",
+        "6-pin (server)",
+        "Molex",
+        "Proprietary/FRU"
+      ],
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "voltage",
+      "display_name": "Voltage (V)",
+      "data_type": "enum",
+      "enum_values": [
+        "5V",
+        "12V",
+        "24V",
+        "48V"
+      ],
+      "sort_order": 4
+    },
+    {
+      "spec_key": "airflow_cfm",
+      "display_name": "Airflow (CFM)",
+      "data_type": "numeric",
+      "unit": "CFM",
+      "canonical_unit": "CFM",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "max_rpm",
+      "display_name": "Max Speed (RPM)",
+      "data_type": "numeric",
+      "unit": "RPM",
+      "canonical_unit": "RPM",
+      "sort_order": 6
+    },
+    {
+      "spec_key": "bearing_type",
+      "display_name": "Bearing Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Sleeve",
+        "Ball",
+        "Dual Ball",
+        "Fluid Dynamic (FDB)",
+        "Maglev"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "networking": [
+    {
+      "spec_key": "device_type",
+      "display_name": "Device Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Switch",
+        "Router",
+        "Transceiver/Optic",
+        "DAC/AOC Cable",
+        "Firewall",
+        "Access Point",
+        "Module/Line Card",
+        "Patch Panel"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "port_speed",
+      "display_name": "Port Speed",
+      "data_type": "enum",
+      "enum_values": [
+        "100M",
+        "1GbE",
+        "2.5GbE",
+        "10GbE",
+        "25GbE",
+        "40GbE",
+        "100GbE",
+        "200GbE",
+        "400GbE"
+      ],
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "form_factor",
+      "display_name": "Form Factor / Connector",
+      "data_type": "enum",
+      "enum_values": [
+        "RJ45",
+        "SFP",
+        "SFP+",
+        "SFP28",
+        "QSFP+",
+        "QSFP28",
+        "QSFP-DD",
+        "OSFP",
+        "1U Rack",
+        "2U Rack",
+        "Desktop"
+      ],
+      "sort_order": 3,
+      "is_primary": true
+    },
+    {
+      "spec_key": "port_count",
+      "display_name": "Port Count",
+      "data_type": "numeric",
+      "unit": "ports",
+      "canonical_unit": "ports",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "reach",
+      "display_name": "Optic Reach",
+      "data_type": "enum",
+      "enum_values": [
+        "SR (short)",
+        "LR (long)",
+        "ER",
+        "ZR",
+        "DAC (passive)",
+        "AOC",
+        "BiDi",
+        "CWDM/DWDM"
+      ],
+      "sort_order": 5
+    },
+    {
+      "spec_key": "vendor_coding",
+      "display_name": "Vendor Coding",
+      "data_type": "enum",
+      "enum_values": [
+        "Cisco",
+        "Juniper",
+        "Arista",
+        "Mellanox/NVIDIA",
+        "HPE",
+        "Dell",
+        "Generic/Coded",
+        "OEM Original"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "managed",
+      "display_name": "Management",
+      "data_type": "enum",
+      "enum_values": [
+        "Managed",
+        "Smart/Web-Managed",
+        "Unmanaged"
+      ],
+      "sort_order": 7
+    }
+  ],
+  "motors": [
+    {
+      "spec_key": "motor_type",
+      "display_name": "Motor Type",
+      "data_type": "enum",
+      "enum_values": [
+        "DC Brushed",
+        "DC Brushless (BLDC)",
+        "Stepper",
+        "Servo",
+        "AC Induction",
+        "Gear Motor",
+        "Vibration",
+        "Linear Actuator"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "rated_voltage",
+      "display_name": "Rated Voltage",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "rated_speed",
+      "display_name": "Rated Speed",
+      "data_type": "numeric",
+      "unit": "RPM",
+      "canonical_unit": "RPM",
+      "sort_order": 3
+    },
+    {
+      "spec_key": "torque",
+      "display_name": "Torque",
+      "data_type": "numeric",
+      "unit": "mNm",
+      "canonical_unit": "mNm",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "shaft_diameter",
+      "display_name": "Shaft Diameter",
+      "data_type": "numeric",
+      "unit": "mm",
+      "canonical_unit": "mm",
+      "sort_order": 5
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting / Frame",
+      "data_type": "enum",
+      "enum_values": [
+        "NEMA 8",
+        "NEMA 11",
+        "NEMA 14",
+        "NEMA 17",
+        "NEMA 23",
+        "NEMA 34",
+        "Flange",
+        "Face",
+        "PCB"
+      ],
+      "sort_order": 6
+    }
+  ],
+  "enclosures": [
+    {
+      "spec_key": "enclosure_type",
+      "display_name": "Enclosure Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Box / General Purpose",
+        "Handheld",
+        "Wall Mount",
+        "DIN Rail",
+        "Rack Mount",
+        "Project Box",
+        "PCB / Card Cage",
+        "Junction Box"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "material",
+      "display_name": "Material",
+      "data_type": "enum",
+      "enum_values": [
+        "ABS Plastic",
+        "Polycarbonate",
+        "Aluminum",
+        "Steel",
+        "Stainless Steel",
+        "Die-Cast"
+      ],
+      "sort_order": 2
+    },
+    {
+      "spec_key": "ip_rating",
+      "display_name": "IP / NEMA Rating",
+      "data_type": "enum",
+      "enum_values": [
+        "IP20",
+        "IP54",
+        "IP65",
+        "IP66",
+        "IP67",
+        "IP68",
+        "NEMA 1",
+        "NEMA 4",
+        "NEMA 4X",
+        "NEMA 12"
+      ],
+      "sort_order": 3
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "Wall",
+        "DIN Rail",
+        "Rack",
+        "Panel",
+        "Desktop / Free-standing",
+        "Pole"
+      ],
+      "sort_order": 4
+    }
+  ],
+  "tools_accessories": [
+    {
+      "spec_key": "tool_type",
+      "display_name": "Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Soldering",
+        "Hand Tool",
+        "Test Probe / Lead",
+        "Heat Shrink",
+        "Cable Tie / Management",
+        "Hardware / Fastener",
+        "Cleaning / Chemical",
+        "Adhesive / Tape",
+        "Antistatic / ESD",
+        "Other Accessory"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "material",
+      "display_name": "Material",
+      "data_type": "enum",
+      "enum_values": [
+        "Plastic / Nylon",
+        "Steel",
+        "Stainless Steel",
+        "Brass",
+        "Aluminum",
+        "Rubber / Silicone",
+        "Other"
+      ],
+      "sort_order": 2
+    },
+    {
+      "spec_key": "function",
+      "display_name": "Function",
+      "data_type": "enum",
+      "enum_values": [
+        "Assembly",
+        "Repair / Rework",
+        "Test / Measurement",
+        "Protection / Insulation",
+        "Mounting / Fastening",
+        "Cleaning / Maintenance",
+        "Identification / Labeling"
+      ],
+      "sort_order": 3
+    },
+    {
+      "spec_key": "kit",
+      "display_name": "Kit / Assortment",
+      "data_type": "boolean",
+      "sort_order": 4
+    }
+  ],
+  "other": [
+    {
+      "spec_key": "form",
+      "display_name": "Form",
+      "data_type": "enum",
+      "enum_values": [
+        "Component",
+        "Module / Board",
+        "Cable / Wire",
+        "Mechanical / Hardware",
+        "Consumable",
+        "Kit / Assembly",
+        "Unknown"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "mounting",
+      "display_name": "Mounting",
+      "data_type": "enum",
+      "enum_values": [
+        "SMD",
+        "through-hole",
+        "panel",
+        "chassis",
+        "DIN rail",
+        "cable",
+        "N/A"
+      ],
+      "sort_order": 2
+    },
+    {
+      "spec_key": "rohs",
+      "display_name": "RoHS Compliant",
+      "data_type": "boolean",
+      "sort_order": 3
+    },
+    {
+      "spec_key": "packaging",
+      "display_name": "Packaging",
+      "data_type": "enum",
+      "enum_values": [
+        "Bulk",
+        "Tube",
+        "Tray",
+        "Tape & Reel",
+        "Cut Tape",
+        "Box",
+        "Bag"
+      ],
+      "sort_order": 4
+    }
+  ],
   "capacitors": [
     {
       "spec_key": "capacitance",

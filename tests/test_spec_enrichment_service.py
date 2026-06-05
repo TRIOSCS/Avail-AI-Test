@@ -93,10 +93,10 @@ async def test_skips_card_without_description_or_schema(db: Session, _schemas):
     from app.services.spec_enrichment_service import enrich_card_specs
 
     no_desc = _mc(db, "NODESC", description=None)
-    no_schema = _mc(db, "NOSCHEMA", category="analog_ic")  # not in commodity_seeds
+    no_schema = _mc(db, "NOSCHEMA", category="not_a_real_commodity")  # absent from commodity_seeds
     with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={"parts": []}):
         stats = await enrich_card_specs([no_desc.id, no_schema.id], db)
-    assert stats["skipped_no_schema"] == 1  # the analog_ic card
+    assert stats["skipped_no_schema"] == 1  # the schema-less card
     # no_desc is filtered out before grouping (description IS NULL) → not processed
     assert stats["cards_processed"] == 0
 
