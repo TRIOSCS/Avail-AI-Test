@@ -21,7 +21,7 @@ from app.connectors.errors import ConnectorAuthError, ConnectorQuotaError, Conne
 from app.constants import MaterialEnrichmentStatus
 from app.models import MaterialCard
 from app.services.enrichment_types import WebMeter
-from app.services.enrichment_worker.oem_classifier import classify_oem_vendor
+from app.services.enrichment_worker.oem_classifier import HIGH_PRECISION_VENDORS, classify_oem_vendor
 from app.services.enrichment_worker.oem_extractor import (
     CrossRefResult,
     OemExtractResult,
@@ -227,17 +227,18 @@ def apply_cross_ref_verified(
     xrefs = list(card.cross_references or [])
     xrefs.append({"mpn": xr.resolved_mpn, "manufacturer": xr.manufacturer})
     card.cross_references = xrefs
+    confirmer = contributors[0] if contributors else None
     prov = dict(provenance)
     prov["cross_ref"] = {
         "oem_part": card.display_mpn,
         "resolved_mpn": xr.resolved_mpn,
         "linkage_source_url": xr.linkage_source_url,
         "linkage_source_domain": xr.linkage_source_domain,
-        "confirmed_by": contributors[0] if contributors else None,
+        "confirmed_by": confirmer,
         "confidence": xr.confidence,
     }
     card.enrichment_provenance = prov
-    card.enrichment_source = contributors[0] if contributors else "cross_ref"
+    card.enrichment_source = confirmer or "cross_ref"
     card.enrichment_status = MaterialEnrichmentStatus.VERIFIED
     card.enriched_at = now
 
@@ -307,8 +308,11 @@ async def enrich_card(
     resolved MPN) is pure async connector I/O — no DB query/flush — so the invariant
     holds.
     """
-    if card.enrichment_status == MaterialEnrichmentStatus.VERIFIED and not refresh:
-        return MaterialEnrichmentStatus.VERIFIED
+    if (
+        card.enrichment_status in (MaterialEnrichmentStatus.VERIFIED, MaterialEnrichmentStatus.OEM_SOURCED)
+        and not refresh
+    ):
+        return card.enrichment_status
 
     conns = connectors if connectors is not None else _connectors_in_order(db)
     results = await fetch_authoritative(card.display_mpn, card.normalized_mpn, conns, disabled, cooldown)
@@ -386,9 +390,14 @@ async def enrich_card(
         }
         return MaterialEnrichmentStatus.AI_INFERRED
 
-    # Terminal: not_catalogued only when an OEM pattern matched AND the OEM tiers ran.
+    # Terminal: not_catalogued only when a HIGH-PRECISION OEM pattern matched AND the OEM
+    # tiers ran. The broad Dell 5-char pattern is excluded (see HIGH_PRECISION_VENDORS) so a
+    # generic 5-char part missing every tier stays not_found (22h retry) instead of being
+    # parked for ~30 days. `vendor in HIGH_PRECISION_VENDORS` is False when vendor is None.
     card.enrichment_status = (
-        MaterialEnrichmentStatus.NOT_CATALOGUED if (vendor and oem_attempted) else MaterialEnrichmentStatus.NOT_FOUND
+        MaterialEnrichmentStatus.NOT_CATALOGUED
+        if (vendor in HIGH_PRECISION_VENDORS and oem_attempted)
+        else MaterialEnrichmentStatus.NOT_FOUND
     )
     card.enrichment_source = None
     card.enrichment_provenance = None
@@ -407,8 +416,10 @@ async def enrich_cards(card_ids: list[int], db: Session, *, concurrency: int = 5
     counts: dict[str, int] = {
         MaterialEnrichmentStatus.VERIFIED: 0,
         MaterialEnrichmentStatus.WEB_SOURCED: 0,
+        MaterialEnrichmentStatus.OEM_SOURCED: 0,
         MaterialEnrichmentStatus.AI_INFERRED: 0,
         MaterialEnrichmentStatus.NOT_FOUND: 0,
+        MaterialEnrichmentStatus.NOT_CATALOGUED: 0,
     }
 
     async def _one(cid: int) -> None:

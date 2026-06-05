@@ -13,6 +13,12 @@ from __future__ import annotations
 
 import re
 
+# Vendors whose patterns are precise enough that an OEM-tier miss means "genuinely an
+# uncatalogued OEM service part" (-> not_catalogued, 30-day backoff). The broad Dell
+# 5-char pattern is excluded: a miss there is more likely a generic part, so it stays
+# not_found (22h retry) instead of being parked for a month.
+HIGH_PRECISION_VENDORS: frozenset[str] = frozenset({"lenovo", "ibm", "hpe", "acer", "asus"})
+
 # Ordered (priority) (vendor, pattern). First match wins. Anchored, matched against the
 # UPPERCASED stripped display_mpn. Each pattern is justified by a real not_found sample
 # (see spec §1).
