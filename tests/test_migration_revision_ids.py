@@ -18,10 +18,10 @@ import re
 _VERSIONS = pathlib.Path(__file__).resolve().parent.parent / "alembic" / "versions"
 _MAX = 32  # Alembic's default alembic_version.version_num length on PostgreSQL.
 
-# Pre-existing over-length id (40 chars), grandfathered: the live DB was provisioned from a
-# dump and never ran this revision live, so it has not bitten. Tracked as separate latent
-# drift — do NOT add new entries here; new revision ids must be <= 32 chars.
-_GRANDFATHERED = {"016_add_sightings_vendor_name_normalized"}
+# No grandfathered ids: every revision id must be <= 32 chars. (The previously-grandfathered
+# 40-char 016 id was renamed to 016_sightings_vendor_normalized.) Keep this set empty — fix
+# the offending id instead of adding an exception.
+_GRANDFATHERED: set[str] = set()
 
 _REV = re.compile(r"""^revision\s*=\s*["']([^"']+)["']""", re.MULTILINE)
 

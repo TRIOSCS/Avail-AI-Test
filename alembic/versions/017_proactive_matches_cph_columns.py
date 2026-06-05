@@ -5,7 +5,7 @@ When TESTING=1 or DB is built only via Alembic, startup _add_missing_columns
 does not run, so these columns must be added by a migration. Idempotent.
 
 Revision ID: 017_proactive_matches_cph
-Revises: 016_add_sightings_vendor_name_normalized
+Revises: 016_sightings_vendor_normalized
 Create Date: 2026-02-26
 """
 
@@ -14,7 +14,7 @@ from sqlalchemy import text
 from alembic import op
 
 revision = "017_proactive_matches_cph"
-down_revision = "016_add_sightings_vendor_name_normalized"
+down_revision = "016_sightings_vendor_normalized"
 branch_labels = None
 depends_on = None
 
