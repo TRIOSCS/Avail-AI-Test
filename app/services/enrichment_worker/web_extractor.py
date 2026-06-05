@@ -60,6 +60,11 @@ async def extract_part_from_web(
     Returns a ``WebExtractResult`` with ``status="web_sourced"`` on success
     or ``status="failed"`` on any gate failure or Claude exception.
     """
+    if not normalized_mpn:
+        # Defense-in-depth: an empty key would let Gate 2 pass on a missing
+        # exact_mpn_found (both normalize to ""). Non-reachable in practice
+        # (normalized_mpn is NOT NULL/unique), but cheap to guard.
+        return _FAILED
     try:
         data = await claude_json(
             _PROMPT.format(mpn=display_mpn),

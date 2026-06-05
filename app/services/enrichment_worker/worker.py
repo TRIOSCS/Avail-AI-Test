@@ -150,17 +150,17 @@ async def run_one_batch(
             card.enriched_at = now
             counts[status] = counts.get(status, 0) + 1
 
-            if status == MaterialEnrichmentStatus.WEB_SOURCED:
+            # A billable web_search call fires on EVERY web-tier attempt (gate-pass OR
+            # gate-fail-then-fall-through) — i.e. whenever there was no verified hit and
+            # the web tier wasn't disabled. Count all of them against the daily budget,
+            # not just web_sourced successes, so WEB_DAILY_CAP is actually respected.
+            if status != MaterialEnrichmentStatus.VERIFIED and "web_search" not in disabled:
                 web_calls_today += 1
-                intel_cache.set_cached(
-                    web_cache_key,
-                    {"count": web_calls_today},
-                    ttl_days=1.0,
-                )
+                intel_cache.set_cached(web_cache_key, {"count": web_calls_today}, ttl_days=1.0)
+
+            if status in (MaterialEnrichmentStatus.WEB_SOURCED, MaterialEnrichmentStatus.AI_INFERRED):
                 breaker.record_claude_success()
-            elif status == MaterialEnrichmentStatus.AI_INFERRED:
-                breaker.record_claude_success()
-            # verified and not_found are connector results — no Claude call to record
+            # verified comes from a connector — no Claude/web call to record
 
         except Exception as e:
             logger.error(
