@@ -75,6 +75,13 @@
                title="Web-sourced from {{ (m.enrichment_provenance or {}).get('source_domains', ['authoritative page'])|join(', ') }} — below API-verified">
               WEB-SOURCED
             </a>
+            {% elif es == "oem_sourced" %}
+            {% set _ou = (m.enrichment_provenance or {}).get('source_urls', [None])[0] %}
+            <a href="{{ _ou or '#' }}" target="_blank" rel="noopener"
+               class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-indigo-50 text-indigo-700 border-indigo-200"
+               title="OEM-official source: {{ (m.enrichment_provenance or {}).get('source_domains', ['vendor page'])|join(', ') }} — description from the OEM; specs not distributor-verified">
+              OEM-SOURCED
+            </a>
             {% elif es == "ai_inferred" %}
             <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-amber-50 text-amber-700 border-amber-200"
                   title="AI guess (&ge;95% confidence) — RECONFIRM NEEDED before trusting; not verified">
@@ -84,6 +91,11 @@
             <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-gray-100 text-gray-500 border-gray-200"
                   title="No authoritative source found this part">
               NOT FOUND
+            </span>
+            {% elif es == "not_catalogued" %}
+            <span class="inline-flex px-2 py-0.5 text-xs font-medium rounded-full border bg-slate-100 text-slate-600 border-slate-300"
+                  title="Recognised OEM service/FRU part; no public specs published">
+              NOT CATALOGUED
             </span>
             {% else %}
             <span class="text-xs text-gray-400">--</span>
