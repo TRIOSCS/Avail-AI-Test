@@ -1090,6 +1090,57 @@ def test_run_one_batch_triggers_spec_extraction_for_enriched_cards(db_session):
     assert passed_ids == [verified_id]  # ONLY the verified card; not the not_found one
 
 
+def test_run_one_batch_spec_extraction_includes_oem_sourced_excludes_not_catalogued(db_session):
+    """Merge-integration guard: the second-pass spec extraction must INCLUDE oem_sourced
+    (a real category) and EXCLUDE not_catalogued (a terminal miss, like not_found)."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import AsyncMock, patch
+
+    from app.constants import MaterialEnrichmentStatus
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+
+    now = datetime.now(timezone.utc)
+    # Newest-first selection → oem_sourced card is processed before the not_catalogued one.
+    oem_card = MaterialCard(normalized_mpn="soem", display_mpn="SOEM", enrichment_status="unenriched", created_at=now)
+    nc_card = MaterialCard(
+        normalized_mpn="snc", display_mpn="SNC", enrichment_status="unenriched", created_at=now - timedelta(seconds=1)
+    )
+    db_session.add(oem_card)
+    db_session.add(nc_card)
+    db_session.flush()
+    oem_id = oem_card.id
+
+    returns = [MaterialEnrichmentStatus.OEM_SOURCED, MaterialEnrichmentStatus.NOT_CATALOGUED]
+    idx = [0]
+
+    async def fake_enrich_card(card, db, **kw):
+        st = returns[idx[0]]
+        idx[0] += 1
+        card.enrichment_status = st
+        return st
+
+    cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=80)
+    breaker = EnrichmentCircuitBreaker(cfg)
+    spec_mock = AsyncMock(return_value={"cards_processed": 1, "specs_written": 2})
+
+    with (
+        patch("app.services.enrichment_worker.worker.enrich_card", side_effect=fake_enrich_card),
+        patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value=None),
+        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
+        patch("app.services.spec_enrichment_service.enrich_card_specs", spec_mock),
+    ):
+        asyncio.run(run_one_batch(db_session, cfg, {}, breaker, set(), {"web_calls": 0}))
+
+    spec_mock.assert_awaited_once()
+    passed_ids = spec_mock.await_args.args[0]
+    assert passed_ids == [oem_id]  # oem_sourced included; not_catalogued excluded
+
+
 def test_run_one_batch_spec_extraction_claude_error_feeds_breaker(db_session):
     """If the spec-extraction pass raises a ClaudeError, it feeds the circuit breaker
     and the batch still commits (no crash)."""
