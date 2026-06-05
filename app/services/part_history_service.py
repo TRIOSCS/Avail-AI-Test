@@ -84,13 +84,20 @@ def offers_for_card(db: Session, card_id: int, limit: int = TOP_N) -> list[Offer
 
 
 def buyers_for_card(db: Session, card_id: int) -> list[User]:
-    return (
-        db.query(User)
-        .join(Offer, Offer.entered_by_id == User.id)
-        .filter(Offer.material_card_id == card_id)
+    # Dedup on the integer FK, NOT a DISTINCT over the full User row: Postgres can't
+    # apply DISTINCT to a row containing User.commodity_tags (JSON has no equality
+    # operator → "could not identify an equality operator for type json"). Resolve the
+    # distinct buyer ids first, then load those users.
+    buyer_ids = [
+        bid
+        for (bid,) in db.query(Offer.entered_by_id)
+        .filter(Offer.material_card_id == card_id, Offer.entered_by_id.isnot(None))
         .distinct()
         .all()
-    )
+    ]
+    if not buyer_ids:
+        return []
+    return db.query(User).filter(User.id.in_(buyer_ids)).all()
 
 
 def won_offers_for_card(db: Session, card_id: int, limit: int = TOP_N) -> list[Offer]:

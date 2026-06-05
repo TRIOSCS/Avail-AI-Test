@@ -264,3 +264,29 @@ def test_buyers_excludes_offers_with_null_entered_by(db_session: Session):
     h = get_part_history(db_session, "lm317t")
     assert h.offers_count == 1
     assert h.buyers == []
+
+
+def test_buyers_deduped_when_user_has_json_commodity_tags(db_session: Session):
+    """Regression: buyers must dedup even though User carries a JSON column.
+
+    On Postgres a ``SELECT DISTINCT`` over the full User row (which includes
+    ``commodity_tags``, a ``JSON`` column with no equality operator) raises
+    "could not identify an equality operator for type json". Deduping on the
+    offer FK instead avoids that. SQLite tolerates DISTINCT-over-JSON, so it
+    can't reproduce the operator error here — the live-Postgres check is the
+    real guard; this asserts the dedup contract and that the loaded buyer keeps
+    its JSON field intact.
+    """
+    card = _make_card(db_session)
+    req = _make_requisition(db_session)
+    u1 = _make_user(db_session)
+    u1.commodity_tags = ["resistors", "capacitors"]  # the column that broke DISTINCT
+    db_session.commit()
+    # Same buyer across two offers must collapse to a single buyer.
+    _make_offer(db_session, card, req, u1, vendor="Avnet")
+    _make_offer(db_session, card, req, u1, vendor="TTI")
+
+    h = get_part_history(db_session, "lm317t")
+    assert len(h.buyers) == 1
+    assert h.buyers[0].id == u1.id
+    assert h.buyers[0].commodity_tags == ["resistors", "capacitors"]
