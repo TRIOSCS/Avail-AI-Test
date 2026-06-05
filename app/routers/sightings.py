@@ -1329,7 +1329,14 @@ async def sightings_send_inquiry(
         if progressed_count:
             msg += f" {progressed_count} requirement{'s' if progressed_count != 1 else ''} advanced to sourcing."
 
-    return _oob_toast(msg, "warning" if failed_vendors else "success")
+    # Machine-readable result so the browser caller (rfqVendorModal.confirmSend) can
+    # report the TRUE outcome: this route intentionally returns 200 even on a partial
+    # or total send failure (the failures are captured above, not raised), so the
+    # client must not infer success from the HTTP status alone.
+    resp = _oob_toast(msg, "warning" if failed_vendors else "success")
+    resp.headers["X-RFQ-Sent"] = str(sent_count)
+    resp.headers["X-RFQ-Total"] = str(total)
+    return resp
 
 
 # ─────────────────────────────────────────────────────────────────────────────

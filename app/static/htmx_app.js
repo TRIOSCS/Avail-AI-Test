@@ -1397,4 +1397,145 @@ Alpine.data('quoteBuilder', (initialLines, reqId, hasCustomerSite, requirementId
   },
 }));
 
+// ── rfqVendorModal: sightings "Send RFQ" vendor-selection + compose modal ──
+// Rendered by app/templates/htmx/partials/sightings/vendor_modal.html. The server
+// passes the pre-selected vendor normalized-names and the requirement ids through a
+// SINGLE-quoted x-data attribute via |tojson — kept out of an inline x-data because
+// |tojson emits double quotes that would close a double-quoted attribute and break
+// Alpine init (see CLAUDE.md Alpine-quoting anti-pattern).
+Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
+  step: 'compose',
+  // Selection state as a plain reactive object keyed by vendor name (NOT a Set) — matches
+  // the sightingSelection store and the project's Alpine-reactivity guidance: Alpine tracks
+  // object key add/delete reliably, Set mutations less so.
+  selectedVendors: Object.fromEntries((suggestedNames || []).map((n) => [n, true])),
+  requirementIds: requirementIds || [],
+  emailBody: '',
+  previewing: false,
+  sending: false,
+
+  get selectedCount() {
+    return Object.keys(this.selectedVendors).length;
+  },
+  isSelected(name) {
+    return !!this.selectedVendors[name];
+  },
+  toggleVendor(name) {
+    if (this.selectedVendors[name]) delete this.selectedVendors[name];
+    else this.selectedVendors[name] = true;
+  },
+
+  // Build a FormData with REPEATED keys for the multi-valued fields. (Object.fromEntries
+  // on a FormData silently collapses duplicate keys to the last value — that would send
+  // only one requirement_id / vendor_name.) htmx.ajax accepts a FormData for `values`
+  // as-is, and fetch sends it directly.
+  _form() {
+    const form = new FormData();
+    this.requirementIds.forEach((id) => form.append('requirement_ids', id));
+    Object.keys(this.selectedVendors).forEach((v) => form.append('vendor_names', v));
+    form.append('email_body', this.emailBody);
+    return form;
+  },
+
+  _toast(message, type) {
+    // Toast store is { message, type, show } — set fields directly; show is a boolean.
+    this.$store.toast.message = message;
+    this.$store.toast.type = type;
+    this.$store.toast.show = true;
+  },
+
+  async loadPreview() {
+    if (this.selectedCount === 0 || !this.emailBody || this.previewing) return;
+    this.previewing = true;
+    try {
+      await htmx.ajax('POST', '/v2/partials/sightings/preview-inquiry', {
+        target: this.$refs.previewContent,
+        swap: 'innerHTML',
+        indicator: this.$refs.previewContent,
+        values: this._form(),
+      });
+      this.step = 'preview';
+    } catch (err) {
+      console.error('[rfqVendorModal] preview failed', err);
+      this._toast('Preview failed — please try again', 'error');
+    } finally {
+      this.previewing = false;
+    }
+  },
+
+  async confirmSend() {
+    if (this.selectedCount === 0 || !this.emailBody || this.sending) return;
+    this.sending = true;
+    const count = this.selectedCount;
+    try {
+      // Raw fetch so we can read the result headers below. starlette_csrf requires the
+      // x-csrftoken header on POST (mirrors quoteBuilder).
+      const csrf = document.cookie.match(/csrftoken=([^;]+)/)?.[1] || '';
+      const resp = await fetch('/v2/partials/sightings/send-inquiry', {
+        method: 'POST',
+        headers: { 'x-csrftoken': csrf },
+        body: this._form(),
+      });
+      if (!resp.ok) throw new Error('HTTP ' + resp.status);
+      // The route returns 200 even on a partial/total send failure, so report the TRUE
+      // outcome from the X-RFQ-* headers rather than assuming success.
+      const sent = parseInt(resp.headers.get('X-RFQ-Sent') || '0', 10);
+      const total = parseInt(resp.headers.get('X-RFQ-Total') || String(count), 10);
+      const outcome = this._sendOutcome(sent, total);
+      this._toast(outcome.message, outcome.type);
+      if (!outcome.delivered) return; // nothing sent — keep the modal open to retry
+      this._refreshSightings();
+      this.$dispatch('close-modal');
+    } catch (err) {
+      console.error('[rfqVendorModal] send failed', err);
+      this._toast('Send failed — please try again', 'error');
+    } finally {
+      this.sending = false;
+    }
+  },
+
+  // Map the server's sent/total counts to a toast. `delivered` is false only when
+  // nothing went out, so the caller can keep the modal open for a retry.
+  _sendOutcome(sent, total) {
+    if (sent === 0) {
+      return { type: 'error', delivered: false, message: 'Send failed — no RFQs were delivered' };
+    }
+    if (sent < total) {
+      return {
+        type: 'warning',
+        delivered: true,
+        message: 'Sent to ' + sent + ' of ' + total + ' vendors — ' + (total - sent) + ' failed',
+      };
+    }
+    return {
+      type: 'success',
+      delivered: true,
+      message: 'RFQ sent to ' + sent + ' vendor' + (sent === 1 ? '' : 's'),
+    };
+  },
+
+  // A successful send can change BOTH the open detail panel (status pill auto-advances
+  // OPEN→SOURCING, new "RFQ sent" activity rows) and the requirements list. Refresh
+  // whichever is on screen.
+  _refreshSightings() {
+    const selectedReqId = Alpine.store('sightingSelection')?.selectedReqId;
+    if (selectedReqId) {
+      htmx.ajax('GET', '/v2/partials/sightings/' + selectedReqId + '/detail', {
+        target: '#sightings-detail',
+        swap: 'innerHTML',
+        indicator: '#sightings-detail-skeleton',
+      });
+    }
+    const table = document.getElementById('sightings-table');
+    const tableUrl = table && table.getAttribute('hx-get');
+    if (tableUrl) {
+      htmx.ajax('GET', tableUrl, {
+        target: '#sightings-table',
+        swap: 'innerHTML',
+        indicator: '#sightings-load-spinner',
+      });
+    }
+  },
+}));
+
 Alpine.start();

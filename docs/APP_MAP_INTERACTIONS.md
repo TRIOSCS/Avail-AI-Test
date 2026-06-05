@@ -1319,6 +1319,32 @@ Component bound to `/requisitions2` `<tr>`. CSS handles hover reveal via
 `@focusin`/`@focusout`/`@keydown.enter` toggle visibility for keyboard
 users. `Escape` dismisses.
 
+### rfqVendorModal  (htmx_app.js, Alpine.data)
+
+Backs `sightings/vendor_modal.html` — the "Send RFQ" batch-inquiry modal opened
+from a sighting's vendor row (`requirement_ids=<id>`) or the table action bar
+(comma-joined ids). Invoked as
+`x-data='rfqVendorModal({{ suggested_vendors|map(attribute="normalized_name")|list|tojson }}, {{ requirement_ids|tojson }})'`.
+The factory lives in JS (not inline) because `|tojson` emits double quotes that
+would close a double-quoted `x-data` attribute and break Alpine init; the data is
+carried through a **single-quoted** attribute (tojson escapes `'`). State:
+`step` (compose|preview), `selectedVendors` (a plain reactive object keyed by vendor
+name — matches the `sightingSelection` store, not a Set; `selectedCount` getter +
+`isSelected(name)` back the bindings), `emailBody`. Methods: `toggleVendor`;
+`loadPreview()` → `POST /v2/partials/sightings/preview-inquiry` (htmx.ajax swap into
+`x-ref="previewContent"`); `confirmSend()` → `fetch POST
+/v2/partials/sightings/send-inquiry` with the `x-csrftoken` header, then on success
+`_refreshSightings()` re-GETs the open `#sightings-detail` (status auto-advances
+OPEN→SOURCING + new activity rows) and the `#sightings-table` list, and dispatches
+`close-modal`. `_form()` builds a `FormData` with **repeated** `requirement_ids`/
+`vendor_names` keys (not `Object.fromEntries`, which collapses duplicates).
+
+The route returns **HTTP 200 even on partial/total send failure** (failures are
+captured, not raised) and exposes the true outcome via `X-RFQ-Sent` / `X-RFQ-Total`
+response headers. `confirmSend` reads them and toasts via `$store.toast`: full
+success, partial-failure (warning), or total-failure (error — modal stays open to
+retry); it never infers success from the HTTP status alone.
+
 ---
 
 ## 8x8 Integration — Operator Enablement
