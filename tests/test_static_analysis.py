@@ -62,8 +62,6 @@ def test_htmx_ajax_calls_have_indicator():
     allowlist: set[tuple[str, int]] = {
         ("app/templates/htmx/base.html", 56),
         ("app/templates/requisitions2/_inline_cell.html", 16),
-        ("app/templates/htmx/partials/sightings/vendor_modal.html", 26),
-        ("app/templates/htmx/partials/sightings/vendor_modal.html", 44),
         ("app/templates/htmx/partials/sourcing/workspace.html", 177),
         ("app/templates/htmx/partials/excess/bid_form.html", 16),
         ("app/templates/htmx/partials/parts/cell_edit.html", 12),

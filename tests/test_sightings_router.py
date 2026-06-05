@@ -7,6 +7,7 @@ Depends on: conftest.py fixtures, app models, sighting_status service
 import json
 import re
 from datetime import datetime, timedelta, timezone
+from html.parser import HTMLParser
 
 from app.constants import ActivityType
 from app.models.intelligence import ActivityLog, MaterialCard
@@ -14,6 +15,24 @@ from app.models.offers import Offer
 from app.models.sourcing import Requirement, Requisition, Sighting
 from app.models.vendor_sighting_summary import VendorSightingSummary
 from app.models.vendors import VendorCard, VendorContact
+
+
+class _XDataExtractor(HTMLParser):
+    """Collect every x-data attribute value AS THE BROWSER TOKENIZES IT.
+
+    Faithfully reproduces HTML attribute-value termination, so a literal double-quote
+    injected by |tojson into a double-quoted x-data attribute shows up here as a
+    TRUNCATED value — exactly what breaks Alpine init in the browser.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.xdata_values: list[str] = []
+
+    def handle_starttag(self, tag, attrs):
+        for name, value in attrs:
+            if name == "x-data" and value:
+                self.xdata_values.append(value)
 
 
 def _seed_data(db_session):
@@ -327,6 +346,49 @@ class TestSightingsVendorModal:
         resp = client.get("/v2/partials/sightings/vendor-modal?requirement_ids=99999")
         assert resp.status_code == 200
 
+    def test_xdata_not_truncated_with_vendors(self, client, db_session):
+        """Regression for the broken "Send RFQ" modal.
+
+        With at least one suggested vendor, the modal's root x-data must survive HTML
+        attribute tokenization. The original template injected the vendor-name list via
+        |tojson INSIDE a double-quoted x-data attribute; tojson emits literal double
+        quotes (``["good vendor"]``) which close the attribute at the first vendor name,
+        so Alpine fails to init and the whole modal goes inert (the reported bug). The
+        fix routes the data through a single-quoted x-data invoking the rfqVendorModal()
+        factory, so the attribute — and the vendor name inside it — parse intact.
+        """
+        _, r, _ = _seed_data(db_session)
+        # VendorCard whose normalized_name matches lower(trim(vendor_name)) so the
+        # suggested_vendors join returns a non-empty list (the failing scenario).
+        db_session.add(
+            VendorCard(
+                normalized_name="good vendor",
+                display_name="Good Vendor",
+                is_blacklisted=False,
+                engagement_score=50.0,
+            )
+        )
+        db_session.commit()
+
+        resp = client.get(f"/v2/partials/sightings/vendor-modal?requirement_ids={r.id}")
+        assert resp.status_code == 200
+        # Sanity: the join matched and the vendor is actually in the modal.
+        assert "Good Vendor" in resp.text
+
+        extractor = _XDataExtractor()
+        extractor.feed(resp.text)
+        modal_xdata = [v for v in extractor.xdata_values if "rfqVendorModal" in v]
+        assert modal_xdata, (
+            "modal root must invoke the rfqVendorModal() factory via a single-quoted "
+            f"x-data; x-data values parsed: {extractor.xdata_values!r}"
+        )
+        # The vendor name must survive intact inside the parsed attribute — proof the
+        # tojson double-quotes did NOT terminate the attribute early.
+        assert any("good vendor" in v for v in modal_xdata), (
+            "vendor name was truncated out of the x-data attribute — tojson double-quotes "
+            "broke attribute tokenization (the original bug)."
+        )
+
 
 class TestSightingsBatchLimit:
     def test_batch_refresh_over_limit_returns_400(self, client, db_session):
@@ -350,6 +412,62 @@ class TestSightingsSendInquiry:
             data={"requirement_ids": str(r.id), "vendor_names": "Acme"},
         )
         assert resp.status_code == 400
+
+
+class TestSightingsSendInquiryResultHeaders:
+    """The route returns HTTP 200 even on a partial/total send failure (failures are
+    captured, not raised).
+
+    The X-RFQ-Sent / X-RFQ-Total headers carry the true outcome so the browser modal
+    (rfqVendorModal.confirmSend) never reports a false success.
+    """
+
+    def _post(self, client, r):
+        return client.post(
+            "/v2/partials/sightings/send-inquiry",
+            data={
+                "requirement_ids": str(r.id),
+                "vendor_names": ["Acme", "Globex"],  # list → repeated form keys
+                "email_body": "Please quote.",
+            },
+        )
+
+    def test_full_success_headers(self, client, db_session, monkeypatch):
+        _, r, _ = _seed_data(db_session)
+
+        async def fake_send(**kwargs):
+            # One result per vendor group => all sent.
+            return [{"vendor": g} for g in kwargs["vendor_groups"]]
+
+        monkeypatch.setattr("app.email_service.send_batch_rfq", fake_send)
+        resp = self._post(client, r)
+        assert resp.status_code == 200
+        assert resp.headers["X-RFQ-Sent"] == "2"
+        assert resp.headers["X-RFQ-Total"] == "2"
+
+    def test_partial_failure_still_200_with_headers(self, client, db_session, monkeypatch):
+        _, r, _ = _seed_data(db_session)
+
+        async def fake_send(**kwargs):
+            return [{"vendor": kwargs["vendor_groups"][0]}]  # only 1 of 2 delivered
+
+        monkeypatch.setattr("app.email_service.send_batch_rfq", fake_send)
+        resp = self._post(client, r)
+        assert resp.status_code == 200
+        assert resp.headers["X-RFQ-Sent"] == "1"
+        assert resp.headers["X-RFQ-Total"] == "2"
+
+    def test_total_failure_still_200_with_headers(self, client, db_session, monkeypatch):
+        _, r, _ = _seed_data(db_session)
+
+        async def fake_send(**kwargs):
+            raise RuntimeError("Graph API down")
+
+        monkeypatch.setattr("app.email_service.send_batch_rfq", fake_send)
+        resp = self._post(client, r)
+        assert resp.status_code == 200
+        assert resp.headers["X-RFQ-Sent"] == "0"
+        assert resp.headers["X-RFQ-Total"] == "2"
 
 
 class TestDashboardCounters:

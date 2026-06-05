@@ -4,48 +4,12 @@
    Context: suggested_vendors, requirement_ids, parts
 #}
 
-<div class="p-4" x-data="{
-  step: 'compose',
-  selectedVendors: new Set({{ suggested_vendors|map(attribute='normalized_name')|list|tojson }}),
-  emailBody: '',
-  cleaning: false,
-  previewing: false,
-  sending: false,
-  toggleVendor(name) {
-    if (this.selectedVendors.has(name)) this.selectedVendors.delete(name);
-    else this.selectedVendors.add(name);
-  },
-  async loadPreview() {
-    this.previewing = true;
-    const form = new FormData();
-    {{ requirement_ids|tojson }}.forEach(id => form.append('requirement_ids', id));
-    this.selectedVendors.forEach(v => form.append('vendor_names', v));
-    form.append('email_body', this.emailBody);
-    try {
-      const target = this.$refs.previewContent;
-      await htmx.ajax('POST', '/v2/partials/sightings/preview-inquiry', {
-        target: target, swap: 'innerHTML', values: Object.fromEntries(form)
-      });
-      this.step = 'preview';
-    } catch {
-      $store.toast.show('Preview failed — check your selections', 'error');
-    } finally {
-      this.previewing = false;
-    }
-  },
-  confirmSend() {
-    this.sending = true;
-    const form = new FormData();
-    {{ requirement_ids|tojson }}.forEach(id => form.append('requirement_ids', id));
-    this.selectedVendors.forEach(v => form.append('vendor_names', v));
-    form.append('email_body', this.emailBody);
-    const xhr = new XMLHttpRequest();
-    xhr.open('POST', '/v2/partials/sightings/send-inquiry');
-    xhr.onload = () => { const t = document.getElementById('sightings-table'); if (t) htmx.ajax('GET', t.getAttribute('hx-get') || window.location.pathname, {target: '#sightings-table'}); };
-    xhr.send(form);
-    $dispatch('close-modal');
-  }
-}">
+{# The component logic lives in the rfqVendorModal() factory in app/static/htmx_app.js.
+   The vendor-name list and requirement ids are passed via |tojson inside a SINGLE-quoted
+   x-data attribute — tojson emits double quotes, which would close a double-quoted
+   attribute and break Alpine init (CLAUDE.md Alpine-quoting anti-pattern). #}
+<div class="p-4"
+     x-data='rfqVendorModal({{ suggested_vendors|map(attribute="normalized_name")|list|tojson }}, {{ requirement_ids|tojson }})'>
 
   {# ── Step 1: Compose ─────────────────────────────────────────── #}
   <div x-show="step === 'compose'" x-cloak>
@@ -60,8 +24,8 @@
         {% for v in suggested_vendors %}
         <label class="flex items-center gap-3 px-3 py-2 hover:bg-gray-50 cursor-pointer">
           <input type="checkbox"
-                 :checked="selectedVendors.has('{{ v.normalized_name }}')"
-                 @change="toggleVendor('{{ v.normalized_name }}')"
+                 :checked='isSelected({{ v.normalized_name|tojson }})'
+                 @change='toggleVendor({{ v.normalized_name|tojson }})'
                  class="rounded border-gray-300">
           <div class="flex-1 min-w-0">
             <span class="text-sm font-medium text-gray-700">{{ v.display_name }}</span>
@@ -103,17 +67,17 @@
         Cancel
       </button>
       <button @click="loadPreview()"
-              :disabled="selectedVendors.size === 0 || !emailBody || previewing"
+              :disabled="selectedCount === 0 || !emailBody || previewing"
               class="px-4 py-2 text-sm font-medium text-brand-600 bg-brand-50 hover:bg-brand-100 border border-brand-200 rounded-lg transition-colors disabled:bg-gray-100 disabled:text-gray-400 disabled:border-gray-200">
         <span x-show="!previewing" x-cloak>
-          Preview <span x-text="selectedVendors.size"></span> Email<span x-show="selectedVendors.size !== 1" x-cloak>s</span>
+          Preview <span x-text="selectedCount"></span> Email<span x-show="selectedCount !== 1" x-cloak>s</span>
         </span>
         <span x-show="previewing" x-cloak>Loading...</span>
       </button>
       <button @click="confirmSend()"
-              :disabled="selectedVendors.size === 0 || !emailBody || sending"
+              :disabled="selectedCount === 0 || !emailBody || sending"
               class="px-4 py-2 text-sm font-medium text-white bg-brand-500 hover:bg-brand-600 rounded-lg transition-colors disabled:bg-gray-300">
-        Send to <span x-text="selectedVendors.size"></span> Vendor<span x-show="selectedVendors.size !== 1" x-cloak>s</span>
+        Send to <span x-text="selectedCount"></span> Vendor<span x-show="selectedCount !== 1" x-cloak>s</span>
       </button>
     </div>
   </div>
