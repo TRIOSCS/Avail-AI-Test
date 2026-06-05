@@ -235,6 +235,132 @@ def test_filters_sub_ignores_manufacturers_key(client, db_session):
     )
 
 
+def test_global_filters_partial_renders(client, db_session: Session):
+    """The global-facets partial renders lifecycle / RoHS / datasheet with counts."""
+    db_session.add(
+        MaterialCard(
+            normalized_mpn="gf-1",
+            display_mpn="GF-1",
+            category="resistors",
+            lifecycle_status="active",
+            rohs_status="compliant",
+            datasheet_url="https://example.com/ds.pdf",
+            created_at=datetime.now(timezone.utc),
+        )
+    )
+    db_session.commit()
+    resp = client.get("/v2/partials/materials/filters/global")
+    assert resp.status_code == 200
+    assert "Lifecycle" in resp.text
+    assert "RoHS" in resp.text
+    assert "Has datasheet" in resp.text
+    # Bound to Alpine state arrays, not the legacy toggles.
+    assert "toggleGlobalFacet('lifecycle'" in resp.text
+    assert "toggleDatasheet()" in resp.text
+
+
+def test_faceted_lifecycle_param_filters(client, db_session: Session):
+    """The faceted route parses ?lifecycle= and returns only matching cards."""
+    db_session.add_all(
+        [
+            MaterialCard(
+                normalized_mpn="lc-active",
+                display_mpn="LC-ACTIVE",
+                category="resistors",
+                lifecycle_status="active",
+                created_at=datetime.now(timezone.utc),
+            ),
+            MaterialCard(
+                normalized_mpn="lc-eol",
+                display_mpn="LC-EOL",
+                category="resistors",
+                lifecycle_status="eol",
+                created_at=datetime.now(timezone.utc),
+            ),
+        ]
+    )
+    db_session.commit()
+    resp = client.get("/v2/partials/materials/faceted?lifecycle=active")
+    assert resp.status_code == 200
+    assert "LC-ACTIVE" in resp.text
+    assert "LC-EOL" not in resp.text
+
+
+def test_faceted_rohs_and_datasheet_params_filter(client, db_session: Session):
+    """?rohs= and ?has_datasheet=true narrow the result set correctly."""
+    db_session.add_all(
+        [
+            MaterialCard(
+                normalized_mpn="r-ok-ds",
+                display_mpn="R-OK-DS",
+                category="resistors",
+                rohs_status="compliant",
+                datasheet_url="https://example.com/a.pdf",
+                created_at=datetime.now(timezone.utc),
+            ),
+            MaterialCard(
+                normalized_mpn="r-ok-no-ds",
+                display_mpn="R-OK-NO-DS",
+                category="resistors",
+                rohs_status="compliant",
+                datasheet_url=None,
+                created_at=datetime.now(timezone.utc),
+            ),
+            MaterialCard(
+                normalized_mpn="r-bad-ds",
+                display_mpn="R-BAD-DS",
+                category="resistors",
+                rohs_status="non-compliant",
+                datasheet_url="https://example.com/b.pdf",
+                created_at=datetime.now(timezone.utc),
+            ),
+        ]
+    )
+    db_session.commit()
+    resp = client.get("/v2/partials/materials/faceted?rohs=compliant&has_datasheet=true")
+    assert resp.status_code == 200
+    assert "R-OK-DS" in resp.text  # compliant + has datasheet
+    assert "R-OK-NO-DS" not in resp.text  # compliant but no datasheet
+    assert "R-BAD-DS" not in resp.text  # has datasheet but non-compliant
+
+
+def test_faceted_statuses_param_still_filters(client, db_session: Session):
+    """The trust-ladder ?statuses= CSV restricts to listed enrichment tiers."""
+    db_session.add_all(
+        [
+            MaterialCard(
+                normalized_mpn="st-verified",
+                display_mpn="ST-VERIFIED",
+                category="resistors",
+                enrichment_status="verified",
+                created_at=datetime.now(timezone.utc),
+            ),
+            MaterialCard(
+                normalized_mpn="st-ai",
+                display_mpn="ST-AI",
+                category="resistors",
+                enrichment_status="ai_inferred",
+                created_at=datetime.now(timezone.utc),
+            ),
+        ]
+    )
+    db_session.commit()
+    resp = client.get("/v2/partials/materials/faceted?statuses=verified")
+    assert resp.status_code == 200
+    assert "ST-VERIFIED" in resp.text
+    assert "ST-AI" not in resp.text
+
+
+def test_workspace_renders_trust_ladder(client):
+    """The Data-confidence section + trust-ladder toggle method appear in the
+    sidebar."""
+    resp = client.get("/v2/partials/materials/workspace")
+    assert resp.status_code == 200
+    assert "Data confidence" in resp.text
+    assert "toggleStatus(" in resp.text
+    assert "AI-inferred" in resp.text
+
+
 def test_list_renders_zero_price_and_currency():
     """A $0 best price renders (not '--'); a non-USD currency shows its ISO code."""
     from types import SimpleNamespace

@@ -706,6 +706,10 @@ Claude Haiku (Anthropic API)  — FIRST PASS
 After first pass (scheduled job only):
 tagging_jobs.py -> enrich_pending_specs() [spec extraction, second pass]
   OR
+enrichment_worker/worker.py::run_one_batch -> enrich_card_specs(<this batch's
+    newly core-enriched card ids>)  [paced, once per batch, same session + commit;
+    only verified/web_sourced/ai_inferred cards — never not_found]
+  OR
 POST /v2/partials/materials/{id}/enrich (Enrich button) -> enrich_card_specs([id], force=True)
   OR
 python -m app.management.enrich_specs --limit N  (one-time/on-demand backfill)
@@ -715,7 +719,8 @@ spec_enrichment_service.py  — SECOND PASS
     |
     +---> Per-commodity structured-spec extraction via claude_structured (model_tier="smart")
     |       +---> COMMODITY_SPECS schema drives prompt (per category: key, label, type, values)
-    |       +---> Records facets at confidence >= 0.70
+    |       +---> Records facets at confidence >= 0.85 (FACET_MIN_CONF; higher than the
+    |             free-text summary bar because a wrong spec value silently mis-filters a part)
     |
     +---> spec_write_service.record_spec()
     |       +---> DB: UPDATE material_cards.specs_structured (JSONB — keyed parametric values)
@@ -777,6 +782,22 @@ faceted_search_service.py
 NOTE: Uses tsvector + trgm for multi-word queries, ILIKE fallback for
       single tokens. GIN-indexed TSVECTOR with weighted fields
       (MPN=A, manufacturer=B, description/category=C).
+
+Sidebar facets (workspace.html + materialsFilter Alpine component):
+    +---> Data confidence (trust ladder): 5 ordered, color-coded enrichment
+    |     tiers (verified > web_sourced > ai_inferred > not_found > unenriched).
+    |     Multi-select; default selection = verified + web_sourced. Alpine state
+    |     `statuses[]` → `?statuses=` CSV → search_materials_faceted(statuses=...)
+    |     which IN-filters MaterialCard.enrichment_status. `statuses` takes
+    |     precedence over the legacy `verified_only` boolean (never ANDed).
+    +---> Global facets (MaterialCard columns, OR-within each, AND across):
+    |       +---> lifecycle  → lifecycle_status IN (active|nrfnd|eol|obsolete|ltb)
+    |       +---> rohs        → rohs_status IN (compliant|non-compliant|exempt)
+    |       +---> has_datasheet (boolean) → datasheet_url IS NOT NULL
+    |     Counts come from get_global_facet_counts(); rendered by
+    |     /v2/partials/materials/filters/global (reloads on commodity-changed).
+    +---> Manufacturer facet → /v2/partials/materials/filters/manufacturers
+    +---> Commodity sub-filters → /v2/partials/materials/filters/sub (spec facets)
 
 Search coverage:
     +---> global_search_service.py includes substitutes_text.ilike for

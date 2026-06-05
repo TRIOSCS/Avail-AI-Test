@@ -73,6 +73,7 @@ from ..services.commodity_registry import COMMODITY_TREE, get_display_name
 from ..services.faceted_search_service import (
     get_commodity_counts,
     get_facet_counts,
+    get_global_facet_counts,
     get_subfilter_options,
     search_materials_faceted,
 )
@@ -7049,6 +7050,7 @@ async def materials_workspace_partial(
     ctx = _base_ctx(request, user, "materials")
     ctx["total_materials"] = total_materials
     ctx["display_names"] = {sub: get_display_name(sub) for sub in all_subs}
+    ctx["global_facet_counts"] = get_global_facet_counts(db)
     return template_response("htmx/partials/materials/workspace.html", ctx)
 
 
@@ -7066,6 +7068,24 @@ async def materials_filters_manufacturers_partial(
     ctx = _base_ctx(request, user, "materials")
     ctx["manufacturer_options"] = options
     return template_response("htmx/partials/materials/filters/manufacturers.html", ctx)
+
+
+@router.get("/v2/partials/materials/filters/global", response_class=HTMLResponse)
+async def materials_filters_global_partial(
+    request: Request,
+    commodity: str = "",
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """Render global facets (lifecycle / RoHS / has-datasheet) with live counts.
+
+    Mirrors the manufacturer-filter partial: a container that reloads on commodity
+    change so counts reflect the active category.
+    """
+    counts = get_global_facet_counts(db, commodity=commodity or None)
+    ctx = _base_ctx(request, user, "materials")
+    ctx["global_facet_counts"] = counts
+    return template_response("htmx/partials/materials/filters/global.html", ctx)
 
 
 @router.get("/v2/partials/manufacturers/search", response_class=HTMLResponse)
@@ -7217,6 +7237,9 @@ async def materials_faceted_partial(
     offset: int = Query(0, ge=0),
     verified_only: bool = Query(False),
     statuses: str = Query(""),
+    lifecycle: str = Query(""),
+    rohs: str = Query(""),
+    has_datasheet: bool = Query(False),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -7230,9 +7253,13 @@ async def materials_faceted_partial(
         mfr_val = parsed_filters.pop("manufacturers")
         manufacturers = mfr_val if isinstance(mfr_val, list) else [mfr_val]
 
-    parsed_statuses: list[str] | None = None
-    if statuses:
-        parsed_statuses = [s.strip() for s in statuses.split(",") if s.strip()]
+    def _csv_list(raw: str) -> list[str] | None:
+        items = [s.strip() for s in raw.split(",") if s.strip()]
+        return items or None
+
+    parsed_statuses = _csv_list(statuses)
+    parsed_lifecycle = _csv_list(lifecycle)
+    parsed_rohs = _csv_list(rohs)
 
     materials, total = search_materials_faceted(
         db,
@@ -7242,6 +7269,9 @@ async def materials_faceted_partial(
         manufacturers=manufacturers,
         verified_only=verified_only,
         statuses=parsed_statuses,
+        lifecycle=parsed_lifecycle,
+        rohs=parsed_rohs,
+        has_datasheet=has_datasheet,
         limit=limit,
         offset=offset,
     )

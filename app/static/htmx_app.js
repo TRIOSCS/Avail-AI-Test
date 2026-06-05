@@ -554,14 +554,40 @@ Alpine.data('materialsFilter', () => ({
   page: 0,
   drawerOpen: false,
   displayNames: {},
-  verifiedOnly: false,
-  webSourced: false,
+  // Trust ladder — ordered enrichment tiers (most → least trustworthy).
+  // Default selection = the trustworthy set (Verified + Web-sourced).
+  statuses: ['verified', 'web_sourced'],
+  // Global facets — MaterialCard columns (OR-within each).
+  lifecycle: [],
+  rohs: [],
+  hasDatasheet: false,
   _onPopstate: null,
+
+  // Ordered tier metadata. label = sidebar/chip text; the array order pins
+  // the visual ordering of the Data-confidence section.
+  TRUST_TIERS: [
+    { key: 'verified', label: 'Verified' },
+    { key: 'web_sourced', label: 'Web-sourced' },
+    { key: 'ai_inferred', label: 'AI-inferred' },
+    { key: 'not_found', label: 'Not found' },
+    { key: 'unenriched', label: 'Unenriched' },
+  ],
+  DEFAULT_STATUSES: ['verified', 'web_sourced'],
 
   get commodityDisplayName() {
     if (!this.commodity) return '';
     return this.displayNames[this.commodity]
       || this.commodity.replace(/_/g, ' ').replace(/(^|\s)\S/g, l => l.toUpperCase());
+  },
+
+  // Tiers selected beyond the trustworthy default — surfaced as active chips.
+  get nonDefaultStatuses() {
+    return this.statuses.filter(s => !this.DEFAULT_STATUSES.includes(s));
+  },
+
+  statusLabel(key) {
+    const tier = this.TRUST_TIERS.find(t => t.key === key);
+    return tier ? tier.label : key;
   },
 
   get activeFilterCount() {
@@ -570,6 +596,10 @@ Alpine.data('materialsFilter', () => ({
       if (Array.isArray(val)) count += val.length;
       else if (val !== '' && val !== null) count += 1;
     }
+    count += this.nonDefaultStatuses.length;
+    count += this.lifecycle.length;
+    count += this.rohs.length;
+    if (this.hasDatasheet) count += 1;
     return count;
   },
 
@@ -591,8 +621,20 @@ Alpine.data('materialsFilter', () => ({
       const params = new URLSearchParams(window.location.search);
       this.commodity = params.get('commodity') || '';
       this.q = params.get('q') || '';
-      this.verifiedOnly = params.get('verified_only') === 'true';
-      this.webSourced = params.get('web_sourced') === 'true';
+      // Trust ladder: explicit `statuses` CSV wins; otherwise fall back to the
+      // trustworthy default. (Legacy verified_only/web_sourced links still map in.)
+      const statusesParam = params.get('statuses');
+      if (statusesParam !== null) {
+        this.statuses = statusesParam.split(',').filter(s => s !== '');
+      } else {
+        const legacy = [];
+        if (params.get('verified_only') === 'true') legacy.push('verified');
+        if (params.get('web_sourced') === 'true') legacy.push('web_sourced');
+        this.statuses = legacy.length > 0 ? legacy : [...this.DEFAULT_STATUSES];
+      }
+      this.lifecycle = (params.get('lifecycle') || '').split(',').filter(s => s !== '');
+      this.rohs = (params.get('rohs') || '').split(',').filter(s => s !== '');
+      this.hasDatasheet = params.get('has_datasheet') === 'true';
       const pageVal = parseInt(params.get('page') || '0', 10);
       this.page = isNaN(pageVal) ? 0 : pageVal;
       this.subFilters = {};
@@ -621,8 +663,10 @@ Alpine.data('materialsFilter', () => ({
       // Broken URL — reset to defaults
       this.commodity = '';
       this.q = '';
-      this.verifiedOnly = false;
-      this.webSourced = false;
+      this.statuses = [...this.DEFAULT_STATUSES];
+      this.lifecycle = [];
+      this.rohs = [];
+      this.hasDatasheet = false;
       this.page = 0;
       this.subFilters = {};
     }
@@ -632,8 +676,14 @@ Alpine.data('materialsFilter', () => ({
     const params = new URLSearchParams();
     if (this.commodity) params.set('commodity', this.commodity);
     if (this.q) params.set('q', this.q);
-    if (this.verifiedOnly) params.set('verified_only', 'true'); else params.delete('verified_only');
-    if (this.webSourced) params.set('web_sourced', 'true'); else params.delete('web_sourced');
+    // Persist the trust ladder only when it differs from the default set, so
+    // clean URLs stay clean. An empty selection is meaningful → always written.
+    const isDefault = this.statuses.length === this.DEFAULT_STATUSES.length
+      && this.DEFAULT_STATUSES.every(s => this.statuses.includes(s));
+    if (!isDefault) params.set('statuses', this.statuses.join(','));
+    if (this.lifecycle.length > 0) params.set('lifecycle', this.lifecycle.join(','));
+    if (this.rohs.length > 0) params.set('rohs', this.rohs.join(','));
+    if (this.hasDatasheet) params.set('has_datasheet', 'true');
     if (this.page > 0) params.set('page', this.page);
     for (const [key, val] of Object.entries(this.subFilters)) {
       if (Array.isArray(val) && val.length > 0) {
@@ -652,6 +702,39 @@ Alpine.data('materialsFilter', () => ({
     this.commodity = commodity || '';
     this.subFilters = {};
     document.body.dispatchEvent(new CustomEvent('commodity-changed'));
+    this.applyFilters();
+  },
+
+  // Trust-ladder tier toggle (multi-select). Always re-applies (the tiers live
+  // in their own pinned section, not the mobile-batch sub-filter group).
+  toggleStatus(key) {
+    const idx = this.statuses.indexOf(key);
+    if (idx >= 0) this.statuses.splice(idx, 1);
+    else this.statuses.push(key);
+    this.applyFilters();
+  },
+
+  // Global-facet array toggle (lifecycle / rohs). OR-within each facet.
+  toggleGlobalFacet(facet, value) {
+    const arr = this[facet];
+    if (!Array.isArray(arr)) return;
+    const idx = arr.indexOf(value);
+    if (idx >= 0) arr.splice(idx, 1);
+    else arr.push(value);
+    if (window.innerWidth >= 1024) this.applyFilters();
+  },
+
+  toggleDatasheet() {
+    this.hasDatasheet = !this.hasDatasheet;
+    if (window.innerWidth >= 1024) this.applyFilters();
+  },
+
+  // Chip removal for a global facet — always re-applies (explicit user action).
+  removeGlobalFacet(facet, value) {
+    const arr = this[facet];
+    if (!Array.isArray(arr)) return;
+    const idx = arr.indexOf(value);
+    if (idx >= 0) arr.splice(idx, 1);
     this.applyFilters();
   },
 

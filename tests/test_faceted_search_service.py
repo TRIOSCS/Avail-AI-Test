@@ -12,6 +12,7 @@ from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
 from app.services.faceted_search_service import (
     get_commodity_counts,
     get_facet_counts,
+    get_global_facet_counts,
     get_manufacturer_options,
     get_subfilter_options,
     search_materials_faceted,
@@ -283,6 +284,86 @@ def test_search_faceted_filters_by_manufacturer(db_session: Session):
     results, total = search_materials_faceted(db_session, commodity="resistors", manufacturers=["TI"])
     assert total == 1
     assert results[0].manufacturer == "TI"
+
+
+# --- Global facets: lifecycle / rohs / has_datasheet ---
+
+
+def _mk_global(db, mpn, *, lifecycle=None, rohs=None, datasheet=None):
+    card = MaterialCard(
+        normalized_mpn=mpn,
+        display_mpn=mpn.upper(),
+        category="resistors",
+        lifecycle_status=lifecycle,
+        rohs_status=rohs,
+        datasheet_url=datasheet,
+        created_at=datetime.now(timezone.utc),
+    )
+    db.add(card)
+    db.flush()
+    return card
+
+
+def test_search_faceted_lifecycle_filter(db_session: Session):
+    _mk_global(db_session, "lc-active", lifecycle="active")
+    _mk_global(db_session, "lc-eol", lifecycle="eol")
+    _mk_global(db_session, "lc-obs", lifecycle="obsolete")
+
+    results, total = search_materials_faceted(db_session, lifecycle=["active", "eol"])
+    mpns = {c.normalized_mpn for c in results}
+    assert mpns == {"lc-active", "lc-eol"}
+    assert total == 2
+
+
+def test_search_faceted_rohs_filter(db_session: Session):
+    _mk_global(db_session, "rohs-ok", rohs="compliant")
+    _mk_global(db_session, "rohs-no", rohs="non-compliant")
+    _mk_global(db_session, "rohs-ex", rohs="exempt")
+
+    results, total = search_materials_faceted(db_session, rohs=["compliant", "exempt"])
+    mpns = {c.normalized_mpn for c in results}
+    assert mpns == {"rohs-ok", "rohs-ex"}
+    assert total == 2
+
+
+def test_search_faceted_has_datasheet_filter(db_session: Session):
+    _mk_global(db_session, "ds-yes", datasheet="https://example.com/ds.pdf")
+    _mk_global(db_session, "ds-no", datasheet=None)
+
+    results, total = search_materials_faceted(db_session, has_datasheet=True)
+    mpns = {c.normalized_mpn for c in results}
+    assert mpns == {"ds-yes"}
+    assert total == 1
+
+    # has_datasheet=False is a no-op → both rows returned.
+    _, total_all = search_materials_faceted(db_session, has_datasheet=False)
+    assert total_all == 2
+
+
+def test_search_faceted_global_facets_combine_with_status(db_session: Session):
+    """Global facets AND with the trust-ladder statuses filter."""
+    c1 = _mk_global(db_session, "combo-1", lifecycle="active")
+    c1.enrichment_status = "verified"
+    c2 = _mk_global(db_session, "combo-2", lifecycle="active")
+    c2.enrichment_status = "ai_inferred"
+    db_session.flush()
+
+    results, total = search_materials_faceted(db_session, lifecycle=["active"], statuses=["verified"])
+    assert {c.normalized_mpn for c in results} == {"combo-1"}
+    assert total == 1
+
+
+def test_get_global_facet_counts(db_session: Session):
+    _mk_global(db_session, "g-1", lifecycle="active", rohs="compliant", datasheet="https://x/1.pdf")
+    _mk_global(db_session, "g-2", lifecycle="active", rohs="exempt", datasheet=None)
+    _mk_global(db_session, "g-3", lifecycle="eol", rohs="compliant", datasheet="https://x/3.pdf")
+
+    counts = get_global_facet_counts(db_session)
+    assert counts["lifecycle"]["active"] == 2
+    assert counts["lifecycle"]["eol"] == 1
+    assert counts["rohs"]["compliant"] == 2
+    assert counts["rohs"]["exempt"] == 1
+    assert counts["has_datasheet"]["true"] == 2
 
 
 class TestFacetedSearchEdgeCases:

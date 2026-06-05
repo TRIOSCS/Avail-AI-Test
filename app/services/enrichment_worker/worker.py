@@ -110,6 +110,14 @@ async def run_one_batch(
 ) -> dict[str, int]:
     """Enrich one batch of cards and return per-tier counts.
 
+    After the per-card core-enrichment loop completes, this also triggers a paced,
+    second-pass PARAMETRIC SPEC extraction (``enrich_card_specs``) for the cards that
+    landed a real category this batch (verified / web_sourced / ai_inferred) — so the
+    materials filter tree gets MaterialSpecFacet + specs_structured data. It runs ONCE
+    per batch (the extractor groups by category internally) and shares the same session
+    and final commit, so core attrs and specs persist together. Bounded by the worker's
+    daily_cap (≤ daily_cap cards/day receive a spec pass).
+
     Returns an empty dict if the batch is empty (caller should idle-sleep).
 
     ``disabled`` accumulates sources that hit a quota/auth wall (connectors) and the
@@ -148,6 +156,10 @@ async def run_one_batch(
 
     conns = _connectors_in_order(db)
     counts: dict[str, int] = {}
+    # Cards that landed a real category this batch (verified / web_sourced / ai_inferred) —
+    # the ones eligible for a second-pass parametric spec extraction. not_found and
+    # exception (poison-pill) cards are deliberately excluded.
+    enriched_ids: list[int] = []
     now = datetime.now(timezone.utc)
 
     for card in batch:
@@ -172,6 +184,11 @@ async def run_one_batch(
             )
             card.enriched_at = now
             counts[status] = counts.get(status, 0) + 1
+
+            if status != MaterialEnrichmentStatus.NOT_FOUND:
+                # Landed a real category (verified / web_sourced / ai_inferred) — queue it
+                # for the second-pass parametric spec extraction below.
+                enriched_ids.append(int(card.id))
 
             if status != MaterialEnrichmentStatus.VERIFIED:
                 # A non-verified result means a Claude tier (web and/or infer) completed
@@ -215,6 +232,21 @@ async def run_one_batch(
             counts[MaterialEnrichmentStatus.NOT_FOUND] = counts.get(MaterialEnrichmentStatus.NOT_FOUND, 0) + 1
 
     web_state["web_calls"] = web_calls_today
+
+    # Second pass: parametric spec extraction for cards that landed a real category this
+    # batch. Runs ONCE per batch (the extractor groups by category internally) on the same
+    # session, so specs persist together with core attrs at the commit below.
+    if enriched_ids:
+        from app.services.spec_enrichment_service import enrich_card_specs
+
+        try:
+            spec_stats = await enrich_card_specs(enriched_ids, db)
+            logger.info("ENRICH_WORKER: specs {}", spec_stats)
+        except ClaudeError as e:
+            logger.warning("ENRICH_WORKER: spec extraction Claude error: {}", type(e).__name__)
+            breaker.record_claude_error()
+        except Exception as e:
+            logger.error("ENRICH_WORKER: spec extraction failed: {}", e)
 
     try:
         db.commit()
