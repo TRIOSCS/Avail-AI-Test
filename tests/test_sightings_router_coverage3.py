@@ -647,7 +647,7 @@ class TestSendInquiryCoverage:
         assert "Failed" in resp.text or "failed" in resp.text.lower()
 
     def test_send_single_vendor_singular_message(self, client: TestClient, req_item):
-        """Line 1236: sent_count==1 → 'vendor' (not 'vendors') in message."""
+        """sent_count==1 → singular 'vendor' (not 'vendors') in the success message."""
         _, item = req_item
         # Realistic send_batch_rfq result: one record tagged "sent" (sent_count counts
         # status=="sent", not list length).

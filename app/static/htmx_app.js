@@ -1518,8 +1518,10 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
   // OPEN→SOURCING, new "RFQ sent" activity rows) and the requirements list. Refresh
   // whichever is on screen.
   _refreshSightings() {
-    // The send already succeeded; if a panel refresh fails, warn rather than silently
-    // leaving a stale status pill / requirements list on screen.
+    // Best-effort refresh of the open panel + list after a successful send. htmx.ajax
+    // rejects only on network/timeout/target errors (HTTP 4xx/5xx are surfaced by the
+    // global htmx:responseError toast registered above), so this .catch covers the
+    // connection-failure case with a clearer "you already sent" message.
     const onRefreshError = (err) => {
       console.error('[rfqVendorModal] post-send refresh failed', err);
       this._toast('Sent — refresh the page to see updated status', 'warning');

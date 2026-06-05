@@ -34,7 +34,7 @@ change, update the relevant APP_MAP doc(s) in the same PR.**
 - **Quality > speed. Zero ambiguity in designs.** Resolve every decision in the spec; no TBDs, no "options A/B".
 - **Hosted CLI only.** No GUI, no screenshots, no desktop-dependent suggestions, no browser visual companion.
 - **Before pushing big PRs:** run `pre-commit run --all-files` (local git-hook scope is narrower than CI and bites otherwise).
-- **Deploy is `./deploy.sh` only** — uses `--no-cache` and `--force-recreate`. Bare `docker compose up -d --build` ships stale templates. After deploy, verify any new Tailwind classes actually appear in built CSS.
+- **Deploy is `./deploy.sh` only.** It passes a unique `--build-arg BUILD_COMMIT=<sha>-<ts>` that the Dockerfile consumes right before the source COPYs in BOTH stages, so templates/static/Vite always rebuild fresh while apt/pip/npm-ci cache (~30s deploys; PR #211 — no more `--no-cache`). Bare `docker compose up -d --build` (without that build-arg) ships stale templates. After deploy, verify any new Tailwind classes actually appear in built CSS.
 
 - Always write tests with any new code. Don't ask, just include them.
 - Give exact file paths for everything.
@@ -209,10 +209,13 @@ docker compose down               # Stop everything
 ./deploy.sh                       # From main: commit + push + rebuild + health-check + verify
 ./deploy.sh --no-commit           # Rebuild current branch without committing/pushing
 ```
-`deploy.sh` must run from `main` unless `--no-commit`. It builds with `--no-cache`,
+`deploy.sh` must run from `main` unless `--no-commit`. It builds with a unique
+`BUILD_COMMIT` build-arg (consumed before the source COPYs in both Dockerfile stages, so
+templates/static/Vite always rebuild fresh while apt/pip/npm-ci cache — no `--no-cache`),
 recreates only the `app` container, waits for the health check, verifies the deployed
 build tag, and checks that Tailwind classes in templates exist in the built CSS bundle.
-Never use bare `docker compose up -d --build` — it ships stale templates.
+Never use bare `docker compose up -d --build` (without `--build-arg BUILD_COMMIT=...`) —
+it ships stale templates.
 
 ### Python lint / type check
 ```bash
