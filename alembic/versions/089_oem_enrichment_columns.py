@@ -6,8 +6,12 @@ not_catalogued) added alongside the no-hallucination OEM enrichment feature. Als
 documents the expanded MaterialEnrichmentStatus value set on material_cards via a
 Postgres column comment (guarded so it no-ops on SQLite test runs).
 
-Revision ID: 089_oem_enrichment_status_columns
+Revision ID: 089_oem_enrichment_columns
 Revises: 088_enrichment_worker_status
+
+NOTE: the revision id is kept <= 32 chars — Alembic's ``alembic_version.version_num``
+column is ``VARCHAR(32)`` on PostgreSQL. A longer id passes SQLite tests (no length
+enforcement) but fails the version-write on Postgres. See tests/test_migration_revision_ids.py.
 Create Date: 2026-06-05
 """
 
@@ -15,7 +19,7 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "089_oem_enrichment_status_columns"
+revision = "089_oem_enrichment_columns"
 down_revision = "088_enrichment_worker_status"
 branch_labels = None
 depends_on = None
