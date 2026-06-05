@@ -196,6 +196,30 @@ def test_no_asyncio_run_in_htmx_views():
     assert not offenders, f"asyncio.run( found in htmx_views.py at line(s): {offenders}"
 
 
+def test_templates_never_reference_static_public_prefix():
+    """Production serves /static/* from the Vite *build* output (app/static/dist/,
+    copied into Caddy's static_files volume by docker-entrypoint.sh). Vite flattens its
+    public/ directory into the output root, so files that live at
+    app/static/public/<name> are served at /static/<name> — the `public/` segment NEVER
+    appears in a served URL. Caddy answers /static/* directly from that volume and never
+    proxies to the FastAPI source mount, so a /static/public/... URL is a guaranteed 404
+    in production.
+
+    Regression guard for commit 69066c67, which mistakenly rewrote the logo references
+    from /static/avail_logo*.png to /static/public/avail_logo*.png and broke every logo
+    on the live site.
+    """
+    offenders = []
+    for path in Path("app/templates").rglob("*.html"):
+        for i, line in enumerate(path.read_text().splitlines(), 1):
+            if "/static/public/" in line:
+                offenders.append(f"{path}:{i}: {line.strip()}")
+    assert not offenders, (
+        "Templates must reference Vite-flattened static URLs (/static/<name>), not the "
+        "source-only /static/public/<name> path, which 404s through Caddy in production:\n" + "\n".join(offenders)
+    )
+
+
 def test_standalone_pages_register_csrf_listener():
     """Standalone page templates that issue mutating HTMX requests but do not
     unconditionally load htmx_app.js must register their own htmx:configRequest CSRF
