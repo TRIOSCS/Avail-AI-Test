@@ -456,3 +456,137 @@ def test_enrich_cards_already_verified_skipped(mock_conns, db_session):
     counts = asyncio.run(enrich_cards([card.id], db_session, refresh=False))
     assert call_count["n"] == 0
     assert counts.get("verified", 0) == 1
+
+
+from unittest.mock import AsyncMock, patch
+
+import pytest
+
+from app.constants import MaterialEnrichmentStatus
+from app.services import authoritative_enrichment_service as aes
+from app.services.enrichment_worker.oem_extractor import CrossRefResult, OemExtractResult
+
+
+def _oem_card(mpn="01HW917"):
+    return MaterialCard(display_mpn=mpn, normalized_mpn=mpn.lower().replace("-", ""))
+
+
+@pytest.mark.asyncio
+async def test_crossref_double_verify_to_verified(db_session):
+    card = _oem_card()
+    xr = CrossRefResult(
+        status="resolved",
+        resolved_mpn="M393A2K40EB3-CWE",
+        manufacturer="Samsung",
+        linkage_source_url="https://support.lenovo.com/x",
+        linkage_source_domain="support.lenovo.com",
+        confidence=0.95,
+    )
+
+    # No distributor hit for the FRU; distributor DOES confirm the resolved MPN.
+    async def fake_fetch(display, norm, conns, disabled, cooldown):
+        if norm == "m393a2k40eb3cwe":
+            return {
+                "mouser": [
+                    {"mpn_matched": "M393A2K40EB3-CWE", "description": "16GB DDR4 RDIMM", "manufacturer": "Samsung"}
+                ]
+            }
+        return {}
+
+    meter = {"web_calls": 0, "claude_ok": False}
+    with (
+        patch.object(aes, "classify_oem_vendor", return_value="lenovo"),
+        patch.object(aes, "extract_part_from_web", new=AsyncMock(return_value=type("W", (), {"status": "failed"})())),
+        patch.object(aes, "cross_reference_mpn", new=AsyncMock(return_value=xr)),
+        patch.object(aes, "fetch_authoritative", new=AsyncMock(side_effect=fake_fetch)),
+    ):
+        status = await aes.enrich_card(card, db_session, connectors=[], web_meter=meter)
+
+    assert status == MaterialEnrichmentStatus.VERIFIED
+    assert card.description == "16GB DDR4 RDIMM"
+    assert any(x.get("mpn") == "M393A2K40EB3-CWE" for x in (card.cross_references or []))
+    assert card.enrichment_provenance["cross_ref"]["resolved_mpn"] == "M393A2K40EB3-CWE"
+    assert meter["claude_ok"] is True and meter["web_calls"] >= 2
+
+
+@pytest.mark.asyncio
+async def test_crossref_unconfirmed_mpn_falls_through(db_session):
+    card = _oem_card()
+    xr = CrossRefResult(
+        status="resolved", resolved_mpn="BOGUS-NOPART", confidence=0.95, linkage_source_domain="support.lenovo.com"
+    )
+    with (
+        patch.object(aes, "classify_oem_vendor", return_value="lenovo"),
+        patch.object(aes, "extract_part_from_web", new=AsyncMock(return_value=type("W", (), {"status": "failed"})())),
+        patch.object(aes, "cross_reference_mpn", new=AsyncMock(return_value=xr)),
+        patch.object(aes, "fetch_authoritative", new=AsyncMock(return_value={})),
+        patch.object(aes, "extract_oem_description", new=AsyncMock(return_value=OemExtractResult(status="failed"))),
+        patch(
+            "app.services.ai_inference_fallback.infer_part",
+            new=AsyncMock(return_value=type("I", (), {"status": "not_found"})()),
+        ),
+    ):
+        status = await aes.enrich_card(card, db_session, connectors=[], web_meter={"web_calls": 0, "claude_ok": False})
+    # Unconfirmed cross-ref discarded; OEM desc failed; AI declined → not_catalogued (OEM pattern matched).
+    assert status == MaterialEnrichmentStatus.NOT_CATALOGUED
+    assert card.cross_references in (None, [])
+
+
+@pytest.mark.asyncio
+async def test_oem_description_path(db_session):
+    card = _oem_card()
+    oem = OemExtractResult(
+        status="oem_sourced",
+        description="ThinkSystem 16GB RDIMM",
+        manufacturer="Lenovo",
+        category="Memory Module",
+        confidence=0.95,
+        source_urls=["https://support.lenovo.com/x"],
+        source_domains=["support.lenovo.com"],
+    )
+    with (
+        patch.object(aes, "classify_oem_vendor", return_value="lenovo"),
+        patch.object(aes, "extract_part_from_web", new=AsyncMock(return_value=type("W", (), {"status": "failed"})())),
+        patch.object(aes, "cross_reference_mpn", new=AsyncMock(return_value=CrossRefResult(status="failed"))),
+        patch.object(aes, "extract_oem_description", new=AsyncMock(return_value=oem)),
+    ):
+        status = await aes.enrich_card(card, db_session, connectors=[], web_meter={"web_calls": 0, "claude_ok": False})
+    assert status == MaterialEnrichmentStatus.OEM_SOURCED
+    assert card.description == "ThinkSystem 16GB RDIMM"
+    assert card.enrichment_provenance["oem_sourced"] is True
+
+
+@pytest.mark.asyncio
+async def test_non_oem_failure_stays_not_found(db_session):
+    card = _oem_card("LM2596S")
+    with (
+        patch.object(aes, "classify_oem_vendor", return_value=None),
+        patch.object(aes, "extract_part_from_web", new=AsyncMock(return_value=type("W", (), {"status": "failed"})())),
+        patch.object(aes, "fetch_authoritative", new=AsyncMock(return_value={})),
+        patch(
+            "app.services.ai_inference_fallback.infer_part",
+            new=AsyncMock(return_value=type("I", (), {"status": "not_found"})()),
+        ),
+    ):
+        status = await aes.enrich_card(card, db_session, connectors=[], web_meter={"web_calls": 0, "claude_ok": False})
+    assert status == MaterialEnrichmentStatus.NOT_FOUND
+
+
+@pytest.mark.asyncio
+async def test_oem_tiers_skipped_when_web_disabled(db_session):
+    card = _oem_card()
+    xref = AsyncMock()
+    with (
+        patch.object(aes, "classify_oem_vendor", return_value="lenovo"),
+        patch.object(aes, "fetch_authoritative", new=AsyncMock(return_value={})),
+        patch.object(aes, "cross_reference_mpn", new=xref),
+        patch(
+            "app.services.ai_inference_fallback.infer_part",
+            new=AsyncMock(return_value=type("I", (), {"status": "not_found"})()),
+        ),
+    ):
+        status = await aes.enrich_card(
+            card, db_session, connectors=[], disabled={"web_search"}, web_meter={"web_calls": 0, "claude_ok": False}
+        )
+    xref.assert_not_called()  # OEM tiers gated by web budget
+    assert status == MaterialEnrichmentStatus.NOT_FOUND  # not_catalogued requires an actual attempt
