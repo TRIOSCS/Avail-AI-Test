@@ -51,7 +51,7 @@ def update_enrichment_worker_status(db, **kwargs) -> None:
     Pass any column as a kwarg: is_running=True, enriched_today=5, etc.
     Silently returns if the row does not yet exist (e.g. pre-migration).
     """
-    status = db.query(EnrichmentWorkerStatus).filter(EnrichmentWorkerStatus.id == 1).first()
+    status = db.get(EnrichmentWorkerStatus, 1)
     if not status:
         return
     for key, value in kwargs.items():

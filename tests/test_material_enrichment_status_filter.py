@@ -72,3 +72,21 @@ def test_statuses_filter_empty_list_means_no_filter(db_session):
     # An empty list is falsy → treated as no filter (all results returned)
     results, total = search_materials_faceted(db_session, statuses=[])
     assert total >= 2
+
+
+def test_statuses_takes_precedence_over_verified_only(db_session):
+    _mk(db_session, "ws5", "web_sourced")
+    _mk(db_session, "v5", "verified")
+    db_session.flush()
+
+    # `statuses` must win when both are provided. The old AND-bug filtered
+    # status==verified AND status IN ('web_sourced') → impossible → empty list.
+    results, total = search_materials_faceted(db_session, verified_only=True, statuses=["web_sourced"])
+    assert {c.normalized_mpn for c in results} == {"ws5"}
+    assert total == 1
+    assert results[0].enrichment_status == "web_sourced"
+
+    # Legacy path still works when statuses is omitted.
+    verified, total_v = search_materials_faceted(db_session, verified_only=True, statuses=None)
+    assert {c.normalized_mpn for c in verified} == {"v5"}
+    assert total_v == 1

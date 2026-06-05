@@ -141,3 +141,40 @@ async def test_keyword_fallback_survives_400(connector, monkeypatch):
     results = await connector._do_search("TPS65217CRSLR")
     assert results == []
     assert call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_403_qps_body_raises_rate_limit(connector, monkeypatch):
+    """403 with a 'queries per second' body (no auth marker) is a transient QPS cap →
+    ConnectorRateLimitError so fetch_authoritative applies a cooldown instead of
+    disabling the source."""
+    import httpx
+
+    from app.connectors.errors import ConnectorRateLimitError
+
+    fake_request = httpx.Request("GET", "https://api.element14.com/catalog/products")
+
+    async def mock_get(*args, **kwargs):
+        return httpx.Response(403, request=fake_request, text="Account Over Queries Per Second Limit")
+
+    monkeypatch.setattr("app.connectors.element14.http", type("FakeHTTP", (), {"get": mock_get})())
+    with pytest.raises(ConnectorRateLimitError):
+        await connector._api_search("LM358N", "LM358N")
+
+
+@pytest.mark.asyncio
+async def test_403_qps_with_auth_marker_raises_auth(connector, monkeypatch):
+    """403 whose body contains BOTH 'queries per second' AND an auth marker is a
+    credential rejection → ConnectorAuthError (auth wins over rate limit)."""
+    import httpx
+
+    from app.connectors.errors import ConnectorAuthError
+
+    fake_request = httpx.Request("GET", "https://api.element14.com/catalog/products")
+
+    async def mock_get(*args, **kwargs):
+        return httpx.Response(403, request=fake_request, text="Invalid API key - queries per second")
+
+    monkeypatch.setattr("app.connectors.element14.http", type("FakeHTTP", (), {"get": mock_get})())
+    with pytest.raises(ConnectorAuthError):
+        await connector._api_search("LM358N", "LM358N")

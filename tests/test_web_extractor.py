@@ -63,5 +63,35 @@ async def test_low_confidence_rejected(mock_cj):
 @pytest.mark.asyncio
 @patch("app.services.enrichment_worker.web_extractor.claude_json", new_callable=AsyncMock)
 async def test_claude_error_returns_failed(mock_cj):
-    mock_cj.side_effect = RuntimeError("claude down")
+    """A NON-Claude exception (e.g. a bug) is swallowed → failed (chain falls
+    through)."""
+    mock_cj.side_effect = RuntimeError("unexpected bug")
+    assert (await extract_part_from_web("LM317T", "lm317t")).status == "failed"
+
+
+@pytest.mark.asyncio
+@patch("app.services.enrichment_worker.web_extractor.claude_json", new_callable=AsyncMock)
+async def test_claude_backend_error_propagates(mock_cj):
+    """A Claude BACKEND failure must surface (not be swallowed) so the worker's circuit
+    breaker can detect a sustained outage instead of marking every part not_found."""
+    from app.utils.claude_errors import ClaudeError, ClaudeRateLimitError
+
+    mock_cj.side_effect = ClaudeRateLimitError("429")
+    with pytest.raises(ClaudeError):
+        await extract_part_from_web("LM317T", "lm317t")
+
+
+@pytest.mark.asyncio
+@patch("app.services.enrichment_worker.web_extractor.claude_json", new_callable=AsyncMock)
+async def test_short_description_rejected(mock_cj):
+    """Gate 4 (anti-hallucination quality floor): a too-short description → failed."""
+    mock_cj.return_value = {**_GOOD, "description": "reg"}
+    assert (await extract_part_from_web("LM317T", "lm317t")).status == "failed"
+
+
+@pytest.mark.asyncio
+@patch("app.services.enrichment_worker.web_extractor.claude_json", new_callable=AsyncMock)
+async def test_missing_manufacturer_rejected(mock_cj):
+    """Gate 4: a missing manufacturer → failed (we never accept web data without a maker)."""
+    mock_cj.return_value = {**_GOOD, "manufacturer": ""}
     assert (await extract_part_from_web("LM317T", "lm317t")).status == "failed"

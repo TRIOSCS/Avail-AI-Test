@@ -9,6 +9,7 @@ from urllib.parse import urlparse
 from loguru import logger
 
 from app.utils.claude_client import claude_json
+from app.utils.claude_errors import ClaudeError
 from app.utils.normalization import normalize_mpn_key
 
 from .trusted_domains import is_trusted_domain
@@ -74,8 +75,14 @@ async def extract_part_from_web(
             tools=[{"type": "web_search_20250305", "name": "web_search", "max_uses": 4}],
             timeout=timeout,
         )
+    except ClaudeError:
+        # Claude backend failure (auth / rate-limit / server / unreachable). Surface it so
+        # the worker's circuit breaker can detect a sustained outage — and do NOT fall
+        # through to infer_part (another Claude call) which would also fail. A genuine
+        # "couldn't find it" reply is a parsed result, not an exception, and still falls through.
+        raise
     except Exception as e:
-        logger.warning("WEB_ENRICH: claude error for {}: {}", display_mpn, type(e).__name__)
+        logger.warning("WEB_ENRICH: unexpected error for {}: {}", display_mpn, type(e).__name__)
         return _FAILED
 
     if not isinstance(data, dict):

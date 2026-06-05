@@ -37,8 +37,9 @@ def upgrade() -> None:
         sa.CheckConstraint("id = 1", name="ck_enrichment_worker_status_singleton"),
         if_not_exists=True,
     )
-    # Seed singleton row
-    op.execute("INSERT INTO enrichment_worker_status (id) VALUES (1)")
+    # Seed singleton row (idempotent — matches the if_not_exists table create, so a
+    # re-run after a partial apply does not fail on the primary-key conflict).
+    op.execute("INSERT INTO enrichment_worker_status (id) VALUES (1) ON CONFLICT (id) DO NOTHING")
 
 
 def downgrade() -> None:

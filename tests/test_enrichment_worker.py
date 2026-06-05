@@ -10,7 +10,7 @@ test tolerates None (row is None or id==1).
 def test_worker_status_singleton(db_session):
     from app.models.enrichment_worker_status import EnrichmentWorkerStatus
 
-    row = db_session.query(EnrichmentWorkerStatus).get(1)
+    row = db_session.get(EnrichmentWorkerStatus, 1)
     # Migration seeds id=1 in Postgres; in SQLite tests the row is absent (None).
     assert row is None or row.id == 1
 
@@ -77,7 +77,7 @@ def test_update_helper_sets_fields(db_session):
     )
 
     db_session.expire_all()
-    refreshed = db_session.query(EnrichmentWorkerStatus).get(1)
+    refreshed = db_session.get(EnrichmentWorkerStatus, 1)
     assert refreshed is not None
     assert refreshed.is_running is True
     assert refreshed.enriched_today == 10
@@ -618,3 +618,226 @@ def test_run_one_batch_below_web_cap_does_not_disable(db_session):
 
     assert len(captured_disabled) == 1
     assert "web_search" not in captured_disabled[0]
+
+
+# ---------------------------------------------------------------------------
+# run_one_batch — web-budget accounting, circuit breaker, persistence (review fixes)
+# ---------------------------------------------------------------------------
+
+
+def test_run_one_batch_charges_budget_per_billable_attempt(db_session):
+    """Every non-verified card charges the web budget exactly once; a verified hit (a
+    connector match, no Claude/web call) does NOT charge.
+
+    The in-process tally in web_state carries the running count forward.
+    """
+    import asyncio
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    from app.constants import MaterialEnrichmentStatus
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+
+    now = datetime.now(timezone.utc)
+    returns = [
+        MaterialEnrichmentStatus.VERIFIED,  # no charge (connector hit)
+        MaterialEnrichmentStatus.WEB_SOURCED,  # charge
+        MaterialEnrichmentStatus.AI_INFERRED,  # charge
+        MaterialEnrichmentStatus.NOT_FOUND,  # charge (gate-fail-then-fall-through still billed)
+    ]
+    for i in range(len(returns)):
+        db_session.add(
+            MaterialCard(normalized_mpn=f"b{i}", display_mpn=f"B{i}", enrichment_status="unenriched", created_at=now)
+        )
+    db_session.flush()
+
+    idx = [0]
+
+    async def fake_enrich_card(card, db, **kw):
+        st = returns[idx[0]]
+        idx[0] += 1
+        return st
+
+    set_counts: list[int] = []
+
+    def fake_set(key, data, **kw):
+        set_counts.append(data["count"])
+
+    cfg = EnrichmentWorkerConfig(batch_size=10, web_daily_cap=80)
+    breaker = EnrichmentCircuitBreaker(cfg)
+    web_state = {"web_calls": 0}
+
+    with (
+        patch("app.services.enrichment_worker.worker.enrich_card", side_effect=fake_enrich_card),
+        patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value=None),
+        patch("app.services.enrichment_worker.worker.intel_cache.set_cached", side_effect=fake_set),
+    ):
+        asyncio.run(run_one_batch(db_session, cfg, {}, breaker, set(), web_state))
+
+    # 3 billable (web_sourced, ai_inferred, not_found); verified does not charge.
+    assert set_counts == [1, 2, 3]
+    assert web_state["web_calls"] == 3
+
+
+def test_run_one_batch_in_process_budget_backstop_when_cache_down(db_session):
+    """If the cache is unavailable (get_cached -> None) but the in-process web_state
+    tally already meets the cap, the web tier is still disabled — WEB_DAILY_CAP is not
+    bypassed."""
+    import asyncio
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    from app.constants import MaterialEnrichmentStatus
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+
+    now = datetime.now(timezone.utc)
+    db_session.add(MaterialCard(normalized_mpn="bk", display_mpn="BK", enrichment_status="unenriched", created_at=now))
+    db_session.flush()
+
+    captured: list[bool] = []
+
+    async def fake_enrich_card(card, db, disabled=None, **kw):
+        captured.append("web_search" in (disabled or set()))
+        return MaterialEnrichmentStatus.NOT_FOUND
+
+    cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=10)
+    breaker = EnrichmentCircuitBreaker(cfg)
+
+    with (
+        patch("app.services.enrichment_worker.worker.enrich_card", side_effect=fake_enrich_card),
+        patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value=None),  # cache down
+        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
+    ):
+        # web_state already at cap even though the cache reports nothing
+        asyncio.run(run_one_batch(db_session, cfg, {}, breaker, set(), {"web_calls": 10}))
+
+    assert captured == [True]
+
+
+def test_run_one_batch_trips_breaker_on_claude_errors(db_session):
+    """A Claude outage (enrich_card raising ClaudeError) feeds the circuit breaker so it
+    trips after the threshold — instead of silently marking the whole queue
+    not_found."""
+    import asyncio
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+    from app.utils.claude_errors import ClaudeRateLimitError
+
+    now = datetime.now(timezone.utc)
+    for i in range(3):
+        db_session.add(
+            MaterialCard(normalized_mpn=f"c{i}", display_mpn=f"C{i}", enrichment_status="unenriched", created_at=now)
+        )
+    db_session.flush()
+
+    async def boom(card, db, **kw):
+        raise ClaudeRateLimitError("429")
+
+    cfg = EnrichmentWorkerConfig(batch_size=10, circuit_breaker_errors=3)
+    breaker = EnrichmentCircuitBreaker(cfg)
+
+    with (
+        patch("app.services.enrichment_worker.worker.enrich_card", side_effect=boom),
+        patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value=None),
+        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
+    ):
+        asyncio.run(run_one_batch(db_session, cfg, {}, breaker, set(), {"web_calls": 0}))
+
+    assert breaker.should_stop()  # 3 consecutive Claude errors >= threshold
+
+
+def test_run_one_batch_non_claude_exception_does_not_trip_breaker(db_session):
+    """A non-Claude exception is logged but must NOT trip the Claude-specific breaker,
+    and must not charge the web budget."""
+    import asyncio
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+
+    now = datetime.now(timezone.utc)
+    for i in range(3):
+        db_session.add(
+            MaterialCard(normalized_mpn=f"d{i}", display_mpn=f"D{i}", enrichment_status="unenriched", created_at=now)
+        )
+    db_session.flush()
+
+    async def boom(card, db, **kw):
+        raise ValueError("a bug, not Claude")
+
+    charged: list[int] = []
+
+    cfg = EnrichmentWorkerConfig(batch_size=10, circuit_breaker_errors=3)
+    breaker = EnrichmentCircuitBreaker(cfg)
+    web_state = {"web_calls": 0}
+
+    with (
+        patch("app.services.enrichment_worker.worker.enrich_card", side_effect=boom),
+        patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value=None),
+        patch(
+            "app.services.enrichment_worker.worker.intel_cache.set_cached",
+            side_effect=lambda *a, **k: charged.append(1),
+        ),
+    ):
+        asyncio.run(run_one_batch(db_session, cfg, {}, breaker, set(), web_state))
+
+    assert not breaker.should_stop()  # non-Claude errors don't trip the Claude breaker
+    assert charged == []  # no billable web call recorded on a hard failure
+    assert web_state["web_calls"] == 0
+
+
+def test_run_one_batch_disabled_set_persists_across_calls(db_session):
+    """The caller-owned disabled set persists: a connector disabled by a prior batch stays
+    disabled (passed through to enrich_card) instead of being re-tried every loop."""
+    import asyncio
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    from app.constants import MaterialEnrichmentStatus
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+
+    now = datetime.now(timezone.utc)
+    db_session.add(MaterialCard(normalized_mpn="dp", display_mpn="DP", enrichment_status="unenriched", created_at=now))
+    db_session.flush()
+
+    seen: list[set] = []
+
+    async def fake_enrich_card(card, db, disabled=None, **kw):
+        seen.append(set(disabled or set()))
+        return MaterialEnrichmentStatus.NOT_FOUND
+
+    cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=80)
+    breaker = EnrichmentCircuitBreaker(cfg)
+    disabled = {"digikey"}  # disabled by an earlier batch (quota/auth wall)
+
+    with (
+        patch("app.services.enrichment_worker.worker.enrich_card", side_effect=fake_enrich_card),
+        patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value={"count": 0}),
+        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
+    ):
+        asyncio.run(run_one_batch(db_session, cfg, {}, breaker, disabled, {"web_calls": 0}))
+
+    assert "digikey" in seen[0]  # passed through to enrich_card this batch
+    assert "digikey" in disabled  # and still present afterward (same persistent object)
