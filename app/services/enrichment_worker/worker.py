@@ -62,8 +62,10 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
     - ``not_found``: eligible only when ``enriched_at IS NULL`` OR older than
       ``not_found_retry_hours`` (self-heal as quotas reset daily).
     - ``is_internal_part``, ``deleted_at`` are excluded.
-    - Ordered by ``search_count DESC, created_at ASC`` (high-demand parts first,
-      then oldest un-enriched first for fairness).
+    - Ordered by ``search_count DESC, created_at DESC``: demand still wins
+      (high-demand parts first); among equal demand — the common case where
+      newly-added parts have ``search_count=0`` — the most-recently-added part
+      is enriched first, so a just-added part heads the next batch (fast lane).
     """
     from app.models import MaterialCard
 
@@ -90,7 +92,7 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
         )
         .order_by(
             MaterialCard.search_count.desc(),
-            MaterialCard.created_at.asc(),
+            MaterialCard.created_at.desc(),
         )
         .limit(config.batch_size)
         .all()

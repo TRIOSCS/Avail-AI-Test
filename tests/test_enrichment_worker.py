@@ -115,7 +115,7 @@ def test_config_defaults():
     assert cfg.daily_cap == 200
     assert cfg.web_daily_cap == 80
     assert cfg.loop_sleep_seconds == 30
-    assert cfg.idle_sleep_seconds == 300
+    assert cfg.idle_sleep_seconds == 60
     assert cfg.not_found_retry_hours == 22
     assert cfg.circuit_breaker_errors == 5
 
@@ -306,6 +306,101 @@ def test_select_batch_ordering(db_session):
     results = select_batch(db_session, cfg)
     search_counts = [c.search_count for c in results]
     assert search_counts == sorted(search_counts, reverse=True)
+
+
+def test_select_batch_freshness_tiebreaker(db_session):
+    """Among equal demand (search_count=0), the most-recently-created card wins.
+
+    This is the fast-lane guarantee: a just-added part heads the next batch.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import select_batch
+
+    now = datetime.now(timezone.utc)
+    for mpn, created in [
+        ("oldest", now - timedelta(hours=2)),
+        ("middle", now - timedelta(hours=1)),
+        ("newest", now),
+    ]:
+        db_session.add(
+            MaterialCard(
+                normalized_mpn=mpn,
+                display_mpn=mpn.upper(),
+                enrichment_status="unenriched",
+                search_count=0,
+                created_at=created,
+            )
+        )
+    db_session.flush()
+
+    cfg = EnrichmentWorkerConfig(batch_size=5)
+    order = [c.normalized_mpn for c in select_batch(db_session, cfg)]
+    assert order == ["newest", "middle", "oldest"]
+
+
+def test_select_batch_demand_beats_freshness(db_session):
+    """Demand is primary: a high-search_count old card outranks a brand-new card.
+
+    Freshness only breaks ties; it never overrides demand.
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import select_batch
+
+    now = datetime.now(timezone.utc)
+    db_session.add(
+        MaterialCard(
+            normalized_mpn="old_hot",
+            display_mpn="OLD_HOT",
+            enrichment_status="unenriched",
+            search_count=50,
+            created_at=now - timedelta(days=7),
+        )
+    )
+    db_session.add(
+        MaterialCard(
+            normalized_mpn="new_cold",
+            display_mpn="NEW_COLD",
+            enrichment_status="unenriched",
+            search_count=0,
+            created_at=now,
+        )
+    )
+    db_session.flush()
+
+    cfg = EnrichmentWorkerConfig(batch_size=5)
+    order = [c.normalized_mpn for c in select_batch(db_session, cfg)]
+    assert order[0] == "old_hot"
+
+
+def test_new_cards_are_enrichable_by_worker(db_session):
+    """Any new MaterialCard creation path feeds the worker.
+
+    Mimics stock-import / email-attachment creation: construct without passing
+    enrichment_status, flush, and assert it defaults to 'unenriched' and is selected by
+    the worker. Guards the single-enrichment-authority invariant.
+    """
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import select_batch
+
+    card = MaterialCard(
+        normalized_mpn="fresh_part",
+        display_mpn="FRESH_PART",
+    )
+    db_session.add(card)
+    db_session.flush()
+
+    assert card.enrichment_status == "unenriched"
+
+    cfg = EnrichmentWorkerConfig(batch_size=10)
+    picked = {c.normalized_mpn for c in select_batch(db_session, cfg)}
+    assert "fresh_part" in picked
 
 
 def test_select_batch_respects_batch_size(db_session):

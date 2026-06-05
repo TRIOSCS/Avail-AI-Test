@@ -22,7 +22,10 @@ class EnrichmentWorkerConfig:
     daily_cap: int = 200
     web_daily_cap: int = 80
     loop_sleep_seconds: int = 30
-    idle_sleep_seconds: int = 300
+    # Keeps a newly-added part's worst-case wait ~1 min when the queue is
+    # otherwise empty; select_batch is a cheap indexed query, so polling this
+    # often is negligible.
+    idle_sleep_seconds: int = 60
     not_found_retry_hours: int = 22
     circuit_breaker_errors: int = 5
 
@@ -34,7 +37,7 @@ class EnrichmentWorkerConfig:
             daily_cap=int(os.environ.get("ENRICHMENT_DAILY_CAP", 200)),
             web_daily_cap=int(os.environ.get("ENRICHMENT_WEB_DAILY_CAP", 80)),
             loop_sleep_seconds=int(os.environ.get("ENRICHMENT_LOOP_SLEEP_SECONDS", 30)),
-            idle_sleep_seconds=int(os.environ.get("ENRICHMENT_IDLE_SLEEP_SECONDS", 300)),
+            idle_sleep_seconds=int(os.environ.get("ENRICHMENT_IDLE_SLEEP_SECONDS", 60)),
             not_found_retry_hours=int(os.environ.get("ENRICHMENT_NOT_FOUND_RETRY_HOURS", 22)),
             circuit_breaker_errors=int(os.environ.get("ENRICHMENT_CIRCUIT_BREAKER_ERRORS", 5)),
         )
