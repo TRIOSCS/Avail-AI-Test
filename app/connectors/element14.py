@@ -67,9 +67,11 @@ class Element14Connector(BaseConnector):
         # when the next ping returns 200. See
         # docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
         # element14 returns HTTP 403 for BOTH credential rejection AND a per-second
-        # rate cap ("Account Over Queries Per Second Limit"). The latter is transient,
-        # so classify it as a rate limit (retried with backoff) rather than an auth wall.
-        if r.status_code == 403 and "queries per second" in r.text.lower():
+        # rate cap ("Account Over Queries Per Second Limit"). Distinguish by body:
+        # QPS errors contain "queries per second" but no auth-failure markers.
+        body = r.text.lower()
+        _AUTH_MARKERS = ("invalid", "unauthorized", "forbidden", "api key", "not accepted")
+        if r.status_code == 403 and "queries per second" in body and not any(m in body for m in _AUTH_MARKERS):
             raise ConnectorRateLimitError(f"element14 rate limited (QPS): {r.text[:200]}")
         if r.status_code in (401, 403):
             # 401 = bad/expired API key; 403 = key rejected for the requested

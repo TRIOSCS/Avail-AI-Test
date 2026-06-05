@@ -10,15 +10,18 @@ guess.
 from __future__ import annotations
 
 import asyncio
+import time as _time
 from datetime import datetime, timezone
 from typing import Any
 
 from loguru import logger
 from sqlalchemy.orm import Session
 
-from app.connectors.errors import ConnectorAuthError, ConnectorQuotaError
+from app.connectors.errors import ConnectorAuthError, ConnectorQuotaError, ConnectorRateLimitError
 from app.models import MaterialCard
 from app.utils.normalization import normalize_mpn_key
+
+_RATE_COOLDOWN_SECONDS = 300  # 5 min
 
 # Cost-optimized: free distributor APIs first, paid Nexar last (gaps only).
 SOURCE_ORDER = ["digikey", "mouser", "element14", "oemsecrets", "nexar"]
@@ -95,19 +98,25 @@ async def fetch_authoritative(
     normalized_mpn: str,
     connectors: list,
     disabled: set[str] | None = None,
+    cooldown: dict[str, float] | None = None,
 ) -> dict[str, list[dict]]:
     """Query connectors in priority order; short-circuit before paid Nexar once
     adequate.
 
     A source that hits a quota or auth wall is added to ``disabled`` and skipped
     for the rest of the run (so we don't keep burning failed calls), and surfaced
-    loudly. Transient per-MPN failures are logged and treated as no result.
+    loudly. A source that hits a transient rate limit is added to ``cooldown`` (not
+    permanently disabled) and skipped until the cooldown window expires.
+    Transient per-MPN failures are logged and treated as no result.
     """
     results: dict[str, list[dict]] = {}
+    now = _time.monotonic()
     for conn in connectors:
         name = _SOURCE_TYPE_ALIASES.get(conn.source_name, conn.source_name)
         if disabled is not None and name in disabled:
             continue
+        if cooldown is not None and cooldown.get(name, 0) > now:
+            continue  # rate-limit cooldown active
         if name == "nexar":
             merged, _, _ = merge_authoritative(normalized_mpn, results)
             if all(f in merged for f in _ADEQUATE):
@@ -121,8 +130,19 @@ async def fetch_authoritative(
                 disabled.add(name)
             logger.error("AUTH_ENRICH: {} DISABLED for run ({}): {}", name, type(e).__name__, e)
             results[name] = []
+        except ConnectorRateLimitError as e:
+            if cooldown is not None:
+                cooldown[name] = _time.monotonic() + _RATE_COOLDOWN_SECONDS
+            logger.warning(
+                "AUTH_ENRICH: {} rate-limited for {} (cooldown {}s): {}",
+                name,
+                normalized_mpn,
+                _RATE_COOLDOWN_SECONDS,
+                e,
+            )
+            results[name] = []
         except Exception as e:  # transient connector failure — non-fatal for this MPN
-            logger.warning("AUTH_ENRICH: {} failed for {}: {}", name, normalized_mpn, type(e).__name__)
+            logger.warning("AUTH_ENRICH: {} failed for {}: {}: {}", name, normalized_mpn, type(e).__name__, e)
             results[name] = []
     return results
 
@@ -149,11 +169,14 @@ async def enrich_card(
     connectors: list | None = None,
     refresh: bool = False,
     disabled: set[str] | None = None,
+    cooldown: dict[str, float] | None = None,
 ) -> str:
     """Enrich one card: authoritative -> flagged AI inference -> not_found.
 
     Returns the resulting enrichment_status. Does not commit (caller controls txn).
     ``disabled`` accumulates sources that hit a quota/auth wall (skipped run-wide).
+    ``cooldown`` accumulates sources that hit a transient rate limit (skipped until
+    the cooldown window expires, not permanently disabled).
 
     CONCURRENCY INVARIANT: safe to run over a shared Session via asyncio.gather
     because, after its first ``await``, this function performs NO DB query/flush —
@@ -167,7 +190,7 @@ async def enrich_card(
         return "verified"
 
     conns = connectors if connectors is not None else _connectors_in_order(db)
-    results = await fetch_authoritative(card.display_mpn, card.normalized_mpn, conns, disabled)
+    results = await fetch_authoritative(card.display_mpn, card.normalized_mpn, conns, disabled, cooldown)
     merged, provenance, contributors = merge_authoritative(card.normalized_mpn, results)
 
     if merged:
@@ -197,8 +220,10 @@ async def enrich_card(
         }
         return "ai_inferred"
 
+    # F5: not_found parts get no provenance — they are genuinely unresolved.
     card.enrichment_status = "not_found"
-    card.enrichment_source = card.enrichment_source or "claude_opus_inferred"
+    card.enrichment_source = None
+    card.enrichment_provenance = None
     return "not_found"
 
 
