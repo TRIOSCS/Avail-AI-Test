@@ -58,24 +58,18 @@ def safe_pin_count(raw: Any) -> int | None:
     return v if v > 0 else None
 
 
-def digikey_parameter(params: Any, names: tuple[str, ...]) -> str | None:
-    """Extract a ValueText from DigiKey Parameters[] by ParameterText match."""
-    if not isinstance(params, list):
-        return None
-    wanted = {n.lower() for n in names}
-    for p in params:
-        if isinstance(p, dict) and str(p.get("ParameterText", "")).strip().lower() in wanted:
-            val = str(p.get("ValueText", "")).strip()
-            if val and val != "-":
-                return val
-    return None
+def _meaningful(value: Any) -> str | None:
+    """Return the stripped value, or None if it is empty or the '-' placeholder."""
+    val = str(value).strip()
+    return val if val and val != "-" else None
 
 
 def generic_attribute(attrs: Any, name_key: str, value_key: str, names: tuple[str, ...]) -> str | None:
     """Extract a value from a generic attribute list by label/name match.
 
-    Works for Mouser ProductAttributes ({AttributeName, AttributeValue}) and Element14
-    attributes ({attributeLabel, attributeValue}) by passing the appropriate key names.
+    Works for DigiKey Parameters ({ParameterText, ValueText}), Mouser ProductAttributes
+    ({AttributeName, AttributeValue}) and Element14 attributes ({attributeLabel,
+    attributeValue}) by passing the appropriate key names.
     """
     if not isinstance(attrs, list):
         return None
@@ -85,7 +79,12 @@ def generic_attribute(attrs: Any, name_key: str, value_key: str, names: tuple[st
             continue
         label = str(attr.get(name_key, "")).strip().lower()
         if label in wanted:
-            val = str(attr.get(value_key, "")).strip()
-            if val and val != "-":
+            val = _meaningful(attr.get(value_key, ""))
+            if val is not None:
                 return val
     return None
+
+
+def digikey_parameter(params: Any, names: tuple[str, ...]) -> str | None:
+    """Extract a ValueText from DigiKey Parameters[] by ParameterText match."""
+    return generic_attribute(params, "ParameterText", "ValueText", names)

@@ -11,6 +11,7 @@ import csv
 import os
 import sys
 from datetime import datetime, timezone
+from typing import NamedTuple
 
 # Allow running from the scripts/ directory or from the repo root.
 _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -43,6 +44,13 @@ _REPORT_COLS = [
     "datasheet_url",
     "notes",
 ]
+
+
+class _WorkItem(NamedTuple):
+    raw: str
+    norm: str
+    card: MaterialCard
+    transient: bool
 
 
 def _report_row(raw: str, norm: str, status: str, card: MaterialCard, transient: bool) -> dict:
@@ -78,7 +86,7 @@ async def _run(file_path: str, commit: bool, report_path: str, refresh: bool, co
         rows: list[dict] = []
 
         # Phase 1 (serial): resolve existing or build transient cards.
-        work: list[list] = []  # [raw, norm, card, transient]
+        work: list[_WorkItem] = []
         for raw in mpns:
             norm = normalize_mpn_key(raw)
             if not norm:
@@ -88,7 +96,7 @@ async def _run(file_path: str, commit: bool, report_path: str, refresh: bool, co
             transient = card is None
             if transient:
                 card = MaterialCard(normalized_mpn=norm, display_mpn=raw.strip(), created_at=datetime.now(timezone.utc))
-            work.append([raw, norm, card, transient])
+            work.append(_WorkItem(raw, norm, card, transient))
 
         # Phase 2: enrich concurrently (only the network calls overlap; sync DB ops
         # run atomically between awaits, so the shared Session stays consistent).
@@ -104,12 +112,12 @@ async def _run(file_path: str, commit: bool, report_path: str, refresh: bool, co
         done = 0
         for start in range(0, len(work), chunk_size):
             chunk = work[start : start + chunk_size]
-            statuses = await asyncio.gather(*(_enrich(item[2]) for item in chunk))
-            for (raw, norm, card, transient), status in zip(chunk, statuses):
+            statuses = await asyncio.gather(*(_enrich(item.card) for item in chunk))
+            for item, status in zip(chunk, statuses):
                 counts[status] = counts.get(status, 0) + 1
-                rows.append(_report_row(raw, norm, status, card, transient))
-                if commit and transient:
-                    db.add(card)
+                rows.append(_report_row(item.raw, item.norm, status, item.card, item.transient))
+                if commit and item.transient:
+                    db.add(item.card)
             if commit:
                 db.commit()
             done += len(chunk)

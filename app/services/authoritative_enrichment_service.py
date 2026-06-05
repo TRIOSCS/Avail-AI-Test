@@ -83,7 +83,7 @@ def _connectors_in_order(db: Session) -> list:
     from app.search_service import _build_connectors
 
     conns, _, _ = _build_connectors(db)
-    by_name = {}
+    by_name: dict[str, Any] = {}
     for c in conns:
         name = _SOURCE_TYPE_ALIASES.get(c.source_name, c.source_name)
         by_name.setdefault(name, c)
