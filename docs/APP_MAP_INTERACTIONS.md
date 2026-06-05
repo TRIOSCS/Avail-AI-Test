@@ -654,7 +654,64 @@ materials router -> enrich_material_cards() [user-triggered, batch processing]
     |       (ensures MPN list and card list stay in sync)
     |
     v
-Claude Haiku (Anthropic API)  — FIRST PASS
+authoritative_enrichment_service.enrich_card()  — ENRICHMENT TIER SEQUENCE
+    |
+    +---> Tier 1: distributor connector fanout (fetch_authoritative → merge_authoritative)
+    |       HIT  → status=verified; apply_authoritative() writes description/specs/lifecycle.
+    |       MISS → fall through.
+    |
+    +---> Tier 2: distributor/manufacturer web search (extract_part_from_web, web_meter +1)
+    |       HIT (web_sourced)  → apply_web_sourced(); done.
+    |       MISS → fall through.
+    |
+    +---> OEM gate: classify_oem_vendor(display_mpn) — pure regex, no web call.
+    |       Non-OEM parts skip Tiers 3-4 entirely.
+    |
+    +---> Tier 3 (OEM only): cross-reference MPN (cross_reference_mpn, web_meter +1)
+    |       Grounded Claude web search; four Python gates:
+    |         (1) ≥1 source URL on is_crossref_domain allowlist
+    |         (2) both OEM code and resolved MPN appear verbatim in the sourced linkage_quote
+    |         (3) resolved_mpn != original (no echo)
+    |         (4) confidence ≥ 0.90
+    |       RESOLVED → fetch_authoritative(resolved_mpn) double-verify against distributors
+    |         CONFIRMED → apply_cross_ref_verified(): writes distributor data onto card,
+    |                     records FRU→MPN linkage in cross_references JSONB +
+    |                     cross_ref provenance block; status=verified.
+    |         UNCONFIRMED → discard candidate, fall through.
+    |       FAILED → fall through.
+    |
+    +---> Tier 4 (OEM only): OEM-official description (extract_oem_description, web_meter +1)
+    |       Grounded Claude web search on OEM's own page; four Python gates:
+    |         (1) ≥1 source URL on is_oem_domain allowlist (stricter than cross-ref)
+    |         (2) exact_mpn_found matches normalized_mpn verbatim
+    |         (3) confidence ≥ 0.90
+    |         (4) description ≥ 10 chars + manufacturer present
+    |       HIT → apply_oem_sourced(): writes description/category/datasheet + oem_sourced
+    |             provenance; status=oem_sourced.
+    |       MISS → fall through.
+    |
+    +---> Tier 5: AI inference fallback (infer_part via ai_inference_fallback,
+    |       web_meter: claude_ok=True)
+    |       ai_inferred → writes description/category with reconfirm_needed flag.
+    |       not_found → terminal.
+    |
+    +---> Terminal:
+    |       OEM pattern matched AND OEM tiers ran → status=not_catalogued
+    |         (recognised OEM/FRU part; no public specs; retries on 30-day backoff)
+    |       Otherwise → status=not_found (22h backoff)
+
+web_meter contract ({"web_calls": int, "claude_ok": bool}, updated in place):
+    - web_calls: incremented by 1 for each billable web-search call
+      (Tier 2 + Tier 3 + Tier 4 each count as 1; connector fanout is free).
+    - claude_ok: set True after ANY Claude call returns without raising
+      (Tier 2, 3, 4 or infer_part); the worker reads this to reset its
+      circuit breaker. Default None = no metering (call still works).
+    The enrichment worker passes a fresh meter per card and adds
+    card_meter["web_calls"] to the rolling web_calls_today counter for
+    the daily budget gate (ENRICHMENT_WEB_DAILY_CAP, env-configurable).
+
+Claude Haiku (Anthropic API)  — FIRST PASS (legacy path — superseded by
+    authoritative_enrichment_service for new cards; kept for bulk/batch jobs)
     |
     +---> Classify card: description, category, lifecycle_status
     +---> DB: UPDATE material_cards (description, category, lifecycle_status)
