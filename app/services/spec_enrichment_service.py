@@ -21,7 +21,10 @@ from app.services.spec_write_service import record_spec
 COMMODITY_SPECS = get_batch_spec_schema()
 
 BATCH_SIZE = 25
-FACET_MIN_CONF = 0.70
+# Filter facets demand higher confidence than the free-text summary: a wrong spec VALUE
+# silently mis-filters a part (it appears under the wrong facet bucket, or vanishes from
+# the right one), whereas a wrong summary token is only cosmetic. So facets gate at 0.85.
+FACET_MIN_CONF = 0.85
 SUMMARY_MIN_CONF = 0.85
 
 _SYSTEM = (

@@ -664,6 +664,10 @@ Claude Haiku (Anthropic API)  — FIRST PASS
 After first pass (scheduled job only):
 tagging_jobs.py -> enrich_pending_specs() [spec extraction, second pass]
   OR
+enrichment_worker/worker.py::run_one_batch -> enrich_card_specs(<this batch's
+    newly core-enriched card ids>)  [paced, once per batch, same session + commit;
+    only verified/web_sourced/ai_inferred cards — never not_found]
+  OR
 POST /v2/partials/materials/{id}/enrich (Enrich button) -> enrich_card_specs([id], force=True)
   OR
 python -m app.management.enrich_specs --limit N  (one-time/on-demand backfill)
@@ -673,7 +677,8 @@ spec_enrichment_service.py  — SECOND PASS
     |
     +---> Per-commodity structured-spec extraction via claude_structured (model_tier="smart")
     |       +---> COMMODITY_SPECS schema drives prompt (per category: key, label, type, values)
-    |       +---> Records facets at confidence >= 0.70
+    |       +---> Records facets at confidence >= 0.85 (FACET_MIN_CONF; higher than the
+    |             free-text summary bar because a wrong spec value silently mis-filters a part)
     |
     +---> spec_write_service.record_spec()
     |       +---> DB: UPDATE material_cards.specs_structured (JSONB — keyed parametric values)

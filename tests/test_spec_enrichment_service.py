@@ -41,10 +41,19 @@ def _schemas(db: Session):
 
 
 def _payload(mpn: str):
-    # has_usb above threshold (written), has_can below threshold (skipped).
+    # has_usb above the 0.85 facet threshold (written); has_uart in the old 0.70–0.84 band,
+    # now below threshold (skipped); has_can well below (skipped).
     return {
         "parts": [
-            {"mpn": mpn, "has_usb": True, "has_usb_confidence": 0.95, "has_can": True, "has_can_confidence": 0.40}
+            {
+                "mpn": mpn,
+                "has_usb": True,
+                "has_usb_confidence": 0.95,
+                "has_uart": True,
+                "has_uart_confidence": 0.80,
+                "has_can": True,
+                "has_can_confidence": 0.40,
+            }
         ]
     }
 
@@ -63,7 +72,8 @@ async def test_writes_high_conf_facet_and_marks_card(db: Session, _schemas):
     facets = db.query(MaterialSpecFacet).filter_by(material_card_id=card.id).all()
     keys = {f.spec_key: f.value_text for f in facets}
     assert keys.get("has_usb") == "true"
-    assert "has_can" not in keys  # below 0.70 threshold
+    assert "has_uart" not in keys  # 0.80 — below the 0.85 facet threshold
+    assert "has_can" not in keys  # 0.40 — well below the 0.85 facet threshold
 
 
 @pytest.mark.asyncio

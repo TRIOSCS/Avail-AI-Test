@@ -891,3 +891,149 @@ def test_run_one_batch_does_not_overshoot_cap_mid_batch(db_session):
     # Exactly the first 2 cards web-enabled (charge); remaining 3 disabled — no overshoot.
     assert web_enabled_seen == [True, True, False, False, False]
     assert web_state["web_calls"] == 2
+
+
+# ---------------------------------------------------------------------------
+# run_one_batch — second-pass parametric spec extraction
+# ---------------------------------------------------------------------------
+
+
+def test_run_one_batch_triggers_spec_extraction_for_enriched_cards(db_session):
+    """After core enrichment, run_one_batch triggers a single spec-extraction pass for
+    ONLY the cards that landed a real category (verified/web_sourced/ai_inferred) —
+    never the not_found ones."""
+    import asyncio
+    from datetime import datetime, timedelta, timezone
+    from unittest.mock import AsyncMock, patch
+
+    from app.constants import MaterialEnrichmentStatus
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+
+    now = datetime.now(timezone.utc)
+    # Distinct created_at so selection order is deterministic (newest first):
+    # verified first, then not_found.
+    verified_card = MaterialCard(normalized_mpn="sv", display_mpn="SV", enrichment_status="unenriched", created_at=now)
+    nf_card = MaterialCard(
+        normalized_mpn="snf", display_mpn="SNF", enrichment_status="unenriched", created_at=now - timedelta(seconds=1)
+    )
+    db_session.add(verified_card)
+    db_session.add(nf_card)
+    db_session.flush()
+    verified_id = verified_card.id
+
+    returns = [MaterialEnrichmentStatus.VERIFIED, MaterialEnrichmentStatus.NOT_FOUND]
+    idx = [0]
+
+    async def fake_enrich_card(card, db, **kw):
+        st = returns[idx[0]]
+        idx[0] += 1
+        card.enrichment_status = st
+        return st
+
+    cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=80)
+    breaker = EnrichmentCircuitBreaker(cfg)
+    spec_mock = AsyncMock(return_value={"cards_processed": 1, "specs_written": 2})
+
+    with (
+        patch("app.services.enrichment_worker.worker.enrich_card", side_effect=fake_enrich_card),
+        patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value=None),
+        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
+        patch("app.services.spec_enrichment_service.enrich_card_specs", spec_mock),
+    ):
+        asyncio.run(run_one_batch(db_session, cfg, {}, breaker, set(), {"web_calls": 0}))
+
+    spec_mock.assert_awaited_once()
+    passed_ids = spec_mock.await_args.args[0]
+    assert passed_ids == [verified_id]  # ONLY the verified card; not the not_found one
+
+
+def test_run_one_batch_spec_extraction_claude_error_feeds_breaker(db_session):
+    """If the spec-extraction pass raises a ClaudeError, it feeds the circuit breaker
+    and the batch still commits (no crash)."""
+    import asyncio
+    from datetime import datetime, timezone
+    from unittest.mock import AsyncMock, patch
+
+    from app.constants import MaterialEnrichmentStatus
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+    from app.utils.claude_errors import ClaudeRateLimitError
+
+    now = datetime.now(timezone.utc)
+    db_session.add(
+        MaterialCard(normalized_mpn="sce", display_mpn="SCE", enrichment_status="unenriched", created_at=now)
+    )
+    db_session.flush()
+
+    async def fake_enrich_card(card, db, **kw):
+        card.enrichment_status = MaterialEnrichmentStatus.VERIFIED
+        return MaterialEnrichmentStatus.VERIFIED
+
+    spec_mock = AsyncMock(side_effect=ClaudeRateLimitError("429"))
+
+    cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=80, circuit_breaker_errors=1)
+    breaker = EnrichmentCircuitBreaker(cfg)
+
+    with (
+        patch("app.services.enrichment_worker.worker.enrich_card", side_effect=fake_enrich_card),
+        patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value=None),
+        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
+        patch("app.services.spec_enrichment_service.enrich_card_specs", spec_mock),
+    ):
+        counts = asyncio.run(run_one_batch(db_session, cfg, {}, breaker, set(), {"web_calls": 0}))
+
+    spec_mock.assert_awaited_once()
+    # A connector-verified hit does not reset the breaker, so the single recorded spec
+    # Claude error stands → with circuit_breaker_errors=1 the breaker is open.
+    assert breaker.should_stop()
+    # Batch still produced its counts (committed cleanly, no crash).
+    assert counts.get(MaterialEnrichmentStatus.VERIFIED, 0) == 1
+
+
+def test_run_one_batch_no_spec_extraction_when_all_not_found(db_session):
+    """When every card is not_found, no spec-extraction pass is triggered."""
+    import asyncio
+    from datetime import datetime, timezone
+    from unittest.mock import AsyncMock, patch
+
+    from app.constants import MaterialEnrichmentStatus
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+
+    now = datetime.now(timezone.utc)
+    for i in range(3):
+        db_session.add(
+            MaterialCard(
+                normalized_mpn=f"nfe{i}", display_mpn=f"NFE{i}", enrichment_status="unenriched", created_at=now
+            )
+        )
+    db_session.flush()
+
+    async def fake_enrich_card(card, db, **kw):
+        card.enrichment_status = MaterialEnrichmentStatus.NOT_FOUND
+        return MaterialEnrichmentStatus.NOT_FOUND
+
+    spec_mock = AsyncMock(return_value={})
+
+    cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=80)
+    breaker = EnrichmentCircuitBreaker(cfg)
+
+    with (
+        patch("app.services.enrichment_worker.worker.enrich_card", side_effect=fake_enrich_card),
+        patch("app.services.enrichment_worker.worker._connectors_in_order", return_value=[]),
+        patch("app.services.enrichment_worker.worker.intel_cache.get_cached", return_value=None),
+        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
+        patch("app.services.spec_enrichment_service.enrich_card_specs", spec_mock),
+    ):
+        asyncio.run(run_one_batch(db_session, cfg, {}, breaker, set(), {"web_calls": 0}))
+
+    spec_mock.assert_not_awaited()
