@@ -227,3 +227,299 @@ def test_breaker_get_trip_info_includes_custom_fields():
     assert info["is_open"] is True
     assert "consecutive_failures" in info
     assert info["trip_reason"] != ""
+
+
+# ---------------------------------------------------------------------------
+# Task 9: select_batch (anti-spin query)
+# ---------------------------------------------------------------------------
+
+
+def test_select_batch_anti_spin(db_session):
+    """select_batch returns unenriched + old not_found; excludes recent not_found,
+    verified, is_internal_part, and deleted cards."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import select_batch
+
+    now = datetime.now(timezone.utc)
+
+    def mk(mpn, status, enriched=None, sc=0, internal=False, deleted=None):
+        c = MaterialCard(
+            normalized_mpn=mpn,
+            display_mpn=mpn.upper(),
+            enrichment_status=status,
+            enriched_at=enriched,
+            search_count=sc,
+            created_at=now,
+            is_internal_part=internal,
+            deleted_at=deleted,
+        )
+        db_session.add(c)
+        return c
+
+    mk("u1", "unenriched", sc=5)
+    mk("nf_old", "not_found", enriched=now - timedelta(hours=30))
+    mk("nf_recent", "not_found", enriched=now - timedelta(hours=1))
+    mk("ver", "verified")
+    mk("internal_u", "unenriched", internal=True)
+    mk("deleted_u", "unenriched", deleted=now - timedelta(days=1))
+    # not_found with enriched_at=None is also eligible
+    mk("nf_none", "not_found", enriched=None)
+    db_session.flush()
+
+    cfg = EnrichmentWorkerConfig(batch_size=10, not_found_retry_hours=22)
+    picked = {c.normalized_mpn for c in select_batch(db_session, cfg)}
+
+    assert "u1" in picked
+    assert "nf_old" in picked
+    assert "nf_none" in picked
+    assert "nf_recent" not in picked  # within retry window
+    assert "ver" not in picked  # already verified
+    assert "internal_u" not in picked  # is_internal_part
+    assert "deleted_u" not in picked  # soft-deleted
+
+
+def test_select_batch_ordering(db_session):
+    """Cards with higher search_count should appear first."""
+    from datetime import datetime, timezone
+
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import select_batch
+
+    now = datetime.now(timezone.utc)
+    for mpn, sc in [("low_sc", 1), ("high_sc", 99), ("mid_sc", 10)]:
+        db_session.add(
+            MaterialCard(
+                normalized_mpn=mpn,
+                display_mpn=mpn.upper(),
+                enrichment_status="unenriched",
+                search_count=sc,
+                created_at=now,
+            )
+        )
+    db_session.flush()
+
+    cfg = EnrichmentWorkerConfig(batch_size=5)
+    results = select_batch(db_session, cfg)
+    search_counts = [c.search_count for c in results]
+    assert search_counts == sorted(search_counts, reverse=True)
+
+
+def test_select_batch_respects_batch_size(db_session):
+    """select_batch returns at most batch_size cards."""
+    from datetime import datetime, timezone
+
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import select_batch
+
+    now = datetime.now(timezone.utc)
+    for i in range(10):
+        db_session.add(
+            MaterialCard(
+                normalized_mpn=f"part{i}",
+                display_mpn=f"PART{i}",
+                enrichment_status="unenriched",
+                created_at=now,
+            )
+        )
+    db_session.flush()
+
+    cfg = EnrichmentWorkerConfig(batch_size=3)
+    assert len(select_batch(db_session, cfg)) == 3
+
+
+# ---------------------------------------------------------------------------
+# Task 9: run_one_batch
+# ---------------------------------------------------------------------------
+
+
+def test_run_one_batch_empty_returns_empty(db_session):
+    """run_one_batch returns {} when there are no eligible cards."""
+    import asyncio
+
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+
+    cfg = EnrichmentWorkerConfig(batch_size=5)
+    breaker = EnrichmentCircuitBreaker(cfg)
+    result = asyncio.run(run_one_batch(db_session, cfg, {}, breaker))
+    assert result == {}
+
+
+def test_run_one_batch_stamps_enriched_at_and_returns_counts(db_session, monkeypatch):
+    """run_one_batch calls enrich_card for each card, stamps enriched_at, accumulates
+    per-tier counts, and calls db.commit()."""
+    import asyncio
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    from app.constants import MaterialEnrichmentStatus
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+
+    now = datetime.now(timezone.utc)
+    cards = []
+    statuses_to_return = [
+        MaterialEnrichmentStatus.WEB_SOURCED,
+        MaterialEnrichmentStatus.AI_INFERRED,
+        MaterialEnrichmentStatus.NOT_FOUND,
+    ]
+    for i, st in enumerate(statuses_to_return):
+        c = MaterialCard(
+            normalized_mpn=f"p{i}",
+            display_mpn=f"P{i}",
+            enrichment_status="unenriched",
+            created_at=now,
+        )
+        db_session.add(c)
+        cards.append(c)
+    db_session.flush()
+
+    call_idx = [0]
+
+    async def fake_enrich_card(card, db, **kw):
+        status = statuses_to_return[call_idx[0]]
+        call_idx[0] += 1
+        card.enrichment_status = status
+        return status
+
+    cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=80)
+    breaker = EnrichmentCircuitBreaker(cfg)
+
+    with (
+        patch(
+            "app.services.enrichment_worker.worker.enrich_card",
+            side_effect=fake_enrich_card,
+        ),
+        patch(
+            "app.services.enrichment_worker.worker._connectors_in_order",
+            return_value=[],
+        ),
+        patch(
+            "app.services.enrichment_worker.worker.intel_cache.get_cached",
+            return_value=None,
+        ),
+        patch(
+            "app.services.enrichment_worker.worker.intel_cache.set_cached",
+        ),
+    ):
+        counts = asyncio.run(run_one_batch(db_session, cfg, {}, breaker))
+
+    assert counts.get(MaterialEnrichmentStatus.WEB_SOURCED, 0) == 1
+    assert counts.get(MaterialEnrichmentStatus.AI_INFERRED, 0) == 1
+    assert counts.get(MaterialEnrichmentStatus.NOT_FOUND, 0) == 1
+
+    # enriched_at should be stamped on all cards
+    for c in cards:
+        assert c.enriched_at is not None
+
+
+def test_run_one_batch_web_cap_disables_web_tier(db_session, monkeypatch):
+    """When web daily cap is reached, 'web_search' is added to disabled set."""
+    import asyncio
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+
+    now = datetime.now(timezone.utc)
+    db_session.add(
+        MaterialCard(
+            normalized_mpn="testpart",
+            display_mpn="TESTPART",
+            enrichment_status="unenriched",
+            created_at=now,
+        )
+    )
+    db_session.flush()
+
+    captured_disabled: list[set] = []
+
+    async def fake_enrich_card(card, db, disabled=None, **kw):
+        captured_disabled.append(set(disabled) if disabled else set())
+        return "not_found"
+
+    cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=10)
+    breaker = EnrichmentCircuitBreaker(cfg)
+
+    with (
+        patch(
+            "app.services.enrichment_worker.worker.enrich_card",
+            side_effect=fake_enrich_card,
+        ),
+        patch(
+            "app.services.enrichment_worker.worker._connectors_in_order",
+            return_value=[],
+        ),
+        patch(
+            "app.services.enrichment_worker.worker.intel_cache.get_cached",
+            return_value={"count": 10},  # at cap
+        ),
+        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
+    ):
+        asyncio.run(run_one_batch(db_session, cfg, {}, breaker))
+
+    assert len(captured_disabled) == 1
+    assert "web_search" in captured_disabled[0]
+
+
+def test_run_one_batch_below_web_cap_does_not_disable(db_session):
+    """When below web daily cap, 'web_search' is NOT in the disabled set."""
+    import asyncio
+    from datetime import datetime, timezone
+    from unittest.mock import patch
+
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import run_one_batch
+
+    now = datetime.now(timezone.utc)
+    db_session.add(
+        MaterialCard(
+            normalized_mpn="testpart2",
+            display_mpn="TESTPART2",
+            enrichment_status="unenriched",
+            created_at=now,
+        )
+    )
+    db_session.flush()
+
+    captured_disabled: list[set] = []
+
+    async def fake_enrich_card(card, db, disabled=None, **kw):
+        captured_disabled.append(set(disabled) if disabled else set())
+        return "not_found"
+
+    cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=80)
+    breaker = EnrichmentCircuitBreaker(cfg)
+
+    with (
+        patch(
+            "app.services.enrichment_worker.worker.enrich_card",
+            side_effect=fake_enrich_card,
+        ),
+        patch(
+            "app.services.enrichment_worker.worker._connectors_in_order",
+            return_value=[],
+        ),
+        patch(
+            "app.services.enrichment_worker.worker.intel_cache.get_cached",
+            return_value={"count": 5},  # well below cap
+        ),
+        patch("app.services.enrichment_worker.worker.intel_cache.set_cached"),
+    ):
+        asyncio.run(run_one_batch(db_session, cfg, {}, breaker))
+
+    assert len(captured_disabled) == 1
+    assert "web_search" not in captured_disabled[0]
