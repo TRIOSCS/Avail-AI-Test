@@ -19,8 +19,14 @@ from app.utils.normalization import normalize_mpn, normalize_mpn_key, parse_subs
 
 
 def _part_mpns(requirement: Requirement) -> list[str]:
-    """Primary MPN + substitute MPNs as display strings (deduped, non-empty)."""
-    subs = parse_substitute_mpns(requirement.substitutes or [], requirement.primary_mpn)
+    """Primary MPN + substitute MPNs as display strings (deduped, non-empty).
+
+    Substitutes may be the canonical list-of-dicts or legacy plain strings; coerce to
+    dicts before parsing so a legacy row can't crash the detail page.
+    """
+    raw_subs = requirement.substitutes or []
+    dict_subs = [s if isinstance(s, dict) else {"mpn": s, "manufacturer": ""} for s in raw_subs]
+    subs = parse_substitute_mpns(dict_subs, requirement.primary_mpn)
     mpns = [requirement.primary_mpn] + [s["mpn"] for s in subs]
     return [m for m in mpns if m]
 

@@ -5,12 +5,15 @@ Depends on: conftest fixtures (client, db_session), Offer/Requirement/Requisitio
 models, app.services.part_offers, the sightings offer endpoints.
 """
 
+from datetime import date
+
 from app.constants import ActivityType, OfferStatus
-from app.models.intelligence import ActivityLog
+from app.models.intelligence import ActivityLog, MaterialCard
 from app.models.offers import Offer
 from app.models.sourcing import Requirement, Requisition
 from app.models.vendor_sighting_summary import VendorSightingSummary
 from app.services.part_offers import part_offers_for
+from app.utils.normalization import normalize_mpn_key
 
 
 def _req(db, mpn="LM317T", subs=None, customer="Acme Corp"):
@@ -87,8 +90,9 @@ def test_offers_tab_lists_part_offers_with_source_hint(client, db_session):
     _offer(db_session, rq2, r2, "Mouser", "LM317T", "lm317t", price=0.51)
     body = client.get(f"/v2/partials/sightings/{r1.id}/detail").text
     assert "activeTab = 'offers'" in body
-    assert "Mouser" in body
-    assert "Beta Inc" in body  # source hint
+    panel = body.split('id="sightings-offers-panel"', 1)[1]
+    assert "Mouser" in panel
+    assert "Beta Inc" in panel  # source hint, anchored to the offers panel
 
 
 def test_pending_offer_in_offers_panel_not_vendors(client, db_session):
@@ -200,3 +204,130 @@ def test_edit_offer_updates_field(client, db_session):
     assert resp.status_code == 200
     db_session.expire_all()
     assert float(db_session.get(Offer, o.id).unit_price) == 2.50
+
+
+# ── Review follow-ups: hardening + coverage gaps ────────────────────────────
+
+
+def test_part_offers_legacy_string_substitutes_no_crash(db_session):
+    """Legacy plain-string substitutes must not crash the part-offers query."""
+    rq, r = _req(db_session, mpn="PRIME-1", subs=["LEGACY-SUB-1"])  # plain strings
+    _offer(db_session, rq, r, "Arrow", "LEGACY-SUB-1", "LEGACY-SUB-1")
+    offers = part_offers_for(r, db_session)
+    assert {o.vendor_name for o in offers} == {"Arrow"}
+
+
+def test_part_offers_matches_via_material_card_id(db_session):
+    """An offer linked by material_card_id is found even if normalized_mpn differs."""
+    card = MaterialCard(normalized_mpn=normalize_mpn_key("LM317T"), display_mpn="LM317T")
+    db_session.add(card)
+    db_session.flush()
+    rq, r = _req(db_session, mpn="LM317T")
+    o = Offer(
+        requisition_id=rq.id,
+        requirement_id=r.id,
+        vendor_name="CardVend",
+        mpn="LM317T",
+        normalized_mpn="zzz999",  # deliberately non-matching
+        material_card_id=card.id,
+        status=OfferStatus.ACTIVE,
+    )
+    db_session.add(o)
+    db_session.commit()
+    assert "CardVend" in {x.vendor_name for x in part_offers_for(r, db_session)}
+
+
+def test_part_offers_empty_when_no_match(db_session):
+    """A part with no offers returns an empty list (no query error)."""
+    _, r = _req(db_session, mpn="NOOFFERS-XYZ")
+    assert part_offers_for(r, db_session) == []
+
+
+def test_reject_pending_offer_via_panel(client, db_session):
+    rq, r = _req(db_session, mpn="LM317T")
+    o = _offer(db_session, rq, r, "PendVend", "LM317T", "lm317t", status=OfferStatus.PENDING_REVIEW)
+    resp = client.post(
+        f"/v2/partials/sightings/{r.id}/offers/{o.id}/review",
+        data={"action": "reject"},
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(Offer, o.id).status == OfferStatus.REJECTED
+
+
+def test_reconfirm_offer_via_panel(client, db_session):
+    rq, r = _req(db_session, mpn="LM317T")
+    o = _offer(db_session, rq, r, "Arrow", "LM317T", "lm317t", status=OfferStatus.ACTIVE)
+    resp = client.post(f"/v2/partials/sightings/{r.id}/offers/{o.id}/reconfirm")
+    assert resp.status_code == 200
+    db_session.expire_all()
+    refreshed = db_session.get(Offer, o.id)
+    assert refreshed.reconfirm_count == 1
+    assert refreshed.reconfirmed_at is not None
+
+
+def test_mark_sold_via_panel_for_creator(client, db_session):
+    """Mark-sold works for an offer the current buyer entered (via the create path)."""
+    rq, r = _req(db_session, mpn="LM317T")
+    client.post(
+        f"/v2/partials/sightings/{r.id}/offers",
+        data={"vendor_name": "Arrow", "mpn": "LM317T", "unit_price": "0.45"},
+    )
+    o = db_session.query(Offer).filter(Offer.vendor_name.ilike("%arrow%")).one()
+    resp = client.post(f"/v2/partials/sightings/{r.id}/offers/{o.id}/mark-sold")
+    assert resp.status_code == 200
+    db_session.expire_all()
+    assert db_session.get(Offer, o.id).status == OfferStatus.SOLD
+
+
+def test_edit_form_prefills_and_404(client, db_session):
+    rq, r = _req(db_session, mpn="LM317T")
+    o = _offer(db_session, rq, r, "Arrow", "LM317T", "lm317t", price=1.25)
+    body = client.get(f"/v2/partials/sightings/{r.id}/offers/{o.id}/edit-form").text
+    assert "Edit Offer" in body
+    assert 'value="Arrow"' in body
+    # bogus offer id → 404
+    assert client.get(f"/v2/partials/sightings/{r.id}/offers/999999/edit-form").status_code == 404
+
+
+def test_offer_form_prefills_lead_days_and_moq(client, db_session):
+    rq, r = _req(db_session, mpn="LM317T")
+    body = client.get(
+        f"/v2/partials/sightings/{r.id}/offer-form?vendor_name=Arrow&lead_days=14&moq=100&manufacturer=TI"
+    ).text
+    assert 'value="14 days"' in body
+    assert 'value="100"' in body
+    assert 'value="TI"' in body
+
+
+def test_create_offer_persists_valid_until(client, db_session):
+    rq, r = _req(db_session, mpn="LM317T")
+    resp = client.post(
+        f"/v2/partials/sightings/{r.id}/offers",
+        data={"vendor_name": "Arrow", "mpn": "LM317T", "valid_until": "2026-12-31"},
+    )
+    assert resp.status_code == 200
+    o = db_session.query(Offer).filter(Offer.vendor_name.ilike("%arrow%")).one()
+    assert o.valid_until == date(2026, 12, 31)
+
+
+def test_create_offer_bad_numeric_is_4xx_not_500(client, db_session):
+    """A constraint-violating value (spq=0, ge=1) is reported as 4xx, never a 500."""
+    rq, r = _req(db_session, mpn="LM317T")
+    resp = client.post(
+        f"/v2/partials/sightings/{r.id}/offers",
+        data={"vendor_name": "Arrow", "mpn": "LM317T", "spq": "0"},
+    )
+    assert 400 <= resp.status_code < 500
+    assert db_session.query(Offer).filter(Offer.vendor_name.ilike("%arrow%")).count() == 0
+
+
+def test_mutation_response_is_panel_scoped(client, db_session):
+    """Mutations return only the offers panel (not the full tab shell), so the user
+    stays on the Offers tab."""
+    rq, r = _req(db_session, mpn="LM317T")
+    o = _offer(db_session, rq, r, "Arrow", "LM317T", "lm317t")
+    resp = client.delete(f"/v2/partials/sightings/{r.id}/offers/{o.id}")
+    assert resp.status_code == 200
+    assert "All offers for" in resp.text  # panel heading
+    assert "activeTab: 'vendors'" not in resp.text  # not the full detail shell

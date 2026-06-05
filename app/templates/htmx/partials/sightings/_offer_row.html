@@ -1,8 +1,8 @@
 {# _offer_row.html — one compact offer row for the sightings Offers panel.
    Context: o (Offer), requirement.
-   Kebab actions hx-post to the sightings offer endpoints and re-render
-   #sightings-offers-panel. Pending offers show Approve/Reject; active offers
-   show Reconfirm/Mark Sold; all show Edit/Delete. #}
+   Kebab: Edit opens the offer modal; pending offers show Approve/Reject; active or
+   approved offers show Reconfirm/Mark Sold; all show Delete. The mutating actions
+   (review/reconfirm/mark-sold/delete) re-render #sightings-offers-panel. #}
 {% set sc = {
   'active': 'bg-emerald-50 text-emerald-700',
   'pending_review': 'bg-amber-50 text-amber-700',
@@ -40,8 +40,7 @@
       </button>
       <div x-show="open" x-cloak
            class="absolute right-0 top-full mt-1 w-36 bg-white border border-gray-200 rounded-lg shadow-lg z-10 py-1 text-xs">
-        <button hx-get="/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/edit-form"
-                @click.stop="open = false"
+        <button @click.stop="$dispatch('open-modal', {url: '/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/edit-form'}); open = false"
                 class="w-full text-left px-3 py-1.5 text-gray-700 hover:bg-gray-50">Edit</button>
         {% if o.status == 'pending_review' %}
         <button hx-post="/v2/partials/sightings/{{ requirement.id }}/offers/{{ o.id }}/review"

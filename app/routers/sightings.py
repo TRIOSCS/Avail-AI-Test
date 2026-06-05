@@ -12,12 +12,14 @@ Depends on: models (Requirement, Requisition, Sighting, VendorSightingSummary,
 import asyncio
 import json
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any, Final, Literal
 
 from fastapi import APIRouter, Depends, Form, HTTPException, Query, Request
+from fastapi.exceptions import RequestValidationError
 from fastapi.responses import HTMLResponse
 from loguru import logger
+from pydantic import ValidationError
 from sqlalchemy import func as sqlfunc
 from sqlalchemy.orm import Session, joinedload
 
@@ -38,6 +40,7 @@ from ..services.sighting_status import compute_vendor_statuses
 from ..services.sse_broker import broker
 from ..services.status_machine import SOURCING_TRANSITIONS, require_valid_transition
 from ..template_env import template_response
+from ..utils import safe_float, safe_int
 from ..utils.sql_helpers import escape_like
 from ..vendor_utils import normalize_vendor_name
 
@@ -94,7 +97,6 @@ def _render_offers_panel(request: Request, requirement: Requirement, db: Session
     ctx = {
         "request": request,
         "requirement": requirement,
-        "requisition": db.get(Requisition, requirement.requisition_id),
         "part_offers": part_offers_for(requirement, db),
     }
     resp = template_response("htmx/partials/sightings/offers_panel.html", ctx)
@@ -103,8 +105,8 @@ def _render_offers_panel(request: Request, requirement: Requirement, db: Session
 
 
 def _with_toast(resp: HTMLResponse, msg: str, level: str = "success") -> HTMLResponse:
-    """Attach an HX-Trigger toast to an HTMX response (base.html listens for
-    showToast)."""
+    """Attach the `showToast` HX-Trigger to an HTMX response (the same toast trigger
+    this router already emits via HX-Trigger elsewhere)."""
     resp.headers["HX-Trigger"] = json.dumps({"showToast": {"message": msg, "type": level}})
     return resp
 
@@ -1337,19 +1339,22 @@ async def sightings_send_inquiry(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _opt_int(v: str | None) -> int | None:
-    """Parse an optional integer form field ('' → None)."""
-    try:
-        return int(v) if v and str(v).strip() else None
-    except (TypeError, ValueError):
+def _refresh_offers_panel(request: Request, requirement_id: int, db: Session) -> HTMLResponse:
+    """Re-fetch the requirement (post-mutation) and render the offers panel, or 404."""
+    requirement = db.get(Requirement, requirement_id)
+    if not requirement:
+        raise HTTPException(404, "Requirement not found")
+    return _render_offers_panel(request, requirement, db)
+
+
+def _parse_iso_date(v: str | None) -> date | None:
+    """Parse an optional ISO-date form field ('' or unparseable → None)."""
+    s = (v or "").strip()
+    if not s:
         return None
-
-
-def _opt_float(v: str | None) -> float | None:
-    """Parse an optional float form field ('' → None)."""
     try:
-        return float(v) if v and str(v).strip() else None
-    except (TypeError, ValueError):
+        return date.fromisoformat(s)
+    except ValueError:
         return None
 
 
@@ -1404,10 +1409,11 @@ async def sightings_create_offer(
     spq: str = Form(""),
     warranty: str = Form(""),
     country_of_origin: str = Form(""),
+    valid_until: str = Form(""),
     notes: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(require_buyer),
-):
+) -> HTMLResponse:
     """Create an offer for this part via the canonical create_offer, then re-render the
     offers panel.
 
@@ -1420,30 +1426,35 @@ async def sightings_create_offer(
     if not requirement:
         raise HTTPException(404, "Requirement not found")
 
-    payload = OfferCreate(
-        mpn=mpn,
-        vendor_name=vendor_name,
-        requirement_id=requirement_id,
-        manufacturer=manufacturer or None,
-        qty_available=_opt_int(qty_available),
-        unit_price=_opt_float(unit_price),
-        lead_time=lead_time or None,
-        date_code=date_code or None,
-        condition=condition or "new",
-        packaging=packaging or None,
-        firmware=firmware or None,
-        hardware_code=hardware_code or None,
-        moq=_opt_int(moq),
-        spq=_opt_int(spq),
-        warranty=warranty or None,
-        country_of_origin=country_of_origin or None,
-        notes=notes or None,
-        source="manual",
-    )
+    try:
+        payload = OfferCreate(
+            mpn=mpn,
+            vendor_name=vendor_name,
+            requirement_id=requirement_id,
+            manufacturer=manufacturer or None,
+            qty_available=safe_int(qty_available),
+            unit_price=safe_float(unit_price),
+            lead_time=lead_time or None,
+            date_code=date_code or None,
+            condition=condition or "new",
+            packaging=packaging or None,
+            firmware=firmware or None,
+            hardware_code=hardware_code or None,
+            moq=safe_int(moq),
+            spq=safe_int(spq),
+            warranty=warranty or None,
+            country_of_origin=country_of_origin or None,
+            valid_until=_parse_iso_date(valid_until),
+            notes=notes or None,
+            source="manual",
+        )
+    except ValidationError as e:
+        # Surface as a 422 (not a 500) so a bad numeric/date is reported, not crashed.
+        raise RequestValidationError(e.errors()) from e
+
     await create_offer(requirement.requisition_id, payload, user=user, db=db)
     db.expire_all()
-    requirement = db.get(Requirement, requirement_id)
-    return _with_toast(_render_offers_panel(request, requirement, db), "Offer saved")
+    return _with_toast(_refresh_offers_panel(request, requirement_id, db), "Offer saved")
 
 
 @router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}/review", response_class=HTMLResponse)
@@ -1466,7 +1477,7 @@ async def sightings_review_offer(
     else:
         await reject_offer(offer_id, user=user, db=db)
     db.expire_all()
-    return _render_offers_panel(request, db.get(Requirement, requirement_id), db)
+    return _refresh_offers_panel(request, requirement_id, db)
 
 
 @router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}/reconfirm", response_class=HTMLResponse)
@@ -1485,7 +1496,7 @@ async def sightings_reconfirm_offer(
         raise HTTPException(404, "Requirement not found")
     await reconfirm_offer(offer_id, user=user, db=db)
     db.expire_all()
-    return _render_offers_panel(request, db.get(Requirement, requirement_id), db)
+    return _refresh_offers_panel(request, requirement_id, db)
 
 
 @router.post("/v2/partials/sightings/{requirement_id}/offers/{offer_id}/mark-sold", response_class=HTMLResponse)
@@ -1504,7 +1515,7 @@ async def sightings_mark_offer_sold(
         raise HTTPException(404, "Requirement not found")
     await mark_offer_sold(offer_id, user=user, db=db)
     db.expire_all()
-    return _render_offers_panel(request, db.get(Requirement, requirement_id), db)
+    return _refresh_offers_panel(request, requirement_id, db)
 
 
 @router.delete("/v2/partials/sightings/{requirement_id}/offers/{offer_id}", response_class=HTMLResponse)
@@ -1523,7 +1534,7 @@ async def sightings_delete_offer(
         raise HTTPException(404, "Requirement not found")
     await delete_offer(offer_id, user=user, db=db)
     db.expire_all()
-    return _render_offers_panel(request, db.get(Requirement, requirement_id), db)
+    return _refresh_offers_panel(request, requirement_id, db)
 
 
 @router.get("/v2/partials/sightings/{requirement_id}/offers/{offer_id}/edit-form", response_class=HTMLResponse)
@@ -1582,10 +1593,11 @@ async def sightings_update_offer(
     spq: str = Form(""),
     warranty: str = Form(""),
     country_of_origin: str = Form(""),
+    valid_until: str = Form(""),
     notes: str = Form(""),
     db: Session = Depends(get_db),
     user: User = Depends(require_buyer),
-):
+) -> HTMLResponse:
     """Update an offer via the canonical update_offer, then re-render the panel."""
     from ..routers.crm.offers import update_offer
     from ..schemas.crm import OfferUpdate
@@ -1593,24 +1605,29 @@ async def sightings_update_offer(
     requirement = db.get(Requirement, requirement_id)
     if not requirement:
         raise HTTPException(404, "Requirement not found")
-    payload = OfferUpdate(
-        vendor_name=vendor_name or None,
-        mpn=mpn or None,
-        manufacturer=manufacturer or None,
-        qty_available=_opt_int(qty_available),
-        unit_price=_opt_float(unit_price),
-        lead_time=lead_time or None,
-        date_code=date_code or None,
-        condition=condition or None,
-        packaging=packaging or None,
-        firmware=firmware or None,
-        hardware_code=hardware_code or None,
-        moq=_opt_int(moq),
-        spq=_opt_int(spq),
-        warranty=warranty or None,
-        country_of_origin=country_of_origin or None,
-        notes=notes or None,
-    )
+    try:
+        payload = OfferUpdate(
+            vendor_name=vendor_name or None,
+            mpn=mpn or None,
+            manufacturer=manufacturer or None,
+            qty_available=safe_int(qty_available),
+            unit_price=safe_float(unit_price),
+            lead_time=lead_time or None,
+            date_code=date_code or None,
+            condition=condition or None,
+            packaging=packaging or None,
+            firmware=firmware or None,
+            hardware_code=hardware_code or None,
+            moq=safe_int(moq),
+            spq=safe_int(spq),
+            warranty=warranty or None,
+            country_of_origin=country_of_origin or None,
+            valid_until=_parse_iso_date(valid_until),
+            notes=notes or None,
+        )
+    except ValidationError as e:
+        raise RequestValidationError(e.errors()) from e
+
     await update_offer(offer_id, payload, user=user, db=db)
     db.expire_all()
-    return _with_toast(_render_offers_panel(request, db.get(Requirement, requirement_id), db), "Offer updated")
+    return _with_toast(_refresh_offers_panel(request, requirement_id, db), "Offer updated")

@@ -14,6 +14,7 @@ Depends on: pydantic
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -148,6 +149,7 @@ class OfferCreate(BaseModel):
     spq: int | None = Field(default=None, ge=1)
     warranty: str | None = None
     country_of_origin: str | None = None
+    valid_until: date | None = None
     source: str = "manual"
     vendor_response_id: int | None = None
     notes: str | None = None
@@ -206,6 +208,7 @@ class OfferUpdate(BaseModel):
     spq: int | None = Field(default=None, ge=1)
     warranty: str | None = None
     country_of_origin: str | None = None
+    valid_until: date | None = None
     notes: str | None = None
     status: Literal["active", "expired", "won", "lost", "pending_review"] | None = None
 
