@@ -66,6 +66,11 @@ class Element14Connector(BaseConnector):
         # circuits the keyword fallback in _do_search — auto-recovers
         # when the next ping returns 200. See
         # docs/APP_MAP_INTERACTIONS.md § Connector Failure Contract.
+        # element14 returns HTTP 403 for BOTH credential rejection AND a per-second
+        # rate cap ("Account Over Queries Per Second Limit"). The latter is transient,
+        # so classify it as a rate limit (retried with backoff) rather than an auth wall.
+        if r.status_code == 403 and "queries per second" in r.text.lower():
+            raise ConnectorRateLimitError(f"element14 rate limited (QPS): {r.text[:200]}")
         if r.status_code in (401, 403):
             # 401 = bad/expired API key; 403 = key rejected for the requested
             # store/region. Both require operator credential rotation.
