@@ -4,12 +4,14 @@ OEM-official description. All trust gates enforced in Python — the model's gat
 never trusted.
 
 Called by: app.services.authoritative_enrichment_service.enrich_card.
-Depends on: app.utils.claude_client, app.utils.normalization, .oem_domains.
+Depends on: app.utils.claude_client, app.utils.claude_errors, app.utils.normalization,
+.oem_domains.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from typing import Literal
 from urllib.parse import urlparse
 
 from loguru import logger
@@ -27,11 +29,16 @@ _MIN_OEM_CONFIDENCE = 0.90
 # --------------------------------- cross-reference ---------------------------------
 
 
-@dataclass
+@dataclass(frozen=True)
 class CrossRefResult:
-    """Candidate OEM->commodity-MPN cross-reference (not yet distributor-confirmed)."""
+    """Candidate OEM->commodity-MPN cross-reference (not yet distributor-confirmed).
 
-    status: str  # "resolved" | "failed"
+    Frozen: producers build the full object in one ``return`` and consumers only read, so
+    immutability is safe and lets the ``_XR_FAILED`` module singleton be shared without an
+    aliasing footgun.
+    """
+
+    status: Literal["resolved", "failed"]
     resolved_mpn: str | None = None
     manufacturer: str | None = None
     linkage_source_url: str | None = None
@@ -102,6 +109,12 @@ async def cross_reference_mpn(
     if not resolved_key:
         return _XR_FAILED
 
+    # Linkage gate: the FRU<->MPN association is single-attestation (the model's quoted
+    # text), checked as a normalized-substring containment of BOTH codes. This is the one
+    # place an LLM claim is load-bearing for the *linkage*; it is defended in depth — the
+    # source domain must be allowlisted (gate 1), the resolved MPN is INDEPENDENTLY
+    # re-verified against a distributor by the caller, and confidence must clear 0.90.
+    # A short code embedded in a longer token is an accepted residual (see review notes).
     linkage_key = normalize_mpn_key(data.get("linkage_quote"))
     if normalized_mpn not in linkage_key or resolved_key not in linkage_key:
         logger.info("OEM_XREF: {} rejected — linkage quote missing a code", display_mpn)
@@ -132,11 +145,16 @@ async def cross_reference_mpn(
 # --------------------------------- OEM description ---------------------------------
 
 
-@dataclass
+@dataclass(frozen=True)
 class OemExtractResult:
-    """Result of an OEM-official description extraction (description/category only)."""
+    """Result of an OEM-official description extraction (description/category only).
 
-    status: str  # "oem_sourced" | "failed"
+    Frozen: producers build the full object in one ``return`` and consumers only read, so
+    immutability is safe and lets the ``_OEM_FAILED`` module singleton be shared without an
+    aliasing footgun.
+    """
+
+    status: Literal["oem_sourced", "failed"]
     description: str | None = None
     manufacturer: str | None = None
     category: str | None = None
