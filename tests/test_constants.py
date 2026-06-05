@@ -31,3 +31,12 @@ def test_source_run_status_strenum():
     assert SourceRunStatus.ERROR_SKIPPED == "error_skipped"
     assert SourceRunStatus.SKIPPED == "skipped"
     assert SourceRunStatus.DISABLED == "disabled"
+
+
+def test_material_enrichment_status_has_oem_tiers():
+    from app.constants import MaterialEnrichmentStatus
+
+    assert MaterialEnrichmentStatus.OEM_SOURCED == "oem_sourced"
+    assert MaterialEnrichmentStatus.NOT_CATALOGUED == "not_catalogued"
+    # All values fit the String(20) column.
+    assert all(len(s.value) <= 20 for s in MaterialEnrichmentStatus)

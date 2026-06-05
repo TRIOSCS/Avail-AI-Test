@@ -29,3 +29,24 @@ def test_validator_accepts_enum_and_literal(db_session):
     assert card.enrichment_status == "web_sourced"
     card.enrichment_status = MaterialEnrichmentStatus.VERIFIED
     assert card.enrichment_status == "verified"
+
+
+def test_validator_accepts_oem_tiers():
+    from app.constants import MaterialEnrichmentStatus
+    from app.models import MaterialCard
+
+    c = MaterialCard(display_mpn="01HW917", normalized_mpn="01hw917")
+    c.enrichment_status = MaterialEnrichmentStatus.OEM_SOURCED
+    assert c.enrichment_status == "oem_sourced"
+    c.enrichment_status = "not_catalogued"
+    assert c.enrichment_status == "not_catalogued"
+
+
+def test_validator_still_rejects_junk():
+    import pytest
+
+    from app.models import MaterialCard
+
+    c = MaterialCard(display_mpn="X", normalized_mpn="x")
+    with pytest.raises(ValueError):
+        c.enrichment_status = "bogus_status"

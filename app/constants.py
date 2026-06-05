@@ -452,7 +452,7 @@ class InboxSyncHealth(StrEnum):
 class MaterialEnrichmentStatus(StrEnum):
     """Enrichment tier for MaterialCard.enrichment_status.
 
-    Single source of truth for the five valid enrichment tiers. Enforced at the ORM
+    Single source of truth for the seven valid enrichment tiers. Enforced at the ORM
     layer via @validates on MaterialCard.
     """
 
@@ -461,3 +461,5 @@ class MaterialEnrichmentStatus(StrEnum):
     WEB_SOURCED = "web_sourced"
     AI_INFERRED = "ai_inferred"
     NOT_FOUND = "not_found"
+    OEM_SOURCED = "oem_sourced"
+    NOT_CATALOGUED = "not_catalogued"
