@@ -568,7 +568,9 @@ Alpine.data('materialsFilter', () => ({
   TRUST_TIERS: [
     { key: 'verified', label: 'Verified' },
     { key: 'web_sourced', label: 'Web-sourced' },
+    { key: 'oem_sourced', label: 'OEM-sourced' },
     { key: 'ai_inferred', label: 'AI-inferred' },
+    { key: 'not_catalogued', label: 'Not catalogued' },
     { key: 'not_found', label: 'Not found' },
     { key: 'unenriched', label: 'Unenriched' },
   ],

@@ -31,7 +31,7 @@ AvailAI is a production electronic component sourcing platform and CRM. Buyers s
 | **redis** | Cache + coordination | 768 MB |
 | **caddy** | Reverse proxy, HTTPS | 512 MB |
 | **db-backup** | pg_dump every 6 hours | 256 MB |
-| **enrichment-worker** | Paced material-card enrichment — trust chain `verified` (distributor API) → `web_sourced` (Claude web search, authorized domains) → `ai_inferred` (Opus 4.8, ≥0.95, flagged). Fast-lane: newest-added parts head the queue (`select_batch` orders `search_count DESC, created_at DESC`); ~60s idle poll | 512 MB |
+| **enrichment-worker** | Paced material-card enrichment — trust chain `verified` (distributor API) → `web_sourced` (Claude web search, authorized domains) → **OEM cross-ref** (grounded web, double-verify against distributors → `verified`) → **OEM description** (`oem_sourced`, single official OEM page) → `ai_inferred` (Opus 4.8, ≥0.95, flagged) → `not_catalogued` (recognised OEM/FRU, no public specs) / `not_found`. OEM tiers gated by a pure regex classifier (`oem_classifier.py`). `web_meter` tracks per-card billable web calls + Claude health for exact budget accounting and circuit-breaker reset. Fast-lane: newest-added parts head the queue (`select_batch` orders `search_count DESC, created_at DESC`); ~60s idle poll | 512 MB |
 
 ## Request Flow — Browser to Database
 
@@ -177,6 +177,22 @@ authoritative reference. Static-analysis tests in
 |--------|-----------|---------|
 | `reenrich.py` | `python -m app.management.reenrich` | Re-run first-pass card enrichment (description/category/lifecycle) on existing cards |
 | `enrich_specs.py` | `python -m app.management.enrich_specs --limit N` | One-time / on-demand backfill of structured-spec extraction for cards missing `specs_enriched_at` |
+
+## Enrichment Worker Modules (`app/services/enrichment_worker/`)
+
+Key modules added for OEM/FRU enrichment:
+
+| Module | Purpose |
+|--------|---------|
+| `oem_classifier.py` | Pure regex vendor classifier (`classify_oem_vendor`) — detects Lenovo/IBM, HPE/HP, Dell, Acer, ASUS FRU codes to gate the OEM tiers. Non-OEM parts never incur OEM web calls. |
+| `oem_domains.py` | Security allowlists (`is_oem_domain`, `is_crossref_domain`) for OEM-official and distributor/manufacturer pages; mirrors `trusted_domains.py`. All domain checks enforced in Python — LLM claims are never trusted. |
+| `oem_extractor.py` | Grounded-web-search extractors: `cross_reference_mpn` resolves an OEM/FRU code to a candidate commodity MPN (four Python gates); `extract_oem_description` fetches an official OEM description (four Python gates). Both raise `ClaudeError` on backend failure. |
+
+## Scripts (`scripts/`)
+
+| Script | Purpose |
+|--------|---------|
+| `backfill_oem_enrichment.py` | Dry-run-first backfill over `not_found` / `not_catalogued` cards through the OEM tiers. Writes a coverage CSV; rolls back unless `--commit`. Shared `web_meter` budget cap (`--max-web-calls`, default 300) halts mid-run to prevent API overspend. The paced worker drains any remainder. |
 
 ## Key Numbers
 

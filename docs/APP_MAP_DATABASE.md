@@ -289,7 +289,8 @@
 | lifecycle_status | String 50 | active\|nrfnd\|eol\|obsolete\|ltb |
 | package_type | String 100 | QFP-64\|BGA-256\|0603 |
 | rohs_status | String 50 | compliant\|non-compliant\|exempt |
-| cross_references | JSONB | Alternative MPNs |
+| enrichment_status | String 20 | `unenriched` \| `verified` \| `web_sourced` \| `oem_sourced` \| `ai_inferred` \| `not_found` \| `not_catalogued`. Validated on write against `MaterialEnrichmentStatus` (constants.py). `oem_sourced` = single official OEM page; `not_catalogued` = recognised OEM/FRU part with no public specs (retries on 30-day backoff). No migration — varchar column. |
+| cross_references | JSONB | Alternative MPNs; also records OEM FRU→commodity-MPN linkages written by the cross-ref enrichment tier (`[{"mpn": <resolved>, "manufacturer": <mfr>}]`). |
 | specs_structured | JSONB | Parametric data |
 | enriched_at | UTCDateTime, nullable | When the first-pass card enrichment (description/category/lifecycle) ran; NULL = not yet run |
 | specs_enriched_at | UTCDateTime, nullable, indexed | When the second-pass structured-spec extraction ran; NULL = spec pass not yet run |

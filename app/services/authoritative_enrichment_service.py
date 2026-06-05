@@ -20,6 +20,14 @@ from sqlalchemy.orm import Session
 from app.connectors.errors import ConnectorAuthError, ConnectorQuotaError, ConnectorRateLimitError
 from app.constants import MaterialEnrichmentStatus
 from app.models import MaterialCard
+from app.services.enrichment_types import WebMeter
+from app.services.enrichment_worker.oem_classifier import HIGH_PRECISION_VENDORS, classify_oem_vendor
+from app.services.enrichment_worker.oem_extractor import (
+    CrossRefResult,
+    OemExtractResult,
+    cross_reference_mpn,
+    extract_oem_description,
+)
 from app.services.enrichment_worker.web_extractor import WebExtractResult, extract_part_from_web
 from app.utils.claude_errors import ClaudeError
 from app.utils.normalization import normalize_mpn_key
@@ -200,6 +208,71 @@ def apply_web_sourced(card: MaterialCard, result: WebExtractResult) -> None:
     card.enriched_at = now
 
 
+def apply_cross_ref_verified(
+    card: MaterialCard,
+    merged: dict,
+    provenance: dict,
+    contributors: list[str],
+    xr: CrossRefResult,
+) -> None:
+    """Write the resolved commodity MPN's distributor data onto an OEM/FRU card.
+
+    Status becomes ``verified`` (the resolved MPN was independently confirmed against a
+    distributor). Records the FRU<->MPN linkage in ``cross_references`` and a top-level
+    ``cross_ref`` provenance block so the whole chain is auditable.
+    """
+    now = datetime.now(timezone.utc)
+    for field_name, value in merged.items():
+        setattr(card, field_name, value)
+    xrefs = list(card.cross_references or [])
+    xrefs.append({"mpn": xr.resolved_mpn, "manufacturer": xr.manufacturer})
+    card.cross_references = xrefs
+    confirmer = contributors[0] if contributors else None
+    prov = dict(provenance)
+    prov["cross_ref"] = {
+        "oem_part": card.display_mpn,
+        "resolved_mpn": xr.resolved_mpn,
+        "linkage_source_url": xr.linkage_source_url,
+        "linkage_source_domain": xr.linkage_source_domain,
+        "confirmed_by": confirmer,
+        "confidence": xr.confidence,
+    }
+    card.enrichment_provenance = prov
+    card.enrichment_source = confirmer or "cross_ref"
+    card.enrichment_status = MaterialEnrichmentStatus.VERIFIED
+    card.enriched_at = now
+
+
+def apply_oem_sourced(card: MaterialCard, result: OemExtractResult) -> None:
+    """Write OEM-official description/category onto the card (status ``oem_sourced``).
+
+    Description + category + datasheet only — never structured specs.
+    """
+    now = datetime.now(timezone.utc)
+    iso = now.isoformat()
+    prov: dict = {
+        "oem_sourced": True,
+        "confidence": result.confidence,
+        "source_urls": result.source_urls,
+        "source_domains": result.source_domains,
+        "fetched_at": iso,
+    }
+    fields = {
+        "description": result.description,
+        "category": result.category,
+        "datasheet_url": result.datasheet_url,
+        "manufacturer": result.manufacturer,
+    }
+    for f, v in fields.items():
+        if v:
+            setattr(card, f, v)
+            prov[f] = {"source": "oem_official", "confidence": result.confidence, "fetched_at": iso}
+    card.enrichment_source = "oem_official"
+    card.enrichment_status = MaterialEnrichmentStatus.OEM_SOURCED
+    card.enrichment_provenance = prov
+    card.enriched_at = now
+
+
 async def enrich_card(
     card: MaterialCard,
     db: Session,
@@ -208,13 +281,22 @@ async def enrich_card(
     refresh: bool = False,
     disabled: set[str] | None = None,
     cooldown: dict[str, float] | None = None,
+    web_meter: WebMeter | None = None,
 ) -> str:
-    """Enrich one card: authoritative -> flagged AI inference -> not_found.
+    """Authoritative -> web -> OEM cross-ref/description -> flagged AI inference ->
+    not_catalogued/not_found.
 
     Returns the resulting enrichment_status. Does not commit (caller controls txn).
     ``disabled`` accumulates sources that hit a quota/auth wall (skipped run-wide).
     ``cooldown`` accumulates sources that hit a transient rate limit (skipped until
     the cooldown window expires, not permanently disabled).
+
+    ``web_meter`` (optional :class:`WebMeter`) is updated in place: ``web_calls`` counts each
+    web-search-enabled Claude tier attempt (distributor / cross-ref / OEM-description),
+    reserved before dispatch so a call that bills then raises is still counted; ``claude_ok``
+    is latched True after ANY Claude call (incl. infer_part) returns without raising. The
+    worker uses ``web_calls`` for the daily budget and ``claude_ok`` to reset its circuit
+    breaker. Default None = no metering.
 
     CONCURRENCY INVARIANT: safe to run over a shared Session via asyncio.gather
     because, after its first ``await``, this function performs NO DB query/flush —
@@ -222,10 +304,15 @@ async def enrich_card(
     interleave across awaits on the single-threaded event loop. Do NOT add a
     db.query()/db.flush() after the await without switching callers to per-card
     sessions, or concurrent runs (import script, enrichment worker) will corrupt
-    the identity map.
+    the identity map. The cross-ref re-verification (``fetch_authoritative`` on the
+    resolved MPN) is pure async connector I/O — no DB query/flush — so the invariant
+    holds.
     """
-    if card.enrichment_status == MaterialEnrichmentStatus.VERIFIED and not refresh:
-        return MaterialEnrichmentStatus.VERIFIED
+    if (
+        card.enrichment_status in (MaterialEnrichmentStatus.VERIFIED, MaterialEnrichmentStatus.OEM_SOURCED)
+        and not refresh
+    ):
+        return card.enrichment_status
 
     conns = connectors if connectors is not None else _connectors_in_order(db)
     results = await fetch_authoritative(card.display_mpn, card.normalized_mpn, conns, disabled, cooldown)
@@ -235,20 +322,55 @@ async def enrich_card(
         apply_authoritative(card, merged, provenance, contributors)
         return MaterialEnrichmentStatus.VERIFIED
 
-    # Web-sourced tier: grounded web search on authoritative distributor/manufacturer pages.
-    # Skipped when "web_search" is in the disabled set (e.g. daily budget exhausted).
+    web_enabled = not (disabled and "web_search" in disabled)
+
+    # Distributor / manufacturer web tier.
     # CONCURRENCY INVARIANT: this await is pure async (no DB) — no DB query/flush follows it;
     # see the docstring above for the full invariant.
-    if not (disabled and "web_search" in disabled):
+    if web_enabled:
+        if web_meter is not None:
+            web_meter.reserve_web_call()
         web = await extract_part_from_web(card.display_mpn, card.normalized_mpn)
+        if web_meter is not None:
+            web_meter.mark_claude_ok()
         if web.status == "web_sourced":
             apply_web_sourced(card, web)
             return MaterialEnrichmentStatus.WEB_SOURCED
 
-    # No authoritative hit -> flagged inference
+    # OEM tiers — only for recognised OEM/FRU codes, only when the web budget is live.
+    vendor = classify_oem_vendor(card.display_mpn)
+    oem_attempted = False
+    if vendor and web_enabled:
+        oem_attempted = True
+        # Tier 3: cross-reference, then INDEPENDENTLY re-verify against distributors.
+        if web_meter is not None:
+            web_meter.reserve_web_call()
+        xr = await cross_reference_mpn(card.display_mpn, card.normalized_mpn, vendor)
+        if web_meter is not None:
+            web_meter.mark_claude_ok()
+        if xr.status == "resolved" and xr.resolved_mpn:
+            resolved_key = normalize_mpn_key(xr.resolved_mpn)
+            xr_results = await fetch_authoritative(xr.resolved_mpn, resolved_key, conns, disabled, cooldown)
+            xr_merged, xr_prov, xr_contrib = merge_authoritative(resolved_key, xr_results)
+            if xr_merged:
+                apply_cross_ref_verified(card, xr_merged, xr_prov, xr_contrib, xr)
+                return MaterialEnrichmentStatus.VERIFIED
+        # Tier 4: OEM-official description (single authoritative page).
+        if web_meter is not None:
+            web_meter.reserve_web_call()
+        oem = await extract_oem_description(card.display_mpn, card.normalized_mpn, vendor)
+        if web_meter is not None:
+            web_meter.mark_claude_ok()
+        if oem.status == "oem_sourced":
+            apply_oem_sourced(card, oem)
+            return MaterialEnrichmentStatus.OEM_SOURCED
+
+    # No authoritative hit -> flagged inference.
     from app.services.ai_inference_fallback import infer_part
 
     inf = await infer_part(card.display_mpn)
+    if web_meter is not None:
+        web_meter.mark_claude_ok()
     now = datetime.now(timezone.utc)
     card.enriched_at = now
     if inf.status == "ai_inferred":
@@ -268,11 +390,18 @@ async def enrich_card(
         }
         return MaterialEnrichmentStatus.AI_INFERRED
 
-    # F5: not_found parts get no provenance — they are genuinely unresolved.
-    card.enrichment_status = MaterialEnrichmentStatus.NOT_FOUND
+    # Terminal: not_catalogued only when a HIGH-PRECISION OEM pattern matched AND the OEM
+    # tiers ran. The broad Dell 5-char pattern is excluded (see HIGH_PRECISION_VENDORS) so a
+    # generic 5-char part missing every tier stays not_found (22h retry) instead of being
+    # parked for ~30 days. `vendor in HIGH_PRECISION_VENDORS` is False when vendor is None.
+    card.enrichment_status = (
+        MaterialEnrichmentStatus.NOT_CATALOGUED
+        if (vendor in HIGH_PRECISION_VENDORS and oem_attempted)
+        else MaterialEnrichmentStatus.NOT_FOUND
+    )
     card.enrichment_source = None
     card.enrichment_provenance = None
-    return MaterialEnrichmentStatus.NOT_FOUND
+    return card.enrichment_status
 
 
 async def enrich_cards(card_ids: list[int], db: Session, *, concurrency: int = 5, refresh: bool = False) -> dict:
@@ -287,8 +416,10 @@ async def enrich_cards(card_ids: list[int], db: Session, *, concurrency: int = 5
     counts: dict[str, int] = {
         MaterialEnrichmentStatus.VERIFIED: 0,
         MaterialEnrichmentStatus.WEB_SOURCED: 0,
+        MaterialEnrichmentStatus.OEM_SOURCED: 0,
         MaterialEnrichmentStatus.AI_INFERRED: 0,
         MaterialEnrichmentStatus.NOT_FOUND: 0,
+        MaterialEnrichmentStatus.NOT_CATALOGUED: 0,
     }
 
     async def _one(cid: int) -> None:

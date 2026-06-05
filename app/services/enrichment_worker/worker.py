@@ -1,9 +1,9 @@
 """Enrichment worker — paced background loop.
 
 Selects small batches of unenriched/retryable parts, runs each through
-``enrich_card`` (verified → web_sourced → ai_inferred → not_found),
-paces via a daily web-call budget + per-source cooldowns, and heartbeats to
-``enrichment_worker_status``.
+``enrich_card`` (verified → web_sourced → oem_sourced → ai_inferred →
+not_found/not_catalogued), paces via a daily web-call budget + per-source
+cooldowns, and heartbeats to ``enrichment_worker_status``.
 
 Run: python -m app.services.enrichment_worker
 
@@ -28,6 +28,7 @@ from app.services.authoritative_enrichment_service import (
     _connectors_in_order,
     enrich_card,
 )
+from app.services.enrichment_types import WebMeter
 from app.utils.claude_errors import ClaudeError
 
 if TYPE_CHECKING:
@@ -62,6 +63,9 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
     - ``unenriched``: always eligible.
     - ``not_found``: eligible only when ``enriched_at IS NULL`` OR older than
       ``not_found_retry_hours`` (self-heal as quotas reset daily).
+    - ``not_catalogued``: eligible when ``enriched_at IS NULL`` OR older than
+      ``not_catalogued_retry_days`` (long backoff — uncatalogued OEM service parts
+      rarely become catalogued, so re-check infrequently).
     - ``is_internal_part``, ``deleted_at`` are excluded.
     - Ordered by ``search_count DESC, created_at DESC``: demand still wins
       (high-demand parts first); among equal demand — the common case where
@@ -81,6 +85,15 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
         ),
     )
 
+    not_catalogued_cutoff = now - timedelta(days=config.not_catalogued_retry_days)
+    not_catalogued_eligible = and_(
+        MaterialCard.enrichment_status == MaterialEnrichmentStatus.NOT_CATALOGUED,
+        or_(
+            MaterialCard.enriched_at.is_(None),
+            MaterialCard.enriched_at < not_catalogued_cutoff,
+        ),
+    )
+
     return (
         db.query(MaterialCard)
         .filter(
@@ -89,6 +102,7 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
             or_(
                 MaterialCard.enrichment_status == MaterialEnrichmentStatus.UNENRICHED,
                 not_found_eligible,
+                not_catalogued_eligible,
             ),
         )
         .order_by(
@@ -130,12 +144,14 @@ async def run_one_batch(
     ``enrichment_worker:web_calls:{date}`` in the intel_cache, but defended in depth by an
     in-process tally in ``web_state`` — the cache silently no-ops if Redis AND Postgres are
     both down, which would otherwise let WEB_DAILY_CAP be bypassed entirely. The gate is
-    re-checked BEFORE each card (not once per batch), so it cannot overshoot the cap by up
-    to ``batch_size`` calls. Once the cap is hit, ``"web_search"`` is added to ``disabled``
-    so ``enrich_card`` skips the web tier and falls through to Opus ai_inferred.
+    re-checked BEFORE each card (not once per batch). A single card may fire up to 3 billable
+    web calls, so the per-card gate can overshoot the cap by at most 2; the meter is flushed
+    in a finally so every dispatched call is billed even when a later tier raises. Once the
+    cap is hit, ``"web_search"`` is added to ``disabled`` so ``enrich_card`` skips the web
+    tier and falls through to Opus ai_inferred.
 
-    After each billable web-tier attempt the cache counter and ``web_state`` tally are
-    incremented (TTL = 1 day).
+    After each card the dispatched web-call count is flushed into the cache counter and the
+    ``web_state`` tally (TTL = 1 day).
     """
     batch = select_batch(db, config)
     if not batch:
@@ -172,8 +188,7 @@ async def run_one_batch(
                 config.web_daily_cap,
             )
             disabled.add("web_search")
-        web_enabled = "web_search" not in disabled
-
+        card_meter = WebMeter()
         try:
             status = await enrich_card(
                 card,
@@ -181,27 +196,22 @@ async def run_one_batch(
                 connectors=conns,
                 disabled=disabled,
                 cooldown=cooldown,
+                web_meter=card_meter,
             )
             card.enriched_at = now
             counts[status] = counts.get(status, 0) + 1
 
-            if status != MaterialEnrichmentStatus.NOT_FOUND:
-                # Landed a real category (verified / web_sourced / ai_inferred) — queue it
-                # for the second-pass parametric spec extraction below.
+            if status not in (MaterialEnrichmentStatus.NOT_FOUND, MaterialEnrichmentStatus.NOT_CATALOGUED):
+                # Landed a real category (verified / web_sourced / oem_sourced / ai_inferred)
+                # — queue it for the second-pass parametric spec extraction below. not_found
+                # and not_catalogued (terminal misses) are excluded, as are poison-pill cards.
                 enriched_ids.append(int(card.id))
 
-            if status != MaterialEnrichmentStatus.VERIFIED:
-                # A non-verified result means a Claude tier (web and/or infer) completed
-                # WITHOUT raising — reset the breaker's consecutive-error counter. (A
-                # verified hit comes from a connector with no Claude call, so it must not
-                # reset the breaker, or sustained Claude outages would never trip it.)
+            # A Claude call (web/cross-ref/OEM/infer) returned without raising → backend
+            # healthy. (A pure-connector VERIFIED hit makes no Claude call, so card_meter
+            # .claude_ok stays False and must not reset the breaker.)
+            if card_meter.claude_ok:
                 breaker.record_claude_success()
-                if web_enabled:
-                    # A billable web_search call fires on EVERY web-tier attempt (gate-pass
-                    # OR gate-fail-then-fall-through). Count all of them, not just
-                    # web_sourced successes, so WEB_DAILY_CAP is actually respected.
-                    web_calls_today += 1
-                    intel_cache.set_cached(web_cache_key, {"count": web_calls_today}, ttl_days=1.0)
 
         except ClaudeError as e:
             # Claude backend is failing — feed the circuit breaker so a sustained outage
@@ -230,6 +240,13 @@ async def run_one_batch(
             card.enrichment_status = MaterialEnrichmentStatus.NOT_FOUND
             card.enriched_at = now
             counts[MaterialEnrichmentStatus.NOT_FOUND] = counts.get(MaterialEnrichmentStatus.NOT_FOUND, 0) + 1
+        finally:
+            # Bill every web call that was DISPATCHED, even if a later tier raised — the
+            # meter reserves before each await, so calls that fired then failed are still
+            # counted (otherwise WEB_DAILY_CAP drifts over on a ClaudeError mid-card).
+            if card_meter.web_calls > 0:
+                web_calls_today += card_meter.web_calls
+                intel_cache.set_cached(web_cache_key, {"count": web_calls_today}, ttl_days=1.0)
 
     web_state["web_calls"] = web_calls_today
 
@@ -293,8 +310,10 @@ async def main() -> None:
     # Running totals for today
     enriched_today = 0
     web_sourced_today = 0
+    oem_sourced_today = 0
     ai_inferred_today = 0
     not_found_today = 0
+    not_catalogued_today = 0
     last_stats_date = None
 
     logger.info(
@@ -329,11 +348,14 @@ async def main() -> None:
                 if last_stats_date != today_date:
                     if last_stats_date is not None:
                         logger.info(
-                            "ENRICH_WORKER daily summary: enriched={}, web={}, ai={}, not_found={}",
+                            "ENRICH_WORKER daily summary: enriched={}, web={}, oem={}, ai={}, "
+                            "not_found={}, not_catalogued={}",
                             enriched_today,
                             web_sourced_today,
+                            oem_sourced_today,
                             ai_inferred_today,
                             not_found_today,
+                            not_catalogued_today,
                         )
                         db = SessionLocal()
                         try:
@@ -343,20 +365,26 @@ async def main() -> None:
                                     "date": str(last_stats_date),
                                     "enriched": enriched_today,
                                     "web_sourced": web_sourced_today,
+                                    "oem_sourced": oem_sourced_today,
                                     "ai_inferred": ai_inferred_today,
                                     "not_found": not_found_today,
+                                    "not_catalogued": not_catalogued_today,
                                 },
                                 enriched_today=0,
                                 web_sourced_today=0,
+                                oem_sourced_today=0,
                                 ai_inferred_today=0,
                                 not_found_today=0,
+                                not_catalogued_today=0,
                             )
                         finally:
                             db.close()
                     enriched_today = 0
                     web_sourced_today = 0
+                    oem_sourced_today = 0
                     ai_inferred_today = 0
                     not_found_today = 0
+                    not_catalogued_today = 0
                     last_stats_date = today_date
                     # New day: quotas/budgets reset, so re-enable disabled sources and the
                     # web tier, and zero the in-process web tally (the cache counter is
@@ -405,8 +433,10 @@ async def main() -> None:
                         total_this_batch = sum(batch_counts.values())
                         enriched_today += total_this_batch
                         web_sourced_today += batch_counts.get(MaterialEnrichmentStatus.WEB_SOURCED, 0)
+                        oem_sourced_today += batch_counts.get(MaterialEnrichmentStatus.OEM_SOURCED, 0)
                         ai_inferred_today += batch_counts.get(MaterialEnrichmentStatus.AI_INFERRED, 0)
                         not_found_today += batch_counts.get(MaterialEnrichmentStatus.NOT_FOUND, 0)
+                        not_catalogued_today += batch_counts.get(MaterialEnrichmentStatus.NOT_CATALOGUED, 0)
 
                         # Heartbeat + counters
                         update_enrichment_worker_status(
@@ -415,8 +445,10 @@ async def main() -> None:
                             last_enriched_at=datetime.now(timezone.utc),
                             enriched_today=enriched_today,
                             web_sourced_today=web_sourced_today,
+                            oem_sourced_today=oem_sourced_today,
                             ai_inferred_today=ai_inferred_today,
                             not_found_today=not_found_today,
+                            not_catalogued_today=not_catalogued_today,
                             circuit_breaker_open=False,
                             circuit_breaker_reason=None,
                         )
@@ -446,11 +478,13 @@ async def main() -> None:
 
     finally:
         logger.info(
-            "ENRICH_WORKER shutting down: enriched_today={}, web={}, ai={}, not_found={}",
+            "ENRICH_WORKER shutting down: enriched_today={}, web={}, oem={}, ai={}, not_found={}, not_catalogued={}",
             enriched_today,
             web_sourced_today,
+            oem_sourced_today,
             ai_inferred_today,
             not_found_today,
+            not_catalogued_today,
         )
         db = SessionLocal()
         try:
