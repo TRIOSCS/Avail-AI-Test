@@ -129,13 +129,27 @@ def test_enrich_card_verified(mock_conns, db_session):
 def test_enrich_card_ai_inferred_when_no_authoritative(mock_conns, mock_claude, db_session):
     card = _card(db_session, "04M3HJ")
     mock_conns.return_value = [_FakeConn("digikey", [])]  # no hits anywhere
-    mock_claude.return_value = {"description": "Dell laptop bezel", "category": "Mechanical", "confidence": 0.7}
+    mock_claude.return_value = {"description": "Dell laptop bezel", "category": "Mechanical", "confidence": 0.97}
     import asyncio
 
     asyncio.run(enrich_card(card, db_session))
     assert card.enrichment_status == "ai_inferred"
     assert card.description == "Dell laptop bezel"
     assert card.lifecycle_status is None  # never guessed
+    assert card.enrichment_provenance["reconfirm_needed"] is True  # flagged for reconfirmation
+
+
+@patch("app.services.ai_inference_fallback.claude_structured", new_callable=AsyncMock)
+@patch("app.services.authoritative_enrichment_service._connectors_in_order")
+def test_enrich_card_below_95_confidence_is_not_found(mock_conns, mock_claude, db_session):
+    card = _card(db_session, "04M3HJ")
+    mock_conns.return_value = [_FakeConn("digikey", [])]
+    mock_claude.return_value = {"description": "maybe a bezel", "category": "Mechanical", "confidence": 0.8}
+    import asyncio
+
+    asyncio.run(enrich_card(card, db_session))
+    assert card.enrichment_status == "not_found"
+    assert card.description is None
 
 
 @patch("app.services.ai_inference_fallback.claude_structured", new_callable=AsyncMock)

@@ -2,8 +2,9 @@
 
 Uses Claude Opus 4.8 (model_tier="opus") with a strict refusal rule. Produces ONLY
 description + category — never structured specs (lifecycle/package/pins/rohs), because
-guessing those is the dangerous kind of hallucination. Confidence below threshold or
-empty description => not_found (no guess kept).
+guessing those is the dangerous kind of hallucination. A guess is only accepted at >=
+0.95 confidence, and even then it is flagged "reconfirm needed" (status ai_inferred) so
+it is never mistaken for verified data. Below 0.95 (or empty) => not_found.
 """
 
 from __future__ import annotations
@@ -14,7 +15,8 @@ from loguru import logger
 
 from app.utils.claude_client import claude_structured
 
-_MIN_CONFIDENCE = 0.5
+# A guess is only accepted at >= 95% confidence (and then flagged "reconfirm needed").
+_MIN_CONFIDENCE = 0.95
 
 _SYSTEM = (
     "You are an expert electronic-component engineer. You are given a single "

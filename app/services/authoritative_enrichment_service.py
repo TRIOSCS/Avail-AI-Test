@@ -177,12 +177,15 @@ async def enrich_card(
         card.category = inf.category
         card.enrichment_source = "claude_opus_inferred"
         card.enrichment_status = "ai_inferred"
+        # >= 0.95-confidence guess: added, but flagged for human reconfirmation so it
+        # is never mistaken for verified data.
         card.enrichment_provenance = {
+            "reconfirm_needed": True,
             "description": {
                 "source": "claude_opus_inferred",
                 "confidence": inf.confidence,
                 "fetched_at": now.isoformat(),
-            }
+            },
         }
         return "ai_inferred"
 
