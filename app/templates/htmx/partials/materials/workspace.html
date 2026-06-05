@@ -229,28 +229,27 @@
     <div id="materials-results-spinner" class="htmx-indicator px-4 py-2 text-xs text-gray-400">Loading materials…</div>
 
     {# Results container #}
+    {# hx-vals js: MUST be an object-literal expression. htmx wraps any value not starting
+       with "{" in {…} (htmx.js getValuesForElement), so an IIFE becomes invalid
+       `{(function(){…})()}` → Function() throws → the request silently never fires (the
+       results spinner hangs forever). Keep it a pure object literal, inlining the workspace
+       lookups, exactly like the sub-filters container above. #}
     <div id="materials-results"
          hx-target="this"
          hx-get="/v2/partials/materials/faceted"
          hx-trigger="load, filters-changed from:body"
          hx-indicator="#materials-results-spinner"
-         hx-vals='js:(function(){
-           var ws = document.querySelector("#materials-workspace");
-           var statusList = Alpine.evaluate(ws, "statuses") || [];
-           var lifecycleList = Alpine.evaluate(ws, "lifecycle") || [];
-           var rohsList = Alpine.evaluate(ws, "rohs") || [];
-           return {
-             "commodity": Alpine.evaluate(ws, "commodity") || "",
-             "q": Alpine.evaluate(ws, "q") || "",
-             "sub_filters": JSON.stringify(Alpine.evaluate(ws, "subFilters") || {}),
-             "statuses": statusList.join(","),
-             "lifecycle": lifecycleList.join(","),
-             "rohs": rohsList.join(","),
-             "has_datasheet": Alpine.evaluate(ws, "hasDatasheet") || false,
-             "limit": 50,
-             "offset": Alpine.evaluate(ws, "page") * 50 || 0
-           };
-         })()'
+         hx-vals='js:{
+           "commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || "",
+           "q": Alpine.evaluate(document.querySelector("#materials-workspace"), "q") || "",
+           "sub_filters": JSON.stringify(Alpine.evaluate(document.querySelector("#materials-workspace"), "subFilters") || {}),
+           "statuses": (Alpine.evaluate(document.querySelector("#materials-workspace"), "statuses") || []).join(","),
+           "lifecycle": (Alpine.evaluate(document.querySelector("#materials-workspace"), "lifecycle") || []).join(","),
+           "rohs": (Alpine.evaluate(document.querySelector("#materials-workspace"), "rohs") || []).join(","),
+           "has_datasheet": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasDatasheet") || false,
+           "limit": 50,
+           "offset": (Alpine.evaluate(document.querySelector("#materials-workspace"), "page") || 0) * 50
+         }'
          hx-swap="innerHTML"
          hx-sync="this:replace">
       {# Skeleton loading #}

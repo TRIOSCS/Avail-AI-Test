@@ -158,6 +158,34 @@ def test_no_tojson_in_double_quoted_alpine_attribute():
     )
 
 
+_HX_VALS_JS = re.compile(r"""hx-vals\s*=\s*(['"])js:(.*?)\1""", re.DOTALL)
+
+
+def test_hx_vals_js_is_object_literal():
+    """`hx-vals="js:..."` MUST be a plain object literal (start with `{`).
+
+    htmx wraps any js: expression that does not start with `{` in `{...}`
+    (getValuesForElement), so an IIFE or function call — `js:(function(){...})()`,
+    `js:buildVals()` — becomes invalid `{(function(){...})()}`; `Function()` throws and
+    htmx SILENTLY aborts the request (it never fires, the indicator hangs forever). This
+    is exactly how the materials faceted list stopped loading. Inline the lookups into an
+    object literal instead.
+    """
+    offenders: list[str] = []
+    for path in sorted(Path("app/templates").rglob("*.html")):
+        text = path.read_text()
+        for m in _HX_VALS_JS.finditer(text):
+            body = m.group(2).strip()
+            if not body.startswith("{"):
+                line = text[: m.start()].count("\n") + 1
+                offenders.append(f"{path.relative_to(Path('.'))}:{line}: got {body[:30]!r}")
+    assert not offenders, (
+        "hx-vals='js:...' must be an OBJECT LITERAL (start with '{'). htmx wraps a non-'{' "
+        "expression in {...}, turning an IIFE/function-call into invalid JS, so the request "
+        "silently never fires:\n" + "\n".join(offenders)
+    )
+
+
 def test_sightings_template_responses_set_rendered_req_id():
     """Every template_response() rendering a context-sensitive sightings partial must
     set the X-Rendered-Req-Id header so the client htmx:beforeSwap stale-response guard
