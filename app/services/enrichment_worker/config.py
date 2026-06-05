@@ -27,6 +27,7 @@ class EnrichmentWorkerConfig:
     # often is negligible.
     idle_sleep_seconds: int = 60
     not_found_retry_hours: int = 22
+    not_catalogued_retry_days: int = 30
     circuit_breaker_errors: int = 5
 
     @classmethod
@@ -39,5 +40,6 @@ class EnrichmentWorkerConfig:
             loop_sleep_seconds=int(os.environ.get("ENRICHMENT_LOOP_SLEEP_SECONDS", 30)),
             idle_sleep_seconds=int(os.environ.get("ENRICHMENT_IDLE_SLEEP_SECONDS", 60)),
             not_found_retry_hours=int(os.environ.get("ENRICHMENT_NOT_FOUND_RETRY_HOURS", 22)),
+            not_catalogued_retry_days=int(os.environ.get("ENRICHMENT_NOT_CATALOGUED_RETRY_DAYS", 30)),
             circuit_breaker_errors=int(os.environ.get("ENRICHMENT_CIRCUIT_BREAKER_ERRORS", 5)),
         )

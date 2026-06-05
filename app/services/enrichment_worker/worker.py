@@ -81,6 +81,15 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
         ),
     )
 
+    not_catalogued_cutoff = now - timedelta(days=config.not_catalogued_retry_days)
+    not_catalogued_eligible = and_(
+        MaterialCard.enrichment_status == MaterialEnrichmentStatus.NOT_CATALOGUED,
+        or_(
+            MaterialCard.enriched_at.is_(None),
+            MaterialCard.enriched_at < not_catalogued_cutoff,
+        ),
+    )
+
     return (
         db.query(MaterialCard)
         .filter(
@@ -89,6 +98,7 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
             or_(
                 MaterialCard.enrichment_status == MaterialEnrichmentStatus.UNENRICHED,
                 not_found_eligible,
+                not_catalogued_eligible,
             ),
         )
         .order_by(
@@ -160,8 +170,7 @@ async def run_one_batch(
                 config.web_daily_cap,
             )
             disabled.add("web_search")
-        web_enabled = "web_search" not in disabled
-
+        card_meter = {"web_calls": 0, "claude_ok": False}
         try:
             status = await enrich_card(
                 card,
@@ -169,22 +178,18 @@ async def run_one_batch(
                 connectors=conns,
                 disabled=disabled,
                 cooldown=cooldown,
+                web_meter=card_meter,
             )
             card.enriched_at = now
             counts[status] = counts.get(status, 0) + 1
 
-            if status != MaterialEnrichmentStatus.VERIFIED:
-                # A non-verified result means a Claude tier (web and/or infer) completed
-                # WITHOUT raising — reset the breaker's consecutive-error counter. (A
-                # verified hit comes from a connector with no Claude call, so it must not
-                # reset the breaker, or sustained Claude outages would never trip it.)
+            # A Claude call (web/cross-ref/OEM/infer) returned without raising → backend healthy.
+            if card_meter["claude_ok"]:
                 breaker.record_claude_success()
-                if web_enabled:
-                    # A billable web_search call fires on EVERY web-tier attempt (gate-pass
-                    # OR gate-fail-then-fall-through). Count all of them, not just
-                    # web_sourced successes, so WEB_DAILY_CAP is actually respected.
-                    web_calls_today += 1
-                    intel_cache.set_cached(web_cache_key, {"count": web_calls_today}, ttl_days=1.0)
+            # Each card may fire 1–3 billable web-search calls; meter keeps the cap exact.
+            if card_meter["web_calls"] > 0:
+                web_calls_today += card_meter["web_calls"]
+                intel_cache.set_cached(web_cache_key, {"count": web_calls_today}, ttl_days=1.0)
 
         except ClaudeError as e:
             # Claude backend is failing — feed the circuit breaker so a sustained outage

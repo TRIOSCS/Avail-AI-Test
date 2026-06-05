@@ -656,9 +656,13 @@ def test_run_one_batch_charges_budget_per_billable_attempt(db_session):
 
     idx = [0]
 
-    async def fake_enrich_card(card, db, **kw):
+    async def fake_enrich_card(card, db, web_meter=None, **kw):
         st = returns[idx[0]]
         idx[0] += 1
+        # Simulate real enrich_card: non-verified results make at least one web call.
+        if web_meter is not None and st != MaterialEnrichmentStatus.VERIFIED:
+            web_meter["web_calls"] = web_meter.get("web_calls", 0) + 1
+            web_meter["claude_ok"] = True
         return st
 
     set_counts: list[int] = []
@@ -872,8 +876,13 @@ def test_run_one_batch_does_not_overshoot_cap_mid_batch(db_session):
 
     web_enabled_seen: list[bool] = []
 
-    async def fake_enrich_card(card, db, disabled=None, **kw):
-        web_enabled_seen.append("web_search" not in (disabled or set()))
+    async def fake_enrich_card(card, db, disabled=None, web_meter=None, **kw):
+        enabled = "web_search" not in (disabled or set())
+        web_enabled_seen.append(enabled)
+        # Simulate real enrich_card: a web call is made only when web is enabled.
+        if web_meter is not None and enabled:
+            web_meter["web_calls"] = web_meter.get("web_calls", 0) + 1
+            web_meter["claude_ok"] = True
         return MaterialEnrichmentStatus.NOT_FOUND
 
     cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=2)
@@ -891,3 +900,44 @@ def test_run_one_batch_does_not_overshoot_cap_mid_batch(db_session):
     # Exactly the first 2 cards web-enabled (charge); remaining 3 disabled — no overshoot.
     assert web_enabled_seen == [True, True, False, False, False]
     assert web_state["web_calls"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Task 6: not_catalogued config field + select_batch eligibility
+# ---------------------------------------------------------------------------
+
+
+from datetime import datetime, timedelta, timezone
+
+from app.constants import MaterialEnrichmentStatus
+from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+
+
+def test_config_has_not_catalogued_retry_days():
+    c = EnrichmentWorkerConfig()
+    assert c.not_catalogued_retry_days == 30
+
+
+def test_select_batch_not_catalogued_eligibility(db_session):
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.worker import select_batch
+
+    now = datetime.now(timezone.utc)
+    cfg = EnrichmentWorkerConfig(batch_size=10, not_catalogued_retry_days=30)
+    fresh = MaterialCard(
+        display_mpn="A1",
+        normalized_mpn="a1",
+        enrichment_status=MaterialEnrichmentStatus.NOT_CATALOGUED,
+        enriched_at=now - timedelta(days=1),
+    )
+    stale = MaterialCard(
+        display_mpn="A2",
+        normalized_mpn="a2",
+        enrichment_status=MaterialEnrichmentStatus.NOT_CATALOGUED,
+        enriched_at=now - timedelta(days=40),
+    )
+    db_session.add_all([fresh, stale])
+    db_session.commit()
+    picked = {c.normalized_mpn for c in select_batch(db_session, cfg)}
+    assert "a2" in picked  # past 30-day backoff → eligible
+    assert "a1" not in picked  # within backoff → not yet
