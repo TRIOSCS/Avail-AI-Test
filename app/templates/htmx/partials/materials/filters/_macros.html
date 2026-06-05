@@ -9,9 +9,11 @@
   <div class="space-y-0.5" :class="!expanded && {{ values|length }} > 6 ? 'max-h-[168px] overflow-hidden' : 'max-h-[320px] overflow-y-auto'">
     {% for val in values %}
     <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm group">
+      {# Single-quoted attributes: |tojson emits double quotes (and escapes single quotes),
+         so spec_key/val are safe inside single quotes — a double-quoted attribute breaks. #}
       <input type="checkbox" value="{{ val }}"
-             :checked="(subFilters['{{ spec_key }}'] || []).includes({{ val|tojson }})"
-             @change="toggleFilter('{{ spec_key }}', {{ val|tojson }})"
+             :checked='(subFilters[{{ spec_key|tojson }}] || []).includes({{ val|tojson }})'
+             @change='toggleFilter({{ spec_key|tojson }}, {{ val|tojson }})'
              class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
       <span class="text-gray-700 truncate flex-1 text-[13px]">{{ val }}</span>
       {% if counts and val in counts %}
