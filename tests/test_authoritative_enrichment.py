@@ -464,6 +464,7 @@ import pytest
 
 from app.constants import MaterialEnrichmentStatus
 from app.services import authoritative_enrichment_service as aes
+from app.services.enrichment_types import WebMeter
 from app.services.enrichment_worker.oem_extractor import CrossRefResult, OemExtractResult
 
 
@@ -493,7 +494,7 @@ async def test_crossref_double_verify_to_verified(db_session):
             }
         return {}
 
-    meter = {"web_calls": 0, "claude_ok": False}
+    meter = WebMeter()
     with (
         patch.object(aes, "classify_oem_vendor", return_value="lenovo"),
         patch.object(aes, "extract_part_from_web", new=AsyncMock(return_value=type("W", (), {"status": "failed"})())),
@@ -506,7 +507,7 @@ async def test_crossref_double_verify_to_verified(db_session):
     assert card.description == "16GB DDR4 RDIMM"
     assert any(x.get("mpn") == "M393A2K40EB3-CWE" for x in (card.cross_references or []))
     assert card.enrichment_provenance["cross_ref"]["resolved_mpn"] == "M393A2K40EB3-CWE"
-    assert meter["claude_ok"] is True and meter["web_calls"] >= 2
+    assert meter.claude_ok is True and meter.web_calls >= 2
 
 
 @pytest.mark.asyncio
@@ -526,7 +527,7 @@ async def test_crossref_unconfirmed_mpn_falls_through(db_session):
             new=AsyncMock(return_value=type("I", (), {"status": "not_found"})()),
         ),
     ):
-        status = await aes.enrich_card(card, db_session, connectors=[], web_meter={"web_calls": 0, "claude_ok": False})
+        status = await aes.enrich_card(card, db_session, connectors=[], web_meter=WebMeter())
     # Unconfirmed cross-ref discarded; OEM desc failed; AI declined → not_catalogued (OEM pattern matched).
     assert status == MaterialEnrichmentStatus.NOT_CATALOGUED
     assert card.cross_references in (None, [])
@@ -550,7 +551,7 @@ async def test_oem_description_path(db_session):
         patch.object(aes, "cross_reference_mpn", new=AsyncMock(return_value=CrossRefResult(status="failed"))),
         patch.object(aes, "extract_oem_description", new=AsyncMock(return_value=oem)),
     ):
-        status = await aes.enrich_card(card, db_session, connectors=[], web_meter={"web_calls": 0, "claude_ok": False})
+        status = await aes.enrich_card(card, db_session, connectors=[], web_meter=WebMeter())
     assert status == MaterialEnrichmentStatus.OEM_SOURCED
     assert card.description == "ThinkSystem 16GB RDIMM"
     assert card.enrichment_provenance["oem_sourced"] is True
@@ -568,7 +569,7 @@ async def test_non_oem_failure_stays_not_found(db_session):
             new=AsyncMock(return_value=type("I", (), {"status": "not_found"})()),
         ),
     ):
-        status = await aes.enrich_card(card, db_session, connectors=[], web_meter={"web_calls": 0, "claude_ok": False})
+        status = await aes.enrich_card(card, db_session, connectors=[], web_meter=WebMeter())
     assert status == MaterialEnrichmentStatus.NOT_FOUND
 
 
@@ -585,8 +586,6 @@ async def test_oem_tiers_skipped_when_web_disabled(db_session):
             new=AsyncMock(return_value=type("I", (), {"status": "not_found"})()),
         ),
     ):
-        status = await aes.enrich_card(
-            card, db_session, connectors=[], disabled={"web_search"}, web_meter={"web_calls": 0, "claude_ok": False}
-        )
+        status = await aes.enrich_card(card, db_session, connectors=[], disabled={"web_search"}, web_meter=WebMeter())
     xref.assert_not_called()  # OEM tiers gated by web budget
     assert status == MaterialEnrichmentStatus.NOT_FOUND  # not_catalogued requires an actual attempt

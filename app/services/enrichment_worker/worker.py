@@ -28,6 +28,7 @@ from app.services.authoritative_enrichment_service import (
     _connectors_in_order,
     enrich_card,
 )
+from app.services.enrichment_types import WebMeter
 from app.utils.claude_errors import ClaudeError
 
 if TYPE_CHECKING:
@@ -132,12 +133,14 @@ async def run_one_batch(
     ``enrichment_worker:web_calls:{date}`` in the intel_cache, but defended in depth by an
     in-process tally in ``web_state`` — the cache silently no-ops if Redis AND Postgres are
     both down, which would otherwise let WEB_DAILY_CAP be bypassed entirely. The gate is
-    re-checked BEFORE each card (not once per batch), so it cannot overshoot the cap by up
-    to ``batch_size`` calls. Once the cap is hit, ``"web_search"`` is added to ``disabled``
-    so ``enrich_card`` skips the web tier and falls through to Opus ai_inferred.
+    re-checked BEFORE each card (not once per batch). A single card may fire up to 3 billable
+    web calls, so the per-card gate can overshoot the cap by at most 2; the meter is flushed
+    in a finally so every dispatched call is billed even when a later tier raises. Once the
+    cap is hit, ``"web_search"`` is added to ``disabled`` so ``enrich_card`` skips the web
+    tier and falls through to Opus ai_inferred.
 
-    After each billable web-tier attempt the cache counter and ``web_state`` tally are
-    incremented (TTL = 1 day).
+    After each card the dispatched web-call count is flushed into the cache counter and the
+    ``web_state`` tally (TTL = 1 day).
     """
     batch = select_batch(db, config)
     if not batch:
@@ -170,7 +173,7 @@ async def run_one_batch(
                 config.web_daily_cap,
             )
             disabled.add("web_search")
-        card_meter = {"web_calls": 0, "claude_ok": False}
+        card_meter = WebMeter()
         try:
             status = await enrich_card(
                 card,
@@ -184,12 +187,8 @@ async def run_one_batch(
             counts[status] = counts.get(status, 0) + 1
 
             # A Claude call (web/cross-ref/OEM/infer) returned without raising → backend healthy.
-            if card_meter["claude_ok"]:
+            if card_meter.claude_ok:
                 breaker.record_claude_success()
-            # Each card may fire 1–3 billable web-search calls; meter keeps the cap exact.
-            if card_meter["web_calls"] > 0:
-                web_calls_today += card_meter["web_calls"]
-                intel_cache.set_cached(web_cache_key, {"count": web_calls_today}, ttl_days=1.0)
 
         except ClaudeError as e:
             # Claude backend is failing — feed the circuit breaker so a sustained outage
@@ -218,6 +217,13 @@ async def run_one_batch(
             card.enrichment_status = MaterialEnrichmentStatus.NOT_FOUND
             card.enriched_at = now
             counts[MaterialEnrichmentStatus.NOT_FOUND] = counts.get(MaterialEnrichmentStatus.NOT_FOUND, 0) + 1
+        finally:
+            # Bill every web call that was DISPATCHED, even if a later tier raised — the
+            # meter reserves before each await, so calls that fired then failed are still
+            # counted (otherwise WEB_DAILY_CAP drifts over on a ClaudeError mid-card).
+            if card_meter.web_calls > 0:
+                web_calls_today += card_meter.web_calls
+                intel_cache.set_cached(web_cache_key, {"count": web_calls_today}, ttl_days=1.0)
 
     web_state["web_calls"] = web_calls_today
 

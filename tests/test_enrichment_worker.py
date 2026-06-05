@@ -661,8 +661,8 @@ def test_run_one_batch_charges_budget_per_billable_attempt(db_session):
         idx[0] += 1
         # Simulate real enrich_card: non-verified results make at least one web call.
         if web_meter is not None and st != MaterialEnrichmentStatus.VERIFIED:
-            web_meter["web_calls"] = web_meter.get("web_calls", 0) + 1
-            web_meter["claude_ok"] = True
+            web_meter.reserve_web_call()
+            web_meter.mark_claude_ok()
         return st
 
     set_counts: list[int] = []
@@ -881,8 +881,8 @@ def test_run_one_batch_does_not_overshoot_cap_mid_batch(db_session):
         web_enabled_seen.append(enabled)
         # Simulate real enrich_card: a web call is made only when web is enabled.
         if web_meter is not None and enabled:
-            web_meter["web_calls"] = web_meter.get("web_calls", 0) + 1
-            web_meter["claude_ok"] = True
+            web_meter.reserve_web_call()
+            web_meter.mark_claude_ok()
         return MaterialEnrichmentStatus.NOT_FOUND
 
     cfg = EnrichmentWorkerConfig(batch_size=5, web_daily_cap=2)

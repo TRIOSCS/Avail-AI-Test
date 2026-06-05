@@ -53,7 +53,8 @@ async def test_budget_cap_halts(db_session, tmp_path):
 
     async def fake_enrich(card, db, *, web_meter=None, **kw):
         if web_meter is not None:
-            web_meter["web_calls"] = web_meter.get("web_calls", 0) + 2
+            web_meter.reserve_web_call()
+            web_meter.reserve_web_call()
         card.enrichment_status = MaterialEnrichmentStatus.NOT_CATALOGUED
         return MaterialEnrichmentStatus.NOT_CATALOGUED
 

@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session
 from app.connectors.errors import ConnectorAuthError, ConnectorQuotaError, ConnectorRateLimitError
 from app.constants import MaterialEnrichmentStatus
 from app.models import MaterialCard
+from app.services.enrichment_types import WebMeter
 from app.services.enrichment_worker.oem_classifier import classify_oem_vendor
 from app.services.enrichment_worker.oem_extractor import (
     CrossRefResult,
@@ -279,20 +280,22 @@ async def enrich_card(
     refresh: bool = False,
     disabled: set[str] | None = None,
     cooldown: dict[str, float] | None = None,
-    web_meter: dict | None = None,
+    web_meter: WebMeter | None = None,
 ) -> str:
-    """Enrich one card: authoritative -> flagged AI inference -> not_found.
+    """Authoritative -> web -> OEM cross-ref/description -> flagged AI inference ->
+    not_catalogued/not_found.
 
     Returns the resulting enrichment_status. Does not commit (caller controls txn).
     ``disabled`` accumulates sources that hit a quota/auth wall (skipped run-wide).
     ``cooldown`` accumulates sources that hit a transient rate limit (skipped until
     the cooldown window expires, not permanently disabled).
 
-    ``web_meter`` (optional ``{"web_calls": int, "claude_ok": bool}``) is updated in place:
-    ``web_calls`` counts each billable web-search call made (distributor web, cross-ref, OEM
-    description); ``claude_ok`` is set True after ANY Claude call (incl. infer_part) returns
-    without raising. The worker uses ``web_calls`` for the daily budget and ``claude_ok`` to
-    reset its circuit breaker. Default None = no metering.
+    ``web_meter`` (optional :class:`WebMeter`) is updated in place: ``web_calls`` counts each
+    web-search-enabled Claude tier attempt (distributor / cross-ref / OEM-description),
+    reserved before dispatch so a call that bills then raises is still counted; ``claude_ok``
+    is latched True after ANY Claude call (incl. infer_part) returns without raising. The
+    worker uses ``web_calls`` for the daily budget and ``claude_ok`` to reset its circuit
+    breaker. Default None = no metering.
 
     CONCURRENCY INVARIANT: safe to run over a shared Session via asyncio.gather
     because, after its first ``await``, this function performs NO DB query/flush —
@@ -321,10 +324,11 @@ async def enrich_card(
     # CONCURRENCY INVARIANT: this await is pure async (no DB) — no DB query/flush follows it;
     # see the docstring above for the full invariant.
     if web_enabled:
+        if web_meter is not None:
+            web_meter.reserve_web_call()
         web = await extract_part_from_web(card.display_mpn, card.normalized_mpn)
         if web_meter is not None:
-            web_meter["web_calls"] = web_meter.get("web_calls", 0) + 1
-            web_meter["claude_ok"] = True
+            web_meter.mark_claude_ok()
         if web.status == "web_sourced":
             apply_web_sourced(card, web)
             return MaterialEnrichmentStatus.WEB_SOURCED
@@ -335,10 +339,11 @@ async def enrich_card(
     if vendor and web_enabled:
         oem_attempted = True
         # Tier 3: cross-reference, then INDEPENDENTLY re-verify against distributors.
+        if web_meter is not None:
+            web_meter.reserve_web_call()
         xr = await cross_reference_mpn(card.display_mpn, card.normalized_mpn, vendor)
         if web_meter is not None:
-            web_meter["web_calls"] = web_meter.get("web_calls", 0) + 1
-            web_meter["claude_ok"] = True
+            web_meter.mark_claude_ok()
         if xr.status == "resolved" and xr.resolved_mpn:
             resolved_key = normalize_mpn_key(xr.resolved_mpn)
             xr_results = await fetch_authoritative(xr.resolved_mpn, resolved_key, conns, disabled, cooldown)
@@ -347,10 +352,11 @@ async def enrich_card(
                 apply_cross_ref_verified(card, xr_merged, xr_prov, xr_contrib, xr)
                 return MaterialEnrichmentStatus.VERIFIED
         # Tier 4: OEM-official description (single authoritative page).
+        if web_meter is not None:
+            web_meter.reserve_web_call()
         oem = await extract_oem_description(card.display_mpn, card.normalized_mpn, vendor)
         if web_meter is not None:
-            web_meter["web_calls"] = web_meter.get("web_calls", 0) + 1
-            web_meter["claude_ok"] = True
+            web_meter.mark_claude_ok()
         if oem.status == "oem_sourced":
             apply_oem_sourced(card, oem)
             return MaterialEnrichmentStatus.OEM_SOURCED
@@ -360,7 +366,7 @@ async def enrich_card(
 
     inf = await infer_part(card.display_mpn)
     if web_meter is not None:
-        web_meter["claude_ok"] = True
+        web_meter.mark_claude_ok()
     now = datetime.now(timezone.utc)
     card.enriched_at = now
     if inf.status == "ai_inferred":

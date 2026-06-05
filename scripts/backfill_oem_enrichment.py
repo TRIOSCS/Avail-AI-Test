@@ -33,6 +33,7 @@ from app.services.authoritative_enrichment_service import (  # noqa: E402
     _connectors_in_order,
     enrich_card,
 )
+from app.services.enrichment_types import WebMeter  # noqa: E402
 from app.services.enrichment_worker.oem_classifier import classify_oem_vendor  # noqa: E402
 
 _TARGET_STATUSES = (MaterialEnrichmentStatus.NOT_FOUND, MaterialEnrichmentStatus.NOT_CATALOGUED)
@@ -70,7 +71,7 @@ async def run(*, commit: bool, limit, max_web_calls: int, csv_path: str) -> dict
             if web_total >= max_web_calls:
                 logger.info("BACKFILL: web budget {} reached — stopping (remaining drains via worker)", max_web_calls)
                 break
-            meter = {"web_calls": 0, "claude_ok": False}
+            meter = WebMeter()
             try:
                 status = await enrich_card(
                     card, db, connectors=conns, disabled=disabled, cooldown=cooldown, web_meter=meter
@@ -78,7 +79,7 @@ async def run(*, commit: bool, limit, max_web_calls: int, csv_path: str) -> dict
             except Exception as e:  # noqa: BLE001 — a single bad card must not abort the run
                 logger.warning("BACKFILL: {} failed: {}", card.display_mpn, type(e).__name__)
                 status = "error"
-            web_total += meter["web_calls"]
+            web_total += meter.web_calls
             counts["processed"] += 1
             counts[status] = counts.get(status, 0) + 1
             resolved = None
