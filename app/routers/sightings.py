@@ -97,6 +97,7 @@ def _oob_toast(msg: str, level: str = "success") -> HTMLResponse:
 # count from these rather than inferring success from the status code.
 RFQ_SENT_HEADER = "X-RFQ-Sent"
 RFQ_TOTAL_HEADER = "X-RFQ-Total"
+RFQ_SKIPPED_HEADER = "X-RFQ-Skipped"  # vendors with no contact email (not a delivery failure)
 
 
 def _render_offers_panel(request: Request, requirement: Requirement, db: Session) -> HTMLResponse:
@@ -1288,7 +1289,8 @@ async def sightings_send_inquiry(
 
     sent_count = 0
     progressed_count = 0
-    failed_vendors = []
+    failed_vendors: list[str] = []
+    no_email_vendors: list[str] = []
     try:
         from ..email_service import send_batch_rfq
 
@@ -1299,31 +1301,39 @@ async def sightings_send_inquiry(
             requisition_id=requisition_id,
             vendor_groups=vendor_groups,
         )
-        # Count only records the email service tagged "sent". send_batch_rfq returns one
-        # record per attempted vendor INCLUDING per-vendor failures (status="failed"), so
-        # len(results) would over-count and report a false success on a partial failure.
+        # send_batch_rfq returns one record per requested vendor tagged "sent" / "failed"
+        # / "skipped" (no contact email). A vendor is delivered only when status=="sent"
+        # — len(results) would over-count, and a "skipped" vendor is not a delivery
+        # failure (the user just needs to add an email), so surface the three distinctly.
         sent_count = sum(1 for r in results if r.get("status") == "sent")
+        sent_vendors = {r.get("vendor_name") for r in results if r.get("status") == "sent"}
+        failed_vendors = [r.get("vendor_name", "") for r in results if r.get("status") == "failed"]
+        no_email_vendors = [r.get("vendor_name", "") for r in results if r.get("status") == "skipped"]
 
+        # Log "RFQ sent" activity only for vendors actually reached.
         for r in requirements:
             for vn in vendor_names:
-                log_rfq_activity(
-                    db=db,
-                    rfq_id=r.requisition_id,
-                    activity_type="rfq_sent",
-                    description=f"RFQ sent to {vn}",
-                    user_id=user.id,
-                    requirement_id=r.id,
-                )
+                if vn in sent_vendors:
+                    log_rfq_activity(
+                        db=db,
+                        rfq_id=r.requisition_id,
+                        activity_type="rfq_sent",
+                        description=f"RFQ sent to {vn}",
+                        user_id=user.id,
+                        requirement_id=r.id,
+                    )
 
-        # Auto-progress sourcing status OPEN → SOURCING on successful send
-        from ..services.sourcing_auto_progress import auto_progress_status
+        # Auto-progress sourcing status OPEN → SOURCING only once at least one RFQ went out.
+        if sent_vendors:
+            from ..services.sourcing_auto_progress import auto_progress_status
 
-        for r in requirements:
-            if auto_progress_status(r, SourcingStatus.SOURCING, db, user.id):
-                progressed_count += 1
+            for r in requirements:
+                if auto_progress_status(r, SourcingStatus.SOURCING, db, user.id):
+                    progressed_count += 1
     except Exception:
         logger.warning("RFQ send failed", exc_info=True)
-        failed_vendors = vendor_names
+        failed_vendors = list(vendor_names)
+        sent_count = 0
 
     db.commit()
 
@@ -1332,20 +1342,29 @@ async def sightings_send_inquiry(
         await _publish_if_user_source(source, user.id, r.id)
 
     total = len(vendor_names)
-    if failed_vendors:
-        msg = f"Sent to {sent_count}/{total} vendors. Failed: {', '.join(failed_vendors)}."
-    else:
+    if sent_count >= total:
         msg = f"RFQ sent to {sent_count} vendor{'s' if sent_count != 1 else ''}."
         if progressed_count:
             msg += f" {progressed_count} requirement{'s' if progressed_count != 1 else ''} advanced to sourcing."
+        level = "success"
+    else:
+        bits = [f"Sent to {sent_count}/{total} vendors."]
+        if failed_vendors:
+            bits.append(f"Failed: {', '.join(v for v in failed_vendors if v)}.")
+        if no_email_vendors:
+            bits.append(f"No email on file: {', '.join(v for v in no_email_vendors if v)}.")
+        msg = " ".join(bits)
+        level = "warning"
 
     # Machine-readable result so the browser caller (rfqVendorModal.confirmSend) can
-    # report the TRUE outcome: this route intentionally returns 200 even on a partial
-    # or total send failure (the failures are captured above, not raised), so the
-    # client must not infer success from the HTTP status alone.
-    resp = _oob_toast(msg, "warning" if failed_vendors else "success")
+    # report the TRUE outcome: this route intentionally returns 200 even on a partial /
+    # total failure (failures are captured above, not raised), so the client must not
+    # infer success from the HTTP status. X-RFQ-Skipped counts no-email vendors so the
+    # client can distinguish "had no email" from "send failed".
+    resp = _oob_toast(msg, level)
     resp.headers[RFQ_SENT_HEADER] = str(sent_count)
     resp.headers[RFQ_TOTAL_HEADER] = str(total)
+    resp.headers[RFQ_SKIPPED_HEADER] = str(len(no_email_vendors))
     return resp
 
 

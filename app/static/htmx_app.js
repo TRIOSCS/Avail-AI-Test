@@ -1481,7 +1481,8 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
       // outcome from the X-RFQ-* headers rather than assuming success.
       const sent = parseInt(resp.headers.get('X-RFQ-Sent') || '0', 10);
       const total = parseInt(resp.headers.get('X-RFQ-Total') || String(count), 10);
-      const outcome = this._sendOutcome(sent, total);
+      const skipped = parseInt(resp.headers.get('X-RFQ-Skipped') || '0', 10);
+      const outcome = this._sendOutcome(sent, total, skipped);
       this._toast(outcome.message, outcome.type);
       if (!outcome.delivered) return; // nothing sent — keep the modal open to retry
       this._refreshSightings();
@@ -1494,17 +1495,22 @@ Alpine.data('rfqVendorModal', (suggestedNames, requirementIds) => ({
     }
   },
 
-  // Map the server's sent/total counts to a toast. `delivered` is false only when
-  // nothing went out, so the caller can keep the modal open for a retry.
-  _sendOutcome(sent, total) {
+  // Map the server's sent/total/skipped counts to a toast. `delivered` is false only when
+  // nothing went out, so the caller can keep the modal open for a retry. `skipped` =
+  // vendors with no contact email — reported distinctly from send failures.
+  _sendOutcome(sent, total, skipped = 0) {
     if (sent === 0) {
       return { type: 'error', delivered: false, message: 'Send failed — no RFQs were delivered' };
     }
     if (sent < total) {
+      const failed = total - sent - skipped;
+      const reasons = [];
+      if (failed > 0) reasons.push(failed + ' failed');
+      if (skipped > 0) reasons.push(skipped + ' had no email');
       return {
         type: 'warning',
         delivered: true,
-        message: 'Sent to ' + sent + ' of ' + total + ' vendors — ' + (total - sent) + ' failed',
+        message: 'Sent to ' + sent + ' of ' + total + ' vendors' + (reasons.length ? ' — ' + reasons.join(', ') : ''),
       };
     }
     return {

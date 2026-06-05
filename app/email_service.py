@@ -86,7 +86,9 @@ async def send_batch_rfq(
     """Send one RFQ email per vendor group.
 
     Each group: {vendor_name, vendor_email, parts, subject, body}.
-    Returns list of created Contact records as dicts.
+    Returns one result dict per requested vendor, each tagged ``status``:
+    ``"sent"``, ``"failed"`` (a send was attempted but errored), or ``"skipped"``
+    (no contact email on file — no email attempted, no Contact created).
     """
     from app.utils.graph_client import GraphClient
 
@@ -101,6 +103,21 @@ async def send_batch_rfq(
     for group in vendor_groups:
         email = group.get("vendor_email")
         if not email:
+            # Don't silently drop: a selected vendor with no contact email must be
+            # visible (logged + a "skipped" result record) so the caller can report it
+            # distinctly rather than miscounting it as a delivery failure.
+            logger.warning(
+                "RFQ skipped — no contact email on file for vendor '{}'",
+                group.get("vendor_name"),
+            )
+            results.append(
+                {
+                    "vendor_name": group.get("vendor_name"),
+                    "vendor_email": "",
+                    "status": "skipped",
+                    "error": "no contact email on file",
+                }
+            )
             continue
 
         html_body = _build_html_body(group["body"])

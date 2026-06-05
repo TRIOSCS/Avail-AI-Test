@@ -477,6 +477,28 @@ class TestSightingsSendInquiryResultHeaders:
         assert resp.headers["X-RFQ-Sent"] == "0"
         assert resp.headers["X-RFQ-Total"] == "2"
 
+    def test_skipped_no_email_reported_distinctly(self, client, db_session, monkeypatch):
+        """A vendor with no contact email is 'skipped' — counted in X-RFQ-Skipped and
+        named in the toast as 'No email on file', NOT folded into a delivery-failure
+        count."""
+        _, r, _ = _seed_data(db_session)
+
+        async def fake_send(**kwargs):
+            groups = kwargs["vendor_groups"]
+            return [
+                {"vendor_name": groups[0]["vendor_name"], "status": "sent"},
+                {"vendor_name": groups[1]["vendor_name"], "status": "skipped", "error": "no contact email on file"},
+            ]
+
+        monkeypatch.setattr("app.email_service.send_batch_rfq", fake_send)
+        resp = self._post(client, r)
+        assert resp.status_code == 200
+        assert resp.headers["X-RFQ-Sent"] == "1"
+        assert resp.headers["X-RFQ-Total"] == "2"
+        assert resp.headers["X-RFQ-Skipped"] == "1"
+        assert "No email on file" in resp.text  # distinguished from "Failed:"
+        assert "Globex" in resp.text  # the skipped vendor is named
+
 
 class TestDashboardCounters:
     """Phase 2: Smart Priority Dashboard Strip counters in sightings_list context."""

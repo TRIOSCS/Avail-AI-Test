@@ -1340,10 +1340,14 @@ OPEN→SOURCING + new activity rows) and the `#sightings-table` list, and dispat
 `vendor_names` keys (not `Object.fromEntries`, which collapses duplicates).
 
 The route returns **HTTP 200 even on partial/total send failure** (failures are
-captured, not raised) and exposes the true outcome via `X-RFQ-Sent` / `X-RFQ-Total`
-response headers. `confirmSend` reads them and toasts via `$store.toast`: full
-success, partial-failure (warning), or total-failure (error — modal stays open to
-retry); it never infers success from the HTTP status alone.
+captured, not raised) and exposes the true outcome via `X-RFQ-Sent` / `X-RFQ-Total` /
+`X-RFQ-Skipped` response headers. `send_batch_rfq` tags each result `sent` / `failed` /
+`skipped` (no contact email — logged, not silently dropped); the route counts only
+`sent`, names `failed` vs "No email on file" vendors distinctly in the toast, and logs
+activity + auto-advances status only for actually-sent vendors. `confirmSend` reads the
+headers and toasts via `$store.toast`: full success, partial (warning, distinguishing
+"N failed" from "N had no email"), or total failure (error — modal stays open to retry);
+it never infers success from the HTTP status alone.
 
 ---
 
