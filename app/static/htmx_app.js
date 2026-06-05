@@ -556,6 +556,8 @@ Alpine.data('materialsFilter', () => ({
   displayNames: {},
   verifiedOnly: false,
   webSourced: false,
+  oemSourced: false,
+  notCatalogued: false,
   _onPopstate: null,
 
   get commodityDisplayName() {
@@ -593,6 +595,8 @@ Alpine.data('materialsFilter', () => ({
       this.q = params.get('q') || '';
       this.verifiedOnly = params.get('verified_only') === 'true';
       this.webSourced = params.get('web_sourced') === 'true';
+      this.oemSourced = params.get('oem_sourced') === 'true';
+      this.notCatalogued = params.get('not_catalogued') === 'true';
       const pageVal = parseInt(params.get('page') || '0', 10);
       this.page = isNaN(pageVal) ? 0 : pageVal;
       this.subFilters = {};
@@ -623,6 +627,8 @@ Alpine.data('materialsFilter', () => ({
       this.q = '';
       this.verifiedOnly = false;
       this.webSourced = false;
+      this.oemSourced = false;
+      this.notCatalogued = false;
       this.page = 0;
       this.subFilters = {};
     }
@@ -634,6 +640,8 @@ Alpine.data('materialsFilter', () => ({
     if (this.q) params.set('q', this.q);
     if (this.verifiedOnly) params.set('verified_only', 'true'); else params.delete('verified_only');
     if (this.webSourced) params.set('web_sourced', 'true'); else params.delete('web_sourced');
+    if (this.oemSourced) params.set('oem_sourced', 'true'); else params.delete('oem_sourced');
+    if (this.notCatalogued) params.set('not_catalogued', 'true'); else params.delete('not_catalogued');
     if (this.page > 0) params.set('page', this.page);
     for (const [key, val] of Object.entries(this.subFilters)) {
       if (Array.isArray(val) && val.length > 0) {

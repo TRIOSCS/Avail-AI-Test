@@ -53,13 +53,33 @@
         </label>
       </div>
       {# Web-sourced toggle #}
-      <div class="mb-3">
+      <div class="mb-1">
         <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer text-sm">
           <input type="checkbox"
                  :checked="webSourced"
                  @change="webSourced = !webSourced; applyFilters()"
                  class="rounded border-gray-300 text-sky-600 focus:ring-sky-500 h-3.5 w-3.5">
           <span class="text-gray-700 font-medium">Web-sourced</span>
+        </label>
+      </div>
+      {# OEM-sourced toggle #}
+      <div class="mb-1">
+        <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer text-sm">
+          <input type="checkbox"
+                 :checked="oemSourced"
+                 @change="oemSourced = !oemSourced; applyFilters()"
+                 class="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 h-3.5 w-3.5">
+          <span class="text-gray-700 font-medium">OEM-sourced</span>
+        </label>
+      </div>
+      {# Not-catalogued toggle #}
+      <div class="mb-3">
+        <label class="flex items-center gap-2 px-2 py-1.5 rounded hover:bg-gray-50 cursor-pointer text-sm">
+          <input type="checkbox"
+                 :checked="notCatalogued"
+                 @change="notCatalogued = !notCatalogued; applyFilters()"
+                 class="rounded border-gray-300 text-slate-600 focus:ring-slate-500 h-3.5 w-3.5">
+          <span class="text-gray-700 font-medium">Not catalogued</span>
         </label>
       </div>
 
@@ -193,9 +213,13 @@
            var ws = document.querySelector("#materials-workspace");
            var verifiedOnly = Alpine.evaluate(ws, "verifiedOnly") || false;
            var webSourced = Alpine.evaluate(ws, "webSourced") || false;
+           var oemSourced = Alpine.evaluate(ws, "oemSourced") || false;
+           var notCatalogued = Alpine.evaluate(ws, "notCatalogued") || false;
            var statusList = [];
            if (verifiedOnly) statusList.push("verified");
            if (webSourced) statusList.push("web_sourced");
+           if (oemSourced) statusList.push("oem_sourced");
+           if (notCatalogued) statusList.push("not_catalogued");
            return {
              "commodity": Alpine.evaluate(ws, "commodity") || "",
              "q": Alpine.evaluate(ws, "q") || "",
