@@ -3,32 +3,11 @@
    Called by: partial_solicit_form route (/v2/partials/excess/{list_id}/solicit-form).
    Depends on: modal shell (#modal-content), brand palette, Alpine.js, HTMX.
 #}
+{# subject (the only dynamic field) is passed via a SINGLE-quoted x-data through |tojson:
+   a list title containing a quote/apostrophe would close a double-quoted x-data and break
+   Alpine init. The component lives in the solicitModal() factory in app/static/htmx_app.js. #}
 <div class="p-6"
-     x-data="{
-       recipientEmail: '',
-       recipientName: '',
-       subject: '{{ ("Bid Request: " ~ list.title)|e if list else "Bid Request" }}',
-       bundled: true,
-       message: 'We have the following parts available and are seeking your best bid. Please reply with unit price, quantity, and lead time.',
-       polishing: false,
-       async polishEmail() {
-         if (!this.message.trim()) return;
-         this.polishing = true;
-         try {
-           const res = await fetch('/api/excess-lists/polish-email', {
-             method: 'POST',
-             headers: {'Content-Type': 'application/json'},
-             body: JSON.stringify({text: this.message})
-           });
-           if (res.ok) {
-             const data = await res.json();
-             this.message = data.text;
-           }
-         } finally {
-           this.polishing = false;
-         }
-       }
-     }">
+     x-data='solicitModal({{ (("Bid Request: " ~ list.title) if list else "Bid Request")|tojson }})'>
 
   {# ── Header ─────────────────────────────────────────────────────────── #}
   <div class="flex items-center justify-between mb-5">
