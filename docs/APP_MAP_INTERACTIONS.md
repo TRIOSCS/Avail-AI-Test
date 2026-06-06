@@ -1349,6 +1349,22 @@ headers and toasts via `$store.toast`: full success, partial (warning, distingui
 "N failed" from "N had no email"), or total failure (error — modal stays open to retry);
 it never infers success from the HTTP status alone.
 
+### solicitModal  (htmx_app.js, Alpine.data)
+
+Backs `excess/solicit_modal.html` — the "Solicit Bids" email composer opened from an
+excess list. Only the email **subject** (derived from the list title) is dynamic, so the
+factory takes that one argument: `x-data='solicitModal({{ (("Bid Request: " ~ list.title)
+if list else "Bid Request")|tojson }})'`. It lives in JS (not inline) for the same reason
+as `rfqVendorModal`: the title may contain `'`/`"`, and the old inline **double-quoted**
+`x-data` interpolated it with `|e` — which HTML-escapes but emits an invalid JS string
+literal, so an apostrophe/quote title broke `Alpine.init()` and left the whole modal inert
+(spinner/"AI Clean Up" never un-cloaked, submit dead). The **single-quoted** `x-data` +
+`|tojson` is immune. State: `recipientEmail`, `recipientName`, `subject`, `bundled`
+(one bundled email vs one per item), `message`, `polishing`. Method: `polishEmail()` →
+`POST /api/excess-lists/polish-email` ({text} in, {text} out) replaces the body with an
+AI-cleaned version. The form itself posts via HTMX to
+`/v2/partials/excess/{list_id}/solicit` and closes the modal on success.
+
 ---
 
 ## 8x8 Integration — Operator Enablement
