@@ -2,13 +2,14 @@
 
 **AvailAI** — electronic-component sourcing engine and CRM for Trio Supply Chain Solutions.
 **Stack:** FastAPI + SQLAlchemy 2.0 + PostgreSQL 16 + HTMX 2.x + Alpine.js 3.x + Jinja2 + Tailwind CSS 3.x.
-**Deploy:** Docker Compose (app, db, redis, caddy, db-backup) on DigitalOcean.
+**Deploy:** Docker Compose (app, enrichment-worker, db, redis, caddy, db-backup) on DigitalOcean.
 **Version:** `APP_VERSION` constant in `app/config.py`.
 
 It searches supplier APIs in parallel (BrokerBin, Nexar, DigiKey, Mouser, OEMSecrets,
 Element14, Sourcengine, eBay, AI web search, email mining), tracks vendor intelligence,
-automates RFQ workflows via Microsoft Graph, mines inboxes with Claude AI, and runs a
-full CRM (companies, quotes, buy plans, customer matching).
+enriches companies/contacts (Apollo), automates RFQ workflows via Microsoft Graph,
+mines inboxes with Claude AI, and runs a full CRM (companies, quotes, buy plans,
+customer matching).
 
 ---
 
@@ -94,8 +95,18 @@ Top-level `app/` modules of note (see APP_MAP_ARCHITECTURE for the full tree):
 - `search_service.py` — requirement search orchestrator (all supplier sources)
 - `email_service.py` — Graph API batch RFQ, inbox monitor, AI reply parsing
 - `enrichment_service.py` — customer/vendor enrichment orchestrator
-- `models/` `schemas/` `routers/` `services/` `connectors/` `cache/` `utils/`
+- `scoring.py` — sighting buyer-usefulness multi-factor scoring
+- `evidence_tiers.py` — data-provenance tier tags for sightings/offers
+- `vendor_utils.py` — `fuzzy_score_vendor()` (rapidfuzz wrapper) — use this, never inline fuzzy
+- `http_client.py` — shared singleton `httpx.AsyncClient`s (connection pooling for outbound)
+- `rate_limit.py` — shared rate limiter (Redis-backed, in-memory fallback)
+- `prometheus_metrics.py` — ASGI metrics middleware + `/metrics` endpoint
+- `connector_status.py` — logs which supplier connectors are enabled/disabled at startup
+- `models/` `schemas/` `routers/` `services/` `connectors/` `cache/` `utils/` `management/`
+- `config/routing_maps.json` — brand→commodity inference maps (used by buy-plan scoring)
 - `templates/` (Jinja2) `static/` (Vite-built assets in `static/dist/`)
+
+`app/management/` holds one-off CLI commands (e.g. `python -m app.management.reenrich`).
 
 Migrations live at repo-root `alembic/versions/`, **not** under `app/`.
 Tests live in `tests/` (unit/integration) and `tests/e2e/` (Playwright).
@@ -276,13 +287,29 @@ Requisitions, Customers, Vendors, Sourcing Engine.
 
 ---
 
+## Observability
+
+- **Sentry** — initialized in `app/main.py` lifespan only when `SENTRY_DSN` is set
+  (FastAPI, httpx, Loguru, SQLAlchemy integrations). A `before_send` hook scrubs
+  sensitive data — extend it, never bypass it, when adding new sensitive fields.
+- **Prometheus** — `app/prometheus_metrics.py` is a pure ASGI middleware exposing
+  `http_requests_total`, `http_request_duration_seconds`, and `http_requests_inprogress`
+  at `GET /metrics` (token-gated). It replaced `prometheus-fastapi-instrumentator` (which
+  hard-pinned `starlette<1.0.0`); keep it streaming-safe (don't consume response bodies)
+  so it composes with SSE endpoints.
+- **Logging** — Loguru with auto-injected `request_id` context (see Logging convention).
+
+---
+
 ## Configuration
 
 All config via `.env` (see `.env.example`). Key groups: Azure OAuth (`AZURE_CLIENT_ID`,
 `AZURE_CLIENT_SECRET`, `AZURE_TENANT_ID`, `AZURE_REDIRECT_URI`), Anthropic
-(`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`), `DATABASE_URL`, supplier API keys (feature
-disabled if unset), feature flags (`MVP_MODE`, `EMAIL_MINING_ENABLED`, etc.), and email
-(`MICROSOFT_GRAPH_ENDPOINT`, `SMTP_FROM`).
+(`ANTHROPIC_API_KEY`, `ANTHROPIC_MODEL`), `DATABASE_URL`, `REDIS_URL`, supplier API keys
+(feature disabled if unset — e.g. `NEXAR_CLIENT_ID`, `BROKERBIN_API_KEY`,
+`DIGIKEY_CLIENT_ID`, `MOUSER_API_KEY`), feature flags (`MVP_MODE`, `EMAIL_MINING_ENABLED`,
+etc.), email (`MICROSOFT_GRAPH_ENDPOINT`, `SMTP_FROM`), and observability (`SENTRY_DSN` —
+optional).
 
 ---
 
