@@ -1,10 +1,18 @@
 {#
   materials/list.html — Material card results table (rendered inside workspace).
   Receives: materials (list of MaterialCard), q (str), commodity (str),
-            total (int), limit (int), offset (int).
+            commodity_display (str), total (int), limit (int), offset (int).
   Called by: htmx_views.py materials_faceted_partial endpoint.
   Depends on: HTMX, Tailwind CSS with brand palette, Alpine.js materialsFilter().
 #}
+
+{# Live result count — re-renders every filters-changed cycle (the feedback loop). #}
+<div class="flex items-baseline gap-2 mb-2 px-1">
+  <span class="text-sm font-semibold text-gray-700 tabular-nums">{{ "{:,}".format(total) }}</span>
+  <span class="text-sm text-gray-500">{% if commodity_display %}{{ commodity_display }} {% endif %}part{{ '' if total == 1 else 's' }}</span>
+</div>
+{# Screen-reader announcement of the new count on each swap. #}
+<div class="sr-only" role="status" aria-live="polite">{{ "{:,}".format(total) }} {% if commodity_display %}{{ commodity_display }} {% endif %}parts match</div>
 
 {# Table #}
 <div class="bg-white rounded-lg border border-brand-200 overflow-hidden">
