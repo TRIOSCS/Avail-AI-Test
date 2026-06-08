@@ -81,6 +81,16 @@ scripts/branch-cleanup.sh --apply --remote   # also delete stale REMOTE branches
 Do this whenever the local branch list grows past the active set, and after a
 batch of PRs merges.
 
+For **worktrees**, use the companion guard (same dry-run-by-default contract). It
+removes a worktree only when it is BOTH clean and merged into `origin/main`, and
+**HOLDS** any worktree with uncommitted work or unmerged commits — so a name
+collision or a still-active session can never lose WIP to automated cleanup:
+
+```bash
+scripts/worktree-guard.sh              # report SAFE vs HELD (dry run)
+scripts/worktree-guard.sh --apply      # remove only the SAFE (clean + merged) ones
+```
+
 ## 5. Keep the workspace clean
 
 - **Working tree:** commit or quarantine untracked files; `git status` should be
