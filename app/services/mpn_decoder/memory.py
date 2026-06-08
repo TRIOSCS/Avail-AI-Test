@@ -45,7 +45,7 @@ def _samsung(mpn: str) -> DecodeResult | None:
     mod = _SAMSUNG_MODULE.get(m.group(1))
     if not mod:
         return None
-    specs: dict = {"form_factor": mod[0], "ecc": "true" if mod[1] else "false"}
+    specs: dict = {"form_factor": mod[0], "ecc": mod[1]}
     if m.group(1) in _SAMSUNG_DDR5_CODES:
         specs["ddr_type"] = DDR5
     elif m.group(2) == "A":
@@ -72,16 +72,18 @@ def _hynix(mpn: str) -> DecodeResult | None:
         form, ecc = _HYNIX_FORM[ff.group(1)]
         specs["form_factor"] = form
         if ecc is True:
-            specs["ecc"] = "true"  # RDIMM/LRDIMM are always ECC
+            specs["ecc"] = True  # RDIMM/LRDIMM are always ECC
         elif ff.group(2) == "7":
-            specs["ecc"] = "true"  # 72-bit ECC UDIMM/SODIMM
+            specs["ecc"] = True  # 72-bit ECC UDIMM/SODIMM
         elif ff.group(2) == "6":
-            specs["ecc"] = "false"  # 64-bit non-ECC
+            specs["ecc"] = False  # 64-bit non-ECC
     return _r(specs, "SK Hynix")
 
 
-# ── Micron (MT[A|C]…, 72=ECC / 64=non-ECC) ───────────────────────────────
-_MICRON = re.compile(r"^MT([AC]?)\d")
+# ── Micron (MTA = DDR4, MTC = DDR5; 72=ECC / 64=non-ECC) ──────────────────
+# Only the explicit MTA/MTC MODULE prefixes are decoded. A bare "MT<digit>…" (SDRAM
+# components, DDR3/legacy modules) is NOT decoded — never default a generation.
+_MICRON = re.compile(r"^MT([AC])\d")
 _MICRON_ECC = re.compile(r"(72|64)")
 
 
@@ -89,13 +91,10 @@ def _micron(mpn: str) -> DecodeResult | None:
     m = _MICRON.match(mpn)
     if not m:
         return None
-    gen = {"A": DDR4, "C": DDR5, "": DDR3}.get(m.group(1))
-    specs: dict = {}
-    if gen:
-        specs["ddr_type"] = gen
+    specs: dict = {"ddr_type": {"A": DDR4, "C": DDR5}[m.group(1)]}
     ecc = _MICRON_ECC.search(mpn)
     if ecc:
-        specs["ecc"] = "true" if ecc.group(1) == "72" else "false"
+        specs["ecc"] = ecc.group(1) == "72"
     return _r(specs, "Micron")
 
 
@@ -137,7 +136,7 @@ def _kingston(mpn: str) -> DecodeResult | None:
         form = _KING_FORM.get(km.group(2))
         if form:
             specs["form_factor"] = form[0]
-            specs["ecc"] = "true" if form[1] else "false"
+            specs["ecc"] = form[1]
     gen = _KING_GEN.search(mpn)
     if gen:
         specs["ddr_type"] = {"3": DDR3, "4": DDR4, "5": DDR5}[gen.group(1)]
@@ -171,7 +170,7 @@ def _crucial(mpn: str) -> DecodeResult | None:
     if form:
         specs["form_factor"] = form[0]
         if form[1] is True:
-            specs["ecc"] = "true"
+            specs["ecc"] = True
     st = _CRUCIAL_SPEED_TOKEN.search(mpn)
     if st and st.group(1) in _CRUCIAL_SPEED:
         specs["speed_mhz"] = _CRUCIAL_SPEED[st.group(1)]

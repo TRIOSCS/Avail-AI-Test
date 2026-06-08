@@ -261,8 +261,8 @@ async def run_one_batch(
 
             try:
                 logger.info("ENRICH_WORKER: mpn-decode {}", decode_and_record_specs(db, enriched_ids))
-            except Exception as e:
-                logger.error("ENRICH_WORKER: mpn-decode failed: {}", e)
+            except Exception:
+                logger.exception("ENRICH_WORKER: mpn-decode failed over {} cards", len(enriched_ids))
 
     # Second pass: parametric spec extraction for cards that landed a real category this
     # batch. Runs ONCE per batch (the extractor groups by category internally) on the same

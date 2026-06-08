@@ -22,21 +22,25 @@ def decode_and_record_specs(db: Session, card_ids: list[int]) -> dict[str, int]:
     decoded_cards = 0
     written = 0
     for card_id in card_ids:
-        card = db.get(MaterialCard, card_id)
-        if card is None:
-            continue
-        result = decode_mpn(card.display_mpn, card.manufacturer)
-        if result is None:
-            continue
-        # The decoded commodity MUST match the card's actual category — otherwise a shared
-        # spec_key (e.g. capacity_gb exists for hdd/ssd/dram) could write a drive's capacity
-        # onto a mis-categorized card.
-        if result.commodity != (card.category or "").lower().strip():
-            continue
-        decoded_cards += 1
-        for spec_key, value in result.specs.items():
-            if record_spec(db, card_id, spec_key, value, source=DECODE_SOURCE, confidence=DECODE_CONFIDENCE):
-                written += 1
+        # Per-card isolation: a single malformed MPN must never abort decode for the batch.
+        try:
+            card = db.get(MaterialCard, card_id)
+            if card is None:
+                continue
+            result = decode_mpn(card.display_mpn, card.manufacturer)
+            if result is None:
+                continue
+            # The decoded commodity MUST match the card's actual category — otherwise a shared
+            # spec_key (e.g. capacity_gb exists for hdd/ssd/dram) could write a drive's capacity
+            # onto a mis-categorized card.
+            if result.commodity != (card.category or "").lower().strip():
+                continue
+            decoded_cards += 1
+            for spec_key, value in result.specs.items():
+                if record_spec(db, card_id, spec_key, value, source=DECODE_SOURCE, confidence=DECODE_CONFIDENCE):
+                    written += 1
+        except Exception:
+            logger.exception("mpn-decode: failed on card_id={}", card_id)
     if written:
         logger.info("mpn-decode: wrote {} specs across {} cards", written, decoded_cards)
     return {"decoded": decoded_cards, "written": written}

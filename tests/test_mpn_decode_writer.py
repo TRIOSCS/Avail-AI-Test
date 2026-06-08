@@ -43,6 +43,18 @@ def test_decode_writes_dram(db_session: Session):
     assert f["ecc"] == "true"
 
 
+def test_decode_writes_ecc_false(db_session: Session):
+    # Regression: a non-ECC module must persist ecc="false" (the string→bool corruption bug).
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(normalized_mpn="m378b5273dh0-ck0", display_mpn="M378B5273DH0-CK0", category="dram")
+    db_session.add(card)
+    db_session.flush()
+
+    decode_and_record_specs(db_session, [card.id])
+    db_session.commit()
+    assert _facets(db_session, card.id)["ecc"] == "false"
+
+
 def test_decode_skips_on_category_mismatch(db_session: Session):
     # A drive MPN on a card mis-categorized as dram must NOT write (commodity guard prevents
     # writing a drive's capacity onto a DRAM card via the shared capacity_gb key).

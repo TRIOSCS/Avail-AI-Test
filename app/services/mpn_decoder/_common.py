@@ -18,5 +18,5 @@ class DecodeResult:
 
     commodity: str
     vendor: str
-    specs: dict[str, str | int | float] = field(default_factory=dict)
+    specs: dict[str, str | int | float | bool] = field(default_factory=dict)
     confidence: float = DECODE_CONFIDENCE

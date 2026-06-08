@@ -22,6 +22,7 @@ CASES = [
     # HGST/Hitachi — prefix → form + usage (capacity not in a clean token here)
     ("HUH721212ALN604", {"form_factor": '3.5"', "usage_class": "Enterprise / Datacenter"}, "hdd"),
     ("HTS721010A9E630", {"form_factor": '2.5"'}, "hdd"),
+    ("HMS5C4040ALE640", {"form_factor": '3.5"', "usage_class": "Desktop / Client"}, "hdd"),
 ]
 
 

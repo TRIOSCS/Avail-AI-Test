@@ -129,6 +129,7 @@ _HGST_PREFIX = {
     "HTS": (FF_25, None),  # Travelstar
     "HDN": (FF_35, UC_NAS),  # Deskstar NAS
     "HDS": (FF_35, UC_DESKTOP),  # Deskstar
+    "HMS": (FF_35, UC_DESKTOP),  # Deskstar / CinemaStar 3.5"
 }
 
 
@@ -136,7 +137,9 @@ def _hgst(mpn: str) -> DecodeResult | None:
     m = _HGST.match(mpn)
     if not m:
         return None
-    info = _HGST_PREFIX[m.group(1)]
+    info = _HGST_PREFIX.get(m.group(1))  # defensive: never KeyError if the gate drifts
+    if info is None:
+        return None
     specs: dict = {"form_factor": info[0]}
     if info[1]:
         specs["usage_class"] = info[1]
