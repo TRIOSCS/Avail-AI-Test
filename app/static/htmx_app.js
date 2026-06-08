@@ -554,27 +554,28 @@ Alpine.data('materialsFilter', () => ({
   page: 0,
   drawerOpen: false,
   displayNames: {},
-  // Trust ladder — ordered enrichment tiers (most → least trustworthy).
-  // Default selection = the trustworthy set (Verified + Web-sourced).
-  statuses: ['verified', 'web_sourced'],
+  // Data-confidence selection — the flat list of enrichment tiers sent to the backend.
+  // Surfaced as 3 user-facing checkboxes (see CONFIDENCE_GROUPS). Default = all tiers on
+  // (the filter only narrows; the page opens showing everything).
+  statuses: ['verified', 'web_sourced', 'oem_sourced', 'ai_inferred', 'not_catalogued', 'not_found', 'unenriched'],
   // Global facets — MaterialCard columns (OR-within each).
   lifecycle: [],
   rohs: [],
+  condition: [],
   hasDatasheet: false,
   _onPopstate: null,
 
-  // Ordered tier metadata. label = sidebar/chip text; the array order pins
-  // the visual ordering of the Data-confidence section.
-  TRUST_TIERS: [
-    { key: 'verified', label: 'Verified' },
-    { key: 'web_sourced', label: 'Web-sourced' },
-    { key: 'oem_sourced', label: 'OEM-sourced' },
-    { key: 'ai_inferred', label: 'AI-inferred' },
-    { key: 'not_catalogued', label: 'Not catalogued' },
-    { key: 'not_found', label: 'Not found' },
-    { key: 'unenriched', label: 'Unenriched' },
+  // 3 user-facing confidence groups, each expanding to a set of enrichment tiers.
+  // Array order pins the visual ordering of the Data-confidence section.
+  CONFIDENCE_GROUPS: [
+    { key: 'trusted', label: 'Trusted', dot: 'bg-emerald-500', tiers: ['verified', 'web_sourced', 'oem_sourced'] },
+    { key: 'ai_inferred', label: 'AI-inferred', dot: 'bg-amber-500', tiers: ['ai_inferred'] },
+    { key: 'no_data', label: 'No data', dot: 'bg-gray-400', tiers: ['not_catalogued', 'not_found', 'unenriched'] },
   ],
-  DEFAULT_STATUSES: ['verified', 'web_sourced'],
+  // Derived from the groups so the tier set has a single source of truth.
+  get DEFAULT_STATUSES() {
+    return this.CONFIDENCE_GROUPS.flatMap(g => g.tiers);
+  },
 
   get commodityDisplayName() {
     if (!this.commodity) return '';
@@ -582,14 +583,38 @@ Alpine.data('materialsFilter', () => ({
       || this.commodity.replace(/_/g, ' ').replace(/(^|\s)\S/g, l => l.toUpperCase());
   },
 
-  // Tiers selected beyond the trustworthy default — surfaced as active chips.
-  get nonDefaultStatuses() {
-    return this.statuses.filter(s => !this.DEFAULT_STATUSES.includes(s));
+  // True when the confidence selection is narrowed from the all-on default.
+  get confidenceNarrowed() {
+    return !(this.statuses.length === this.DEFAULT_STATUSES.length
+      && this.DEFAULT_STATUSES.every(s => this.statuses.includes(s)));
   },
 
-  statusLabel(key) {
-    const tier = this.TRUST_TIERS.find(t => t.key === key);
-    return tier ? tier.label : key;
+  _groupChecked(group) {
+    return group.tiers.every(t => this.statuses.includes(t));
+  },
+
+  // Fully-checked confidence groups — surfaced as active chips, but only when narrowed.
+  get activeConfidenceGroups() {
+    if (!this.confidenceNarrowed) return [];
+    return this.CONFIDENCE_GROUPS.filter(g => this._groupChecked(g));
+  },
+
+  confidenceGroupChecked(groupKey) {
+    const group = this.CONFIDENCE_GROUPS.find(g => g.key === groupKey);
+    return !!group && this._groupChecked(group);
+  },
+
+  toggleConfidenceGroup(groupKey) {
+    const group = this.CONFIDENCE_GROUPS.find(g => g.key === groupKey);
+    if (!group) return;
+    if (this._groupChecked(group)) {
+      this.statuses = this.statuses.filter(s => !group.tiers.includes(s));
+    } else {
+      for (const t of group.tiers) {
+        if (!this.statuses.includes(t)) this.statuses.push(t);
+      }
+    }
+    this.applyFilters();
   },
 
   get activeFilterCount() {
@@ -598,9 +623,10 @@ Alpine.data('materialsFilter', () => ({
       if (Array.isArray(val)) count += val.length;
       else if (val !== '' && val !== null) count += 1;
     }
-    count += this.nonDefaultStatuses.length;
+    count += this.activeConfidenceGroups.length;
     count += this.lifecycle.length;
     count += this.rohs.length;
+    count += this.condition.length;
     if (this.hasDatasheet) count += 1;
     return count;
   },
@@ -636,6 +662,7 @@ Alpine.data('materialsFilter', () => ({
       }
       this.lifecycle = (params.get('lifecycle') || '').split(',').filter(s => s !== '');
       this.rohs = (params.get('rohs') || '').split(',').filter(s => s !== '');
+      this.condition = (params.get('condition') || '').split(',').filter(s => s !== '');
       this.hasDatasheet = params.get('has_datasheet') === 'true';
       const pageVal = parseInt(params.get('page') || '0', 10);
       this.page = isNaN(pageVal) ? 0 : pageVal;
@@ -668,6 +695,7 @@ Alpine.data('materialsFilter', () => ({
       this.statuses = [...this.DEFAULT_STATUSES];
       this.lifecycle = [];
       this.rohs = [];
+      this.condition = [];
       this.hasDatasheet = false;
       this.page = 0;
       this.subFilters = {};
@@ -685,6 +713,7 @@ Alpine.data('materialsFilter', () => ({
     if (!isDefault) params.set('statuses', this.statuses.join(','));
     if (this.lifecycle.length > 0) params.set('lifecycle', this.lifecycle.join(','));
     if (this.rohs.length > 0) params.set('rohs', this.rohs.join(','));
+    if (this.condition.length > 0) params.set('condition', this.condition.join(','));
     if (this.hasDatasheet) params.set('has_datasheet', 'true');
     if (this.page > 0) params.set('page', this.page);
     for (const [key, val] of Object.entries(this.subFilters)) {
@@ -704,15 +733,6 @@ Alpine.data('materialsFilter', () => ({
     this.commodity = commodity || '';
     this.subFilters = {};
     document.body.dispatchEvent(new CustomEvent('commodity-changed'));
-    this.applyFilters();
-  },
-
-  // Trust-ladder tier toggle (multi-select). Always re-applies (the tiers live
-  // in their own pinned section, not the mobile-batch sub-filter group).
-  toggleStatus(key) {
-    const idx = this.statuses.indexOf(key);
-    if (idx >= 0) this.statuses.splice(idx, 1);
-    else this.statuses.push(key);
     this.applyFilters();
   },
 

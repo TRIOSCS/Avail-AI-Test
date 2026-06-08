@@ -21,10 +21,12 @@ COMMODITY_TREE: dict[str, list[str]] = {
     "Passives": ["capacitors", "resistors", "inductors", "transformers", "fuses", "oscillators", "filters"],
     "Semiconductors \u2014 Discrete": ["diodes", "transistors", "mosfets", "thyristors"],
     "Semiconductors \u2014 ICs": ["analog_ic", "logic_ic", "power_ic"],
+    "Memory": ["dram", "flash"],
     "Processors & Programmable": ["microcontrollers", "cpu", "microprocessors", "dsp", "fpga", "asic", "gpu"],
-    "Memory & Storage": ["dram", "flash", "ssd", "hdd"],
-    "Connectors & Electromechanical": ["connectors", "cables", "relays", "switches", "sockets"],
+    "Storage & Drives": ["ssd", "hdd"],
     "Power & Energy": ["power_supplies", "voltage_regulators", "batteries"],
+    "Connectors, Interconnects & Cables": ["connectors", "cables", "sockets"],
+    "Electromechanical": ["relays", "switches", "motors"],
     "Optoelectronics & Display": ["leds", "displays", "optoelectronics"],
     "Sensors & RF": ["sensors", "rf"],
     "IT / Server Hardware": [
@@ -35,7 +37,7 @@ COMMODITY_TREE: dict[str, list[str]] = {
         "fans_cooling",
         "networking",
     ],
-    "Misc": ["motors", "enclosures", "tools_accessories", "other"],
+    "Misc": ["enclosures", "tools_accessories", "other"],
 }
 
 # Display names for sub-categories (for UI rendering)
@@ -153,6 +155,24 @@ def get_batch_spec_schema() -> dict[str, dict]:
     return result
 
 
+def _row_from_seed(commodity: str, spec: dict) -> CommoditySpecSchema:
+    """Build a CommoditySpecSchema row from a seed dict (shared by the inserter +
+    reseeder)."""
+    return CommoditySpecSchema(
+        commodity=commodity,
+        spec_key=spec["spec_key"],
+        display_name=spec["display_name"],
+        data_type=spec["data_type"],
+        unit=spec.get("unit"),
+        canonical_unit=spec.get("canonical_unit"),
+        enum_values=spec.get("enum_values"),
+        numeric_range=spec.get("numeric_range"),
+        sort_order=spec.get("sort_order", 0),
+        is_filterable=spec.get("is_filterable", True),
+        is_primary=spec.get("is_primary", False),
+    )
+
+
 def seed_commodity_schemas(db: Session) -> int:
     """Seed commodity_spec_schemas table. Idempotent -- skips existing rows.
 
@@ -179,23 +199,81 @@ def seed_commodity_schemas(db: Session) -> int:
             if (commodity, spec["spec_key"]) in existing_pairs:
                 continue
 
-            row = CommoditySpecSchema(
-                commodity=commodity,
-                spec_key=spec["spec_key"],
-                display_name=spec["display_name"],
-                data_type=spec["data_type"],
-                unit=spec.get("unit"),
-                canonical_unit=spec.get("canonical_unit"),
-                enum_values=spec.get("enum_values"),
-                numeric_range=spec.get("numeric_range"),
-                sort_order=spec.get("sort_order", 0),
-                is_filterable=spec.get("is_filterable", True),
-                is_primary=spec.get("is_primary", False),
-            )
-            db.add(row)
+            db.add(_row_from_seed(commodity, spec))
             inserted += 1
 
     if inserted:
         db.commit()
         logger.info("Seeded {} commodity_spec_schemas rows", inserted)
     return inserted
+
+
+def _enum_list(raw) -> list:
+    """Coerce a stored enum_values cell (list, JSON string, or None) to an ordered list.
+
+    Order-preserving: a pure reorder of the same values must count as a change, because the
+    list order is the canonical display order rendered in the sidebar.
+    """
+    if raw is None:
+        return []
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            return [raw]
+    return list(raw or [])
+
+
+def _spec_differs(row: CommoditySpecSchema, seed: dict) -> bool:
+    """True if the DB row diverges from the seed definition in any compared field.
+
+    ``enum_values`` is compared order-sensitively so a reordered vocabulary is reconciled.
+    """
+    return any(
+        [
+            row.display_name != seed["display_name"],
+            row.data_type != seed["data_type"],
+            row.unit != seed.get("unit"),
+            row.canonical_unit != seed.get("canonical_unit"),
+            _enum_list(row.enum_values) != _enum_list(seed.get("enum_values")),
+            (row.numeric_range or None) != (seed.get("numeric_range") or None),
+            row.sort_order != seed.get("sort_order", 0),
+            bool(row.is_filterable) != seed.get("is_filterable", True),
+            bool(row.is_primary) != seed.get("is_primary", False),
+        ]
+    )
+
+
+def reseed_changed_schemas(db: Session) -> int:
+    """Reconcile commodity_spec_schemas rows whose definition drifted from the seed.
+
+    ``seed_commodity_schemas()`` only INSERTS missing ``(commodity, spec_key)`` pairs; it
+    never updates an existing row. This reconciles CHANGED rows via delete-then-reinsert
+    (which also re-establishes canonical ``enum_values`` ordering). Brand-new pairs are left
+    to the boot seeder. Idempotent. Returns the number of rows reseeded.
+    """
+    seed_commodities = list(COMMODITY_SPEC_SEEDS.keys())
+    existing: dict[tuple[str, str], CommoditySpecSchema] = {
+        (r.commodity, r.spec_key): r
+        for r in db.query(CommoditySpecSchema).filter(CommoditySpecSchema.commodity.in_(seed_commodities)).all()
+    }
+
+    # Two-pass: collect + delete changed rows, flush to clear the unique constraint,
+    # then reinsert from the seed (so order/values reflect the new definition).
+    changed: list[tuple[str, dict]] = []
+    for commodity, specs in COMMODITY_SPEC_SEEDS.items():
+        for spec in specs:
+            row = existing.get((commodity, spec["spec_key"]))
+            if row is not None and _spec_differs(row, spec):
+                changed.append((commodity, spec))
+                db.delete(row)
+
+    if not changed:
+        return 0
+
+    db.flush()
+    for commodity, spec in changed:
+        db.add(_row_from_seed(commodity, spec))
+    db.commit()
+    logger.info("Reseeded {} changed commodity_spec_schemas rows", len(changed))
+    return len(changed)

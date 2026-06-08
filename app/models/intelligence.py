@@ -39,6 +39,9 @@ class MaterialCard(Base):
     package_type = Column(String(100))  # QFP-64, BGA-256, 0603, etc.
     category = Column(String(255))  # Microcontroller, Capacitor, Connector, etc.
     rohs_status = Column(String(50))  # compliant, non-compliant, exempt
+    # Stock condition (broker facet): New | Recertified | Refurbished | Used | Pulled | Unknown.
+    # Application-validated (no DB CHECK), like lifecycle_status. NULL until a source populates it.
+    condition = Column(String(20), index=True)
     pin_count = Column(Integer)
     datasheet_url = Column(String(1000))
     cross_references = Column(JSONB, default=list)  # [{mpn, manufacturer}]

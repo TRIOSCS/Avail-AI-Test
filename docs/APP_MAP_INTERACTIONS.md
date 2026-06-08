@@ -840,21 +840,31 @@ NOTE: Uses tsvector + trgm for multi-word queries, ILIKE fallback for
       single tokens. GIN-indexed TSVECTOR with weighted fields
       (MPN=A, manufacturer=B, description/category=C).
 
-Sidebar facets (workspace.html + materialsFilter Alpine component):
-    +---> Data confidence (trust ladder): 5 ordered, color-coded enrichment
-    |     tiers (verified > web_sourced > ai_inferred > not_found > unenriched).
-    |     Multi-select; default selection = verified + web_sourced. Alpine state
-    |     `statuses[]` → `?statuses=` CSV → search_materials_faceted(statuses=...)
-    |     which IN-filters MaterialCard.enrichment_status. `statuses` takes
-    |     precedence over the legacy `verified_only` boolean (never ANDed).
+Sidebar facets (workspace.html + materialsFilter Alpine component). Order top→bottom:
+    +---> Manufacturer facet → /v2/partials/materials/filters/manufacturers
+    |     (search box + top-N by count; high-cardinality, never a flat dump).
     +---> Global facets (MaterialCard columns, OR-within each, AND across):
     |       +---> lifecycle  → lifecycle_status IN (active|nrfnd|eol|obsolete|ltb)
     |       +---> rohs        → rohs_status IN (compliant|non-compliant|exempt)
+    |       +---> condition   → condition IN (New|Recertified|Refurbished|Used|Pulled|
+    |       |                   Unknown); section hidden until data exists (no 0-rows)
     |       +---> has_datasheet (boolean) → datasheet_url IS NOT NULL
     |     Counts come from get_global_facet_counts(); rendered by
     |     /v2/partials/materials/filters/global (reloads on commodity-changed).
-    +---> Manufacturer facet → /v2/partials/materials/filters/manufacturers
-    +---> Commodity sub-filters → /v2/partials/materials/filters/sub (spec facets)
+    +---> Commodity tree → /v2/partials/materials/filters/tree (taxonomy, 13 groups;
+    |     Memory ≠ Storage & Drives, Connectors/Interconnects ≠ Electromechanical).
+    +---> Commodity sub-filters → /v2/partials/materials/filters/sub (spec facets):
+    |       is_primary facets expanded; the rest fold under "More filters (N)".
+    |       Fixed-vocab enums show every canonical value with a count incl. (0);
+    |       open-vocab enums (e.g. connector series) use a typeahead. Counts from
+    |       get_facet_counts() (context-aware).
+    +---> Data confidence (bottom; low-priority filter): 3 groups — Trusted
+    |     (verified+web_sourced+oem_sourced) / AI-inferred / No data
+    |     (not_catalogued+not_found+unenriched). Each checkbox toggles its member
+    |     tiers. Default = all groups on (page opens unfiltered). Alpine
+    |     `statuses[]` → `?statuses=` CSV → search_materials_faceted(statuses=...)
+    |     IN-filters MaterialCard.enrichment_status. `statuses` takes precedence
+    |     over the legacy `verified_only` boolean (never ANDed).
 
 Search coverage:
     +---> global_search_service.py includes substitutes_text.ilike for

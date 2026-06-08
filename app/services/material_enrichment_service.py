@@ -69,6 +69,9 @@ def _apply_enrichment_result(card: MaterialCard, ai: dict) -> None:
     cat = ai.get("category", "other")
     lifecycle = ai.get("lifecycle_status", "active")
 
+    from app.services.category_normalizer import normalize_category
+
+    cat = normalize_category(cat) or cat
     if cat not in VALID_CATEGORIES:
         cat = "other"
     if lifecycle not in VALID_LIFECYCLE:

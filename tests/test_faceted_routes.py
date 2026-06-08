@@ -351,14 +351,14 @@ def test_faceted_statuses_param_still_filters(client, db_session: Session):
     assert "ST-AI" not in resp.text
 
 
-def test_workspace_renders_trust_ladder(client):
-    """The Data-confidence section + trust-ladder toggle method appear in the
-    sidebar."""
+def test_workspace_renders_confidence_groups(client):
+    """The Data-confidence section renders as 3 groups via the confidence-group
+    handler."""
     resp = client.get("/v2/partials/materials/workspace")
     assert resp.status_code == 200
     assert "Data confidence" in resp.text
-    assert "toggleStatus(" in resp.text
-    assert "AI-inferred" in resp.text
+    assert "toggleConfidenceGroup(" in resp.text
+    assert "CONFIDENCE_GROUPS" in resp.text
 
 
 def test_list_renders_zero_price_and_currency():

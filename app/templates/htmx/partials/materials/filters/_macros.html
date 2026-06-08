@@ -16,9 +16,7 @@
              @change='toggleFilter({{ spec_key|tojson }}, {{ val|tojson }})'
              class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
       <span class="text-gray-700 truncate flex-1 text-[13px]">{{ val }}</span>
-      {% if counts and val in counts %}
-      <span class="text-[11px] text-gray-400 tabular-nums">{{ counts[val] }}</span>
-      {% endif %}
+      <span class="text-[11px] text-gray-400 tabular-nums">{{ counts[val] if (counts and val in counts) else 0 }}</span>
     </label>
     {% endfor %}
   </div>
@@ -65,13 +63,56 @@
     <button @click="toggleFilter('{{ spec_key }}', 'true')"
             :class="(subFilters['{{ spec_key }}'] || []).includes('true') ? 'bg-brand-50 text-brand-700 border-brand-300' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'"
             class="px-3 py-1 text-sm border rounded-md transition-colors">
-      Yes {% if counts and 'true' in counts %}<span class="text-[11px] opacity-60 tabular-nums">({{ counts['true'] }})</span>{% endif %}
+      Yes <span class="text-[11px] opacity-60 tabular-nums">({{ counts['true'] if (counts and 'true' in counts) else 0 }})</span>
     </button>
     <button @click="toggleFilter('{{ spec_key }}', 'false')"
             :class="(subFilters['{{ spec_key }}'] || []).includes('false') ? 'bg-brand-50 text-brand-700 border-brand-300' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'"
             class="px-3 py-1 text-sm border rounded-md transition-colors">
-      No {% if counts and 'false' in counts %}<span class="text-[11px] opacity-60 tabular-nums">({{ counts['false'] }})</span>{% endif %}
+      No <span class="text-[11px] opacity-60 tabular-nums">({{ counts['false'] if (counts and 'false' in counts) else 0 }})</span>
     </button>
   </div>
 </div>
+{% endmacro %}
+
+{% macro typeahead_group(spec_key, display_name, values, counts, total_distinct) %}
+{# Open-vocabulary facet (no canonical enum_values, e.g. connector series): a search box
+   over the top-N observed values by count. Avoids a thousand-row (0) dump. #}
+<div class="mb-3" x-data="{ taSearch: '' }">
+  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">{{ display_name }}</h4>
+  <input type="text" x-model="taSearch" placeholder="Search {{ display_name|lower }}…"
+         aria-label="Search {{ display_name }}"
+         class="w-full mb-1 px-2 py-1 text-[13px] border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
+  <div class="space-y-0.5 max-h-40 overflow-y-auto">
+    {% for val in values %}
+    {# Single-quoted attributes: |tojson emits double quotes, so it is safe inside single
+       quotes (a double-quoted attribute would break). #}
+    <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm"
+           x-show='!taSearch || {{ val|tojson }}.toLowerCase().includes(taSearch.toLowerCase())' x-cloak>
+      <input type="checkbox" value="{{ val }}"
+             :checked='(subFilters[{{ spec_key|tojson }}] || []).includes({{ val|tojson }})'
+             @change='toggleFilter({{ spec_key|tojson }}, {{ val|tojson }})'
+             class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+      <span class="text-gray-700 truncate flex-1 text-[13px]">{{ val }}</span>
+      <span class="text-[11px] text-gray-400 tabular-nums">{{ counts[val] if (counts and val in counts) else 0 }}</span>
+    </label>
+    {% endfor %}
+  </div>
+  {% if total_distinct and total_distinct > values|length %}
+  <p class="text-[11px] text-gray-400 italic px-2 mt-0.5">{{ values|length }} most common of {{ total_distinct }}</p>
+  {% endif %}
+</div>
+{% endmacro %}
+
+{% macro render_subfilter(opt, facet_counts) %}
+{# Dispatch one sub-filter option to its widget. Shared by the primary + "More filters"
+   sections of subfilters.html so the if/elif chain lives in one place. #}
+  {% if opt.data_type == 'enum' and opt.get('widget') == 'typeahead' and opt['values'] %}
+    {{ typeahead_group(opt.spec_key, opt.display_name, opt['values'], facet_counts.get(opt.spec_key, {}), opt.get('total_distinct', opt['values']|length)) }}
+  {% elif opt.data_type == 'enum' and opt['values'] %}
+    {{ checkbox_group(opt.spec_key, opt.display_name, opt['values'], facet_counts.get(opt.spec_key, {}), []) }}
+  {% elif opt.data_type == 'numeric' %}
+    {{ range_input(opt.spec_key, opt.display_name, opt.range, opt.unit, None, None) }}
+  {% elif opt.data_type == 'boolean' and opt['values'] %}
+    {{ boolean_toggle(opt.spec_key, opt.display_name, facet_counts.get(opt.spec_key, {}), None) }}
+  {% endif %}
 {% endmacro %}

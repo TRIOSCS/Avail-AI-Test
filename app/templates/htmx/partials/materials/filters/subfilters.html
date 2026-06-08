@@ -2,7 +2,7 @@
    Called by: HTMX request when commodity or filters change
    Depends on: subfilter_options, facet_counts from route context
 #}
-{% from "htmx/partials/materials/filters/_macros.html" import checkbox_group, range_input, boolean_toggle %}
+{% from "htmx/partials/materials/filters/_macros.html" import render_subfilter %}
 
 {% if subfilter_options %}
 <div class="border-t border-gray-100 pt-3 mt-3">
@@ -12,15 +12,26 @@
             class="text-[11px] text-brand-600 hover:text-brand-700 font-medium">Clear all</button>
   </div>
 
-  {% for opt in subfilter_options %}
-    {% if opt.data_type == 'enum' and opt['values'] %}
-      {{ checkbox_group(opt.spec_key, opt.display_name, opt['values'], facet_counts.get(opt.spec_key, {}), []) }}
-    {% elif opt.data_type == 'numeric' %}
-      {{ range_input(opt.spec_key, opt.display_name, opt.range, opt.unit, None, None) }}
-    {% elif opt.data_type == 'boolean' and opt['values'] %}
-      {{ boolean_toggle(opt.spec_key, opt.display_name, facet_counts.get(opt.spec_key, {}), None) }}
-    {% endif %}
+  {# Essential facets (is_primary) render expanded; the rest fold under "More filters". #}
+  {% set primary_opts = subfilter_options | selectattr('is_primary') | list %}
+  {% set advanced_opts = subfilter_options | rejectattr('is_primary') | list %}
+
+  {% for opt in primary_opts %}
+    {{ render_subfilter(opt, facet_counts) }}
   {% endfor %}
+
+  {% if advanced_opts %}
+  <div x-data="{ moreOpen: false }">
+    <button @click="moreOpen = !moreOpen" :aria-expanded="moreOpen"
+            class="text-[11px] text-brand-600 hover:text-brand-700 font-medium px-2 py-1"
+            x-text="moreOpen ? 'Fewer filters' : 'More filters ({{ advanced_opts|length }})'"></button>
+    <div x-show="moreOpen" x-cloak x-transition>
+      {% for opt in advanced_opts %}
+        {{ render_subfilter(opt, facet_counts) }}
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
 </div>
 {% elif commodity_selected %}
 <div class="border-t border-gray-100 pt-3 mt-3">

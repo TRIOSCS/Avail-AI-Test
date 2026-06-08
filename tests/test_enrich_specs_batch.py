@@ -64,7 +64,9 @@ class TestBuildSpecPrompt:
         prompt = _build_spec_prompt("dram", cards)
         assert "ddr_type" in prompt
         assert "capacity_gb" in prompt
-        assert "DDR3, DDR4, DDR5" in prompt
+        # Canonical enum_values flow into the extraction prompt (curated DDR generation set).
+        assert "DDR4, DDR5" in prompt
+        assert "DDR3L" in prompt
 
     def test_includes_card_info(self):
         cards = [{"display_mpn": "GRM155R71C104KA88D", "manufacturer": "Murata", "description": "100nF 16V X7R"}]

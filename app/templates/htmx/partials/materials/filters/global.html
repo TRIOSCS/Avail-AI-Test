@@ -5,6 +5,7 @@
 #}
 {% set lc_counts = global_facet_counts.get('lifecycle', {}) %}
 {% set rohs_counts = global_facet_counts.get('rohs', {}) %}
+{% set condition_counts = global_facet_counts.get('condition', {}) %}
 {% set ds_count = global_facet_counts.get('has_datasheet', {}).get('true', 0) %}
 
 {# Lifecycle facet — stored values: active|eol|obsolete|nrfnd|ltb (NRND→nrfnd) #}
@@ -51,6 +52,32 @@
     {% endfor %}
   </div>
 </div>
+
+{# Condition facet — stock condition (broker). Hidden until data exists (no permanent
+   zero rows); values render only where count > 0, matching Lifecycle/RoHS. #}
+{% set condition_opts = [
+  ('New', 'New'), ('Recertified', 'Recertified'), ('Refurbished', 'Refurbished'),
+  ('Used', 'Used'), ('Pulled', 'Pulled'), ('Unknown', 'Unknown')
+] %}
+{% if condition_counts %}
+<div class="mb-3">
+  <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Condition</h4>
+  <div class="space-y-0.5">
+    {% for value, label in condition_opts %}
+    {% if condition_counts.get(value, 0) > 0 %}
+    <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm">
+      <input aria-label="Filter by condition {{ label }}" type="checkbox" value="{{ value }}"
+             :checked="condition.includes('{{ value }}')"
+             @change="toggleGlobalFacet('condition', '{{ value }}')"
+             class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+      <span class="text-gray-700 truncate flex-1 text-[13px]">{{ label }}</span>
+      <span class="text-[11px] text-gray-400 tabular-nums">{{ condition_counts[value] }}</span>
+    </label>
+    {% endif %}
+    {% endfor %}
+  </div>
+</div>
+{% endif %}
 
 {# Has-datasheet boolean toggle — datasheet_url IS NOT NULL #}
 {% if ds_count > 0 %}
