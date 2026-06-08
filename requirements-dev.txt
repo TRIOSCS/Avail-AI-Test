@@ -8,7 +8,7 @@ pytest-cov>=4.1.0
 pytest-xdist>=3.8.0
 responses>=0.26.1
 freezegun>=1.4.0
-schemathesis>=3.36.0
+schemathesis>=4.21.1
 nest_asyncio>=1.6.0
 
 # E2E / Playwright
