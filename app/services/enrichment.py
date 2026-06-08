@@ -175,7 +175,10 @@ def _apply_enrichment_to_card(card: MaterialCard, enrichment: dict, db: Session)
     if not card.manufacturer:
         card.manufacturer = manufacturer
     if enrichment.get("category") and not card.category:
-        card.category = enrichment["category"]
+        from app.services.category_normalizer import normalize_category
+
+        raw_cat = enrichment["category"]
+        card.category = normalize_category(raw_cat) or raw_cat
 
     # Classify and tag
     result = classify_material_card(card.normalized_mpn, manufacturer, card.category)
