@@ -2,6 +2,7 @@
    Called by: htmx_views.py materials_workspace route
    Depends on: Alpine.js materialsFilter() in htmx_app.js
 #}
+{% from "htmx/partials/materials/filters/_macros.html" import disclosure_header %}
 <div id="materials-workspace" x-data="materialsFilter"
      data-display-names='{{ display_names|tojson }}' class="flex h-full">
 
@@ -105,16 +106,7 @@
          Collapsed by default; demoted below the commodity facets. Containers still load
          while hidden (hx-trigger="load") so counts are ready when expanded. #}
       <div class="border-t border-gray-100 pt-3 mt-3">
-        <button @click="moreAttrsOpen = !moreAttrsOpen" :aria-expanded="moreAttrsOpen" aria-controls="more-attrs-panel"
-                class="w-full flex items-center justify-between text-[10px] font-semibold text-gray-400 uppercase tracking-widest">
-          <span class="flex items-center gap-1.5">
-            <svg class="w-3 h-3 transition-transform" :class="moreAttrsOpen && 'rotate-90'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-            More attributes
-          </span>
-          <template x-if="attributesActiveCount > 0">
-            <span class="bg-brand-100 text-brand-700 rounded-full px-1.5 text-[10px] font-medium normal-case" x-text="attributesActiveCount"></span>
-          </template>
-        </button>
+        {{ disclosure_header('moreAttrsOpen', 'more-attrs-panel', 'More attributes', 'attributesActiveCount > 0', 'attributesActiveCount') }}
         <div id="more-attrs-panel" role="region" aria-label="More attributes" x-show="moreAttrsOpen" x-collapse x-cloak class="mt-2">
           {# Manufacturer #}
           <div id="manufacturer-filter-container"
@@ -140,16 +132,7 @@
          Lowest-priority filter. Each group checkbox toggles its member enrichment tiers;
          the backend still receives a `statuses` CSV. #}
       <div class="border-t border-gray-100 pt-3 mt-3">
-        <button @click="confidenceOpen = !confidenceOpen" :aria-expanded="confidenceOpen" aria-controls="confidence-panel"
-                class="w-full flex items-center justify-between text-[10px] font-semibold text-gray-400 uppercase tracking-widest">
-          <span class="flex items-center gap-1.5">
-            <svg class="w-3 h-3 transition-transform" :class="confidenceOpen && 'rotate-90'" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 5l7 7-7 7"/></svg>
-            Data confidence
-          </span>
-          <template x-if="confidenceNarrowed">
-            <span class="bg-brand-100 text-brand-700 rounded-full px-1.5 text-[10px] font-medium normal-case" x-text="activeConfidenceGroups.length"></span>
-          </template>
-        </button>
+        {{ disclosure_header('confidenceOpen', 'confidence-panel', 'Data confidence', 'confidenceNarrowed', 'activeConfidenceGroups.length') }}
         <div id="confidence-panel" role="region" aria-label="Data confidence" x-show="confidenceOpen" x-collapse x-cloak class="space-y-0.5 mt-2">
           <template x-for="group in CONFIDENCE_GROUPS" :key="group.key">
             <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm">
