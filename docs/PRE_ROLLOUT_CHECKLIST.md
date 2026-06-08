@@ -315,6 +315,41 @@ Once the import succeeds and the system has been stable for 48h:
 - Capture the final row counts in `docs/APP_MAP_DATABASE.md` so future diagnostics have a baseline.
 - Update this checklist with anything new you learned during the import — especially any gate that was missing or insufficient.
 
+### Re-tune `/requisitions2` column widths against real data (was issue #88)
+
+Current defaults in `app/templates/requisitions2/page.html` (`resizableTable('rq2-list', {...})`) were tuned on the 14 seed requisitions and may not fit the real SFDC distribution:
+
+```
+{select:36, name:200, status:110, customer:220, count:60}
+```
+
+Once data has landed, run these against the live DB:
+
+```sql
+SELECT AVG(req_count) AS avg_reqs, MAX(req_count) AS max_reqs,
+       percentile_cont(0.5) WITHIN GROUP (ORDER BY req_count) AS median
+FROM (SELECT requisition_id, COUNT(*) AS req_count FROM requirements GROUP BY requisition_id) t;
+
+SELECT MAX(LENGTH(primary_mpn)) AS longest_mpn, AVG(LENGTH(primary_mpn))::int AS avg_mpn
+FROM requirements WHERE primary_mpn IS NOT NULL;
+
+SELECT MAX(LENGTH(customer_name)) AS longest_cust, AVG(LENGTH(customer_name))::int AS avg_cust
+FROM requisitions WHERE customer_name IS NOT NULL;
+
+SELECT COUNT(*) FILTER (WHERE opportunity_value > 0) AS entered,
+       COUNT(*) FILTER (WHERE opportunity_value IS NULL OR opportunity_value = 0) AS missing,
+       COUNT(*) AS total
+FROM requisitions;
+```
+
+Tune if:
+- `avg_mpn` > 14 → 200px Name col fits only 1 chip; bump the Name default.
+- `avg_cust` > 27 → bump the Customer default further.
+- `max_reqs` >> 3 → chip overflow fires often; verify the `+N` hover is readable.
+- Deal-value `entered` ratio stays < 30% → revisit how computed/partial values render. **Note:** partly handled already by the new `deal_value()` macro (`deal_value_source`/`priced_count`/`requirement_count` in `_single_row.html` / `_table_rows.html`); only the width / chip-overflow portion remains.
+
+Refs: PR #87 (160→220 customer bump on seed data), PR #81 v2 rollout (original distribution query, 2026-04-22). Migrated from closed issue #88.
+
 ---
 
 ## Tech debt captured during 2026-04-22 session (address post-rollout)
@@ -333,4 +368,4 @@ These are known-but-deferred items. None blocks rollout but each is real:
 
 ---
 
-_Last updated: 2026-04-22 during sourcing-engine Phase 4 repair session._
+_Last updated: 2026-06-08 (folded in the `/requisitions2` column-width review from issue #88); originally 2026-04-22 during the sourcing-engine Phase 4 repair session._
