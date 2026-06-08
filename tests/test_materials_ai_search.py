@@ -37,7 +37,7 @@ def test_build_enum_reference_includes_ddr_types():
 
 def test_get_parent_for_commodity_known():
     """Known commodities should return their parent group."""
-    assert get_parent_for_commodity("dram") == "Memory & Storage"
+    assert get_parent_for_commodity("dram") == "Memory"
     assert get_parent_for_commodity("capacitors") == "Passives"
 
 
