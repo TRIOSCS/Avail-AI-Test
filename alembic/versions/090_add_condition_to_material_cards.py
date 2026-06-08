@@ -2,10 +2,13 @@
 
 New | Recertified | Refurbished | Used | Pulled | Unknown. Nullable, application-validated
 (like lifecycle_status), indexed for faceting. Populated by a later source (offer/sighting
-provenance); the filter shows only values that have data.
+provenance); the Condition facet shows only values that have data.
 
-Revision ID: 091_add_condition_mc
-Revises: 090_reseed_commodity_schemas
+(Commodity-spec-schema seed changes are reconciled at startup via reseed_changed_schemas,
+not via a migration — see app/startup.py — so this is the only schema change in the rework.)
+
+Revision ID: 090_add_condition_mc
+Revises: 089_oem_enrichment_columns
 Create Date: 2026-06-08
 """
 
@@ -13,8 +16,8 @@ import sqlalchemy as sa
 
 from alembic import op
 
-revision = "091_add_condition_mc"
-down_revision = "090_reseed_commodity_schemas"
+revision = "090_add_condition_mc"
+down_revision = "089_oem_enrichment_columns"
 branch_labels = None
 depends_on = None
 

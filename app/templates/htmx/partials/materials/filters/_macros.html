@@ -98,7 +98,7 @@
     {% endfor %}
   </div>
   {% if total_distinct and total_distinct > values|length %}
-  <p class="text-[11px] text-gray-400 italic px-2 mt-0.5">Top {{ values|length }} of {{ total_distinct }} — type to narrow</p>
+  <p class="text-[11px] text-gray-400 italic px-2 mt-0.5">{{ values|length }} most common of {{ total_distinct }}</p>
   {% endif %}
 </div>
 {% endmacro %}

@@ -847,11 +847,14 @@ def _seed_commodity_schemas() -> None:
     Called by: run_startup_migrations
     Depends on: commodity_registry, SessionLocal
     """
-    from .services.commodity_registry import seed_commodity_schemas
+    from .services.commodity_registry import reseed_changed_schemas, seed_commodity_schemas
 
     db = SessionLocal()
     try:
         seed_commodity_schemas(db)
+        # Reconcile rows whose seed definition drifted (the inserter never updates existing
+        # rows). Idempotent — a no-op (single SELECT) when the DB already matches the seed.
+        reseed_changed_schemas(db)
     except Exception:
         logger.exception("Failed seeding commodity schemas")
         db.rollback()

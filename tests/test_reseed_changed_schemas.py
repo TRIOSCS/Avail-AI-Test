@@ -83,6 +83,30 @@ def test_reseed_ignores_missing_pairs_seeder_inserts_them(db_session: Session):
     assert db_session.query(CommoditySpecSchema).filter_by(commodity="hdd", spec_key="usage_class").count() == 1
 
 
+def test_reseed_detects_pure_enum_reorder(db_session: Session):
+    # Same values, different order — must reconcile so the canonical display order applies.
+    seed = _seed_lookup("dram", "form_factor")
+    scrambled = list(reversed(seed["enum_values"]))
+    assert set(scrambled) == set(seed["enum_values"]) and scrambled != seed["enum_values"]
+    db_session.add(
+        CommoditySpecSchema(
+            commodity="dram",
+            spec_key="form_factor",
+            display_name=seed["display_name"],
+            data_type="enum",
+            enum_values=scrambled,
+            sort_order=seed.get("sort_order", 0),
+            is_filterable=True,
+            is_primary=seed.get("is_primary", False),
+        )
+    )
+    db_session.commit()
+
+    assert reseed_changed_schemas(db_session) >= 1
+    row = db_session.query(CommoditySpecSchema).filter_by(commodity="dram", spec_key="form_factor").one()
+    assert list(row.enum_values) == seed["enum_values"]  # canonical order restored
+
+
 def test_reseed_detects_sort_order_change(db_session: Session):
     seed = _seed_lookup("hdd", "capacity_gb")
     db_session.add(

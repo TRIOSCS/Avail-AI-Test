@@ -203,28 +203,34 @@ def seed_commodity_schemas(db: Session) -> int:
     return inserted
 
 
-def _normalize_enum_values(raw) -> set:
-    """Coerce a stored enum_values cell (list, JSON string, or None) to a set for
-    comparison."""
+def _enum_list(raw) -> list:
+    """Coerce a stored enum_values cell (list, JSON string, or None) to an ordered list.
+
+    Order-preserving: a pure reorder of the same values must count as a change, because the
+    list order is the canonical display order rendered in the sidebar.
+    """
     if raw is None:
-        return set()
+        return []
     if isinstance(raw, str):
         try:
             raw = json.loads(raw)
         except (ValueError, TypeError):
-            return {raw}
-    return set(raw or [])
+            return [raw]
+    return list(raw or [])
 
 
 def _spec_differs(row: CommoditySpecSchema, seed: dict) -> bool:
-    """True if the DB row diverges from the seed definition in any compared field."""
+    """True if the DB row diverges from the seed definition in any compared field.
+
+    ``enum_values`` is compared order-sensitively so a reordered vocabulary is reconciled.
+    """
     return any(
         [
             row.display_name != seed["display_name"],
             row.data_type != seed["data_type"],
             row.unit != seed.get("unit"),
             row.canonical_unit != seed.get("canonical_unit"),
-            _normalize_enum_values(row.enum_values) != _normalize_enum_values(seed.get("enum_values")),
+            _enum_list(row.enum_values) != _enum_list(seed.get("enum_values")),
             (row.numeric_range or None) != (seed.get("numeric_range") or None),
             row.sort_order != seed.get("sort_order", 0),
             bool(row.is_filterable) != seed.get("is_filterable", True),
