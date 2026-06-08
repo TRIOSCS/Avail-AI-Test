@@ -201,3 +201,82 @@ def seed_commodity_schemas(db: Session) -> int:
         db.commit()
         logger.info("Seeded {} commodity_spec_schemas rows", inserted)
     return inserted
+
+
+def _normalize_enum_values(raw) -> set:
+    """Coerce a stored enum_values cell (list, JSON string, or None) to a set for
+    comparison."""
+    if raw is None:
+        return set()
+    if isinstance(raw, str):
+        try:
+            raw = json.loads(raw)
+        except (ValueError, TypeError):
+            return {raw}
+    return set(raw or [])
+
+
+def _spec_differs(row: CommoditySpecSchema, seed: dict) -> bool:
+    """True if the DB row diverges from the seed definition in any compared field."""
+    return any(
+        [
+            row.display_name != seed["display_name"],
+            row.data_type != seed["data_type"],
+            row.unit != seed.get("unit"),
+            row.canonical_unit != seed.get("canonical_unit"),
+            _normalize_enum_values(row.enum_values) != _normalize_enum_values(seed.get("enum_values")),
+            (row.numeric_range or None) != (seed.get("numeric_range") or None),
+            row.sort_order != seed.get("sort_order", 0),
+            bool(row.is_filterable) != seed.get("is_filterable", True),
+            bool(row.is_primary) != seed.get("is_primary", False),
+        ]
+    )
+
+
+def reseed_changed_schemas(db: Session) -> int:
+    """Reconcile commodity_spec_schemas rows whose definition drifted from the seed.
+
+    ``seed_commodity_schemas()`` only INSERTS missing ``(commodity, spec_key)`` pairs; it
+    never updates an existing row. This reconciles CHANGED rows via delete-then-reinsert
+    (which also re-establishes canonical ``enum_values`` ordering). Brand-new pairs are left
+    to the boot seeder. Idempotent. Returns the number of rows reseeded.
+    """
+    seed_commodities = list(COMMODITY_SPEC_SEEDS.keys())
+    existing: dict[tuple[str, str], CommoditySpecSchema] = {
+        (r.commodity, r.spec_key): r
+        for r in db.query(CommoditySpecSchema).filter(CommoditySpecSchema.commodity.in_(seed_commodities)).all()
+    }
+
+    # Two-pass: collect + delete changed rows, flush to clear the unique constraint,
+    # then reinsert from the seed (so order/values reflect the new definition).
+    changed: list[tuple[str, dict]] = []
+    for commodity, specs in COMMODITY_SPEC_SEEDS.items():
+        for spec in specs:
+            row = existing.get((commodity, spec["spec_key"]))
+            if row is not None and _spec_differs(row, spec):
+                changed.append((commodity, spec))
+                db.delete(row)
+
+    if not changed:
+        return 0
+
+    db.flush()
+    for commodity, spec in changed:
+        db.add(
+            CommoditySpecSchema(
+                commodity=commodity,
+                spec_key=spec["spec_key"],
+                display_name=spec["display_name"],
+                data_type=spec["data_type"],
+                unit=spec.get("unit"),
+                canonical_unit=spec.get("canonical_unit"),
+                enum_values=spec.get("enum_values"),
+                numeric_range=spec.get("numeric_range"),
+                sort_order=spec.get("sort_order", 0),
+                is_filterable=spec.get("is_filterable", True),
+                is_primary=spec.get("is_primary", False),
+            )
+        )
+    db.commit()
+    logger.info("Reseeded {} changed commodity_spec_schemas rows", len(changed))
+    return len(changed)

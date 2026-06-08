@@ -5,10 +5,12 @@
       "display_name": "DDR Type",
       "data_type": "enum",
       "enum_values": [
+        "DDR",
+        "DDR2",
         "DDR3",
+        "DDR3L",
         "DDR4",
         "DDR5",
-        "DDR5X",
         "LPDDR4",
         "LPDDR5"
       ],
@@ -51,11 +53,11 @@
       "display_name": "Form Factor",
       "data_type": "enum",
       "enum_values": [
-        "DIMM",
-        "SO-DIMM",
-        "UDIMM",
         "RDIMM",
-        "LRDIMM"
+        "LRDIMM",
+        "UDIMM",
+        "SO-DIMM",
+        "DIMM"
       ],
       "sort_order": 5
     }
@@ -2969,6 +2971,31 @@
       "is_primary": true
     },
     {
+      "spec_key": "interface",
+      "display_name": "Interface",
+      "data_type": "enum",
+      "enum_values": [
+        "SATA",
+        "SAS",
+        "SCSI",
+        "NVMe",
+        "FC",
+        "IDE/PATA"
+      ],
+      "sort_order": 2
+    },
+    {
+      "spec_key": "form_factor",
+      "display_name": "Form Factor",
+      "data_type": "enum",
+      "enum_values": [
+        "3.5\"",
+        "2.5\"",
+        "1.8\""
+      ],
+      "sort_order": 3
+    },
+    {
       "spec_key": "rpm",
       "display_name": "RPM",
       "data_type": "enum",
@@ -2978,28 +3005,31 @@
         "10000",
         "15000"
       ],
-      "sort_order": 2
-    },
-    {
-      "spec_key": "form_factor",
-      "display_name": "Form Factor",
-      "data_type": "enum",
-      "enum_values": [
-        "2.5\"",
-        "3.5\""
-      ],
-      "sort_order": 3
-    },
-    {
-      "spec_key": "interface",
-      "display_name": "Interface",
-      "data_type": "enum",
-      "enum_values": [
-        "SATA",
-        "SAS",
-        "NVMe"
-      ],
       "sort_order": 4
+    },
+    {
+      "spec_key": "usage_class",
+      "display_name": "Usage Class",
+      "data_type": "enum",
+      "enum_values": [
+        "Desktop / Client",
+        "NAS",
+        "Enterprise / Datacenter",
+        "Surveillance",
+        "Network Video Recorder"
+      ],
+      "sort_order": 5,
+      "is_primary": true
+    },
+    {
+      "spec_key": "recording_tech",
+      "display_name": "Recording Tech",
+      "data_type": "enum",
+      "enum_values": [
+        "CMR",
+        "SMR"
+      ],
+      "sort_order": 6
     }
   ],
   "ssd": [
@@ -3018,9 +3048,15 @@
       "data_type": "enum",
       "enum_values": [
         "2.5\"",
-        "M.2",
+        "M.2 2280",
+        "M.2 2230",
+        "M.2 22110",
         "U.2",
-        "mSATA"
+        "U.3",
+        "mSATA",
+        "AIC (PCIe card)",
+        "EDSFF E1.S",
+        "EDSFF E3.S"
       ],
       "sort_order": 2
     },
@@ -3030,8 +3066,12 @@
       "data_type": "enum",
       "enum_values": [
         "SATA",
-        "NVMe",
-        "SAS"
+        "SAS",
+        "NVMe PCIe 3.0",
+        "NVMe PCIe 4.0",
+        "NVMe PCIe 5.0",
+        "U.2",
+        "SCSI"
       ],
       "sort_order": 3
     },
@@ -3067,17 +3107,58 @@
         "PLC"
       ],
       "sort_order": 6
+    },
+    {
+      "spec_key": "usage_class",
+      "display_name": "Usage Class",
+      "data_type": "enum",
+      "enum_values": [
+        "Client / Consumer",
+        "Enterprise - Read Intensive",
+        "Enterprise - Mixed Use",
+        "Enterprise - Write Intensive",
+        "Datacenter / Boot"
+      ],
+      "sort_order": 7,
+      "is_primary": true
     }
   ],
   "connectors": [
+    {
+      "spec_key": "connector_type",
+      "display_name": "Connector Family / Type",
+      "data_type": "enum",
+      "enum_values": [
+        "Rectangular / Headers",
+        "Circular",
+        "D-Sub",
+        "Terminal Block",
+        "Card Edge",
+        "RJ45 / Modular",
+        "USB",
+        "HDMI / DisplayPort",
+        "Coaxial / RF",
+        "Fiber Optic",
+        "Backplane / High-Speed",
+        "FFC/FPC",
+        "Power",
+        "PCIe",
+        "M.2",
+        "SATA",
+        "SAS",
+        "JST",
+        "Molex"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
     {
       "spec_key": "pin_count",
       "display_name": "Pin Count",
       "data_type": "numeric",
       "unit": "pins",
       "canonical_unit": "pins",
-      "sort_order": 1,
-      "is_primary": true
+      "sort_order": 2
     },
     {
       "spec_key": "pitch_mm",
@@ -3085,18 +3166,20 @@
       "data_type": "numeric",
       "unit": "mm",
       "canonical_unit": "mm",
-      "sort_order": 2
+      "sort_order": 3
     },
     {
       "spec_key": "mounting",
       "display_name": "Mounting",
       "data_type": "enum",
       "enum_values": [
-        "through-hole",
         "SMD",
+        "through-hole",
+        "panel-mount",
+        "cable-mount",
         "press-fit"
       ],
-      "sort_order": 3
+      "sort_order": 4
     },
     {
       "spec_key": "gender",
@@ -3107,31 +3190,12 @@
         "female",
         "genderless"
       ],
-      "sort_order": 4
+      "sort_order": 5
     },
     {
       "spec_key": "series",
       "display_name": "Series",
       "data_type": "enum",
-      "sort_order": 5
-    },
-    {
-      "spec_key": "connector_type",
-      "display_name": "Connector Type",
-      "data_type": "enum",
-      "enum_values": [
-        "USB",
-        "RJ45",
-        "HDMI",
-        "PCIe",
-        "D-Sub",
-        "JST",
-        "Molex",
-        "FPC/FFC",
-        "M.2",
-        "SATA",
-        "SAS"
-      ],
       "sort_order": 6
     }
   ],
