@@ -67,10 +67,11 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
       ``not_catalogued_retry_days`` (long backoff — uncatalogued OEM service parts
       rarely become catalogued, so re-check infrequently).
     - ``is_internal_part``, ``deleted_at`` are excluded.
-    - Ordered by ``search_count DESC, created_at DESC``: demand still wins
-      (high-demand parts first); among equal demand — the common case where
-      newly-added parts have ``search_count=0`` — the most-recently-added part
-      is enriched first, so a just-added part heads the next batch (fast lane).
+    - Ordered by ``status=unenriched DESC, search_count DESC, created_at DESC``:
+      never-resolved parts drain before re-checks of already-terminal cards (so old,
+      low-demand ``unenriched`` parts aren't starved by the daily ``not_found``
+      re-check churn); then demand wins (high-demand first); then, among equal
+      demand, the most-recently-added part heads the next batch (fast lane).
     """
     from app.models import MaterialCard
 
@@ -106,6 +107,11 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
             ),
         )
         .order_by(
+            # Never-resolved parts drain before re-checks of already-terminal ones.
+            # Without this, old low-demand `unenriched` cards are starved: they share
+            # search_count=0 with the daily `not_found` re-check churn, and created_at
+            # DESC then favours the newer not_found cards until the daily cap is spent.
+            (MaterialCard.enrichment_status == MaterialEnrichmentStatus.UNENRICHED).desc(),
             MaterialCard.search_count.desc(),
             MaterialCard.created_at.desc(),
         )

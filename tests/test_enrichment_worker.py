@@ -281,6 +281,52 @@ def test_select_batch_anti_spin(db_session):
     assert "deleted_u" not in picked  # soft-deleted
 
 
+def test_select_batch_prioritizes_unenriched_over_not_found_recheck(db_session):
+    """A never-resolved `unenriched` card is selected before re-checking an
+    already-`not_found` card — even when the not_found card is newer and equal demand.
+
+    Guards the starvation bug where old, low-demand `unenriched` parts sink below
+    the daily `not_found` re-check churn (both have search_count=0, so the
+    created_at DESC tiebreaker picked the newer not_found card first and the
+    200/day cap was exhausted before the old unenriched parts were ever reached).
+    """
+    from datetime import datetime, timedelta, timezone
+
+    from app.models import MaterialCard
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import select_batch
+
+    now = datetime.now(timezone.utc)
+    # Old, never-resolved, no demand.
+    db_session.add(
+        MaterialCard(
+            normalized_mpn="old_unenriched",
+            display_mpn="OLD_UNENRICHED",
+            enrichment_status="unenriched",
+            search_count=0,
+            created_at=now - timedelta(days=60),
+        )
+    )
+    # Newer, re-eligible not_found (enriched_at past the retry window), same demand.
+    db_session.add(
+        MaterialCard(
+            normalized_mpn="new_not_found",
+            display_mpn="NEW_NOT_FOUND",
+            enrichment_status="not_found",
+            search_count=0,
+            created_at=now - timedelta(days=1),
+            enriched_at=now - timedelta(hours=30),
+        )
+    )
+    db_session.flush()
+
+    cfg = EnrichmentWorkerConfig(batch_size=1, not_found_retry_hours=22)
+    picked = [c.normalized_mpn for c in select_batch(db_session, cfg)]
+
+    # With a single slot, the never-resolved part must win over the not_found re-check.
+    assert picked == ["old_unenriched"]
+
+
 def test_select_batch_ordering(db_session):
     """Cards with higher search_count should appear first."""
     from datetime import datetime, timezone
