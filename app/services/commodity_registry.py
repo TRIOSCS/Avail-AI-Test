@@ -155,6 +155,24 @@ def get_batch_spec_schema() -> dict[str, dict]:
     return result
 
 
+def _row_from_seed(commodity: str, spec: dict) -> CommoditySpecSchema:
+    """Build a CommoditySpecSchema row from a seed dict (shared by the inserter +
+    reseeder)."""
+    return CommoditySpecSchema(
+        commodity=commodity,
+        spec_key=spec["spec_key"],
+        display_name=spec["display_name"],
+        data_type=spec["data_type"],
+        unit=spec.get("unit"),
+        canonical_unit=spec.get("canonical_unit"),
+        enum_values=spec.get("enum_values"),
+        numeric_range=spec.get("numeric_range"),
+        sort_order=spec.get("sort_order", 0),
+        is_filterable=spec.get("is_filterable", True),
+        is_primary=spec.get("is_primary", False),
+    )
+
+
 def seed_commodity_schemas(db: Session) -> int:
     """Seed commodity_spec_schemas table. Idempotent -- skips existing rows.
 
@@ -181,20 +199,7 @@ def seed_commodity_schemas(db: Session) -> int:
             if (commodity, spec["spec_key"]) in existing_pairs:
                 continue
 
-            row = CommoditySpecSchema(
-                commodity=commodity,
-                spec_key=spec["spec_key"],
-                display_name=spec["display_name"],
-                data_type=spec["data_type"],
-                unit=spec.get("unit"),
-                canonical_unit=spec.get("canonical_unit"),
-                enum_values=spec.get("enum_values"),
-                numeric_range=spec.get("numeric_range"),
-                sort_order=spec.get("sort_order", 0),
-                is_filterable=spec.get("is_filterable", True),
-                is_primary=spec.get("is_primary", False),
-            )
-            db.add(row)
+            db.add(_row_from_seed(commodity, spec))
             inserted += 1
 
     if inserted:
@@ -268,21 +273,7 @@ def reseed_changed_schemas(db: Session) -> int:
 
     db.flush()
     for commodity, spec in changed:
-        db.add(
-            CommoditySpecSchema(
-                commodity=commodity,
-                spec_key=spec["spec_key"],
-                display_name=spec["display_name"],
-                data_type=spec["data_type"],
-                unit=spec.get("unit"),
-                canonical_unit=spec.get("canonical_unit"),
-                enum_values=spec.get("enum_values"),
-                numeric_range=spec.get("numeric_range"),
-                sort_order=spec.get("sort_order", 0),
-                is_filterable=spec.get("is_filterable", True),
-                is_primary=spec.get("is_primary", False),
-            )
-        )
+        db.add(_row_from_seed(commodity, spec))
     db.commit()
     logger.info("Reseeded {} changed commodity_spec_schemas rows", len(changed))
     return len(changed)

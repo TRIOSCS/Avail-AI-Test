@@ -572,7 +572,10 @@ Alpine.data('materialsFilter', () => ({
     { key: 'ai_inferred', label: 'AI-inferred', dot: 'bg-amber-500', tiers: ['ai_inferred'] },
     { key: 'no_data', label: 'No data', dot: 'bg-gray-400', tiers: ['not_catalogued', 'not_found', 'unenriched'] },
   ],
-  DEFAULT_STATUSES: ['verified', 'web_sourced', 'oem_sourced', 'ai_inferred', 'not_catalogued', 'not_found', 'unenriched'],
+  // Derived from the groups so the tier set has a single source of truth.
+  get DEFAULT_STATUSES() {
+    return this.CONFIDENCE_GROUPS.flatMap(g => g.tiers);
+  },
 
   get commodityDisplayName() {
     if (!this.commodity) return '';
@@ -586,22 +589,25 @@ Alpine.data('materialsFilter', () => ({
       && this.DEFAULT_STATUSES.every(s => this.statuses.includes(s)));
   },
 
+  _groupChecked(group) {
+    return group.tiers.every(t => this.statuses.includes(t));
+  },
+
   // Fully-checked confidence groups — surfaced as active chips, but only when narrowed.
   get activeConfidenceGroups() {
     if (!this.confidenceNarrowed) return [];
-    return this.CONFIDENCE_GROUPS.filter(g => g.tiers.every(t => this.statuses.includes(t)));
+    return this.CONFIDENCE_GROUPS.filter(g => this._groupChecked(g));
   },
 
   confidenceGroupChecked(groupKey) {
     const group = this.CONFIDENCE_GROUPS.find(g => g.key === groupKey);
-    return !!group && group.tiers.every(t => this.statuses.includes(t));
+    return !!group && this._groupChecked(group);
   },
 
   toggleConfidenceGroup(groupKey) {
     const group = this.CONFIDENCE_GROUPS.find(g => g.key === groupKey);
     if (!group) return;
-    const allPresent = group.tiers.every(t => this.statuses.includes(t));
-    if (allPresent) {
+    if (this._groupChecked(group)) {
       this.statuses = this.statuses.filter(s => !group.tiers.includes(s));
     } else {
       for (const t of group.tiers) {
