@@ -223,8 +223,10 @@ docker compose down               # Stop everything
 `deploy.sh` must run from `main` unless `--no-commit`. It builds with a unique
 `BUILD_COMMIT` build-arg (consumed before the source COPYs in both Dockerfile stages, so
 templates/static/Vite always rebuild fresh while apt/pip/npm-ci cache — no `--no-cache`),
-recreates only the `app` container, waits for the health check, verifies the deployed
-build tag, and checks that Tailwind classes in templates exist in the built CSS bundle.
+rebuilds + recreates **both** the `app` and `enrichment-worker` containers (they share
+`requirements.txt`, so the worker must not lag the app on a dependency bump), waits for
+the app health check, verifies the deployed build tag on both, and checks that Tailwind
+classes in templates exist in the built CSS bundle.
 Never use bare `docker compose up -d --build` (without `--build-arg BUILD_COMMIT=...`) —
 it ships stale templates.
 
