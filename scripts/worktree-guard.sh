@@ -15,6 +15,8 @@
 # Guarantees:
 #   - A worktree with uncommitted TRACKED changes is NEVER removed.
 #   - A worktree whose branch has commits not in origin/main is NEVER removed.
+#   - If merge state can't be determined (fetch / origin/main / gh / git error),
+#     the run aborts or HOLDs — a failed check is never read as "safe".
 #   - The primary checkout is never touched.
 #   - Dry-run by default; pass --apply to actually remove the SAFE ones.
 #   - HOLD worktrees print the exact reason; forcing one is a deliberate MANUAL act
@@ -37,11 +39,31 @@ done
 run() { if [ "$APPLY" = 1 ]; then "$@"; else echo "  DRY-RUN: $*"; fi; }
 
 cd "$(git rev-parse --show-toplevel)" || exit 1
-git fetch origin -q --prune || true
 
-# Branches with open PRs are off-limits (mirrors branch-cleanup.sh).
-PROTECTED=$(gh pr list --state open --limit 100 --json headRefName -q '.[].headRefName' 2>/dev/null | sort -u || true)
-protected() { [ -n "$PROTECTED" ] && grep -qxF "$1" <<<"$PROTECTED"; }
+# Merge state is only trustworthy if origin/main is current and resolvable. A
+# swallowed fetch failure or a missing origin/main is the difference between
+# "no unmerged commits" and "couldn't check" — never resolve that toward removal.
+if ! git fetch origin -q --prune; then
+  echo "ERROR: 'git fetch origin' failed — cannot determine merge state. Aborting; nothing removed." >&2
+  exit 1
+fi
+if ! git rev-parse --verify -q origin/main >/dev/null; then
+  echo "ERROR: origin/main is not resolvable — refusing to classify any worktree. Aborting." >&2
+  exit 1
+fi
+
+# Branches with open PRs are off-limits (mirrors branch-cleanup.sh). If gh can't be
+# queried we can't prove a branch is PR-free, so HOLD everything rather than guess.
+if PROTECTED=$(gh pr list --state open --limit 100 --json headRefName -q '.[].headRefName' 2>/dev/null | sort -u); then
+  GH_OK=1
+else
+  GH_OK=0
+  echo "WARNING: could not query open PRs via gh — every branch-attached worktree will be HELD." >&2
+fi
+protected() {
+  [ "$GH_OK" = 0 ] && return 0
+  [ -n "$PROTECTED" ] && grep -qxF "$1" <<<"$PROTECTED"
+}
 
 # Parse `git worktree list --porcelain` into "path<TAB>branch" lines, skipping the
 # first (primary) worktree, which git always lists first.
@@ -65,14 +87,21 @@ for line in "${WORKTREES[@]}"; do
   [ -d "$path" ] || { echo "stale worktree entry (path gone): $path — run 'git worktree prune'"; continue; }
 
   reasons=()
-  # 1) uncommitted TRACKED changes (untracked files like node_modules don't block)
-  if [ -n "$(git -C "$path" status --porcelain --untracked-files=no)" ]; then
+  # 1) uncommitted TRACKED changes (untracked files like node_modules don't block).
+  #    A git error here must NOT be read as "clean".
+  if ! status=$(git -C "$path" status --porcelain --untracked-files=no 2>/dev/null); then
+    reasons+=("git status failed — held")
+  elif [ -n "$status" ]; then
     reasons+=("uncommitted tracked changes")
   fi
-  # 2) commits not in origin/main (squash-merges land here too — held to be safe)
-  if [ "$branch" != "(detached)" ] && [ -n "$(git -C "$path" log --oneline origin/main..HEAD 2>/dev/null)" ]; then
-    n=$(git -C "$path" rev-list --count origin/main..HEAD 2>/dev/null || echo "?")
-    reasons+=("$n commit(s) not in origin/main")
+  # 2) commits not in origin/main (squash-merges land here too — held to be safe).
+  #    A detached HEAD or a failed comparison is "can't tell" -> HOLD, never SAFE.
+  if [ "$branch" = "(detached)" ]; then
+    reasons+=("detached HEAD — held")
+  elif ! ahead=$(git -C "$path" rev-list --count origin/main..HEAD 2>/dev/null); then
+    reasons+=("could not compare against origin/main — held")
+  elif [ "$ahead" -gt 0 ]; then
+    reasons+=("$ahead commit(s) not in origin/main")
   fi
   # 3) open PR on the branch
   if [ "$branch" != "(detached)" ] && protected "$branch"; then
@@ -81,7 +110,8 @@ for line in "${WORKTREES[@]}"; do
 
   if [ "${#reasons[@]}" -gt 0 ]; then
     held=$((held + 1))
-    printf 'HOLD  %s [%s]\n      reason: %s\n' "$path" "$branch" "$(IFS='; '; echo "${reasons[*]}")"
+    echo "HOLD  $path [$branch]"
+    for rr in "${reasons[@]}"; do echo "      - $rr"; done
     echo "      to remove anyway (loses uncommitted work): git worktree remove --force \"$path\""
   else
     safe=$((safe + 1))

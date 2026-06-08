@@ -138,6 +138,20 @@ if [ "$(docker inspect --format='{{.State.Running}}' "$WORKER_CONTAINER" 2>/dev/
     docker compose logs --tail=50 enrichment-worker
     exit 1
 fi
+# Catch a worker that builds fine but crash-loops at runtime (a bad import / a
+# redis-py or anthropic API break — exactly the #227 scenario). It has no health
+# check and uses restart: always, so a single snapshot can catch it mid-restart
+# looking "running"; confirm RestartCount is stable over a short window.
+RC1=$(docker inspect --format='{{.RestartCount}}' "$WORKER_CONTAINER" 2>/dev/null || echo 0)
+sleep 8
+RC2=$(docker inspect --format='{{.RestartCount}}' "$WORKER_CONTAINER" 2>/dev/null || echo 0)
+if [ "${RC2:-0}" -gt "${RC1:-0}" ] \
+    || [ "$(docker inspect --format='{{.State.Running}}' "$WORKER_CONTAINER" 2>/dev/null)" != "true" ]; then
+    echo "==> ERROR: enrichment-worker is crash-looping (restarts ${RC1} -> ${RC2}) — not a healthy deploy"
+    echo "==> Last 50 log lines:"
+    docker compose logs --tail=50 enrichment-worker
+    exit 1
+fi
 WORKER_COMMIT=$(docker compose exec -T enrichment-worker printenv BUILD_COMMIT 2>/dev/null | tr -d '[:space:]' || echo "UNKNOWN")
 if [ "$WORKER_COMMIT" != "$BUILD_COMMIT" ]; then
     echo "==> MISMATCH: enrichment-worker ($WORKER_COMMIT) does NOT match build ($BUILD_COMMIT)"

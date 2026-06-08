@@ -48,7 +48,16 @@ def redis_client():
     """
     import redis
 
-    client = redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=3)
+    # Match the app's full from_url kwarg set (intel_cache.py) so a removed/renamed
+    # constructor kwarg — e.g. retry_on_timeout, the canonical redis-py-8.0-style
+    # break — fails here too, not only via the _get_redis path.
+    client = redis.from_url(
+        REDIS_URL,
+        decode_responses=True,
+        socket_connect_timeout=3,
+        socket_timeout=2,
+        retry_on_timeout=True,
+    )
     try:
         client.ping()
     except Exception as exc:  # pragma: no cover - environment guard
@@ -89,6 +98,59 @@ def test_client_ops_app_relies_on(redis_client):
     assert set(found) == {f"{_KEY_PREFIX}p:a", f"{_KEY_PREFIX}p:b"}
     assert r.delete(*found) == 2
     assert r.get(f"{_KEY_PREFIX}p:a") is None
+
+
+def test_distributed_lock_set_nx_ex(redis_client):
+    """Set(key, val, nx=True, ex=N) — the lock primitive used in core_jobs and
+    activity_digest_service (and plain set/get in signature_parser /
+    material_enrichment_service).
+
+    A redis-py change to set()'s nx/ex handling or return contract would silently break
+    both locks; the rest of the file never exercises set().
+    """
+    r = redis_client
+    lock = f"{_KEY_PREFIX}lock"
+
+    assert r.set(lock, "1", nx=True, ex=30)  # first acquire -> truthy
+    assert r.set(lock, "1", nx=True, ex=30) is None  # contended -> None
+    assert r.ttl(lock) > 0
+    r.delete(lock)
+    assert r.set(lock, "1", nx=True, ex=30)  # acquirable again once cleared
+    r.delete(lock)
+
+    # plain set + get (no nx/ex) — signature_parser / material_enrichment_service.
+    r.set(f"{_KEY_PREFIX}plain", "v")
+    assert r.get(f"{_KEY_PREFIX}plain") == "v"
+    r.delete(f"{_KEY_PREFIX}plain")
+
+
+def test_search_service_get_redis_connects(monkeypatch):
+    """app.search_service._get_search_redis() — the app's SECOND redis client.
+
+    Distinct from intel_cache (different from_url kwargs) and references
+    redis.RedisError at module scope, which a redis-py reorg could move. Nothing else in
+    the job imports/executes this path, so without this test a break here ships green.
+    """
+    import redis
+
+    import app.search_service as search_service
+    from app.config import settings
+
+    # The module-level `except redis.RedisError` clauses must keep resolving.
+    assert issubclass(redis.RedisError, Exception)
+
+    monkeypatch.delenv("TESTING", raising=False)
+    monkeypatch.setattr(settings, "redis_url", REDIS_URL, raising=False)
+    monkeypatch.setattr(search_service, "_search_redis", None, raising=False)
+    monkeypatch.setattr(search_service, "_search_redis_attempted", False, raising=False)
+
+    client = search_service._get_search_redis()
+    assert client is not None, "search_service could not connect to Redis"
+    assert client.ping() is True
+
+    client.setex(f"{_KEY_PREFIX}ss", 30, "ok")
+    assert client.get(f"{_KEY_PREFIX}ss") == "ok"
+    client.delete(f"{_KEY_PREFIX}ss")
 
 
 def test_intel_cache_get_redis_connects(monkeypatch):
