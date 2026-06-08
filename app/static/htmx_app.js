@@ -547,6 +547,10 @@ document.addEventListener('keydown', (e) => {
  * Manages commodity, sub-filters, search query, pagination.
  * URL is the canonical source of truth (back button, deep links work).
  */
+// $persist when the plugin is registered (browser, before Alpine.start); plain default
+// otherwise (vitest mocks / plugin absent) — never throws at factory-call time.
+const persistOr = (def, key) => (typeof Alpine !== 'undefined' && Alpine.$persist) ? Alpine.$persist(def).as(key) : def;
+
 Alpine.data('materialsFilter', () => ({
   commodity: '',
   subFilters: {},
@@ -574,9 +578,9 @@ Alpine.data('materialsFilter', () => ({
   // Transient "Copied" flash for the copy-link control.
   copied: false,
   // Persisted CHROME only (layout prefs); filter STATE stays URL-bound.
-  recentCommodities: Alpine.$persist([]).as('mat_recent_commodities'),
-  moreAttrsOpen: Alpine.$persist(false).as('mat_more_attrs_open'),
-  confidenceOpen: Alpine.$persist(false).as('mat_confidence_open'),
+  recentCommodities: persistOr([], 'mat_recent_commodities'),
+  moreAttrsOpen: persistOr(false, 'mat_more_attrs_open'),
+  confidenceOpen: persistOr(false, 'mat_confidence_open'),
 
   // 3 user-facing confidence groups, each expanding to a set of enrichment tiers.
   // Array order pins the visual ordering of the Data-confidence section.
