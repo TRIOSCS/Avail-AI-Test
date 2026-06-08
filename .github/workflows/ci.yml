@@ -29,6 +29,15 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v5
@@ -152,6 +161,19 @@ jobs:
             --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml \
             --cov-fail-under=50 \
             --junitxml=test-results.xml
+
+      - name: Redis integration tests
+        # Exercises the REAL redis-py client against the `redis` service above —
+        # coverage the main suite cannot give (it runs under TESTING=1, where
+        # every Redis path short-circuits to None/in-memory). Catches a
+        # redis-py-breaking change (the redis-py 8.0 / #227 scenario) before it
+        # ships. Uses INTEGRATION_REDIS_URL because conftest.py blanks REDIS_URL
+        # for test isolation; -o addopts="" drops the suite-wide xdist/ignore opts.
+        env:
+          INTEGRATION_REDIS_URL: redis://localhost:6379/0
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          pytest tests/integration/test_redis_integration.py -v -o addopts=""
 
       - name: Upload test results
         if: always()
