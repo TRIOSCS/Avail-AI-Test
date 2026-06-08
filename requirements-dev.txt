@@ -18,7 +18,7 @@ pytest-timeout>=2.3.0
 itsdangerous>=2.1.0
 
 # Stability
-pybreaker>=1.2.0
+pybreaker>=1.4.1
 
 # Linting
 ruff>=0.15.15
