@@ -21,10 +21,12 @@ COMMODITY_TREE: dict[str, list[str]] = {
     "Passives": ["capacitors", "resistors", "inductors", "transformers", "fuses", "oscillators", "filters"],
     "Semiconductors \u2014 Discrete": ["diodes", "transistors", "mosfets", "thyristors"],
     "Semiconductors \u2014 ICs": ["analog_ic", "logic_ic", "power_ic"],
+    "Memory": ["dram", "flash"],
     "Processors & Programmable": ["microcontrollers", "cpu", "microprocessors", "dsp", "fpga", "asic", "gpu"],
-    "Memory & Storage": ["dram", "flash", "ssd", "hdd"],
-    "Connectors & Electromechanical": ["connectors", "cables", "relays", "switches", "sockets"],
+    "Storage & Drives": ["ssd", "hdd"],
     "Power & Energy": ["power_supplies", "voltage_regulators", "batteries"],
+    "Connectors, Interconnects & Cables": ["connectors", "cables", "sockets"],
+    "Electromechanical": ["relays", "switches", "motors"],
     "Optoelectronics & Display": ["leds", "displays", "optoelectronics"],
     "Sensors & RF": ["sensors", "rf"],
     "IT / Server Hardware": [
@@ -35,7 +37,7 @@ COMMODITY_TREE: dict[str, list[str]] = {
         "fans_cooling",
         "networking",
     ],
-    "Misc": ["motors", "enclosures", "tools_accessories", "other"],
+    "Misc": ["enclosures", "tools_accessories", "other"],
 }
 
 # Display names for sub-categories (for UI rendering)
