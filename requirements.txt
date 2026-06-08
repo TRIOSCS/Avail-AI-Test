@@ -198,7 +198,6 @@ typing-extensions==4.15.0
     # via
     #   alembic
     #   anthropic
-    #   anyio
     #   azure-communication-callautomation
     #   azure-core
     #   beautifulsoup4
@@ -208,7 +207,6 @@ typing-extensions==4.15.0
     #   pydantic-core
     #   pyee
     #   sqlalchemy
-    #   starlette
     #   typing-inspection
 typing-inspection==0.4.2
     # via
@@ -227,7 +225,7 @@ uvloop==0.22.1
     # via uvicorn
 watchfiles==1.2.0
     # via uvicorn
-weasyprint==68.1
+weasyprint==69.0
     # via -r requirements.in
 webencodings==0.5.1
     # via
