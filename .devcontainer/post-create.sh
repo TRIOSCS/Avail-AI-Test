@@ -12,8 +12,10 @@ sudo apt-get update && sudo apt-get install -y --no-install-recommends \
     libpango-1.0-0 libpangocairo-1.0-0 libgdk-pixbuf-2.0-0 libffi-dev shared-mime-info \
     && sudo rm -rf /var/lib/apt/lists/*
 
-# Install all dev/test dependencies (includes prod deps via -r requirements.txt)
-pip install --no-cache-dir -r requirements-dev.txt
+# Install prod + dev/test dependencies. Since the pip-tools migration these are two
+# separate locks: requirements-dev.txt uses `-c requirements.txt` (constraint), so it
+# no longer pulls in prod packages — both files must be installed (as CI does).
+pip install --no-cache-dir -r requirements.txt -r requirements-dev.txt
 
 # Install Chromium for Playwright-based tests
 python3 -m playwright install chromium

@@ -9,7 +9,20 @@ updates:
     labels:
       - dependencies
     groups:
-      minor-and-patch:
+      # All dev/test tooling — batch every update INCLUDING majors into one PR.
+      # Low blast radius (pytest/cov/asyncio/schemathesis/etc. never ship to prod),
+      # and the repo's unbounded `>=` floors make most of these no-op floor raises.
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+          - major
+      # Production runtime deps — batch only SAFE minor/patch into one PR.
+      # MAJOR production bumps stay UNGROUPED (one PR each) so they get individual
+      # scrutiny + a smoke test before merge (e.g. redis-py 8.0).
+      production-minor-patch:
+        dependency-type: production
         update-types:
           - minor
           - patch
@@ -21,6 +34,10 @@ updates:
       day: monday
     labels:
       - ci
+    groups:
+      github-actions:
+        patterns:
+          - "*"
 
   - package-ecosystem: npm
     directory: "/"
@@ -31,7 +48,14 @@ updates:
     labels:
       - dependencies
     groups:
-      minor-and-patch:
+      dev-dependencies:
+        dependency-type: development
+        update-types:
+          - minor
+          - patch
+          - major
+      production-minor-patch:
+        dependency-type: production
         update-types:
           - minor
           - patch
@@ -43,3 +67,7 @@ updates:
       day: monday
     labels:
       - dependencies
+    groups:
+      docker-images:
+        patterns:
+          - "*"

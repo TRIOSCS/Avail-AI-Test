@@ -29,6 +29,15 @@ jobs:
           --health-interval 10s
           --health-timeout 5s
           --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
 
     steps:
       - uses: actions/checkout@v5
@@ -58,6 +67,21 @@ jobs:
         run: |
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
+
+      - name: Verify requirements lockfiles are in sync
+        # requirements*.txt are COMPILED from requirements*.in via pip-tools (pinned
+        # in requirements-dev.txt). Recompile WITHOUT --upgrade — existing pins are
+        # kept, so a fresh PyPI release never counts as drift — and fail if the
+        # committed lock changed, i.e. a .in was edited without recompiling, or a
+        # .txt was hand-edited. Keeps installs reproducible.
+        run: |
+          pip-compile --no-header --no-strip-extras --quiet requirements.in
+          pip-compile --no-header --no-strip-extras --quiet requirements-dev.in
+          if ! git diff --exit-code requirements.txt requirements-dev.txt; then
+            echo "::error::Lockfiles out of sync with their .in sources. Run: pip-compile --no-header --no-strip-extras requirements.in && pip-compile --no-header --no-strip-extras requirements-dev.in (then commit)."
+            exit 1
+          fi
+          echo "Lockfiles in sync with .in sources."
 
       - name: Install frontend dependencies
         run: npm ci
@@ -152,6 +176,19 @@ jobs:
             --cov=app --cov-report=term-missing --cov-report=xml:coverage.xml \
             --cov-fail-under=50 \
             --junitxml=test-results.xml
+
+      - name: Redis integration tests
+        # Exercises the REAL redis-py client against the `redis` service above —
+        # coverage the main suite cannot give (it runs under TESTING=1, where
+        # every Redis path short-circuits to None/in-memory). Catches a
+        # redis-py-breaking change (the redis-py 8.0 / #227 scenario) before it
+        # ships. Uses INTEGRATION_REDIS_URL because conftest.py blanks REDIS_URL
+        # for test isolation; -o addopts="" drops the suite-wide xdist/ignore opts.
+        env:
+          INTEGRATION_REDIS_URL: redis://localhost:6379/0
+          PYTHONPATH: ${{ github.workspace }}
+        run: |
+          pytest tests/integration/test_redis_integration.py -v -o addopts=""
 
       - name: Upload test results
         if: always()

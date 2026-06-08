@@ -1,0 +1,56 @@
+# Production dependency SOURCE (hand-authored). Edit this file, then regenerate the
+# pinned lock with:  pip-compile --no-header requirements.in
+# Do NOT edit requirements.txt by hand — it is the compiled, fully-pinned output.
+fastapi==0.136.3
+uvicorn[standard]==0.49.0
+sqlalchemy==2.0.50
+psycopg2-binary==2.9.12
+python-multipart==0.0.32
+httpx==0.28.1
+openpyxl==3.1.5
+jinja2==3.1.6
+# Email Mining v2 hardening
+filetype==1.2.0
+charset-normalizer==3.4.7
+# Credential encryption
+cryptography==48.0.0
+# Observability
+loguru==0.7.3
+# Pinned >=1.0.1 to fix PYSEC-2026-161 (Host header URL-reconstruction auth bypass).
+# Forces resolver to pick the fixed 1.x line; fastapi 0.136.x accepts starlette>=0.46.0 unbounded.
+starlette>=1.2.1,<2.0
+# Replaced prometheus-fastapi-instrumentator (hard-pinned starlette<1.0.0) with a small
+# ASGI middleware in app/prometheus_metrics.py that uses prometheus_client directly.
+prometheus_client>=0.25.0,<1.0
+sentry-sdk[fastapi]==2.61.1
+# Rate limiting
+slowapi==0.1.9
+# Fuzzy matching
+rapidfuzz>=3.0.0,<4.0
+# PDF generation
+weasyprint==68.1
+# Scheduling
+apscheduler>=3.11.2,<4.0
+# Migrations
+alembic==1.18.4
+# Caching
+redis[hiredis]==8.0.0
+orjson>=3.11.9,<4.0
+# CSRF protection
+starlette-csrf==3.0.0
+# NetComponents integration
+beautifulsoup4==4.15.0
+patchright==1.60.1
+# Typed settings from env vars (fail-fast validation at startup)
+pydantic-settings==2.14.1
+# SSE streaming for HTMX sourcing progress
+sse-starlette>=3.4.4,<4.0
+# Anthropic Claude API (used by claude_client, enrichment, batch extraction)
+anthropic>=0.107.1,<1.0
+# HTML sanitization for untrusted email content (XSS prevention)
+nh3==0.3.5
+# Safe XML parsing (XXE prevention)
+defusedxml>=0.7.1
+# Azure Communication Services (click-to-call)
+azure-communication-callautomation>=1.5.0,<2.0
+azure-communication-identity>=1.5.0,<2.0

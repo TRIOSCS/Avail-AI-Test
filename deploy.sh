@@ -75,8 +75,13 @@ fi
 # input-pinned layers (apt, gh, pip, Chromium, `npm ci`) stay cached. ~4x faster deploys
 # with no stale-template risk. The unique timestamp also invalidates --no-commit deploys.
 BUILD_COMMIT="$(git rev-parse --short HEAD)-$(date +%s)"
-echo "==> Rebuilding app container (build tag: $BUILD_COMMIT)..."
-docker compose build --build-arg BUILD_COMMIT="$BUILD_COMMIT" app
+echo "==> Rebuilding app + enrichment-worker images (build tag: $BUILD_COMMIT)..."
+# app and enrichment-worker share `build: .` (same Dockerfile), so building both
+# here reuses every cached layer — the worker image is nearly free. This stops the
+# worker from silently running stale wheels after a dependency bump: it shares
+# requirements.txt with the app (e.g. redis-py, anthropic), and deploy.sh used to
+# rebuild only the app, leaving the worker on the old image until someone noticed.
+docker compose build --build-arg BUILD_COMMIT="$BUILD_COMMIT" app enrichment-worker
 
 # Step 3: Recreate only the app container with the new image
 # Clean up any orphaned rename containers from previous deploys
@@ -117,6 +122,42 @@ if [ "$DEPLOYED_COMMIT" != "$BUILD_COMMIT" ]; then
     exit 1
 fi
 echo "==> MATCH: deployed build tag ($DEPLOYED_COMMIT)"
+
+# Step 5b: Recreate the enrichment-worker on the freshly-built image.
+# The worker has no HTTP health check, so confirm it is running and verify the
+# BUILD_COMMIT baked into its env (same Dockerfile as app). Done after the app is
+# healthy + verified so a broken app build never disrupts a working worker.
+echo ""
+echo "==> Recreating enrichment-worker..."
+docker compose up -d enrichment-worker
+sleep 3
+WORKER_CONTAINER=$(docker compose ps -q enrichment-worker)
+if [ "$(docker inspect --format='{{.State.Running}}' "$WORKER_CONTAINER" 2>/dev/null)" != "true" ]; then
+    echo "==> ERROR: enrichment-worker is not running after recreate"
+    echo "==> Last 50 log lines:"
+    docker compose logs --tail=50 enrichment-worker
+    exit 1
+fi
+# Catch a worker that builds fine but crash-loops at runtime (a bad import / a
+# redis-py or anthropic API break — exactly the #227 scenario). It has no health
+# check and uses restart: always, so a single snapshot can catch it mid-restart
+# looking "running"; confirm RestartCount is stable over a short window.
+RC1=$(docker inspect --format='{{.RestartCount}}' "$WORKER_CONTAINER" 2>/dev/null || echo 0)
+sleep 8
+RC2=$(docker inspect --format='{{.RestartCount}}' "$WORKER_CONTAINER" 2>/dev/null || echo 0)
+if [ "${RC2:-0}" -gt "${RC1:-0}" ] \
+    || [ "$(docker inspect --format='{{.State.Running}}' "$WORKER_CONTAINER" 2>/dev/null)" != "true" ]; then
+    echo "==> ERROR: enrichment-worker is crash-looping (restarts ${RC1} -> ${RC2}) — not a healthy deploy"
+    echo "==> Last 50 log lines:"
+    docker compose logs --tail=50 enrichment-worker
+    exit 1
+fi
+WORKER_COMMIT=$(docker compose exec -T enrichment-worker printenv BUILD_COMMIT 2>/dev/null | tr -d '[:space:]' || echo "UNKNOWN")
+if [ "$WORKER_COMMIT" != "$BUILD_COMMIT" ]; then
+    echo "==> MISMATCH: enrichment-worker ($WORKER_COMMIT) does NOT match build ($BUILD_COMMIT)"
+    exit 1
+fi
+echo "==> MATCH: enrichment-worker build tag ($WORKER_COMMIT)"
 
 # Step 6: Verify CSS covers Tailwind color classes used in templates
 echo ""

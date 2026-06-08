@@ -223,8 +223,10 @@ docker compose down               # Stop everything
 `deploy.sh` must run from `main` unless `--no-commit`. It builds with a unique
 `BUILD_COMMIT` build-arg (consumed before the source COPYs in both Dockerfile stages, so
 templates/static/Vite always rebuild fresh while apt/pip/npm-ci cache — no `--no-cache`),
-recreates only the `app` container, waits for the health check, verifies the deployed
-build tag, and checks that Tailwind classes in templates exist in the built CSS bundle.
+rebuilds + recreates **both** the `app` and `enrichment-worker` containers (they share
+`requirements.txt`, so the worker must not lag the app on a dependency bump), waits for
+the app health check, verifies the deployed build tag on both, and checks that Tailwind
+classes in templates exist in the built CSS bundle.
 Never use bare `docker compose up -d --build` (without `--build-arg BUILD_COMMIT=...`) —
 it ships stale templates.
 
@@ -235,6 +237,23 @@ ruff format app/                  # Auto-format
 mypy app/                         # Type check
 ```
 Pre-commit hooks: ruff, ruff-format, mypy, docformatter, detect-private-key.
+
+### Dependencies (pip-tools lockfiles)
+
+Python deps are **pinned lockfiles** compiled from hand-authored sources, so every
+install (CI + deploy) is reproducible.
+
+- **Edit** `requirements.in` (prod) / `requirements-dev.in` (dev) — never the `.txt`.
+- **Recompile** the locks, then commit BOTH the `.in` and the regenerated `.txt`:
+  ```bash
+  pip-compile --no-header --no-strip-extras requirements.in
+  pip-compile --no-header --no-strip-extras requirements-dev.in
+  ```
+- `requirements.txt` (prod lock) is what the Docker image + `deploy.sh` install;
+  `requirements-dev.txt` adds the dev/test tools. CI fails if a `.txt` drifts from
+  its `.in` (the "Verify requirements lockfiles are in sync" step).
+- To bump a dep: change the constraint in the `.in`, recompile, run the suite. To
+  refresh transitive pins to newest: `pip-compile --upgrade ...`.
 
 ### Migrations
 ```bash
