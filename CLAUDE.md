@@ -3,7 +3,7 @@
 **AvailAI** — electronic-component sourcing engine and CRM for Trio Supply Chain Solutions.
 **Stack:** FastAPI + SQLAlchemy 2.0 + PostgreSQL 16 + HTMX 2.x + Alpine.js 3.x + Jinja2 + Tailwind CSS 3.x.
 **Deploy:** Docker Compose (app, enrichment-worker, db, redis, caddy, db-backup) on DigitalOcean.
-**Version:** `APP_VERSION` constant in `app/config.py`.
+**Version:** `APP_VERSION` constant in `app/config.py` (currently `3.1.0`).
 
 It searches supplier APIs in parallel (BrokerBin, Nexar, DigiKey, Mouser, OEMSecrets,
 Element14, Sourcengine, eBay, AI web search, email mining), tracks vendor intelligence,
