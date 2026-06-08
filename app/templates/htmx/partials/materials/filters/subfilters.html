@@ -21,11 +21,12 @@
   {% endfor %}
 
   {% if advanced_opts %}
-  <div x-data="{ moreOpen: false }">
-    <button @click="moreOpen = !moreOpen" :aria-expanded="moreOpen"
+  {# Fold state hoisted to the parent component (ui.moreOpen) so it survives reloads. #}
+  <div>
+    <button @click="ui.moreOpen = !ui.moreOpen" :aria-expanded="ui.moreOpen"
             class="text-[11px] text-brand-600 hover:text-brand-700 font-medium px-2 py-1"
-            x-text="moreOpen ? 'Fewer filters' : 'More filters ({{ advanced_opts|length }})'"></button>
-    <div x-show="moreOpen" x-cloak x-transition>
+            x-text="ui.moreOpen ? 'Fewer filters' : 'More filters ({{ advanced_opts|length }})'"></button>
+    <div x-show="ui.moreOpen" x-cloak x-transition>
       {% for opt in advanced_opts %}
         {{ render_subfilter(opt, facet_counts) }}
       {% endfor %}

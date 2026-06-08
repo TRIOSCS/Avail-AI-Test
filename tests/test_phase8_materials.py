@@ -104,7 +104,7 @@ class TestMaterialList:
         resp = client.get("/v2/partials/materials")
         assert resp.status_code == 200
         assert "materialsFilter" in resp.text
-        assert "Categories" in resp.text
+        assert "Category" in resp.text
 
     def test_search_by_mpn(self, client: TestClient, material_cards):
         """Faceted search results endpoint returns matching cards."""

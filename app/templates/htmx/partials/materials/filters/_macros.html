@@ -4,9 +4,11 @@
 #}
 
 {% macro checkbox_group(spec_key, display_name, values, counts, active_values) %}
-<div class="mb-3" x-data="{ expanded: false }">
+{# Fold state lives on the parent materialsFilter component (ui.facetExpanded[spec_key]) so it
+   survives HTMX re-renders of this partial; no partial-local x-data. spec_key is [a-z0-9_]. #}
+<div class="mb-3">
   <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">{{ display_name }}</h4>
-  <div class="space-y-0.5" :class="!expanded && {{ values|length }} > 6 ? 'max-h-[168px] overflow-hidden' : 'max-h-[320px] overflow-y-auto'">
+  <div class="space-y-0.5" :class="!ui.facetExpanded['{{ spec_key }}'] && {{ values|length }} > 6 ? 'max-h-[168px] overflow-hidden' : 'max-h-[320px] overflow-y-auto'">
     {% for val in values %}
     <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm group">
       {# Single-quoted attributes: |tojson emits double quotes (and escapes single quotes),
@@ -21,10 +23,10 @@
     {% endfor %}
   </div>
   {% if values|length > 6 %}
-  <button @click="expanded = !expanded"
-          :aria-expanded="expanded"
+  <button @click="ui.facetExpanded['{{ spec_key }}'] = !ui.facetExpanded['{{ spec_key }}']"
+          :aria-expanded="!!ui.facetExpanded['{{ spec_key }}']"
           class="text-[11px] text-brand-600 hover:text-brand-700 font-medium mt-1 px-2"
-          x-text="expanded ? 'Show less' : 'Show all ({{ values|length }})'"></button>
+          x-text="ui.facetExpanded['{{ spec_key }}'] ? 'Show less' : 'Show all ({{ values|length }})'"></button>
   {% endif %}
 </div>
 {% endmacro %}
@@ -77,9 +79,9 @@
 {% macro typeahead_group(spec_key, display_name, values, counts, total_distinct) %}
 {# Open-vocabulary facet (no canonical enum_values, e.g. connector series): a search box
    over the top-N observed values by count. Avoids a thousand-row (0) dump. #}
-<div class="mb-3" x-data="{ taSearch: '' }">
+<div class="mb-3">
   <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">{{ display_name }}</h4>
-  <input type="text" x-model="taSearch" placeholder="Search {{ display_name|lower }}…"
+  <input type="text" x-model="ui.facetSearch['{{ spec_key }}']" placeholder="Search {{ display_name|lower }}…"
          aria-label="Search {{ display_name }}"
          class="w-full mb-1 px-2 py-1 text-[13px] border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
   <div class="space-y-0.5 max-h-40 overflow-y-auto">
@@ -87,7 +89,7 @@
     {# Single-quoted attributes: |tojson emits double quotes, so it is safe inside single
        quotes (a double-quoted attribute would break). #}
     <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm"
-           x-show='!taSearch || {{ val|tojson }}.toLowerCase().includes(taSearch.toLowerCase())' x-cloak>
+           x-show='!ui.facetSearch["{{ spec_key }}"] || {{ val|tojson }}.toLowerCase().includes((ui.facetSearch["{{ spec_key }}"]||"").toLowerCase())' x-cloak>
       <input type="checkbox" value="{{ val }}"
              :checked='(subFilters[{{ spec_key|tojson }}] || []).includes({{ val|tojson }})'
              @change='toggleFilter({{ spec_key|tojson }}, {{ val|tojson }})'

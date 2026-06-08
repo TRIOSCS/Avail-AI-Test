@@ -565,6 +565,19 @@ Alpine.data('materialsFilter', () => ({
   hasDatasheet: false,
   _onPopstate: null,
 
+  // ── Direction-B UI state ─────────────────────────────────────────────
+  // Hoisted sub-filter UI state (fold / typeahead text) so it survives HTMX re-renders of
+  // #subfilters-container on every filters-changed. Keyed by spec_key; session-scoped.
+  ui: { moreOpen: false, facetExpanded: {}, facetSearch: {} },
+  // Type-to-find over the category tree (client-side filter; see tree.html).
+  categorySearch: '',
+  // Transient "Copied" flash for the copy-link control.
+  copied: false,
+  // Persisted CHROME only (layout prefs); filter STATE stays URL-bound.
+  recentCommodities: Alpine.$persist([]).as('mat_recent_commodities'),
+  moreAttrsOpen: Alpine.$persist(false).as('mat_more_attrs_open'),
+  confidenceOpen: Alpine.$persist(false).as('mat_confidence_open'),
+
   // 3 user-facing confidence groups, each expanding to a set of enrichment tiers.
   // Array order pins the visual ordering of the Data-confidence section.
   CONFIDENCE_GROUPS: [
@@ -629,6 +642,32 @@ Alpine.data('materialsFilter', () => ({
     count += this.condition.length;
     if (this.hasDatasheet) count += 1;
     return count;
+  },
+
+  // Active selections inside the collapsed "More attributes" section (for its badge).
+  get attributesActiveCount() {
+    return this.lifecycle.length + this.rohs.length + this.condition.length
+      + (this.hasDatasheet ? 1 : 0)
+      + (Array.isArray(this.subFilters.manufacturers) ? this.subFilters.manufacturers.length : 0);
+  },
+
+  // Top summary "Clear all" — resets every filter but KEEPS the selected commodity
+  // (commodity is navigation, not a filter). The spec-scoped control is "Clear specs".
+  clearAllFilters() {
+    this.subFilters = {};
+    this.lifecycle = [];
+    this.rohs = [];
+    this.condition = [];
+    this.hasDatasheet = false;
+    this.statuses = [...this.DEFAULT_STATUSES];
+    this.q = '';
+    this.applyFilters();
+  },
+
+  copyLink() {
+    if (navigator.clipboard) navigator.clipboard.writeText(window.location.href).catch(() => {});
+    this.copied = true;
+    setTimeout(() => { this.copied = false; }, 1500);
   },
 
   init() {
@@ -732,6 +771,12 @@ Alpine.data('materialsFilter', () => ({
   selectCommodity(commodity) {
     this.commodity = commodity || '';
     this.subFilters = {};
+    if (this.commodity) {
+      // Most-recent-first, deduped, capped at 5 (persisted navigation history).
+      const list = this.recentCommodities.filter(x => x !== this.commodity);
+      list.unshift(this.commodity);
+      this.recentCommodities = list.slice(0, 5);
+    }
     document.body.dispatchEvent(new CustomEvent('commodity-changed'));
     this.applyFilters();
   },
