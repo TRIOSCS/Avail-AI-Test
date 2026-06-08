@@ -31,7 +31,7 @@ apscheduler>=3.11.2,<4.0
 # Migrations
 alembic==1.18.4
 # Caching
-redis[hiredis]==7.4.0
+redis[hiredis]==8.0.0
 orjson>=3.11.9,<4.0
 # CSRF protection
 starlette-csrf==3.0.0
