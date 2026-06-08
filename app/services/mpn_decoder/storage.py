@@ -1,9 +1,10 @@
-"""Deterministic HDD/SSD MPN decoders (Seagate, Western Digital, Toshiba, HGST/Hitachi).
+"""Deterministic HDD MPN decoders (Seagate, Western Digital, Toshiba, HGST/Hitachi).
 
 CONSERVATIVE by design: form_factor comes from the vendor prefix (reliable); capacity is
 decoded only where the scheme expresses it unambiguously; usage_class only for well-known
 family codes. Anything uncertain is omitted, never guessed. RPM/interface are not reliably
-encoded in these MPNs, so they are left to later phases.
+encoded in these MPNs, so they are left to later phases. SSD part-number schemes (WD WDS…,
+Seagate XA/ZA/Nytro, …) are intentionally NOT decoded this round — a later increment.
 """
 
 import re

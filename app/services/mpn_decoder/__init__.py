@@ -17,6 +17,7 @@ inventory. See docs/superpowers/specs/2026-06-08-mpn-decode-enrichment-design.md
 from app.services.mpn_decoder._common import DecodeResult
 from app.services.mpn_decoder.memory import decode_memory
 from app.services.mpn_decoder.storage import decode_storage
+from app.utils.normalization import normalize_mpn
 
 # Ordered: storage first, then memory. Each returns a DecodeResult or None.
 _DECODERS = (decode_storage, decode_memory)
@@ -28,9 +29,9 @@ def decode_mpn(mpn: str | None, manufacturer: str | None = None) -> DecodeResult
     `manufacturer` is an optional hint; decoders gate on the MPN string itself, so a wrong
     or missing manufacturer never causes a misdecode (the regex gate is the source of truth).
     """
-    if not mpn or not mpn.strip():
+    normalized = normalize_mpn(mpn)  # upper + strip quotes/whitespace/trailing punct; keeps -, /
+    if not normalized:
         return None
-    normalized = mpn.strip().upper()
     for decoder in _DECODERS:
         result = decoder(normalized, manufacturer)
         if result is not None and result.specs:
