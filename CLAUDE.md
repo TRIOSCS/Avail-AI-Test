@@ -238,6 +238,23 @@ mypy app/                         # Type check
 ```
 Pre-commit hooks: ruff, ruff-format, mypy, docformatter, detect-private-key.
 
+### Dependencies (pip-tools lockfiles)
+
+Python deps are **pinned lockfiles** compiled from hand-authored sources, so every
+install (CI + deploy) is reproducible.
+
+- **Edit** `requirements.in` (prod) / `requirements-dev.in` (dev) — never the `.txt`.
+- **Recompile** the locks, then commit BOTH the `.in` and the regenerated `.txt`:
+  ```bash
+  pip-compile --no-header --no-strip-extras requirements.in
+  pip-compile --no-header --no-strip-extras requirements-dev.in
+  ```
+- `requirements.txt` (prod lock) is what the Docker image + `deploy.sh` install;
+  `requirements-dev.txt` adds the dev/test tools. CI fails if a `.txt` drifts from
+  its `.in` (the "Verify requirements lockfiles are in sync" step).
+- To bump a dep: change the constraint in the `.in`, recompile, run the suite. To
+  refresh transitive pins to newest: `pip-compile --upgrade ...`.
+
 ### Migrations
 ```bash
 alembic upgrade head                              # Apply pending

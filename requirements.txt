@@ -1,53 +1,242 @@
-fastapi==0.136.3
-uvicorn[standard]==0.49.0
-sqlalchemy==2.0.50
-psycopg2-binary==2.9.12
-python-multipart==0.0.32
-httpx==0.28.1
-openpyxl==3.1.5
-jinja2==3.1.6
-# Email Mining v2 hardening
-filetype==1.2.0
-charset-normalizer==3.4.7
-# Credential encryption
-cryptography==48.0.0
-# Observability
-loguru==0.7.3
-# Pinned >=1.0.1 to fix PYSEC-2026-161 (Host header URL-reconstruction auth bypass).
-# Forces resolver to pick the fixed 1.x line; fastapi 0.136.x accepts starlette>=0.46.0 unbounded.
-starlette>=1.2.1,<2.0
-# Replaced prometheus-fastapi-instrumentator (hard-pinned starlette<1.0.0) with a small
-# ASGI middleware in app/prometheus_metrics.py that uses prometheus_client directly.
-prometheus_client>=0.25.0,<1.0
-sentry-sdk[fastapi]==2.61.1
-# Rate limiting
-slowapi==0.1.9
-# Fuzzy matching
-rapidfuzz>=3.0.0,<4.0
-# PDF generation
-weasyprint==68.1
-# Scheduling
-apscheduler>=3.11.2,<4.0
-# Migrations
 alembic==1.18.4
-# Caching
-redis[hiredis]==8.0.0
-orjson>=3.11.9,<4.0
-# CSRF protection
-starlette-csrf==3.0.0
-# NetComponents integration
+    # via -r requirements.in
+annotated-doc==0.0.4
+    # via fastapi
+annotated-types==0.7.0
+    # via pydantic
+anthropic==0.107.1
+    # via -r requirements.in
+anyio==4.13.0
+    # via
+    #   anthropic
+    #   httpx
+    #   sse-starlette
+    #   starlette
+    #   watchfiles
+apscheduler==3.11.2
+    # via -r requirements.in
+azure-communication-callautomation==1.5.0
+    # via -r requirements.in
+azure-communication-identity==1.5.0
+    # via -r requirements.in
+azure-core==1.41.0
+    # via
+    #   azure-communication-callautomation
+    #   azure-communication-identity
+    #   msrest
 beautifulsoup4==4.15.0
-patchright==1.60.1
-# Typed settings from env vars (fail-fast validation at startup)
-pydantic-settings==2.14.1
-# SSE streaming for HTMX sourcing progress
-sse-starlette>=3.4.4,<4.0
-# Anthropic Claude API (used by claude_client, enrichment, batch extraction)
-anthropic>=0.107.1,<1.0
-# HTML sanitization for untrusted email content (XSS prevention)
+    # via -r requirements.in
+brotli==1.2.0
+    # via fonttools
+certifi==2026.5.20
+    # via
+    #   httpcore
+    #   httpx
+    #   msrest
+    #   requests
+    #   sentry-sdk
+cffi==2.0.0
+    # via
+    #   cryptography
+    #   weasyprint
+charset-normalizer==3.4.7
+    # via
+    #   -r requirements.in
+    #   requests
+click==8.4.1
+    # via uvicorn
+cryptography==48.0.0
+    # via -r requirements.in
+cssselect2==0.9.0
+    # via weasyprint
+defusedxml==0.7.1
+    # via -r requirements.in
+deprecated==1.3.1
+    # via limits
+distro==1.9.0
+    # via anthropic
+docstring-parser==0.18.0
+    # via anthropic
+et-xmlfile==2.0.0
+    # via openpyxl
+fastapi==0.136.3
+    # via
+    #   -r requirements.in
+    #   sentry-sdk
+filetype==1.2.0
+    # via -r requirements.in
+fonttools[woff]==4.63.0
+    # via weasyprint
+greenlet==3.5.1
+    # via
+    #   patchright
+    #   sqlalchemy
+h11==0.16.0
+    # via
+    #   httpcore
+    #   uvicorn
+hiredis==3.4.0
+    # via redis
+httpcore==1.0.9
+    # via httpx
+httptools==0.8.0
+    # via uvicorn
+httpx==0.28.1
+    # via
+    #   -r requirements.in
+    #   anthropic
+idna==3.18
+    # via
+    #   anyio
+    #   httpx
+    #   requests
+isodate==0.7.2
+    # via
+    #   azure-communication-callautomation
+    #   msrest
+itsdangerous==2.2.0
+    # via starlette-csrf
+jinja2==3.1.6
+    # via -r requirements.in
+jiter==0.15.0
+    # via anthropic
+limits==5.8.0
+    # via slowapi
+loguru==0.7.3
+    # via -r requirements.in
+mako==1.3.12
+    # via alembic
+markupsafe==3.0.3
+    # via
+    #   jinja2
+    #   mako
+msrest==0.7.1
+    # via azure-communication-identity
 nh3==0.3.5
-# Safe XML parsing (XXE prevention)
-defusedxml>=0.7.1
-# Azure Communication Services (click-to-call)
-azure-communication-callautomation>=1.5.0,<2.0
-azure-communication-identity>=1.5.0,<2.0
+    # via -r requirements.in
+oauthlib==3.3.1
+    # via requests-oauthlib
+openpyxl==3.1.5
+    # via -r requirements.in
+orjson==3.11.9
+    # via -r requirements.in
+packaging==26.2
+    # via limits
+patchright==1.60.1
+    # via -r requirements.in
+pillow==12.2.0
+    # via weasyprint
+prometheus-client==0.25.0
+    # via -r requirements.in
+psycopg2-binary==2.9.12
+    # via -r requirements.in
+pycparser==3.0
+    # via cffi
+pydantic==2.13.4
+    # via
+    #   anthropic
+    #   fastapi
+    #   pydantic-settings
+pydantic-core==2.46.4
+    # via pydantic
+pydantic-settings==2.14.1
+    # via -r requirements.in
+pydyf==0.12.1
+    # via weasyprint
+pyee==13.0.1
+    # via patchright
+pyphen==0.17.2
+    # via weasyprint
+python-dotenv==1.2.2
+    # via
+    #   pydantic-settings
+    #   uvicorn
+python-multipart==0.0.32
+    # via -r requirements.in
+pyyaml==6.0.3
+    # via uvicorn
+rapidfuzz==3.14.5
+    # via -r requirements.in
+redis[hiredis]==8.0.0
+    # via -r requirements.in
+requests==2.34.2
+    # via
+    #   azure-core
+    #   msrest
+    #   requests-oauthlib
+requests-oauthlib==2.0.0
+    # via msrest
+sentry-sdk[fastapi]==2.61.1
+    # via -r requirements.in
+slowapi==0.1.9
+    # via -r requirements.in
+sniffio==1.3.1
+    # via anthropic
+soupsieve==2.8.4
+    # via beautifulsoup4
+sqlalchemy==2.0.50
+    # via
+    #   -r requirements.in
+    #   alembic
+sse-starlette==3.4.4
+    # via -r requirements.in
+starlette==1.2.1
+    # via
+    #   -r requirements.in
+    #   fastapi
+    #   sse-starlette
+    #   starlette-csrf
+starlette-csrf==3.0.0
+    # via -r requirements.in
+tinycss2==1.5.1
+    # via
+    #   cssselect2
+    #   weasyprint
+tinyhtml5==2.1.0
+    # via weasyprint
+typing-extensions==4.15.0
+    # via
+    #   alembic
+    #   anthropic
+    #   anyio
+    #   azure-communication-callautomation
+    #   azure-core
+    #   beautifulsoup4
+    #   fastapi
+    #   limits
+    #   pydantic
+    #   pydantic-core
+    #   pyee
+    #   sqlalchemy
+    #   starlette
+    #   typing-inspection
+typing-inspection==0.4.2
+    # via
+    #   fastapi
+    #   pydantic
+    #   pydantic-settings
+tzlocal==5.3.1
+    # via apscheduler
+urllib3==2.7.0
+    # via
+    #   requests
+    #   sentry-sdk
+uvicorn[standard]==0.49.0
+    # via -r requirements.in
+uvloop==0.22.1
+    # via uvicorn
+watchfiles==1.2.0
+    # via uvicorn
+weasyprint==68.1
+    # via -r requirements.in
+webencodings==0.5.1
+    # via
+    #   cssselect2
+    #   tinycss2
+    #   tinyhtml5
+websockets==16.0
+    # via uvicorn
+wrapt==2.2.1
+    # via deprecated
+zopfli==0.4.2
+    # via fonttools

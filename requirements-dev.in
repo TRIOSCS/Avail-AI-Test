@@ -1,0 +1,47 @@
+# Dev/test dependency SOURCE (hand-authored). Edit this file, then regenerate the
+# pinned lock with:  pip-compile --no-header requirements-dev.in
+# Do NOT edit requirements-dev.txt by hand — it is the compiled output.
+# Prod pins constrain dev deps (-c) so shared versions stay consistent; CI installs
+# both requirements.txt and requirements-dev.txt.
+-c requirements.txt
+
+# Testing
+pytest>=9.0.3
+pytest-asyncio>=1.4.0
+pytest-cov>=7.1.0
+pytest-xdist>=3.8.0
+responses>=0.26.1
+freezegun>=1.5.5
+schemathesis>=4.21.1
+nest_asyncio>=1.6.0
+
+# E2E / Playwright
+playwright>=1.60.0
+pytest-playwright>=0.8.0
+pytest-timeout>=2.3.0
+itsdangerous>=2.1.0
+
+# Stability
+pybreaker>=1.4.1
+
+# Linting
+ruff>=0.15.15
+
+# Type checking
+mypy>=2.1.0
+sqlalchemy[mypy]>=2.0.50
+types-redis>=4.6.0.20241004
+
+# Pre-commit
+pre-commit>=4.6.0
+
+# Security scanning
+bandit>=1.9.4
+pip-audit>=2.10.0
+
+# Debugging
+ipdb>=0.13.13
+
+# Lockfile management — compiles requirements*.in -> requirements*.txt.
+# Pinned in the lock so CI's drift-gate uses the same compiler version we do.
+pip-tools>=7.5.3

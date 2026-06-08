@@ -68,6 +68,21 @@ jobs:
           pip install -r requirements.txt
           pip install -r requirements-dev.txt
 
+      - name: Verify requirements lockfiles are in sync
+        # requirements*.txt are COMPILED from requirements*.in via pip-tools (pinned
+        # in requirements-dev.txt). Recompile WITHOUT --upgrade — existing pins are
+        # kept, so a fresh PyPI release never counts as drift — and fail if the
+        # committed lock changed, i.e. a .in was edited without recompiling, or a
+        # .txt was hand-edited. Keeps installs reproducible.
+        run: |
+          pip-compile --no-header --no-strip-extras --quiet requirements.in
+          pip-compile --no-header --no-strip-extras --quiet requirements-dev.in
+          if ! git diff --exit-code requirements.txt requirements-dev.txt; then
+            echo "::error::Lockfiles out of sync with their .in sources. Run: pip-compile --no-header --no-strip-extras requirements.in && pip-compile --no-header --no-strip-extras requirements-dev.in (then commit)."
+            exit 1
+          fi
+          echo "Lockfiles in sync with .in sources."
+
       - name: Install frontend dependencies
         run: npm ci
 
