@@ -289,6 +289,7 @@
 | lifecycle_status | String 50 | active\|nrfnd\|eol\|obsolete\|ltb |
 | package_type | String 100 | QFP-64\|BGA-256\|0603 |
 | rohs_status | String 50 | compliant\|non-compliant\|exempt |
+| condition | String 20, nullable, indexed | Broker stock condition: `New`\|`Recertified`\|`Refurbished`\|`Used`\|`Pulled`\|`Unknown`. Application-validated (no DB CHECK). Powers the Condition global facet; NULL until a source (offer/sighting provenance) populates it — the facet renders only values with data. Migration 091. |
 | enrichment_status | String 20 | `unenriched` \| `verified` \| `web_sourced` \| `oem_sourced` \| `ai_inferred` \| `not_found` \| `not_catalogued`. Validated on write against `MaterialEnrichmentStatus` (constants.py). `oem_sourced` = single official OEM page; `not_catalogued` = recognised OEM/FRU part with no public specs (retries on 30-day backoff). No migration — varchar column. |
 | cross_references | JSONB | Alternative MPNs; also records OEM FRU→commodity-MPN linkages written by the cross-ref enrichment tier (`[{"mpn": <resolved>, "manufacturer": <mfr>}]`). |
 | specs_structured | JSONB | Parametric data |
@@ -464,3 +465,9 @@ Lineage columns added to existing tables: `requirements.oem_hint`; `sightings.re
 
 **`commodity_spec_schemas`** — Parametric filter definitions per commodity
 **`material_spec_facets`** — Parametric values per material card
+
+> **Seed source of truth:** `app/data/commodity_seeds.json` (loaded by `commodity_registry.py`). `seed_commodity_schemas()` only INSERTs missing `(commodity, spec_key)` pairs at boot — it never updates an existing row. Curating an existing seed (new `enum_values`, renamed `display_name`, reordered) therefore requires `reseed_changed_schemas()` (delete-then-reinsert of drifted rows), run once via Alembic migration `090_reseed_commodity_schemas`.
+>
+> **Canonical filter values:** for a fixed-vocabulary enum (non-empty `enum_values`), `get_subfilter_options()` renders the full declared list — unstocked values still show with a `(0)` count. Open-vocabulary enums (no `enum_values`, e.g. connector `series`) render top-N observed values behind a typeahead. Booleans always offer Yes/No.
+>
+> **Category canonicalization:** `app/services/category_normalizer.py` maps free-text `material_cards.category` variants (e.g. `connectors, interconnects` → `connectors`) to the canonical commodity keys the faceted sidebar buckets on. Forward hook at the three card category write sites; one-off backfill via `scripts/normalize_categories.py --dry-run|--apply`. Ambiguous strings are left untouched.
