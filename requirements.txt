@@ -43,7 +43,7 @@ pydantic-settings==2.14.1
 # SSE streaming for HTMX sourcing progress
 sse-starlette>=3.4.4,<4.0
 # Anthropic Claude API (used by claude_client, enrichment, batch extraction)
-anthropic>=0.105.2,<1.0
+anthropic>=0.107.1,<1.0
 # HTML sanitization for untrusted email content (XSS prevention)
 nh3==0.3.5
 # Safe XML parsing (XXE prevention)
