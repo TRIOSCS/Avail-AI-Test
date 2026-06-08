@@ -16,9 +16,7 @@
              @change='toggleFilter({{ spec_key|tojson }}, {{ val|tojson }})'
              class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
       <span class="text-gray-700 truncate flex-1 text-[13px]">{{ val }}</span>
-      {% if counts and val in counts %}
-      <span class="text-[11px] text-gray-400 tabular-nums">{{ counts[val] }}</span>
-      {% endif %}
+      <span class="text-[11px] text-gray-400 tabular-nums">{{ counts[val] if (counts and val in counts) else 0 }}</span>
     </label>
     {% endfor %}
   </div>
@@ -65,12 +63,12 @@
     <button @click="toggleFilter('{{ spec_key }}', 'true')"
             :class="(subFilters['{{ spec_key }}'] || []).includes('true') ? 'bg-brand-50 text-brand-700 border-brand-300' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'"
             class="px-3 py-1 text-sm border rounded-md transition-colors">
-      Yes {% if counts and 'true' in counts %}<span class="text-[11px] opacity-60 tabular-nums">({{ counts['true'] }})</span>{% endif %}
+      Yes <span class="text-[11px] opacity-60 tabular-nums">({{ counts['true'] if (counts and 'true' in counts) else 0 }})</span>
     </button>
     <button @click="toggleFilter('{{ spec_key }}', 'false')"
             :class="(subFilters['{{ spec_key }}'] || []).includes('false') ? 'bg-brand-50 text-brand-700 border-brand-300' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'"
             class="px-3 py-1 text-sm border rounded-md transition-colors">
-      No {% if counts and 'false' in counts %}<span class="text-[11px] opacity-60 tabular-nums">({{ counts['false'] }})</span>{% endif %}
+      No <span class="text-[11px] opacity-60 tabular-nums">({{ counts['false'] if (counts and 'false' in counts) else 0 }})</span>
     </button>
   </div>
 </div>

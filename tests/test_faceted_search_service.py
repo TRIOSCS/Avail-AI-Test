@@ -446,8 +446,13 @@ class TestFacetedSearchEdgeCases:
         assert total >= 1
 
 
-def test_boolean_subfilter_hidden_when_no_facet_data(db_session):
-    """Boolean specs must not expose Yes/No values when no facets back them."""
+def test_boolean_subfilter_always_exposes_yes_no(db_session):
+    """Boolean specs always expose Yes/No (with counts incl. 0), independent of backing
+    data.
+
+    Filters are not gated on whether data currently exists — a (0) count is itself
+    useful.
+    """
     from app.models.faceted_search import MaterialSpecFacet
     from app.models.intelligence import MaterialCard
     from app.services.commodity_registry import seed_commodity_schemas
@@ -459,10 +464,10 @@ def test_boolean_subfilter_hidden_when_no_facet_data(db_session):
     db_session.commit()
 
     opts = {o["spec_key"]: o for o in get_subfilter_options(db_session, "microcontrollers")}
-    # A boolean spec with NO facet rows → empty values (template will hide it).
-    assert opts["has_usb"]["values"] == []
+    # A boolean spec with NO facet rows still exposes both toggle values.
+    assert opts["has_usb"]["values"] == ["true", "false"]
 
-    # Once a facet row exists, the boolean exposes its toggle values.
+    # Adding a facet row does not change the offered values.
     db_session.add(
         MaterialSpecFacet(material_card_id=card.id, category="microcontrollers", spec_key="has_usb", value_text="true")
     )

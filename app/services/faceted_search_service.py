@@ -13,6 +13,11 @@ from app.constants import MaterialEnrichmentStatus
 from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
 from app.utils.search_builder import SearchBuilder
 
+# Max distinct values rendered for an open-vocabulary (no enum_values) enum facet.
+# Such facets get a typeahead search box + this many top-by-count values
+# (see get_subfilter_options); a fixed-vocabulary facet renders its full canonical list.
+TOP_N = 12
+
 
 def _apply_facet_filters(
     query,
@@ -318,19 +323,27 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
     if not schemas:
         return []
 
-    # Batch query: all distinct text values grouped by spec_key
-    text_rows = (
-        db.query(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_text)
+    # Batch query: observed text values + their counts, grouped by spec_key.
+    # text_map = sorted observed values (used to append unexpected values to a fixed vocab);
+    # count_map = {spec_key: {value: count}} (drives open-vocab top-N selection).
+    text_count_rows = (
+        db.query(
+            MaterialSpecFacet.spec_key,
+            MaterialSpecFacet.value_text,
+            func.count(MaterialSpecFacet.material_card_id.distinct()),
+        )
         .filter(
             MaterialSpecFacet.category == commodity,
             MaterialSpecFacet.value_text.isnot(None),
         )
-        .distinct()
+        .group_by(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_text)
         .all()
     )
     text_map: dict[str, list[str]] = {}
-    for sk, vt in text_rows:
+    count_map: dict[str, dict[str, int]] = {}
+    for sk, vt, cnt in text_count_rows:
         text_map.setdefault(sk, []).append(vt)
+        count_map.setdefault(sk, {})[vt] = cnt
     for k in text_map:
         text_map[k].sort()
 
@@ -362,12 +375,27 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
             "is_primary": schema.is_primary,
         }
         if schema.data_type == "enum":
-            option["values"] = text_map.get(schema.spec_key, [])
+            if schema.enum_values:
+                # Fixed vocabulary: render the full canonical list (so unstocked values
+                # still show with a (0) count), then append any unexpected observed values.
+                observed = set(text_map.get(schema.spec_key, []))
+                option["values"] = list(schema.enum_values) + [
+                    v for v in sorted(observed) if v not in schema.enum_values
+                ]
+                option["widget"] = "checkbox"
+            else:
+                # Open vocabulary (e.g. connector series): no canonical list to enumerate,
+                # so offer the top-N observed values by count + a typeahead search box.
+                observed_counts = count_map.get(schema.spec_key, {})
+                option["values"] = sorted(observed_counts, key=lambda v: observed_counts[v], reverse=True)[:TOP_N]
+                option["widget"] = "typeahead"
+                option["total_distinct"] = len(observed_counts)
         elif schema.data_type == "numeric":
             option["range"] = numeric_map.get(schema.spec_key)
+            option["widget"] = "range"
         elif schema.data_type == "boolean":
-            # Only offer Yes/No when facet rows actually back this spec, so the toggle
-            # never renders as a clickable control that returns zero results.
-            option["values"] = ["true", "false"] if schema.spec_key in text_map else []
+            # Always offer Yes/No (with counts incl. 0) so the toggle renders consistently
+            # regardless of whether data currently backs it.
+            option["values"] = ["true", "false"]
         result.append(option)
     return result
