@@ -554,27 +554,24 @@ Alpine.data('materialsFilter', () => ({
   page: 0,
   drawerOpen: false,
   displayNames: {},
-  // Trust ladder — ordered enrichment tiers (most → least trustworthy).
-  // Default selection = the trustworthy set (Verified + Web-sourced).
-  statuses: ['verified', 'web_sourced'],
+  // Data-confidence selection — the flat list of enrichment tiers sent to the backend.
+  // Surfaced as 3 user-facing checkboxes (see CONFIDENCE_GROUPS). Default = all tiers on
+  // (the filter only narrows; the page opens showing everything).
+  statuses: ['verified', 'web_sourced', 'oem_sourced', 'ai_inferred', 'not_catalogued', 'not_found', 'unenriched'],
   // Global facets — MaterialCard columns (OR-within each).
   lifecycle: [],
   rohs: [],
   hasDatasheet: false,
   _onPopstate: null,
 
-  // Ordered tier metadata. label = sidebar/chip text; the array order pins
-  // the visual ordering of the Data-confidence section.
-  TRUST_TIERS: [
-    { key: 'verified', label: 'Verified' },
-    { key: 'web_sourced', label: 'Web-sourced' },
-    { key: 'oem_sourced', label: 'OEM-sourced' },
-    { key: 'ai_inferred', label: 'AI-inferred' },
-    { key: 'not_catalogued', label: 'Not catalogued' },
-    { key: 'not_found', label: 'Not found' },
-    { key: 'unenriched', label: 'Unenriched' },
+  // 3 user-facing confidence groups, each expanding to a set of enrichment tiers.
+  // Array order pins the visual ordering of the Data-confidence section.
+  CONFIDENCE_GROUPS: [
+    { key: 'trusted', label: 'Trusted', dot: 'bg-emerald-500', tiers: ['verified', 'web_sourced', 'oem_sourced'] },
+    { key: 'ai_inferred', label: 'AI-inferred', dot: 'bg-amber-500', tiers: ['ai_inferred'] },
+    { key: 'no_data', label: 'No data', dot: 'bg-gray-400', tiers: ['not_catalogued', 'not_found', 'unenriched'] },
   ],
-  DEFAULT_STATUSES: ['verified', 'web_sourced'],
+  DEFAULT_STATUSES: ['verified', 'web_sourced', 'oem_sourced', 'ai_inferred', 'not_catalogued', 'not_found', 'unenriched'],
 
   get commodityDisplayName() {
     if (!this.commodity) return '';
@@ -582,14 +579,35 @@ Alpine.data('materialsFilter', () => ({
       || this.commodity.replace(/_/g, ' ').replace(/(^|\s)\S/g, l => l.toUpperCase());
   },
 
-  // Tiers selected beyond the trustworthy default — surfaced as active chips.
-  get nonDefaultStatuses() {
-    return this.statuses.filter(s => !this.DEFAULT_STATUSES.includes(s));
+  // True when the confidence selection is narrowed from the all-on default.
+  get confidenceNarrowed() {
+    return !(this.statuses.length === this.DEFAULT_STATUSES.length
+      && this.DEFAULT_STATUSES.every(s => this.statuses.includes(s)));
   },
 
-  statusLabel(key) {
-    const tier = this.TRUST_TIERS.find(t => t.key === key);
-    return tier ? tier.label : key;
+  // Fully-checked confidence groups — surfaced as active chips, but only when narrowed.
+  get activeConfidenceGroups() {
+    if (!this.confidenceNarrowed) return [];
+    return this.CONFIDENCE_GROUPS.filter(g => g.tiers.every(t => this.statuses.includes(t)));
+  },
+
+  confidenceGroupChecked(groupKey) {
+    const group = this.CONFIDENCE_GROUPS.find(g => g.key === groupKey);
+    return !!group && group.tiers.every(t => this.statuses.includes(t));
+  },
+
+  toggleConfidenceGroup(groupKey) {
+    const group = this.CONFIDENCE_GROUPS.find(g => g.key === groupKey);
+    if (!group) return;
+    const allPresent = group.tiers.every(t => this.statuses.includes(t));
+    if (allPresent) {
+      this.statuses = this.statuses.filter(s => !group.tiers.includes(s));
+    } else {
+      for (const t of group.tiers) {
+        if (!this.statuses.includes(t)) this.statuses.push(t);
+      }
+    }
+    this.applyFilters();
   },
 
   get activeFilterCount() {
@@ -598,7 +616,7 @@ Alpine.data('materialsFilter', () => ({
       if (Array.isArray(val)) count += val.length;
       else if (val !== '' && val !== null) count += 1;
     }
-    count += this.nonDefaultStatuses.length;
+    count += this.activeConfidenceGroups.length;
     count += this.lifecycle.length;
     count += this.rohs.length;
     if (this.hasDatasheet) count += 1;
@@ -704,15 +722,6 @@ Alpine.data('materialsFilter', () => ({
     this.commodity = commodity || '';
     this.subFilters = {};
     document.body.dispatchEvent(new CustomEvent('commodity-changed'));
-    this.applyFilters();
-  },
-
-  // Trust-ladder tier toggle (multi-select). Always re-applies (the tiers live
-  // in their own pinned section, not the mobile-batch sub-filter group).
-  toggleStatus(key) {
-    const idx = this.statuses.indexOf(key);
-    if (idx >= 0) this.statuses.splice(idx, 1);
-    else this.statuses.push(key);
     this.applyFilters();
   },
 

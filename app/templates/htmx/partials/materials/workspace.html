@@ -32,35 +32,6 @@
         </button>
       </div>
 
-      {# ── Data confidence (trust ladder) ──────────────────────────────
-         Ordered, color-coded enrichment tiers (most → least trustworthy).
-         Multi-select; default = Verified + Web-sourced. Sends a `statuses`
-         CSV that the faceted endpoint already consumes. #}
-      {% set trust_tiers = [
-        ('verified', 'Verified', 'bg-emerald-500'),
-        ('web_sourced', 'Web-sourced', 'bg-sky-500'),
-        ('oem_sourced', 'OEM-sourced', 'bg-indigo-500'),
-        ('ai_inferred', 'AI-inferred', 'bg-amber-500'),
-        ('not_catalogued', 'Not catalogued', 'bg-slate-400'),
-        ('not_found', 'Not found', 'bg-gray-400'),
-        ('unenriched', 'Unenriched', 'bg-gray-300'),
-      ] %}
-      <div class="mb-3">
-        <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Data confidence</h4>
-        <div class="space-y-0.5">
-          {% for key, label, dot in trust_tiers %}
-          <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm">
-            <input aria-label="Filter by {{ label }}" type="checkbox" value="{{ key }}"
-                   :checked="statuses.includes('{{ key }}')"
-                   @change="toggleStatus('{{ key }}')"
-                   class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
-            <span class="inline-block w-2 h-2 rounded-full {{ dot }} flex-shrink-0"></span>
-            <span class="text-gray-700 truncate flex-1 text-[13px]">{{ label }}</span>
-          </label>
-          {% endfor %}
-        </div>
-      </div>
-
       {# Manufacturer filter — always visible, reloads on commodity change #}
       <div id="manufacturer-filter-container"
            hx-get="/v2/partials/materials/filters/manufacturers"
@@ -112,6 +83,25 @@
            }'
            hx-swap="innerHTML"
            hx-sync="this:replace">
+      </div>
+
+      {# ── Data confidence (3 groups, default all-on) ──────────────────
+         Low-priority filter, parked at the bottom. Each group checkbox toggles all
+         its member enrichment tiers; the backend still receives a `statuses` CSV. #}
+      <div class="border-t border-gray-100 pt-3 mt-3">
+        <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Data confidence</h4>
+        <div class="space-y-0.5">
+          <template x-for="group in CONFIDENCE_GROUPS" :key="group.key">
+            <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm">
+              <input type="checkbox"
+                     :checked="confidenceGroupChecked(group.key)"
+                     @change="toggleConfidenceGroup(group.key)"
+                     class="rounded border-gray-300 text-brand-600 focus:ring-brand-500 h-3.5 w-3.5">
+              <span class="inline-block w-2 h-2 rounded-full flex-shrink-0" :class="group.dot"></span>
+              <span class="text-gray-700 truncate flex-1 text-[13px]" x-text="group.label"></span>
+            </label>
+          </template>
+        </div>
       </div>
 
       {# Mobile: "Show Results" button (batch-apply) #}
@@ -171,7 +161,7 @@
       <div id="ai-script-container"></div>
 
       {# Active filter chips #}
-      <template x-if="commodity || q || Object.keys(subFilters).length > 0 || nonDefaultStatuses.length > 0 || lifecycle.length > 0 || rohs.length > 0 || hasDatasheet" x-cloak>
+      <template x-if="commodity || q || Object.keys(subFilters).length > 0 || confidenceNarrowed || lifecycle.length > 0 || rohs.length > 0 || hasDatasheet" x-cloak>
         <div class="flex flex-wrap gap-1.5 mt-2">
           <template x-if="q" x-cloak>
             <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs">
@@ -179,11 +169,11 @@
               <button @click="q = ''; applyFilters()" class="hover:text-blue-900" aria-label="Remove filter">&times;</button>
             </span>
           </template>
-          {# Trust-ladder chips — only non-default tiers surface (Verified/Web-sourced are implicit) #}
-          <template x-for="tier in nonDefaultStatuses" :key="'status-' + tier">
+          {# Data-confidence chips — only when narrowed from the all-on default #}
+          <template x-for="group in activeConfidenceGroups" :key="'conf-' + group.key">
             <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-amber-50 text-amber-700 rounded-full text-xs">
-              <span x-text="statusLabel(tier)"></span>
-              <button @click="toggleStatus(tier)" class="hover:text-amber-900" aria-label="Remove filter">&times;</button>
+              Confidence: <span x-text="group.label"></span>
+              <button @click="toggleConfidenceGroup(group.key)" class="hover:text-amber-900" aria-label="Remove filter">&times;</button>
             </span>
           </template>
           {# Lifecycle chips #}
