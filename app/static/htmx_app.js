@@ -665,13 +665,28 @@ Alpine.data('materialsFilter', () => ({
     this.hasDatasheet = false;
     this.statuses = [...this.DEFAULT_STATUSES];
     this.q = '';
+    this.ui.facetSearch = {};
+    this.ui.facetExpanded = {};
     this.applyFilters();
   },
 
+  // True when the type-to-find query matches at least one known category (else show a
+  // "no matches" hint instead of a blank tree). Over displayNames — the dominant
+  // gibberish/typo no-match case; a query is "" → always true.
+  get anyCategoryMatches() {
+    if (!this.categorySearch) return true;
+    const t = this.categorySearch.toLowerCase();
+    return Object.values(this.displayNames).some(n => String(n).toLowerCase().includes(t));
+  },
+
   copyLink() {
-    if (navigator.clipboard) navigator.clipboard.writeText(window.location.href).catch(() => {});
-    this.copied = true;
-    setTimeout(() => { this.copied = false; }, 1500);
+    const url = window.location.href;
+    const flash = () => { this.copied = true; setTimeout(() => { this.copied = false; }, 1500); };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(url).then(flash).catch(() => window.prompt('Copy this link:', url));
+    } else {
+      window.prompt('Copy this link:', url);  // clipboard API unavailable (HTTP / old browser)
+    }
   },
 
   init() {
@@ -775,6 +790,11 @@ Alpine.data('materialsFilter', () => ({
   selectCommodity(commodity) {
     this.commodity = commodity || '';
     this.subFilters = {};
+    // Reset hoisted per-facet UI so a previous commodity's typeahead text / fold (keyed by a
+    // shared spec_key like "package") can't silently filter the new commodity's facets.
+    this.ui.facetSearch = {};
+    this.ui.facetExpanded = {};
+    this.ui.moreOpen = false;
     if (this.commodity) {
       // Most-recent-first, deduped, capped at 5 (persisted navigation history).
       const list = this.recentCommodities.filter(x => x !== this.commodity);

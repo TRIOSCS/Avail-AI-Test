@@ -31,4 +31,8 @@
     </div>
   </div>
   {% endfor %}
+  {# Type-to-find found nothing — don't leave a blank tree with no signal. #}
+  <p x-show="categorySearch && !anyCategoryMatches" x-cloak class="px-3 py-2 text-xs text-gray-400 italic">
+    No categories match “<span x-text="categorySearch"></span>”.
+  </p>
 </div>
