@@ -7239,6 +7239,7 @@ async def materials_faceted_partial(
     statuses: str = Query(""),
     lifecycle: str = Query(""),
     rohs: str = Query(""),
+    condition: str = Query(""),
     has_datasheet: bool = Query(False),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
@@ -7260,6 +7261,7 @@ async def materials_faceted_partial(
     parsed_statuses = _csv_list(statuses)
     parsed_lifecycle = _csv_list(lifecycle)
     parsed_rohs = _csv_list(rohs)
+    parsed_condition = _csv_list(condition)
 
     materials, total = search_materials_faceted(
         db,
@@ -7271,6 +7273,7 @@ async def materials_faceted_partial(
         statuses=parsed_statuses,
         lifecycle=parsed_lifecycle,
         rohs=parsed_rohs,
+        condition=parsed_condition,
         has_datasheet=has_datasheet,
         limit=limit,
         offset=offset,

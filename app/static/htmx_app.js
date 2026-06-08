@@ -561,6 +561,7 @@ Alpine.data('materialsFilter', () => ({
   // Global facets — MaterialCard columns (OR-within each).
   lifecycle: [],
   rohs: [],
+  condition: [],
   hasDatasheet: false,
   _onPopstate: null,
 
@@ -619,6 +620,7 @@ Alpine.data('materialsFilter', () => ({
     count += this.activeConfidenceGroups.length;
     count += this.lifecycle.length;
     count += this.rohs.length;
+    count += this.condition.length;
     if (this.hasDatasheet) count += 1;
     return count;
   },
@@ -654,6 +656,7 @@ Alpine.data('materialsFilter', () => ({
       }
       this.lifecycle = (params.get('lifecycle') || '').split(',').filter(s => s !== '');
       this.rohs = (params.get('rohs') || '').split(',').filter(s => s !== '');
+      this.condition = (params.get('condition') || '').split(',').filter(s => s !== '');
       this.hasDatasheet = params.get('has_datasheet') === 'true';
       const pageVal = parseInt(params.get('page') || '0', 10);
       this.page = isNaN(pageVal) ? 0 : pageVal;
@@ -686,6 +689,7 @@ Alpine.data('materialsFilter', () => ({
       this.statuses = [...this.DEFAULT_STATUSES];
       this.lifecycle = [];
       this.rohs = [];
+      this.condition = [];
       this.hasDatasheet = false;
       this.page = 0;
       this.subFilters = {};
@@ -703,6 +707,7 @@ Alpine.data('materialsFilter', () => ({
     if (!isDefault) params.set('statuses', this.statuses.join(','));
     if (this.lifecycle.length > 0) params.set('lifecycle', this.lifecycle.join(','));
     if (this.rohs.length > 0) params.set('rohs', this.rohs.join(','));
+    if (this.condition.length > 0) params.set('condition', this.condition.join(','));
     if (this.hasDatasheet) params.set('has_datasheet', 'true');
     if (this.page > 0) params.set('page', this.page);
     for (const [key, val] of Object.entries(this.subFilters)) {

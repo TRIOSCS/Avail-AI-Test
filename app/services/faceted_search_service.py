@@ -183,11 +183,13 @@ def get_global_facet_counts(
 
     lifecycle_counts = _count_col(MaterialCard.lifecycle_status)
     rohs_counts = _count_col(MaterialCard.rohs_status)
+    condition_counts = _count_col(MaterialCard.condition)
     has_ds = base.with_entities(func.count(MaterialCard.id)).filter(MaterialCard.datasheet_url.isnot(None)).scalar()
 
     return {
         "lifecycle": lifecycle_counts,
         "rohs": rohs_counts,
+        "condition": condition_counts,
         "has_datasheet": {"true": has_ds or 0},
     }
 
@@ -203,6 +205,7 @@ def search_materials_faceted(
     statuses: list[str] | None = None,
     lifecycle: list[str] | None = None,
     rohs: list[str] | None = None,
+    condition: list[str] | None = None,
     has_datasheet: bool = False,
     limit: int = 50,
     offset: int = 0,
@@ -283,6 +286,8 @@ def search_materials_faceted(
         query = query.filter(MaterialCard.lifecycle_status.in_(lifecycle))
     if rohs:
         query = query.filter(MaterialCard.rohs_status.in_(rohs))
+    if condition:
+        query = query.filter(MaterialCard.condition.in_(condition))
     if has_datasheet:
         query = query.filter(MaterialCard.datasheet_url.isnot(None))
 

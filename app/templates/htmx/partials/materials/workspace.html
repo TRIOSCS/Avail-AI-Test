@@ -161,7 +161,7 @@
       <div id="ai-script-container"></div>
 
       {# Active filter chips #}
-      <template x-if="commodity || q || Object.keys(subFilters).length > 0 || confidenceNarrowed || lifecycle.length > 0 || rohs.length > 0 || hasDatasheet" x-cloak>
+      <template x-if="commodity || q || Object.keys(subFilters).length > 0 || confidenceNarrowed || lifecycle.length > 0 || rohs.length > 0 || condition.length > 0 || hasDatasheet" x-cloak>
         <div class="flex flex-wrap gap-1.5 mt-2">
           <template x-if="q" x-cloak>
             <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-blue-50 text-blue-700 rounded-full text-xs">
@@ -188,6 +188,13 @@
             <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
               <span x-text="'RoHS: ' + val"></span>
               <button @click="removeGlobalFacet('rohs', val)" class="hover:text-gray-900" aria-label="Remove filter">&times;</button>
+            </span>
+          </template>
+          {# Condition chips #}
+          <template x-for="val in condition" :key="'cond-' + val">
+            <span class="inline-flex items-center gap-1 px-2 py-0.5 bg-gray-100 text-gray-600 rounded-full text-xs">
+              <span x-text="'Condition: ' + val"></span>
+              <button @click="removeGlobalFacet('condition', val)" class="hover:text-gray-900" aria-label="Remove filter">&times;</button>
             </span>
           </template>
           {# Has-datasheet chip #}
@@ -236,6 +243,7 @@
            "statuses": (Alpine.evaluate(document.querySelector("#materials-workspace"), "statuses") || []).join(","),
            "lifecycle": (Alpine.evaluate(document.querySelector("#materials-workspace"), "lifecycle") || []).join(","),
            "rohs": (Alpine.evaluate(document.querySelector("#materials-workspace"), "rohs") || []).join(","),
+           "condition": (Alpine.evaluate(document.querySelector("#materials-workspace"), "condition") || []).join(","),
            "has_datasheet": Alpine.evaluate(document.querySelector("#materials-workspace"), "hasDatasheet") || false,
            "limit": 50,
            "offset": (Alpine.evaluate(document.querySelector("#materials-workspace"), "page") || 0) * 50
