@@ -22,7 +22,7 @@ starlette>=1.2.1,<2.0
 # Replaced prometheus-fastapi-instrumentator (hard-pinned starlette<1.0.0) with a small
 # ASGI middleware in app/prometheus_metrics.py that uses prometheus_client directly.
 prometheus_client>=0.25.0,<1.0
-sentry-sdk[fastapi]==2.61.1
+sentry-sdk[fastapi]==2.62.0
 # Rate limiting
 slowapi==0.1.9
 # Fuzzy matching

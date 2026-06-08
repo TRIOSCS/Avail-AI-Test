@@ -166,7 +166,7 @@ requests==2.34.2
     #   requests-oauthlib
 requests-oauthlib==2.0.0
     # via msrest
-sentry-sdk[fastapi]==2.61.1
+sentry-sdk[fastapi]==2.62.0
     # via -r requirements.in
 slowapi==0.1.9
     # via -r requirements.in
@@ -198,7 +198,6 @@ typing-extensions==4.15.0
     # via
     #   alembic
     #   anthropic
-    #   anyio
     #   azure-communication-callautomation
     #   azure-core
     #   beautifulsoup4
@@ -208,7 +207,6 @@ typing-extensions==4.15.0
     #   pydantic-core
     #   pyee
     #   sqlalchemy
-    #   starlette
     #   typing-inspection
 typing-inspection==0.4.2
     # via
