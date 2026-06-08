@@ -1,8 +1,8 @@
 fastapi==0.136.3
-uvicorn[standard]==0.48.0
+uvicorn[standard]==0.49.0
 sqlalchemy==2.0.50
 psycopg2-binary==2.9.12
-python-multipart==0.0.30
+python-multipart==0.0.32
 httpx==0.28.1
 openpyxl==3.1.5
 jinja2==3.1.6
@@ -36,8 +36,8 @@ orjson>=3.11.9,<4.0
 # CSRF protection
 starlette-csrf==3.0.0
 # NetComponents integration
-beautifulsoup4==4.14.3
-patchright==1.60.0
+beautifulsoup4==4.15.0
+patchright==1.60.1
 # Typed settings from env vars (fail-fast validation at startup)
 pydantic-settings==2.14.1
 # SSE streaming for HTMX sourcing progress
