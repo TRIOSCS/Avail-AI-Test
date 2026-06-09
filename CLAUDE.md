@@ -254,6 +254,10 @@ install (CI + deploy) is reproducible.
   its `.in` (the "Verify requirements lockfiles are in sync" step).
 - To bump a dep: change the constraint in the `.in`, recompile, run the suite. To
   refresh transitive pins to newest: `pip-compile --upgrade ...`.
+- **Dependabot pip PRs** edit the files textually and can't run pip-compile, so they
+  fail the sync gate. `.github/workflows/dependabot-lockfile-sync.yml` auto-recompiles
+  the locks and pushes the corrected `.txt` back to the PR (set a `DEPENDABOT_LOCKFILE_TOKEN`
+  PAT secret to make that push re-trigger CI / turn the checks green).
 
 ### Migrations
 ```bash

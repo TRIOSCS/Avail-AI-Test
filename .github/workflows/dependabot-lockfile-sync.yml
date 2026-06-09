@@ -1,0 +1,68 @@
+name: Dependabot lockfile sync
+
+# Why this exists:
+#   Python deps are pip-tools lockfiles — requirements*.txt are COMPILED from
+#   requirements*.in (see CLAUDE.md "Dependencies"). When Dependabot bumps a pip
+#   package it edits the .in AND the .txt textually, but it cannot run pip-compile,
+#   so the committed .txt drifts from a fresh compile (transitive pins / formatting)
+#   and the "Verify requirements lockfiles are in sync" gate in ci.yml fails on
+#   EVERY pip Dependabot PR. This workflow recompiles the locks for those PRs and
+#   pushes the corrected files back to the PR branch so the bump can pass + merge.
+#
+# Security:
+#   Uses pull_request_target because it needs write access to push back to the PR
+#   branch. That runs in the BASE-repo context (token + secrets), so the job is
+#   hard-gated to `github.actor == 'dependabot[bot]'` and only runs `pip-compile`
+#   on the PR's requirements*.in — it never executes PR scripts (no npm/make/tests).
+#   Dependabot only bumps to real published PyPI releases, so resolving them is
+#   low-risk. Do NOT broaden the trigger or drop the actor gate.
+
+on:
+  pull_request_target:
+    paths:
+      - "requirements.in"
+      - "requirements-dev.in"
+
+permissions:
+  contents: write
+
+jobs:
+  recompile:
+    if: ${{ github.actor == 'dependabot[bot]' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout the PR head branch
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.ref }}
+          repository: ${{ github.event.pull_request.head.repo.full_name }}
+          # A PAT in DEPENDABOT_LOCKFILE_TOKEN makes the recompile push re-trigger CI
+          # so the PR's checks turn green (and auto-merge can fire). Without it the
+          # GITHUB_TOKEN still pushes the corrected lock — main stays green on merge —
+          # but the PR's earlier failing check stays stale-red until a manual re-run.
+          token: ${{ secrets.DEPENDABOT_LOCKFILE_TOKEN || secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Recompile pip-tools lockfiles
+        # Pinned pip-tools + identical flags to ci.yml's drift gate, so the output is
+        # byte-identical to what the gate expects.
+        run: |
+          pip install "pip-tools==7.5.3"
+          pip-compile --no-header --no-strip-extras --quiet requirements.in
+          pip-compile --no-header --no-strip-extras --quiet requirements-dev.in
+
+      - name: Commit & push recompiled locks (only if they changed)
+        run: |
+          if git diff --quiet -- requirements.txt requirements-dev.txt; then
+            echo "Lockfiles already in sync — nothing to recompile."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add requirements.txt requirements-dev.txt
+          git commit -m "chore(deps): recompile pip-tools lockfiles for the Dependabot bump"
+          git push
