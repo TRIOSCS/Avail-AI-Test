@@ -11,7 +11,7 @@ only (no code imports it) and depends on the main repo files like
 ## 1. Prerequisites
 
 - **Docker + Docker Compose** (recommended way to run everything locally)
-- **Python 3.12** (for running the app directly or tests without Docker)
+- **Python 3.13** (for running the app directly or tests without Docker)
 - **Node 20 + npm** (only if you are rebuilding the frontend)
 
 You should also have a **`.env`** file at the project root. For local dev you
