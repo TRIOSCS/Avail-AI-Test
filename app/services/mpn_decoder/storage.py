@@ -3,8 +3,8 @@
 CONSERVATIVE by design: form_factor comes from the vendor prefix (reliable); capacity is
 decoded only where the scheme expresses it unambiguously; usage_class only for well-known
 family codes. Anything uncertain is omitted, never guessed. RPM/interface are not reliably
-encoded in these MPNs, so they are left to later phases. SSD part-number schemes (WD WDS…,
-Seagate XA/ZA/Nytro, …) are intentionally NOT decoded this round — a later increment.
+encoded in these MPNs, so they are left to later phases. SSD part-number schemes live in
+the sibling ssd.py (WD WDS…, Samsung MZ…, Kioxia, …); Seagate XA/ZA/Nytro remain undecoded.
 """
 
 import re
@@ -129,7 +129,10 @@ def _toshiba(mpn: str) -> DecodeResult | None:
 
 
 # ── HGST / Hitachi (HDD) ─────────────────────────────────────────────────
-_HGST = re.compile(r"^(HUH|HUS|HUC|HTS|HDN|HDS|HMS)")
+# HUS requires a digit next (Ultrastar HDDs: HUS72…, HUS156…). The letter-suffixed HUS
+# families (HUSMM/HUSSL/HUSMR/HUSPR) are Ultrastar SAS *SSDs* — 2.5", not 3.5" — so the
+# bare ^HUS gate mislabeled them; they now return None rather than a wrong HDD decode.
+_HGST = re.compile(r"^(HUH|HUS(?=\d)|HUC|HTS|HDN|HDS|HMS)")
 _HGST_PREFIX = {
     "HUH": (FF_35, UC_ENTERPRISE),  # Ultrastar He
     "HUS": (FF_35, UC_ENTERPRISE),  # Ultrastar
