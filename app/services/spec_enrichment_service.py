@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 
 from app.constants import MaterialEnrichmentStatus
 from app.models.intelligence import MaterialCard
-from app.services.commodity_registry import get_batch_spec_schema
+from app.services.commodity_registry import COARSE_BUCKETS_WITHOUT_SEEDS, get_batch_spec_schema
 from app.services.spec_write_service import record_spec
 
 # Only cards whose description/category came from a trustworthy, source-attributed tier may
@@ -56,6 +56,10 @@ def build_spec_prompt(category: str, cards: list[dict]) -> str:
             line += f" (number{', unit: ' + unit if unit else ''})"
         elif spec["type"] == "boolean":
             line += " (true/false)"
+        if spec.get("note"):
+            # Seed-level extraction guidance (e.g. graded-ladder vocabularies where one
+            # value must be picked deterministically) — see commodity_seeds.json.
+            line += f" — {spec['note']}"
         spec_instructions.append(line)
     spec_text = "\n".join(spec_instructions)
 
@@ -221,12 +225,20 @@ async def enrich_pending_specs(db: Session, *, limit: int = 300, batch_size: int
     Only cards with a trustworthy/source-attributed status
     (verified/web_sourced/oem_sourced) seed specs, so guess/orphan descriptions never
     produce facets.
+
+    Declared coarse buckets (COARSE_BUCKETS_WITHOUT_SEEDS) are excluded at the query:
+    they carry no spec schema BY DESIGN, so their cards would otherwise be re-selected
+    into the limit window every run, skipped unstamped, and re-selected forever —
+    eventually starving seeded commodities out of the window. Excluding them (rather
+    than stamping specs_enriched_at) keeps them eligible automatically if a schema is
+    ever added.
     """
     rows = (
         db.query(MaterialCard.id)
         .filter(
             MaterialCard.specs_enriched_at.is_(None),
             MaterialCard.category.isnot(None),
+            MaterialCard.category.notin_(sorted(COARSE_BUCKETS_WITHOUT_SEEDS)),
             MaterialCard.description.isnot(None),
             MaterialCard.description != "",
             MaterialCard.deleted_at.is_(None),

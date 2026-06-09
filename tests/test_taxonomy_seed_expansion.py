@@ -1,6 +1,6 @@
-"""tests/test_taxonomy_seed_expansion.py — TRIO taxonomy aliases + seed expansion.
+"""tests/test_taxonomy_seed_expansion.py — TRIO taxonomy seed expansion.
 
-What: Asserts the PR-A seed expansion landed exactly as specified — tape_drives is a
+What: Asserts the taxonomy seed expansion landed exactly as specified — tape_drives is a
       fully-seeded new commodity; dram/ssd/hdd/motherboards/power_supplies/connectors
       carry their matrix extension specs; connectors no longer ships the retired
       open-vocab 'series' spec; and extension rows on already-seeded commodities reach
@@ -84,7 +84,12 @@ def test_hdd_extensions():
         "Datacenter",
     ]
     assert _spec("hdd", "sector_size")["enum_values"] == ["512n", "512e", "4Kn", "520", "528"]
-    assert _spec("hdd", "encryption")["enum_values"] == ["None", "SED", "FIPS 140-2", "ISE/Instant Secure Erase"]
+    # Graded ladder in ascending-tier order; the values are NOT mutually exclusive
+    # (a FIPS 140-2 drive is also an SED with ISE) and the facet stores one value per
+    # card, so the seed note pins the highest-tier-wins convention for writers.
+    encryption = _spec("hdd", "encryption")
+    assert encryption["enum_values"] == ["None", "ISE/Instant Secure Erase", "SED", "FIPS 140-2"]
+    assert "highest tier wins" in encryption["note"]
 
 
 def test_motherboards_extensions():

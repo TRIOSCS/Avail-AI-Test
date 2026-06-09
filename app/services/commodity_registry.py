@@ -160,6 +160,10 @@ def get_batch_spec_schema() -> dict[str, dict]:
                 spec["canonical_unit"] = seed["canonical_unit"]
             if seed.get("unit"):
                 spec["unit_hint"] = seed["unit"]  # For display in prompts
+            if seed.get("note"):
+                # Extraction guidance for the AI writer (e.g. graded-ladder enums where
+                # exactly one tier must be picked). Prompt-only — never stored in the DB.
+                spec["note"] = seed["note"]
             specs.append(spec)
         result[commodity] = {"specs": specs}
     return result

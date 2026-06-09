@@ -2,7 +2,7 @@
 
 import pytest
 
-from app.services.category_normalizer import normalize_category
+from app.services.category_normalizer import normalize_category, normalize_trio_category
 
 
 def test_known_alias_maps_to_canonical():
@@ -28,14 +28,40 @@ def test_known_alias_maps_to_canonical():
     ],
 )
 def test_trio_sfdc_commodity_codes_map_to_tree_keys(raw, expected):
-    """TRIO SFDC part-master Commodity_Code__c vocabulary lands on canonical keys."""
-    assert normalize_category(raw) == expected
+    """TRIO SFDC part-master Commodity_Code__c vocabulary lands on canonical keys via
+    the source-scoped entry point (which falls back to the global map for codes that are
+    unambiguous everywhere)."""
+    assert normalize_trio_category(raw) == expected
 
 
 @pytest.mark.parametrize("raw,expected", [("CPU", "cpu"), ("SSD", "ssd"), ("Other", "other")])
 def test_trio_codes_already_canonical_resolve_via_lowercase(raw, expected):
     """TRIO codes that ARE tree keys resolve without needing an alias entry."""
     assert normalize_category(raw) == expected
+    assert normalize_trio_category(raw) == expected
+
+
+def test_bare_memory_is_source_scoped_not_global():
+    """Bare "memory" is only unambiguous inside TRIO's part master (supplier taxonomies
+    use it for flash/EEPROM/SRAM too), so the global forward-hook path must leave it
+    untouched while the SFDC ingest path resolves it."""
+    assert normalize_category("Memory") is None
+    assert normalize_trio_category("Memory") == "dram"
+
+
+def test_trio_source_map_targets_are_tree_keys():
+    """Source-scoped TRIO entries obey the same invariants as the global map: lower/
+    trimmed keys, targets on canonical COMMODITY_TREE keys."""
+    from app.services.category_normalizer import CATEGORY_ALIASES, TRIO_SFDC_COMMODITY_CODES
+    from app.services.commodity_registry import get_all_commodities
+
+    tree_keys = set(get_all_commodities())
+    for raw, target in TRIO_SFDC_COMMODITY_CODES.items():
+        assert raw == raw.lower().strip(), f"TRIO code {raw!r} must be lower/trimmed"
+        assert target in tree_keys, f"TRIO code {raw!r} -> {target!r} is not a COMMODITY_TREE key"
+        assert raw not in CATEGORY_ALIASES, (
+            f"TRIO code {raw!r} is source-scoped and must NOT also be in the global CATEGORY_ALIASES"
+        )
 
 
 def test_legacy_generic_ic_bucket_maps_to_ics_other():

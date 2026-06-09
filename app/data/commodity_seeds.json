@@ -3098,10 +3098,11 @@
       "data_type": "enum",
       "enum_values": [
         "None",
+        "ISE/Instant Secure Erase",
         "SED",
-        "FIPS 140-2",
-        "ISE/Instant Secure Erase"
+        "FIPS 140-2"
       ],
+      "note": "Graded ladder, highest tier wins: FIPS 140-2 drives are also SED with ISE — label them FIPS 140-2; SED drives with ISE — label them SED. Pick exactly one tier.",
       "sort_order": 9
     }
   ],

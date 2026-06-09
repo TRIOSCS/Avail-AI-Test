@@ -3,13 +3,15 @@
 What: One-off DATA-ONLY migration with two steps.
       (1) Rewrites legacy ``material_cards.category`` values through a FROZEN snapshot
           of the category alias map (case-insensitive on ``LOWER(TRIM(category))``), so
-          rows like "Integrated Circuits (ICs)", "Capacitors", or TRIO SFDC codes like
-          "Hard Drive" land on canonical tree keys ("ics_other", "capacitors", "hdd").
-          Capitalized variants of already-canonical keys are lowercased too. Soft-deleted
-          rows are normalized as well — restoring a card must yield a canonical category.
-      (2) Deletes the retired open-vocab ``(connectors, series)`` row from
-          ``commodity_spec_schemas``: the spec matrix replaced it with ``rows`` (its
-          empty enum made it un-facetable, high-cardinality), and the boot seeder is
+          rows like "Integrated Circuits (ICs)" or TRIO SFDC codes like "Hard Drive"
+          land on canonical tree keys ("ics_other", "hdd"). A second pass lowercases
+          capitalized variants of already-canonical keys ("Capacitors" -> "capacitors").
+          Soft-deleted rows are normalized as well — restoring a card must yield a
+          canonical category.
+      (2) Deletes the retired ``(connectors, series)`` row from
+          ``commodity_spec_schemas``: the spec matrix replaced it with ``rows`` —
+          ``series`` was an open vocabulary with no canonical list, so it could only
+          render as a noisy high-cardinality typeahead — and the boot seeder is
           insert-only/reconcile-only so removals can never reach an existing DB without
           a migration. Existing ``material_spec_facets`` rows with spec_key='series' are
           intentionally LEFT in place (real extracted data; without a schema row the UI
@@ -42,9 +44,12 @@ down_revision = "091_cleanup_vague_descs"
 branch_labels = None
 depends_on = None
 
-# FROZEN snapshot of app/services/category_normalizer.py::CATEGORY_ALIASES at the time
-# this migration was written (incl. the TRIO SFDC Commodity_Code__c vocabulary added in
-# the same PR). Keys are lower/trimmed variants, values are canonical tree keys.
+# FROZEN snapshot of the alias vocabulary at the time this migration was written:
+# app/services/category_normalizer.py::CATEGORY_ALIASES PLUS the source-scoped
+# TRIO_SFDC_COMMODITY_CODES ("memory" -> "dram" — safe in this one-off pass because
+# every existing material_cards row carries TRIO part-master provenance; the forward
+# hooks keep that entry out of the global path). Keys are lower/trimmed variants,
+# values are canonical tree keys.
 _CATEGORY_ALIASES: dict[str, str] = {
     "connectors, interconnects": "connectors",
     "cable assemblies": "cables",

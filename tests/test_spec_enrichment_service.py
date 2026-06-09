@@ -136,6 +136,24 @@ async def test_claude_error_counts_and_continues(db: Session, _schemas):
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize("coarse", ["ics_other", "oem_assemblies"])
+async def test_coarse_bucket_cards_skip_spec_pass_unstamped(db: Session, _schemas, coarse):
+    """The canonical coarse buckets (not just arbitrary unknown strings) hit the
+    skipped_no_schema path when addressed directly (e.g. the enrich button), and stay
+    unstamped so a future schema addition picks them up without force=True."""
+    from app.services.spec_enrichment_service import enrich_card_specs
+
+    card = _mc(db, f"COARSE-{coarse}", category=coarse)
+    with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value={"parts": []}) as m:
+        stats = await enrich_card_specs([card.id], db)
+    assert stats["skipped_no_schema"] == 1
+    assert stats["cards_processed"] == 0
+    m.assert_not_called()
+    db.refresh(card)
+    assert card.specs_enriched_at is None
+
+
+@pytest.mark.asyncio
 async def test_pending_selects_unmarked_cards(db: Session, _schemas):
     from app.services.spec_enrichment_service import enrich_pending_specs
 
@@ -143,6 +161,27 @@ async def test_pending_selects_unmarked_cards(db: Session, _schemas):
     with patch("app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=_payload("PENDING1")):
         stats = await enrich_pending_specs(db, limit=10)
     assert stats["cards_processed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_pending_excludes_coarse_buckets_from_window(db: Session, _schemas):
+    """Coarse-bucket cards never enter the scheduled selection window: they have no
+    schema BY DESIGN, so selecting them would recycle the same unstamped cards through
+    every run and (once the population outgrows the limit) starve seeded commodities."""
+    from app.services.spec_enrichment_service import enrich_pending_specs
+
+    coarse = _mc(db, "COARSE-PENDING", category="ics_other")
+    seeded = _mc(db, "SEEDED-PENDING")  # microcontrollers — seeded, must still be picked
+    with patch(
+        "app.utils.claude_client.claude_structured", new_callable=AsyncMock, return_value=_payload("SEEDED-PENDING")
+    ):
+        stats = await enrich_pending_specs(db, limit=10)
+    assert stats["cards_processed"] == 1  # only the seeded-commodity card
+    assert stats["skipped_no_schema"] == 0  # the coarse card was excluded, not skipped
+    db.refresh(coarse)
+    db.refresh(seeded)
+    assert coarse.specs_enriched_at is None  # stays eligible if a schema ever ships
+    assert seeded.specs_enriched_at is not None
 
 
 @pytest.mark.asyncio
@@ -167,6 +206,18 @@ async def test_enrich_button_triggers_spec_pass(client, test_material_card):
     mspec.assert_awaited_once()
     # force=True so the just-clicked card re-extracts even if previously marked
     assert mspec.call_args.kwargs.get("force") is True
+
+
+def test_build_spec_prompt_includes_graded_ladder_note():
+    """Seed-level extraction notes reach the AI prompt: hdd/encryption is a graded
+    highest-tier-wins ladder (a FIPS 140-2 drive is also an SED with ISE), and the
+    facet holds ONE value per card, so the writer must pick deterministically."""
+    from app.services.spec_enrichment_service import build_spec_prompt
+
+    prompt = build_spec_prompt(
+        "hdd", [{"display_mpn": "ST4000NM000A", "manufacturer": "Seagate", "description": "4TB 7.2K SAS HDD"}]
+    )
+    assert "highest tier wins" in prompt
 
 
 @pytest.mark.asyncio
