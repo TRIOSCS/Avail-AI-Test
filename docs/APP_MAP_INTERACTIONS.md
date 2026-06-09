@@ -785,14 +785,52 @@ spec_enrichment_service.py  — SECOND PASS
     |             free-text summary bar because a wrong spec value silently mis-filters a part)
     |
     +---> spec_write_service.record_spec()
-    |       +---> DB: UPDATE material_cards.specs_structured (JSONB — keyed parametric values)
-    |       +---> DB: UPSERT material_spec_facets (one row per spec facet per card)
+    |       +---> spec_tiers.tier_for(source) + resolve(existing, incoming)  — F1 LADDER
+    |       |       (single uniform conflict rule for ALL sources; see contract below)
+    |       +---> DB: UPDATE material_cards.specs_structured (JSONB — keyed parametric values
+    |       |        incl. tier) — only when resolve() says the incoming write wins
+    |       +---> DB: UPSERT material_spec_facets (incl. source/confidence/tier mirroring the
+    |       |        winning JSONB entry — a losing write never mutates the facet)
     |       +---> DB: UPDATE material_cards.specs_summary (plain-text key-spec summary)
     |
     +---> DB: UPDATE material_cards.specs_enriched_at = now()
     |       (idempotent gate: NULL cards are processed; non-NULL cards are skipped
     |        unless force=True, e.g. from the Enrich button)
+```
 
+### spec_tiers — source→tier provenance ladder (SP2/F1+F2, `app/services/spec_tiers.py`)
+
+The single authoritative "which source wins" rule, so source-execution ORDER is no longer
+load-bearing (it replaced `record_spec`'s old vendor-only special-case + "latest write wins").
+
+```
+SOURCE_TIER  manual:100 · {digikey,mouser,nexar,element14,oemsecrets}_api:90 · mpn_decode:85
+             · {partsurfer,psref}→oem_scrape:80 · web_search:70 · brokerbin:65
+             · spec_extraction:60 · {ai_guess,claude_opus_inferred}:40   (unknown → 0)
+
+tier_for(source) -> int                 # SOURCE_TIER.get(source, 0)
+
+resolve(existing, incoming) -> bool      # incoming wins iff its (tier, confidence, updated_at)
+                                         # tuple is STRICTLY greater. existing=None → win.
+                                         # higher tier always overrides; equal tier → higher
+                                         # confidence; exact tie → newer updated_at; full tie → keep.
+                                         # Pure function — no DB, no side effects.
+
+set_category(card, value, source, confidence) -> bool   # the ONE DB-touching helper
+    +---> normalize_category(value); None (off-vocab/empty) → return False, no write
+    +---> build incoming{tier,confidence,now}; existing from card.category_* (None if category NULL)
+    +---> resolve(): on win set card.category + category_source/confidence/tier, return True;
+          else leave card untouched, return False  (a lower-tier source can't overwrite a
+          higher-tier category; junk can't blank a real one)
+```
+
+Consumers: `record_spec` (tier persisted into `specs_structured`, conflict via `resolve`),
+`mpn_decoder/writer.py` (decode category via `set_category`, tier 85). The 4 remaining
+category writers (enrichment / authoritative / material-enrichment) route through
+`set_category` in SP3. The deterministic decode is now protected by its tier (85), not by
+running before the AI spec pass.
+
+```
 Startup backfill:
     _backfill_material_cards() in startup.py
     +---> Runs at application boot

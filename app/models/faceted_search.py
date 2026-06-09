@@ -59,6 +59,13 @@ class MaterialSpecFacet(Base):
     value_numeric = Column(Float)
     value_unit = Column(String(20))
 
+    # Provenance (SP2/F2) — mirrors the winning specs_structured entry's source/confidence/tier
+    # so a faceted query can surface (or filter on) where each value came from. All nullable:
+    # legacy facet rows pre-date provenance and are backfilled by migration 092_spec_provenance.
+    source = Column(String(50))
+    confidence = Column(Float)
+    tier = Column(Integer)
+
     material_card = relationship("MaterialCard")
 
     __table_args__ = (

@@ -60,6 +60,12 @@ class MaterialCard(Base):
     #                                    "fetched_at": "2026-06-04T..Z", "matched_mpn": "..."}}
     enrichment_provenance = Column(JSONB)
 
+    # Category provenance (SP2/F2 — set via spec_tiers.set_category, governed by the F1 ladder).
+    # A lower-tier source can never overwrite a category written by a higher-tier source.
+    category_source = Column(String(50))  # "mpn_decode", "digikey_api", "claude_opus_inferred", ...
+    category_confidence = Column(Float)
+    category_tier = Column(Integer)
+
     is_internal_part = Column(Boolean, default=False, server_default="false")  # Internal/custom PN (not a standard MPN)
 
     deleted_at = Column(UTCDateTime, nullable=True, index=True)  # NULL = active, non-NULL = soft-deleted

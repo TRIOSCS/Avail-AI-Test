@@ -12,10 +12,8 @@ from loguru import logger
 from sqlalchemy.orm import Session
 
 from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
+from app.services.spec_tiers import resolve, tier_for
 from app.services.unit_normalizer import normalize_value
-
-# Vendor API sources are authoritative — their values are never overwritten.
-_VENDOR_API_SOURCES: set[str] = {"digikey_api", "nexar_api", "mouser_api"}
 
 
 def load_schema_cache(db: Session, commodity: str) -> dict:
@@ -44,8 +42,9 @@ def record_spec(
     commit — caller manages the transaction.
 
     Returns True if the spec was persisted, False if it was skipped for any reason (card
-    not found, no category, no schema, enum mismatch, unparseable numeric, vendor-API
-    conflict, or same-source lower-confidence).
+    not found, no category, no schema, enum mismatch, unparseable numeric, or the F1
+    tier ladder rejecting the write — a lower-(tier, confidence, updated_at) source
+    loses to the existing entry; see app/services/spec_tiers.resolve).
     """
     card = db.get(MaterialCard, card_id)
     if card is None:
@@ -105,12 +104,15 @@ def record_spec(
         if unit and canonical_unit:
             canonical_value = normalize_value(canonical_value, unit, canonical_unit)
 
-    # Build the spec entry
+    # Build the spec entry. ``tier`` (F2) is persisted alongside value/source/confidence so
+    # later writes — and the backfill — can rank this entry without re-deriving it.
     now_iso = datetime.now(timezone.utc).isoformat()
+    incoming_tier = tier_for(source)
     new_entry = {
         "value": canonical_value if schema.data_type == "numeric" else value,
         "source": source,
         "confidence": confidence,
+        "tier": incoming_tier,
         "updated_at": now_iso,
     }
 
@@ -119,55 +121,32 @@ def record_spec(
         new_entry["original_value"] = value
         new_entry["original_unit"] = unit
 
-    # Conflict resolution: 2-tier — vendor API sources are authoritative, otherwise latest wins
+    # Conflict resolution: single uniform F1 ladder — incoming wins iff its
+    # (tier, confidence, updated_at) tuple beats the existing entry's (spec_tiers.resolve).
+    # Higher tier always overrides; equal tier → higher confidence; tie → newer.
     specs = dict(card.specs_structured or {})
     existing = specs.get(spec_key)
 
-    if existing:
-        existing_source = existing.get("source", "")
-
-        if existing_source != source:
-            # Different source — check vendor API priority
-            if existing_source in _VENDOR_API_SOURCES and source not in _VENDOR_API_SOURCES:
-                logger.info(
-                    "spec conflict: card={} key={} kept existing (vendor_api) "
-                    "existing={}({}, conf={}) incoming={}({}, conf={})",
-                    card_id,
-                    spec_key,
-                    existing.get("value", ""),
-                    existing_source,
-                    existing.get("confidence", 0),
-                    value,
-                    source,
-                    confidence,
-                )
-                return False
-
-            # Latest write wins for different non-vendor sources
-            logger.info(
-                "spec conflict: card={} key={} overwriting existing={}({}, conf={}) with incoming={}({}, conf={})",
+    if existing is not None:
+        # Legacy entries pre-date the tier key — backfill in-memory from their source so the
+        # comparison is correct.
+        existing.setdefault("tier", tier_for(existing.get("source", "")))
+        incoming = {"tier": incoming_tier, "confidence": confidence, "updated_at": now_iso}
+        if not resolve(existing, incoming):
+            logger.debug(
+                "spec skip: card={} key={} existing={}({}, tier={}, conf={}) beats incoming={}({}, tier={}, conf={})",
                 card_id,
                 spec_key,
                 existing.get("value", ""),
-                existing_source,
+                existing.get("source", ""),
+                existing.get("tier", 0),
                 existing.get("confidence", 0),
                 value,
                 source,
+                incoming_tier,
                 confidence,
             )
-        else:
-            # Same source — only overwrite if confidence is higher or equal
-            existing_conf = existing.get("confidence", 0)
-            if confidence < existing_conf:
-                logger.debug(
-                    "spec skip: card={} key={} same source={} existing_conf={} > incoming_conf={}",
-                    card_id,
-                    spec_key,
-                    source,
-                    existing_conf,
-                    confidence,
-                )
-                return False
+            return False
 
     # Write to JSONB (source of truth)
     if schema.data_type == "boolean":
@@ -197,6 +176,12 @@ def record_spec(
         facet.value_text = str(value)
         facet.value_numeric = None
         facet.value_unit = None
+
+    # Facet provenance projection (F2): the facet row always mirrors the winning JSONB
+    # entry's source/confidence/tier (reached only when the write won the ladder above).
+    facet.source = source
+    facet.confidence = confidence
+    facet.tier = incoming_tier
 
     db.flush()
     logger.debug(
