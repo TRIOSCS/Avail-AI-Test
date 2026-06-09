@@ -1,8 +1,20 @@
 {# Dynamic sub-filters for a specific commodity.
    Called by: HTMX request when commodity or filters change
-   Depends on: subfilter_options, facet_counts from route context
+   Depends on: subfilter_options, facet_counts, spec_coverage, commodity_display
+               from route context
 #}
 {% from "htmx/partials/materials/filters/_macros.html" import render_subfilter %}
+
+{# Coverage line — sets expectations before parametric filtering: facets only exist on
+   spec-enriched cards, so a thin N here explains thin parametric results. #}
+{% macro coverage_line() %}
+  {% if spec_coverage and spec_coverage.total > 0 %}
+  <p class="text-[11px] text-gray-400 mb-2">
+    {{ "{:,}".format(spec_coverage.with_specs) }} of {{ "{:,}".format(spec_coverage.total) }} parts in
+    {{ commodity_display }} have filterable specs
+  </p>
+  {% endif %}
+{% endmacro %}
 
 {% if subfilter_options %}
 <div class="border-t border-gray-100 pt-3 mt-3">
@@ -11,6 +23,7 @@
     <button @click="clearSubFilters()" x-show="Object.keys(subFilters).length > 0" x-cloak
             class="text-[11px] text-brand-600 hover:text-brand-700 font-medium">Clear specs</button>
   </div>
+  {{ coverage_line() }}
 
   {# Essential facets (is_primary) render expanded; the rest fold under "More filters". #}
   {% set primary_opts = subfilter_options | selectattr('is_primary') | list %}
@@ -36,6 +49,7 @@
 </div>
 {% elif commodity_selected %}
 <div class="border-t border-gray-100 pt-3 mt-3">
+  {{ coverage_line() }}
   <p class="text-xs text-gray-400 italic">No filters available for this category</p>
 </div>
 {% endif %}

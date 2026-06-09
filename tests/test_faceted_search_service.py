@@ -475,3 +475,213 @@ def test_boolean_subfilter_always_exposes_yes_no(db_session):
     db_session.commit()
     opts2 = {o["spec_key"]: o for o in get_subfilter_options(db_session, "microcontrollers")}
     assert opts2["has_usb"]["values"] == ["true", "false"]
+
+
+# --- Operational (Layer-3) sourcing filters ---
+
+
+def _mk_op(
+    db,
+    mpn,
+    *,
+    crosses="unset",
+    internal=None,
+    last_searched=None,
+    searches=0,
+    vendor_price="none",
+):
+    """Card with operational fields.
+
+    crosses: 'unset' keeps the column default ([]).
+    vendor_price: 'none' = no vendor rows, None = row without price, number = row with price.
+    """
+    card = MaterialCard(
+        normalized_mpn=mpn,
+        display_mpn=mpn.upper(),
+        category="resistors",
+        is_internal_part=internal,
+        last_searched_at=last_searched,
+        search_count=searches,
+        created_at=datetime.now(timezone.utc),
+    )
+    if crosses != "unset":
+        card.cross_references = crosses
+    db.add(card)
+    db.flush()
+    if vendor_price != "none":
+        from app.models import MaterialVendorHistory
+
+        db.add(MaterialVendorHistory(material_card_id=card.id, vendor_name="V1", last_price=vendor_price))
+        db.flush()
+    return card
+
+
+def test_search_faceted_has_stock_filter(db_session: Session):
+    _mk_op(db_session, "stock-yes", vendor_price=None)  # row exists, price unknown
+    _mk_op(db_session, "stock-no")
+
+    results, total = search_materials_faceted(db_session, has_stock=True)
+    assert {c.normalized_mpn for c in results} == {"stock-yes"}
+    assert total == 1
+
+    _, total_all = search_materials_faceted(db_session, has_stock=False)
+    assert total_all == 2  # False is a no-op
+
+
+def test_search_faceted_has_price_filter(db_session: Session):
+    _mk_op(db_session, "price-yes", vendor_price=1.25)
+    _mk_op(db_session, "price-null", vendor_price=None)  # sighting without a price
+    _mk_op(db_session, "price-none")  # no vendor rows at all
+
+    results, total = search_materials_faceted(db_session, has_price=True)
+    assert {c.normalized_mpn for c in results} == {"price-yes"}
+    assert total == 1
+
+    # has_stock is the looser predicate: any vendor row counts.
+    _, total_stock = search_materials_faceted(db_session, has_stock=True)
+    assert total_stock == 2
+
+
+def test_search_faceted_has_crosses_filter_portable(db_session: Session):
+    """has_crosses must hold on rows with SQL NULL, JSON null, [] and a real list.
+
+    The predicate is text-cast based so it behaves identically on PostgreSQL JSONB and
+    SQLite JSON-as-text (see feedback_sqlite_masks_postgres).
+    """
+    _mk_op(db_session, "x-null", crosses=None)  # JSON null / SQL NULL
+    _mk_op(db_session, "x-empty", crosses=[])  # empty list
+    _mk_op(db_session, "x-default")  # column default (list)
+    _mk_op(db_session, "x-real", crosses=[{"mpn": "ALT-1", "manufacturer": "TI"}])
+
+    results, total = search_materials_faceted(db_session, has_crosses=True)
+    assert {c.normalized_mpn for c in results} == {"x-real"}
+    assert total == 1
+
+    _, total_all = search_materials_faceted(db_session, has_crosses=False)
+    assert total_all == 4  # False is a no-op
+
+
+def test_search_faceted_internal_tristate(db_session: Session):
+    _mk_op(db_session, "int-true", internal=True)
+    _mk_op(db_session, "int-false", internal=False)
+    _mk_op(db_session, "int-null", internal=None)  # legacy rows: NULL counts as standard
+
+    _, total_all = search_materials_faceted(db_session, internal="all")
+    assert total_all == 3
+
+    results, total = search_materials_faceted(db_session, internal="standard")
+    assert {c.normalized_mpn for c in results} == {"int-false", "int-null"}
+    assert total == 2
+
+    results, total = search_materials_faceted(db_session, internal="internal")
+    assert {c.normalized_mpn for c in results} == {"int-true"}
+    assert total == 1
+
+    # Unknown value degrades to the "all" no-op (hand-edited URLs).
+    _, total_bogus = search_materials_faceted(db_session, internal="bogus")
+    assert total_bogus == 3
+
+
+def test_search_faceted_searched_within_buckets(db_session: Session):
+    from datetime import timedelta
+
+    now = datetime.now(timezone.utc)
+    _mk_op(db_session, "sw-1d", last_searched=now - timedelta(days=1))
+    _mk_op(db_session, "sw-10d", last_searched=now - timedelta(days=10))
+    _mk_op(db_session, "sw-45d", last_searched=now - timedelta(days=45))
+    _mk_op(db_session, "sw-120d", last_searched=now - timedelta(days=120))
+    _mk_op(db_session, "sw-never", last_searched=None)
+
+    cases = {
+        "7d": {"sw-1d"},
+        "30d": {"sw-1d", "sw-10d"},
+        "90d": {"sw-1d", "sw-10d", "sw-45d"},
+    }
+    for bucket, expected in cases.items():
+        results, total = search_materials_faceted(db_session, searched_within=bucket)
+        assert {c.normalized_mpn for c in results} == expected, bucket
+        assert total == len(expected), bucket
+
+    # "any" and unknown values are no-ops — never-searched rows included.
+    for bucket in ("any", "bogus"):
+        _, total_all = search_materials_faceted(db_session, searched_within=bucket)
+        assert total_all == 5, bucket
+
+
+def test_search_faceted_min_searches(db_session: Session):
+    _mk_op(db_session, "ms-0", searches=0)
+    _mk_op(db_session, "ms-3", searches=3)
+    _mk_op(db_session, "ms-9", searches=9)
+
+    results, total = search_materials_faceted(db_session, min_searches=3)
+    assert {c.normalized_mpn for c in results} == {"ms-3", "ms-9"}  # boundary inclusive
+    assert total == 2
+
+    _, total_all = search_materials_faceted(db_session, min_searches=0)
+    assert total_all == 3  # 0 is a no-op
+
+
+def test_search_faceted_operational_filters_combine(db_session: Session):
+    """Operational filters AND together and with global facets."""
+    keep = _mk_op(
+        db_session,
+        "combo-keep",
+        crosses=[{"mpn": "ALT-9"}],
+        internal=False,
+        searches=5,
+        vendor_price=2.0,
+    )
+    keep.lifecycle_status = "active"
+    drop = _mk_op(db_session, "combo-drop", crosses=[{"mpn": "ALT-8"}], internal=True, searches=5, vendor_price=2.0)
+    drop.lifecycle_status = "active"
+    db_session.flush()
+
+    results, total = search_materials_faceted(
+        db_session,
+        lifecycle=["active"],
+        has_stock=True,
+        has_price=True,
+        has_crosses=True,
+        internal="standard",
+        min_searches=5,
+    )
+    assert {c.normalized_mpn for c in results} == {"combo-keep"}
+    assert total == 1
+
+
+# --- Commodity spec coverage ---
+
+
+def test_get_commodity_spec_coverage(db_session: Session):
+    from app.services.faceted_search_service import get_commodity_spec_coverage
+
+    _seed_dram_schema(db_session)
+    _make_dram_card(db_session, "COV-001", "DDR4", 16)  # has facet rows
+    no_specs = MaterialCard(
+        normalized_mpn="cov-002",
+        display_mpn="COV-002",
+        category="DRAM",
+        created_at=datetime.now(timezone.utc),
+    )
+    deleted = MaterialCard(
+        normalized_mpn="cov-003",
+        display_mpn="COV-003",
+        category="DRAM",
+        deleted_at=datetime.now(timezone.utc),
+        created_at=datetime.now(timezone.utc),
+    )
+    other_cat = MaterialCard(
+        normalized_mpn="cov-004",
+        display_mpn="COV-004",
+        category="Capacitors",
+        created_at=datetime.now(timezone.utc),
+    )
+    db_session.add_all([no_specs, deleted, other_cat])
+    db_session.flush()
+
+    coverage = get_commodity_spec_coverage(db_session, "dram")
+    assert coverage == {"with_specs": 1, "total": 2}  # deleted + other-category excluded
+
+    # Case-insensitive commodity key, and an unknown commodity yields zeros.
+    assert get_commodity_spec_coverage(db_session, "  DRAM ") == {"with_specs": 1, "total": 2}
+    assert get_commodity_spec_coverage(db_session, "nonexistent_xyz") == {"with_specs": 0, "total": 0}

@@ -865,6 +865,20 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     +---> "More attributes" (collapsed, $persist moreAttrsOpen; active-count badge):
     |       Manufacturer (search + top-N) + Global facets (lifecycle / rohs / condition /
     |       has_datasheet) via get_global_facet_counts(). Containers load while hidden.
+    +---> "Sourcing signals" (collapsed, $persist sourcingOpen; active-count badge) —
+    |     Layer-3 operational filters, all top-level params on
+    |     /v2/partials/materials/faceted → search_materials_faceted():
+    |       has_stock   (EXISTS MaterialVendorHistory row)
+    |       has_price   (EXISTS row with last_price IS NOT NULL)
+    |       has_crosses (cross_references holds a non-empty list; portable text-cast
+    |                    predicate — identical on PG JSONB and SQLite JSON-as-text)
+    |       internal    (tri-state all|standard|internal on is_internal_part; default
+    |                    `all` — deliberate deviation from the matrix's default=standard
+    |                    so first load never silently drops rows)
+    |       searched_within (7d|30d|90d|any chips on last_searched_at)
+    |       min_searches    (int ≥ 0 on search_count)
+    |     Unknown enum values degrade to the no-op default (no 500 on hand-edited URLs).
+    |     Static section (no per-value counts → no HTMX reload).
     +---> Data confidence (collapsed, bottom, $persist confidenceOpen): 3 groups —
     |     Trusted / AI-inferred / No data; default all-on; `statuses[]` → `?statuses=` CSV
     |     → search_materials_faceted (IN-filters enrichment_status; precedence over the
@@ -872,6 +886,20 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     Live result count "<N> <Commodity> parts" renders at the top of the results pane
     (list.html) every filters-changed cycle, with an sr-only aria-live announcement.
     Mobile drawer: x-trap focus trap + Escape-to-close.
+
+Coverage-aware empty states (get_commodity_spec_coverage(db, commodity) →
+{"with_specs": N, "total": M}; two cheap aggregates, no N+1):
+    +---> Sub-filters panel header shows "N of M parts in <commodity> have filterable
+    |     specs" so thin parametric results are explained before filtering.
+    +---> Zero results + active parametric sub_filters + N < M → list.html renders the
+    |     "not yet spec-enriched" nudge instead of the generic empty state.
+Result-row upgrades (list.html, server-side in materials_faceted_partial):
+    +---> Spec chips also render WITHOUT a commodity: each card's own category's
+    |     is_primary schema keys (one batched CommoditySpecSchema query), else the first
+    |     3 scalar specs_structured entries, formatted "label: value".
+    +---> Datasheet icon-link (new tab, rel=noopener) when datasheet_url is set;
+    |     "N alternates" badge when cross_references is non-empty; condition badge
+    |     styled like the lifecycle palette.
 
 Search coverage:
     +---> global_search_service.py includes substitutes_text.ilike for

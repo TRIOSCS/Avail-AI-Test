@@ -71,7 +71,10 @@ from ..services import task_service
 from ..services.activity_service import log_activity as _log_activity
 from ..services.commodity_registry import COMMODITY_TREE, get_display_name
 from ..services.faceted_search_service import (
+    INTERNAL_FILTER_VALUES,
+    SEARCHED_WITHIN_DAYS,
     get_commodity_counts,
+    get_commodity_spec_coverage,
     get_facet_counts,
     get_global_facet_counts,
     get_subfilter_options,
@@ -7199,6 +7202,8 @@ async def materials_filters_sub_partial(
             "subfilter_options": subfilter_options,
             "facet_counts": facet_counts,
             "commodity_selected": True,
+            "spec_coverage": get_commodity_spec_coverage(db, commodity),
+            "commodity_display": get_display_name(commodity),
         }
     )
     return template_response("htmx/partials/materials/filters/subfilters.html", ctx)
@@ -7241,6 +7246,12 @@ async def materials_faceted_partial(
     rohs: str = Query(""),
     condition: str = Query(""),
     has_datasheet: bool = Query(False),
+    has_stock: bool = Query(False),
+    has_price: bool = Query(False),
+    has_crosses: bool = Query(False),
+    internal: str = Query("all"),
+    searched_within: str = Query("any"),
+    min_searches: int = Query(0, ge=0),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -7262,6 +7273,11 @@ async def materials_faceted_partial(
     parsed_lifecycle = _csv_list(lifecycle)
     parsed_rohs = _csv_list(rohs)
     parsed_condition = _csv_list(condition)
+    # Unknown enum values degrade to the no-op default (hand-edited URLs must not 500).
+    if internal not in INTERNAL_FILTER_VALUES:
+        internal = "all"
+    if searched_within != "any" and searched_within not in SEARCHED_WITHIN_DAYS:
+        searched_within = "any"
 
     materials, total = search_materials_faceted(
         db,
@@ -7275,6 +7291,12 @@ async def materials_faceted_partial(
         rohs=parsed_rohs,
         condition=parsed_condition,
         has_datasheet=has_datasheet,
+        has_stock=has_stock,
+        has_price=has_price,
+        has_crosses=has_crosses,
+        internal=internal,
+        searched_within=searched_within,
+        min_searches=min_searches,
         limit=limit,
         offset=offset,
     )
@@ -7298,13 +7320,30 @@ async def materials_faceted_partial(
         # currency shown only when a card's vendor rows are single-currency; mixed → default $
         vendor_stats = {s[0]: (s[1], s[2], s[4] if s[3] == 1 else None) for s in stats}
 
-    # Attach primary spec chips for display
-    primary_keys = {}
+    # Attach spec chips for display. In commodity context: the selected commodity's
+    # is_primary keys (unchanged). Without a commodity: each card's OWN category's
+    # primary keys when a schema exists (one batched query — no N+1), else the first
+    # 3 scalar specs_structured entries; the template renders "label: value" there.
+    def _spec_scalar(raw):
+        val = raw.get("value") if isinstance(raw, dict) else raw
+        return val if isinstance(val, (str, int, float, bool)) else None
+
+    primary_by_cat: dict[str, dict[str, str]] = {}
     if commodity:
-        primary_keys = {
+        primary_by_cat[commodity.lower().strip()] = {
             s.spec_key: s.display_name
             for s in db.query(CommoditySpecSchema).filter_by(commodity=commodity, is_primary=True).all()
         }
+    else:
+        card_cats = {(m.category or "").lower().strip() for m in materials if m.category}
+        if card_cats:
+            schema_rows = (
+                db.query(CommoditySpecSchema)
+                .filter(CommoditySpecSchema.commodity.in_(card_cats), CommoditySpecSchema.is_primary.is_(True))
+                .all()
+            )
+            for s in schema_rows:
+                primary_by_cat.setdefault(s.commodity, {})[s.spec_key] = s.display_name
 
     for m in materials:
         vc, bp, cur = vendor_stats.get(m.id, (0, None, None))
@@ -7312,9 +7351,32 @@ async def materials_faceted_partial(
         m._best_price = bp
         m._best_currency = cur
         specs = m.specs_structured or {}
-        m._primary_specs = [
-            {"label": primary_keys[k], "value": specs[k].get("value", "")} for k in primary_keys if k in specs
+        card_cat = commodity.lower().strip() if commodity else (m.category or "").lower().strip()
+        primary_keys = primary_by_cat.get(card_cat, {})
+        chips = [
+            {"label": primary_keys[k], "value": _spec_scalar(specs[k])}
+            for k in primary_keys
+            if k in specs and _spec_scalar(specs[k]) is not None
         ]
+        if not commodity and not chips:
+            # No schema-known primary values for this card — first 3 scalar entries,
+            # labelled by their prettified spec key.
+            for k, raw in specs.items():
+                val = _spec_scalar(raw)
+                if val is None:
+                    continue
+                chips.append({"label": k.replace("_", " "), "value": val})
+                if len(chips) >= 3:
+                    break
+        m._primary_specs = chips
+
+    # Coverage-aware empty state: a parametric zero-result inside a commodity usually
+    # means "not yet spec-enriched", not "no such parts". Coverage is computed only when
+    # the nudge could render (zero results + active parametric sub_filters + commodity).
+    parametric_active = bool(commodity and parsed_filters)
+    spec_coverage = None
+    if total == 0 and parametric_active:
+        spec_coverage = get_commodity_spec_coverage(db, commodity)
 
     ctx = _base_ctx(request, user, "materials")
     ctx.update(
@@ -7330,6 +7392,8 @@ async def materials_faceted_partial(
             "top_categories": [],
             "interpreted_query": "",
             "faceted": True,
+            "parametric_active": parametric_active,
+            "spec_coverage": spec_coverage,
         }
     )
     return template_response("htmx/partials/materials/list.html", ctx)

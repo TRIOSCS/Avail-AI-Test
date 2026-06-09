@@ -582,6 +582,13 @@ Alpine.data('materialsFilter', () => ({
   rohs: [],
   condition: [],
   hasDatasheet: false,
+  // Sourcing signals (Layer-3 operational filters) — MaterialCard + vendor history.
+  hasStock: false,
+  hasPrice: false,
+  hasCrosses: false,
+  internal: 'all',            // 'all' | 'standard' | 'internal'
+  searchedWithin: 'any',      // '7d' | '30d' | '90d' | 'any'
+  minSearches: 0,
   _onPopstate: null,
 
   // ── Direction-B UI state ─────────────────────────────────────────────
@@ -595,6 +602,7 @@ Alpine.data('materialsFilter', () => ({
   // Persisted CHROME only (layout prefs); filter STATE stays URL-bound.
   recentCommodities: persistOr([], 'mat_recent_commodities'),
   moreAttrsOpen: persistOr(false, 'mat_more_attrs_open'),
+  sourcingOpen: persistOr(false, 'mat_sourcing_open'),
   confidenceOpen: persistOr(false, 'mat_confidence_open'),
 
   // 3 user-facing confidence groups, each expanding to a set of enrichment tiers.
@@ -649,6 +657,14 @@ Alpine.data('materialsFilter', () => ({
     this.applyFilters();
   },
 
+  // Active selections inside the "Sourcing signals" section (for its badge + chips).
+  get sourcingActiveCount() {
+    return (this.hasStock ? 1 : 0) + (this.hasPrice ? 1 : 0) + (this.hasCrosses ? 1 : 0)
+      + (this.internal !== 'all' ? 1 : 0)
+      + (this.searchedWithin !== 'any' ? 1 : 0)
+      + (this.minSearches > 0 ? 1 : 0);
+  },
+
   get activeFilterCount() {
     let count = 0;
     for (const [key, val] of Object.entries(this.subFilters)) {
@@ -660,6 +676,7 @@ Alpine.data('materialsFilter', () => ({
     count += this.rohs.length;
     count += this.condition.length;
     if (this.hasDatasheet) count += 1;
+    count += this.sourcingActiveCount;
     return count;
   },
 
@@ -678,6 +695,12 @@ Alpine.data('materialsFilter', () => ({
     this.rohs = [];
     this.condition = [];
     this.hasDatasheet = false;
+    this.hasStock = false;
+    this.hasPrice = false;
+    this.hasCrosses = false;
+    this.internal = 'all';
+    this.searchedWithin = 'any';
+    this.minSearches = 0;
     this.statuses = [...this.DEFAULT_STATUSES];
     this.q = '';
     this.ui.facetSearch = {};
@@ -737,6 +760,15 @@ Alpine.data('materialsFilter', () => ({
       this.rohs = (params.get('rohs') || '').split(',').filter(s => s !== '');
       this.condition = (params.get('condition') || '').split(',').filter(s => s !== '');
       this.hasDatasheet = params.get('has_datasheet') === 'true';
+      this.hasStock = params.get('has_stock') === 'true';
+      this.hasPrice = params.get('has_price') === 'true';
+      this.hasCrosses = params.get('has_crosses') === 'true';
+      const internalParam = params.get('internal');
+      this.internal = ['standard', 'internal'].includes(internalParam) ? internalParam : 'all';
+      const withinParam = params.get('searched_within');
+      this.searchedWithin = ['7d', '30d', '90d'].includes(withinParam) ? withinParam : 'any';
+      const minSearchesVal = parseInt(params.get('min_searches') || '0', 10);
+      this.minSearches = (isNaN(minSearchesVal) || minSearchesVal < 0) ? 0 : minSearchesVal;
       const pageVal = parseInt(params.get('page') || '0', 10);
       this.page = isNaN(pageVal) ? 0 : pageVal;
       this.subFilters = {};
@@ -770,6 +802,12 @@ Alpine.data('materialsFilter', () => ({
       this.rohs = [];
       this.condition = [];
       this.hasDatasheet = false;
+      this.hasStock = false;
+      this.hasPrice = false;
+      this.hasCrosses = false;
+      this.internal = 'all';
+      this.searchedWithin = 'any';
+      this.minSearches = 0;
       this.page = 0;
       this.subFilters = {};
     }
@@ -788,6 +826,12 @@ Alpine.data('materialsFilter', () => ({
     if (this.rohs.length > 0) params.set('rohs', this.rohs.join(','));
     if (this.condition.length > 0) params.set('condition', this.condition.join(','));
     if (this.hasDatasheet) params.set('has_datasheet', 'true');
+    if (this.hasStock) params.set('has_stock', 'true');
+    if (this.hasPrice) params.set('has_price', 'true');
+    if (this.hasCrosses) params.set('has_crosses', 'true');
+    if (this.internal !== 'all') params.set('internal', this.internal);
+    if (this.searchedWithin !== 'any') params.set('searched_within', this.searchedWithin);
+    if (this.minSearches > 0) params.set('min_searches', this.minSearches);
     if (this.page > 0) params.set('page', this.page);
     for (const [key, val] of Object.entries(this.subFilters)) {
       if (Array.isArray(val) && val.length > 0) {
@@ -832,6 +876,34 @@ Alpine.data('materialsFilter', () => ({
 
   toggleDatasheet() {
     this.hasDatasheet = !this.hasDatasheet;
+    if (window.innerWidth >= 1024) this.applyFilters();
+  },
+
+  // Sourcing-signal boolean toggle (hasStock / hasPrice / hasCrosses).
+  toggleSourcingFlag(flag) {
+    if (!['hasStock', 'hasPrice', 'hasCrosses'].includes(flag)) return;
+    this[flag] = !this[flag];
+    if (window.innerWidth >= 1024) this.applyFilters();
+  },
+
+  // Internal-vs-standard segmented control ('all' | 'standard' | 'internal').
+  setInternal(mode) {
+    this.internal = ['standard', 'internal'].includes(mode) ? mode : 'all';
+    if (window.innerWidth >= 1024) this.applyFilters();
+  },
+
+  // Recently-searched chips ('7d' | '30d' | '90d' | 'any'). Re-clicking the active
+  // bucket resets to 'any'.
+  setSearchedWithin(bucket) {
+    const next = ['7d', '30d', '90d'].includes(bucket) ? bucket : 'any';
+    this.searchedWithin = (this.searchedWithin === next) ? 'any' : next;
+    if (window.innerWidth >= 1024) this.applyFilters();
+  },
+
+  // Min-searches numeric input (0 = off).
+  setMinSearches(value) {
+    const num = parseInt(value, 10);
+    this.minSearches = (isNaN(num) || num < 0) ? 0 : num;
     if (window.innerWidth >= 1024) this.applyFilters();
   },
 

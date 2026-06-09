@@ -6,17 +6,24 @@ Called by: htmx_views.py faceted search routes
 Depends on: MaterialCard, MaterialSpecFacet, CommoditySpecSchema
 """
 
-from sqlalchemy import func
+from datetime import datetime, timedelta, timezone
+
+from sqlalchemy import Text, cast, exists, func, or_
 from sqlalchemy.orm import Session
 
 from app.constants import MaterialEnrichmentStatus
-from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet
+from app.models import CommoditySpecSchema, MaterialCard, MaterialSpecFacet, MaterialVendorHistory
 from app.utils.search_builder import SearchBuilder
 
 # Max distinct values rendered for an open-vocabulary (no enum_values) enum facet.
 # Such facets get a typeahead search box + this many top-by-count values
 # (see get_subfilter_options); a fixed-vocabulary facet renders its full canonical list.
 TOP_N = 12
+
+# Operational (Layer-3) filter vocabularies — validated in search_materials_faceted;
+# unknown values degrade to the no-op default rather than erroring on hand-edited URLs.
+INTERNAL_FILTER_VALUES = ("all", "standard", "internal")
+SEARCHED_WITHIN_DAYS = {"7d": 7, "30d": 30, "90d": 90}
 
 
 def _apply_facet_filters(
@@ -212,6 +219,12 @@ def search_materials_faceted(
     rohs: list[str] | None = None,
     condition: list[str] | None = None,
     has_datasheet: bool = False,
+    has_stock: bool = False,
+    has_price: bool = False,
+    has_crosses: bool = False,
+    internal: str = "all",
+    searched_within: str = "any",
+    min_searches: int = 0,
     limit: int = 50,
     offset: int = 0,
 ) -> tuple[list[MaterialCard], int]:
@@ -230,6 +243,17 @@ def search_materials_faceted(
             (OR-within, e.g. ``["active", "eol"]``).
         rohs: When provided, restrict to cards whose rohs_status is in this list (OR-within).
         has_datasheet: When True, restrict to cards that have a non-null datasheet_url.
+        has_stock: When True, restrict to cards with at least one vendor-history row
+            ("has vendor sightings / stock seen").
+        has_price: When True, restrict to cards with a vendor-history row carrying a
+            recorded last_price.
+        has_crosses: When True, restrict to cards whose cross_references JSON holds a
+            non-empty list (portable across PostgreSQL JSONB and SQLite JSON-as-text).
+        internal: Tri-state — "all" (no-op), "standard" (is_internal_part FALSE/NULL),
+            "internal" (is_internal_part TRUE). Unknown values degrade to "all".
+        searched_within: Recency bucket on last_searched_at — "7d" | "30d" | "90d" |
+            "any" (no-op). Unknown values degrade to "any".
+        min_searches: Minimum search_count (0 = no-op).
         limit: Max results
         offset: Pagination offset
 
@@ -248,8 +272,6 @@ def search_materials_faceted(
         # Multi-word natural language queries → FTS for relevance ranking
         use_fts = is_pg and " " in q.strip()
         if use_fts:
-            from sqlalchemy import or_
-
             ts_query = func.plainto_tsquery("english", q)
             # Combine FTS with ILIKE on MPN fields (FTS misses partial MPN matches)
             query = query.filter(
@@ -295,6 +317,36 @@ def search_materials_faceted(
         query = query.filter(MaterialCard.condition.in_(condition))
     if has_datasheet:
         query = query.filter(MaterialCard.datasheet_url.isnot(None))
+
+    # Operational (Layer-3) sourcing filters — MaterialCard columns + vendor history.
+    if has_stock:
+        query = query.filter(exists().where(MaterialVendorHistory.material_card_id == MaterialCard.id))
+    if has_price:
+        query = query.filter(
+            exists().where(
+                MaterialVendorHistory.material_card_id == MaterialCard.id,
+                MaterialVendorHistory.last_price.isnot(None),
+            )
+        )
+    if has_crosses:
+        # Portable non-empty-JSON-list predicate: PG jsonb::text renders an empty array
+        # as '[]' and a JSON null as 'null'; SQLite stores json.dumps() output, which
+        # matches the same literals. Avoids PG-only jsonb_array_length() that SQLite
+        # tests would silently mis-handle.
+        query = query.filter(
+            MaterialCard.cross_references.isnot(None),
+            cast(MaterialCard.cross_references, Text).notin_(("[]", "null", "")),
+        )
+    if internal == "standard":
+        query = query.filter(or_(MaterialCard.is_internal_part.is_(False), MaterialCard.is_internal_part.is_(None)))
+    elif internal == "internal":
+        query = query.filter(MaterialCard.is_internal_part.is_(True))
+    days = SEARCHED_WITHIN_DAYS.get(searched_within)
+    if days:
+        cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+        query = query.filter(MaterialCard.last_searched_at >= cutoff)
+    if min_searches and min_searches > 0:
+        query = query.filter(MaterialCard.search_count >= min_searches)
 
     if sub_filters and commodity:
         commodity_lower = commodity.lower().strip()
@@ -409,3 +461,30 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
             option["values"] = ["true", "false"]
         result.append(option)
     return result
+
+
+def get_commodity_spec_coverage(db: Session, commodity: str) -> dict[str, int]:
+    """Return parametric-spec coverage for a commodity.
+
+    {"with_specs": N, "total": M} — N = distinct non-deleted cards in the commodity that
+    have at least one MaterialSpecFacet row, M = all non-deleted cards in the commodity.
+    Drives the coverage line in the sub-filters panel and the coverage-aware empty state
+    (a parametric zero-result mostly means "not yet spec-enriched", not "no such
+    parts"). Two cheap aggregates, no N+1.
+    """
+    commodity = commodity.lower().strip()
+    commodity_cards = db.query(MaterialCard.id).filter(
+        MaterialCard.deleted_at.is_(None),
+        func.lower(func.trim(MaterialCard.category)) == commodity,
+    )
+    total = db.query(func.count()).select_from(commodity_cards.subquery()).scalar() or 0
+    with_specs = (
+        db.query(func.count(func.distinct(MaterialSpecFacet.material_card_id)))
+        .filter(
+            MaterialSpecFacet.category == commodity,
+            MaterialSpecFacet.material_card_id.in_(commodity_cards),
+        )
+        .scalar()
+        or 0
+    )
+    return {"with_specs": with_specs, "total": total}
