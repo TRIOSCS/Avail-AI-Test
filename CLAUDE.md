@@ -225,8 +225,10 @@ docker compose down               # Stop everything
 templates/static/Vite always rebuild fresh while apt/pip/npm-ci cache — no `--no-cache`),
 rebuilds + recreates **both** the `app` and `enrichment-worker` containers (they share
 `requirements.txt`, so the worker must not lag the app on a dependency bump), waits for
-the app health check, verifies the deployed build tag on both, and checks that Tailwind
-classes in templates exist in the built CSS bundle.
+the app health check, verifies the deployed build tag on both, checks that Tailwind
+classes in templates exist in the built CSS bundle, and restarts the host `nc`/`ics`
+worker systemd units (they run from `/root/availai` outside docker, so they'd otherwise
+keep running stale code after a deploy).
 Never use bare `docker compose up -d --build` (without `--build-arg BUILD_COMMIT=...`) —
 it ships stale templates.
 

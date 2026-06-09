@@ -183,6 +183,27 @@ else
     fi
 fi
 
+# Step 6b: Restart the HOST nc/ics worker systemd units.
+# nc_worker and ics_worker run on the HOST (systemd units from /root/availai), OUTSIDE
+# docker — so a deploy that changes their code would otherwise leave them on stale code
+# until someone manually restarts them. Best-effort + idempotent: only touches units
+# that exist (a no-op on CI / boxes without them). NOTE: these host workers use
+# host-installed deps, NOT the pinned requirements.txt lockfile — folding them onto the
+# pinned deps is a separate follow-up.
+echo ""
+echo "==> Restarting host worker units (nc/ics)..."
+for unit in avail-nc-worker avail-ics-worker; do
+    if systemctl cat "${unit}.service" >/dev/null 2>&1; then
+        if systemctl restart "${unit}.service" 2>/dev/null || sudo systemctl restart "${unit}.service" 2>/dev/null; then
+            echo "==> restarted ${unit} ($(systemctl is-active "${unit}.service" 2>/dev/null || true))"
+        else
+            echo "==> WARNING: could not restart ${unit} — restart it manually if its code changed"
+        fi
+    else
+        echo "==> ${unit} not installed here — skipping"
+    fi
+done
+
 # Step 7: Show recent logs to confirm the right code is running
 echo ""
 echo "==> Recent app logs:"
