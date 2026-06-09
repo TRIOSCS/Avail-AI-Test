@@ -11,11 +11,17 @@ name: Dependabot lockfile sync
 #
 # Security:
 #   Uses pull_request_target because it needs write access to push back to the PR
-#   branch. That runs in the BASE-repo context (token + secrets), so the job is
-#   hard-gated to `github.actor == 'dependabot[bot]'` and only runs `pip-compile`
-#   on the PR's requirements*.in — it never executes PR scripts (no npm/make/tests).
-#   Dependabot only bumps to real published PyPI releases, so resolving them is
-#   low-risk. Do NOT broaden the trigger or drop the actor gate.
+#   branch — that runs in the BASE-repo context with a write token, and pip-compile
+#   DOES resolve (and may build) the PR's requirements*.in, which is code execution.
+#   So the job is gated by TWO conditions that must BOTH hold (see the job `if:`):
+#     (1) the immutable PR AUTHOR is dependabot[bot]  — `pull_request.user.login`
+#         cannot be spoofed (unlike `github.actor`); and
+#     (2) the PR head is a branch IN THIS REPO  — `head.repo == github.repository`
+#         rejects all forks. Dependabot pushes `dependabot/*` branches to this repo,
+#         never a fork, so only write-access-gated, bot-authored PRs can reach the
+#         checkout — i.e. pip-compile only ever resolves Dependabot's bump of an
+#         ALREADY-declared dependency, the same trust level as ci.yml's `pip install`.
+#   Do NOT weaken either condition.
 
 on:
   pull_request_target:
@@ -28,14 +34,17 @@ permissions:
 
 jobs:
   recompile:
-    if: ${{ github.actor == 'dependabot[bot]' }}
+    # SECURITY GATE — both must hold (see the Security note above). Do not weaken.
+    if: >-
+      github.event.pull_request.user.login == 'dependabot[bot]' &&
+      github.event.pull_request.head.repo.full_name == github.repository
     runs-on: ubuntu-latest
     steps:
       - name: Checkout the PR head branch
         uses: actions/checkout@v5
         with:
+          # head is guaranteed in-repo by the `if:` gate, so this is never a fork ref.
           ref: ${{ github.event.pull_request.head.ref }}
-          repository: ${{ github.event.pull_request.head.repo.full_name }}
           # A PAT in DEPENDABOT_LOCKFILE_TOKEN makes the recompile push re-trigger CI
           # so the PR's checks turn green (and auto-merge can fire). Without it the
           # GITHUB_TOKEN still pushes the corrected lock — main stays green on merge —
