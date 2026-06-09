@@ -55,6 +55,16 @@ def update_worker_status(db: Session, **kwargs):
     db.commit()
 
 
+def _record_heartbeat(db: Session):
+    """Refresh the worker liveness heartbeat for the current loop tick.
+
+    Called at the top of every main-loop iteration so last_heartbeat stays fresh on
+    EVERY path (idle, cap-sleep, breaker-open, business-hours), not just after
+    completing work. Returns early if the singleton row is absent.
+    """
+    update_worker_status(db, is_running=True, last_heartbeat=datetime.now(timezone.utc))
+
+
 async def run_ai_gate(db: Session):
     """Run the AI gate (async wrapper since claude_structured is async)."""
     from .ai_gate import process_ai_gate
@@ -131,6 +141,14 @@ def main():
                 break
 
             try:
+                # Refresh liveness heartbeat on EVERY tick, before any branch,
+                # so monitors don't false-alarm during idle/sleep/breaker paths.
+                db = SessionLocal()
+                try:
+                    _record_heartbeat(db)
+                finally:
+                    db.close()
+
                 now_eastern = datetime.now(EASTERN)
 
                 # Reset daily stats at midnight

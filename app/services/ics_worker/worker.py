@@ -57,6 +57,16 @@ def update_worker_status(db: Session, **kwargs):
     db.commit()
 
 
+def _record_heartbeat(db: Session):
+    """Refresh the worker liveness heartbeat to now.
+
+    Called at the top of every main-loop tick so last_heartbeat stays fresh on EVERY
+    path (idle, cap-sleep, breaker-open, off-hours) — not just after a completed search.
+    Keeps liveness monitors from false-alarming "worker DOWN".
+    """
+    update_worker_status(db, is_running=True, last_heartbeat=datetime.now(timezone.utc))
+
+
 async def main():
     """Main worker loop."""
     from app.database import SessionLocal
@@ -127,6 +137,14 @@ async def main():
                 break
 
             try:
+                # Refresh liveness heartbeat every tick — runs on ALL paths
+                # (idle, cap-sleep, breaker-open, off-hours), not just searches.
+                db = SessionLocal()
+                try:
+                    _record_heartbeat(db)
+                finally:
+                    db.close()
+
                 now_eastern = datetime.now(EASTERN)
 
                 # Reset daily stats at midnight

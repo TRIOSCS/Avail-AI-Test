@@ -357,7 +357,12 @@ once at startup by `seed_browser_worker_sources` (see `app/startup.py`)
 and the seed survives because the ping loop never touches them. Their
 actual health is tracked via `IcsWorkerStatus` / `NcWorkerStatus`
 heartbeats; both singletons are seeded at startup so
-`update_worker_status()` writes are not silently dropped.
+`update_worker_status()` writes are not silently dropped. Each worker
+(ics, nc, and enrichment) refreshes `last_heartbeat` on **every** loop
+tick via `_record_heartbeat()` at the top of the loop — so the heartbeat
+reflects process liveness independent of work, and stays fresh on idle /
+cap-sleep / breaker-open / off-hours paths (a liveness monitor reading
+`last_heartbeat` won't false-alarm "DOWN" while a worker is merely paused).
 
 ### Removed (2026-05-14)
 

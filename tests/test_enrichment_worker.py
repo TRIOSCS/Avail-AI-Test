@@ -88,6 +88,79 @@ def test_update_helper_sets_fields(db_session):
 
 
 # ---------------------------------------------------------------------------
+# _record_heartbeat — top-of-loop liveness write (every tick)
+# ---------------------------------------------------------------------------
+
+
+def test_record_heartbeat_advances_with_closed_breaker(db_session):
+    """_record_heartbeat refreshes last_heartbeat, marks is_running, and clears the
+    breaker flag when the breaker is CLOSED — and returns False."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.enrichment_worker_status import EnrichmentWorkerStatus
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import _record_heartbeat
+
+    # Seed the singleton with a stale heartbeat + a stale-open breaker flag.
+    stale = datetime.now(timezone.utc) - timedelta(hours=2)
+    db_session.add(
+        EnrichmentWorkerStatus(
+            id=1,
+            is_running=False,
+            last_heartbeat=stale,
+            circuit_breaker_open=True,
+            circuit_breaker_reason="old reason",
+        )
+    )
+    db_session.commit()
+
+    before = datetime.now(timezone.utc) - timedelta(seconds=5)
+    breaker = EnrichmentCircuitBreaker(EnrichmentWorkerConfig(circuit_breaker_errors=3))
+
+    result = _record_heartbeat(db_session, breaker)
+
+    assert result is False
+    db_session.expire_all()
+    row = db_session.get(EnrichmentWorkerStatus, 1)
+    assert row.is_running is True
+    assert row.last_heartbeat >= before  # advanced to ~now
+    assert row.circuit_breaker_open is False  # stale True cleared
+    assert row.circuit_breaker_reason is None
+
+
+def test_record_heartbeat_persists_open_breaker_and_reason(db_session):
+    """With a TRIPPED breaker, _record_heartbeat persists circuit_breaker_open=True with
+    the trip reason — and returns True."""
+    from datetime import datetime, timedelta, timezone
+
+    from app.models.enrichment_worker_status import EnrichmentWorkerStatus
+    from app.services.enrichment_worker.circuit_breaker import EnrichmentCircuitBreaker
+    from app.services.enrichment_worker.config import EnrichmentWorkerConfig
+    from app.services.enrichment_worker.worker import _record_heartbeat
+
+    db_session.add(EnrichmentWorkerStatus(id=1))
+    db_session.commit()
+
+    cfg = EnrichmentWorkerConfig(circuit_breaker_errors=2)
+    breaker = EnrichmentCircuitBreaker(cfg)
+    for _ in range(cfg.circuit_breaker_errors):
+        breaker.record_claude_error()
+    assert breaker.should_stop()  # tripped
+
+    before = datetime.now(timezone.utc) - timedelta(seconds=5)
+    result = _record_heartbeat(db_session, breaker)
+
+    assert result is True
+    db_session.expire_all()
+    row = db_session.get(EnrichmentWorkerStatus, 1)
+    assert row.is_running is True
+    assert row.last_heartbeat >= before
+    assert row.circuit_breaker_open is True
+    assert row.circuit_breaker_reason  # non-empty trip reason set
+
+
+# ---------------------------------------------------------------------------
 # Task 8: EnrichmentWorkerConfig
 # ---------------------------------------------------------------------------
 
