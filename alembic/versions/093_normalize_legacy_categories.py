@@ -9,7 +9,7 @@ What: One-off DATA-ONLY migration with two steps.
           Soft-deleted rows are normalized as well — restoring a card must yield a
           canonical category.
       (2) Deletes the retired ``(connectors, series)`` row from
-          ``commodity_spec_schemas``: the spec matrix replaced it with ``rows`` —
+          ``commodity_spec_schemas``: the 2026-06-09 taxonomy expansion replaced it with ``rows`` —
           ``series`` was an open vocabulary with no canonical list, so it could only
           render as a noisy high-cardinality typeahead — and the boot seeder is
           insert-only/reconcile-only so removals can never reach an existing DB without
