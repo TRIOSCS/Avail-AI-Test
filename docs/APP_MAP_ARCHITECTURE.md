@@ -10,7 +10,7 @@ AvailAI is a production electronic component sourcing platform and CRM. Buyers s
 
 | Layer | Technology |
 |-------|-----------|
-| **Backend** | Python 3.12, FastAPI, Uvicorn |
+| **Backend** | Python 3.13, FastAPI, Uvicorn |
 | **Database** | PostgreSQL 16, SQLAlchemy 2.0, Alembic |
 | **Cache** | Redis 7 (fallback: PG JSONB) |
 | **Frontend** | Jinja2 + HTMX 2.0 + Alpine.js 3.15 + Tailwind CSS |
