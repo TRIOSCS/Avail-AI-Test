@@ -198,6 +198,7 @@ typing-extensions==4.15.0
     # via
     #   alembic
     #   anthropic
+    #   anyio
     #   azure-communication-callautomation
     #   azure-core
     #   beautifulsoup4
@@ -207,6 +208,7 @@ typing-extensions==4.15.0
     #   pydantic-core
     #   pyee
     #   sqlalchemy
+    #   starlette
     #   typing-inspection
 typing-inspection==0.4.2
     # via
