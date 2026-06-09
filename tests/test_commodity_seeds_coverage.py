@@ -13,6 +13,7 @@ from sqlalchemy.orm import Session
 
 from app.models import CommoditySpecSchema
 from app.services.commodity_registry import (
+    COARSE_BUCKETS_WITHOUT_SEEDS,
     COMMODITY_TREE,
     _load_commodity_seeds,
     get_all_commodities,
@@ -26,10 +27,24 @@ SEEDS = _load_commodity_seeds()
 
 
 def test_every_tree_subcategory_is_seeded():
-    """Every COMMODITY_TREE sub-category key has a non-empty spec list."""
+    """Every COMMODITY_TREE sub-category key has a non-empty spec list.
+
+    Declared coarse buckets (ics_other, oem_assemblies) are exempt — they intentionally
+    carry no parametric seeds.
+    """
     for commodity in get_all_commodities():
+        if commodity in COARSE_BUCKETS_WITHOUT_SEEDS:
+            continue
         assert commodity in SEEDS, f"{commodity} from COMMODITY_TREE not in seeds"
         assert SEEDS[commodity], f"{commodity} has an empty spec list"
+
+
+def test_coarse_buckets_are_tree_keys_without_seeds():
+    """The coarse-bucket declaration stays consistent: in the tree, NOT in the seeds."""
+    tree_keys = set(get_all_commodities())
+    for commodity in COARSE_BUCKETS_WITHOUT_SEEDS:
+        assert commodity in tree_keys, f"{commodity} declared coarse but absent from COMMODITY_TREE"
+        assert commodity not in SEEDS, f"{commodity} declared coarse but HAS seeds — undeclare it"
 
 
 def test_no_orphan_seed_commodities():
@@ -59,9 +74,9 @@ def test_every_spec_has_required_fields():
 def test_enum_values_when_present_are_nonempty_lists():
     """When an enum declares enum_values it must be a non-empty list.
 
-    Open-ended enums (e.g. connectors/series, cpu/socket) intentionally omit enum_values
-    so the UI accepts free-text, so presence is not required; but a declared list must
-    never be empty or the wrong type.
+    Open-ended enums (e.g. motherboards/chipset) intentionally omit enum_values so the
+    UI accepts free-text, so presence is not required; but a declared list must never be
+    empty or the wrong type.
     """
     for commodity, specs in SEEDS.items():
         for spec in specs:
@@ -146,9 +161,14 @@ def test_seed_commodity_schemas_inserts_new_commodities(db_session: Session):
 
 
 def test_seed_commodity_schemas_covers_full_tree(db_session: Session):
-    """After seeding, every COMMODITY_TREE sub-category has rows in the DB."""
+    """After seeding, every COMMODITY_TREE sub-category has rows in the DB.
+
+    Coarse buckets (no parametric seeds by design) are exempt.
+    """
     seed_commodity_schemas(db_session)
     seeded_commodities = {row[0] for row in db_session.query(CommoditySpecSchema.commodity).distinct().all()}
     for group_subs in COMMODITY_TREE.values():
         for commodity in group_subs:
+            if commodity in COARSE_BUCKETS_WITHOUT_SEEDS:
+                continue
             assert commodity in seeded_commodities, f"{commodity} not seeded into DB"
