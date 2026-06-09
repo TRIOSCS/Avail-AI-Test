@@ -166,7 +166,7 @@ requests==2.34.2
     #   requests-oauthlib
 requests-oauthlib==2.0.0
     # via msrest
-sentry-sdk[fastapi]==2.61.1
+sentry-sdk[fastapi]==2.62.0
     # via -r requirements.in
 slowapi==0.1.9
     # via -r requirements.in
