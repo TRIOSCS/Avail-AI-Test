@@ -49,10 +49,13 @@ def _seagate(mpn: str) -> DecodeResult | None:
 
 
 # ── Western Digital (HDD) ────────────────────────────────────────────────
-# Modern scheme WD<cap><suffix> where cap is 2-3 digits = TB×10 (WD40 = 4 TB,
-# WD140 = 14 TB) and the suffix's first letter gives the form factor (E = 3.5", S = 2.5").
+# Modern scheme WD<cap><suffix> where cap is 2-3 digits = TB×10 (WD40 = 4 TB, WD140 = 14 TB).
 # The old 4-digit GB scheme (WD5000AAKX) and SSDs (WDS…) don't match: a 4th digit blocks
 # [A-Z]+, and WDS starts with a letter.
+# form_factor is taken ONLY from a recognized 3.5" family code (every entry in _WD_FAMILY is
+# a 3.5" line). The suffix's first letter is NOT a reliable form-factor signal — 2.5" mobile
+# drives use varied codes (WD10JPLX, WD…LPLX, WD…LPCX) that don't start "S", so the old
+# "S ⇒ 2.5"" rule mislabeled them 3.5". When no family matches we emit capacity only.
 _WD = re.compile(r"^WD(\d{2,3})([A-Z]+)")
 _WD_FAMILY = [  # ordered substring → usage_class (first match wins)
     ("EFR", UC_NAS),
@@ -83,10 +86,10 @@ def _wd(mpn: str) -> DecodeResult | None:
         return None
     specs: dict = {"capacity_gb": int(m.group(1)) * 100}  # TB×10 → GB
     suffix = m.group(2)
-    specs["form_factor"] = FF_25 if suffix.startswith("S") else FF_35
     for token, uc in _WD_FAMILY:
         if token in suffix:
             specs["usage_class"] = uc
+            specs["form_factor"] = FF_35  # every family in _WD_FAMILY is a 3.5" line
             break
     return DecodeResult(commodity="hdd", vendor="Western Digital", specs=specs)
 
@@ -94,7 +97,11 @@ def _wd(mpn: str) -> DecodeResult | None:
 # ── Toshiba (HDD) ────────────────────────────────────────────────────────
 # Prefix → form factor + (where known) usage class. Capacity from an explicit "<n>T" token
 # when present (e.g. MG08ACA16TE = 16 TB).
-_TOSHIBA = re.compile(r"^(MG|MN|MD|MQ|DT|HDW)")
+# Gate requires the full Toshiba family structure — prefix + 2 digits + a 3-letter family
+# code (MG08ACA…, DT01ACA…, MQ01ABD…). A bare 2-char prefix matched too broadly: short OEM
+# spare numbers like Dell DPNs "MGK50"/"MGJN9" (no \d{2}) and "DT10171…" (digits, not 3
+# letters, after the prefix) were mis-decoded as drives. The structured gate excludes them.
+_TOSHIBA = re.compile(r"^(MG|MN|MD|MQ|DT)\d{2}[A-Z]{3}")
 _TOSHIBA_PREFIX = {
     "MG": (FF_35, UC_ENTERPRISE),
     "MN": (FF_35, UC_NAS),
