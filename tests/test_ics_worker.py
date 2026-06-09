@@ -15,6 +15,7 @@ from app.models.ics_worker_status import IcsWorkerStatus
 from app.services.ics_worker.worker import (
     EASTERN,
     _handle_shutdown,
+    _record_heartbeat,
     update_worker_status,
 )
 
@@ -73,6 +74,32 @@ class TestUpdateWorkerStatus:
         update_worker_status(db_session, searches_today=1)
         db_session.refresh(ws)
         assert ws.updated_at is not None
+
+
+# ── Tests: _record_heartbeat ────────────────────────────────────
+
+
+class TestRecordHeartbeat:
+    def test_advances_heartbeat_and_marks_running(self, db_session):
+        """_record_heartbeat refreshes last_heartbeat to ~now and sets is_running."""
+        status = _seed_worker_status(db_session)
+        # Seed a stale heartbeat well in the past.
+        stale = datetime(2000, 1, 1, tzinfo=timezone.utc)
+        status.last_heartbeat = stale
+        status.is_running = False
+        db_session.commit()
+
+        before = datetime.now(timezone.utc)
+        _record_heartbeat(db_session)
+        after = datetime.now(timezone.utc)
+
+        refreshed = db_session.query(IcsWorkerStatus).filter_by(id=1).first()
+        assert refreshed.is_running is True
+        hb = refreshed.last_heartbeat
+        if hb.tzinfo is None:
+            hb = hb.replace(tzinfo=timezone.utc)
+        assert hb > stale
+        assert before <= hb <= after
 
 
 # ── Tests: _handle_shutdown ──────────────────────────────────────

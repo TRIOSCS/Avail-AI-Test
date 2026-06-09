@@ -1397,6 +1397,25 @@ class TestWorker:
         assert ws.is_running is True
         assert ws.searches_today == 5
 
+    def test_record_heartbeat_advances_timestamp(self, db_session):
+        """_record_heartbeat refreshes last_heartbeat to ~now and sets is_running."""
+        from datetime import datetime, timedelta, timezone
+
+        from app.services.nc_worker.worker import _record_heartbeat
+
+        stale = datetime.now(timezone.utc) - timedelta(hours=1)
+        ws = NcWorkerStatus(id=1, is_running=False, last_heartbeat=stale)
+        db_session.add(ws)
+        db_session.commit()
+
+        _record_heartbeat(db_session)
+        db_session.refresh(ws)
+
+        assert ws.is_running is True
+        assert ws.last_heartbeat is not None
+        assert ws.last_heartbeat > stale
+        assert datetime.now(timezone.utc) - ws.last_heartbeat < timedelta(seconds=30)
+
     def test_update_worker_status_no_row(self, db_session):
         """update_worker_status does nothing when no singleton row exists."""
         from app.services.nc_worker.worker import update_worker_status

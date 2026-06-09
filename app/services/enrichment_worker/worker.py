@@ -56,6 +56,35 @@ signal.signal(signal.SIGINT, _handle_shutdown)
 # ---------------------------------------------------------------------------
 
 
+def _record_heartbeat(db: Session, breaker: "EnrichmentCircuitBreaker") -> bool:
+    """Refresh the liveness heartbeat on the status singleton — EVERY loop tick.
+
+    Called at the top of the main loop (before any branch returns/sleeps) so
+    ``last_heartbeat`` advances on idle, daily-cap, breaker-open and business-hours
+    ticks too — not only after a non-empty batch. Without this, a perfectly alive
+    worker can go ~1h between writes and a liveness monitor false-alarms "DOWN".
+
+    Also keeps the persisted breaker flag honest: ``breaker.should_stop()`` is
+    idempotent (auto-resets after cooldown), so writing it every tick clears a stale
+    ``circuit_breaker_open=True`` even when the queue is empty (the non-empty-batch
+    write that previously reset it never runs in that case).
+
+    Returns the current ``breaker_open`` state so the caller can reuse it without a
+    second ``should_stop()`` call.
+    """
+    from app.models.enrichment_worker_status import update_enrichment_worker_status
+
+    breaker_open = breaker.should_stop()
+    update_enrichment_worker_status(
+        db,
+        is_running=True,
+        last_heartbeat=datetime.now(timezone.utc),
+        circuit_breaker_open=breaker_open,
+        circuit_breaker_reason=(breaker.get_trip_info()["trip_reason"] if breaker_open else None),
+    )
+    return breaker_open
+
+
 def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
     """Return the next batch of cards eligible for enrichment.
 
@@ -75,6 +104,8 @@ def select_batch(db: Session, config: "EnrichmentWorkerConfig") -> list:
     """
     from app.models import MaterialCard
 
+    # NOTE: eligibility is read from material_cards.enrichment_status — NOT the (unused)
+    # enrichment_queue table. material_cards is the single source of enrichment state.
     now = datetime.now(timezone.utc)
     retry_cutoff = now - timedelta(hours=config.not_found_retry_hours)
 
@@ -361,6 +392,15 @@ async def main() -> None:
                 break
 
             try:
+                # Liveness heartbeat — EVERY tick, before any branch sleeps/continues, so
+                # last_heartbeat never goes stale on idle/cap/breaker/business-hours paths.
+                # Also reused below as the breaker-open gate (no second should_stop() call).
+                db = SessionLocal()
+                try:
+                    breaker_open = _record_heartbeat(db, breaker)
+                finally:
+                    db.close()
+
                 now_utc = datetime.now(timezone.utc)
                 today_date = now_utc.date()
 
@@ -422,22 +462,14 @@ async def main() -> None:
                     await asyncio.sleep(3600)
                     continue
 
-                # Circuit breaker check — long sleep when open
-                if breaker.should_stop():
-                    info = breaker.get_trip_info()
+                # Circuit breaker check — long sleep when open. Reuses the breaker_open
+                # value already persisted by _record_heartbeat at the top of this tick, so
+                # the status write is not duplicated here.
+                if breaker_open:
                     logger.error(
                         "ENRICH_WORKER: circuit breaker open ({}), sleeping 1h",
-                        info["trip_reason"],
+                        breaker.get_trip_info()["trip_reason"],
                     )
-                    db = SessionLocal()
-                    try:
-                        update_enrichment_worker_status(
-                            db,
-                            circuit_breaker_open=True,
-                            circuit_breaker_reason=info["trip_reason"],
-                        )
-                    finally:
-                        db.close()
                     await asyncio.sleep(3600)
                     continue
 
