@@ -12,7 +12,10 @@ WorkingDirectory=/root/availai
 EnvironmentFile=/root/availai/.env.ics-worker
 Environment="DISPLAY=:99"
 Environment="PYTHONPATH=/root/availai"
-ExecStart=/usr/bin/python3 -m app.services.ics_worker.worker
+# Runs from the pinned-lockfile venv (requirements.txt), NOT system python, so the
+# host workers carry the same pinned deps as the docker app/enrichment images.
+# deploy.sh refreshes this venv from requirements.txt on every deploy.
+ExecStart=/root/availai/.venv/bin/python -m app.services.ics_worker.worker
 Restart=on-failure
 RestartSec=300
 StandardOutput=journal

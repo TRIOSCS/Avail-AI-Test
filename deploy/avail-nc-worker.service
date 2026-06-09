@@ -1,18 +1,21 @@
 [Unit]
 Description=AVAIL NetComponents Search Worker
 Documentation=https://github.com/TRIOSCS/Avail-AI-Test
-After=network.target postgresql.service avail-xvfb.service
+After=network.target avail-xvfb.service
 Requires=avail-xvfb.service
 
 [Service]
 Type=simple
-User=avail
-Group=avail
-WorkingDirectory=/home/avail/avail-ai
-EnvironmentFile=/home/avail/avail-ai/.env
+User=root
+Group=root
+WorkingDirectory=/root/availai
+EnvironmentFile=/root/availai/.env.nc-worker
 Environment="DISPLAY=:99"
-Environment="PYTHONPATH=/home/avail/avail-ai"
-ExecStart=/home/avail/avail-ai/.venv/bin/python -m app.services.nc_worker.worker
+Environment="PYTHONPATH=/root/availai"
+# Runs from the pinned-lockfile venv (requirements.txt), NOT system python, so the
+# host workers carry the same pinned deps as the docker app/enrichment images.
+# deploy.sh refreshes this venv from requirements.txt on every deploy.
+ExecStart=/root/availai/.venv/bin/python -m app.services.nc_worker.worker
 Restart=on-failure
 RestartSec=300
 StandardOutput=journal

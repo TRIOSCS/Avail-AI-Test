@@ -1301,8 +1301,25 @@ deploy.sh
     |       +---> Scan templates for Tailwind color classes
     |       +---> Grep CSS bundle for each class
     |       +---> Warn on any MISSING classes (safelist gap)
+    +---> Step 6b: Host worker venv refresh + restart (nc/ics)
+    |       +---> pip install -r requirements.txt into /root/availai/.venv
+    |       +---> systemctl restart avail-nc-worker avail-ics-worker
+    |       +---> WARN (re-surfaced after logs) if venv/restart fails
     +---> Step 7: Tail logs for errors
 ```
+
+**Host worker dependencies (pinned-lockfile venv).** The `avail-nc-worker`
+/ `avail-ics-worker` systemd units run on the HOST (outside docker, from
+`/root/availai`, `User=root`) and execute
+`/root/availai/.venv/bin/python -m app.services.{nc,ics}_worker.worker`.
+That venv is built from the SAME pinned `requirements.txt` as the docker
+app/enrichment images (not ad-hoc `pip install patchright beautifulsoup4`),
+so the host workers carry identical pinned deps — notably `patchright`,
+which they use to drive **system Google Chrome** via `channel="chrome"`
+(the bundled Chromium is unused). `deploy.sh` Step 6b refreshes the venv
+from the lockfile and restarts both units on every deploy;
+`scripts/setup_nc_worker.sh` bootstraps the venv on a fresh host. The
+unit files live in `deploy/avail-{nc,ics}-worker.service`.
 
 ---
 

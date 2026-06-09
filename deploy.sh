@@ -183,16 +183,30 @@ else
     fi
 fi
 
-# Step 6b: Restart the HOST nc/ics worker systemd units.
+# Step 6b: Refresh the host worker venv, then restart the HOST nc/ics worker units.
 # nc_worker and ics_worker run on the HOST (systemd units from /root/availai), OUTSIDE
 # docker — so a deploy that changes their code would otherwise leave them on stale code
-# until someone manually restarts them. Best-effort + idempotent: only touches units
-# that exist (a no-op on CI / boxes without them). NOTE: these host workers use
-# host-installed deps, NOT the pinned requirements.txt lockfile — folding them onto the
-# pinned deps is a separate follow-up.
+# until someone manually restarts them. They run from the pinned-lockfile venv
+# (/root/availai/.venv, built from requirements.txt) so they carry the SAME pinned deps
+# as the docker images; this step re-syncs that venv to the current lock before restart.
+# Best-effort + idempotent: only touches the venv/units that exist (a no-op on CI / boxes
+# without them).
+echo ""
+echo "==> Refreshing host worker venv from requirements.txt..."
+HOST_WORKER_WARN=""
+if [ -x .venv/bin/pip ]; then
+    if venv_err=$(.venv/bin/pip install -q -r requirements.txt 2>&1); then
+        echo "==> host venv in sync with pinned lock (patchright $(.venv/bin/pip show patchright 2>/dev/null | awk '/^Version:/{print $2}'))"
+    else
+        echo "==> WARNING: host worker venv refresh FAILED (workers may run stale deps):"
+        echo "${venv_err}" | tail -5
+        HOST_WORKER_WARN="${HOST_WORKER_WARN} venv-refresh"
+    fi
+else
+    echo "==> no host worker venv (.venv) here — skipping refresh"
+fi
 echo ""
 echo "==> Restarting host worker units (nc/ics)..."
-HOST_WORKER_WARN=""
 for unit in avail-nc-worker avail-ics-worker; do
     if ! systemctl cat "${unit}.service" >/dev/null 2>&1; then
         echo "==> ${unit} not installed here — skipping"
@@ -214,12 +228,15 @@ echo ""
 echo "==> Recent app logs:"
 docker compose logs --tail=20 app
 
-# Re-surface any host-worker restart failure AFTER the log dump, so the operator's last
-# line is the actionable warning — a SILENTLY stale host worker is the bug this prevents.
+# Re-surface any host-worker venv/restart failure AFTER the log dump, so the operator's
+# last line is the actionable warning — a SILENTLY stale host worker is the bug this
+# prevents (stale code OR stale deps).
 if [ -n "${HOST_WORKER_WARN}" ]; then
     echo ""
-    echo "==> ⚠️  Deploy OK, but these host worker(s) FAILED to restart and may be running stale code."
-    echo "==>     Restart them manually:${HOST_WORKER_WARN}"
+    echo "==> ⚠️  Deploy OK, but these host worker step(s) FAILED and may leave workers on stale code/deps:"
+    echo "==>    ${HOST_WORKER_WARN}"
+    echo "==>     Fix manually: 'cd /root/availai && .venv/bin/pip install -r requirements.txt' (deps),"
+    echo "==>     then 'sudo systemctl restart avail-nc-worker avail-ics-worker'."
 fi
 
 echo ""
