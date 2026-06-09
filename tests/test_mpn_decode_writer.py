@@ -57,15 +57,17 @@ def test_decode_writes_ecc_false(db_session: Session):
 
 def test_decode_skips_on_category_mismatch(db_session: Session):
     # A drive MPN on a card mis-categorized as dram must NOT write (commodity guard prevents
-    # writing a drive's capacity onto a DRAM card via the shared capacity_gb key).
+    # writing a drive's capacity onto a DRAM card via the shared capacity_gb key). An EXISTING
+    # category is authoritative — it is never overwritten by the decode.
     seed_commodity_schemas(db_session)
     card = MaterialCard(normalized_mpn="st4000nm0035", display_mpn="ST4000NM0035", category="dram")
     db_session.add(card)
     db_session.flush()
 
     stats = decode_and_record_specs(db_session, [card.id])
-    assert stats == {"decoded": 0, "written": 0}
+    assert stats == {"decoded": 0, "written": 0, "categorized": 0}
     assert _facets(db_session, card.id) == {}
+    assert card.category == "dram"  # untouched
 
 
 def test_decode_skips_unrecognized_mpn(db_session: Session):
@@ -76,4 +78,58 @@ def test_decode_skips_unrecognized_mpn(db_session: Session):
     db_session.flush()
 
     stats = decode_and_record_specs(db_session, [card.id])
-    assert stats == {"decoded": 0, "written": 0}
+    assert stats == {"decoded": 0, "written": 0, "categorized": 0}
+
+
+def test_decode_categorizes_uncategorized_card(db_session: Session):
+    # A card with NO category but a deterministically-decodable MPN gets categorized FROM the
+    # decode (regex-gated commodity), then its specs are written. This is what unblocks the
+    # existing inventory, where most decodable cards have a NULL category.
+    seed_commodity_schemas(db_session)
+    card = MaterialCard(normalized_mpn="st4000nm0035", display_mpn="ST4000NM0035", category=None)
+    db_session.add(card)
+    db_session.flush()
+
+    stats = decode_and_record_specs(db_session, [card.id])
+    db_session.commit()
+
+    assert stats["categorized"] == 1
+    assert stats["decoded"] == 1
+    assert stats["written"] >= 3
+    assert card.category == "hdd"  # set from the decode
+    f = _facets(db_session, card.id)
+    assert f["capacity_gb"] == 4000
+    assert f["form_factor"] == '3.5"'
+
+
+def test_savepoint_isolates_a_failing_card(db_session: Session, monkeypatch):
+    # If a card's spec write raises mid-card, the per-card SAVEPOINT must roll back that card's
+    # partial state (including a categorize-from-null) WITHOUT poisoning the shared transaction —
+    # so sibling cards in the same batch still commit and the counters stay honest.
+    seed_commodity_schemas(db_session)
+    bad = MaterialCard(normalized_mpn="st4000nm0035", display_mpn="ST4000NM0035", category=None)
+    good = MaterialCard(normalized_mpn="st8000nm0055", display_mpn="ST8000NM0055", category="hdd")
+    db_session.add_all([bad, good])
+    db_session.flush()
+
+    import app.services.mpn_decoder.writer as writer_mod
+
+    real_record_spec = writer_mod.record_spec
+
+    def flaky(db, card_id, *args, **kwargs):
+        if card_id == bad.id:
+            db.flush()  # flush the pending categorize, then fail the way a DB error would
+            raise RuntimeError("simulated flush failure")
+        return real_record_spec(db, card_id, *args, **kwargs)
+
+    monkeypatch.setattr(writer_mod, "record_spec", flaky)
+
+    stats = decode_and_record_specs(db_session, [bad.id, good.id])
+    db_session.commit()  # must NOT raise — the bad card's savepoint kept the transaction clean
+
+    assert stats["decoded"] == 1  # only the good card
+    assert stats["categorized"] == 0
+    assert stats["written"] >= 3
+    assert _facets(db_session, good.id)["capacity_gb"] == 8000
+    assert _facets(db_session, bad.id) == {}  # bad card fully rolled back
+    assert bad.category is None  # categorize-from-null did NOT leak past the rollback

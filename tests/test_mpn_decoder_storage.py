@@ -45,3 +45,20 @@ def test_non_drive_mpn_returns_none():
     assert decode_mpn("GARBAGE123") is None
     assert decode_mpn("") is None
     assert decode_mpn(None) is None
+
+
+@pytest.mark.parametrize("mpn", ["MGK50", "MGJN9", "DT10171-H7R6-4F", "MDR60"])
+def test_short_oem_spare_not_misdecoded_as_toshiba(mpn):
+    # Dell/OEM spare numbers share Toshiba's 2-char prefix but not the family structure
+    # (prefix + 2 digits + 3-letter code). The tightened gate must reject them, NOT emit a
+    # bogus 3.5"/Enterprise drive. Regression for the dry-run's MGK50/MGJN9/DT10171 hits.
+    assert decode_mpn(mpn) is None, f"{mpn} should not decode as a Toshiba drive"
+
+
+def test_wd_mobile_drive_capacity_only_no_guessed_form_factor():
+    # WD10JPLX is a 2.5" mobile drive whose suffix does not start "S"; the old rule mislabeled
+    # it 3.5". Capacity is reliable (WD10 = 1 TB); form_factor must be ABSENT, not wrong.
+    result = decode_mpn("WD10JPLX")
+    assert result is not None
+    assert result.specs.get("capacity_gb") == 1000
+    assert "form_factor" not in result.specs
