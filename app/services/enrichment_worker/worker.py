@@ -256,6 +256,20 @@ async def run_one_batch(
 
     web_state["web_calls"] = web_calls_today
 
+    # Deterministic MPN→spec decode (storage/DRAM): zero-LLM, regex-gated, enum-validated by
+    # record_spec. Runs BEFORE the AI spec pass so its 0.95 values are the baseline the 0.85
+    # description-mined pass cannot overwrite. Same session, committed together below.
+    if enriched_ids:
+        from app.config import settings
+
+        if settings.mpn_decode_enabled:
+            from app.services.mpn_decoder.writer import decode_and_record_specs
+
+            try:
+                logger.info("ENRICH_WORKER: mpn-decode {}", decode_and_record_specs(db, enriched_ids))
+            except Exception:
+                logger.exception("ENRICH_WORKER: mpn-decode failed over {} cards", len(enriched_ids))
+
     # Second pass: parametric spec extraction for cards that landed a real category this
     # batch. Runs ONCE per batch (the extractor groups by category internally) on the same
     # session, so specs persist together with core attrs at the commit below.

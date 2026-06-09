@@ -127,6 +127,9 @@ class Settings(BaseSettings):
     # real connector data (DigiKey, Mouser, Nexar) before re-enabling.
     material_enrichment_enabled: bool = False
     material_enrichment_batch_size: int = 300
+    # Deterministic MPN→spec decoders (storage/DRAM): zero-network, zero-LLM, regex-gated.
+    # Safe to leave on — values are enum-validated by record_spec. See app/services/mpn_decoder.
+    mpn_decode_enabled: bool = True
 
     # --- Tagging ---
     min_tag_confidence: float = 0.90
