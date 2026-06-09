@@ -8,9 +8,15 @@ Called by: enrichment services (forward hook at write time) and
       scripts/normalize_categories.py (one-off backfill).
 
 Only UNAMBIGUOUS mappings are included. Generic strings whose canonical bucket is
-ambiguous (e.g. "integrated circuits (ics)", "discrete semiconductor products", a bare
-manufacturer name) are intentionally omitted so ``normalize_category`` returns ``None``
-and the caller leaves the existing value untouched rather than guessing.
+ambiguous (e.g. "discrete semiconductor products", a bare manufacturer name) are
+intentionally omitted so ``normalize_category`` returns ``None`` and the caller leaves
+the existing value untouched rather than guessing. Formerly-ambiguous generic IC
+strings ("ic", "integrated circuits (ics)") now have an honest coarse bucket
+(``ics_other``) and map there.
+
+The TRIO SFDC part-master block maps the raw ``Commodity_Code__c`` vocabulary used by
+TRIO's Salesforce export so the source-ingest ladder lands every row on a canonical
+tree key.
 """
 
 from app.services.commodity_registry import get_all_commodities
@@ -46,6 +52,20 @@ CATEGORY_ALIASES: dict[str, str] = {
     "cpu - central processing units": "cpu",
     "tools": "tools_accessories",
     "soldering, desoldering, rework products": "tools_accessories",
+    # TRIO SFDC part-master Commodity_Code__c vocabulary (cpu, ssd, other are
+    # already canonical tree keys and resolve via _CANONICAL_KEYS).
+    "main board": "motherboards",
+    "hard drive": "hdd",
+    "memory": "dram",
+    "lcd": "displays",
+    "lcd assy": "displays",
+    "psu": "power_supplies",
+    "graphics card": "gpu",
+    "tape drive": "tape_drives",
+    "ic": "ics_other",
+    "oem assy": "oem_assemblies",
+    # Legacy generic bucket seen on live cards — now has a coarse canonical key.
+    "integrated circuits (ics)": "ics_other",
 }
 
 

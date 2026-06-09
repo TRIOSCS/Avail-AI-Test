@@ -34,6 +34,18 @@ def test_get_parent_group_returns_group_name():
     assert get_parent_group("cpu") == "Processors & Programmable"
 
 
+def test_trio_taxonomy_additions_have_parents_and_display_names():
+    """tape_drives / ics_other / oem_assemblies sit under the right parent groups."""
+    from app.services.commodity_registry import get_display_name
+
+    assert get_parent_group("tape_drives") == "Storage & Drives"
+    assert get_parent_group("ics_other") == "Semiconductors — ICs"
+    assert get_parent_group("oem_assemblies") == "IT / Server Hardware"
+    assert get_display_name("tape_drives") == "Tape Drives"
+    assert get_display_name("ics_other") == "ICs (General)"
+    assert get_display_name("oem_assemblies") == "OEM Assemblies"
+
+
 def test_get_parent_group_unknown_returns_misc():
     group = get_parent_group("not_a_real_commodity")
     assert group == "Misc"

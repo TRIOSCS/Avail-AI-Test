@@ -394,7 +394,7 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
                 ]
                 option["widget"] = "checkbox"
             else:
-                # Open vocabulary (e.g. connector series): no canonical list to enumerate,
+                # Open vocabulary (e.g. motherboard chipset): no canonical list to enumerate,
                 # so offer the top-N observed values by count + a typeahead search box.
                 observed_counts = count_map.get(schema.spec_key, {})
                 option["values"] = sorted(observed_counts, key=lambda v: observed_counts[v], reverse=True)[:TOP_N]

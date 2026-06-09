@@ -20,10 +20,10 @@ from app.models import CommoditySpecSchema
 COMMODITY_TREE: dict[str, list[str]] = {
     "Passives": ["capacitors", "resistors", "inductors", "transformers", "fuses", "oscillators", "filters"],
     "Semiconductors \u2014 Discrete": ["diodes", "transistors", "mosfets", "thyristors"],
-    "Semiconductors \u2014 ICs": ["analog_ic", "logic_ic", "power_ic"],
+    "Semiconductors \u2014 ICs": ["analog_ic", "logic_ic", "power_ic", "ics_other"],
     "Memory": ["dram", "flash"],
     "Processors & Programmable": ["microcontrollers", "cpu", "microprocessors", "dsp", "fpga", "asic", "gpu"],
-    "Storage & Drives": ["ssd", "hdd"],
+    "Storage & Drives": ["ssd", "hdd", "tape_drives"],
     "Power & Energy": ["power_supplies", "voltage_regulators", "batteries"],
     "Connectors, Interconnects & Cables": ["connectors", "cables", "sockets"],
     "Electromechanical": ["relays", "switches", "motors"],
@@ -36,9 +36,16 @@ COMMODITY_TREE: dict[str, list[str]] = {
         "server_chassis",
         "fans_cooling",
         "networking",
+        "oem_assemblies",
     ],
     "Misc": ["enclosures", "tools_accessories", "other"],
 }
+
+# Coarse catch-all buckets that intentionally carry NO parametric spec seeds:
+# no honest, populatable parametric vocabulary exists for generic ICs or whole
+# OEM assemblies, so they appear in the tree (and as alias targets) but not in
+# commodity_seeds.json.
+COARSE_BUCKETS_WITHOUT_SEEDS: frozenset[str] = frozenset({"ics_other", "oem_assemblies"})
 
 # Display names for sub-categories (for UI rendering)
 _DISPLAY_NAMES: dict[str, str] = {
@@ -56,6 +63,7 @@ _DISPLAY_NAMES: dict[str, str] = {
     "analog_ic": "Analog ICs",
     "logic_ic": "Logic ICs",
     "power_ic": "Power Management ICs",
+    "ics_other": "ICs (General)",
     "microcontrollers": "Microcontrollers",
     "cpu": "CPUs",
     "microprocessors": "Microprocessors",
@@ -67,6 +75,7 @@ _DISPLAY_NAMES: dict[str, str] = {
     "flash": "Flash",
     "ssd": "SSD",
     "hdd": "HDD",
+    "tape_drives": "Tape Drives",
     "connectors": "Connectors",
     "cables": "Cables",
     "relays": "Relays",
@@ -86,6 +95,7 @@ _DISPLAY_NAMES: dict[str, str] = {
     "server_chassis": "Server Chassis",
     "fans_cooling": "Fans & Cooling",
     "networking": "Networking",
+    "oem_assemblies": "OEM Assemblies",
     "motors": "Motors",
     "enclosures": "Enclosures",
     "tools_accessories": "Tools & Accessories",

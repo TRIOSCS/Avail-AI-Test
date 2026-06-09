@@ -1911,7 +1911,8 @@ class TestApplyEnrichmentToCard:
                         _apply_enrichment_to_card(card, enrichment, db)
 
         assert card.manufacturer == "TI"
-        assert card.category == "IC"
+        # The forward category hook normalizes "IC" through the alias map → ics_other.
+        assert card.category == "ics_other"
         mock_tag.assert_called_once()
 
     def test_does_not_overwrite_existing_manufacturer(self):

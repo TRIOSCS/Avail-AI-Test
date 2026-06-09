@@ -60,6 +60,40 @@
         "DIMM"
       ],
       "sort_order": 5
+    },
+    {
+      "spec_key": "rank",
+      "display_name": "Rank",
+      "data_type": "enum",
+      "enum_values": [
+        "1Rx4",
+        "1Rx8",
+        "2Rx4",
+        "2Rx8",
+        "4Rx4",
+        "8Rx4"
+      ],
+      "sort_order": 6
+    },
+    {
+      "spec_key": "registered",
+      "display_name": "Registered/Buffered",
+      "data_type": "enum",
+      "enum_values": [
+        "Unbuffered",
+        "Registered",
+        "Load-Reduced",
+        "Fully-Buffered"
+      ],
+      "sort_order": 7
+    },
+    {
+      "spec_key": "voltage",
+      "display_name": "Voltage (V)",
+      "data_type": "numeric",
+      "unit": "V",
+      "canonical_unit": "V",
+      "sort_order": 8
     }
   ],
   "transformers": [
@@ -3030,6 +3064,45 @@
         "SMR"
       ],
       "sort_order": 6
+    },
+    {
+      "spec_key": "drive_class",
+      "display_name": "Drive Class",
+      "data_type": "enum",
+      "enum_values": [
+        "Enterprise/Nearline",
+        "NAS",
+        "Surveillance",
+        "Desktop",
+        "Mobile",
+        "Datacenter"
+      ],
+      "sort_order": 7
+    },
+    {
+      "spec_key": "sector_size",
+      "display_name": "Sector/Format",
+      "data_type": "enum",
+      "enum_values": [
+        "512n",
+        "512e",
+        "4Kn",
+        "520",
+        "528"
+      ],
+      "sort_order": 8
+    },
+    {
+      "spec_key": "encryption",
+      "display_name": "Encryption",
+      "data_type": "enum",
+      "enum_values": [
+        "None",
+        "SED",
+        "FIPS 140-2",
+        "ISE/Instant Secure Erase"
+      ],
+      "sort_order": 9
     }
   ],
   "ssd": [
@@ -3121,6 +3194,14 @@
       ],
       "sort_order": 7,
       "is_primary": true
+    },
+    {
+      "spec_key": "endurance_dwpd",
+      "display_name": "Endurance (DWPD)",
+      "data_type": "numeric",
+      "unit": "DWPD",
+      "canonical_unit": "DWPD",
+      "sort_order": 8
     }
   ],
   "connectors": [
@@ -3193,10 +3274,35 @@
       "sort_order": 5
     },
     {
-      "spec_key": "series",
-      "display_name": "Series",
+      "spec_key": "orientation",
+      "display_name": "Orientation",
       "data_type": "enum",
+      "enum_values": [
+        "vertical/straight",
+        "right-angle",
+        "horizontal"
+      ],
       "sort_order": 6
+    },
+    {
+      "spec_key": "current_rating",
+      "display_name": "Current Rating (per contact)",
+      "data_type": "numeric",
+      "unit": "A",
+      "canonical_unit": "A",
+      "sort_order": 7
+    },
+    {
+      "spec_key": "rows",
+      "display_name": "Number of Rows",
+      "data_type": "enum",
+      "enum_values": [
+        "1",
+        "2",
+        "3",
+        "4"
+      ],
+      "sort_order": 8
     }
   ],
   "motherboards": [
@@ -3267,6 +3373,31 @@
         "Gen5"
       ],
       "sort_order": 6
+    },
+    {
+      "spec_key": "memory_type",
+      "display_name": "Memory Type",
+      "data_type": "enum",
+      "enum_values": [
+        "DDR3",
+        "DDR4",
+        "DDR5",
+        "DDR4 RDIMM",
+        "DDR5 RDIMM"
+      ],
+      "sort_order": 7
+    },
+    {
+      "spec_key": "socket_count",
+      "display_name": "Socket Count",
+      "data_type": "enum",
+      "enum_values": [
+        "1",
+        "2",
+        "4",
+        "8"
+      ],
+      "sort_order": 8
     }
   ],
   "cpu": [
@@ -3398,6 +3529,44 @@
         "SATA"
       ],
       "sort_order": 6
+    },
+    {
+      "spec_key": "psu_class",
+      "display_name": "Supply Class",
+      "data_type": "enum",
+      "enum_values": [
+        "AC-DC (Enclosed)",
+        "AC-DC (Open Frame)",
+        "AC-DC (DIN Rail)",
+        "AC-DC (External/Adapter)",
+        "ATX/PC",
+        "Server/Redundant",
+        "DC-DC Converter",
+        "Module/On-Board"
+      ],
+      "sort_order": 7,
+      "is_primary": true
+    },
+    {
+      "spec_key": "output_current",
+      "display_name": "Output Current",
+      "data_type": "numeric",
+      "unit": "A",
+      "canonical_unit": "A",
+      "sort_order": 8
+    },
+    {
+      "spec_key": "input_voltage_type",
+      "display_name": "Input Type",
+      "data_type": "enum",
+      "enum_values": [
+        "AC (Universal 85-264V)",
+        "AC 120V",
+        "AC 230V",
+        "AC 3-Phase",
+        "DC Input"
+      ],
+      "sort_order": 9
     }
   ],
   "gpu": [
@@ -3817,6 +3986,65 @@
         "WSON",
         "SOIC"
       ],
+      "sort_order": 5
+    }
+  ],
+  "tape_drives": [
+    {
+      "spec_key": "drive_type",
+      "display_name": "Drive Type",
+      "data_type": "enum",
+      "enum_values": [
+        "LTO-5",
+        "LTO-6",
+        "LTO-7",
+        "LTO-8",
+        "LTO-9",
+        "TS1140",
+        "TS1150",
+        "TS1155",
+        "TS1160",
+        "DAT",
+        "AIT"
+      ],
+      "sort_order": 1,
+      "is_primary": true
+    },
+    {
+      "spec_key": "interface",
+      "display_name": "Interface",
+      "data_type": "enum",
+      "enum_values": [
+        "FC",
+        "SAS",
+        "SCSI"
+      ],
+      "sort_order": 2,
+      "is_primary": true
+    },
+    {
+      "spec_key": "form_factor",
+      "display_name": "Form Factor",
+      "data_type": "enum",
+      "enum_values": [
+        "Full-Height",
+        "Half-Height",
+        "Library Module"
+      ],
+      "sort_order": 3
+    },
+    {
+      "spec_key": "native_capacity_gb",
+      "display_name": "Native Capacity (GB)",
+      "data_type": "numeric",
+      "unit": "GB",
+      "canonical_unit": "GB",
+      "sort_order": 4
+    },
+    {
+      "spec_key": "encryption",
+      "display_name": "Encryption",
+      "data_type": "boolean",
       "sort_order": 5
     }
   ]
