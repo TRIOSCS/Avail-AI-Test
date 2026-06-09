@@ -3,7 +3,7 @@ exclude_dirs = ["tests", "alembic"]
 skips = ["B101"]  # allow assert in non-test code (used in type narrowing)
 
 [tool.mypy]
-python_version = "3.12"
+python_version = "3.13"
 ignore_missing_imports = true
 no_strict_optional = true
 warn_unused_ignores = true
