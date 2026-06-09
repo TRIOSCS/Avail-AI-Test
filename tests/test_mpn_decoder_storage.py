@@ -55,6 +55,14 @@ def test_short_oem_spare_not_misdecoded_as_toshiba(mpn):
     assert decode_mpn(mpn) is None, f"{mpn} should not decode as a Toshiba drive"
 
 
+@pytest.mark.parametrize("mpn", ["HUSMM1640ASS204", "HUSSL4010BSS600", "HUSMR1650ASS204"])
+def test_hgst_sas_ssd_families_not_misdecoded_as_hdd(mpn):
+    # HUSMM/HUSSL/HUSMR are Ultrastar SAS *SSDs* (2.5"), not Ultrastar HDDs — the HUS gate
+    # requires a digit next (HUS72…, HUS156…) so these return None instead of a wrong
+    # 3.5"/Enterprise HDD decode.
+    assert decode_mpn(mpn) is None, f"{mpn} must not decode as an HDD"
+
+
 def test_wd_mobile_drive_capacity_only_no_guessed_form_factor():
     # WD10JPLX is a 2.5" mobile drive whose suffix does not start "S"; the old rule mislabeled
     # it 3.5". Capacity is reliable (WD10 = 1 TB); form_factor must be ABSENT, not wrong.
