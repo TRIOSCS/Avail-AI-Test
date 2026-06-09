@@ -547,6 +547,10 @@ document.addEventListener('keydown', (e) => {
  * Manages commodity, sub-filters, search query, pagination.
  * URL is the canonical source of truth (back button, deep links work).
  */
+// $persist when the plugin is registered (browser, before Alpine.start); plain default
+// otherwise (vitest mocks / plugin absent) — never throws at factory-call time.
+const persistOr = (def, key) => (typeof Alpine !== 'undefined' && Alpine.$persist) ? Alpine.$persist(def).as(key) : def;
+
 Alpine.data('materialsFilter', () => ({
   commodity: '',
   subFilters: {},
@@ -564,6 +568,19 @@ Alpine.data('materialsFilter', () => ({
   condition: [],
   hasDatasheet: false,
   _onPopstate: null,
+
+  // ── Direction-B UI state ─────────────────────────────────────────────
+  // Hoisted sub-filter UI state (fold / typeahead text) so it survives HTMX re-renders of
+  // #subfilters-container on every filters-changed. Keyed by spec_key; session-scoped.
+  ui: { moreOpen: false, facetExpanded: {}, facetSearch: {} },
+  // Type-to-find over the category tree (client-side filter; see tree.html).
+  categorySearch: '',
+  // Transient "Copied" flash for the copy-link control.
+  copied: false,
+  // Persisted CHROME only (layout prefs); filter STATE stays URL-bound.
+  recentCommodities: persistOr([], 'mat_recent_commodities'),
+  moreAttrsOpen: persistOr(false, 'mat_more_attrs_open'),
+  confidenceOpen: persistOr(false, 'mat_confidence_open'),
 
   // 3 user-facing confidence groups, each expanding to a set of enrichment tiers.
   // Array order pins the visual ordering of the Data-confidence section.
@@ -629,6 +646,47 @@ Alpine.data('materialsFilter', () => ({
     count += this.condition.length;
     if (this.hasDatasheet) count += 1;
     return count;
+  },
+
+  // Active selections inside the collapsed "More attributes" section (for its badge).
+  get attributesActiveCount() {
+    return this.lifecycle.length + this.rohs.length + this.condition.length
+      + (this.hasDatasheet ? 1 : 0)
+      + (Array.isArray(this.subFilters.manufacturers) ? this.subFilters.manufacturers.length : 0);
+  },
+
+  // Top summary "Clear all" — resets every filter but KEEPS the selected commodity
+  // (commodity is navigation, not a filter). The spec-scoped control is "Clear specs".
+  clearAllFilters() {
+    this.subFilters = {};
+    this.lifecycle = [];
+    this.rohs = [];
+    this.condition = [];
+    this.hasDatasheet = false;
+    this.statuses = [...this.DEFAULT_STATUSES];
+    this.q = '';
+    this.ui.facetSearch = {};
+    this.ui.facetExpanded = {};
+    this.applyFilters();
+  },
+
+  // True when the type-to-find query matches at least one known category (else show a
+  // "no matches" hint instead of a blank tree). Over displayNames — the dominant
+  // gibberish/typo no-match case; a query is "" → always true.
+  get anyCategoryMatches() {
+    if (!this.categorySearch) return true;
+    const t = this.categorySearch.toLowerCase();
+    return Object.values(this.displayNames).some(n => String(n).toLowerCase().includes(t));
+  },
+
+  copyLink() {
+    const url = window.location.href;
+    const flash = () => { this.copied = true; setTimeout(() => { this.copied = false; }, 1500); };
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(url).then(flash).catch(() => window.prompt('Copy this link:', url));
+    } else {
+      window.prompt('Copy this link:', url);  // clipboard API unavailable (HTTP / old browser)
+    }
   },
 
   init() {
@@ -732,6 +790,17 @@ Alpine.data('materialsFilter', () => ({
   selectCommodity(commodity) {
     this.commodity = commodity || '';
     this.subFilters = {};
+    // Reset hoisted per-facet UI so a previous commodity's typeahead text / fold (keyed by a
+    // shared spec_key like "package") can't silently filter the new commodity's facets.
+    this.ui.facetSearch = {};
+    this.ui.facetExpanded = {};
+    this.ui.moreOpen = false;
+    if (this.commodity) {
+      // Most-recent-first, deduped, capped at 5 (persisted navigation history).
+      const list = this.recentCommodities.filter(x => x !== this.commodity);
+      list.unshift(this.commodity);
+      this.recentCommodities = list.slice(0, 5);
+    }
     document.body.dispatchEvent(new CustomEvent('commodity-changed'));
     this.applyFilters();
   },

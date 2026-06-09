@@ -20,8 +20,9 @@ def test_open_vocab_facet_renders_typeahead_search(client, db_session: Session):
 
     resp = client.get("/v2/partials/materials/filters/sub?commodity=connectors&sub_filters=%7B%7D")
     assert resp.status_code == 200
-    # Typeahead search box for the open-vocab "series" facet.
-    assert 'x-model="taSearch"' in resp.text
+    # Typeahead search box for the open-vocab "series" facet — state hoisted to the
+    # parent component (ui.facetSearch[spec_key]) so it survives HTMX reloads.
+    assert "ui.facetSearch['series']" in resp.text
     assert "Micro-Fit" in resp.text
 
 

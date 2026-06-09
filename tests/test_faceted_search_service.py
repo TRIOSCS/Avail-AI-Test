@@ -181,14 +181,15 @@ def test_get_facet_counts_with_active_filters(db_session: Session):
     _make_dram_card(db_session, "MEM-002", "DDR4", 32, ecc=False)
     _make_dram_card(db_session, "MEM-003", "DDR5", 16, ecc=True)
 
-    # Filter to DDR4 only — should see 2 cards, ecc counts should reflect DDR4 subset
+    # Filter to DDR4 only. OTHER facets (ecc) reflect the DDR4 subset...
     counts = get_facet_counts(db_session, "dram", active_filters={"ddr_type": ["DDR4"]})
     # Only DDR4 cards: MEM-001 (ecc=true) and MEM-002 (ecc=false)
     assert counts["ecc"]["true"] == 1
     assert counts["ecc"]["false"] == 1
-    # DDR5 should still appear in ddr_type counts (facet counts show options within filtered set)
+    # ...but ddr_type SELF-EXCLUDES — its own counts ignore the ddr_type selection, so the
+    # sibling DDR5 is NOT collapsed (OR-within-facet correctness; see test_facet_counts_self_exclusion).
     assert counts["ddr_type"]["DDR4"] == 2
-    assert "DDR5" not in counts.get("ddr_type", {})
+    assert counts["ddr_type"]["DDR5"] == 1
 
 
 # --- Text search with q parameter ---

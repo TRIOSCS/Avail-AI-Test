@@ -7325,6 +7325,7 @@ async def materials_faceted_partial(
             "limit": limit,
             "offset": offset,
             "commodity": commodity,
+            "commodity_display": get_display_name(commodity) if commodity else "",
             "category": commodity,
             "top_categories": [],
             "interpreted_query": "",

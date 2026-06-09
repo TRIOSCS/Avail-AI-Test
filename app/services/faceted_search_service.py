@@ -97,35 +97,40 @@ def get_facet_counts(
     Only includes text-based facets (enums, booleans).
     """
     commodity = commodity.lower().strip()
+    active_filters = active_filters or {}
 
-    base_q = db.query(MaterialSpecFacet.material_card_id).filter(
-        MaterialSpecFacet.category == commodity,
-    )
-
-    # Apply active filters to narrow the base set
-    if active_filters:
-        base_q = _apply_facet_filters(base_q, db, commodity, active_filters)
-
-    card_ids_subq = base_q.distinct().subquery()
-
-    rows = (
-        db.query(
+    def _grouped_counts(narrow_filters: dict, only_spec_key: str | None = None) -> list:
+        base = db.query(MaterialSpecFacet.material_card_id).filter(MaterialSpecFacet.category == commodity)
+        if narrow_filters:
+            base = _apply_facet_filters(base, db, commodity, narrow_filters)
+        card_ids_subq = base.distinct().subquery()
+        q = db.query(
             MaterialSpecFacet.spec_key,
             MaterialSpecFacet.value_text,
             func.count(MaterialSpecFacet.material_card_id.distinct()),
-        )
-        .filter(
+        ).filter(
             MaterialSpecFacet.category == commodity,
             MaterialSpecFacet.value_text.isnot(None),
             MaterialSpecFacet.material_card_id.in_(db.query(card_ids_subq.c.material_card_id)),
         )
-        .group_by(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_text)
-        .all()
-    )
+        if only_spec_key is not None:
+            q = q.filter(MaterialSpecFacet.spec_key == only_spec_key)
+        return q.group_by(MaterialSpecFacet.spec_key, MaterialSpecFacet.value_text).all()
 
+    # Pass 1: every facet narrowed by ALL active filters — correct for facets the user has NOT
+    # filtered on (they should reflect the full current narrowing).
     result: dict[str, dict[str, int]] = {}
-    for spec_key, value, count in rows:
+    for spec_key, value, count in _grouped_counts(active_filters):
         result.setdefault(spec_key, {})[value] = count
+
+    # Pass 2: OR-within-facet correctness — recompute each ACTIVELY-FILTERED enum facet's own
+    # value counts against the set narrowed by every OTHER facet (excluding its own selection),
+    # so checking one value never collapses its siblings to 0. (Enum filters carry list values;
+    # numeric _min/_max filters have no value_text counts, so they are skipped.)
+    enum_filtered_keys = [k for k, v in active_filters.items() if isinstance(v, list)]
+    for fk in enum_filtered_keys:
+        others = {k: v for k, v in active_filters.items() if k not in (fk, f"{fk}_min", f"{fk}_max")}
+        result[fk] = {value: count for _sk, value, count in _grouped_counts(others, only_spec_key=fk)}
     return result
 
 

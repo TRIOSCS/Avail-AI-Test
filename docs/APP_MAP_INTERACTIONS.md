@@ -840,31 +840,33 @@ NOTE: Uses tsvector + trgm for multi-word queries, ILIKE fallback for
       single tokens. GIN-indexed TSVECTOR with weighted fields
       (MPN=A, manufacturer=B, description/category=C).
 
-Sidebar facets (workspace.html + materialsFilter Alpine component). Order top→bottom:
-    +---> Manufacturer facet → /v2/partials/materials/filters/manufacturers
-    |     (search box + top-N by count; high-cardinality, never a flat dump).
-    +---> Global facets (MaterialCard columns, OR-within each, AND across):
-    |       +---> lifecycle  → lifecycle_status IN (active|nrfnd|eol|obsolete|ltb)
-    |       +---> rohs        → rohs_status IN (compliant|non-compliant|exempt)
-    |       +---> condition   → condition IN (New|Recertified|Refurbished|Used|Pulled|
-    |       |                   Unknown); section hidden until data exists (no 0-rows)
-    |       +---> has_datasheet (boolean) → datasheet_url IS NOT NULL
-    |     Counts come from get_global_facet_counts(); rendered by
-    |     /v2/partials/materials/filters/global (reloads on commodity-changed).
-    +---> Commodity tree → /v2/partials/materials/filters/tree (taxonomy, 13 groups;
-    |     Memory ≠ Storage & Drives, Connectors/Interconnects ≠ Electromechanical).
-    +---> Commodity sub-filters → /v2/partials/materials/filters/sub (spec facets):
-    |       is_primary facets expanded; the rest fold under "More filters (N)".
-    |       Fixed-vocab enums show every canonical value with a count incl. (0);
-    |       open-vocab enums (e.g. connector series) use a typeahead. Counts from
-    |       get_facet_counts() (context-aware).
-    +---> Data confidence (bottom; low-priority filter): 3 groups — Trusted
-    |     (verified+web_sourced+oem_sourced) / AI-inferred / No data
-    |     (not_catalogued+not_found+unenriched). Each checkbox toggles its member
-    |     tiers. Default = all groups on (page opens unfiltered). Alpine
-    |     `statuses[]` → `?statuses=` CSV → search_materials_faceted(statuses=...)
-    |     IN-filters MaterialCard.enrichment_status. `statuses` takes precedence
-    |     over the legacy `verified_only` boolean (never ANDed).
+Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY-FIRST
+(Direction B). Order top→bottom:
+    +---> Sticky summary band: "<N> active · Clear all · Copy link" (Clear all =
+    |     clearAllFilters(), keeps commodity; Copy link copies the URL). Compact only —
+    |     detailed removable chips stay in the results header.
+    +---> Recents strip (recentCommodities, $persist, cap 5) + type-to-find "Jump to
+    |     category…" (categorySearch client-filters the tree; group headers hide, matches
+    |     show flat).
+    +---> Commodity tree → /v2/partials/materials/filters/tree (13 groups; the entry
+    |     point, moved to TOP). Memory ≠ Storage & Drives, Connectors ≠ Electromechanical.
+    +---> Selected commodity's sub-filters → /v2/partials/materials/filters/sub:
+    |       is_primary expanded; rest fold under "More filters (N)". Fixed-vocab enums
+    |       show every canonical value with a count incl. (0); open-vocab → typeahead.
+    |       Fold/typeahead state HOISTED to materialsFilter.ui.* so it survives the
+    |       per-filters-changed HTMX reload. Counts via get_facet_counts() — which now
+    |       SELF-EXCLUDES each actively-filtered facet (OR-within-facet; selecting one
+    |       value no longer collapses its siblings to 0).
+    +---> "More attributes" (collapsed, $persist moreAttrsOpen; active-count badge):
+    |       Manufacturer (search + top-N) + Global facets (lifecycle / rohs / condition /
+    |       has_datasheet) via get_global_facet_counts(). Containers load while hidden.
+    +---> Data confidence (collapsed, bottom, $persist confidenceOpen): 3 groups —
+    |     Trusted / AI-inferred / No data; default all-on; `statuses[]` → `?statuses=` CSV
+    |     → search_materials_faceted (IN-filters enrichment_status; precedence over the
+    |     legacy verified_only).
+    Live result count "<N> <Commodity> parts" renders at the top of the results pane
+    (list.html) every filters-changed cycle, with an sr-only aria-live announcement.
+    Mobile drawer: x-trap focus trap + Escape-to-close.
 
 Search coverage:
     +---> global_search_service.py includes substitutes_text.ilike for

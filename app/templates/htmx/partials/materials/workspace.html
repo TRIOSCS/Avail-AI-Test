@@ -2,6 +2,7 @@
    Called by: htmx_views.py materials_workspace route
    Depends on: Alpine.js materialsFilter() in htmx_app.js
 #}
+{% from "htmx/partials/materials/filters/_macros.html" import disclosure_header %}
 <div id="materials-workspace" x-data="materialsFilter"
      data-display-names='{{ display_names|tojson }}' class="flex h-full">
 
@@ -16,49 +17,65 @@
 
   {# -- Sidebar (desktop: static, mobile: slide-over drawer) -- #}
   <div :class="drawerOpen ? 'translate-x-0' : '-translate-x-full lg:translate-x-0'"
+       x-trap.noscroll="drawerOpen"
+       @keydown.escape.window="drawerOpen = false"
        class="fixed inset-y-0 left-0 z-50 w-72 bg-white border-r border-gray-200 overflow-y-auto flex-shrink-0
               transition-transform duration-200 ease-out
               lg:static lg:z-auto lg:border-r lg:border-gray-100 faceted-sidebar
               top-[52px] bottom-[48px]">
 
     <div class="p-3">
-      {# Sidebar header (mobile: includes close button) #}
-      <div class="flex items-center justify-between mb-2">
-        <h3 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Categories</h3>
-        <button @click="drawerOpen = false" class="lg:hidden p-1 text-gray-400 hover:text-gray-600 rounded">
+      {# Sidebar header (mobile drawer close only) #}
+      <div class="flex items-center justify-end mb-1 lg:hidden">
+        <button @click="drawerOpen = false" aria-label="Close filters" class="p-1 text-gray-400 hover:text-gray-600 rounded">
           <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/>
           </svg>
         </button>
       </div>
 
-      {# Manufacturer filter — always visible, reloads on commodity change #}
-      <div id="manufacturer-filter-container"
-           hx-get="/v2/partials/materials/filters/manufacturers"
-           hx-target="this"
-           hx-trigger="load, commodity-changed from:body"
-           hx-indicator="#mfr-filter-spinner"
-           hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
-           hx-swap="innerHTML">
+      {# ── Sticky active-filter summary ───────────────────────────────
+         Compact count + global Clear all (keeps commodity) + Copy link. Detailed
+         removable chips remain in the results header. #}
+      <div class="sticky top-0 z-10 bg-white -mx-3 px-3 py-1.5 mb-2 border-b border-gray-100">
+        <template x-if="activeFilterCount > 0">
+          <div class="flex items-center gap-2 text-[11px]">
+            <span class="font-semibold text-gray-600"><span x-text="activeFilterCount"></span> active</span>
+            <button @click="clearAllFilters()" class="text-brand-600 hover:text-brand-700 font-medium">Clear all</button>
+            <span class="text-gray-300">·</span>
+            <button @click="copyLink()" class="text-brand-600 hover:text-brand-700 font-medium" x-text="copied ? 'Copied' : 'Copy link'"></button>
+          </div>
+        </template>
+        <template x-if="activeFilterCount === 0">
+          <span class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest">Filters</span>
+        </template>
       </div>
 
-      {# Global facets — lifecycle / RoHS / has-datasheet, reload on commodity change #}
-      <div id="global-filter-container"
-           hx-get="/v2/partials/materials/filters/global"
-           hx-target="this"
-           hx-trigger="load, commodity-changed from:body"
-           hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
-           hx-swap="innerHTML">
-      </div>
+      {# ── Recents (re-entry accelerator) ─────────────────────────────#}
+      <template x-if="recentCommodities.length > 0">
+        <div class="mb-3">
+          <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Recent</h4>
+          <div class="flex flex-wrap gap-1">
+            <template x-for="rc in recentCommodities" :key="rc">
+              <button @click="selectCommodity(rc)"
+                      :class="commodity === rc ? 'bg-brand-100 text-brand-800 border-brand-300' : 'bg-gray-50 text-gray-600 border-gray-200 hover:border-gray-300'"
+                      class="px-2 py-0.5 text-[11px] border rounded-full transition-colors"
+                      x-text="displayNames[rc] || rc"></button>
+            </template>
+          </div>
+        </div>
+      </template>
 
-      {# "All Materials" button #}
-      <button @click="selectCommodity(null)"
-              :class="!commodity ? 'bg-brand-50 text-brand-700 font-medium border-l-2 border-brand-500' : 'text-gray-600 hover:bg-gray-50 border-l-2 border-transparent'"
+      {# ── Category (the entry point) ─────────────────────────────────#}
+      <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Category</h4>
+      <input type="text" x-model="categorySearch" placeholder="Jump to category…"
+             aria-label="Filter categories"
+             class="w-full mb-1 px-2 py-1 text-[13px] border border-gray-200 rounded focus:ring-1 focus:ring-brand-500 focus:border-brand-500">
+      <button @click="selectCommodity(null)" x-show="!categorySearch"
+              :class="!commodity ? 'bg-brand-100 text-brand-800 font-semibold border-l-[3px] border-brand-500' : 'text-gray-600 hover:bg-gray-50 border-l-[3px] border-transparent'"
               class="w-full text-left px-3 py-1.5 text-sm rounded-r transition-colors mb-1">
         All Materials <span class="text-xs text-gray-400">({{ total_materials }})</span>
       </button>
-
-      {# Commodity tree — loaded once #}
       <span id="mfr-filter-spinner" class="htmx-indicator text-xs text-gray-400">Loading...</span>
       <div hx-get="/v2/partials/materials/filters/tree"
            hx-target="this"
@@ -85,12 +102,38 @@
            hx-sync="this:replace">
       </div>
 
-      {# ── Data confidence (3 groups, default all-on) ──────────────────
-         Low-priority filter, parked at the bottom. Each group checkbox toggles all
-         its member enrichment tiers; the backend still receives a `statuses` CSV. #}
+      {# ── More attributes (manufacturer + lifecycle/RoHS/condition/datasheet) ──
+         Collapsed by default; demoted below the commodity facets. Containers still load
+         while hidden (hx-trigger="load") so counts are ready when expanded. #}
       <div class="border-t border-gray-100 pt-3 mt-3">
-        <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Data confidence</h4>
-        <div class="space-y-0.5">
+        {{ disclosure_header('moreAttrsOpen', 'more-attrs-panel', 'More attributes', 'attributesActiveCount > 0', 'attributesActiveCount') }}
+        <div id="more-attrs-panel" role="region" aria-label="More attributes" x-show="moreAttrsOpen" x-collapse x-cloak class="mt-2">
+          {# Manufacturer #}
+          <div id="manufacturer-filter-container"
+               hx-get="/v2/partials/materials/filters/manufacturers"
+               hx-target="this"
+               hx-trigger="load, commodity-changed from:body"
+               hx-indicator="#mfr-filter-spinner"
+               hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
+               hx-swap="innerHTML">
+          </div>
+          {# Global facets — lifecycle / RoHS / condition / has-datasheet #}
+          <div id="global-filter-container"
+               hx-get="/v2/partials/materials/filters/global"
+               hx-target="this"
+               hx-trigger="load, commodity-changed from:body"
+               hx-vals='js:{"commodity": Alpine.evaluate(document.querySelector("#materials-workspace"), "commodity") || ""}'
+               hx-swap="innerHTML">
+          </div>
+        </div>
+      </div>
+
+      {# ── Data confidence (3 groups, collapsed, bottom) ───────────────
+         Lowest-priority filter. Each group checkbox toggles its member enrichment tiers;
+         the backend still receives a `statuses` CSV. #}
+      <div class="border-t border-gray-100 pt-3 mt-3">
+        {{ disclosure_header('confidenceOpen', 'confidence-panel', 'Data confidence', 'confidenceNarrowed', 'activeConfidenceGroups.length') }}
+        <div id="confidence-panel" role="region" aria-label="Data confidence" x-show="confidenceOpen" x-collapse x-cloak class="space-y-0.5 mt-2">
           <template x-for="group in CONFIDENCE_GROUPS" :key="group.key">
             <label class="flex items-center gap-2 px-2 py-1 rounded hover:bg-gray-50 cursor-pointer text-sm">
               <input type="checkbox"
