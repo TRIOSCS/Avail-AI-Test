@@ -72,7 +72,7 @@ from ..services.activity_service import log_activity as _log_activity
 from ..services.commodity_registry import COMMODITY_TREE, get_display_name
 from ..services.faceted_search_service import (
     INTERNAL_FILTER_VALUES,
-    SEARCHED_WITHIN_DAYS,
+    SEARCHED_WITHIN_VALUES,
     get_commodity_counts,
     get_commodity_spec_coverage,
     get_facet_counts,
@@ -7251,7 +7251,7 @@ async def materials_faceted_partial(
     has_crosses: bool = Query(False),
     internal: str = Query("all"),
     searched_within: str = Query("any"),
-    min_searches: int = Query(0, ge=0),
+    min_searches: str = Query("0"),
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
@@ -7273,11 +7273,24 @@ async def materials_faceted_partial(
     parsed_lifecycle = _csv_list(lifecycle)
     parsed_rohs = _csv_list(rohs)
     parsed_condition = _csv_list(condition)
-    # Unknown enum values degrade to the no-op default (hand-edited URLs must not 500).
+    # Unknown/invalid operational values (incl. non-numeric/negative min_searches)
+    # degrade to the no-op default — hand-edited URLs must not 500/422 — but each
+    # degrade is LOGGED so frontend/backend vocabulary drift (e.g. a bucket added to
+    # the UI but not the backend constants) surfaces in logs instead of silently
+    # no-op'ing the filter while the active-filter chip claims it is applied.
     if internal not in INTERNAL_FILTER_VALUES:
+        logger.warning("materials faceted: unknown internal={!r}, degrading to 'all'", internal)
         internal = "all"
-    if searched_within != "any" and searched_within not in SEARCHED_WITHIN_DAYS:
+    if searched_within not in SEARCHED_WITHIN_VALUES:
+        logger.warning("materials faceted: unknown searched_within={!r}, degrading to 'any'", searched_within)
         searched_within = "any"
+    try:
+        min_searches_n = int(min_searches)
+    except ValueError:
+        min_searches_n = -1
+    if min_searches_n < 0:
+        logger.warning("materials faceted: invalid min_searches={!r}, degrading to 0", min_searches)
+        min_searches_n = 0
 
     materials, total = search_materials_faceted(
         db,
@@ -7296,7 +7309,7 @@ async def materials_faceted_partial(
         has_crosses=has_crosses,
         internal=internal,
         searched_within=searched_within,
-        min_searches=min_searches,
+        min_searches=min_searches_n,
         limit=limit,
         offset=offset,
     )
@@ -7321,9 +7334,12 @@ async def materials_faceted_partial(
         vendor_stats = {s[0]: (s[1], s[2], s[4] if s[3] == 1 else None) for s in stats}
 
     # Attach spec chips for display. In commodity context: the selected commodity's
-    # is_primary keys (unchanged). Without a commodity: each card's OWN category's
-    # primary keys when a schema exists (one batched query — no N+1), else the first
-    # 3 scalar specs_structured entries; the template renders "label: value" there.
+    # is_primary keys (same keys as before; non-scalar/missing values are now SKIPPED
+    # instead of rendering dict-reprs or 500ing on raw-scalar entries). Without a
+    # commodity: each card's OWN category's primary keys (one batched query — no N+1);
+    # whenever that yields no chips (schema-less category OR a card lacking values for
+    # every primary key) fall back to the first 3 scalar specs_structured entries; the
+    # template renders "label: value" there.
     def _spec_scalar(raw):
         val = raw.get("value") if isinstance(raw, dict) else raw
         return val if isinstance(val, (str, int, float, bool)) else None

@@ -873,11 +873,16 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     |       has_crosses (cross_references holds a non-empty list; portable text-cast
     |                    predicate — identical on PG JSONB and SQLite JSON-as-text)
     |       internal    (tri-state all|standard|internal on is_internal_part; default
-    |                    `all` — deliberate deviation from the matrix's default=standard
-    |                    so first load never silently drops rows)
+    |                    `all` — deliberately not `standard` — so first load never
+    |                    silently drops rows)
     |       searched_within (7d|30d|90d|any chips on last_searched_at)
     |       min_searches    (int ≥ 0 on search_count)
-    |     Unknown enum values degrade to the no-op default (no 500 on hand-edited URLs).
+    |     Unknown/invalid values (incl. non-numeric or negative min_searches) degrade
+    |     to the no-op default with a WARNING log (hand-edited URLs never 500/422; the
+    |     log surfaces frontend/backend vocabulary drift). Vocabularies are owned by
+    |     faceted_search_service (INTERNAL_FILTER_VALUES / SEARCHED_WITHIN_VALUES,
+    |     derived from the maps that drive the query branches); the JS twin is
+    |     INTERNAL_MODES / SEARCH_BUCKETS on the materialsFilter component.
     |     Static section (no per-value counts → no HTMX reload).
     +---> Data confidence (collapsed, bottom, $persist confidenceOpen): 3 groups —
     |     Trusted / AI-inferred / No data; default all-on; `statuses[]` → `?statuses=` CSV
@@ -888,7 +893,7 @@ Sidebar facets (workspace.html + materialsFilter Alpine component) — COMMODITY
     Mobile drawer: x-trap focus trap + Escape-to-close.
 
 Coverage-aware empty states (get_commodity_spec_coverage(db, commodity) →
-{"with_specs": N, "total": M}; two cheap aggregates, no N+1):
+SpecCoverage(with_specs=N, total=M) NamedTuple; two cheap aggregates, no N+1):
     +---> Sub-filters panel header shows "N of M parts in <commodity> have filterable
     |     specs" so thin parametric results are explained before filtering.
     +---> Zero results + active parametric sub_filters + N < M → list.html renders the

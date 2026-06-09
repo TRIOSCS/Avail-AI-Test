@@ -158,7 +158,8 @@
           <div class="mb-3">
             <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Part type</h4>
             <div class="flex flex-wrap gap-1">
-              <template x-for="opt in [['all', 'All'], ['standard', 'Standard MPNs'], ['internal', 'Internal parts']]" :key="'int-' + opt[0]">
+              {# Vocabulary lives on the component (INTERNAL_MODES) — single front-end source of truth. #}
+              <template x-for="opt in INTERNAL_MODES" :key="'int-' + opt[0]">
                 <button @click="setInternal(opt[0])"
                         :class="internal === opt[0] ? 'bg-brand-50 text-brand-700 border-brand-300' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'"
                         :aria-pressed="internal === opt[0]"
@@ -170,7 +171,8 @@
           <div class="mb-3">
             <h4 class="text-[10px] font-semibold text-gray-400 uppercase tracking-widest mb-1.5">Searched within</h4>
             <div class="flex flex-wrap gap-1">
-              <template x-for="opt in [['7d', '7d'], ['30d', '30d'], ['90d', '90d'], ['any', 'Any']]" :key="'sw-' + opt[0]">
+              {# Vocabulary lives on the component (SEARCH_BUCKETS) — single front-end source of truth. #}
+              <template x-for="opt in SEARCH_BUCKETS" :key="'sw-' + opt[0]">
                 <button @click="setSearchedWithin(opt[0])"
                         :class="searchedWithin === opt[0] ? 'bg-brand-50 text-brand-700 border-brand-300' : 'bg-white text-gray-500 border-gray-200 hover:border-gray-300'"
                         :aria-pressed="searchedWithin === opt[0]"

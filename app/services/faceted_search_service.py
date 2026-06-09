@@ -7,6 +7,7 @@ Depends on: MaterialCard, MaterialSpecFacet, CommoditySpecSchema
 """
 
 from datetime import datetime, timedelta, timezone
+from typing import NamedTuple
 
 from sqlalchemy import Text, cast, exists, func, or_
 from sqlalchemy.orm import Session
@@ -20,10 +21,23 @@ from app.utils.search_builder import SearchBuilder
 # (see get_subfilter_options); a fixed-vocabulary facet renders its full canonical list.
 TOP_N = 12
 
-# Operational (Layer-3) filter vocabularies — validated in search_materials_faceted;
-# unknown values degrade to the no-op default rather than erroring on hand-edited URLs.
-INTERNAL_FILTER_VALUES = ("all", "standard", "internal")
+# Operational (Layer-3) filter vocabularies. This service OWNS the vocabularies: the
+# maps below drive the query branches in search_materials_faceted, and the *_VALUES
+# tuples (sentinel + map keys) are derived from them — adding a mode/bucket to a map
+# wires the query branch and the route check together. The faceted ROUTE
+# (htmx_views.materials_faceted_partial) validates incoming params against the *_VALUES
+# tuples and degrades unknowns to the no-op sentinel with a WARNING log; inside this
+# service unknown values simply fall through the map lookups as silent no-ops.
+# Front-end twin (must stay in sync): INTERNAL_MODES / SEARCH_BUCKETS on the
+# materialsFilter Alpine component in app/static/htmx_app.js.
+_INTERNAL_MODE_PREDICATES = {
+    # mode -> zero-arg predicate factory on MaterialCard.is_internal_part.
+    "standard": lambda: or_(MaterialCard.is_internal_part.is_(False), MaterialCard.is_internal_part.is_(None)),
+    "internal": lambda: MaterialCard.is_internal_part.is_(True),
+}
+INTERNAL_FILTER_VALUES = ("all", *_INTERNAL_MODE_PREDICATES)  # "all" = no-op sentinel
 SEARCHED_WITHIN_DAYS = {"7d": 7, "30d": 30, "90d": 90}
+SEARCHED_WITHIN_VALUES = ("any", *SEARCHED_WITHIN_DAYS)  # "any" = no-op sentinel
 
 
 def _apply_facet_filters(
@@ -337,10 +351,9 @@ def search_materials_faceted(
             MaterialCard.cross_references.isnot(None),
             cast(MaterialCard.cross_references, Text).notin_(("[]", "null", "")),
         )
-    if internal == "standard":
-        query = query.filter(or_(MaterialCard.is_internal_part.is_(False), MaterialCard.is_internal_part.is_(None)))
-    elif internal == "internal":
-        query = query.filter(MaterialCard.is_internal_part.is_(True))
+    internal_predicate = _INTERNAL_MODE_PREDICATES.get(internal)
+    if internal_predicate is not None:
+        query = query.filter(internal_predicate())
     days = SEARCHED_WITHIN_DAYS.get(searched_within)
     if days:
         cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -463,14 +476,22 @@ def get_subfilter_options(db: Session, commodity: str) -> list[dict]:
     return result
 
 
-def get_commodity_spec_coverage(db: Session, commodity: str) -> dict[str, int]:
+class SpecCoverage(NamedTuple):
+    """Parametric-spec coverage for a commodity (invariant: 0 <= with_specs <=
+    total)."""
+
+    with_specs: int
+    total: int
+
+
+def get_commodity_spec_coverage(db: Session, commodity: str) -> SpecCoverage:
     """Return parametric-spec coverage for a commodity.
 
-    {"with_specs": N, "total": M} — N = distinct non-deleted cards in the commodity that
-    have at least one MaterialSpecFacet row, M = all non-deleted cards in the commodity.
-    Drives the coverage line in the sub-filters panel and the coverage-aware empty state
-    (a parametric zero-result mostly means "not yet spec-enriched", not "no such
-    parts"). Two cheap aggregates, no N+1.
+    SpecCoverage(with_specs=N, total=M) — N = distinct non-deleted cards in the
+    commodity that have at least one MaterialSpecFacet row, M = all non-deleted cards in
+    the commodity. Drives the coverage line in the sub-filters panel and the coverage-
+    aware empty state (a parametric zero-result mostly means "not yet spec-enriched",
+    not "no such parts"). Two cheap aggregates, no N+1.
     """
     commodity = commodity.lower().strip()
     commodity_cards = db.query(MaterialCard.id).filter(
@@ -487,4 +508,4 @@ def get_commodity_spec_coverage(db: Session, commodity: str) -> dict[str, int]:
         .scalar()
         or 0
     )
-    return {"with_specs": with_specs, "total": total}
+    return SpecCoverage(with_specs=with_specs, total=total)

@@ -564,7 +564,7 @@ def test_faceted_searched_within_param(client, db_session: Session):
 
 
 def test_faceted_bogus_operational_params_degrade(client, db_session: Session):
-    """Unknown enum values on hand-edited URLs degrade to no-ops, never 500."""
+    """Unknown/invalid values on hand-edited URLs degrade to no-ops, never 500/422."""
     _op_card(db_session, "deg-1", is_internal_part=True)
     _op_card(db_session, "deg-2", is_internal_part=False)
     db_session.commit()
@@ -572,6 +572,13 @@ def test_faceted_bogus_operational_params_degrade(client, db_session: Session):
     resp = client.get("/v2/partials/materials/faceted?internal=bogus&searched_within=yesterday")
     assert resp.status_code == 200
     assert "DEG-1" in resp.text and "DEG-2" in resp.text
+
+    # min_searches follows the same contract: non-numeric and negative values degrade
+    # to the 0 no-op (NOT a FastAPI 422, which htmx would silently refuse to swap).
+    for bad in ("-1", "abc"):
+        resp = client.get(f"/v2/partials/materials/faceted?min_searches={bad}")
+        assert resp.status_code == 200
+        assert "DEG-1" in resp.text and "DEG-2" in resp.text
 
 
 def test_workspace_renders_sourcing_signals_section(client):
@@ -675,6 +682,21 @@ def test_faceted_empty_state_generic_without_parametric_filters(client, db_sessi
     assert "spec-enriched" not in resp.text
 
 
+def test_faceted_empty_state_generic_when_commodity_has_no_cards(client, db_session: Session):
+    """Parametric filters on a commodity with ZERO cards (coverage 0/0) → generic empty
+    state; the nonsensical 'Only 0 of 0 parts' nudge must never render."""
+    import json
+
+    _seed_ddr_schema(db_session)  # schema exists, but no dram cards are seeded
+    db_session.commit()
+
+    filters_json = json.dumps({"ddr_type": ["DDR5"]})
+    resp = client.get(f"/v2/partials/materials/faceted?commodity=dram&sub_filters={filters_json}")
+    assert resp.status_code == 200
+    assert "No results match your filters" in resp.text
+    assert "spec-enriched" not in resp.text
+
+
 # --- Material-card (result row) upgrades ---
 
 
@@ -773,9 +795,15 @@ def test_faceted_spec_chips_in_commodity_context_unchanged(client, db_session: S
         )
     )
     _op_card(db_session, "chip-ctx", category="dram", specs_structured={"capacity_gb": {"value": 64}})
+    # Raw-scalar primary spec (no {"value": ...} wrapper) — the pre-_spec_scalar code
+    # raised AttributeError (HTTP 500) on this shape in commodity context; it must now
+    # render the chip gracefully.
+    _op_card(db_session, "chip-ctx-raw", category="dram", specs_structured={"capacity_gb": 32})
     db_session.commit()
 
     resp = client.get("/v2/partials/materials/faceted?commodity=dram")
     assert resp.status_code == 200
-    assert ">64<" in resp.text.replace("\n", "").replace(" ", "")
+    compact = resp.text.replace("\n", "").replace(" ", "")
+    assert ">64<" in compact
+    assert ">32<" in compact
     assert "Capacity (GB): 64" not in resp.text

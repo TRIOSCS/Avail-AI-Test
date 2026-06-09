@@ -617,6 +617,15 @@ Alpine.data('materialsFilter', () => ({
     return this.CONFIDENCE_GROUPS.flatMap(g => g.tiers);
   },
 
+  // Sourcing-signal vocabularies — the single front-end source of truth as
+  // [value, label] pairs (incl. the no-op sentinel 'all'/'any'). Rendered by
+  // workspace.html's x-for templates and consulted by syncFromURL + the setters.
+  // Backend twin (must stay in sync): INTERNAL_FILTER_VALUES / SEARCHED_WITHIN_VALUES
+  // in app/services/faceted_search_service.py — the route logs a WARNING and degrades
+  // to the sentinel when the vocabularies drift.
+  INTERNAL_MODES: [['all', 'All'], ['standard', 'Standard MPNs'], ['internal', 'Internal parts']],
+  SEARCH_BUCKETS: [['7d', '7d'], ['30d', '30d'], ['90d', '90d'], ['any', 'Any']],
+
   get commodityDisplayName() {
     if (!this.commodity) return '';
     return this.displayNames[this.commodity]
@@ -764,9 +773,9 @@ Alpine.data('materialsFilter', () => ({
       this.hasPrice = params.get('has_price') === 'true';
       this.hasCrosses = params.get('has_crosses') === 'true';
       const internalParam = params.get('internal');
-      this.internal = ['standard', 'internal'].includes(internalParam) ? internalParam : 'all';
+      this.internal = this.INTERNAL_MODES.some(([v]) => v === internalParam) ? internalParam : 'all';
       const withinParam = params.get('searched_within');
-      this.searchedWithin = ['7d', '30d', '90d'].includes(withinParam) ? withinParam : 'any';
+      this.searchedWithin = this.SEARCH_BUCKETS.some(([v]) => v === withinParam) ? withinParam : 'any';
       const minSearchesVal = parseInt(params.get('min_searches') || '0', 10);
       this.minSearches = (isNaN(minSearchesVal) || minSearchesVal < 0) ? 0 : minSearchesVal;
       const pageVal = parseInt(params.get('page') || '0', 10);
@@ -888,14 +897,14 @@ Alpine.data('materialsFilter', () => ({
 
   // Internal-vs-standard segmented control ('all' | 'standard' | 'internal').
   setInternal(mode) {
-    this.internal = ['standard', 'internal'].includes(mode) ? mode : 'all';
+    this.internal = this.INTERNAL_MODES.some(([v]) => v === mode) ? mode : 'all';
     if (window.innerWidth >= 1024) this.applyFilters();
   },
 
   // Recently-searched chips ('7d' | '30d' | '90d' | 'any'). Re-clicking the active
   // bucket resets to 'any'.
   setSearchedWithin(bucket) {
-    const next = ['7d', '30d', '90d'].includes(bucket) ? bucket : 'any';
+    const next = this.SEARCH_BUCKETS.some(([v]) => v === bucket) ? bucket : 'any';
     this.searchedWithin = (this.searchedWithin === next) ? 'any' : next;
     if (window.innerWidth >= 1024) this.applyFilters();
   },

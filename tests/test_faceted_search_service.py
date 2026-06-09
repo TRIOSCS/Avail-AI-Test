@@ -548,7 +548,13 @@ def test_search_faceted_has_crosses_filter_portable(db_session: Session):
     The predicate is text-cast based so it behaves identically on PostgreSQL JSONB and
     SQLite JSON-as-text (see feedback_sqlite_masks_postgres).
     """
-    _mk_op(db_session, "x-null", crosses=None)  # JSON null / SQL NULL
+    from sqlalchemy import null
+
+    # Python None persists as the JSON 'null' encoding (JSON.none_as_null is False);
+    # a true SQL NULL needs the explicit null() expression. Both shapes are seeded so
+    # both halves of the predicate (isnot(None) + the text-cast notin_) are exercised.
+    _mk_op(db_session, "x-json-null", crosses=None)  # JSON null
+    _mk_op(db_session, "x-sql-null", crosses=null())  # SQL NULL
     _mk_op(db_session, "x-empty", crosses=[])  # empty list
     _mk_op(db_session, "x-default")  # column default (list)
     _mk_op(db_session, "x-real", crosses=[{"mpn": "ALT-1", "manufacturer": "TI"}])
@@ -558,7 +564,7 @@ def test_search_faceted_has_crosses_filter_portable(db_session: Session):
     assert total == 1
 
     _, total_all = search_materials_faceted(db_session, has_crosses=False)
-    assert total_all == 4  # False is a no-op
+    assert total_all == 5  # False is a no-op
 
 
 def test_search_faceted_internal_tristate(db_session: Session):
@@ -653,7 +659,7 @@ def test_search_faceted_operational_filters_combine(db_session: Session):
 
 
 def test_get_commodity_spec_coverage(db_session: Session):
-    from app.services.faceted_search_service import get_commodity_spec_coverage
+    from app.services.faceted_search_service import SpecCoverage, get_commodity_spec_coverage
 
     _seed_dram_schema(db_session)
     _make_dram_card(db_session, "COV-001", "DDR4", 16)  # has facet rows
@@ -680,8 +686,8 @@ def test_get_commodity_spec_coverage(db_session: Session):
     db_session.flush()
 
     coverage = get_commodity_spec_coverage(db_session, "dram")
-    assert coverage == {"with_specs": 1, "total": 2}  # deleted + other-category excluded
+    assert coverage == SpecCoverage(with_specs=1, total=2)  # deleted + other-category excluded
 
     # Case-insensitive commodity key, and an unknown commodity yields zeros.
-    assert get_commodity_spec_coverage(db_session, "  DRAM ") == {"with_specs": 1, "total": 2}
-    assert get_commodity_spec_coverage(db_session, "nonexistent_xyz") == {"with_specs": 0, "total": 0}
+    assert get_commodity_spec_coverage(db_session, "  DRAM ") == SpecCoverage(with_specs=1, total=2)
+    assert get_commodity_spec_coverage(db_session, "nonexistent_xyz") == SpecCoverage(with_specs=0, total=0)
