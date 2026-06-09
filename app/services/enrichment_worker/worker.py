@@ -301,6 +301,21 @@ async def run_one_batch(
             except Exception:
                 logger.exception("ENRICH_WORKER: mpn-decode failed over {} cards", len(enriched_ids))
 
+    # Deterministic description→spec extraction (storage/DRAM token grammar): zero-LLM,
+    # enum-validated by record_spec. Runs AFTER mpn-decode (its 0.95 values outrank this
+    # pass's 0.90 — the writer skips higher-confidence keys) and BEFORE the AI spec pass
+    # (0.85), on the same shared post-await session. Committed together below.
+    if enriched_ids:
+        from app.config import settings
+
+        if settings.desc_parse_enabled:
+            from app.services.desc_extractor.writer import extract_and_record_specs
+
+            try:
+                logger.info("ENRICH_WORKER: desc-parse {}", extract_and_record_specs(db, enriched_ids))
+            except Exception:
+                logger.exception("ENRICH_WORKER: desc-parse failed over {} cards", len(enriched_ids))
+
     # Second pass: parametric spec extraction for cards that landed a real category this
     # batch. Runs ONCE per batch (the extractor groups by category internally) on the same
     # session, so specs persist together with core attrs at the commit below.
