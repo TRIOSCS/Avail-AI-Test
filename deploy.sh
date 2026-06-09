@@ -192,15 +192,20 @@ fi
 # pinned deps is a separate follow-up.
 echo ""
 echo "==> Restarting host worker units (nc/ics)..."
+HOST_WORKER_WARN=""
 for unit in avail-nc-worker avail-ics-worker; do
-    if systemctl cat "${unit}.service" >/dev/null 2>&1; then
-        if systemctl restart "${unit}.service" 2>/dev/null || sudo systemctl restart "${unit}.service" 2>/dev/null; then
-            echo "==> restarted ${unit} ($(systemctl is-active "${unit}.service" 2>/dev/null || true))"
-        else
-            echo "==> WARNING: could not restart ${unit} — restart it manually if its code changed"
-        fi
-    else
+    if ! systemctl cat "${unit}.service" >/dev/null 2>&1; then
         echo "==> ${unit} not installed here — skipping"
+        continue
+    fi
+    # Capture stderr so a failed restart reports WHY (needs-root vs broken new code vs transient),
+    # instead of a generic "could not restart". Try unprivileged, then escalate to sudo.
+    if restart_err=$(systemctl restart "${unit}.service" 2>&1) \
+        || restart_err=$(sudo systemctl restart "${unit}.service" 2>&1); then
+        echo "==> restarted ${unit} ($(systemctl is-active "${unit}.service" 2>/dev/null || true))"
+    else
+        echo "==> WARNING: could not restart ${unit}: ${restart_err}"
+        HOST_WORKER_WARN="${HOST_WORKER_WARN} ${unit}"
     fi
 done
 
@@ -208,5 +213,14 @@ done
 echo ""
 echo "==> Recent app logs:"
 docker compose logs --tail=20 app
+
+# Re-surface any host-worker restart failure AFTER the log dump, so the operator's last
+# line is the actionable warning — a SILENTLY stale host worker is the bug this prevents.
+if [ -n "${HOST_WORKER_WARN}" ]; then
+    echo ""
+    echo "==> ⚠️  Deploy OK, but these host worker(s) FAILED to restart and may be running stale code."
+    echo "==>     Restart them manually:${HOST_WORKER_WARN}"
+fi
+
 echo ""
 echo "==> Deploy complete."
