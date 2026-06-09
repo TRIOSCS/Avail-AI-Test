@@ -2,7 +2,7 @@
 
 What: Extracts per-commodity structured specs for material cards via Claude and
       writes them through record_spec (specs_structured JSONB + material_spec_facets).
-Called by: jobs/tagging_jobs.py (_job_material_enrichment), routers/htmx_views.py
+Called by: jobs/tagging_jobs.py (_job_spec_enrichment), routers/htmx_views.py
            (enrich button), app/management/enrich_specs.py (backfill).
 Depends on: commodity_registry.get_batch_spec_schema, spec_write_service.record_spec,
             utils.claude_client.claude_structured.
@@ -13,9 +13,18 @@ from datetime import datetime, timezone
 from loguru import logger
 from sqlalchemy.orm import Session
 
+from app.constants import MaterialEnrichmentStatus
 from app.models.intelligence import MaterialCard
 from app.services.commodity_registry import get_batch_spec_schema
 from app.services.spec_write_service import record_spec
+
+# Only cards whose description/category came from a trustworthy, source-attributed tier may
+# seed structured-spec facets. A guess/orphan description must never produce filter facets.
+_TRUSTWORTHY_STATUSES = (
+    MaterialEnrichmentStatus.VERIFIED,
+    MaterialEnrichmentStatus.WEB_SOURCED,
+    MaterialEnrichmentStatus.OEM_SOURCED,
+)
 
 # {category: {"specs": [{"key","label","type","values"?,"canonical_unit"?,"unit_hint"?}]}}
 COMMODITY_SPECS = get_batch_spec_schema()
@@ -110,9 +119,13 @@ async def enrich_card_specs(
     """Extract and record structured specs for the given cards (second pass).
 
     Eligible cards have a category, a non-empty description, and (unless force) no prior
-    spec pass. Cards are grouped by category; each category uses its own prompt/schema.
-    Specs with confidence >= FACET_MIN_CONF are written via record_spec (JSONB + facet).
-    Every processed card gets specs_enriched_at stamped so it is not reprocessed.
+    spec pass. Only cards with a trustworthy/source-attributed status (verified/web_sourced/
+    oem_sourced) seed specs, so guess/orphan descriptions never produce facets — the status
+    gate is a correctness invariant and applies even when ``force=True`` (force only bypasses
+    the ``specs_enriched_at`` re-process filter). Cards are grouped by category; each category
+    uses its own prompt/schema. Specs with confidence >= FACET_MIN_CONF are written via
+    record_spec (JSONB + facet). Every processed card gets specs_enriched_at stamped so it is
+    not reprocessed.
     """
     from app.utils.claude_client import claude_structured  # lazy: tests patch at source
 
@@ -122,6 +135,9 @@ async def enrich_card_specs(
         MaterialCard.category.isnot(None),
         MaterialCard.description.isnot(None),
         MaterialCard.description != "",
+        # Status gate is OUTSIDE the force branch: force only bypasses re-processing, never
+        # the trustworthy-source invariant.
+        MaterialCard.enrichment_status.in_(_TRUSTWORTHY_STATUSES),
     )
     if not force:
         query = query.filter(MaterialCard.specs_enriched_at.is_(None))
@@ -200,8 +216,12 @@ async def enrich_card_specs(
 
 
 async def enrich_pending_specs(db: Session, *, limit: int = 300, batch_size: int = BATCH_SIZE) -> dict:
-    """Find and enrich cards that need a spec pass (card-level enriched, no specs
-    yet)."""
+    """Find and enrich cards that need a spec pass (card-level enriched, no specs yet).
+
+    Only cards with a trustworthy/source-attributed status
+    (verified/web_sourced/oem_sourced) seed specs, so guess/orphan descriptions never
+    produce facets.
+    """
     rows = (
         db.query(MaterialCard.id)
         .filter(
@@ -210,6 +230,7 @@ async def enrich_pending_specs(db: Session, *, limit: int = 300, batch_size: int
             MaterialCard.description.isnot(None),
             MaterialCard.description != "",
             MaterialCard.deleted_at.is_(None),
+            MaterialCard.enrichment_status.in_(_TRUSTWORTHY_STATUSES),
         )
         .order_by(MaterialCard.search_count.desc().nullslast())
         .limit(limit)

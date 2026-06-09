@@ -5,6 +5,7 @@ from unittest.mock import AsyncMock, patch
 import pytest
 from sqlalchemy.orm import Session
 
+from app.constants import MaterialEnrichmentStatus
 from app.models.faceted_search import MaterialSpecFacet
 from app.models.intelligence import MaterialCard
 from app.services.commodity_registry import seed_commodity_schemas
@@ -17,7 +18,15 @@ def db(db_session):
 
 
 def _mc(
-    db: Session, mpn: str, *, category: str | None = "microcontrollers", description="An MCU", specs_enriched_at=None
+    db: Session,
+    mpn: str,
+    *,
+    category: str | None = "microcontrollers",
+    description="An MCU",
+    specs_enriched_at=None,
+    # SP1 (2026-06-09): only trustworthy/source-attributed cards seed specs. Default the
+    # helper to 'verified' so existing happy-path tests still exercise the spec reader.
+    enrichment_status=MaterialEnrichmentStatus.VERIFIED,
 ) -> MaterialCard:
     card = MaterialCard(
         normalized_mpn=mpn.lower().replace("-", ""),
@@ -27,6 +36,7 @@ def _mc(
         category=category,
         search_count=5,
         specs_enriched_at=specs_enriched_at,
+        enrichment_status=enrichment_status,
     )
     db.add(card)
     db.commit()
@@ -137,13 +147,23 @@ async def test_pending_selects_unmarked_cards(db: Session, _schemas):
 
 @pytest.mark.asyncio
 async def test_enrich_button_triggers_spec_pass(client, test_material_card):
+    # SP1 (2026-06-09): the button routes to the authoritative ladder (enrich_cards), then
+    # the status-gated spec pass — never the removed Haiku path (enrich_material_cards).
     with (
-        patch("app.services.material_enrichment_service.enrich_material_cards", new_callable=AsyncMock) as mcard,
+        patch(
+            "app.services.authoritative_enrichment_service.enrich_cards",
+            new_callable=AsyncMock,
+            return_value={"verified": 1},
+        ) as mauth,
         patch("app.services.spec_enrichment_service.enrich_card_specs", new_callable=AsyncMock) as mspec,
+        patch("app.services.material_enrichment_service.enrich_material_cards", new_callable=AsyncMock) as mhaiku,
     ):
         resp = client.post(f"/v2/partials/materials/{test_material_card.id}/enrich")
     assert resp.status_code == 200
-    mcard.assert_awaited_once()
+    mauth.assert_awaited_once()
+    # refresh=True so even a terminal card re-enters the ladder
+    assert mauth.call_args.kwargs.get("refresh") is True
+    mhaiku.assert_not_called()
     mspec.assert_awaited_once()
     # force=True so the just-clicked card re-extracts even if previously marked
     assert mspec.call_args.kwargs.get("force") is True
@@ -152,7 +172,11 @@ async def test_enrich_button_triggers_spec_pass(client, test_material_card):
 @pytest.mark.asyncio
 async def test_enrich_button_survives_spec_failure(client, test_material_card):
     with (
-        patch("app.services.material_enrichment_service.enrich_material_cards", new_callable=AsyncMock),
+        patch(
+            "app.services.authoritative_enrichment_service.enrich_cards",
+            new_callable=AsyncMock,
+            return_value={"verified": 1},
+        ),
         patch(
             "app.services.spec_enrichment_service.enrich_card_specs",
             new_callable=AsyncMock,

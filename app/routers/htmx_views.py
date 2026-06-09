@@ -8742,18 +8742,37 @@ async def enrich_material(
     user: User = Depends(require_user),
     db: Session = Depends(get_db),
 ):
-    """Trigger AI enrichment for a material card."""
-    from ..models.intelligence import MaterialCard
-    from ..services.material_enrichment_service import enrich_material_cards
+    """Trigger authoritative enrichment for a material card.
 
-    mc = db.query(MaterialCard).filter(MaterialCard.id == material_id).first()
+    Runs the authoritative ladder (verified -> web -> OEM -> flagged inference) with
+    refresh=True so even a terminal card re-enters the ladder, then a status-gated
+    structured-spec pass. The Haiku card-enrichment path was removed in SP1
+    (2026-06-09).
+    """
+    from ..constants import MaterialEnrichmentStatus
+    from ..models.intelligence import MaterialCard
+    from ..services.authoritative_enrichment_service import enrich_cards
+
+    mc = db.get(MaterialCard, material_id)
     if not mc:
         raise HTTPException(404, "Material not found")
 
+    # enrich_cards self-handles ClaudeError / disabled-source outages internally and
+    # returns a counts dict (it does NOT raise on a backend outage). Capture it so we can
+    # tell the user when nothing actually happened instead of reporting false success.
+    enrich_blocked = False
+    counts: dict = {}
     try:
-        await enrich_material_cards([material_id], db)
+        counts = await enrich_cards([material_id], db, refresh=True)
     except Exception as e:
-        logger.warning("Enrichment failed for material {}: {}", material_id, e)
+        logger.exception("Enrichment failed for material {}: {}", material_id, e)
+        enrich_blocked = True
+
+    # A single card produces exactly one status tally on success. If no real status landed,
+    # or a Claude outage / disabled source blocked the run, the card is unchanged.
+    status_tallies = sum(int(counts.get(s, 0)) for s in MaterialEnrichmentStatus)
+    if counts.get("claude_error") or counts.get("disabled_sources") or status_tallies == 0:
+        enrich_blocked = True
 
     try:
         from ..services.spec_enrichment_service import enrich_card_specs
@@ -8764,7 +8783,20 @@ async def enrich_material(
 
     db.refresh(mc)
 
-    return await material_detail_partial(request, material_id, user, db)
+    response = await material_detail_partial(request, material_id, user, db)
+    if enrich_blocked:
+        # Surface a user-facing toast WITHOUT breaking the partial swap, via the existing
+        # showToast HX-Trigger convention bridged to the global $store.toast (htmx_app.js).
+        logger.warning("Enrichment no-op for material {} (counts={}) — surfacing toast", material_id, counts)
+        response.headers["HX-Trigger"] = json.dumps(
+            {
+                "showToast": {
+                    "message": "Enrichment couldn't complete — a data source was unavailable. Try again shortly.",
+                    "type": "error",
+                }
+            }
+        )
+    return response
 
 
 @router.post("/v2/partials/materials/{material_id}/find-crosses", response_class=HTMLResponse)

@@ -679,32 +679,27 @@ class TestJobExpireStale:
 
 
 class TestRegisterTaggingJobs:
-    def test_registers_four_jobs_without_enrichment(self):
-        """register_tagging_jobs adds 4 jobs when enrichment is disabled."""
+    def test_registers_all_jobs_unconditionally(self):
+        """register_tagging_jobs adds the 5 tagging/spec jobs unconditionally.
+
+        SP1 (2026-06-09): the gated 'material_enrichment' Haiku job was removed and
+        replaced with an always-on 'spec_enrichment' backlog sweep.
+        """
         from app.jobs.tagging_jobs import register_tagging_jobs
 
         mock_scheduler = MagicMock()
-        mock_settings = MagicMock(material_enrichment_enabled=False)
+        mock_settings = MagicMock()
         register_tagging_jobs(mock_scheduler, mock_settings)
 
-        assert mock_scheduler.add_job.call_count == 4
+        assert mock_scheduler.add_job.call_count == 5
         job_ids = [c.kwargs["id"] for c in mock_scheduler.add_job.call_args_list]
         assert "internal_confidence_boost" in job_ids
         assert "prefix_backfill" in job_ids
         assert "sighting_mining" in job_ids
         assert "ai_tagging" in job_ids
-
-    def test_registers_five_jobs_with_enrichment(self):
-        """register_tagging_jobs adds 5 jobs when enrichment is enabled."""
-        from app.jobs.tagging_jobs import register_tagging_jobs
-
-        mock_scheduler = MagicMock()
-        mock_settings = MagicMock(material_enrichment_enabled=True)
-        register_tagging_jobs(mock_scheduler, mock_settings)
-
-        assert mock_scheduler.add_job.call_count == 5
-        job_ids = [c.kwargs["id"] for c in mock_scheduler.add_job.call_args_list]
-        assert "material_enrichment" in job_ids
+        assert "spec_enrichment" in job_ids
+        # The removed Haiku card-enrichment job must never re-appear.
+        assert "material_enrichment" not in job_ids
 
 
 class TestJobInternalBoost:
