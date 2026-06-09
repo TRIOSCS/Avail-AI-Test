@@ -172,6 +172,21 @@ htmx.on('htmx:responseError', (evt) => {
     Alpine.store('toast').show = true;
 });
 
+// ── Server-driven toast bridge ───────────────────────────────
+// HTMX dispatches a DOM event named after each HX-Trigger key. Servers emit
+// {"showToast": {"message": "...", "type": "..."}} (see htmx_views.py); bridge
+// it into the global $store.toast the base layout renders (htmx/base.html).
+// Plain string or {message,type} both supported; type defaults to "info".
+document.body.addEventListener('showToast', (evt) => {
+    const d = evt.detail;
+    const msg = typeof d === 'string' ? d : (d && d.message) || '';
+    if (!msg) return;
+    const type = (d && d.type) || 'info';
+    Alpine.store('toast').message = msg;
+    Alpine.store('toast').type = type;
+    Alpine.store('toast').show = true;
+});
+
 // Stale-response guard: HTMX swaps can arrive out of order when the user
 // clicks a new row before the previous /refresh resolves. Correlate via
 // X-Rendered-Req-Id and drop swaps for the wrong row.

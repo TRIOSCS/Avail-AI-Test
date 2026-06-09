@@ -54,7 +54,6 @@ def _mock_settings(**overrides):
         eight_by_eight_enabled=False,
         prospecting_enabled=False,
         customer_enrichment_enabled=False,
-        material_enrichment_enabled=False,
     )
     defaults.update(overrides)
     mock = MagicMock()

@@ -885,17 +885,26 @@ class TestProactiveRoutes:
         card = _material_card(db_session)
         db_session.commit()
 
-        with patch(
-            "app.services.material_enrichment_service.enrich_material_cards",
-            AsyncMock(return_value=None),
+        with (
+            patch(
+                "app.services.authoritative_enrichment_service.enrich_cards",
+                AsyncMock(return_value={}),
+            ) as auth,
+            patch("app.services.spec_enrichment_service.enrich_card_specs", AsyncMock(return_value={})),
+            patch(
+                "app.services.material_enrichment_service.enrich_material_cards",
+                AsyncMock(return_value=None),
+            ) as haiku,
         ):
             resp = client.post(f"/v2/partials/materials/{card.id}/enrich")
         assert resp.status_code == 200
+        auth.assert_awaited_once()  # routes to the authoritative ladder
+        haiku.assert_not_called()  # never the removed Haiku path
 
     def test_enrich_material_not_found(self, client, db_session: Session):
         with patch(
-            "app.services.material_enrichment_service.enrich_material_cards",
-            AsyncMock(return_value=None),
+            "app.services.authoritative_enrichment_service.enrich_cards",
+            AsyncMock(return_value={}),
         ):
             resp = client.post("/v2/partials/materials/999999/enrich")
         assert resp.status_code == 404

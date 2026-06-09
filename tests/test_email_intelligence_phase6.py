@@ -282,7 +282,6 @@ class TestJobEmailHealthUpdate:
                     eight_by_eight_enabled=False,
                     prospecting_enabled=False,
                     customer_enrichment_enabled=False,
-                    material_enrichment_enabled=False,
                 ),
             ),
         ):
@@ -417,7 +416,6 @@ class TestJobCalendarScan:
                     eight_by_eight_enabled=False,
                     prospecting_enabled=False,
                     customer_enrichment_enabled=False,
-                    material_enrichment_enabled=False,
                 ),
             ),
         ):

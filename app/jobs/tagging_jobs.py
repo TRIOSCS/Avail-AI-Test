@@ -1,8 +1,9 @@
-"""Material tagging background jobs — Claude Haiku AI, prefix, sighting, boost.
+"""Material tagging background jobs — Claude Haiku AI, prefix, sighting, boost, spec
+sweep.
 
 Called by: app/jobs/__init__.py via register_tagging_jobs()
 Depends on: app.database, app.models, app.services.enrichment, app.services.tagging_backfill,
-            app.services.tagging_ai, app.utils.claude_client
+            app.services.tagging_ai, app.services.spec_enrichment_service, app.utils.claude_client
 """
 
 from apscheduler.triggers.interval import IntervalTrigger
@@ -46,13 +47,15 @@ def register_tagging_jobs(scheduler, settings):
         name="Classify untagged cards via Claude Haiku",
     )
 
-    if settings.material_enrichment_enabled:
-        scheduler.add_job(
-            _job_material_enrichment,
-            IntervalTrigger(hours=2),
-            id="material_enrichment",
-            name="Material card AI enrichment (Claude Haiku)",
-        )
+    # Spec extraction backlog sweep. SP1 (2026-06-09): the automated Haiku card-enrichment
+    # path was removed — this job ONLY runs the status-gated structured-spec second pass over
+    # cards already enriched by the authoritative ladder (verified/web_sourced/oem_sourced).
+    scheduler.add_job(
+        _job_spec_enrichment,
+        IntervalTrigger(hours=2),
+        id="spec_enrichment",
+        name="Material card spec extraction (backlog sweep)",
+    )
 
 
 @_traced_job
@@ -203,26 +206,19 @@ async def _job_ai_tagging():
 
 
 @_traced_job
-async def _job_material_enrichment():
-    """Every 2h — AI-enrich material cards missing descriptions/categories via Claude
-    Haiku."""
-    from ..config import settings
+async def _job_spec_enrichment():
+    """Every 2h — structured-spec second pass over the spec backlog.
+
+    SP1 (2026-06-09): the automated Claude Haiku card-enrichment path was removed. This job
+    runs ONLY ``enrich_pending_specs`` (no card-level enrichment), which is status-gated so it
+    seeds facets exclusively from cards with a trustworthy/source-attributed status.
+    """
     from ..database import SessionLocal
+    from ..services.spec_enrichment_service import enrich_pending_specs
 
     db = SessionLocal()
     try:
-        from ..services.material_enrichment_service import enrich_pending_cards
-        from ..services.spec_enrichment_service import enrich_pending_specs
-
-        result = await enrich_pending_cards(db, limit=settings.material_enrichment_batch_size)
-        logger.info(
-            "Material enrichment: enriched={} errors={} pending={}",
-            result["enriched"],
-            result["errors"],
-            result.get("pending", 0),
-        )
-
-        spec_stats = await enrich_pending_specs(db, limit=settings.material_enrichment_batch_size)
+        spec_stats = await enrich_pending_specs(db)
         logger.info(
             "Material spec enrichment: cards={} specs={} errors={} skipped_no_schema={}",
             spec_stats["cards_processed"],
@@ -231,7 +227,7 @@ async def _job_material_enrichment():
             spec_stats["skipped_no_schema"],
         )
     except Exception:
-        logger.exception("Material enrichment job failed")
+        logger.exception("Material spec enrichment job failed")
         db.rollback()
         raise
     finally:
