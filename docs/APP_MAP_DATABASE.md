@@ -312,6 +312,24 @@
 
 **`customer_part_history`** — What parts each customer has bought (for proactive matching)
 
+**`fru_links`** — IBM/Lenovo FRU crosswalk: one row per FRU ↔ related-PN edge (migration 094)
+| Column | Type | Notes |
+|--------|------|-------|
+| id | Integer PK | |
+| fru_raw / fru_norm | String 64, NOT NULL | FRU as in source / `normalize_mpn_key` form (`ix_fru_links_fru_norm`) |
+| related_raw / related_norm | String 64, NOT NULL | Related PN raw / normalized (`ix_fru_links_related_norm`) |
+| rel_kind | String 24, NOT NULL | `FruLinkKind` (constants.py): `ibm_11s`\|`mfg_model`\|`option`\|`option_pn`\|`sourcing_pn`\|`lenovo_pn`\|`lenovo_ppn`\|`tray`\|`tray_alt`\|`bracket`\|`board`\|`screws`\|`shuttle`\|`dongle`\|`drive_pn`\|`assembly`. Validated on write. |
+| manufacturer | String 128, nullable | Maker of the related part (mfg_model/drive_pn rows) |
+| description / note | Text, nullable | Part description / free-text context (feature codes, FW, carrier notes) |
+| series / machine | String 64 / 128, nullable | Platform context (xSeries, Storwize, POWER 8, ...) |
+| qual_status / qual_date | String 64 / Date, nullable | `qlot approved`, `qlot approved - Only EMEA`, `cdc_pending` + date when known |
+| source_sheet | String 64, NOT NULL | Workbook sheet the edge came from |
+| created_at / updated_at | UTCDateTime | |
+
+> UNIQUE `uq_fru_links_edge` (fru_norm, related_norm, rel_kind, source_sheet). Populated by
+> `python -m app.management.ingest_fru_matrix <xlsx> [--apply]`; read by
+> `app/services/fru_matrix_service.py` for the materials detail "FRU matrix" / "Used in FRUs" panels.
+
 ---
 
 ### Excess Inventory

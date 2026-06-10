@@ -822,6 +822,45 @@ find_crosses() endpoint
 
 ---
 
+## FRU Crosswalk (IBM/Lenovo FRU ↔ 11S ↔ model ↔ tray)
+
+```
+Ingest (one-off, admin CLI):
+python -m app.management.ingest_fru_matrix <FRU_PN_TRAY matrix .xlsx> [--apply]
+    |
+    +---> per-sheet parsers (openpyxl read_only): Main, Qlot, Gabor, CZ, CDC,
+    |       Lenovo-HDD, Lenovo FRU-PN, LVN VPD Mapping, Series, NSeries(NetApp)
+    |       - hygiene: nbsp strip, sentinel→NULL (N/A, #N/A, PENDIENTE, ...),
+    |         comma/slash multi-value split, carrier parentheticals→note,
+    |         Lenovo SAP zero-padding/_Exx de-pad, NSeries FRU forward-fill,
+    |         prose cells rejected by PN-plausibility regex
+    |       - normalization: fru_norm/related_norm via normalize_mpn_key
+    |
+    +---> DEFAULT dry run: per-sheet parsed/skipped/kind counts + samples, no writes
+    +---> --apply: chunked upsert into fru_links
+            (insert new edges; refresh context attrs on existing unique key)
+
+Lookup (read path):
+GET /v2/partials/materials/{card_id}          (material detail surface)
+GET /v2/partials/materials/fru-lookup?q=<pn>  (standalone HTMX partial; must stay
+    |                                          registered BEFORE the {card_id} route)
+    v
+fru_matrix_service.get_fru_view(db, mpn)      — forward: the part IS a FRU
+fru_matrix_service.get_reverse_view(db, mpn)  — reverse: FRUs the PN appears under
+    |   (raw input normalized internally; cross-sheet dedup prefers rows with
+    |    qual_status/manufacturer and coalesces missing attributes)
+    v
+htmx/partials/materials/fru_section.html
+    +---> "FRU matrix" panel: sections (Approved drives & models / 11S part numbers /
+    |       Options / Trays & hardware / Lenovo PNs / Sourcing & assembly), count
+    |       badges, qual pills (emerald=qlot approved, amber=cdc_pending),
+    |       series/machine context chips; items link to materials search
+    +---> "Used in FRUs" panel: FRU | role | qualification | context table; each FRU
+            links to its own fru-lookup (swaps #fru-crosswalk in place)
+```
+
+---
+
 ## Faceted Search (Full-Text Search)
 
 ```

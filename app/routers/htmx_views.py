@@ -7415,6 +7415,34 @@ async def materials_faceted_partial(
     return template_response("htmx/partials/materials/list.html", ctx)
 
 
+@router.get("/v2/partials/materials/fru-lookup", response_class=HTMLResponse)
+async def fru_lookup_partial(
+    request: Request,
+    q: str = Query("", max_length=100),
+    user: User = Depends(require_user),
+    db: Session = Depends(get_db),
+):
+    """FRU crosswalk lookup: render whichever view matches the part number.
+
+    Forward view when q is a known FRU, reverse "Used in FRUs" view when q appears
+    as a related PN (11S/model/tray/...), an empty state when neither.
+    NOTE: must stay registered BEFORE /v2/partials/materials/{card_id} — the path
+    would otherwise be captured by the card_id route.
+    """
+    from ..services.fru_matrix_service import get_fru_view, get_reverse_view
+
+    ctx = _base_ctx(request, user, "materials")
+    ctx.update(
+        {
+            "fru_view": get_fru_view(db, q) if q else None,
+            "fru_usages": get_reverse_view(db, q) if q else [],
+            "fru_query": q,
+            "show_empty": True,
+        }
+    )
+    return template_response("htmx/partials/materials/fru_section.html", ctx)
+
+
 @router.get("/v2/partials/materials/{card_id}", response_class=HTMLResponse)
 async def material_detail_partial(
     request: Request,
@@ -7424,6 +7452,7 @@ async def material_detail_partial(
 ):
     """Return material card detail as HTML partial."""
     from ..models.intelligence import MaterialCard
+    from ..services.fru_matrix_service import get_fru_view, get_reverse_view
 
     card = (
         db.query(MaterialCard)
@@ -7438,8 +7467,17 @@ async def material_detail_partial(
 
     sightings = sightings_for_card(db, card_id, limit=50)
     offers = offers_for_card(db, card_id, limit=50)
+    mpn = card.display_mpn or card.normalized_mpn
     ctx = _base_ctx(request, user, "materials")
-    ctx.update({"card": card, "sightings": sightings, "offers": offers})
+    ctx.update(
+        {
+            "card": card,
+            "sightings": sightings,
+            "offers": offers,
+            "fru_view": get_fru_view(db, mpn),
+            "fru_usages": get_reverse_view(db, mpn),
+        }
+    )
     return template_response("htmx/partials/materials/detail.html", ctx)
 
 

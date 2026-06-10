@@ -463,3 +463,28 @@ class MaterialEnrichmentStatus(StrEnum):
     NOT_FOUND = "not_found"
     OEM_SOURCED = "oem_sourced"
     NOT_CATALOGUED = "not_catalogued"
+
+
+class FruLinkKind(StrEnum):
+    """Relationship kind for FruLink rows (IBM/Lenovo FRU crosswalk).
+
+    Single source of truth for the valid fru_links.rel_kind values. Enforced at the ORM
+    layer via @validates on FruLink.
+    """
+
+    IBM_11S = "ibm_11s"  # IBM 11S part number stamped on the part
+    MFG_MODEL = "mfg_model"  # Manufacturer model / MPN (e.g. SSDSC2BB120G4I)
+    OPTION = "option"  # IBM/Lenovo option number
+    OPTION_PN = "option_pn"  # Option part number
+    SOURCING_PN = "sourcing_pn"  # Additional sourcing / make-to-label numbers
+    LENOVO_PN = "lenovo_pn"  # Lenovo / Idea part number
+    LENOVO_PPN = "lenovo_ppn"  # Lenovo PPN (FRU-PPN BOM)
+    TRAY = "tray"  # Carrier / tray part number
+    TRAY_ALT = "tray_alt"  # Alternate carrier / tray
+    BRACKET = "bracket"  # Mounting bracket
+    BOARD = "board"  # Interposer / carrier board
+    SCREWS = "screws"  # Mounting screws
+    SHUTTLE = "shuttle"  # NetApp shuttle
+    DONGLE = "dongle"  # NetApp dongle
+    DRIVE_PN = "drive_pn"  # Bare drive part number (qual lists)
+    ASSEMBLY = "assembly"  # Assembly part number
