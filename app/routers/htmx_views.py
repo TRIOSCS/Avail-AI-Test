@@ -7399,13 +7399,21 @@ async def materials_faceted_partial(
     # a crosswalk-only PN matches no material card, so the section must not depend
     # on card results. Both lookups are indexed point reads; non-MPN text queries
     # simply miss and render nothing.
+    # The section is ADDITIVE, so the lookups get the same scoped try/except
+    # search_history_panel uses — a crosswalk failure degrades to "no FRU section"
+    # and must never 500 the whole materials list (the primary surface).
     fru_view = None
     fru_reverse = None
     if q:
         from ..services.fru_matrix_service import get_fru_view, get_reverse_view
 
-        fru_view = get_fru_view(db, q)
-        fru_reverse = get_reverse_view(db, q)
+        try:
+            fru_view = get_fru_view(db, q)
+            fru_reverse = get_reverse_view(db, q)
+        except Exception:
+            logger.exception("materials faceted FRU section failed q={} user={}", q, user.id)
+            fru_view = None
+            fru_reverse = None
 
     ctx = _base_ctx(request, user, "materials")
     ctx.update(

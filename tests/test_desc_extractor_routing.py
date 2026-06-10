@@ -150,6 +150,36 @@ def test_packaging_suffixed_foreign_labels_stay_foreign_even_hinted():
     assert result is not None and result.commodity == "motherboards"
 
 
+# ── _NEUTRAL_LEADS growth tripwire (wave-6 guard) ─────────────────────────
+# _is_neutral_lead admits a multi-word label only when EVERY word is neutral, so
+# the foreign-lead guard for these accessory/system rows hinges on specific words
+# ("SERVER", "TRAY", "CBL", "EXPANSION", …) staying OUT of _NEUTRAL_LEADS. Each
+# case pairs a foreign multi-word label with body tokens AND a matching hint —
+# the strongest possible pull toward extraction — so a wave-6 brand/packaging
+# addition that re-admits one of these labels turns red HERE instead of silently
+# writing the served part's facets onto its accessory/chassis row. Bare and
+# hinted forms must BOTH stay None.
+FOREIGN_MULTIWORD_LEAD_CASES = [
+    # accessory labels mixing a foreign word with packaging words
+    ("CBL ASSY,RPS REAR MB, XL", "motherboards"),
+    ("Drive Tray Kit, 600GB 15K rpm SAS HDD trays", "hdd"),
+    ('Cable Assy, for LCD 15.6" FHD panel', "displays"),
+    ('Server Tray, 2.5" Hot-Swap SAS HDD caddy', "hdd"),
+    # brand + system words — adding the system word as "neutral" would flip these
+    ("HP SERVER, 16GB DDR4 RDIMM 2x Xeon Gold 6134", "dram"),
+    ('IBM STORAGE EXPANSION, 12x 3.5" SAS HDD bays', "hdd"),
+]
+
+
+@pytest.mark.parametrize("description,hint", FOREIGN_MULTIWORD_LEAD_CASES)
+def test_foreign_multiword_leads_stay_foreign(description, hint):
+    assert extract_desc(description) is None, f"{description!r} must stay FOREIGN unhinted"
+    assert extract_desc(description, commodity_hint=hint) is None, (
+        f"{description!r} must stay FOREIGN under a {hint!r} hint — a _NEUTRAL_LEADS "
+        "addition re-admitted an accessory/system label"
+    )
+
+
 def test_neutral_lead_keeps_phase1_conflict_guards():
     # Behind a neutral brand lead, a body mixing HDD+DIMM tokens still hard-conflicts
     # to None (constructed string — the guard predates phase 2 and must survive it).

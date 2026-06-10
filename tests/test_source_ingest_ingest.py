@@ -135,6 +135,22 @@ def test_ai_inferred_category_uses_trio_source_ai_tier(db_session: Session):
     assert card.category_tier == 88
 
 
+def test_ai_description_fill_credits_trio_source_ai(db_session: Session):
+    # A Claude-standardized description filling an empty card must be credited to
+    # trio_source_ai in the by-source report — not claimed as raw trio_source ground
+    # truth. Apply mode and dry run must attribute identically.
+    seed_commodity_schemas(db_session)
+    part = _part(category=None, description="raw text", ai_description="AI standardized text")
+    dry = ingest(db_session, [part], apply=False)
+    stats = ingest(db_session, [part], apply=True)
+
+    card = db_session.query(MaterialCard).filter_by(normalized_mpn="st4000nm0035").first()
+    assert card.description == "AI standardized text"
+    for s in (dry, stats):
+        assert s["descriptions_filled"] == 1
+        assert s["fields_by_source"] == {"trio_source_ai": 1}  # nothing credited to trio_source
+
+
 def test_ai_specs_written_at_trio_source_ai(db_session: Session):
     seed_commodity_schemas(db_session)
     part = _part(ai_specs={"rpm": {"value": "7200", "confidence": 0.9}})

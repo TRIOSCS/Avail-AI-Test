@@ -155,11 +155,14 @@ def _ingest_part(db: Session, part: ConsolidatedPart, schema_caches: dict, stats
 
         # Description: fill ONLY when empty — there is no description-tier yet, so we must not
         # clobber an existing description (documented design choice; see module docstring).
+        # Credit the fill to AI_SOURCE when the text is the AI-standardized description
+        # (_description_for prefers ai_description) — the by-source report must not claim
+        # Claude-standardized text as raw trio_source ground truth.
         desc = _description_for(part)
         if desc and not (card.description or "").strip():
             card.description = desc[:1000]
             tally["descriptions_filled"] += 1
-            by_source[RAW_SOURCE] += 1
+            by_source[AI_SOURCE if part.ai_description else RAW_SOURCE] += 1
 
         # Condition: fill only with a real value, never "Unknown" (see _condition_fillable).
         if _condition_fillable(part.condition, card.condition):
@@ -278,7 +281,8 @@ def _tally_dry_run(
         stats["fields_by_source"][RAW_SOURCE] += 1
     if desc_would:
         stats["descriptions_filled"] += 1
-        stats["fields_by_source"][RAW_SOURCE] += 1
+        # Mirror apply-mode's attribution: an AI-standardized description credits AI_SOURCE.
+        stats["fields_by_source"][AI_SOURCE if part.ai_description else RAW_SOURCE] += 1
     if cond_would:
         stats["conditions_filled"] += 1
         stats["fields_by_source"][RAW_SOURCE] += 1

@@ -1021,7 +1021,9 @@ SOURCE_TIER  manual:100 · trio_source:95 · {digikey,mouser,nexar,element14,oem
              · trio_source_ai:88 · mpn_decode:85 · fru_matrix_decode:84 · desc_parse:83
              · fru_desc_parse:82 (FRU-linked qual-sheet descriptions — below the card's
                OWN description, above the OEM scrapers)
-             · {partsurfer,psref}→oem_scrape:80 · web_search:70 · brokerbin:65
+             · {partsurfer,psref,oem_official}:80 (the named OEM scrapers and the broader
+               oem_official umbrella — authoritative_enrichment_service's OEM-domain
+               extractor — are the same evidence class) · web_search:70 · brokerbin:65
              · spec_extraction:60 · legacy_backfill:50 (pre-ladder data; also the runtime
                floor for a valued category with NULL provenance) ·
                {ai_guess,claude_opus_inferred,claude_haiku}:40
@@ -1301,8 +1303,9 @@ htmx/partials/materials/fru_section.html
 python -m app.management.enrichment_coverage_report [--json] [--log-file PATH]
     |   (read-only — single session, no writes; on PG all queries share one
     |    REPEATABLE READ snapshot so concurrent enrichment-worker writes can't
-    |    skew cross-metric ratios; intended as a daily ops cron — host-side,
-    |    not yet registered anywhere in this repo)
+    |    skew cross-metric ratios; daily ops cron via
+    |    scripts/enrichment_coverage_cron.sh — host crontab runs it inside the
+    |    app container, JSONL history persisted in the applogs volume)
     v
 collect_metrics(db) — a handful of aggregate queries over active cards
     |   (deleted_at IS NULL everywhere, incl. the facet joins)
@@ -1321,6 +1324,15 @@ collect_metrics(db) — a handful of aggregate queries over active cards
     |       to one streamed Python pass — keep all three branches in sync; when
     |       changing the PG SQL, run the opt-in parity test (set PG_TEST_DSN to
     |       a Postgres DSN) or verify against live PG
+    +---> Category provenance: categorized cards grouped by category_source
+    |       ("(none)" = NULL provenance — a writer bypassing set_category or
+    |       unbackfilled pre-096 data); spec-entry counts alone are WINS-only and
+    |       spec-only, so a category-only ingest is visible ONLY here
+    +---> Facet provenance: facet rows grouped by source ("(none)" = NULL rows
+    |       the guarded 096 backfill could not match to a JSONB entry)
+    +---> Unregistered-source callout: any observed source string (spec, category,
+    |       or facet) missing from spec_tiers.SOURCE_TIER — such a writer ranks at
+    |       tier 0 and silently loses every conflict; the report makes it trend
     +---> enrichment_status distribution; fru_links totals (rows + distinct
             fru_norm) only if the table exists
     |

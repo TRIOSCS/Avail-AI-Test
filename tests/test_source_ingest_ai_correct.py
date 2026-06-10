@@ -56,6 +56,39 @@ async def test_ai_correct_standardizes_and_extracts(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_other_category_is_withheld_and_rejected(monkeypatch):
+    # clean.py blanks TRIO's 'Other' commodity code precisely so those rows stay open to
+    # the deterministic decode (85) / desc-parse (83) lanes — and the AI lane categorizes
+    # exactly those blanked rows (ai_category applies only when part.category is falsy).
+    # Re-admitting 'other' at trio_source_ai (88) would lock them out permanently, so it
+    # must be (a) withheld from the model's vocabulary AND (b) rejected if returned anyway
+    # (mirrors test_source_ingest_clean.test_clean_blanks_other_commodity_code).
+    seen: dict = {}
+
+    async def fake(prompt, schema, **kw):
+        seen["prompt"] = prompt
+        seen["schema"] = schema
+        return {
+            "normalized_mpn": "x",
+            "standardized_description": None,
+            "category": "other",  # off-vocab reply — must be dropped, not applied
+            "category_confidence": 0.9,
+            "specs": [],
+        }
+
+    monkeypatch.setattr(ai_mod, "claude_structured", fake)
+    part = _part(category=None)
+    stats = await ai_correct([part])
+
+    enum = seen["schema"]["properties"]["category"]["enum"]
+    assert "other" not in enum and None in enum and "hdd" in enum
+    vocab_line = seen["prompt"].splitlines()[0]
+    assert "other" not in vocab_line.split(": ", 1)[1].split(", ")
+    assert part.ai_category is None and part.ai_category_confidence is None
+    assert stats == {"corrected": 1, "failed": 0}  # the rest of the result still applies
+
+
+@pytest.mark.asyncio
 async def test_ai_correct_does_not_override_existing_category(monkeypatch):
     async def fake(prompt, schema, **kw):
         return {

@@ -49,7 +49,9 @@ if TYPE_CHECKING:
 # spec_extraction the worker's run-order + writer pre-gates used to enforce by hand; the
 # same grammar run over a FRU's LINKED qual-sheet descriptions (``fru_desc_parse`` — a
 # one-hop fru_links row's prose, weaker than the card's OWN description) is 82; OEM
-# scrapers (PartSurfer/PSREF) map to 80; ``legacy_backfill`` (50) marks pre-ladder data
+# pages map to 80 — the named scrapers (``partsurfer``/``psref``) and the broader
+# ``oem_official`` umbrella (authoritative_enrichment_service's OEM-domain extractor)
+# are the same evidence class; ``legacy_backfill`` (50) marks pre-ladder data
 # whose true source is unknown — above the AI guesses (a stray guess can't flip legacy
 # data) but below every real source; AI free-text mining sits at the bottom (Haiku batch
 # categorization ``claude_haiku`` ranks with the other AI guesses). ``manual`` (a human
@@ -73,6 +75,7 @@ SOURCE_TIER: dict[str, int] = {
     "fru_desc_parse": 82,
     "partsurfer": 80,
     "psref": 80,
+    "oem_official": 80,
     "web_search": 70,
     "brokerbin": 65,
     "spec_extraction": 60,
