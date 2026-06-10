@@ -982,7 +982,10 @@ htmx/partials/materials/fru_section.html
 
 ```
 python -m app.management.enrichment_coverage_report [--json] [--log-file PATH]
-    |   (read-only — single session, no writes; intended as a daily ops cron)
+    |   (read-only — single session, no writes; on PG all queries share one
+    |    REPEATABLE READ snapshot so concurrent enrichment-worker writes can't
+    |    skew cross-metric ratios; intended as a daily ops cron — host-side,
+    |    not yet registered anywhere in this repo)
     v
 collect_metrics(db) — a handful of aggregate queries over active cards
     |   (deleted_at IS NULL everywhere, incl. the facet joins)
@@ -994,11 +997,13 @@ collect_metrics(db) — a handful of aggregate queries over active cards
     |       facet.category IS the commodity)
     +---> Sources: specs_structured entries grouped by each entry's recorded
     |       "source" (mpn_decode / desc_parse / fru_matrix_decode /
-    |       spec_extraction / vendor APIs / "(none)" for legacy non-dict entries).
+    |       spec_extraction / vendor APIs / "(none)" for legacy non-dict entries
+    |       or entries with a missing/null source).
     |       ONE query: PG iterates the JSONB in SQL (CROSS JOIN LATERAL
     |       jsonb_each), SQLite uses json_each (tests), other dialects fall back
-    |       to one streamed Python pass — keep both SQL branches in sync and
-    |       verify the PG one against live PG when changing it
+    |       to one streamed Python pass — keep all three branches in sync; when
+    |       changing the PG SQL, run the opt-in parity test (set PG_TEST_DSN to
+    |       a Postgres DSN) or verify against live PG
     +---> enrichment_status distribution; fru_links totals (rows + distinct
             fru_norm) only if the table exists
     |
@@ -1007,7 +1012,10 @@ Output: one compact human-readable block, or the structured metrics dict with
 --json. With --log-file it appends one JSONL line {ts, metrics} per run and, when
 a previous line exists, prints "Δ since last run" for the headline numbers
 (cards / with-category / with-description / faceted-cards / facet-rows /
-spec-entries / fru-rows).
+spec-entries / fru-rows). The history reader scans backwards past corrupt or
+wrong-shape trailing lines (each logged as a warning), and appends heal a
+missing trailing newline first, so a torn write from a crashed run never merges
+with — or suppresses deltas beyond — its own entry.
 
 Tests: tests/test_enrichment_coverage_report.py (seeded fixture set; metrics,
 delta math, --json shape, log-file behavior).

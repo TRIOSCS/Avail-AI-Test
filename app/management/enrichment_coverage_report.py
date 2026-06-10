@@ -7,9 +7,12 @@ What: Aggregates material-card enrichment coverage into one compact human-readab
       appends a JSONL history line ({ts, metrics}) and prints run-over-run deltas
       for the headline numbers.
 Usage: python -m app.management.enrichment_coverage_report [--json] [--log-file PATH]
-Called by: ops cron (daily) or admin manually.
+Called by: admin manually; intended for a daily ops cron (host-side — not yet
+      registered anywhere in this repo).
 Depends on: MaterialCard, MaterialSpecFacet, FruLink models; app.database.SessionLocal
-      (single read-only session — performs no writes).
+      (single read-only session — performs no writes; on PostgreSQL all queries share
+      one REPEATABLE READ snapshot so concurrent enrichment-worker writes cannot skew
+      cross-metric ratios).
 """
 
 import argparse
@@ -43,7 +46,12 @@ HEADLINES: tuple[tuple[str, str], ...] = (
 # specs_structured source counting. PG iterates the JSONB in SQL (one query);
 # SQLite uses the equivalent json_each; any other dialect falls back to one
 # streamed Python pass. The jsonb_typeof/json_type guards skip legacy non-object
-# payloads, and non-dict entry values count under "(none)".
+# payloads, and non-dict entry values count under "(none)". Keep all three
+# branches aligned: only a MISSING or JSON-null source maps to "(none)" — a
+# present-but-empty source ("") is its own bucket. Non-string scalar sources
+# render as JSON text in PG (->>) and the Python fallback ('true' / '0');
+# SQLite's json_extract renders booleans as 1/0 — sources are strings in
+# practice, so that residual difference is accepted.
 _PG_SOURCES_SQL = text(
     """
     SELECT COALESCE(e.value ->> 'source', '(none)') AS src, count(*) AS n
@@ -96,13 +104,39 @@ def _spec_source_counts(db: Session) -> dict[str, int]:
                 continue
             for entry in specs.values():
                 source = entry.get("source") if isinstance(entry, dict) else None
-                counts[str(source) if source else "(none)"] += 1
+                if source is None:
+                    key = "(none)"
+                elif isinstance(source, str):
+                    key = source
+                else:
+                    key = json.dumps(source)  # JSON text, like PG's ->> ('true', '0')
+                counts[key] += 1
         rows = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))
     return {str(src): int(n) for src, n in rows}
 
 
+def _pin_snapshot(db: Session) -> None:
+    """Pin one consistent snapshot for the whole metric collection (PostgreSQL).
+
+    At PG's default READ COMMITTED every statement sees its own snapshot, so a
+    concurrently writing enrichment worker could skew derived ratios (e.g. a faceted-
+    cards numerator over a cards total taken statements earlier). REPEATABLE READ makes
+    all queries in this transaction read one snapshot; the session stays read-only. Must
+    run before the transaction's first statement, so callers should pass a fresh session
+    (main() does). SQLite is already snapshot-consistent per transaction; other dialects
+    keep their default.
+    """
+    if db.get_bind().dialect.name == "postgresql" and not db.in_transaction():
+        db.connection(execution_options={"isolation_level": "REPEATABLE READ"})
+
+
 def collect_metrics(db: Session) -> dict[str, Any]:
-    """Gather all coverage metrics with a handful of read-only aggregate queries."""
+    """Gather all coverage metrics with a handful of read-only aggregate queries.
+
+    On PostgreSQL the queries share one REPEATABLE READ snapshot (see _pin_snapshot) so
+    the figures are mutually consistent even while the enrichment worker writes.
+    """
+    _pin_snapshot(db)
     active = MaterialCard.deleted_at.is_(None)
     category_norm = func.lower(func.trim(MaterialCard.category))
     has_category = and_(MaterialCard.category.isnot(None), func.trim(MaterialCard.category) != "")
@@ -165,9 +199,11 @@ def collect_metrics(db: Session) -> dict[str, Any]:
         .all()
     )
 
-    # 5. fru_links totals — only if the table exists in this database.
+    # 5. fru_links totals — only if the table exists in this database. Inspect the
+    # session's own connection (NOT the engine, which would check on a second
+    # pooled connection outside this transaction's snapshot).
     fru_links: dict[str, int] | None = None
-    if sa_inspect(db.get_bind()).has_table(FruLink.__tablename__):
+    if sa_inspect(db.connection()).has_table(FruLink.__tablename__):
         fru_rows, fru_distinct = db.query(func.count(FruLink.id), func.count(FruLink.fru_norm.distinct())).one()
         fru_links = {"rows": int(fru_rows), "distinct_frus": int(fru_distinct)}
 
@@ -217,33 +253,51 @@ def compute_deltas(prev: dict[str, Any], curr: dict[str, Any]) -> dict[str, int]
 
 
 def read_last_metrics(path: Path) -> dict[str, Any] | None:
-    """Return the metrics dict from the last well-formed JSONL line, if any."""
+    """Return the metrics dict from the last well-formed JSONL line, if any.
+
+    Scans backwards past unusable trailing lines — malformed JSON (e.g. a torn write
+    from a crash mid-append) or a line without a dict "metrics" key (e.g. a hand edit) —
+    logging a warning for each skipped line, so one bad line costs only its own
+    datapoint, never the delta computation itself.
+    """
     if not path.exists():
         return None
-    last = None
     with path.open(encoding="utf-8") as fh:
-        for line in fh:
-            if line.strip():
-                last = line.strip()
-    if last is None:
-        return None
-    try:
-        entry = json.loads(last)
-    except json.JSONDecodeError:
-        logger.warning("Could not parse last line of {} — skipping delta computation", path)
-        return None
-    metrics = entry.get("metrics") if isinstance(entry, dict) else None
-    return metrics if isinstance(metrics, dict) else None
+        lines = [line.strip() for line in fh if line.strip()]
+    for raw in reversed(lines):
+        try:
+            entry = json.loads(raw)
+        except json.JSONDecodeError:
+            logger.warning("Skipping malformed line in {} while reading last metrics entry", path)
+            continue
+        metrics = entry.get("metrics") if isinstance(entry, dict) else None
+        if isinstance(metrics, dict):
+            return metrics
+        logger.warning("Skipping line without a 'metrics' dict in {} while reading last metrics entry", path)
+    return None
 
 
 def append_metrics(path: Path, metrics: dict[str, Any]) -> None:
+    """Append one ``{ts, metrics}`` JSONL line.
+
+    If a previous run crashed mid-write the file can end in a torn line with no trailing
+    newline — heal that first so the new entry never merges into (and gets destroyed by)
+    the corrupt line.
+    """
     path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as fh:
-        fh.write(json.dumps({"ts": metrics["generated_at"], "metrics": metrics}, default=str) + "\n")
+    line = json.dumps({"ts": metrics["generated_at"], "metrics": metrics}, default=str)
+    with path.open("a+b") as fh:
+        fh.seek(0, 2)
+        if fh.tell() > 0:
+            fh.seek(-1, 2)
+            if fh.read(1) != b"\n":
+                fh.write(b"\n")
+        fh.write((line + "\n").encode("utf-8"))
 
 
 def _join(pairs: list[tuple[str, str]]) -> str:
-    return " · ".join(f"{k} {v}" for k, v in pairs) if pairs else "(none)"
+    # Blank labels (e.g. an empty-string spec source) render quoted so they stay visible.
+    return " · ".join(f"{k if k.strip() else repr(k)} {v}" for k, v in pairs) if pairs else "(none)"
 
 
 def format_report(metrics: dict[str, Any], deltas: dict[str, int] | None = None, prev_ts: str | None = None) -> str:
