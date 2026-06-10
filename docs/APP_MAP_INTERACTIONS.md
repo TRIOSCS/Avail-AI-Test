@@ -441,13 +441,143 @@ entered offers appear in the Activity tab automatically.
 
 Vendor rows (_vendor_row.html) also carry a row-level status treatment keyed off
 the server-computed vendor status `vs` (precedence resolved in
-app/services/sighting_status.py — offer-in dominates unavailable): unavailable
-rows get a soft rose tint + dimmed text + rose badge; offer-in rows get an
-emerald tint + emerald badge.
+app/services/sighting_status.py — offer-in dominates unavailable): offer-in rows
+get an emerald tint + emerald badge. Unavailability rendering is NOT keyed off the
+row's `is_unavailable` boolean alone — the durable `vendor_part_unavailability`
+record is the authority, and the row renders one of three states (suppressed rose
+/ expired advisory / possible-restock chip). See § 2d.
 
 NOTE: the two creation paths historically wrote Offer.normalized_mpn differently
 (create_offer = normalize_mpn_key, add_offer = normalize_mpn); add_offer was
 fixed to use normalize_mpn_key, and the part query matches both forms for safety.
+
+### 2d. Vendor+part unavailability (durable knowledge + temporal policy)
+
+"Unavailable" is learned vendor intelligence about a **(vendor, part)** pair, not
+a row attribute: a durable `vendor_part_unavailability` record (reason + note +
+provenance — schema in APP_MAP_DATABASE.md) that outlives the scraped Sighting
+rows it was marked from. `Sighting.is_unavailable` is demoted to a **render
+cache**; the predicate `is_active(record, now)` in
+`app/services/vendor_unavailability.py` is the single authority every read
+surface uses. All business logic lives in that service; the sightings router
+stays thin.
+
+**Mark (and re-arm).** Row "Mark Unavail" → `$dispatch('open-modal')` →
+`GET /v2/partials/sightings/{requirement_id}/unavailable-form` (reason radios
+from `UnavailabilityReason`, optional note, the "applies to all of this vendor's
+listings of this MPN" caveat) → `POST .../mark-unavailable`:
+
+```
+sightings_mark_unavailable (router; reason required + enum-validated, else 400)
+    |
+    v
+record_unavailability(db, requirement, vendor_name, reason, note, user)
+    |
+    +---> ValueError on empty vendor norm or zero derivable MPN keys
+    |       --> router maps to 400 JSON error; NOTHING written (no ActivityLog)
+    |
+    +---> UPSERT one record per derivable key (matched-sighting MPN keys +
+    |     primary-MPN key): reason/note/created_by/created_at refreshed;
+    |     per-key qty_at_mark snapshot (keep-old-on-NULL);
+    |     released_at/release_trigger NULLed; requirement_id provenance refreshed
+    |
+    +---> stamps is_unavailable=True on the vendor's sightings via the ONE
+    |     shared matching helper (NULL-norm legacy fallback — never a bare
+    |     column-equality filter)
+    |
+    +---> ONE ActivityLog entry (vendor, reason label, note, MPN — never a
+          None MPN: falls back to a matched MPN or "requirement #<id>")
+```
+
+Re-POSTing for an already-marked vendor is the **re-arm** path (upsert refresh —
+one click buys a fresh quiet window; the just-seen qty becomes the new O2
+baseline). There is NO separate verify endpoint: the advisory/restock "verify"
+affordance maps onto re-arm (the mark-unavailable modal) and clear
+(mark-available).
+
+**Clear.** `POST .../mark-available` → `clear_unavailability`: DELETEs records
+matching the vendor norm AND (key in the requirement's current keys OR
+`requirement_id == requirement.id` — the provenance arm catches zombie records
+whose key no longer matches), unflags the vendor's sightings via the same shared
+helper, writes an ActivityLog entry. DELETE is deliberate (explicit human
+"forget it"); history survives in the activity timeline. Auto-expiry and
+overrides O1/O2 never delete.
+
+**Temporal policy — "Two Windows, Real Proof"**
+(`docs/superpowers/specs/2026-06-10-unavailability-temporal-policy.md` is
+authoritative). Suppression is read-time bounded per reason class: `is_active` =
+`released_at IS NULL AND (reason == different_part OR created_at >= now −
+window(reason))` — pure Python cutoffs, no cron, no lazy writes. Windows: **30d**
+for lot reasons (bought_by_us/sold_elsewhere/broken/other; knob
+`unavailability_suppress_days`), **180d** for the phantom-listing reason
+(not_really_there; knob `unavailability_listing_suppress_days`), **never** for
+different_part (identity knowledge — hard-coded, not a knob). While a record is
+active, fresh rows are evaluated by overrides **dispatched on the row's source
+class** (mutually exclusive — never priority order): LIVE
+(digikey/mouser/element14 or `is_authorized`) → **O1**: qty > 0 and ≠
+`qty_at_mark` leaves the row unstamped (advisory; applies to ALL reasons);
+HUMAN_DIRECT (`email_attachment` only) → **O3**: qty > 0 releases the record
+(`released_at=now`, `release_trigger='vendor_email'`, one ActivityLog line);
+everything else is listing-class → **O2**: fresh qty > snapshot AND ≥ snapshot ×
+`unavailability_qty_jump_factor` (2.0) leaves the row unstamped with no record
+mutation (stateless, self-healing). O2/O3 — and the offer hook — are disabled
+for different_part. **Offer-release hook:** the offer-creation route calls
+`release_on_offer(...)` after the offer persists (same transaction) —
+`release_trigger='offer_received'`. Expired/released records render as labeled
+advisory states, never silent suppression.
+
+**Re-stamping at every sighting-persistence path.** Each of the six code paths
+that persist fresh Sighting rows calls `apply_to_fresh_sightings(db,
+requirement, rows)` — which embeds the O1/O2/O3 matrix, so every path gets
+policy behavior for free — in its OWN session, right where the rows are created:
+
+1. `app/search_service.py` — after the fresh-Sighting construction loop that
+   follows the connector-aware delete (inside search's separate write session).
+2. `app/services/ics_worker/sighting_writer.py` — async ICS browser-worker save loop.
+3. `app/services/nc_worker/sighting_writer.py` — same, NetComponents worker.
+4. `app/routers/sources.py` — email-attachment import (ALSO the HUMAN_DIRECT/O3
+   release path: a buyer-routed attachment with qty > 0 releases instead of stamping).
+5. `app/routers/htmx_views.py` — add-to-requisition picker (deliberately stamped;
+   the user can Mark available to override).
+6. `app/jobs/inventory_jobs.py` — excess-list sighting creation (rows grouped
+   per requirement before calling).
+
+**Reader-authority rule.** The record predicate is the only authority; the row
+flag is a render cache that every reader reinterprets:
+
+1. **Row render** (`_vendor_row.html`, via the annotated `unavailable_intel`
+   context from `unavailability_for_requirement`): active record + stamped row →
+   suppressed (rose tint, reason/note/age, only action = Mark available);
+   non-active record → expired advisory (normal row, gray italic history hint,
+   amber "Verify availability" link, full action trio — Mark Unavail doubles as
+   re-arm); active record + row left unstamped by O1/O2 → possible restock
+   (bordered emerald chip, qty delta, emerald "Verify restock" link; RFQ stays
+   gated server-side).
+2. **Status pill** (`compute_vendor_statuses` Batch 4): vendor is `unavailable`
+   iff (an active record matches AND the vendor has NO unstamped row) OR (no
+   record at all AND all rows flagged — true legacy). Rows-win: one
+   override-surfaced row flips the pill; an expired record's stale stamped rows
+   no longer pin it. The legacy all-rows-flagged branch applies ONLY to vendors
+   with no record. Precedence unchanged: blacklisted > offer-in > contacted >
+   unavailable > sighting.
+3. **RFQ:** active records only (next paragraph).
+
+Races across the six writers leave at most a stale flag that the next render
+reinterprets correctly — no reconciliation pass, no read-path writes.
+
+**RFQ exclusion (active-only, with visible skip).** The RFQ vendor modal
+(`sightings_vendor_modal`) excludes vendors in
+`excluded_vendor_norms(db, requirements)` — vendors with an ACTIVE record whose
+key matches a selected requirement's primary-MPN key; excluded if unavailable
+for ANY selected part (deliberately conservative). Expired/released/cleared →
+the vendor returns to suggestions. `sightings_send_inquiry` and
+`sightings_preview_inquiry` re-validate the submitted vendor names against the
+same active-only set at request time (closing the TOCTOU the modal filter alone
+leaves open): excluded vendors are dropped from the send AND visibly reported
+("Skipped (marked unavailable): …" in the result toast + the
+`X-RFQ-Unavailable` count header) — never a silent drop. Override-surfaced
+(possible-restock) rows do NOT re-enable RFQ while the record is active; the
+exits are window expiry, offer/email release, or manual clear.
 
 ## 3. RFQ Email Sending
 
@@ -1731,6 +1861,7 @@ or whose state change should propagate via SSE:
 - `sightings_refresh`
 - `sightings_batch_refresh`
 - `sightings_mark_unavailable`
+- `sightings_mark_available`
 - `sightings_assign_buyer`
 - `sightings_advance_status`
 - `sightings_log_activity`
@@ -1773,7 +1904,7 @@ the current implementation.
 | Quotes | 25 | CRUD, send, PDF, e-signature, pricing history |
 | Buy Plans | 6 | CRUD, external approval via token |
 | Materials | 20 | CRUD, substitutes, stock levels, price history |
-| Sightings | 25 | CRUD, RFQ send, batch RFQ, inquiry |
+| Sightings | 25 | CRUD, RFQ send, batch RFQ, inquiry, vendor+part unavailability (mark/clear/reason modal) |
 | Excess | 30 | Lists, line items, bids, solicitations, import |
 | AI | 18 | Parse email, normalize, find contacts, draft RFQ |
 | Proactive | 12 | Matches, refresh, dismiss, send, scorecard |
